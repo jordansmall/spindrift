@@ -2,6 +2,7 @@ package driverkit
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -479,6 +480,39 @@ func TestHeartbeatWriterRendersHostOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := FormatSpindriftOp("7", op) + "\n"; out.String() != want {
+		t.Errorf("out = %q, want %q", out.String(), want)
+	}
+}
+
+func TestHeartbeatWriterTrackingGroupsByLineNotBlockOrder(t *testing.T) {
+	call := func(name string) Event { return Event{Kind: KindToolCall, ToolName: name} }
+	table := map[string][]Event{
+		// The tool precedes the text in the stream but narrates after the model
+		// switch and before the call is counted; only the first text and first
+		// tool of a line count, and a subagent's text is dropped.
+		"a": {{Kind: KindModel, Model: "big-1", Role: "scout"}, call("Read"), call("Read"),
+			{Kind: KindText, Text: "   "}, {Kind: KindText, Text: "ignored"}},
+		"b":   {{Kind: KindModel, Model: "big-1", Role: "scout"}, {Kind: KindText, Text: "hi"}, call("Edit")},
+		"sub": {{Kind: KindModel, Model: "big-1", Role: "scout", InSubagent: true}, {Kind: KindText, Text: "hush", InSubagent: true}, call("Read")},
+		"bad": {{Kind: KindResult, NoTurns: true, NumTurns: 9}},
+		"end": {{Kind: KindResult, NumTurns: 2}},
+	}
+	var out bytes.Buffer
+	w := NewHeartbeatWriter(io.Discard, "7", &out, fakeDecoder(table), "top").Track(HeartbeatTracking{
+		Phase:  func(tool string, _ json.RawMessage) string { return strings.ToLower(tool) },
+		Kind:   func(tool string) string { return "k" + tool },
+		Family: func(m string) string { return strings.TrimSuffix(m, "-1") },
+	})
+	if _, err := w.Write([]byte("a\nb\nsub\nbad\nend\n")); err != nil {
+		t.Fatal(err)
+	}
+	want := FormatRoleHeader("7", "scout", "big") + "\n" +
+		"#7 [read] hi\n" +
+		"#7 scout [read] · 1 kRead\n" +
+		"#7 scout [edit] · 1 kEdit\n" +
+		"#7 scout [read] · 1 kRead\n" +
+		"#7 scout [read] · 2 turns\n"
+	if out.String() != want {
 		t.Errorf("out = %q, want %q", out.String(), want)
 	}
 }

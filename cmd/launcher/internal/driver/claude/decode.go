@@ -103,10 +103,10 @@ func (d *decoder) decodeLine(line string) []driverkit.Event {
 		return append([]driverkit.Event{d.errorEvent(line)}, d.contentEvents(line, true)...)
 	}
 
-	// A type error anywhere fails the whole Unmarshal, so the text, is_error and
-	// totals decode separately, as the pre-decoder readers did: a mistyped total
-	// must not cost the result text or the echo check, and a mistyped is_error
-	// must cost neither the text nor the totals.
+	// A type error anywhere fails the whole Unmarshal, so the text, is_error,
+	// totals and num_turns decode separately, as the pre-decoder readers did: a
+	// mistyped total must not cost the result text or the echo check, and a
+	// mistyped is_error must cost neither the text nor the totals.
 	var env struct {
 		Type   string          `json:"type"`
 		Result json.RawMessage `json:"result"`
@@ -121,7 +121,6 @@ func (d *decoder) decodeLine(line string) []driverkit.Event {
 	}
 	notError := json.Unmarshal([]byte(line), &flags) == nil && !flags.IsError
 	var tot struct {
-		NumTurns      int        `json:"num_turns"`
 		TotalCostUSD  float64    `json:"total_cost_usd"`
 		DurationMs    int64      `json:"duration_ms"`
 		DurationAPIMs int64      `json:"duration_api_ms"`
@@ -138,9 +137,22 @@ func (d *decoder) decodeLine(line string) []driverkit.Event {
 			CacheWrite5m: tot.Usage.CacheCreationInputTokens,
 			CostUSD:      tot.TotalCostUSD,
 		}
-		result.DurationMs, result.DurationAPIMs, result.NumTurns = tot.DurationMs, tot.DurationAPIMs, tot.NumTurns
+		result.DurationMs, result.DurationAPIMs = tot.DurationMs, tot.DurationAPIMs
 	} else {
 		result.NoTotals = true
+	}
+	// Decoded alone: the heartbeat drops a result only for a mistyped
+	// num_turns, not for any other bad total.
+	var turns struct {
+		NumTurns int `json:"num_turns"`
+	}
+	if json.Unmarshal([]byte(line), &turns) == nil {
+		result.NumTurns = turns.NumTurns
+	} else {
+		// A mistyped num_turns is a mistyped total too: no totals at all.
+		result.Tokens = driverkit.Tokens{}
+		result.DurationMs, result.DurationAPIMs = 0, 0
+		result.NoTotals, result.NoTurns = true, true
 	}
 	out := []driverkit.Event{result}
 	// An is_error result is a genuine failure, never an echo of preceding content.

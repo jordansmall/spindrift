@@ -184,6 +184,10 @@ type Event struct {
 	// NoTotals marks a KindResult whose session totals failed to decode: it
 	// still carries Text, but the usage reader skips it entirely.
 	NoTotals bool
+
+	// NoTurns marks a KindResult whose turn count failed to decode; the
+	// heartbeat drops such a result.
+	NoTurns bool
 }
 
 // Tokens is one model call's token tally. A field the CLI does not report is
