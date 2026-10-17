@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
 # Paired dispatch of the same issue twice against one pinned image, intended
-# for the worker/coordinator split (issue #2057). The arms pass different
-# dispatch-time --worker-model values (empty on OFF, $AB_WORKER_ON on ON), but
-# under `nix run .#` that flag is a no-op: WORKER_MODEL is image-time only, the
-# flake wrapper always passes --input, and the launcher prefers the document's
-# baked WORKER_PROVISIONED (current images carry it) to the live value. Both
-# arms therefore run the same baked worker roster, so the pair is a same-config
-# noise baseline and any OFF/ON difference is run-to-run variance. Measuring
+# for the worker/coordinator split (issue #2057). Both arms dispatch the
+# identical command (only --branch-prefix differs) and pass no --worker-model:
+# under `nix run .#` that flag is a no-op, since WORKER_MODEL is image-time
+# only, the flake wrapper always passes --input, and the launcher prefers the
+# document's baked WORKER_PROVISIONED to the live value. Both arms run the same
+# baked worker roster, so the pair is a same-config noise baseline and any
+# OFF/ON difference is run-to-run variance; off/on are labels only. Measuring
 # the worker needs two images with different rosters, one per arm. Arm order
 # is randomised per issue.
 
@@ -40,7 +40,6 @@ AB_PREFIX_OFF="${AB_PREFIX_OFF:-ab-off/issue-}"
 AB_PREFIX_ON="${AB_PREFIX_ON:-ab-on/issue-}"
 AB_NO_BUILD="${AB_NO_BUILD:-1}"
 AB_OUTDIR="${AB_OUTDIR:-./ab-results/$(date +%Y%m%d-%H%M%S)}"
-AB_WORKER_ON="${AB_WORKER_ON:-$AB_MODEL}"
 
 # Sum every "type":"result" event: the orchestrator emits one per pass and the
 # launcher's own comment keeps only the last, so summing is the honest total.
@@ -216,7 +215,6 @@ parse_outcome() { # Prints the status= of the last SPINDRIFT_OUTCOME line, or no
 
 run_arm() {
   local issue="$1" arm="$2" prefix="$3"
-  local wm="$4"
   local armdir="$AB_OUTDIR/$issue/$arm"
   mkdir -p "$armdir"
   local host_log=".spindrift/logs/issue-${issue}.log"
@@ -225,7 +223,7 @@ run_arm() {
 
   local -a nb=(); [ "$AB_NO_BUILD" = "1" ] && nb=(--no-build)
 
-  info "issue #$issue [$arm] worker-model='${wm}' (no-op) prefix='$prefix'"
+  info "issue #$issue [$arm] prefix='$prefix'"
   # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
   # before the launcher's ambient-knob check, so they beat whatever harness.env
   # exported, which is how a stray REPO_SLUG would otherwise leak in.
@@ -242,7 +240,6 @@ run_arm() {
     --model "$AB_MODEL"
     --issue-tracker "$tracker"
     --box-forge-and-issue-access read-write
-    --worker-model "$wm"
     "$issue"
   )
   if [ -n "${AB_DRY_RUN:-}" ]; then
@@ -334,8 +331,8 @@ main() {
 
   cat >&2 <<EOF
 
-  A/B experiment — paired noise baseline (worker flag is a no-op)
-  ---------------------------------------------------------------
+  A/B experiment — paired same-config noise baseline
+  --------------------------------------------------
   issues        : ${issues[*]}
   base          : $AB_BASE
   model         : $AB_MODEL
@@ -348,8 +345,8 @@ main() {
   remote above. No PR is opened and nothing is merged (CODE_FORGE=git,
   MERGE_MODE=manual).
 
-  NOTE: --worker-model is a no-op under nix run .#, so both arms run the
-  image's baked worker roster; treat the pair as a noise baseline.
+  NOTE: both arms dispatch the identical command (only --branch-prefix differs)
+  against one image, so treat the pair as a noise baseline.
 EOF
   if [ "$tracker" = "github" ]; then
     warn "ISSUE_TRACKER=github: every run will swap this issue's labels and post a"
@@ -377,11 +374,11 @@ EOF
   for issue in "${issues[@]}"; do
     # Randomise arm order per issue for cache hygiene.
     if [ $((RANDOM % 2)) -eq 0 ]; then
-      run_arm "$issue" off "$AB_PREFIX_OFF" ""
-      run_arm "$issue" on  "$AB_PREFIX_ON"  "$AB_WORKER_ON"
+      run_arm "$issue" off "$AB_PREFIX_OFF"
+      run_arm "$issue" on  "$AB_PREFIX_ON"
     else
-      run_arm "$issue" on  "$AB_PREFIX_ON"  "$AB_WORKER_ON"
-      run_arm "$issue" off "$AB_PREFIX_OFF" ""
+      run_arm "$issue" on  "$AB_PREFIX_ON"
+      run_arm "$issue" off "$AB_PREFIX_OFF"
     fi
 
     # Blind judging bundle: neutral variant names and a separate un-blinding key.
