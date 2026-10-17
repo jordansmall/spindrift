@@ -275,8 +275,9 @@ full gate.
 
 A Driver's Nix checks live in `nix/checks/drivers/<name>.nix`, named after its
 row in `lib/drivers/default.nix`; `nix/checks/drivers.nix` unions the files
-and runs the parity checks over every row. Build one check with
-`nix build .#checks.<system>.<attr> -L`.
+and runs the parity checks over every row. Its Go tests are the exception:
+`nix/checks/go.nix` generates `drivers-<name>-go-test` from the same row.
+Build one check with `nix build .#checks.<system>.<attr> -L`.
 
 A check failure is deterministic: the same derivation hash fails the same
 way however it is scheduled. Never re-run a failed check unchanged — not
