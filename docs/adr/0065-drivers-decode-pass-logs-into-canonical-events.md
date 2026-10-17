@@ -76,8 +76,9 @@ this lands:
   largest and the default, goes last.
 
 The old-versus-new differential was never kept as a standing test. The
-committed per-Driver corpus goldens (`TestDriverCorpusGoldens`, which checks
-each Driver through the interface alone) replaced it and stay as the
+committed per-Driver corpus goldens (each Driver package's `TestCorpus`, which
+replays its corpus through `conformance.Run` and checks each Driver through
+the interface alone; issue #5506) replaced it and stay as the
 permanent gate. (Amended by issue #5187: the planned standing differential and
 the later-slice deletion of old readers did not happen as written; see the
 #5187 amendment below.)

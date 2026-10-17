@@ -1100,11 +1100,18 @@ Driver entry declares:
 - `name`, `package`, `bin`, `flagsCommon`, `agentsJsonTemplate` — the
   fields ADR 0009 already documents. Session flags are not a registry
   field: declare `SessionFlags` in the Driver's `driverkit.Strategy`
-  (`cmd/launcher/internal/driver`), along with the decoder its Pass-log
-  readers share (see [Host-side event layer](#host-side-event-layer)).
+  (`cmd/launcher/internal/driver/<name>/strategy.go`), along with the
+  decoder its Pass-log readers share (see [Host-side event layer](#host-side-event-layer)).
   That package (`cmd/launcher/internal/driver/<name>`) also ships a
   canonical `testdata/outcome-fixture.jsonl` pinned by an
   `outcome_fixture_test.go`, as claude and opencode do.
+  It proves itself with the conformance kit
+  (`cmd/launcher/internal/driver/driverkit/conformance`): its corpus lives in
+  `testdata/corpus/<case>/` there (see [Driver Pass-log
+  corpus](#driver-pass-log-corpus)), and a `TestCorpus` calls
+  `conformance.Run` with the Driver's exported `Strategy`. A Driver package's
+  tests never import the registry or another Driver, which
+  `TestDriverTestClosuresStandAlone` guards.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row
@@ -1352,20 +1359,22 @@ opencode's `ResolveExit` finds errors with its own narrower decode; see
 ##### Driver Pass-log corpus
 
 Every Driver also carries a corpus of Pass logs under
-`cmd/launcher/internal/driver/testdata/corpus/<driver>/<case>/pass.jsonl`
+`cmd/launcher/internal/driver/<driver>/testdata/corpus/<case>/pass.jsonl`
 (issue #5180), seeded from the synthetic per-Driver fixtures and grown with
 scrubbed real logs. The seed logs are frozen copies that deliberately do not
 track later edits to those fixtures (the corpus pins behaviour, so a fixture
-edit must not move a golden). `TestDriverCorpusGoldens` drives each registered
-Driver over each log and compares its output to goldens beside it:
+edit must not move a golden). The Driver's own `TestCorpus` calls
+`conformance.Run` (`cmd/launcher/internal/driver/driverkit/conformance`) with
+its exported `Strategy`, which drives the Driver over each log and compares
+its output to goldens beside it:
 `classification.golden.json` (transient-vs-terminal classification),
 `usage.golden.json` (token and cost report),
 `heartbeat.golden.json` (heartbeat lines and `OnModel` calls),
 `transcript.golden.txt` and `result.golden.txt` (the rendered transcript and
 final result), `resolve-exit.golden.json` (exit-code resolution), and, for a
 reviewer-role case only, `verdict.golden.json` (what the review verdict scan
-returns for the transcript). The test fails until a newly registered Driver
-has at least one `<case>` log.
+returns for the transcript). It also replays each heartbeat in chunks. The
+test fails until a Driver has at least one `<case>` log.
 
 The transcript and heartbeat render under the default `implementor` role. A
 review-pass case opts in to the reviewer role with a `render.json` beside its
@@ -1397,18 +1406,18 @@ before committing.
 ```sh
 cd cmd/launcher
 go run ./internal/driver/corpus/scrub raw.jsonl \
-  internal/driver/testdata/corpus/<driver>/<case>/pass.jsonl
+  internal/driver/<driver>/testdata/corpus/<case>/pass.jsonl
 ```
 
 Then write its goldens with `nix run .#regen-goldens`, or, from
-`cmd/launcher`, `UPDATE_GOLDENS=1 go test -run '^TestDriverCorpusGoldens$'
-./internal/driver`. Goldens are permanent: regenerate them only in a change
-that deliberately alters a reader's output (a behaviour fix), never in a
-Driver's switch to the shared readers (issue #4944), where an unchanged golden
-is the proof the switch preserved behaviour. `TestDriverCorpusHasNoCredentials`
-rejects any credential-shaped string, email, host home path or
-`GIT_USER_NAME` value in the corpus, in CI and the in-box gate. It cannot recognise repo content, so it does not
-check that bodies were blanked.
+`cmd/launcher`, `UPDATE_GOLDENS=1 go test -run '^TestCorpus$'
+./internal/driver/<driver>`. Goldens are permanent: regenerate them only in
+a change that deliberately alters a reader's output (a behaviour fix), never
+in a Driver's switch to the shared readers (issue #4944), where an unchanged
+golden is the proof the switch preserved behaviour. The kit's `credentials`
+subtest rejects any credential-shaped string, email, host home path or
+`GIT_USER_NAME` value in the corpus, in CI and the in-box gate. It cannot
+recognise repo content, so it does not check that bodies were blanked.
 
 #### Loop/background affordances are stripped, not merely discouraged
 
