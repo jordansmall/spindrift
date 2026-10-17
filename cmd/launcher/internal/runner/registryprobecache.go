@@ -16,10 +16,11 @@ import (
 const registryProbeCacheVersion = 1
 
 // registryProbeCacheKey holds the inputs the transport verdict depends on; a
-// stored key differing from the live key is a miss, never a wrong answer. An
-// old image missing the probe-registry-socket verb reads as socket-incapable
-// (#3120), and oci.go hard-errors when a socket-incapable verdict meets a
-// mode that denies host loopback, so both are in the key.
+// stored key differing from the live key is a miss, never a wrong answer. The
+// image is keyed because its own driver-exec, run as its own user, measures
+// the verdict, so re-probing on a new image is the conservative choice; and
+// oci.go hard-errors when a socket-incapable verdict meets a mode that denies
+// host loopback, so the network mode is keyed too.
 type registryProbeCacheKey struct {
 	// runtime is the resolved binary, not the raw infra.runtime string, so
 	// aliases that resolve to one binary share a cache entry.
