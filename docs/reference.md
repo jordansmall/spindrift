@@ -1111,7 +1111,14 @@ Driver entry declares:
   corpus](#driver-pass-log-corpus)), and a `TestCorpus` calls
   `conformance.Run` with the Driver's exported `Strategy`. A Driver package's
   tests never import the registry or another Driver, which
-  `TestDriverTestClosuresStandAlone` guards.
+  `TestDriverTestClosuresStandAlone` guards. Its tests run in their own
+  `drivers-<name>-go-test` check, generated from the registry row — build it
+  while iterating (`nix build .#checks.<system>.drivers-<name>-go-test -L`). If
+  the tests import an internal package missing from that check's fileset, add
+  it to `driverGoTestShared` in `nix/checks/go.nix`. The check vendors from a
+  source without any Driver directory under the launcher's `launcherVendorHash`,
+  so a Driver importing a third-party module no other launcher package uses
+  makes that vendor derivation mismatch the hash.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row

@@ -19,7 +19,9 @@ declarative surface and the built image.
 nix flake check                 # everything CI runs, in one shot
 nix flake check -L              # same, streaming build logs (aka --print-build-logs)
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-go-test -L
-                                # run a single check (Go tests here) in isolation
+                                # launcher Go tests, minus the Driver packages (next line)
+nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).drivers-claude-go-test -L
+                                # one Driver's own tests (drivers-<name>-go-test)
 nix build .#packages.x86_64-linux.agent-image -L
                                 # realise the Linux OCI image (the one thing checks assert only at eval time)
 nix develop                     # host-side dev shell: git, gh, jq, and the spindrift CLI on PATH
@@ -222,7 +224,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   their Driver's checks in `checks/drivers/<name>.nix`, named after its row
   in `lib/drivers/default.nix`, and `checks/drivers.nix` unions it in and
   runs the parity checks over every row — a row with no file fails
-  evaluation (issue #5502). Also here: `fixtures.nix` (the
+  evaluation (issue #5502). Its Go tests run in `drivers-<name>-go-test`,
+  which `checks/go.nix` generates from the same row. Also here:
+  `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), and `regen-goldens.nix` (`nix run
   .#regen-goldens`, which reruns the Go golden test
