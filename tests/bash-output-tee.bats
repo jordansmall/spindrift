@@ -85,3 +85,10 @@ setup() {
     run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
   [ "$status" -eq 2 ]
 }
+
+@test "blocks a Bash call when the credential list file names no variables" {
+  printf '# only a comment\n\n' >"$BATS_TEST_TMPDIR/empty"
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/empty" \
+    run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
+  [ "$status" -eq 2 ]
+}
