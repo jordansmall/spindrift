@@ -268,7 +268,7 @@
             # };
             # issues = {
             #   forgejo = {
-            #     # Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo
+            #     # Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo
             #     baseURL = "https://codeberg.org";
             #   };
             #   jira = {
