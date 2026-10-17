@@ -183,13 +183,15 @@ func (d *decoder) errorEvent(line string) driverkit.Event {
 }
 
 // decodedBlock is the union of the content-block fields the decoder reads.
+// Thinking stays raw so a stray non-string key on another block type cannot
+// fail that block's whole unmarshal; only a thinking block decodes it.
 type decodedBlock struct {
 	Type      string          `json:"type"`
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
 	Text      string          `json:"text"`
-	Thinking  string          `json:"thinking"`
+	Thinking  json.RawMessage `json:"thinking"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
 	Content   json.RawMessage `json:"content"`
@@ -264,7 +266,11 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 			}
 			ev.Kind, ev.Text = driverkit.KindText, b.Text
 		case "thinking":
-			ev.Kind, ev.Text = driverkit.KindReasoning, b.Thinking
+			var thinking string
+			if len(b.Thinking) > 0 && json.Unmarshal(b.Thinking, &thinking) != nil {
+				continue
+			}
+			ev.Kind, ev.Text = driverkit.KindReasoning, thinking
 		case "tool_use":
 			// A call lives in an assistant turn and its result in the user turn
 			// after it; a block in the other turn type was never rendered.

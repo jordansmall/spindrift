@@ -92,6 +92,18 @@ func TestWriterToolCountsShowKind(t *testing.T) {
 	}
 }
 
+func TestWriterToolCountSurvivesNonStringThinkingKey(t *testing.T) {
+	var status bytes.Buffer
+	w := newWriter("7", &status)
+
+	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"},"thinking":0}]}}`+"\n")
+	fmt.Fprint(w, `{"type":"result","num_turns":1}`+"\n")
+
+	if out := status.String(); !strings.Contains(out, "1 edit") {
+		t.Errorf("count line missing '1 edit': %q", out)
+	}
+}
+
 func TestWriterEmitsOnResultEvent(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter("9", &status)
@@ -456,6 +468,17 @@ func TestWriterNarrationText(t *testing.T) {
 		t.Errorf("heartbeat missing issue prefix: %q", out)
 	}
 	if !strings.Contains(out, "hello") {
+		t.Errorf("heartbeat missing narration text: %q", out)
+	}
+}
+
+func TestWriterNarrationSurvivesNonStringThinkingKey(t *testing.T) {
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "8", &status)
+
+	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"text","text":"hello","thinking":0}]}}`+"\n")
+
+	if out := status.String(); !strings.Contains(out, "hello") {
 		t.Errorf("heartbeat missing narration text: %q", out)
 	}
 }
