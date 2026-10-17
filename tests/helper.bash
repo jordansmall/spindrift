@@ -13,14 +13,16 @@ if [ -n "${SPINDRIFT_SEAM_FIXTURES_DIR:-}" ]; then
   : "${RESEARCH_OUTCOME_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/research-outcome-contract.md}"
   : "${DRIVER_PREAMBLE_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/driver-preamble.sh}"
   : "${AGENT_PATHS_PREAMBLE_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/agent-paths-preamble.sh}"
+  : "${CLAUDE_SETTINGS_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/agent-files-claude/home/agent/.claude/settings.json}"
   export OUTCOME_CONTRACT_FILE COMMS_CONTRACT_FILE CHECK_CONTRACT_FILE \
     RESEARCH_OUTCOME_CONTRACT_FILE DRIVER_PREAMBLE_FILE \
-    AGENT_PATHS_PREAMBLE_FILE
+    AGENT_PATHS_PREAMBLE_FILE CLAUDE_SETTINGS_FILE
   # The file names are duplicated from nix/seam-fixtures.nix; a rename there
   # must fail loudly here.
   for _f in "$OUTCOME_CONTRACT_FILE" "$COMMS_CONTRACT_FILE" \
     "$CHECK_CONTRACT_FILE" "$RESEARCH_OUTCOME_CONTRACT_FILE" \
-    "$DRIVER_PREAMBLE_FILE" "$AGENT_PATHS_PREAMBLE_FILE"; do
+    "$DRIVER_PREAMBLE_FILE" "$AGENT_PATHS_PREAMBLE_FILE" \
+    "$CLAUDE_SETTINGS_FILE"; do
     [ -r "$_f" ] || { echo "helper.bash: seam fixture not found: $_f" >&2; exit 1; }
   done
   unset _f

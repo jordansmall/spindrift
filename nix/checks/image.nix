@@ -739,9 +739,9 @@ in
           echo "settings.json does not register a PreToolUse hook matched to Bash" >&2
           exit 1
         }
-        jq -e '.hooks.PreToolUse[0].hooks[0].command | endswith("reject-background-bash.sh")' \
+        jq -e '.hooks.PreToolUse[0].hooks[0].command | (contains("/home/agent/.claude/hooks/reject-background-bash.sh") and contains("refusing the call"))' \
           "$settings" >/dev/null || {
-          echo "settings.json's PreToolUse hook does not point at reject-background-bash.sh" >&2
+          echo "settings.json's PreToolUse hook does not point at reject-background-bash.sh or is not wrapped by guardHook" >&2
           exit 1
         }
         touch $out
@@ -763,9 +763,9 @@ in
         settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         for matcher in Read Bash; do
           jq -e --arg matcher "$matcher" \
-            'any(.hooks.PreToolUse[]; .matcher == $matcher and (.hooks[0].command | endswith("credential-deny.sh")))' \
+            'any(.hooks.PreToolUse[]; .matcher == $matcher and (.hooks[0].command | (contains("/home/agent/.claude/hooks/credential-deny.sh") and contains("refusing the call"))))' \
             "$settings" >/dev/null || {
-            echo "settings.json does not register a $matcher-matched PreToolUse hook pointing at credential-deny.sh" >&2
+            echo "settings.json does not register a $matcher-matched PreToolUse hook pointing at credential-deny.sh (or is not wrapped by guardHook)" >&2
             exit 1
           }
         done
@@ -808,9 +808,9 @@ in
         }
         settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e \
-          'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("env-credential-scrub.sh")))' \
+          'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | (contains("/home/agent/.claude/hooks/env-credential-scrub.sh") and contains("refusing the call"))))' \
           "$settings" >/dev/null || {
-          echo "settings.json does not register a Bash-matched PreToolUse hook pointing at env-credential-scrub.sh" >&2
+          echo "settings.json does not register a Bash-matched PreToolUse hook pointing at env-credential-scrub.sh (or is not wrapped by guardHook)" >&2
           exit 1
         }
         touch $out
@@ -870,9 +870,9 @@ in
         }
         settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e \
-          'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | endswith("bash-output-tee.sh")))' \
+          'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | (contains("/home/agent/.claude/hooks/bash-output-tee.sh") and contains("refusing the call"))))' \
           "$settings" >/dev/null || {
-          echo "settings.json does not register a Bash-matched PreToolUse hook pointing at bash-output-tee.sh" >&2
+          echo "settings.json does not register a Bash-matched PreToolUse hook pointing at bash-output-tee.sh (or is not wrapped by guardHook)" >&2
           exit 1
         }
         touch $out
