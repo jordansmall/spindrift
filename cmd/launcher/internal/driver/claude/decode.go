@@ -129,7 +129,7 @@ func (d *decoder) decodeLine(line string) []driverkit.Event {
 		TotalCostUSD  float64    `json:"total_cost_usd"`
 		DurationMs    int64      `json:"duration_ms"`
 		DurationAPIMs int64      `json:"duration_api_ms"`
-		Usage         TokenUsage `json:"usage"`
+		Usage         tokenUsage `json:"usage"`
 	}
 	result := driverkit.Event{Kind: driverkit.KindResult, Text: text}
 	if json.Unmarshal([]byte(line), &tot) == nil {
@@ -213,7 +213,7 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 			ID      string          `json:"id"`
 			Model   string          `json:"model"`
 			Content json.RawMessage `json:"content"`
-			Usage   TokenUsage      `json:"usage"`
+			Usage   tokenUsage      `json:"usage"`
 		} `json:"message"`
 	}
 	if json.Unmarshal([]byte(line), &env) != nil {
@@ -227,23 +227,21 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 		raws = nil
 	}
 	blocks := make([]decodedBlock, 0, len(raws))
-	spawn := make([]ContentBlock, 0, len(raws))
 	for _, raw := range raws {
 		var b decodedBlock
 		if json.Unmarshal(raw, &b) != nil {
 			continue
 		}
 		blocks = append(blocks, b)
-		spawn = append(spawn, ContentBlock{Type: b.Type, ID: b.ID, Name: b.Name, Input: b.Input})
 	}
 	if env.Type == "assistant" {
-		CollectTaskRoles(Event{Message: &Message{Content: spawn}}, d.taskRole)
+		d.recordSpawns(blocks)
 	}
 
 	subagent := env.ParentToolUseID != ""
 	role := d.topRole
 	if subagent {
-		role = ResolveRole(Event{ParentToolUseID: env.ParentToolUseID}, d.taskRole, d.topRole)
+		role = d.subagentRole(env.ParentToolUseID)
 	}
 
 	var out []driverkit.Event
@@ -312,4 +310,98 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 		})
 	}
 	return out
+}
+
+// taskInput is the input payload of a subagent-spawning tool-use block.
+type taskInput struct {
+	SubagentType string `json:"subagent_type"`
+}
+
+// tokenUsage is the per-message token accounting in assistant and result lines.
+type tokenUsage struct {
+	InputTokens              int            `json:"input_tokens"`
+	OutputTokens             int            `json:"output_tokens"`
+	CacheReadInputTokens     int            `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int            `json:"cache_creation_input_tokens"`
+	CacheCreation            *cacheCreation `json:"cache_creation,omitempty"`
+}
+
+// cacheCreation splits CacheCreationInputTokens by cache TTL. It is nil when
+// the line predates the split, so callers must nil-check before dereferencing.
+type cacheCreation struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+}
+
+// isSubagentSpawnTool reports whether a tool-use block with this name spawns a
+// subagent. "Task" is the legacy name; "Agent" is the current Box claude name,
+// confirmed in a real --output-format stream-json sample (issue #2078).
+func isSubagentSpawnTool(name string) bool {
+	return name == "Task" || name == "Agent"
+}
+
+// subagentType reads subagent_type from a spawn tool's input, or "" when it is
+// absent or malformed.
+func subagentType(input json.RawMessage) string {
+	var ti taskInput
+	if len(input) > 0 {
+		_ = json.Unmarshal(input, &ti)
+	}
+	return ti.SubagentType
+}
+
+// recordSpawns records each Task/Agent tool-use block's subagent_type into
+// taskRole, keyed by the spawn block's tool-use ID and defaulting to
+// driverkit.DefaultRole. The key is global rather than per-parent so that a
+// nested spawn's role resolves instead of falling back to DefaultRole.
+func (d *decoder) recordSpawns(blocks []decodedBlock) {
+	for _, b := range blocks {
+		if b.Type != "tool_use" || !isSubagentSpawnTool(b.Name) || b.ID == "" {
+			continue
+		}
+		role := subagentType(b.Input)
+		if role == "" {
+			role = driverkit.DefaultRole
+		}
+		d.taskRole[b.ID] = role
+	}
+}
+
+// subagentRole returns the role recorded for a spawn ID, or
+// driverkit.DefaultRole when the parent is unknown. A top-level event takes
+// topRole instead, left empty here for the readers to default (issue #2092).
+func (d *decoder) subagentRole(parent string) string {
+	if role, ok := d.taskRole[parent]; ok {
+		return role
+	}
+	return driverkit.DefaultRole
+}
+
+// AttributionRoleForPass maps a pass_start op's Role to an attribution role:
+// "review"/"delta-review" to driverkit.ReviewerRole, "implement"/"fix"/"land"
+// to driverkit.ImplementorRole, and anything else to "" so a caller can tell
+// "no role info" from "implementor".
+// The literals are not passmachine's constants because driverExecBin's fileset
+// (lib/mkHarness.nix) excludes that package, so importing it breaks the build.
+func AttributionRoleForPass(passRole string) string {
+	switch passRole {
+	case "review", "delta-review":
+		return driverkit.ReviewerRole
+	case "implement", "fix", "land":
+		return driverkit.ImplementorRole
+	default:
+		return ""
+	}
+}
+
+// nextActiveTopLevelRole returns the top-level attribution role in effect after
+// op (issue #2382). An op that maps to no role leaves current unchanged.
+func nextActiveTopLevelRole(current string, op *hostop.SpindriftOp) string {
+	if op == nil || op.Op != hostop.OpPassStart {
+		return current
+	}
+	if role := AttributionRoleForPass(op.Role); role != "" {
+		return role
+	}
+	return current
 }

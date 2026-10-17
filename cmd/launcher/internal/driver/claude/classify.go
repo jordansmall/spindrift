@@ -1,8 +1,3 @@
-// Package claude is the claude Driver's host-side half (ADR 0009): the
-// Anthropic transient-error taxonomy, stream-json heartbeat parsing, the
-// claude CLI transcript shape, and usage-log parsing. It uses driverkit's
-// Class/Reason/Classification types directly, so the registration adapter in
-// driver/claude.go needs no cast.
 package claude
 
 import (

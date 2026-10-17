@@ -111,7 +111,7 @@ type Event struct {
 	// top-level event the pass role in force (empty = the reader's default). A
 	// Driver whose CLI has no role attribution always leaves it "". The
 	// vocabulary carries no parent tool-use id, so a Driver whose grammar
-	// attributes role by one (claude's ResolveRole) resolves Role in its
+	// attributes role by one (claude) resolves Role in its
 	// stateful decoder.
 	Role string
 

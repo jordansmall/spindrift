@@ -1,12 +1,15 @@
 // Package driverkit holds the vocabulary shared across the Driver seam (ADR
-// 0009): transient classification, pattern matching, NDJSON line framing, the
-// log-scan degrade contract, the role constants, and heartbeat-text
-// sanitizing and trimming. Declaring them here keeps every Driver strategy
-// from hand-mirroring its own copy.
+// 0009, 0065). Each Driver supplies a Decoder that turns one raw Pass-log
+// line into canonical Events (Event, Kind; see event.go), and the readers are
+// written once here over those events, so a reader never learns a CLI's
+// grammar: Classify (transient classification), the heartbeat writer, usage
+// (ExtractUsage and its per-model and per-agent forms), RenderTranscript, the
+// result text (ResultText, LastMessageText), and ReadPasses.
 //
-// It also holds the canonical event vocabulary (Event, Kind, Decoder; ADR
-// 0065): each Driver decodes its Pass log lines into these events, and the
-// shared readers consume only them, so a reader never learns a CLI's grammar.
+// The low-level helpers they share live here too: pattern matching, NDJSON
+// line framing, the log-scan degrade contract, the role constants, and
+// heartbeat-text sanitizing and trimming. Declaring them here keeps every
+// Driver strategy from hand-mirroring its own copy.
 package driverkit
 
 import "time"

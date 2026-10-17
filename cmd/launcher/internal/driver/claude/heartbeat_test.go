@@ -1302,9 +1302,9 @@ func TestWriterOnModelFiresOnPairChangeOnly(t *testing.T) {
 	}
 
 	want := []call{
-		{"claude-sonnet-5-5", claude.ImplementorRole},
+		{"claude-sonnet-5-5", driverkit.ImplementorRole},
 		{"claude-haiku-4-5", "scout"},
-		{"claude-sonnet-5-5", claude.ImplementorRole},
+		{"claude-sonnet-5-5", driverkit.ImplementorRole},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("OnModel calls = %v, want %v", got, want)
