@@ -60,6 +60,7 @@ let
     package = pkgs: pkgs.hello;
     agentsJsonTemplate = "{}";
     agentFilesTemplate = _: { };
+    credentials = [ ];
   };
   # Shared defaultRoster fixture (issue #2386): the two
   # default-roster-effort checks assert the same roster defaults through
@@ -944,6 +945,52 @@ in
       }";
     pkgs.runCommand "drivers-assert-shape-rejects-bad-session-cache-dir-relative" { } "touch $out";
 
+  # Issue #5505: credentials rules are plain data; every malformed rule must
+  # throw, and the well-formed shapes (with and without the optional keys) pass.
+  drivers-assert-shape-credentials-rules =
+    let
+      complete = stubDriverComplete;
+      okRule = {
+        env = [ "STUB_TOKEN" ];
+        remedy = "set STUB_TOKEN";
+      };
+      throws =
+        credentials:
+        !(builtins.tryEval (driverRegistry.assertShape "stub" (complete // { inherit credentials; })))
+        .success;
+      badRules = [
+        (okRule // { env = [ ]; })
+        (okRule // { env = "STUB_TOKEN"; })
+        (okRule // { env = [ 1 ]; })
+        (removeAttrs okRule [ "env" ])
+        (removeAttrs okRule [ "remedy" ])
+        (okRule // { remedy = ""; })
+        (okRule // { modelPrefix = ""; })
+        (okRule // { modelPrefix = 1; })
+        (okRule // { setupCommand = [ ]; })
+        (okRule // { setupCommand = "stub login"; })
+        (okRule // { modelPrefx = "x/"; })
+        "not-a-rule"
+      ];
+      notThrown = filter (r: !(throws [ r ])) badRules;
+      fullRule = okRule // {
+        modelPrefix = "stub/";
+        setupCommand = [
+          "stub"
+          "login"
+        ];
+      };
+    in
+    assert assertMsg (notThrown == [ ])
+      "assertShape must throw for every malformed credentials rule, but did not for: ${
+        concatStringsSep ", " (map (r: generators.toPretty { } r) notThrown)
+      }";
+    assert assertMsg (throws "oops") "assertShape must throw when credentials is not a list";
+    assert assertMsg (
+      !(throws [ ]) && !(throws [ okRule ]) && !(throws [ fullRule ])
+    ) "assertShape must accept an empty credentials list and well-formed rules";
+    pkgs.runCommand "drivers-assert-shape-credentials-rules" { } "touch $out";
+
   drivers-assert-shape-succeeds-with-session-cache-dir-relative =
     let
       complete = stubDriverComplete // {
@@ -1338,6 +1385,7 @@ in
         package = pkgs: pkgs.hello;
         agentsJsonTemplate = "{}";
         agentFilesTemplate = _: { };
+        credentials = [ ];
       };
       result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
     in

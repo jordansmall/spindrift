@@ -25,18 +25,16 @@ func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 		// on a github forge) would pass here and fail `spindrift doctor`.
 		GHToken: ghToken,
 
-		ClaudeOAuthToken: a.claudeOAuthToken,
-		AnthropicAPIKey:  a.anthropicAPIKey,
+		Driver:      a.driver,
+		Credentials: credentialValues(a.credentials),
 
 		Runtime: a.runtime,
 
 		IssueTracker: a.tracker.issueTracker,
 		CodeForge:    codeForge,
 
-		// Driver, Model, OpencodeAuthContent, ResearchDispatch, and
-		// SelfContained stay zero because the wizard never prompts for them. A
-		// zero Driver lands on the driver-credentials row's claude arm, the
-		// credential the wizard did prompt for above.
+		// Models, ResearchDispatch, and SelfContained stay zero because the
+		// wizard never prompts for them.
 	}
 }
 
@@ -72,4 +70,15 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 		// ExtraCrossKnob stays unset: Quickstart's scaffold has no
 		// REGISTRY_PROXY_ROUTES_FILE knob.
 	}
+}
+
+func credentialValues(creds []credential) map[string]string {
+	if len(creds) == 0 {
+		return nil
+	}
+	m := make(map[string]string, len(creds))
+	for _, c := range creds {
+		m[c.env] = c.value
+	}
+	return m
 }

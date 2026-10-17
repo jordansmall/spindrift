@@ -119,9 +119,10 @@ at — Amazon Bedrock (`amazon-bedrock`), Google Vertex (`google-vertex`),
 Azure OpenAI (`azure`) — whose auth is cloud credentials rather than
 a plain `{env:VAR}` apiKey. No knobs land here, though the gate they
 would hang on has since shipped: the launcher's `driver-credentials` check
-already switches on the selected Driver, with the `github-copilot/` `MODEL`
-prefix gated inside the existing `case "opencode":` arm, so each leg below is
-one added `MODEL`-prefix branch inside that arm rather than new machinery. What
+walks the selected Driver's `credentials` rules (amended by issue #5505; it
+once switched on the Driver), with the `github-copilot/` `MODEL` prefix a
+prefix-gated rule on `lib/drivers/opencode.nix`, so each leg below is one added
+rule there rather than new machinery. What
 is still missing is the env-var-content→file primitive one leg needs
 (`cmd/launcher/internal/runner/bwrap.go`'s `offArgvKeys` only keeps values
 off argv, it never writes files). These are findings and a design fork,

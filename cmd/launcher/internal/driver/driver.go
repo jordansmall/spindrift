@@ -87,11 +87,15 @@ func register(s driverkit.Strategy) {
 	registry[s.Name] = strategyDriver{s}
 }
 
+// defaultName is the Driver an empty name selects, matching the nix side's
+// default.
+const defaultName = "claude"
+
 // New returns the registered Driver strategy for name. An empty name defaults
-// to "claude", matching the nix side's default.
+// to "claude".
 func New(name string) (Driver, error) {
 	if name == "" {
-		name = "claude"
+		name = defaultName
 	}
 	d, ok := registry[name]
 	if !ok {
@@ -100,17 +104,34 @@ func New(name string) (Driver, error) {
 	return d, nil
 }
 
+// descriptor returns the generated Descriptor for an exact Driver name.
+func descriptor(name string) (Descriptor, bool) {
+	for _, d := range descriptors {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return Descriptor{}, false
+}
+
 // ProviderNamespacedModels reports whether the named Driver takes
 // provider-namespaced model ids, read from its generated Descriptor. It is the
 // Go mirror of the Nix fact lib/mkHarness.nix's rosterWithoutBareWorker reads
 // (issue #5338); unknown and empty names are false rather than an error.
 func ProviderNamespacedModels(name string) bool {
-	for _, d := range descriptors {
-		if d.Name == name {
-			return d.ProviderNamespacedModels
-		}
+	d, _ := descriptor(name)
+	return d.ProviderNamespacedModels
+}
+
+// CredentialRules returns the named Driver's credential rules from its
+// generated Descriptor. An empty name defaults to "claude", as New does; ok is
+// false for an unknown Driver.
+func CredentialRules(name string) (rules []CredentialRule, ok bool) {
+	if name == "" {
+		name = defaultName
 	}
-	return false
+	d, ok := descriptor(name)
+	return d.Credentials, ok
 }
 
 // Names returns the sorted registered Driver names. The nix/Go parity test

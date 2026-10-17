@@ -787,3 +787,15 @@ credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 		t.Errorf("Probe() error %q must never contain a property value from the file", err.Error())
 	}
 }
+
+// The probe reads the per-tier models the --secret-cmd fallback reads, so a
+// github-copilot REVIEW_MODEL needs the credential even when MODEL does not.
+func TestLauncherChecks_DriverCredentials_AdapterFeedsPerTierModels(t *testing.T) {
+	t.Setenv("REVIEW_MODEL", "github-copilot/gpt-5")
+	c := minimalValidConfig()
+	c.driver = "opencode"
+	c.model = "anthropic/claude-sonnet-5"
+	if _, err := checkByName(t, launcherChecks(c), "driver-credentials").Probe(); err == nil {
+		t.Error("driver-credentials Probe() = nil, want an error for the copilot REVIEW_MODEL")
+	}
+}
