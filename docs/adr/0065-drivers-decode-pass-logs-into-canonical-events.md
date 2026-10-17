@@ -176,3 +176,13 @@ the transcript renderer ends every non-empty transcript with a newline.
 The `claude` package therefore keeps two of the three quirks named above:
 its classify options and its heartbeat tracking, whose family hook now
 also carries the rank the usage order reads.
+
+## Amendment (ADR 0066): registrations are Strategy literals
+
+ADR 0066 supersedes the worked-example sentence in the Decision: a Driver's
+registration no longer calls the shared readers directly from ten methods.
+It is a `driverkit.Strategy` literal, and one shared implementation calls
+the readers from it. The #5501 amendment above is that decision's first
+slice; the default top-level role and the choice of result reader stay
+Strategy fields. The corpus goldens remain the permanent gate, replayed by
+the conformance kit from each Driver's own package (issue #5506).

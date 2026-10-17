@@ -471,3 +471,14 @@ Issue #5378 later moved the lookup off a hand-built path: `session.go` reads
 the store path from `OPENCODE_DB` itself rather than rebuilding it from
 `$HOME`, so the Go and Nix halves cannot drift. An unset or empty
 `OPENCODE_DB` renders nothing.
+
+## Amendment (ADR 0067): the closed registry has named triggers
+
+The Driver registry stays closed on both halves, as decided here. ADR 0067
+records what would open it: a Driver spindrift will not bundle, or `pi`'s
+dogfood (issue #5487) showing a third bundled Driver's cost still lands on
+every contributor, either of which builds a process seam for out-of-tree
+Drivers; or a Consumer variant that overlays and the per-Driver options (ADR
+0064) cannot express, which opens the Nix half alone. ADR 0066 makes the
+host-side strategy a declarative literal, so the per-Driver code this ADR
+anticipated is smaller than it described.
