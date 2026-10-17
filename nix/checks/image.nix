@@ -238,7 +238,7 @@ in
       || { echo "scout-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
     # defaultRoster's fixed default effort (issue #2386) must survive the
     # roster==null fallback (lib/mkHarness.nix's resolvedRoster) end-to-end:
-    # the driver-level checks (nix/checks/drivers.nix) pin the effort table
+    # the driver-level checks (nix/checks/drivers/) pin the effort table
     # lookup's render but bypass that fallback by feeding a hand-built
     # roster straight to the driver renderer, so only this fixture (no
     # `roster` arg) proves the wiring from lib/roster.nix's rosterDefaults
@@ -373,7 +373,7 @@ in
     # proves the roster==null fallback (lib/mkHarness.nix's resolvedRoster)
     # bakes the new per-agent effort defaults correctly for the on-disk
     # opencode agent-files mechanism too, not just the --agents JSON one,
-    # since nix/checks/drivers.nix's driver-level effort checks bypass that
+    # since nix/checks/drivers/'s driver-level effort checks bypass that
     # fallback by feeding a hand-built roster straight to the renderer.
     grep -q 'reasoningEffort: "${rosterDefaults.scout.effort}"' "$scout" \
       || { echo "opencode scout.md missing default scout effort in baked frontmatter" >&2; exit 1; }
@@ -725,7 +725,7 @@ in
   # The PreToolUse hook rejecting backgrounded Bash calls needs both the hook
   # script and the settings.json that registers it (issue #1609), so a real
   # Box enforces the restriction and not just the flagsCommon layer
-  # (drivers-claude-blocks-loop-background-affordances in drivers.nix).
+  # (drivers-claude-blocks-loop-background-affordances in nix/checks/drivers/claude.nix).
   reject-background-bash-hook-baked-into-image =
     pkgs.runCommand "reject-background-bash-hook-baked-into-image" { nativeBuildInputs = [ pkgs.jq ]; }
       ''

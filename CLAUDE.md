@@ -273,6 +273,11 @@ touches; otherwise CI's full `nix flake check` is the final gate. A Box's
 worker subagents run targeted checks only — its coordinator agent owns the
 full gate.
 
+A Driver's Nix checks live in `nix/checks/drivers/<name>.nix`, named after its
+row in `lib/drivers/default.nix`; `nix/checks/drivers.nix` unions the files
+and runs the parity checks over every row. Build one check with
+`nix build .#checks.<system>.<attr> -L`.
+
 A check failure is deterministic: the same derivation hash fails the same
 way however it is scheduled. Never re-run a failed check unchanged — not
 under reduced parallelism (the `EXIT:137` carve-out below is outside

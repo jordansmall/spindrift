@@ -1476,7 +1476,7 @@ by reading the pinned `claude-code` 2.1.204 binary directly (`strings
 bin/.claude-wrapped | grep CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` finds it
 gating `.omit({run_in_background: true})` on the Bash, Agent/Task, and
 PowerShell tool schemas each). That reading is a snapshot, not the durable
-guard: `nix/checks/drivers.nix`'s
+guard: `nix/checks/drivers/claude.nix`'s
 `drivers-claude-cli-knows-disable-background-tasks-env` re-greps whichever
 `claude-code` build is actually pinned, on every run, so a future version
 that renames or drops the var fails CI loudly there instead of leaving the
