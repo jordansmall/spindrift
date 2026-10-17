@@ -170,13 +170,14 @@ type decodedBlock struct {
 	Content   json.RawMessage `json:"content"`
 }
 
-// contentEvents decodes an assistant or user line: its content blocks, then
-// for an assistant line one KindUsage. The envelope is strict: a type error in it
-// (a mistyped usage field, say) yields no events, as the pre-decoder readers
-// dropped such a line. Only the content is lenient: a user turn whose content
-// is a string, or a block that fails to unmarshal, yields no events for that
-// part rather than losing the line. Task spawns are recorded here and nothing
-// is deduplicated; the usage reader dedups by MessageID.
+// contentEvents decodes an assistant or user line: for an assistant line one
+// KindModel, then its content blocks, then one KindUsage. The envelope is
+// strict: a type error in it (a mistyped usage field, say) yields no events,
+// as the pre-decoder readers dropped such a line. Only the content is lenient:
+// a user turn whose content is a string, or a block that fails to unmarshal,
+// yields no events for that part rather than losing the line. Task spawns are
+// recorded here and nothing is deduplicated; the usage reader dedups by
+// MessageID.
 func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 	var env struct {
 		Type            string `json:"type"`
@@ -219,8 +220,16 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 	}
 
 	var out []driverkit.Event
+	if env.Type == "assistant" {
+		// One per line, even with no model: the heartbeat switches role on it.
+		out = append(out, driverkit.Event{
+			Kind: driverkit.KindModel, MessageID: env.Message.ID, Model: env.Message.Model,
+			Role: role, InSubagent: subagent,
+			Synthetic: synthetic || env.Message.Model == syntheticModelSentinel,
+		})
+	}
 	for _, b := range blocks {
-		ev := driverkit.Event{MessageID: env.Message.ID, Role: role, Synthetic: synthetic}
+		ev := driverkit.Event{MessageID: env.Message.ID, Role: role, InSubagent: subagent, Synthetic: synthetic}
 		switch b.Type {
 		case "text":
 			// The transcript lists the agent's prose, not the user turns
