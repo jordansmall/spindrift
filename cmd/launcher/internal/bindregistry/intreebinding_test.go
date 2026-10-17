@@ -612,14 +612,14 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 	}
 }
 
-func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
+func TestApplyInTreeBindingConvergesOnRewrittenContentWithBitClear(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
-	// Simulate Apply's rewrite landing but the process dying before the
-	// skip-worktree bit got set: content rewritten and dirty against the
-	// index, bit clear.
+	// Content already rewritten by some other means and dirty against the
+	// index, bit clear. Apply itself tags first, so this is the defensive
+	// convergence path.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
 	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
@@ -657,8 +657,8 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
 	// Set the bit directly, bypassing ApplyInTreeBinding, so content stays
-	// exactly as committed. The crash-between-phases test above does the
-	// opposite: content rewritten, bit clear.
+	// exactly as committed. The rewritten-content-with-bit-clear test above
+	// does the opposite: content rewritten, bit clear.
 	runGit(t, dir, "update-index", "--skip-worktree", "--", cargoBinding.InTreeConfigPath)
 
 	rewrites := []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}
@@ -700,9 +700,9 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 
 // Issue #3024's gap 2, pinned as accepted risk: workingTreeDirty only says
 // something changed configPath since the index, not that Apply's own rewrite
-// did. A config dirtied for an unrelated reason reads as "a crashed Apply
-// already rewrote this" and gets skip-worktree-tagged, hiding the unrelated
-// edit from git status without ever rewriting it.
+// did. A config dirtied for an unrelated reason reads as "already rewritten"
+// and gets skip-worktree-tagged, hiding the unrelated edit from git status
+// without ever rewriting it.
 func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
@@ -973,13 +973,13 @@ func TestRevertInTreeBindingNoopOnNeverApplied(t *testing.T) {
 	}
 }
 
-func TestRevertInTreeBindingRestoresAfterCrashBetweenPhases(t *testing.T) {
+func TestRevertInTreeBindingRestoresRewrittenContentWithBitClear(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
 	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
 
-	// Simulate Apply's rewrite landing but the process dying before the
-	// skip-worktree bit got set: content dirty, bit clear.
+	// Content already rewritten by some other means, bit clear. Apply itself
+	// tags first, so this is Revert's defensive path.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
 	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
