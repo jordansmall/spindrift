@@ -7003,7 +7003,7 @@ happens next:
 | 0    | dispatched work |
 | 2    | queue empty (no open issues with the dispatch label) |
 | 3    | open issues exist but none are dispatchable |
-| 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or, under the OCI runtime, that the loaded image would also be rebuilt against the current base-branch tip); in-flight Boxes finished, no new ones launched |
+| 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or that the loaded image would also be rebuilt against the current base-branch tip: always under the OCI runtime, and under bwrap only when its hot-swap is unconfigured or fails); in-flight Boxes finished, no new ones launched |
 | 5    | the loaded image is stale in a way no rebuild converges (host-tainted: a host-system derivation reached the image graph, so the same base tip stays stale after a rebuild against it) |
 | 6    | bootstrap rejected the config (the launcher's `exitConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine |
 | 7    | an operator asked the run to stop — the one-shot dispatch wave, selective dispatch, research, and the `recover` gate all share this same two-stage latch, not just `CONTINUOUS_DISPATCH` mode. On one signal the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited; on a second signal it instead reaped every in-flight Box and released their issues back to the dispatchable pool before exiting. Both are the same code deliberately — each means "you asked me to stop" |
@@ -7017,17 +7017,28 @@ launcher-only-stale verdict has no tip to realize, since the launcher cannot
 rebuild itself in place, so that build is always cold.
 
 Under the bwrap runtime, a verdict where only the agent-closure image
-dimension is stale no longer reaches exit 4 at all: the launcher
-hot-swaps the realized closure in place and keeps refilling instead of
-draining (ADR 0043, issue #2682). The agent-closure dimension covers the
-agent files, the agent env, the in-box nix config, and the configured
-`prefetch` snippet, so a merge that changes only `prefetch` is a real
-staleness signal under bwrap rather than a no-op, and the hot-swap hands
-every Box launched afterward the new snippet instead of the one baked at
-launcher startup (issue #2954). Exit 4 under bwrap now fires only when the
-launcher dimension itself is stale (alone, or alongside the image) — a
-process cannot swap itself, so that case still drains and exits exactly as
-before. The OCI runtime is unaffected: it never swaps, so any stale
+dimension is stale hot-swaps instead of draining when it can: the
+launcher realizes the stale tip, swaps the realized closure in place,
+and keeps refilling (ADR 0043, issue #2682). The agent-closure dimension
+covers the agent files, the agent env, the in-box nix config, and the
+configured `prefetch` snippet, so a merge that changes only `prefetch`
+is a real staleness signal under bwrap rather than a no-op, and the
+hot-swap hands every Box launched afterward the new snippet instead of
+the one baked at launcher startup (issue #2954). When the swap is
+unconfigured or fails, an image-only-stale verdict drains to exit 4 just
+as on OCI: `FLAKE_LAUNCHER_ATTR` is unset, the realize fails, the
+realized tip tag is not a `/nix/store/` path, or a nixInBox Consumer's
+nix-var snapshot generation fails. The last three each first print a
+`==> bwrap hot-swap: ... draining instead` line to stderr, which marks a
+failed swap of a fresh launcher. The unconfigured case prints no such
+line, and with `FLAKE_LAUNCHER_ATTR` unset the probe never checks the
+launcher dimension at all, so that exit 4 reports only a stale image.
+Either way, exit 4 under bwrap does not by itself mean the launcher is
+stale. A host-tainted divergence prints no such line either: it halts
+with exit 5 instead, as on OCI. A stale launcher dimension (alone, or
+alongside the image) always drains to exit 4 — a process cannot swap
+itself, so that case drains and exits exactly as before. The OCI
+runtime is unaffected: it never swaps, so any stale
 dimension there still reaches this exit the way the table above describes.
 
 This exit-4 "stale drain" is a distinct concept from the `MAX_JOBS` refill
