@@ -16,7 +16,9 @@ type Kind string
 const (
 	// KindStart marks a model call (turn) beginning. Fills Timestamp and
 	// MessageID. The usage reader anchors the run's event span on the first
-	// one, and the classifier counts it as agent progress.
+	// one, and the classifier counts it as agent progress. A CLI with no
+	// per-call start record (claude) emits one per assistant or user turn as
+	// its progress marker, even for a line with no decodable content.
 	KindStart Kind = "start"
 
 	// KindText is assistant prose. Fills Text (as the CLI wrote it, not
@@ -64,7 +66,9 @@ const (
 	// KindError is an error the CLI reported inside its grammar. Text keeps the
 	// error's raw text, because the classifier matches transient markers on
 	// it; ResetAt carries a rate-limit reset the payload names. The latest one
-	// not followed by agent progress decides the classification.
+	// not followed by agent progress decides the classification, or the first
+	// with ClassifyOptions.FirstMatch. A CLI that reports failures as plain
+	// text (claude) decodes every non-content line to this kind.
 	KindError Kind = "error"
 
 	// KindUnparsed is a line outside the grammar: stderr shares the Pass log,
@@ -109,6 +113,11 @@ type Event struct {
 	// id, so a Driver whose grammar attributes role by one (claude's ResolveRole)
 	// resolves Role in its stateful decoder.
 	Role string
+
+	// Synthetic marks a turn the CLI wrote itself rather than the model: it is
+	// not agent progress, so the classifier does not let a Synthetic content
+	// event (text, reasoning, tool call or result) recover an earlier error.
+	Synthetic bool
 
 	// MessageID identifies the model message the event belongs to. It is the
 	// usage dedup key and the result reader's message boundary; leave it ""

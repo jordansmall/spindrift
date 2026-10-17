@@ -44,7 +44,7 @@ var (
 func TestClassifyProgressResetsLatch(t *testing.T) {
 	for _, k := range []Kind{KindStart, KindText, KindReasoning, KindToolCall, KindToolResult} {
 		path, nd := evLines(t, Event{Kind: KindError, Text: "rate_limit"}, Event{Kind: k})
-		got, err := Classify(path, nd, rlExtras, termExtras)
+		got, err := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestClassifyProgressResetsLatch(t *testing.T) {
 
 func TestClassifyUsageIsNotProgress(t *testing.T) {
 	path, nd := evLines(t, Event{Kind: KindError, Text: "rate_limit"}, Event{Kind: KindUsage}, Event{Kind: KindModel})
-	got, _ := Classify(path, nd, rlExtras, termExtras)
+	got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{})
 	if got.Class != Transient || got.Reason != RateLimit {
 		t.Errorf("got %+v, want Transient/RateLimit", got)
 	}
@@ -69,7 +69,7 @@ func TestClassifyLastUnrecoveredErrorWins(t *testing.T) {
 		Event{Kind: KindText},
 		Event{Kind: KindError, Text: "overloaded"},
 		Event{Kind: KindError, Text: "unrelated"})
-	got, _ := Classify(path, nd, rlExtras, termExtras)
+	got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{})
 	if got.Reason != Overloaded {
 		t.Errorf("got %+v, want Overloaded", got)
 	}
@@ -77,19 +77,19 @@ func TestClassifyLastUnrecoveredErrorWins(t *testing.T) {
 
 func TestClassifyUnparsedOnlyTerminalAndNonOverwriting(t *testing.T) {
 	path, nd := evLines(t, Event{Kind: KindUnparsed, Text: "rate_limit hit"})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.Class != Terminal || got.Reason != TaskFailed {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.Class != Terminal || got.Reason != TaskFailed {
 		t.Errorf("transient marker in unparsed text: got %+v, want fallback", got)
 	}
 	path, nd = evLines(t, Event{Kind: KindUnparsed, Text: "bad flag"})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.Reason != UnsupportedFlag {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.Reason != UnsupportedFlag {
 		t.Errorf("terminal marker in unparsed text: got %+v, want UnsupportedFlag", got)
 	}
 	path, nd = evLines(t, Event{Kind: KindError, Text: "rate_limit"}, Event{Kind: KindUnparsed, Text: "bad flag"})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.Reason != RateLimit {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.Reason != RateLimit {
 		t.Errorf("unparsed overwrote the latched error: got %+v", got)
 	}
 	path, nd = evLines(t, Event{Kind: KindUnparsed, Text: "bad flag"}, Event{Kind: KindError, Text: "rate_limit"})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.Reason != RateLimit {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.Reason != RateLimit {
 		t.Errorf("error did not overwrite the unparsed latch: got %+v", got)
 	}
 }
@@ -99,36 +99,36 @@ func TestClassifyResetAtOnlyOnRateLimit(t *testing.T) {
 	later := at.Add(time.Hour)
 
 	path, nd := evLines(t, Event{Kind: KindError, Text: "rate_limit", ResetAt: &at})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.ResetAt == nil || !got.ResetAt.Equal(at) {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.ResetAt == nil || !got.ResetAt.Equal(at) {
 		t.Errorf("RateLimit ResetAt = %v, want %v", got.ResetAt, at)
 	}
 
 	path, nd = evLines(t, Event{Kind: KindError, Text: "overloaded", ResetAt: &at})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.ResetAt != nil {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.ResetAt != nil {
 		t.Errorf("Overloaded kept ResetAt %v", got.ResetAt)
 	}
 
 	// An unmatched later error leaves the latch, so the earlier error's reset stays.
 	path, nd = evLines(t, Event{Kind: KindError, Text: "rate_limit", ResetAt: &at}, Event{Kind: KindError, Text: "noise", ResetAt: &later})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.ResetAt == nil || !got.ResetAt.Equal(at) {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.ResetAt == nil || !got.ResetAt.Equal(at) {
 		t.Errorf("unmatched error moved ResetAt to %v, want %v", got.ResetAt, at)
 	}
 
 	// A matching later error without its own reset clears the earlier one.
 	path, nd = evLines(t, Event{Kind: KindError, Text: "rate_limit", ResetAt: &at}, Event{Kind: KindError, Text: "rate_limit"})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.ResetAt != nil {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.ResetAt != nil {
 		t.Errorf("stale ResetAt %v survived a newer latch", got.ResetAt)
 	}
 
 	// Progress drops the latch and its reset together.
 	path, nd = evLines(t, Event{Kind: KindError, Text: "rate_limit", ResetAt: &at}, Event{Kind: KindText}, Event{Kind: KindError, Text: "rate_limit"})
-	if got, _ := Classify(path, nd, rlExtras, termExtras); got.ResetAt != nil {
+	if got, _ := Classify(path, nd, rlExtras, termExtras, ClassifyOptions{}); got.ResetAt != nil {
 		t.Errorf("reset survived progress: %v", got.ResetAt)
 	}
 }
 
 func TestClassifyMissingLog(t *testing.T) {
-	got, err := Classify(missingLog(t), fakeDecoder(nil), rlExtras, termExtras)
+	got, err := Classify(missingLog(t), fakeDecoder(nil), rlExtras, termExtras, ClassifyOptions{})
 	if err != nil || got != (Classification{Class: Terminal, Reason: TaskFailed}) {
 		t.Errorf("got %+v, %v", got, err)
 	}
@@ -141,8 +141,8 @@ func TestClassifyUsesFreshDecoderPerScan(t *testing.T) {
 		return func(string) []Event { return nil }
 	}
 	path := writeClassifyLog(t, "x")
-	_, _ = Classify(path, nd, nil, nil)
-	_, _ = Classify(path, nd, nil, nil)
+	_, _ = Classify(path, nd, nil, nil, ClassifyOptions{})
+	_, _ = Classify(path, nd, nil, nil, ClassifyOptions{})
 	if made != 2 {
 		t.Errorf("newDecoder called %d times, want 2", made)
 	}
