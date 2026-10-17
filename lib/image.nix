@@ -141,12 +141,18 @@ let
   # any other code blocks. jq is exercised first because a hook without a
   # working jq exits 0 and allows. bash-output-tee.sh failures blocking is
   # deliberate (it unsets credential vars). Inline sh: a wrapper could be missing.
+  # A hung hook would run the tool too (Claude's own hook timeout is non-blocking),
+  # so timeout bounds it at opencode's 10 s (agent/opencode-guards.js); -k reaps a
+  # TERM-ignoring hook (137, refused); a missing timeout exits 127, so it refuses.
+  # A hook's own exit 124 also reads as timed out (still refused).
+  guardBound = 10;
+  guardGrace = 2;
   guardHook =
     script:
     "jq -n true >/dev/null 2>&1 || "
     + "{ echo \"spindrift guard hook ${script} cannot run (no working jq), refusing the call\" >&2; exit 2; }; "
-    + "/home/agent/.claude/hooks/${script}; rc=$?; "
-    + "case \"$rc\" in 0|2) exit \"$rc\";; 126|127) why=\"cannot run\";; *) why=failed;; esac; "
+    + "timeout -k ${toString guardGrace} ${toString guardBound} /home/agent/.claude/hooks/${script}; rc=$?; "
+    + "case \"$rc\" in 0|2) exit \"$rc\";; 126|127) why=\"cannot run\";; 124) why=\"timed out\";; *) why=failed;; esac; "
     + "echo \"spindrift guard hook ${script} $why (exit $rc), refusing the call\" >&2; exit 2";
 
   # Rendered with builtins.toJSON rather than a hand-built string so the
@@ -160,14 +166,20 @@ let
         map (matcher: {
           inherit matcher;
           hooks = [
-            {
-              type = "command";
-              command =
-                if row.event == "PreToolUse" then
-                  guardHook row.script
-                else
-                  "/home/agent/.claude/hooks/${row.script}";
-            }
+            (
+              {
+                type = "command";
+                command =
+                  if row.event == "PreToolUse" then
+                    guardHook row.script
+                  else
+                    "/home/agent/.claude/hooks/${row.script}";
+              }
+              // lib.optionalAttrs (row.event == "PreToolUse") {
+                # Must stay above guardBound + guardGrace.
+                timeout = 3 * guardBound;
+              }
+            )
           ];
         }) row.matchers
       )
