@@ -180,7 +180,7 @@ func resultEventOutputTokens(t *testing.T, path string) int {
 }
 
 // naivePerMessageOutputSum parses path independently of
-// breakdownByAgentFile/sumInLog and sums output_tokens across every assistant
+// breakdownByAgent/sumInLog and sums output_tokens across every assistant
 // line's message.usage, deduplicated by message.id the way the production scan
 // does (the first non-empty id wins). This is the naive, wrong-for-issue-#3213
 // figure the assertions compare against the result event's ground truth.
@@ -202,4 +202,15 @@ func naivePerMessageOutputSum(t *testing.T, path string) int {
 		sum += ev.Message.Usage.OutputTokens
 	})
 	return sum
+}
+
+// resultEvent is the independent decode of a result line that
+// resultEventOutputTokens uses to cross-check the production reader.
+type resultEvent struct {
+	Type      string    `json:"type"`
+	UsageData usageData `json:"usage"`
+}
+
+type usageData struct {
+	OutputTokens int `json:"output_tokens"`
 }

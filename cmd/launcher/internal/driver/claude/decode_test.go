@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestDecodeHostOpIsNeverAnError(t *testing.T) {
 func TestDecodeAssistantContent(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	evs := d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":" hi "},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`)
-	wantKinds(t, evs, driverkit.KindStart, driverkit.KindReasoning, driverkit.KindText, driverkit.KindToolCall)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindReasoning, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage)
 	if evs[1].Text != "hm" || evs[2].Text != " hi " || evs[2].MessageID != "m1" {
 		t.Errorf("content = %+v", evs)
 	}
@@ -86,7 +87,7 @@ func TestDecodeUserStringContentStillSignalsProgress(t *testing.T) {
 func TestDecodeSyntheticAssistantIsErrorNotProgress(t *testing.T) {
 	line := `{"type":"assistant","error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: 429"}]}}`
 	evs := newDecoderAt(decodeNow)(line)
-	wantKinds(t, evs, driverkit.KindError, driverkit.KindText)
+	wantKinds(t, evs, driverkit.KindError, driverkit.KindText, driverkit.KindUsage)
 	if evs[0].Text != line || !evs[1].Synthetic {
 		t.Errorf("events = %+v", evs)
 	}
@@ -155,4 +156,72 @@ func TestNewDecoderYieldsIndependentState(t *testing.T) {
 	a, b := NewDecoder(), NewDecoder()
 	a(`{"type":"assistant","message":{"content":[{"type":"text","text":"429 Too Many Requests"}]}}`)
 	wantKinds(t, b(`{"type":"result","result":"429 Too Many Requests"}`), driverkit.KindResult, driverkit.KindError)
+}
+
+func TestDecodeAssistantUsage(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	d(`{"type":"assistant","message":{"id":"s","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
+
+	split := d(`{"type":"assistant","message":{"id":"m1","model":"claude-opus-4","content":"x","usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":99,"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":5}}}}`)
+	wantKinds(t, split, driverkit.KindStart, driverkit.KindUsage)
+	want := driverkit.Event{Kind: driverkit.KindUsage, MessageID: "m1", Model: "claude-opus-4", Tokens: driverkit.Tokens{Input: 1, Output: 2, CacheRead: 3, CacheWrite5m: 4, CacheWrite1h: 5}}
+	if !reflect.DeepEqual(split[1], want) {
+		t.Errorf("usage = %+v, want %+v", split[1], want)
+	}
+
+	flat := d(`{"type":"assistant","parent_tool_use_id":"task1","message":{"id":"m2","usage":{"cache_creation_input_tokens":7}}}`)
+	got := flat[len(flat)-1]
+	if got.Tokens.CacheWrite5m != 7 || got.Tokens.CacheWrite1h != 0 || !got.InSubagent || got.Role != "scout" {
+		t.Errorf("flat cache_creation usage = %+v", got)
+	}
+
+	// Re-emitted lines still decode in full: only the reader dedups.
+	again := d(`{"type":"assistant","message":{"id":"m1","content":[]}}`)
+	wantKinds(t, again, driverkit.KindStart, driverkit.KindUsage)
+}
+
+func TestDecodeResultCarriesSessionTotals(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"done","num_turns":3,"total_cost_usd":0.25,"duration_ms":900,"duration_api_ms":400,"usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}`)
+	want := driverkit.Event{
+		Kind: driverkit.KindResult, Text: "done", DurationMs: 900, DurationAPIMs: 400, NumTurns: 3,
+		Tokens: driverkit.Tokens{Input: 1, Output: 2, CacheRead: 3, CacheWrite5m: 4, CostUSD: 0.25},
+	}
+	if !reflect.DeepEqual(evs[0], want) {
+		t.Errorf("result = %+v, want %+v", evs[0], want)
+	}
+}
+
+func TestDecodeMistypedResultFieldContributesNoTotals(t *testing.T) {
+	// One mistyped field fails the whole line's decode: it is still an error
+	// candidate, but carries no session totals.
+	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"done","num_turns":"3","total_cost_usd":0.25,"usage":{"input_tokens":1}}`)
+	wantKinds(t, evs, driverkit.KindError)
+}
+
+func TestDecodeTimestampIsTopLevelOnly(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	const ms = int64(1786474800000) // 2026-08-11T19:00:00Z
+	for name, line := range map[string]string{
+		"assistant": `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`,
+		"result":    `{"type":"result","timestamp":"2026-08-11T19:00:00Z"}`,
+		"system":    `{"type":"system","timestamp":"2026-08-11T19:00:00.000Z"}`,
+		"host op":   `{"type":"spindrift_op","timestamp":"2026-08-11T19:00:00.000Z","spindrift_op":{"op":"pass_start","role":"reviewer"}}`,
+	} {
+		for _, ev := range d(line) {
+			if ev.Timestamp != ms {
+				t.Errorf("%s: %s timestamp = %d, want %d", name, ev.Kind, ev.Timestamp, ms)
+			}
+		}
+	}
+	for name, line := range map[string]string{
+		"no type":    `{"timestamp":"2026-08-11T19:00:00.000Z"}`,
+		"nested":     `{"type":"user","message":{"content":[{"type":"tool_result","content":"{\"timestamp\":\"2026-08-11T19:00:00Z\"}"}]}}`,
+		"unparsable": `{"type":"system","timestamp":"yesterday"}`,
+	} {
+		for _, ev := range d(line) {
+			if ev.Timestamp != 0 {
+				t.Errorf("%s: %s timestamp = %d, want 0", name, ev.Kind, ev.Timestamp)
+			}
+		}
+	}
 }
