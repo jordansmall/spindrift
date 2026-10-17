@@ -9,6 +9,63 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.27.0 — 2026-10-17
+
+A shared toolkit for Drivers, and the opencode Driver catching up with
+claude on it: the same Box guards, session resume, a readable Transcript,
+a working Filer, and Dispatch Records.
+
+**⚠ Breaking changes** this release: opencode configs are checked harder
+at eval (Provider-namespaced models, roster tools opencode can map).
+
+- **driverkit makes new Drivers much cheaper to add.** A Driver used to
+  hand-write its own readers for outcome classification, usage, result
+  text, the Transcript and the heartbeat. Now it supplies one decoder
+  that turns each line of its CLI's Pass log into a small set of shared
+  events, and driverkit's readers do the rest. Both claude and opencode
+  run on it today, so a third Driver mostly means writing that decoder
+  plus a few per-Driver knobs, with both as worked examples. See
+  "Host-side event layer" in `docs/reference.md`.
+- **Claude guard hooks actually run now.** The Box's safety hooks (the
+  credential scrub and the background-Bash block) shipped with shebangs
+  the image couldn't resolve, so they silently let every call through.
+  They're now baked with real paths, and a hook that can't run or hangs
+  blocks the tool call instead of waving it on.
+- **opencode Boxes get the same guards.** A baked plugin runs the shared
+  credential scrub and background-Bash check on every opencode Bash call,
+  and opencode's own permission rules deny reads of credential files and
+  its auth store. Each subagent only gets the tools its roster entry
+  lists, so the default reviewer, scout and Filer can't edit files.
+- **opencode resumes and reports like claude.** A fix pass picks up the
+  issue's own opencode session instead of starting cold, with a per-issue
+  session cache. The console Transcript shows tool calls and results,
+  long Bash output is cut to a tail with the full log on disk, and the
+  Bash timeout is configurable. Usage lands on the right role, so
+  `spindrift stats` and Dispatch Records cover opencode runs too. Fewer
+  false failures, too: a run that recovered from an error or lacks an
+  outcome line no longer fails on that alone, and a rate limit is held
+  until its actual reset time.
+- **opencode Filer and reviewer.** The Filer now turns on whenever the
+  roster provisions it, as it does under claude. The review pass runs at
+  the roster reviewer's effort (`high` by default), so a Consumer whose
+  coordinator runs lower will see review cost go up unless it pins
+  `reviewEffort`. On a read-only opencode deployment with a Filer,
+  `spindrift doctor` now wants the `agent-review-finding` label.
+- **⚠ Breaking: opencode config checks.** Under `DRIVER=opencode`, eval
+  now fails on a bare model id like `claude-sonnet-5-5`; name it with its
+  Provider (`anthropic/claude-sonnet-5-5`). A roster entry listing a tool
+  opencode can't map (such as `NotebookEdit`) also fails eval. Drop the
+  name, or omit `tools` for the full set. See `MIGRATING.md`.
+- **Smaller fixes.** The Box now gets your host git identity, and
+  `SECRET_CMD` templates the credential for whichever Driver is active.
+  A push rejected for lacking workflow scope fails fast instead of
+  retrying, in dispatch and in recover. `doctor --research` checks your
+  configured `RESEARCH_VERDICTS` labels instead of the defaults, and skips
+  label checks on trackers with no labels. The console handles multibyte
+  Backspace in filters and keeps the cursor on screen, and the daemon
+  carries its probe and breaker state across an in-place restart
+  correctly.
+
 ## 0.26.0 — 2026-10-13
 
 Mostly bug fixes, plus a pass over the agent prompts so they only tell a
