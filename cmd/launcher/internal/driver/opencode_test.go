@@ -26,8 +26,8 @@ func TestNewSelectsOpencodeByName(t *testing.T) {
 	}
 }
 
-// The raw sink must stay byte-exact, which is what opencode.New promises at
-// the Driver seam (issue #2092).
+// The raw sink must stay byte-exact, which is what the opencode heartbeat
+// writer promises at the Driver seam (issue #2092).
 func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
