@@ -4,7 +4,7 @@
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
 # cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
-# cmd/launcher/internal/driver/corpus_test.go) with
+# cmd/launcher/internal/driver/<driver>/corpus_test.go) with
 # UPDATE_GOLDENS=1, which flips their compare helpers from fail to
 # overwrite. Separate from nix/regen.nix's regen verb because these
 # goldens are the output of running the test, not a pure render of a
@@ -44,8 +44,9 @@ pkgs.writeShellApplication {
     # has none, so run the test from a copy of the module. The tests read
     # ../../tests, ../../templates, and ../../docs relative to the module, so
     # those three are symlinks back into the checkout. So are the module's own
-    # testdata/golden and the Driver corpus (internal/driver/testdata/corpus),
-    # so goldens written through them land in the repo.
+    # testdata/golden and each Driver's corpus
+    # (internal/driver/<driver>/testdata/corpus), so goldens written through
+    # them land in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
     chmod -R +w "$scratch/src"
@@ -55,8 +56,20 @@ pkgs.writeShellApplication {
     ln -s "$root/docs" "$scratch/src/docs"
     rm -rf "$scratch/src/cmd/launcher/testdata/golden"
     ln -s "$root/cmd/launcher/testdata/golden" "$scratch/src/cmd/launcher/testdata/golden"
-    rm -rf "$scratch/src/cmd/launcher/internal/driver/testdata/corpus"
-    ln -s "$root/cmd/launcher/internal/driver/testdata/corpus" "$scratch/src/cmd/launcher/internal/driver/testdata/corpus"
+    # The Driver list is whatever carries a corpus, so a new Driver is picked
+    # up without touching this file.
+    driver_pkgs=()
+    for corpus in "$root"/cmd/launcher/internal/driver/*/testdata/corpus; do
+      [ -d "$corpus" ] || continue
+      rel="''${corpus#"$root"/cmd/launcher/}"
+      rm -rf "$scratch/src/cmd/launcher/$rel"
+      ln -s "$corpus" "$scratch/src/cmd/launcher/$rel"
+      driver_pkgs+=("./''${rel%/testdata/corpus}")
+    done
+    if [ "''${#driver_pkgs[@]}" -eq 0 ]; then
+      echo "regen-goldens: no Driver corpus found under cmd/launcher/internal/driver/*/testdata/corpus" >&2
+      exit 1
+    fi
 
     ${import ./checks/go-check-env.nix}
     export SPINDRIFT_SEAM_FIXTURES_DIR=${fixtures.seamFixtures}
@@ -69,6 +82,6 @@ pkgs.writeShellApplication {
     # also matches TestStats_ByDimensionsDocumented, which reads ../../docs,
     # hence the docs link above (issue #5248).
     go test -count=1 -run '^TestStats_(.*Golden|By.*)$' .
-    go test -count=1 -run '^TestDriverCorpusGoldens$' ./internal/driver
+    go test -count=1 -run '^TestCorpus$' "''${driver_pkgs[@]}"
   '';
 }
