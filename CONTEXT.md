@@ -43,6 +43,16 @@ strategy in the launcher (transient classification, heartbeat, usage
 extraction). _Provisional
 name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
 
+**Credential rule**:
+One entry in a Driver row's `credentials` list (`lib/drivers/<name>.nix`),
+rendered into the launcher's Driver Descriptor: the env names that satisfy it
+(any one will do), an optional `modelPrefix` that gates it to runs where some
+model tier starts with that prefix, a remedy line, and an optional setup
+command. The one source for doctor's `driver-credentials` check, the
+`--secret-cmd` fallback, and the Quickstart wizard's token step; the reference
+guide's per-Driver credential list is checked against it. _Avoid_: auth config,
+secret spec.
+
 **driverkit**:
 The shared leaf package under the Driver seam's host-side half (ADR 0009) that
 both Driver strategies (`claude`, `opencode`), the parent driver package, and
