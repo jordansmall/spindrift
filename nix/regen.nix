@@ -29,8 +29,7 @@ let
     renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
       extraOptionPaths;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
-  driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
-  providerNamespacedDriversFile = renderers.renderProviderNamespacedDriversGo driverRegistry.entries;
+  driverDescriptorsFile = renderers.renderDriverDescriptorsGo driverRegistry.entries;
   choreCatalog = import ../lib/chore-catalog.nix;
   choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
@@ -172,8 +171,8 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/schemaconfig_gen.go" schemaConfigFile}
     gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
     ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
-    ${writeGenerated "cmd/launcher/internal/driver/drivernames_gen.go" driverNamesFile}
-    ${writeGenerated "cmd/launcher/internal/driver/providernamespaced_gen.go" providerNamespacedDriversFile}
+    ${writeGenerated "cmd/launcher/internal/driver/descriptor_gen.go" driverDescriptorsFile}
+    gofmt -w "$root/cmd/launcher/internal/driver/descriptor_gen.go"
     ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/runtimevalues_gen.go" runtimeValuesFile}
