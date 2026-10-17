@@ -202,9 +202,13 @@ type decodedBlock struct {
 // strict: a type error in it (a mistyped usage field, say) yields no events,
 // as the pre-decoder readers dropped such a line. Only the content is lenient:
 // a user turn whose content is a string, or a block that fails to unmarshal,
-// yields no events for that part rather than losing the line. Task spawns are
-// recorded here and nothing is deduplicated; the usage reader dedups by
-// MessageID.
+// yields no events for that part rather than losing the line. An assistant line
+// whose content is a string, or which holds a block that fails to unmarshal,
+// still yields its KindModel (so OnModel and the model/role switch fire) and
+// its valid blocks, where the pre-decoder heartbeat and usage readers
+// dropped it whole: one bad block should not cost the line's model, narration
+// and tool calls (issue #5454). Task spawns are recorded here and nothing is
+// deduplicated; the usage reader dedups by MessageID.
 func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 	var env struct {
 		Type            string `json:"type"`
