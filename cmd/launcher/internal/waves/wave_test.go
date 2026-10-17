@@ -3,6 +3,7 @@ package waves
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,11 +39,12 @@ type signalRunner struct {
 	once         sync.Once
 }
 
-func (r *signalRunner) EnsureReady() error             { return nil }
-func (r *signalRunner) IsReady() error                 { return nil }
-func (r *signalRunner) Kill(string) error              { return nil }
-func (r *signalRunner) IsRunning(string) bool          { return false }
-func (r *signalRunner) ListRunning() ([]string, error) { return nil, nil }
+func (r *signalRunner) EnsureReady() error               { return nil }
+func (r *signalRunner) IsReady() error                   { return nil }
+func (r *signalRunner) Kill(string) error                { return nil }
+func (r *signalRunner) RemoveHostTree(path string) error { return os.RemoveAll(path) }
+func (r *signalRunner) IsRunning(string) bool            { return false }
+func (r *signalRunner) ListRunning() ([]string, error)   { return nil, nil }
 func (r *signalRunner) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	return registrymanifest.NewUnixEndpoint(""), false, nil
 }

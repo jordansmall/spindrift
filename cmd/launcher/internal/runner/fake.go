@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"os"
 	"sync"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -18,7 +19,10 @@ type Fake struct {
 	RunCalls []Box
 
 	KillCalls []string
-	KillErr   error
+
+	KillErr error
+
+	RemoveHostTreeCalls []string
 
 	EnsureReadyErr error
 
@@ -121,6 +125,15 @@ func (f *Fake) Kill(name string) error {
 	defer f.mu.Unlock()
 	f.KillCalls = append(f.KillCalls, name)
 	return f.KillErr
+}
+
+// RemoveHostTree records the path and removes it for real, so tests that rely
+// on eviction still see the directory gone.
+func (f *Fake) RemoveHostTree(path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RemoveHostTreeCalls = append(f.RemoveHostTreeCalls, path)
+	return os.RemoveAll(path)
 }
 
 // IsRunning records the name and returns IsRunningRet.
