@@ -17,6 +17,22 @@ import (
 // shares it.
 func NewDecoder() driverkit.Decoder { return Decode }
 
+// isErrorEvent reports whether line is a type:"error" event, for ResolveExit.
+// It is deliberately narrower than Decode: it decodes only type and part.text,
+// so a malformed field elsewhere on an error line (a fractional timestamp, a
+// bad token count) still counts as an error, where Decode would drop the whole
+// line to KindUnparsed. part.text stays only for parity with the legacy decode:
+// an error line whose part.text is not a string is dropped, not counted.
+func isErrorEvent(line string) bool {
+	var ev struct {
+		Type string `json:"type"`
+		Part struct {
+			Text string `json:"text"`
+		} `json:"part"`
+	}
+	return json.Unmarshal([]byte(strings.TrimSpace(line)), &ev) == nil && ev.Type == "error"
+}
+
 // Decode turns one line of an opencode `--format json` Pass log into canonical
 // events. Text that does not parse as a JSON object is stderr sharing the log
 // and yields one KindUnparsed; a blank line, a literal `null` or an unknown
