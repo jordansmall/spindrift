@@ -39,10 +39,8 @@ func isErrorEvent(line string) bool {
 // and yields one KindUnparsed; a blank line, a literal `null` or an unknown
 // event type yields none.
 //
-// The line decodes as one struct, the union of the fields the readers consume,
-// so each reader keeps its drop-the-line semantics: a line with any of those
-// fields malformed is KindUnparsed whole. Tool fields no reader inspects stay
-// lenient.
+// Every field the readers consume is strict except the tool fields and the
+// error payload, which are lenient (see the driverkit.Decoder contract).
 func Decode(line string) []driverkit.Event {
 	line = strings.TrimSpace(line)
 	if line == "" {
