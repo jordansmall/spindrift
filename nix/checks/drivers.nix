@@ -53,6 +53,11 @@ let
     agentsJsonTemplate = "{}";
     agentFilesTemplate = _: { };
   };
+  # The real registry plus a well-formed stub row, for the checks that pin
+  # what adding a Driver to the registry yields (issue #5502).
+  stubRegistryEntries = driverRegistry.entries // {
+    stub = driverRegistry.assertArgvShape "stub" (driverRegistry.assertShape "stub" stubDriverComplete);
+  };
   # Shared defaultRoster fixture (issue #2386): the two
   # default-roster-effort checks assert the same roster defaults through
   # their own Driver's render path.
@@ -177,6 +182,46 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
       !result.success
     ) "assertShape must throw when a Driver entry is missing a required attribute";
     pkgs.runCommand "drivers-assert-shape-missing-attribute-throws" { } "touch $out";
+
+  # A stub row added to the registry yields its file's checks and the parity
+  # checks with no other edit (issue #5502). Only attr names are forced: the
+  # stub's check values would build its fake rendering.
+  drivers-registry-stub-row-yields-checks =
+    let
+      entries = stubRegistryEntries;
+      first = firstDriverOf entries;
+      stubCheckFile = builtins.toFile "stub.nix" "{ entry, ... }: { drivers-stub-fixture = entry.name; }";
+      names = builtins.attrNames (driverChecksFor {
+        inherit entries;
+        checkFileOf = n: if n == "stub" then stubCheckFile else defaultCheckFileOf n;
+      });
+    in
+    assert assertMsg (builtins.elem "drivers-stub-fixture" names)
+      "a stub registry row must yield its check file's checks, got: ${concatStringsSep ", " names}";
+    assert assertMsg (builtins.elem "drivers-stub-skills-dir-matches-${first}" names)
+      "a stub registry row must yield its skills-dir parity check, got: ${concatStringsSep ", " names}";
+    pkgs.runCommand "drivers-registry-stub-row-yields-checks" { } "touch $out";
+
+  # A registry row without its check file fails eval (issue #5502).
+  drivers-registry-row-without-check-file-throws =
+    let
+      entries = stubRegistryEntries;
+      result = builtins.tryEval (
+        builtins.attrNames (driverChecksFor {
+          inherit entries;
+        })
+      );
+    in
+    # tryEval cannot expose the thrown message, so the named file is pinned
+    # via missingCheckFiles, the list the message is built from.
+    assert assertMsg (!result.success) "a registry row with no check file must fail evaluation";
+    assert assertMsg (
+      missingCheckFiles {
+        inherit entries;
+        checkFileOf = defaultCheckFileOf;
+      } == [ "nix/checks/drivers/stub.nix" ]
+    ) "the missing-file error must name nix/checks/drivers/stub.nix";
+    pkgs.runCommand "drivers-registry-row-without-check-file-throws" { } "touch $out";
 
   drivers-render-preamble-shape =
     let
