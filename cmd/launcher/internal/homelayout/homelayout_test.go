@@ -18,7 +18,7 @@ type driver struct {
 
 var drivers = []driver{
 	{name: "claude", skillsRel: ".claude/skills", sessionCacheRel: ".claude/projects"},
-	{name: "opencode", skillsRel: ".claude/skills", agentFilesRel: ".config/opencode/agents"},
+	{name: "opencode", skillsRel: ".claude/skills", sessionCacheRel: ".local/share/opencode/spindrift-session", agentFilesRel: ".config/opencode/agents"},
 }
 
 func skipIfRoot(t *testing.T) {
@@ -254,6 +254,35 @@ func TestPopulateHome(t *testing.T) {
 		})
 	}
 
+	for _, d := range drivers {
+		if d.sessionCacheRel == "" {
+			continue
+		}
+		t.Run(d.name+"/unmounted session cache is made writable (#5388)", func(t *testing.T) {
+			skipIfRoot(t)
+			tmp := t.TempDir()
+			home, staged := filepath.Join(tmp, "home"), filepath.Join(tmp, "staged")
+			restoreWritable(t, home, staged)
+			if err := os.MkdirAll(filepath.Join(staged, d.sessionCacheRel), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			chmod(t, filepath.Join(staged, d.sessionCacheRel), 0o555)
+			if err := os.MkdirAll(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cache := filepath.Join(home, d.sessionCacheRel)
+			if err := PopulateHome(home, staged, cache); err != nil {
+				t.Fatal(err)
+			}
+			if !writable(t, cache) {
+				t.Fatal("unmounted session cache not owner-writable")
+			}
+			if err := os.WriteFile(filepath.Join(cache, "db"), nil, 0o644); err != nil {
+				t.Errorf("create file in session cache: %v", err)
+			}
+		})
+	}
+
 	t.Run("staged dir absent is a no-op", func(t *testing.T) {
 		home := t.TempDir()
 		if err := PopulateHome(home, filepath.Join(home, "nope"), ""); err != nil {
@@ -264,51 +293,72 @@ func TestPopulateHome(t *testing.T) {
 		}
 	})
 
-	for _, tc := range []struct {
-		name string
-		mode os.FileMode
-		// slash: sessionCacheDir given with a trailing slash (#2845).
-		slash bool
-	}{
-		{"755", 0o755, false},
-		{"555", 0o555, false},
-		{"555 with trailing slash", 0o555, true},
-	} {
-		t.Run("pre-existing session cache keeps its mode: "+tc.name, func(t *testing.T) {
-			skipIfRoot(t)
-			tmp := t.TempDir()
-			home, staged := filepath.Join(tmp, "home"), filepath.Join(tmp, "staged")
-			restoreWritable(t, home, staged)
-			write(t, filepath.Join(staged, ".claude", "settings.json"), `{}`, 0o444)
-			if err := os.MkdirAll(filepath.Join(staged, ".claude", "projects"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			projects := filepath.Join(home, ".claude", "projects")
-			write(t, filepath.Join(projects, "session.json"), `{}`, 0o444)
-			chmod(t, projects, tc.mode)
+	for _, d := range drivers {
+		if d.sessionCacheRel == "" {
+			continue
+		}
+		for _, tc := range []struct {
+			name string
+			mode os.FileMode
+			// slash: sessionCacheDir given with a trailing slash (#2845).
+			slash bool
+		}{
+			{"755", 0o755, false},
+			{"555", 0o555, false},
+			{"555 with trailing slash", 0o555, true},
+		} {
+			t.Run(d.name+"/pre-existing session cache keeps its mode: "+tc.name, func(t *testing.T) {
+				skipIfRoot(t)
+				tmp := t.TempDir()
+				home, staged := filepath.Join(tmp, "home"), filepath.Join(tmp, "staged")
+				restoreWritable(t, home, staged)
+				write(t, filepath.Join(staged, ".claude", "settings.json"), `{}`, 0o444)
+				if err := os.MkdirAll(filepath.Join(staged, d.sessionCacheRel), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				cache := filepath.Join(home, d.sessionCacheRel)
+				write(t, filepath.Join(cache, "session.json"), `{}`, 0o444)
+				chmod(t, cache, tc.mode)
 
-			sc := projects
-			if tc.slash {
-				sc += "/"
-			}
-			if err := PopulateHome(home, staged, sc); err != nil {
-				t.Fatal(err)
-			}
-			if !writable(t, filepath.Join(home, ".claude", "settings.json")) {
-				t.Error("settings.json not writable")
-			}
-			if writable(t, filepath.Join(projects, "session.json")) {
-				t.Error("session.json was chmod'd")
-			}
-			info, err := os.Stat(projects)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if info.Mode().Perm() != tc.mode {
-				t.Errorf("projects mode = %o, want %o", info.Mode().Perm(), tc.mode)
-			}
-		})
+				sc := cache
+				if tc.slash {
+					sc += "/"
+				}
+				if err := PopulateHome(home, staged, sc); err != nil {
+					t.Fatal(err)
+				}
+				if !writable(t, filepath.Join(home, ".claude", "settings.json")) {
+					t.Error("settings.json not writable")
+				}
+				if writable(t, filepath.Join(cache, "session.json")) {
+					t.Error("session.json was chmod'd")
+				}
+				info, err := os.Stat(cache)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.Mode().Perm() != tc.mode {
+					t.Errorf("session cache mode = %o, want %o", info.Mode().Perm(), tc.mode)
+				}
+			})
+		}
 	}
+
+	t.Run("unstattable session cache dir is an error", func(t *testing.T) {
+		skipIfRoot(t)
+		tmp := t.TempDir()
+		home, staged := filepath.Join(tmp, "home"), filepath.Join(tmp, "staged")
+		locked := filepath.Join(home, "locked")
+		restoreWritable(t, home, staged, locked)
+		write(t, filepath.Join(staged, "f"), "x", 0o644)
+		if err := os.MkdirAll(locked, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		chmod(t, locked, 0o000)
+		if err := PopulateHome(home, staged, filepath.Join(locked, "cache")); err == nil {
+			t.Error("PopulateHome succeeded on an unstattable session cache dir")
+		}
+	})
 
 	t.Run("ordinary copied-in directory is made writable", func(t *testing.T) {
 		skipIfRoot(t)

@@ -56,22 +56,30 @@ func PopulateSkills(dst string, srcs ...string) error {
 // unlike the old shell's `chmod u+w`, which followed it into the read-only
 // store.
 //
-// The directory sessionCacheDir ("" when the Driver has none) is never
-// chmod'd: bwrap binds the live host directory at that path, so a chmod would
-// mutate a directory outside the sandbox (issue #2845). A trailing slash on
-// sessionCacheDir is ignored.
+// The directory sessionCacheDir ("" when the Driver has none) is not chmod'd
+// when it already exists before the copy (checked before copyTree, which
+// would otherwise create it and make every cache look bound): that is the
+// bwrap bind target, and a chmod would mutate the live host directory outside
+// the sandbox (issue #2845). An unmounted one is our own copy of the store's
+// read-only directory and is made writable so the Driver runs cold (issue
+// #5388). A trailing slash on sessionCacheDir is ignored.
 func PopulateHome(home, staged, sessionCacheDir string) error {
 	if ok, err := isDir(staged); err != nil {
 		return err
 	} else if !ok {
 		return nil
 	}
-	if err := copyTree(staged, home); err != nil {
-		return err
-	}
 	skip := ""
 	if sessionCacheDir != "" {
-		skip = filepath.Clean(sessionCacheDir)
+		clean := filepath.Clean(sessionCacheDir)
+		if preexisting, err := isDir(clean); err != nil {
+			return err
+		} else if preexisting {
+			skip = clean
+		}
+	}
+	if err := copyTree(staged, home); err != nil {
+		return err
 	}
 	err := walkInto(staged, home, func(_, target string, d fs.DirEntry) error {
 		if d.IsDir() && target == skip {
