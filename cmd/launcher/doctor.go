@@ -38,6 +38,18 @@ type doctorOptions struct {
 	research    bool // makes the research labels Required
 }
 
+// doctorResearchVerdicts parses RESEARCH_VERDICTS for doctor's label checks.
+// researchVerdictLabels is zero outside the research kind, which doctor's
+// read context has no notion of.
+func doctorResearchVerdicts(c config) forge.VerdictLabels {
+	vl, err := forge.ParseResearchVerdicts(c.researchVerdicts)
+	if err != nil {
+		// validateConfigChecks already reports the parse error.
+		return forge.ResearchVerdictLabels()
+	}
+	return vl
+}
+
 // requiredLabels names the labels, beyond the four work-tier ones, that the
 // selected kinds need the repo to carry, so a daemon preflight fails before a
 // kind that cannot file its labels starts. Research and butler labels stay
@@ -53,7 +65,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 	}
 	var labels []string
 	if opts.research {
-		labels = append(labels, doctor.ResearchLabelNames()...)
+		labels = append(labels, doctor.ResearchLabelNamesFor(doctorResearchVerdicts(c))...)
 	}
 	if opts.butler {
 		labels = append(labels, dispatchkind.Butler.FindingLabel)
@@ -140,18 +152,19 @@ func doctorExitCodeFor(configErr, runErr error) int {
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
-		IssueTracker:    c.issueTracker,
-		NoLabelRegistry: !row.LabelRegistry,
-		RequiredLabels:  requiredLabels,
-		TokenHint:       row.DoctorTokenHint,
-		SlugHint:        row.DoctorSlugHint,
-		Label:           c.label,
-		InProgressLabel: c.inProgressLabel,
-		FailedLabel:     c.failedLabel,
-		CompleteLabel:   c.completeLabel,
-		Runtime:         c.runtime,
-		MergePolicy:     c.mergeMode,
-		BaseBranch:      c.baseBranch,
+		IssueTracker:     c.issueTracker,
+		NoLabelRegistry:  !row.LabelRegistry,
+		RequiredLabels:   requiredLabels,
+		ResearchVerdicts: doctorResearchVerdicts(c),
+		TokenHint:        row.DoctorTokenHint,
+		SlugHint:         row.DoctorSlugHint,
+		Label:            c.label,
+		InProgressLabel:  c.inProgressLabel,
+		FailedLabel:      c.failedLabel,
+		CompleteLabel:    c.completeLabel,
+		Runtime:          c.runtime,
+		MergePolicy:      c.mergeMode,
+		BaseBranch:       c.baseBranch,
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
