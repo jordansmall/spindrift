@@ -121,3 +121,8 @@ both paths exist, and for the old readers to go in a later slice. For
 `opencode`, issue #5182 deleted them in the switch commit instead. The
 committed corpus goldens, unchanged by the switch, stand in as the
 differential: the new path must reproduce them byte for byte.
+
+Issue #5183 then removed the one-line wrappers that switch left in the
+`opencode` package: its Driver registration calls the driverkit readers
+directly, and the package keeps its decoder, transient and terminal
+patterns, exit resolution, result-event encoder and session flags.
