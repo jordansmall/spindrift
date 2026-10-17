@@ -60,6 +60,37 @@ func TestBreakerCrossesExactlyOnce(t *testing.T) {
 	}
 }
 
+// A handoff carrying threshold or more failures (a successor with a lowered
+// threshold) must still trip once on the next failure, not never. The oldest
+// carried time is already out of the window, so threshold+2 carried leaves more
+// than threshold in window, and keeping the oldest threshold-1 instead of the
+// newest would leave the in-window count short of threshold.
+func TestBreakerRestoreAtOrOverThresholdStillCrossesOnce(t *testing.T) {
+	for _, threshold := range []int{3, 1} { // 1: keep == 0, every carried time is dropped
+		for _, carried := range []int{threshold, threshold + 1, threshold + 2} {
+			now := (&testClock{}).Now()
+			times := make([]time.Time, carried)
+			for i := range times {
+				times[i] = now.Add(-time.Duration(carried-i) * time.Second)
+			}
+			times[0] = now.Add(-2 * time.Minute)
+			b := newBreaker(threshold, time.Minute).restore(times)
+
+			b, _, first := b.recordAndCheck(now)
+			if !first {
+				t.Fatalf("threshold %d carried %d: first failure crossed = false, want true", threshold, carried)
+			}
+			for i := range 3 {
+				var crossed bool
+				b, _, crossed = b.recordAndCheck(now)
+				if crossed {
+					t.Fatalf("threshold %d carried %d: later failure %d crossed = true, want false", threshold, carried, i)
+				}
+			}
+		}
+	}
+}
+
 func TestBreakerAgedOutFailuresDoNotCount(t *testing.T) {
 	clk := &testClock{}
 	b := newBreaker(3, time.Minute)

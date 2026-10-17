@@ -70,9 +70,17 @@ func (b breaker) evict(now time.Time) []time.Time {
 
 // restore seeds the breaker with the failure times a handoff carried. The
 // slice is copied: the document's backing array must not be shared with the
-// one evict reuses in place. Times outside the window fall away at the next
-// recordAndCheck.
+// one evict reuses in place. Only the newest threshold-1 are kept (the slice is
+// in append order, as snapshot leaves it): recordAndCheck crosses only from
+// below threshold, so a carried count at or above threshold (a successor's
+// lowered threshold) would never trip. Times outside the window fall away at
+// the next recordAndCheck, so a stale one may hold a kept slot; the in-window
+// count stays below threshold either way.
 func (b breaker) restore(times []time.Time) breaker {
+	keep := b.threshold - 1
+	if len(times) > keep {
+		times = times[len(times)-keep:]
+	}
 	b.times = slices.Clone(times)
 	return b
 }
