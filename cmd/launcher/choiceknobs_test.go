@@ -41,7 +41,7 @@ func envNames(rows []choiceKnobRow) []string {
 
 // This test reads the registry row's own field, so a flipped
 // AfterCrossKnobChecks fails right here. The same flip also breaks
-// TestValidate_RegistryProxyCredentialErrorPrecedesBoxForgeAndIssueAccessChoiceError
+// TestValidate_RegistryProxyRoutesRetirementErrorPrecedesBoxForgeAndIssueAccessChoiceError
 // (main_test.go), but only indirectly, through validate()'s error precedence.
 func TestChoiceKnobRegistry_OnlyBoxForgeAndIssueAccessIsAfterCrossKnobChecks(t *testing.T) {
 	var afterRows []string
