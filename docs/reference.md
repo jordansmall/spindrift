@@ -1612,10 +1612,11 @@ environment.
 
 The variables the Bash tool must never inherit live in one baked file,
 `/home/agent/.claude/hooks/credential-vars` (`ANTHROPIC_API_KEY`,
-`CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`), read by both
-`env-credential-scrub.sh` and `bash-output-tee.sh` so the two `unset` lists
-cannot drift. The `CREDENTIAL_VARS_FILE` environment variable overrides the
-path. A missing or empty list fails closed: the scrub hook denies the Bash
+`CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`), parsed by the sibling
+`credential-vars-parse`, which both `env-credential-scrub.sh` and
+`bash-output-tee.sh` source so the two `unset` lists cannot drift. The
+`CREDENTIAL_VARS_FILE` environment variable overrides the path. A missing or
+empty list, or a missing helper, fails closed: the scrub hook denies the Bash
 call and the tee hook exits 2.
 
 #### The opencode Driver guards Bash through a plugin
