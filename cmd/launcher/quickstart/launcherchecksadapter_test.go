@@ -13,13 +13,13 @@ import (
 
 func validAnswers() answers {
 	return answers{
-		repoSlug:         "jordansmall/spindrift",
-		runtime:          "podman",
-		gitUserName:      "Ada Lovelace",
-		gitUserEmail:     "ada@example.com",
-		tracker:          trackerSettings{issueTracker: "github"},
-		token:            "ghp_faketoken",
-		claudeOAuthToken: "claude-oauth-faketoken",
+		repoSlug:     "jordansmall/spindrift",
+		runtime:      "podman",
+		gitUserName:  "Ada Lovelace",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "github"},
+		token:        "ghp_faketoken",
+		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 }
 
@@ -32,10 +32,7 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
 		GHToken:      a.token,
-		Credentials: map[string]string{
-			"CLAUDE_CODE_OAUTH_TOKEN": a.claudeOAuthToken,
-			"ANTHROPIC_API_KEY":       a.anthropicAPIKey,
-		},
+		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
 		Runtime:      a.runtime,
 		IssueTracker: a.tracker.issueTracker,
 		CodeForge:    "github",
@@ -191,7 +188,7 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 func TestHarnessEnvTokenEnvVar_MatchesRenderedFile(t *testing.T) {
 	for _, name := range launcherchecks.TrackerNamesFromRegistry() {
 		t.Run(name, func(t *testing.T) {
-			out := renderHarnessEnv(name, "faketoken", "claude-oauth-faketoken", "")
+			out := renderHarnessEnv(name, "faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 			if want := harnessEnvTokenEnvVar(name) + "=faketoken"; !strings.Contains(out, want) {
 				t.Errorf("renderHarnessEnv(%q, ...) does not contain %q, got:\n%s", name, want, out)
 			}
@@ -274,4 +271,17 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestQuickstartCheckConfig_CarriesDriver(t *testing.T) {
+	a := validAnswers()
+	a.driver = "opencode"
+	a.credentials = nil
+	c := quickstartCheckConfig(a, "github")
+	if c.Driver != "opencode" {
+		t.Errorf("Driver = %q, want opencode", c.Driver)
+	}
+	if len(c.Credentials) != 0 {
+		t.Errorf("Credentials = %v, want none", c.Credentials)
+	}
 }

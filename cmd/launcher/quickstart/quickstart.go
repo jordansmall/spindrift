@@ -16,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/github"
@@ -332,6 +333,11 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return fmt.Errorf("refusing to overwrite existing %s — rerun with --force to back each up and regenerate", strings.Join(clobbered, ", "))
 	}
 
+	driverName, _ := env.LookupEnv("DRIVER")
+	if _, err := driver.New(driverName); err != nil {
+		return err
+	}
+
 	detectedRuntime, err := runner.Probe(env.LookPath)
 	if err != nil {
 		return err
@@ -446,35 +452,21 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		return err
 	}
 
-	claudeOAuthToken := ""
-	anthropicAPIKey := ""
-	if v, ok := env.LookupEnv("CLAUDE_CODE_OAUTH_TOKEN"); ok && v != "" {
-		claudeOAuthToken = v
-		fmt.Fprintln(w, "reusing ambient CLAUDE_CODE_OAUTH_TOKEN")
-	} else if v, ok := env.LookupEnv("ANTHROPIC_API_KEY"); ok && v != "" {
-		anthropicAPIKey = v
-		fmt.Fprintln(w, "reusing ambient ANTHROPIC_API_KEY")
-	} else if strings.ToLower(strings.TrimSpace(prompt("No ambient Claude credential found. Run `claude setup-token` now (browser OAuth)? [y/N]"))) == "y" {
-		if err := cmdRunner.Run("claude", "setup-token"); err != nil {
-			return fmt.Errorf("run claude setup-token: %w", err)
-		}
-		claudeOAuthToken = promptMasked("Paste the CLAUDE_CODE_OAUTH_TOKEN printed by claude setup-token")
-		if claudeOAuthToken == "" {
-			return fmt.Errorf("claude setup-token: no token pasted")
-		}
-	} else {
-		anthropicAPIKey = promptMasked("Anthropic API key (ANTHROPIC_API_KEY)")
+	rules, _ := driver.CredentialRules(driverName)
+	credentials, err := gatherCredentials(env, rules, w, prompt, promptMasked, cmdRunner)
+	if err != nil {
+		return err
 	}
 
 	a := answers{
-		repoSlug:         repoSlug,
-		runtime:          runtime,
-		gitUserName:      gitUserName,
-		gitUserEmail:     gitUserEmail,
-		tracker:          tracker,
-		token:            token,
-		claudeOAuthToken: claudeOAuthToken,
-		anthropicAPIKey:  anthropicAPIKey,
+		repoSlug:     repoSlug,
+		runtime:      runtime,
+		gitUserName:  gitUserName,
+		gitUserEmail: gitUserEmail,
+		tracker:      tracker,
+		token:        token,
+		driver:       driverName,
+		credentials:  credentials,
 	}
 
 	// Backup runs only here, after every prompt and abort point above has
@@ -871,14 +863,20 @@ type trackerSettings struct {
 // answers holds every operator decision, detected defaults folded in, so
 // render can produce the scaffold without touching any I/O seam.
 type answers struct {
-	repoSlug         string
-	runtime          string
-	gitUserName      string
-	gitUserEmail     string
-	tracker          trackerSettings
-	token            string
-	claudeOAuthToken string
-	anthropicAPIKey  string
+	repoSlug     string
+	runtime      string
+	gitUserName  string
+	gitUserEmail string
+	tracker      trackerSettings
+	token        string
+	driver       string
+	credentials  []credential
+}
+
+// credential is one secret the wizard gathered for the Driver, in the order
+// harness.env writes it.
+type credential struct {
+	env, value string
 }
 
 type scaffoldFile struct {
@@ -893,7 +891,7 @@ type scaffoldFile struct {
 func render(a answers) []scaffoldFile {
 	return []scaffoldFile{
 		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.tracker), mode: 0o644},
-		{path: "harness.env", content: renderHarnessEnv(a.tracker.issueTracker, a.token, a.claudeOAuthToken, a.anthropicAPIKey), mode: 0o600},
+		{path: "harness.env", content: renderHarnessEnv(a.tracker.issueTracker, a.token, a.credentials), mode: 0o600},
 		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
 		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
 	}
@@ -977,16 +975,14 @@ func nixEscape(s string) string {
 }
 
 // renderHarnessEnv writes only the secrets the wizard collected: the
-// code-forge credential under the backend's TokenEnvVar, and whichever Claude
-// credential the operator chose, never both. The generated comments mirror
+// code-forge credential under the backend's TokenEnvVar, and the Driver
+// credentials gatherCredentials collected. The generated comments mirror
 // lib/renderers.nix's renderHarnessEnvExample, the source of that wording.
-func renderHarnessEnv(issueTracker, token, claudeOAuthToken, anthropicAPIKey string) string {
+func renderHarnessEnv(issueTracker, token string, credentials []credential) string {
 	out := harnessEnvPreamble
 	out += harnessEnvSecretLine(harnessEnvTokenEnvVar(issueTracker), token)
-	if claudeOAuthToken != "" {
-		out += harnessEnvSecretLine("CLAUDE_CODE_OAUTH_TOKEN", claudeOAuthToken)
-	} else {
-		out += harnessEnvSecretLine("ANTHROPIC_API_KEY", anthropicAPIKey)
+	for _, c := range credentials {
+		out += harnessEnvSecretLine(c.env, c.value)
 	}
 	return out
 }
@@ -1034,4 +1030,63 @@ func harnessEnvSecretLine(name, value string) string {
 // share the name: flags.go's toKebab and lib/renderers.nix's toKebab.
 func toKebab(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), "_", "-")
+}
+
+// gatherCredentials walks the Driver's credential rules in order. A rule an
+// ambient variable already satisfies is reused; otherwise its setup command
+// is offered, falling back to the next variable it lists, and a rule with no
+// setup command only prints its Remedy. Quickstart configures no models, so
+// a model-gated rule is mentioned rather than demanded.
+func gatherCredentials(env Environment, rules []driver.CredentialRule, w io.Writer, prompt, promptMasked func(string) string, cmdRunner CommandRunner) ([]credential, error) {
+	var creds []credential
+	for _, rule := range rules {
+		if v, name, ok := ambientCredential(env, rule.Env); ok {
+			creds = append(creds, credential{env: name, value: v})
+			fmt.Fprintf(w, "reusing ambient %s\n", name)
+			continue
+		}
+		if len(rule.SetupCommand) == 0 {
+			remedy := rule.Remedy
+			if rule.ModelPrefix != "" {
+				remedy += fmt.Sprintf(" (needed only when a model starts with %s)", rule.ModelPrefix)
+			}
+			fmt.Fprintf(w, "No ambient credential found for %s: %s\n", strings.Join(rule.Env, "/"), remedy)
+			continue
+		}
+		cmdLine := strings.Join(rule.SetupCommand, " ")
+		if strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("No ambient credential found (%s). Run `%s` now? [y/N]", strings.Join(rule.Env, "/"), cmdLine)))) == "y" {
+			if err := cmdRunner.Run(rule.SetupCommand[0], rule.SetupCommand[1:]...); err != nil {
+				return nil, fmt.Errorf("run %s: %w", cmdLine, err)
+			}
+			v := promptMasked(fmt.Sprintf("Paste the %s printed by %s", rule.Env[0], cmdLine))
+			if v == "" {
+				return nil, fmt.Errorf("%s: no token pasted", cmdLine)
+			}
+			creds = append(creds, credential{env: rule.Env[0], value: v})
+			continue
+		}
+		supplied := false
+		for _, name := range rule.Env[1:] {
+			v := promptMasked(fmt.Sprintf("Value for %s", name))
+			if v == "" {
+				continue
+			}
+			creds = append(creds, credential{env: name, value: v})
+			supplied = true
+			break
+		}
+		if !supplied {
+			fmt.Fprintf(w, "No credential supplied for %s: %s\n", strings.Join(rule.Env, "/"), rule.Remedy)
+		}
+	}
+	return creds, nil
+}
+
+func ambientCredential(env Environment, names []string) (value, name string, ok bool) {
+	for _, n := range names {
+		if v, set := env.LookupEnv(n); set && v != "" {
+			return v, n, true
+		}
+	}
+	return "", "", false
 }
