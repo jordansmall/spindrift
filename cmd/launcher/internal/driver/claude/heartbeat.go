@@ -8,7 +8,7 @@ var HeartbeatTracking = driverkit.HeartbeatTracking{
 	Phase:       toolToPhase,
 	Kind:        toolKind,
 	KindOrder:   []string{"read", "edit", "grep", "search", "bash", "subagent"},
-	KindPlurals: map[string]string{"search": "searches"},
+	KindPlurals: map[string]string{"search": "searches", "bash": "bashes"},
 	// The live heartbeat groups by family, not exact model id: it is a
 	// coarse in-flight signal, so one row per family stays readable. The
 	// final per-model token table keys on the exact id and only orders by

@@ -539,6 +539,8 @@ func TestFormatCountLineShape(t *testing.T) {
 		{"1", "implementor", "", map[string]int{"read": 1}, []string{"#1", "1 read"}},
 		{"5", "implementor", "explore", map[string]int{"grep": 2, "read": 1}, []string{"#5", "1 read", "2 greps"}},
 		{"9", "scout", "explore", map[string]int{"read": 1}, []string{"#9", "scout", "[explore]", "1 read"}},
+		{"12", "implementor", "", map[string]int{"bash": 2}, []string{"#12", "2 bashes"}},
+		{"13", "implementor", "", map[string]int{"bash": 1, "subagent": 1}, []string{"#13", "1 bash, 1 subagent"}},
 	}
 	for _, tc := range cases {
 		got := claude.HeartbeatTracking.FormatCountLine(tc.issue, tc.role, tc.phase, tc.counts)
