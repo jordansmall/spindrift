@@ -18,7 +18,7 @@ const costEpsilon = 1e-9
 func TestExtractUsage_MissingLog(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "nope.log")
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestExtractUsage_MissingLog(t *testing.T) {
 func TestExtractUsage_EmptyLog(t *testing.T) {
 	logPath := opencode.WriteLog(t)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestExtractUsage_NoStepFinishEvents(t *testing.T) {
 		`{"type":"text","part":{"text":"hi"}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestExtractUsage_SkipsMalformedLines(t *testing.T) {
 		`{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","tokens":{"input":5,"output":80,"reasoning":40,"cache":{"write":200,"read":1600}},"cost":0.008}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestExtractUsage_AggregatesStepFinishEvents(t *testing.T) {
 		`{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":5,"output":80,"reasoning":40,"cache":{"write":200,"read":1600}},"cost":0.008}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestExtractUsage_EventSpan(t *testing.T) {
 		`{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":5,"output":80,"reasoning":40,"cache":{"write":200,"read":1600}},"cost":0.008}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestExtractUsage_EventSpan_NoStepStart(t *testing.T) {
 		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":800,"read":6400}},"cost":0.012}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestExtractUsage_EventSpan_NoStepFinish(t *testing.T) {
 		`{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestExtractUsage_EventSpan_NoStepFinish(t *testing.T) {
 // lines are ignored, and the two model ids pin ascending-raw-id order. opencode
 // reports no cache TTL split, so every cache.write lands in the 5-minute bucket.
 func TestExtractUsage_Fixture(t *testing.T) {
-	report, err := opencode.ExtractUsage("testdata/run-usage-sample.jsonl")
+	report, err := newDriver(t).ExtractUsage("testdata/run-usage-sample.jsonl")
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestExtractUsage_OutputIsNotMainLoopOnly(t *testing.T) {
 		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0.01}}`,
 	)
 
-	report, err := opencode.ExtractUsage(logPath)
+	report, err := newDriver(t).ExtractUsage(logPath)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}

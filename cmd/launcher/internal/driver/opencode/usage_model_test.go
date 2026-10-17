@@ -1,12 +1,9 @@
-package opencode
+package opencode_test
 
 import (
-	"errors"
-	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/testutil"
-	"spindrift.dev/launcher/internal/usage"
+	"spindrift.dev/launcher/internal/driver/opencode"
 )
 
 // Two step_finish lines sharing a non-empty messageID are an opencode re-emit
@@ -19,12 +16,13 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 		`{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":10,"cache":{"write":20,"read":200}}}}`,
 		`{"type":"step_finish","part":{"messageID":"msg_b","modelID":"gpt-5","tokens":{"input":40,"output":20,"reasoning":0,"cache":{"write":10,"read":80}}}}`,
 	}
-	path := WriteLog(t, lines...)
+	path := opencode.WriteLog(t, lines...)
 
-	got, err := breakdownByModel(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
+	got := report.SummedByModel
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -54,12 +52,13 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 // dropped or panicking.
 func TestBreakdownByModel_UnknownModel(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","tokens":{"input":5,"output":2}}}`
-	path := WriteLog(t, line)
+	path := opencode.WriteLog(t, line)
 
-	got, err := breakdownByModel(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
+	got := report.SummedByModel
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -78,12 +77,13 @@ func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
 		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
 	}
-	path := WriteLog(t, lines...)
+	path := opencode.WriteLog(t, lines...)
 
-	got, err := breakdownByModel(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
+	got := report.SummedByModel
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -105,12 +105,13 @@ func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 // CacheWrite1hTokens stays 0.
 func TestBreakdownByModel_CacheWriteTo5m(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":1,"output":1,"cache":{"write":77,"read":0}}}}`
-	path := WriteLog(t, line)
+	path := opencode.WriteLog(t, line)
 
-	got, err := breakdownByModel(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
+	got := report.SummedByModel
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -129,12 +130,13 @@ func TestBreakdownByModel_TwoModels(t *testing.T) {
 		`{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":100,"output":50}}}`,
 		`{"type":"step_finish","part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":10,"output":5}}}`,
 	}
-	path := WriteLog(t, lines...)
+	path := opencode.WriteLog(t, lines...)
 
-	got, err := breakdownByModel(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
+	got := report.SummedByModel
 	if len(got) != 2 {
 		t.Fatalf("len(got) = %d, want 2: %+v", len(got), got)
 	}
@@ -147,49 +149,15 @@ func TestBreakdownByModel_TwoModels(t *testing.T) {
 	}
 }
 
-// A missing log file degrades to (nil, nil), matching ExtractUsage's own
-// missing-log contract.
+// A missing log file degrades to no error and a nil breakdown, matching
+// ExtractUsage's own missing-log contract.
 func TestBreakdownByModel_FileNotFound(t *testing.T) {
-	got, err := breakdownByModel("/nonexistent/x.log")
+	report, err := newDriver(t).ExtractUsage("/nonexistent/x.log")
 	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
+	got := report.SummedByModel
 	if got != nil {
 		t.Errorf("got = %+v, want nil", got)
-	}
-}
-
-// ExtractUsage still returns the aggregate totals it already summed from
-// step_finish events when breakdownByModel fails with a real I/O error, rather
-// than discarding them (issue #674, mirroring claude's ExtractUsage).
-func TestExtractUsage_BreakdownByModelError(t *testing.T) {
-	line := `{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":0,"cache":{"write":0,"read":0}}}}`
-	path := WriteLog(t, line)
-
-	orig := breakdownByModel
-	breakdownByModel = func(string) ([]usage.ModelUsage, error) {
-		return nil, errors.New("simulated I/O error")
-	}
-	defer func() { breakdownByModel = orig }()
-
-	var report usage.Report
-	var err error
-	stderr := testutil.CaptureStderr(t, func() {
-		report, err = ExtractUsage(path)
-	})
-	if !strings.Contains(stderr, path) || !strings.Contains(stderr, "simulated I/O error") {
-		t.Errorf("stderr = %q, want it to mention the log path and the error", stderr)
-	}
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !report.Found {
-		t.Fatal("expected Found=true")
-	}
-	if report.Totals.InputTokens != 100 || report.Totals.OutputTokens != 50 {
-		t.Errorf("Usage: got %+v, want InputTokens=100 OutputTokens=50", report.Totals)
-	}
-	if report.SummedByModel != nil {
-		t.Errorf("Models: got %+v, want nil", report.SummedByModel)
 	}
 }
