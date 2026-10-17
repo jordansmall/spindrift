@@ -784,12 +784,18 @@ func needsOutbox(cfg Config) bool {
 // resetOutboxDir empties dir and recreates it: the writable outbox mount must
 // start empty every dispatch (ADR 0033), and buildMountSpecs only produces the
 // mount when the source directory exists. The 0o777 mode lets the Box's
-// uid-1000 agent write regardless of rootless uid remapping (issue #1723), and
-// the explicit Chmod is needed because MkdirAll's mode passes through the umask.
+// uid-1000 agent write regardless of rootless uid remapping (issue #1723).
 func resetOutboxDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
+	return mkdirBoxWritable(dir)
+}
+
+// mkdirBoxWritable creates dir 0o777 so the Box's uid-1000 agent can write it
+// under rootless uid remapping (issues #1723, #5387). The explicit Chmod is
+// needed because MkdirAll's mode passes through the umask.
+func mkdirBoxWritable(dir string) error {
 	if err := os.MkdirAll(dir, 0o777); err != nil {
 		return err
 	}
