@@ -495,8 +495,9 @@ func (l *Launcher) drain(tracker forge.IssueTracker, pwd string) {
 	}
 }
 
-// runContinuousQueue adapts runStack's discover closure, pendingCount, and
-// reportStaleDrain plumbing to the waves.Queue seam (issue #2937).
+// runContinuousQueue adapts runStack's discover closure, console
+// Queue.PendingCount, and Launcher.recordStaleDrainReport to the
+// waves.Queue seam (issue #2937).
 // RunContinuous calls Claim/Pending/ReportStaleDrain through this seam
 // exclusively (#2939). Claim is a documented no-op: Queue.Discover already
 // claimed via TransitionState before the Batch reaches RunContinuous.
