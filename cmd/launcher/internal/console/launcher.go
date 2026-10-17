@@ -67,8 +67,9 @@ type Launcher struct {
 	// its sole outside mutators. Lazily constructed by queueRef(), so a bare
 	// struct literal needs no constructor (issue #1542).
 	queue *Queue
-	// staleMessage is updated on every freshnessChecker() call; stale (and
-	// rebuilding/rebuildErr) only by drain/Rebuild themselves.
+	// When Fresh is set, stale and staleMessage are updated on every call of
+	// the checker that freshnessChecker() returns, and a successful Rebuild
+	// clears both; Rebuild alone writes rebuilding/rebuildErr.
 	stale        bool
 	staleMessage string
 	rebuilding   bool
@@ -580,8 +581,10 @@ func (l *Launcher) freshnessChecker() waves.FreshnessChecker {
 		l.staleMessage = msg
 		newlyStale := l.stale && !wasStale
 		l.mu.Unlock()
-		// A stale-to-fresh transition signals nothing: Rebuild is the sole path
-		// that clears staleness and already signals its own clear (issue #1124).
+		// A stale-to-fresh transition signals nothing (issue #1124): the usual
+		// clear is Rebuild's, which signals itself. A clear only a poll sees,
+		// such as after a rebuild outside this session, repaints on the next
+		// unrelated refresh.
 		if newlyStale {
 			l.signalRefresh()
 		}
