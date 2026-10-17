@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -28,6 +29,11 @@ func statsStampedLog(key string, claim time.Time, start hostop.DispatchStart, ha
 		out += statsOp(hostop.SpindriftOp{Op: "prompt_hashes", PromptHashes: &hostop.PromptHashes{RecordID: start.RecordID, Roles: hashes}})
 	}
 	for i, p := range passes {
+		if start.Driver == "opencode" {
+			out += statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: i + 1, Role: p[0]}) +
+				statsOpencodePass(i+1, claim.Add(time.Duration(i+1)*time.Minute), strings.Split(p[1], "+"))
+			continue
+		}
 		ts := claim.Add(time.Duration(i+1) * time.Minute).Format(time.RFC3339)
 		models := make([]string, 0, 2)
 		for _, m := range strings.Split(p[1], "+") {
@@ -38,6 +44,22 @@ func statsStampedLog(key string, claim time.Time, start hostop.DispatchStart, ha
 			`{"type":"result","result":"","timestamp":"` + ts + `","num_turns":2,"total_cost_usd":1.5,"duration_ms":60000,"duration_api_ms":900,` +
 			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},` +
 			`"modelUsage":{` + strings.Join(models, ",") + `}}` + "\n"
+	}
+	return out
+}
+
+// statsOpencodePass is the opencode counterpart of the claude result line: two
+// model calls (the first model, then the last) summing to the same totals and
+// spanning 60s from the first step_start to the last step_finish.
+func statsOpencodePass(pass int, t0 time.Time, models []string) string {
+	base := t0.UnixMilli()
+	var out string
+	for call, at := range [][2]int64{{0, 1000}, {2000, 60000}} {
+		model := models[min(call, len(models)-1)]
+		id := fmt.Sprintf("msg_%d_%d", pass, call)
+		out += fmt.Sprintf(`{"type":"step_start","timestamp":%d,"part":{"messageID":%q}}`, base+at[0], id) + "\n" +
+			fmt.Sprintf(`{"type":"step_finish","timestamp":%d,"part":{"messageID":%q,"modelID":%q,`+
+				`"tokens":{"input":5,"output":10,"reasoning":0,"cache":{"write":20,"read":15}},"cost":0.75}}`, base+at[1], id, model) + "\n"
 	}
 	return out
 }

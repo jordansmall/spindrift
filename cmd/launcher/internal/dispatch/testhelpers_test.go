@@ -66,9 +66,18 @@ func writeOutcomeOnFinalCall(fr *runner.Fake, errs []error, line []byte) {
 // claude-format stream-json fixtures through the Driver seam.
 type fakeDriver struct {
 	ClassifyFn func(logPath string) (driver.Classification, error)
+	// DriverName is the registered Driver name; empty reads as claude.
+	DriverName string
 }
 
-func (d fakeDriver) Name() string { return "fake" }
+// Name is a registered Driver's: Dispatch Records ingest the logs these tests
+// stamp through the Driver the stamp names.
+func (d fakeDriver) Name() string {
+	if d.DriverName != "" {
+		return d.DriverName
+	}
+	return "claude"
+}
 
 func (d fakeDriver) ClassifyTransient(logPath string) (driver.Classification, error) {
 	if d.ClassifyFn != nil {
@@ -104,7 +113,7 @@ func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
 }
 
 func (d fakeDriver) ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
-	return nil, nil
+	return driverkit.ReadPasses(logPath, driverkit.PassOptions{NewDecoder: driverclaude.NewDecoder, Totals: driverkit.SessionTotals, WriteTool: driverclaude.WriteTool}, trackWrite, visit)
 }
 
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {

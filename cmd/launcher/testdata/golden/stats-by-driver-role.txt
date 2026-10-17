@@ -14,13 +14,13 @@ driver = opencode, role = implement
 Records: 1  Passes: 1  Notional USD: $1.50 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
-implement  1       $1.50  $1.50    1.0      0          -
+implement  1       $1.50  $1.50    1.0      2          -
 
 driver = opencode, role = review
 Records: 1  Passes: 1  Notional USD: $1.50 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE    PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
-review  1       $1.50  $1.50    1.0      0          -
+review  1       $1.50  $1.50    1.0      2          -
 
 driver = (none), role = (none)
 Records: 1  Passes: 1  Notional USD: $0.10 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
