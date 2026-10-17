@@ -200,8 +200,16 @@ type Tokens struct {
 }
 
 // Decoder turns one raw Pass log line (newline stripped) into zero or more
-// events. A line the grammar does not know yields none; a line outside the
-// grammar yields one KindUnparsed. A shared reader takes a `func() Decoder`
-// factory rather than a Decoder so a stateful decoder (one correlating a tool
-// id to a role across lines, say) gets fresh state per scan or writer.
+// events. A line the grammar does not know yields none; a line outside it
+// yields one KindUnparsed. A strictly read field that fails to decode puts the
+// line outside the grammar: one KindUnparsed for the whole line, lost to every
+// reader but the classifier's terminal-marker match. A leniently read field
+// decodes as its zero value or a raw fallback the decoder documents, and the
+// line still yields its events. Every decoder must follow this strict/lenient
+// rule; which fields are lenient is each decoder's to document. Worked
+// examples: docs/reference.md, Host-side event layer; change this rule and
+// that section together.
+//
+// A shared reader takes a `func() Decoder` factory rather than a Decoder so a
+// stateful decoder gets fresh state per scan or writer.
 type Decoder func(line string) []Event
