@@ -126,3 +126,19 @@ Issue #5183 then removed the one-line wrappers that switch left in the
 `opencode` package: its Driver registration calls the driverkit readers
 directly, and the package keeps its decoder, transient and terminal
 patterns, exit resolution, result-event encoder and session flags.
+
+## Amendment (issue #5184): claude's old readers are deleted in the switch
+
+`claude` follows `opencode` (issue #5182). Issue #5184 deleted its old
+classification, usage, result-text and transcript readers in the switch
+commits rather than in a later slice, and the unchanged corpus goldens stand
+in as the differential. Its heartbeat still runs its own parse; it moves onto
+the shared writer in its own ticket.
+
+Two divergences from the old `claude` readers are deliberate. Every
+`spindrift_op` line is a host op the classifier ignores; the old classifier
+skipped only `dispatch_start` and `dispatch_settled`, so text in any other
+host op could match a marker. And the per-role cache-write total now comes
+from the split `cache_creation` object when the CLI writes one, rather than
+from the flat `cache_creation_input_tokens`; the two differ only if the CLI's
+own fields disagree.

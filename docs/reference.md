@@ -1229,16 +1229,26 @@ minimal state across lines (say, correlating a tool id to a role), so each
 reader takes a `func() Decoder` factory and gets a fresh decoder per scan.
 
 What stays per Driver, beyond the decoder: extra transient and terminal
-`Pattern`s for the classifier, the top-level role default for the transcript
-and heartbeat, and `ResolveExit`, `ResultEvent` and `SessionFlags`. The
-`opencode` package's thin `Classify`, `ResultText`, `RenderTranscript`,
-`ExtractUsage` and heartbeat functions each delegate to a shared reader with
-its own decoder and inputs; read them as the worked example.
+`Pattern`s for the classifier, a `driverkit.ClassifyOptions` (the policy for
+an oversized line, and `FirstMatch`, which latches the first unrecovered
+marker instead of the last), the usage `TotalsSource`, the top-level role
+default for the transcript and heartbeat, and `ResolveExit`, `ResultEvent` and
+`SessionFlags`. `PerCallTotals` sums every `usage` event, for a CLI that
+reports one tally per call (`opencode`). `SessionTotals` sums the `result`
+events instead, for a CLI whose per-session summary is the ground truth for
+output tokens, cost, turns and durations (`claude`); `usage` events then feed
+only the per-model and per-role breakdowns. The `opencode` package's thin
+`Classify`, `ResultText`, `RenderTranscript`, `ExtractUsage` and heartbeat
+functions each delegate to a shared reader with its own decoder and inputs;
+read them as the worked example. The `claude` package's decoder is the worked
+example of a stateful one: it keeps a task-id to role map, the top-level role
+a `pass_start` line sets, and a latch that recognises a `result` line echoing
+a marker the agent already quoted.
 
 | Kind | Fills (besides `Role`, `MessageID`, `Timestamp` where the line has them) | Read by |
 |------|------|------|
-| `start` | none | usage (anchors the run's span), classifier (progress) |
-| `text` | `Text` | result, transcript, heartbeat; classifier (progress) |
+| `start` | none; `claude` emits one per assistant or user turn as its progress marker | usage (anchors the run's span), classifier (progress) |
+| `text` | `Text`, and `Synthetic` for a turn the CLI wrote itself | result, transcript, heartbeat; classifier (progress, unless `Synthetic`) |
 | `reasoning` | `Text` | classifier (progress) only, never narration or result |
 | `tool_call` | `ToolID`, `ToolName`, `ToolInput`, `ToolTarget` | transcript; classifier (progress) |
 | `tool_result` | `ToolID`, `ToolName`, `ToolTarget`, `ToolOutput`, `IsError`, `Subagent` | transcript; classifier (progress) |
@@ -1247,7 +1257,7 @@ its own decoder and inputs; read them as the worked example.
 | `effort` | `Effort` | none yet |
 | `error` | `Text`, `ResetAt` | classifier (transient markers) |
 | `unparsed` | `Text` | classifier (terminal markers only) |
-| `result` | `Text`, session totals | result (replaces text so far) |
+| `result` | `Text`, session totals (`Tokens`, `DurationMs`, `DurationAPIMs`, `NumTurns`) | result (replaces text so far); usage, summed under `SessionTotals` |
 | `host_op` | `HostOp` | heartbeat (rendered by `FormatSpindriftOp`); the host's own `spindrift_op` lines, in every Driver's stream |
 
 The progress kinds are `driverkit.IsProgress`; opencode's `ResolveExit`
@@ -1257,14 +1267,19 @@ reads the same set to tell a recovered `error` from an unrecovered one.
 reader does with an event. A few conventions matter to a decoder author.
 Decode a CLI's thinking output to `reasoning`, never `text`, or it surfaces in
 the verdict scan and heartbeat. Emit one `usage` event per model call, not a
-running total. `Role` is `""` for the top-level loop; a reader resolves it to
-the top-level role it is given (the usage report uses `usage.MainLoopAgent`),
-so a CLI with no subagent attribution leaves it empty throughout.
+running total. `Role` is a subagent's role or, for a top-level event, the
+pass role in force; `""` means the reader's default top-level role, so a CLI
+with no subagent attribution leaves it empty throughout. `InSubagent` marks an
+event attributed to a subagent: per-role usage keys on it, so a non-subagent
+event lands under `usage.MainLoopAgent` whatever pass role it carries. The
+transcript renders a tool line from `ToolName`, `ToolTarget`, `ToolOutput`,
+`IsError` and `Subagent`, so a decoder fills those rather than formatting the
+line itself.
 
 Canonical events never leave the driver packages. The `Driver` interface is
 the one seam: no caller outside them decodes a line or sees an `Event`.
-`opencode` is built on this layer; `claude` still runs its own readers until
-it is ported.
+Both `opencode` and `claude` are built on this layer. The one reader still on
+its own parse is `claude`'s heartbeat, which a later ticket ports.
 
 ##### Driver Pass-log corpus
 
