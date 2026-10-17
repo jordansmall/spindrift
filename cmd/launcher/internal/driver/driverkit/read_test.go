@@ -231,8 +231,50 @@ func TestExtractUsageSumsEveryEventAndSpans(t *testing.T) {
 	if !reflect.DeepEqual(r.SummedByModel, want) {
 		t.Errorf("SummedByModel = %+v, want %+v", r.SummedByModel, want)
 	}
-	if r.SummedByAgent != nil {
-		t.Errorf("SummedByAgent = %v, want nil", r.SummedByAgent)
+	// Per-agent dedups like per-model: one distinct message, the first tally.
+	wantAgents := []usage.AgentUsage{{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4}}
+	if !reflect.DeepEqual(r.SummedByAgent, wantAgents) {
+		t.Errorf("SummedByAgent = %+v, want %+v", r.SummedByAgent, wantAgents)
+	}
+	if r.OutputIsMainLoopOnly {
+		t.Error("OutputIsMainLoopOnly = true, want false: per-call output is real")
+	}
+}
+
+func TestExtractUsageSummedByAgent(t *testing.T) {
+	roleEv := func(role, id string, tok Tokens) Event {
+		ev := usageEv(id, "m", 1, tok)
+		ev.Role = role
+		return ev
+	}
+	path, nd := evLines(t,
+		roleEv("", "t1", Tokens{Input: 1, Output: 2, CacheRead: 3, CacheWrite5m: 4, CacheWrite1h: 1}),
+		roleEv("", "t1", Tokens{Input: 100}), // re-emitted id: dropped
+		roleEv("", "", Tokens{Input: 1}),     // empty ids are never deduplicated
+		roleEv("", "", Tokens{Input: 1}),
+		roleEv("scout", "s1", Tokens{Input: 50, Output: 50}),
+		roleEv("scout", "s2", Tokens{Input: 5}),
+		roleEv("auditor", "a1", Tokens{Input: 55, Output: 50}), // ties scout on 105: name breaks it
+		roleEv("tiny", "x1", Tokens{Input: 1}),
+	)
+	r, err := ExtractUsage(path, nd, byModelOf(nd))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []usage.AgentUsage{
+		{Agent: usage.MainLoopAgent, APICalls: 3, UncachedInputTokens: 3, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 5},
+		{Agent: "auditor", APICalls: 1, UncachedInputTokens: 55, OutputTokens: 50},
+		{Agent: "scout", APICalls: 2, UncachedInputTokens: 55, OutputTokens: 50},
+		{Agent: "tiny", APICalls: 1, UncachedInputTokens: 1},
+	}
+	if !reflect.DeepEqual(r.SummedByAgent, want) {
+		t.Errorf("SummedByAgent = %+v, want %+v", r.SummedByAgent, want)
+	}
+	// A subagent outweighing the main loop still sorts after it.
+	path, nd = evLines(t, roleEv("scout", "s1", Tokens{Input: 999}), roleEv("", "t1", Tokens{Input: 1}))
+	r, _ = ExtractUsage(path, nd, byModelOf(nd))
+	if len(r.SummedByAgent) != 2 || r.SummedByAgent[0].Agent != usage.MainLoopAgent {
+		t.Errorf("main loop must sort first: %+v", r.SummedByAgent)
 	}
 }
 

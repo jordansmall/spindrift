@@ -2716,7 +2716,11 @@ ground-truth figure for a subagent's own output. The payload states
 that itself via `output_is_main_loop_only`, and only then does the
 heartbeat mark the figure `out (main loop)` — a driver whose own
 stream does carry whole-pass output (opencode) leaves the flag unset
-and its `out` column unqualified. A pass that crashed
+and its `out` column unqualified. That driver's payload is built from
+its decoded usage events by the shared reader, deduplicated by message
+id like the above: one `main` row (opencode attributes no subagent
+roles), so the pass's API-call count reaches
+`spindrift stats --by role`. A pass that crashed
 or produced no usage events emits a zero-valued summary rather than
 nothing, so the marker is present for every pass.
 

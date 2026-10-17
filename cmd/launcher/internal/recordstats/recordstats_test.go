@@ -44,3 +44,17 @@ func TestRecordUSDSumsPasses(t *testing.T) {
 		t.Fatalf("RecordUSD of no passes = %v, want 0", got)
 	}
 }
+
+// TestAggregateRolesSumsAPICalls pins the figure `stats --by role` shows per
+// role: each pass's pass_usage-derived APICalls, summed across the role's passes.
+func TestAggregateRolesSumsAPICalls(t *testing.T) {
+	rec := dispatchrecord.Record{Passes: []dispatchrecord.Pass{
+		{Role: string(passmachine.RoleImplement), APICalls: 13},
+		{Role: string(passmachine.RoleImplement), APICalls: 4},
+		{Role: string(passmachine.RoleReview), APICalls: 2},
+	}}
+	rows, _, _ := AggregateRoles([]dispatchrecord.Record{rec})
+	if len(rows) != 2 || rows[0].APICalls != 17 || rows[1].APICalls != 2 {
+		t.Fatalf("rows = %+v, want implement APICalls=17 and review APICalls=2", rows)
+	}
+}
