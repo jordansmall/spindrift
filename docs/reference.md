@@ -1146,7 +1146,9 @@ Driver entry declares:
   model ids are `<provider>/<model>`. Optional; today `lib/mkHarness.nix`
   uses it to drop a worker whose model lacks the `/` (issue #5331) and to
   fail evaluation on any other non-empty roster or default model that lacks
-  it (issue #5355).
+  it (issue #5355). It also renders into the launcher's Driver Descriptor
+  (`cmd/launcher/internal/driver/descriptor_gen.go`), which the launcher's
+  bare-worker gate reads.
 
 The registry validates every entry against this required-attribute list at
 eval time (`assertShape` in `lib/drivers/default.nix`): an entry missing one
