@@ -45,6 +45,13 @@ The decision set:
 - **The verdict names which half moved, and each half gets the boundary it
   actually needs.** A Box-artifact-only change hot-swaps in place: realize the
   tip closure, bind it for subsequent launches, keep refilling, never exit.
+  (Amended by issue #5432: under bwrap, when the swap is unconfigured or
+  fails, an image-only-stale verdict drains to exit 4 as on OCI instead —
+  that is, when `FLAKE_LAUNCHER_ATTR` is unset, the realize of the tip
+  closure fails, the realized tip tag is not a `/nix/store/` path, or a
+  nixInBox Consumer's nix-var snapshot generation fails. A host-tainted
+  divergence still halts with exit 5 rather than draining; see [Dispatch
+  exit codes](../reference.md#dispatch-exit-codes).)
   A launcher change drains and exits as today, because a process cannot swap
   itself. When both moved, the launcher wins — a restart refreshes the Box
   artifact too, so there is no case where a swap is preferable to a restart
