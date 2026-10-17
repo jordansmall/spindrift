@@ -1,10 +1,8 @@
 package opencode
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
-	"strings"
 
 	"spindrift.dev/launcher/internal/logscan"
 )
@@ -19,21 +17,7 @@ func ResolveExit(logPath string, exitCode int) (int, error) {
 	}
 	sawError := false
 	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
-		s := strings.TrimSpace(line)
-		if s == "" {
-			return
-		}
-		// Mirrors Decode's "error" case. Decodes only type and part.text on
-		// purpose, so a malformed field elsewhere on an error line still fails
-		// the run. part.text stays only for parity with the legacy decode: an
-		// error line whose part.text is not a string is dropped, not counted.
-		var ev struct {
-			Type string `json:"type"`
-			Part struct {
-				Text string `json:"text"`
-			} `json:"part"`
-		}
-		if json.Unmarshal([]byte(s), &ev) == nil && ev.Type == "error" {
+		if isErrorEvent(line) {
 			sawError = true
 		}
 	})
