@@ -4325,7 +4325,9 @@ gh label create agent-research-finding     --repo owner/repo --color c5def5 --de
 ```
 
 If a custom `RESEARCH_VERDICTS` set is configured, create its labels
-instead of (or alongside, if some overlap) the three above.
+instead of (or alongside, if some overlap) the three above. `spindrift doctor`
+checks for (and in interactive mode offers to create) the configured set's
+labels in place of the defaults.
 
 `agent-research-finding` is a provenance label, not a dispatch label: when a
 research dispatch's Filer is provisioned, the Launcher applies it, host-side,
