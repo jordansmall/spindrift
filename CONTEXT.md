@@ -38,24 +38,47 @@ The swappable agent CLI baked into the Box. `claude` (the default) and
 build-time seam (one Driver per image, picked beside `runtime`), analogous to
 the Forge and runner seams. Each Driver normalizes its tool's quirks at its own
 boundary and has two coordinated halves keyed by one name — a nix-generated
-in-box half (invocation, agent-config, outcome extraction) and a Go host-side
-strategy in the launcher (transient classification, heartbeat, usage
-extraction). _Provisional
+in-box half (invocation, agent-config, outcome extraction) and a host-side
+Strategy in the launcher (how its Pass log decodes into canonical events,
+and the few facts the shared readers need). _Provisional
 name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
 
+**Strategy**:
+A Driver's host-side half, as a declarative literal (ADR 0066): its decoder,
+its classify patterns, the facts the shared readers vary on, and its exit
+resolution, result event and session flags. The registry builds the Driver
+interface from it; a Driver author writes a Strategy, never a reader. _Avoid_:
+adapter, spec, profile, plugin.
+
+**Driver Descriptor**:
+The Driver facts the host needs outside the Pass log — its name, whether its
+model ids are Provider-namespaced, and its credential rules — generated from
+the Driver's Nix row, as the backend Descriptor is from its backend's row
+(ADR 0066). _Avoid_: driver config, driver metadata.
+
+**Credential rule**:
+One way a Driver can be authenticated: the environment variables that satisfy
+it, the model-id prefix under which it applies (none means always), the
+remedy to show when it is unmet, and the command that obtains it. A Driver
+Descriptor carries a list of them. _Avoid_: credential arm, auth switch.
+
+**Conformance kit**:
+The shared test runner a Driver's own package calls to prove its Strategy
+against its corpus: the goldens, the chunked heartbeat replay and the
+credential guard, so each Driver's tests stand alone (ADR 0066). The Driver
+seam's counterpart of the forge Conformance contract. _Avoid_: corpus test,
+driver test suite.
+
 **driverkit**:
-The shared leaf package under the Driver seam's host-side half (ADR 0009) that
-both Driver strategies (`claude`, `opencode`), the parent driver package, and
-the orchestrator import, so the substrate every strategy needs is declared once
-instead of hand-mirrored per strategy. Owns the transient-classification
-vocabulary (the `Class`/`Reason`/`Classification` types the driver package
-re-exports as true type aliases), the shared transient-pattern base table
-behind a `MatchTransient` that takes per-Driver extras, the buffered NDJSON
-line-framer both heartbeat writers use, the not-found-returns-zero-value
-log-scan degrade helper, and the role constants (implementor, reviewer, default
-subagent). It imports nothing from the driver package, so a new Driver author
-inherits the seam instead of copying the `claude` strategy. _Avoid_: driver
-core, shared driver lib.
+The shared leaf package under the Driver seam's host-side half (ADR 0009,
+0065, 0066) that every Driver Strategy, the parent driver package, and the
+orchestrator import, so the substrate every Strategy needs is declared once
+instead of hand-mirrored per Driver. Owns the canonical event vocabulary and
+the readers over it (classification, heartbeat, usage, transcript, result,
+Dispatch Record ingestion), the Strategy type, the conformance kit, and the
+role constants. It imports nothing from the driver package, so a new Driver
+author inherits the seam instead of copying the `claude` Strategy. _Avoid_:
+driver core, shared driver lib.
 
 **Provider**:
 The model backend a Driver talks to. Distinct from the Driver: the `claude`
