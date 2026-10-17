@@ -216,13 +216,52 @@ func openOpencodeStore(t *testing.T, home, create string) *sql.DB {
 	return db
 }
 
-// seedOpencodeStore creates the per-issue session store under home with rows.
-func seedOpencodeStore(t *testing.T, home string, rows [][5]any) {
+// seedOpencodeStore creates the per-issue session store under home from the
+// committed opencode schema fixture and inserts rows. Seeding from the real
+// DDL, not a hand-written stub, is what makes a column lookupSession queries
+// going missing from opencode's schema fail a test.
+func seedOpencodeStore(t *testing.T, home string, rows [][5]any) *sql.DB {
 	t.Helper()
-	db := openOpencodeStore(t, home, `CREATE TABLE session (id text PRIMARY KEY, parent_id text, title text NOT NULL, time_created integer NOT NULL, time_archived integer)`)
+	ddl, err := os.ReadFile(filepath.Join("opencode", "testdata", "session-schema.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := openOpencodeStore(t, home, string(ddl))
+	// The NOT NULL columns lookupSession never reads still need values.
+	if _, err := db.Exec(`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('prj', '/w', 0, 0, '[]')`); err != nil {
+		t.Fatal(err)
+	}
 	for _, r := range rows {
-		if _, err := db.Exec(`INSERT INTO session VALUES (?, ?, ?, ?, ?)`, r[0], r[1], r[2], r[3], r[4]); err != nil {
+		if _, err := db.Exec(`INSERT INTO session (id, project_id, slug, directory, version, time_updated, parent_id, title, time_created, time_archived) VALUES (?, 'prj', 's', '/w', 'v', 0, ?, ?, ?, ?)`, r[0], r[1], r[2], r[3], r[4]); err != nil {
 			t.Fatal(err)
+		}
+	}
+	return db
+}
+
+// The columns lookupSession queries (opencode/session.go) must exist in the
+// fixture schema.
+func TestOpencodeSchemaFixtureHasLookupColumns(t *testing.T) {
+	db := seedOpencodeStore(t, t.TempDir(), nil)
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('session')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range []string{"id", "title", "parent_id", "time_archived", "time_created"} {
+		if !have[col] {
+			t.Errorf("session table in opencode/testdata/session-schema.sql has no %q column, which lookupSession queries", col)
 		}
 	}
 }
