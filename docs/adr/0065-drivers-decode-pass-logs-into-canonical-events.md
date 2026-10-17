@@ -1,6 +1,6 @@
 # Drivers decode Pass logs into canonical events
 
-Status: proposed
+Status: accepted
 
 ## Context
 
@@ -75,6 +75,13 @@ this lands:
   model. The `pi` Driver is then built directly on the layer. `claude`, the
   largest and the default, goes last.
 
+The old-versus-new differential was never kept as a standing test. The
+committed per-Driver corpus goldens (`TestDriverCorpusGoldens`, which checks
+each Driver through the interface alone) replaced it and stay as the
+permanent gate. (Amended by issue #5187: the planned standing differential and
+the later-slice deletion of old readers did not happen as written; see the
+#5187 amendment below.)
+
 ADR 0009's Driver boundary stands, but on the host side the per-Driver
 boundary is now the decoder, not the five readers.
 
@@ -112,7 +119,8 @@ boundary is now the decoder, not the five readers.
 - Behaviour bugs found during the port are filed separately, not folded
   into a switch, so each differential stays exact.
 - While a Driver is mid-migration the interface carries two implementations.
-  The window closes when its old readers are deleted.
+  The window closes when its old readers are deleted. It has closed for
+  every Driver (issue #5187).
 
 ## Amendment (issue #5182): opencode's old readers are deleted in the switch
 
@@ -132,8 +140,8 @@ patterns, exit resolution, result-event encoder and session flags.
 `claude` follows `opencode` (issue #5182). Issue #5184 deleted its old
 classification, usage, result-text and transcript readers in the switch
 commits rather than in a later slice, and the unchanged corpus goldens stand
-in as the differential. Its heartbeat still runs its own parse; it moves onto
-the shared writer in its own ticket.
+in as the differential. Its heartbeat still runs its own parse (no longer true;
+see the #5187 amendment); it moves onto the shared writer in its own ticket.
 
 Two divergences from the old `claude` readers are deliberate. Every
 `spindrift_op` line is a host op the classifier ignores; the old classifier
@@ -142,3 +150,19 @@ host op could match a marker. And the per-role cache-write total now comes
 from the split `cache_creation` object when the CLI writes one, rather than
 from the flat `cache_creation_input_tokens`; the two differ only if the CLI's
 own fields disagree.
+
+## Amendment (issue #5187): the migration window closes
+
+The heartbeat note in the previous amendment is out of date: issue #5185
+moved `claude`'s heartbeat onto the shared writer, and issue #5187 removed
+the reader wrappers and the stream-json event types that were left over. The
+`claude` package now holds what the `opencode` one does: its decoder, its
+transient and terminal patterns, its result-event encoder and its session
+flags. It also keeps three quirks the shared readers take as inputs: its
+classify options, its heartbeat tracking, and the ordering of its per-model
+usage. It has no exit resolution, since its CLI's exit code is already
+trustworthy.
+
+Dispatch Record ingestion reads Pass logs only through the stamped Driver
+(issue #5186). The corpus goldens remain the permanent gate. Status moves to
+accepted.
