@@ -80,9 +80,9 @@ const (
 	// ApplyNoopContent: the bit was clear and the content already doesn't
 	// mention upstreamHost, so there is nothing to rewrite or converge.
 	ApplyNoopContent
-	// ApplyApplied: the content rewrite plus skip-worktree tag, or (issue
-	// #2932's converge case) just the tag over content a prior crashed run
-	// already rewrote. The converge case cannot tell that prior rewrite apart
+	// ApplyApplied: the content rewrite plus skip-worktree tag, or (the
+	// defensive converge case) just the tag over dirty content that already
+	// lacks upstreamHost. The converge case cannot tell that content apart
 	// from an unrelated dirty edit; see ApplyInTreeBinding (issue #3024 gap 2).
 	ApplyApplied
 )
@@ -281,11 +281,12 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 		}
 	}
 	if !anyHostPresent {
-		// Bit clear and no host left: either nothing ever needed rewriting, or a
-		// prior Apply's rewrite landed and the process crashed before the bit got
-		// set (issue #2932). dirty is not content evidence, so an unrelated dirty
-		// edit reads identically and is reported ApplyApplied. Accepted, because
-		// telling the two apart needs an API change (issue #3024 gap 2).
+		// Bit clear and no host left: either nothing ever needed rewriting, or
+		// something other than Apply (see "Tag before writing" below) dirtied
+		// the file so it already lacks the upstream host. Converge by tagging.
+		// dirty is not content evidence, so an unrelated dirty edit reads
+		// identically and is reported ApplyApplied. Accepted, because telling
+		// the two apart needs an API change (issue #3024 gap 2).
 		dirty, dirtyErr := workingTreeDirty(repoDir, row.InTreeConfigPath)
 		if dirtyErr != nil {
 			return 0, dirtyErr
@@ -452,9 +453,10 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Row) (reverted bool, err 
 		return true, nil
 	}
 
-	// Bit clear but content may still be dirty: Apply's rewrite can land before
-	// the bit gets set, so a crash in between leaves exactly this state. Treat
-	// it the same as an applied bit.
+	// Bit clear but content may still be dirty: defensively, something other
+	// than Apply (which tags first) may have rewritten or dirtied it. Treat it
+	// the same as an applied bit, so the checkout below also discards an
+	// unrelated dirty edit (Revert's side of issue #3024 gap 2).
 	dirty, err := workingTreeDirty(repoDir, row.InTreeConfigPath)
 	if err != nil {
 		return false, err
