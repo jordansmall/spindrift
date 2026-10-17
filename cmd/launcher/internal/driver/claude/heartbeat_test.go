@@ -101,6 +101,40 @@ func TestWriterToolCountsShowKind(t *testing.T) {
 	}
 }
 
+// Pins the shared count formatter's fixed kind order and the "searches" plural.
+// Tools arrive out of display order so the ordering is proven; a phase change
+// flushes the counts, so kinds that share a phase share a line (edit, search
+// and explore never do, hence three lines).
+func TestWriterToolCountsExactLines(t *testing.T) {
+	var status bytes.Buffer
+	w := newWriter(t, "7", &status)
+
+	tool := func(name, input string) {
+		fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"`+name+`","input":`+input+`}]}}`+"\n")
+	}
+	tool("Skill", `{"skill":"x"}`)
+	tool("Task", `{"subagent_type":"general"}`)
+	tool("Bash", `{"command":"ls"}`)
+	tool("Read", `{"file_path":"a.go"}`)
+	tool("Read", `{"file_path":"b.go"}`)
+	tool("WebSearch", `{"query":"a"}`)
+	tool("WebSearch", `{"query":"b"}`)
+	for range 3 {
+		tool("Grep", `{"pattern":"p"}`)
+	}
+	tool("Edit", `{"file_path":"main.go"}`)
+	fmt.Fprint(w, `{"type":"result","num_turns":1}`+"\n")
+
+	want := "#7 ── implementor ──────────────────\n" +
+		"#7 [explore] · 2 reads, 1 bash, 1 subagent, 1 skill\n" +
+		"#7 [search] · 3 greps, 2 searches\n" +
+		"#7 [edit] · 1 edit\n" +
+		"#7 [edit] · 1 turn\n"
+	if got := status.String(); got != want {
+		t.Errorf("heartbeat output:\n got %q\nwant %q", got, want)
+	}
+}
+
 func TestWriterToolCountSurvivesNonStringThinkingKey(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter(t, "7", &status)
