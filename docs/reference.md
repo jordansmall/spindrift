@@ -1228,6 +1228,13 @@ none; a line outside it yields one `unparsed` event. A decoder may keep
 minimal state across lines (say, correlating a tool id to a role), so each
 reader takes a `func() Decoder` factory and gets a fresh decoder per scan.
 
+Every decoder must follow the strict/lenient rule `driverkit.Decoder`'s Go doc
+states (issue #5418): a malformed strict field costs the whole line for every
+reader, even readers that never read that field, and the classifier still
+matches it against its terminal markers. Which fields are strict is each
+decoder's choice; opencode's cases close this section. Change the Go doc and
+this section together.
+
 What stays per Driver, beyond the decoder: extra transient and terminal
 `Pattern`s for the classifier, a `driverkit.ClassifyOptions` (the policy for
 an oversized line, and `FirstMatch`, which latches the first unrecovered
@@ -1280,6 +1287,29 @@ Canonical events never leave the driver packages. The `Driver` interface is
 the one seam: no caller outside them decodes a line or sees an `Event`.
 Both `opencode` and `claude` are built on this layer. The one reader still on
 its own parse is `claude`'s heartbeat, which a later ticket ports.
+
+###### opencode's strict and lenient fields
+
+opencode reads its tool fields (`callID`, `tool`, `state`) and the `error`
+payload leniently (a non-string `error` falls back to its raw JSON), so
+`{"type":"tool_use","part":{"callID":"c3","tool":"bash","state":7}}`
+still yields a `tool_call` (progress for the classifier), but the transcript
+shows it with no target, input or output. Every other field opencode reads is
+strict, including the `spindrift_op` payload: a `spindrift_op` line whose
+payload fails to decode is likewise one `unparsed` event, while one with no
+payload yields none. On lines opencode itself never writes:
+
+- `{"type":"text","timestamp":"soon","part":{"text":"hi"}}` reaches neither the
+  transcript nor the result text (nor the heartbeat).
+- `{"type":"text","part":{"text":5}}` is progress neither for the classifier
+  nor for opencode's `ResolveExit` recovery check, so an earlier error stays
+  unrecovered.
+- `{"type":"step_finish","part":{"text":5,"tokens":{"input":3}}}` yields no
+  `usage`; `step_finish` is never progress either way, so the classifier only
+  matches the raw line against its terminal markers.
+
+opencode's `ResolveExit` finds errors with its own narrower decode; see
+`isErrorEvent`.
 
 ##### Driver Pass-log corpus
 
