@@ -340,3 +340,20 @@ func TestDecodeToolResultBlockInSubagent(t *testing.T) {
 		t.Errorf("tool_result = %+v", evs[1])
 	}
 }
+
+func TestDecodeResultModelsFromModelUsageKeys(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"ok","num_turns":2,"modelUsage":{"claude-sonnet":{},"claude-haiku":{}}}`)
+	if got := evs[0].Models; len(got) != 2 || got[0] != "claude-haiku" || got[1] != "claude-sonnet" {
+		t.Errorf("Models = %v, want sorted keys", got)
+	}
+	if evs[0].NoTotals || evs[0].NumTurns != 2 {
+		t.Errorf("totals disturbed: %+v", evs[0])
+	}
+}
+
+func TestDecodeResultMistypedModelUsageKeepsTotals(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"ok","num_turns":2,"modelUsage":"oops"}`)
+	if len(evs[0].Models) != 0 || evs[0].NoTotals || evs[0].NumTurns != 2 {
+		t.Errorf("event = %+v, want no Models and intact totals", evs[0])
+	}
+}
