@@ -676,11 +676,17 @@ func (ks kindSched) view(now time.Time) KindView {
 // and cap stay the new config's: a changed knob takes effect on restart, so a
 // carried step is clamped into the new range. A carried jam, or an upper-bound
 // kind's gate, holds its baseline pending for the successor's first probe (a
-// zero baseline would lift the gate and drop the carried step), and a carried
-// kind's ready stays unconfirmed until then, so an inherited child's exit
-// cannot take a zero baseline. An entry for a kind s does not hold is skipped
-// (Loop's validateHandoff has already refused one).
+// zero baseline would lift the gate and drop the carried step). Every probed
+// kind's ready stays unconfirmed until its first probe, carried or not, so an
+// inherited child's exit cannot take a zero baseline. An entry for a kind s
+// does not hold is skipped (Loop's validateHandoff has already refused one).
 func (s Schedule) restore(kinds []HandoffKind) Schedule {
+	for _, k := range s.kinds {
+		if ks := s.state[k]; ks.probed() {
+			ks.readyUnconfirmed = true
+			s = s.with(k, ks)
+		}
+	}
 	for _, hk := range kinds {
 		ks, ok := s.state[hk.Kind]
 		if !ok {
@@ -691,7 +697,6 @@ func (s Schedule) restore(kinds []HandoffKind) Schedule {
 		}
 		ks.gate.until, ks.gate.jammed, ks.gate.gen = hk.Until, hk.Jammed, hk.Gen
 		ks.jamBaselinePending = ks.probed() && !hk.Until.IsZero() && (hk.Jammed || ks.upperBound)
-		ks.readyUnconfirmed = ks.probed()
 		ks.due = NextDue{At: hk.DueAt, OnTipMove: hk.DueOnTipMove}
 		ks.limitedUntil = hk.LimitedUntil
 		s = s.with(hk.Kind, ks)
@@ -701,7 +706,7 @@ func (s Schedule) restore(kinds []HandoffKind) Schedule {
 
 // snapshot is the inverse of restore: the per-kind state a successor needs to
 // resume where s stands. A kind still in its initial state has no entry,
-// since restore leaves an absent kind at exactly that.
+// since restore leaves an absent kind's carried state at exactly that.
 func (s Schedule) snapshot() []HandoffKind {
 	var out []HandoffKind
 	for _, k := range s.kinds {

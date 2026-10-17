@@ -243,14 +243,6 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 			rise: DemandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"8"}},
 		},
 	}
-	step := func(s Schedule, kind Kind) time.Duration {
-		for _, hk := range s.snapshot() {
-			if hk.Kind == kind {
-				return hk.BackoffCur
-			}
-		}
-		return 0
-	}
 	for _, c := range cases {
 		for _, inherited := range []bool{false, true} {
 			name := c.name
@@ -263,7 +255,7 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 				if !pred.Gated || pred.Until.IsZero() {
 					t.Fatalf("predecessor view = %+v, want a gated kind", pred)
 				}
-				carriedStep := step(s, c.kind)
+				carriedStep := carriedBackoff(s, c.kind)
 				if carriedStep <= schedFloor {
 					t.Fatalf("predecessor step = %v, want it escalated past %v", carriedStep, schedFloor)
 				}
@@ -272,14 +264,14 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 				if v := succ.View(c.kind, mid); !v.JamBaselinePending {
 					t.Fatalf("successor view = %+v, want the baseline pending", v)
 				}
-				if got := step(succ, c.kind); got != carriedStep {
+				if got := carriedBackoff(succ, c.kind); got != carriedStep {
 					t.Fatalf("carried step = %v, want %v", got, carriedStep)
 				}
 
 				want := carriedStep
 				if inherited {
 					succ = schedObserve(t, succ, mid, c.exit)
-					want = step(succ, c.kind)
+					want = carriedBackoff(succ, c.kind)
 					if want < carriedStep {
 						t.Fatalf("inherited exit dropped the step to %v, want at least %v", want, carriedStep)
 					}
@@ -296,7 +288,7 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 				if !inherited && fv.Until != pred.Until {
 					t.Fatalf("flat probe moved the gate to %v, want %v", fv.Until, pred.Until)
 				}
-				if got := step(succ, c.kind); got != want {
+				if got := carriedBackoff(succ, c.kind); got != want {
 					t.Fatalf("flat probe moved the step to %v, want %v", got, want)
 				}
 
@@ -306,6 +298,60 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// carriedBackoff is the backoff step s would hand a successor for kind, or 0
+// while the step sits at its floor.
+func carriedBackoff(s Schedule, kind Kind) time.Duration {
+	for _, hk := range s.snapshot() {
+		if hk.Kind == kind {
+			return hk.BackoffCur
+		}
+	}
+	return 0
+}
+
+// A probed kind the handoff carries no entry for still has unconfirmed ready:
+// an inherited child jamming before the first probe must hold its baseline
+// pending rather than take a zero one, which the first flat probe would lift.
+func TestScheduleRestoreLeavesUncarriedReadyUnconfirmed(t *testing.T) {
+	cases := []struct {
+		name    string
+		handoff []HandoffKind
+	}{
+		{name: "empty handoff"},
+		{
+			name:    "entry for another kind only",
+			handoff: []HandoffKind{{Kind: schedResearch, DueAt: schedT0.Add(time.Minute)}},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			succ := probedSchedule([]Kind{schedWork, schedResearch}, 0).restore(c.handoff)
+			succ = schedObserve(t, succ, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
+			if v := succ.View(schedWork, schedT0); !v.Gated || !v.JamBaselinePending {
+				t.Fatalf("after the inherited jam view = %+v, want gated with the baseline pending", v)
+			}
+			want := carriedBackoff(succ, schedWork)
+			if want <= schedFloor {
+				t.Fatalf("inherited jam step = %v, want it escalated past %v", want, schedFloor)
+			}
+
+			succ = schedObserve(t, succ, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
+			v := succ.View(schedWork, schedT0)
+			if !v.Gated || v.JamBaselinePending {
+				t.Fatalf("after a flat probe view = %+v, want gated with the baseline settled", v)
+			}
+			if got := carriedBackoff(succ, schedWork); got != want {
+				t.Fatalf("flat probe moved the step to %v, want %v", got, want)
+			}
+
+			succ = schedObserve(t, succ, schedT0, DemandProbed{Kind: schedWork, Ready: 4})
+			if v := succ.View(schedWork, schedT0); v.Gated {
+				t.Fatalf("after a rise view = %+v, want the gate lifted", v)
+			}
+		})
 	}
 }
 
