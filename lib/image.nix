@@ -39,6 +39,7 @@
 let
   # Single-sourced so a baked skill's name is never hand-typed here (#2532).
   bakedSkills = import ./baked-skills.nix;
+  bashHooks = import ./bash-hooks.nix;
   # Single-sourced so Claude Code's baked output caps are never hand-typed
   # here or in the research-verdict prompt budget that derives from them
   # (issue #3669).
@@ -135,29 +136,6 @@ let
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };
 
-  # reject-background-bash.sh (issue #1609): --disallowedTools strips whole
-  # tools, but run_in_background is a parameter of the Bash tool, not a tool
-  # name, so only a PreToolUse hook can reject it. Home-wide rather than gated
-  # behind a Driver attribute, because the restriction applies to every pass
-  # sharing this $HOME, not to one Driver invocation's flags.
-
-  # credential-deny.sh (issue #1909, spec #1907) rejects a Read or Bash call
-  # targeting a known credential path. Read and Bash each need their own matcher
-  # entry pointing at the same script, because the PreToolUse matcher is
-  # per-tool.
-
-  # env-credential-scrub.sh (issue #1927, spec #1907) unsets every variable
-  # agent/credential-vars names for every Bash call and denies any reference to
-  # /proc/<pid>/environ. Claude Code's own CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
-  # cannot do this job: it forces the Driver's permission mode to `default` and
-  # nests a bwrap sandbox that cannot mount /proc inside the Box's own (#1926).
-
-  # bash-output-tee.sh and bash-output-summary.sh (issue #1988) tee every Bash
-  # call's combined output to a log file and replace the tool result with a
-  # bounded tail, so full output lands on disk and only the tail enters the
-  # model's context. This covers every call, not just the overflow case
-  # BASH_MAX_OUTPUT_LENGTH already handles (issue #1987).
-
   # guardHook: Claude runs the tool on any hook exit but 0 or 2, so an unrunnable
   # hook (126/127) fails open (#5399, #5400). Guard hooks exit only 0 or 2, so
   # any other code blocks. jq is exercised first because a hook without a
@@ -174,66 +152,26 @@ let
   # Rendered with builtins.toJSON rather than a hand-built string so the
   # settings.json is always valid JSON (ADR 0007 tier-1).
   boxSettings = builtins.toJSON {
-    hooks = {
-      PreToolUse = [
-        {
-          matcher = "Bash";
+    # groupBy keeps table order within each event.
+    hooks = lib.mapAttrs (
+      _:
+      lib.concatMap (
+        row:
+        map (matcher: {
+          inherit matcher;
           hooks = [
             {
               type = "command";
-              command = guardHook "reject-background-bash.sh";
+              command =
+                if row.event == "PreToolUse" then
+                  guardHook row.script
+                else
+                  "/home/agent/.claude/hooks/${row.script}";
             }
           ];
-        }
-        {
-          matcher = "Read";
-          hooks = [
-            {
-              type = "command";
-              command = guardHook "credential-deny.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = guardHook "credential-deny.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = guardHook "env-credential-scrub.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = guardHook "bash-output-tee.sh";
-            }
-          ];
-        }
-      ];
-      PostToolUse = [
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/bash-output-summary.sh";
-            }
-          ];
-        }
-      ];
-    };
+        }) row.matchers
+      )
+    ) (builtins.groupBy (row: row.event) bashHooks.hooks);
   };
 
   # Everything under /agent is baked into the image rather than bind-mounted:
