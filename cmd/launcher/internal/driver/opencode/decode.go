@@ -72,7 +72,10 @@ func Decode(line string) []driverkit.Event {
 		}}
 	case "spindrift_op":
 		var op hostop.Event
-		if json.Unmarshal([]byte(line), &op) != nil || op.SpindriftOp == nil {
+		if json.Unmarshal([]byte(line), &op) != nil {
+			return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: line}}
+		}
+		if op.SpindriftOp == nil {
 			return nil
 		}
 		return []driverkit.Event{{Kind: driverkit.KindHostOp, Timestamp: ts, HostOp: op.SpindriftOp}}
