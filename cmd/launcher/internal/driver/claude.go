@@ -45,6 +45,10 @@ func (claudeDriver) ResultEvent(text string) ([]byte, error) {
 	return claude.ResultEvent(text)
 }
 
+func (claudeDriver) ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
+	return driverkit.ReadPasses(logPath, driverkit.PassOptions{NewDecoder: claude.NewDecoder, Totals: driverkit.SessionTotals, WriteTool: claude.WriteTool}, trackWrite, visit)
+}
+
 func (claudeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
 	return claude.SessionFlags(mode, repoSlug, issue, home)
 }

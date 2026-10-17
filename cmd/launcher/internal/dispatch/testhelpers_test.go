@@ -103,6 +103,10 @@ func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
 	return driverclaude.ResultEvent(text)
 }
 
+func (d fakeDriver) ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
+	return nil, nil
+}
+
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
 	return driverclaude.SessionFlags(mode, repoSlug, issue, home)
 }

@@ -11,6 +11,9 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 )
 
+// WriteTool is the claude CLI's file-write tool name.
+const WriteTool = "Write"
+
 // NewDecoder returns a fresh claude stream-json decoder. It is stateful (task
 // roles, the active top-level role, the result-echo latch), so each scan or
 // writer takes its own.

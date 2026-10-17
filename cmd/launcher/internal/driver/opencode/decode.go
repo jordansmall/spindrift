@@ -13,6 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 )
 
+// WriteTool is the opencode CLI's file-write tool name.
+const WriteTool = "write"
+
 // NewDecoder returns the opencode decoder. Decode is stateless, so every call
 // shares it.
 func NewDecoder() driverkit.Decoder { return Decode }
