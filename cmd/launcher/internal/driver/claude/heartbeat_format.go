@@ -7,16 +7,20 @@ import (
 
 // ModelFamily shortens a full model ID to its family label ("claude-opus-…"
 // becomes "opus"), returning the id unchanged when no known family matches.
-func ModelFamily(id string) string {
-	if id == "" {
-		return ""
-	}
-	for _, family := range []string{"haiku", "sonnet", "opus"} {
-		if strings.Contains(id, family) {
-			return family
+// The rank orders the final per-model table: opus, haiku, sonnet, then the
+// rest (including "unknown"). That table stays keyed by exact id, so the rank
+// only orders; within a rank, rows sort by raw id. The table lists families in
+// match order, not rank order: the first family named in the id wins.
+func ModelFamily(id string) (label string, rank int) {
+	for _, f := range []struct {
+		label string
+		rank  int
+	}{{"haiku", 1}, {"sonnet", 2}, {"opus", 0}} {
+		if strings.Contains(id, f.label) {
+			return f.label, f.rank
 		}
 	}
-	return id
+	return id, 3
 }
 
 func toolKind(name string) string {

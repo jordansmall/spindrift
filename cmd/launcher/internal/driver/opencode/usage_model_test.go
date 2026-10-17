@@ -123,8 +123,8 @@ func TestExtractUsageByModel_CacheWriteTo5m(t *testing.T) {
 	}
 }
 
-// Rows come back ordered by ascending raw model id. opencode models are not
-// claude families, so there is no family-rank pass, unlike claude's breakdown.
+// Rows come back ordered by ascending raw model id: opencode passes the shared
+// reader no family hook, so every row shares one rank.
 func TestExtractUsageByModel_TwoModels(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":100,"output":50}}}`,

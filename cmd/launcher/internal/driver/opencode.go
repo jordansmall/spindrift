@@ -29,7 +29,7 @@ func (opencodeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Wri
 // opencodeUsageByModel indirects so tests can simulate an I/O error without a
 // real filesystem race against the usage aggregation scan.
 var opencodeUsageByModel = func(p string) ([]usage.ModelUsage, error) {
-	return driverkit.UsageByModel(p, opencode.NewDecoder)
+	return driverkit.UsageByModel(p, opencode.NewDecoder, nil)
 }
 
 // ExtractUsage sums the step_finish tallies in the log. The decoder attributes

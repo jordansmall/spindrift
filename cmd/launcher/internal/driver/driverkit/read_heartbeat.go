@@ -43,6 +43,10 @@ type HeartbeatWriter struct {
 
 type modelChange struct{ model, role string }
 
+// ModelFamily maps a model id to its family label and the family's rank. The
+// heartbeat groups by label; UsageByModel orders rows by rank, then exact id.
+type ModelFamily func(model string) (label string, rank int)
+
 // HeartbeatTracking opts a HeartbeatWriter into phase and count lines. Every
 // hook is optional: no Kind yields no counts, no Phase an empty phase, and no
 // Family labels a model by its exact id.
@@ -56,9 +60,10 @@ type HeartbeatTracking struct {
 	KindOrder []string
 	// KindPlurals maps a kind to its irregular plural; others append "s".
 	KindPlurals map[string]string
-	// Family maps a model id to the label a switch header shows. The live
-	// heartbeat groups by this coarse label, not the exact id OnModel reports.
-	Family func(model string) string
+	// Family maps a model id to the label a switch header shows (the rank is
+	// ignored here). The live heartbeat groups by this coarse label, not the
+	// exact id OnModel reports.
+	Family ModelFamily
 }
 
 // NewHeartbeatWriter returns a HeartbeatWriter that forwards every byte to raw
@@ -166,7 +171,7 @@ func (w *HeartbeatWriter) onModelEvent(ev Event) {
 	}
 	model := ev.Model
 	if w.track.Family != nil {
-		model = w.track.Family(model)
+		model, _ = w.track.Family(model)
 	}
 	if role != w.currentRole || model != w.currentModel {
 		w.flushRole(w.rolePhase[w.currentRole])
