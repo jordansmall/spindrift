@@ -249,6 +249,7 @@ let
     "default:cmd/launcher" = "launcherGoModules' vendor source";
     "default:nix/checks" = "the coverage guards, both in checks-docs";
     "doctor-report-routing:cmd/launcher" = "greps internal/doctor/*.go and launchgates.go";
+    "drivers:nix/checks/drivers" = "imports each Driver's check file by registry name";
     "equivalence:." = "harness flake fixtures' outPath";
     "equivalence:cmd/launcher" = "source-identity filesets";
     "promptassembly:cmd/launcher/internal/promptassembly" = "greps its *.go";
