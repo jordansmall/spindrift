@@ -10,7 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 )
 
-const opencodeCorpus = "../driver/testdata/corpus/opencode/"
+const opencodeCorpus = "../driver/opencode/testdata/corpus/"
 
 func readCorpus(t *testing.T, name string) string {
 	t.Helper()

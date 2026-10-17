@@ -229,7 +229,7 @@ func TestNewDecoder_IsDecode(t *testing.T) {
 // TestDecode_CorpusLines decodes every real pass.jsonl line: none may panic or
 // yield an event with an empty Kind.
 func TestDecode_CorpusLines(t *testing.T) {
-	paths, err := filepath.Glob("../testdata/corpus/opencode/*/pass.jsonl")
+	paths, err := filepath.Glob("testdata/corpus/*/pass.jsonl")
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("no corpus pass logs found: %v", err)
 	}
