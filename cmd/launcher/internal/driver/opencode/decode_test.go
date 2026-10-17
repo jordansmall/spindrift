@@ -196,6 +196,11 @@ func TestDecode(t *testing.T) {
 			[]driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: &hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}}},
 		},
 		{"spindrift_op without payload", `{"type":"spindrift_op"}`, nil},
+		{
+			"malformed spindrift_op payload is unparsed",
+			`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":"two"}}`,
+			[]driverkit.Event{{Kind: driverkit.KindUnparsed, Text: `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":"two"}}`}},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
