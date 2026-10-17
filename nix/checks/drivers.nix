@@ -83,6 +83,19 @@ let
       dup == [ ]
     ) "nix/checks/drivers.nix: check attr(s) defined twice: ${concatStringsSep ", " dup}";
     a // b;
+  # The old mixed-check names survive as Driver-free aggregates over each
+  # Driver's half, kept so existing attr names keep their meaning. `-both` /
+  # `-both-drivers` is legacy wording from the two-Driver era, kept for attr
+  # stability: every aggregate covers every registered Driver.
+  aggregateSuffixes = {
+    drivers-declare-bash-timeout-env = "declare-bash-timeout-env";
+    drivers-render-empty-roster = "render-empty-roster";
+    drivers-render-custom-roster-both = "render-custom-roster";
+    drivers-roster-custom-agent-both-drivers = "roster-custom-agent";
+  };
+  # ADR 0009's reference Driver, shared so the skills-dir parity checks and
+  # the test pinning them cannot drift on which Driver is first.
+  firstDriverOf = entries: builtins.head (builtins.attrNames entries);
   driverChecksFor =
     {
       entries,
@@ -90,11 +103,8 @@ let
     }:
     let
       missing = missingCheckFiles { inherit entries checkFileOf; };
-    in
-    if missing != [ ] then
-      throw "nix/checks/drivers.nix: registered Driver(s) have no Nix check file; add ${concatStringsSep ", " missing}"
-    else
-      builtins.foldl' (
+      names = builtins.attrNames entries;
+      perDriver = builtins.foldl' (
         acc: name:
         mergeDisjoint acc (
           import (checkFileOf name) (
@@ -105,7 +115,47 @@ let
             }
           )
         )
-      ) { } (builtins.attrNames entries);
+      ) { } names;
+      # ADR 0009: every Driver reads the first Driver's skills directory
+      # rather than wiring its own. Compared across the registry rather than
+      # against a literal, so a rename of that directory still catches a Driver
+      # drifting off it instead of passing silently.
+      first = firstDriverOf entries;
+      skillsParity = builtins.listToAttrs (
+        map (
+          n:
+          let
+            attr = "drivers-${n}-skills-dir-matches-${first}";
+          in
+          {
+            name = attr;
+            value =
+              assert assertMsg (entries.${n}.skillsDirRelative == entries.${first}.skillsDirRelative)
+                "${n} Driver's skillsDirRelative must match ${first}'s (ADR 0009), got ${n}: ${entries.${n}.skillsDirRelative}, ${first}: ${
+                  entries.${first}.skillsDirRelative
+                }";
+              pkgs.runCommand attr { } "touch $out";
+          }
+        ) (builtins.tail names)
+      );
+      # A Driver may lack a half (bashTimeoutEnv is optional), but an aggregate
+      # with no half at all would pass vacuously.
+      aggregates = builtins.mapAttrs (
+        old: suffix:
+        let
+          halves = map (n: perDriver."drivers-${n}-${suffix}") (
+            filter (n: perDriver ? "drivers-${n}-${suffix}") names
+          );
+        in
+        assert assertMsg (halves != [ ])
+          "nix/checks/drivers.nix: aggregate ${old} has no Driver half; expected a drivers-<name>-${suffix} check from at least one Driver";
+        pkgs.runCommand old { inherit halves; } "touch $out"
+      ) aggregateSuffixes;
+    in
+    if missing != [ ] then
+      throw "nix/checks/drivers.nix: registered Driver(s) have no Nix check file; add ${concatStringsSep ", " missing}"
+    else
+      mergeDisjoint (mergeDisjoint perDriver skillsParity) aggregates;
 in
 mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
   drivers-assert-shape-missing-attribute-throws =
@@ -144,7 +194,7 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
 
   # Issue #2011: renderPreamble exports a Driver entry's envCommon into
   # entrypoint.sh's own shell process, so the box program it execs (and
-  # beyond that driver-exec/orchestrator and claude itself) inherits them.
+  # beyond that driver-exec/orchestrator and the Driver CLI itself) inherits them.
   # envCommon is optional, so a Driver with no env vars of its own needn't
   # declare it.
   drivers-render-preamble-env-common =
@@ -228,33 +278,6 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "renderPreamble must reject a bashTimeoutEnv name that isn't a valid shell identifier";
     pkgs.runCommand "drivers-render-preamble-bash-timeout-env-rejects-bad-name" { } "touch $out";
 
-  drivers-declare-bash-timeout-env =
-    let
-      claudeEntry = driverRegistry.entries.claude;
-      opencodeEntry = driverRegistry.entries.opencode;
-    in
-    assert assertMsg
-      (
-        (claudeEntry.bashTimeoutEnv or null) == [
-          "BASH_DEFAULT_TIMEOUT_MS"
-          "BASH_MAX_TIMEOUT_MS"
-        ]
-      )
-      "claude Driver's bashTimeoutEnv must name BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, got: ${
-        builtins.toJSON (claudeEntry.bashTimeoutEnv or null)
-      }";
-    assert assertMsg
-      ((opencodeEntry.bashTimeoutEnv or null) == [ "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS" ])
-      "opencode Driver's bashTimeoutEnv must name OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS, got: ${
-        builtins.toJSON (opencodeEntry.bashTimeoutEnv or null)
-      }";
-    assert assertMsg
-      (hasInfix "DRIVER_BASH_TIMEOUT_ENV=OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS\n" (
-        driverRegistry.renderPreamble opencodeEntry
-      ))
-      "renderPreamble must bake opencode's DRIVER_BASH_TIMEOUT_ENV";
-    pkgs.runCommand "drivers-declare-bash-timeout-env" { } "touch $out";
-
   drivers-assert-shape-succeeds =
     let
       complete = stubDriverComplete;
@@ -267,43 +290,8 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "assertShape must return the Driver entry unchanged when it has every required attribute";
     pkgs.runCommand "drivers-assert-shape-succeeds" { } "touch $out";
 
-  # AC#4: one roster carrying a custom agent outside the
-  # scout/reviewer/filer/worker set must render into both Drivers' output
-  # from the same list, since the roster, not per-Driver hardcoding, is the
-  # single source of agent identity.
-  drivers-roster-custom-agent-both-drivers =
-    let
-      claudeEntry = driverRegistry.entries.claude;
-      opencodeEntry = driverRegistry.entries.opencode;
-      roster = [
-        {
-          name = "auditor";
-          model = "audit-model";
-          mode = "subagent";
-          description = "Audit stuff";
-          tools = [ "Read" ];
-        }
-      ];
-      claudeRendered = builtins.fromJSON (claudeEntry.agentsJsonTemplate { inherit roster; });
-      opencodeRendered = opencodeEntry.agentFilesTemplate { inherit roster; };
-      opencodeAuditorFile = opencodeRendered.".config/opencode/agents/auditor.md" or "";
-    in
-    assert assertMsg (claudeRendered ? auditor)
-      "claude agentsJsonTemplate must render a custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
-    assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
-      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${
-        builtins.toJSON (claudeRendered.auditor or { })
-      }";
-    assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
-      "opencode agentFilesTemplate must render a custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
-    assert assertMsg (hasInfix ''model: "audit-model"'' opencodeAuditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the roster model JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
-    assert assertMsg (hasInfix ''mode: "subagent"'' opencodeAuditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the roster mode JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
-    pkgs.runCommand "drivers-roster-custom-agent-both-drivers" { } "touch $out";
-
   # A Driver entry that declares no agentFilesDirRelative (every stub fixture
-  # here, and claude.nix in production) must render no DRIVER_AGENT_FILES_DIR
+  # here, and some production Drivers) must render no DRIVER_AGENT_FILES_DIR
   # line at all, an unset var rather than an empty string assignment, so
   # box's non-empty gate stays a true no-op.
   drivers-render-preamble-omits-agent-files-dir-when-absent =
@@ -376,86 +364,6 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "assertShape must return the Driver entry unchanged when sessionCacheDirRelative is well-formed";
     pkgs.runCommand "drivers-assert-shape-succeeds-with-session-cache-dir-relative" { } "touch $out";
 
-  # Issue #2152 slice C: an empty roster (`roster = []`) is a deliberate
-  # agent-less image, so claude's agentsJsonTemplate returns "" and
-  # opencode's agentFilesTemplate returns no agent file, only the guard
-  # plugin (issue #5346), which is not roster-derived.
-  drivers-render-empty-roster =
-    let
-      claudeEntry = driverRegistry.entries.claude;
-      opencodeEntry = driverRegistry.entries.opencode;
-      claudeRendered = claudeEntry.agentsJsonTemplate { roster = [ ]; };
-      opencodeRendered = opencodeEntry.agentFilesTemplate { roster = [ ]; };
-    in
-    assert assertMsg (
-      claudeRendered == ""
-    ) "claude agentsJsonTemplate must return \"\" for an empty roster, got: ${claudeRendered}";
-    assert assertMsg
-      (builtins.attrNames opencodeRendered == [ ".config/opencode/plugins/spindrift-guards.js" ])
-      "opencode agentFilesTemplate must return only the guard plugin for an empty roster, got keys: ${builtins.toJSON (builtins.attrNames opencodeRendered)}";
-    pkgs.runCommand "drivers-render-empty-roster" { } "touch $out";
-
-  # Issue #2152 slice C: one multi-agent roster (a built-in scout plus a
-  # custom "auditor") rendered by both Drivers from the same list. claude's
-  # --agents JSON carries the custom agent's model, and opencode's auditor.md
-  # frontmatter carries the JSON-encoded model, mode, and description.
-  drivers-render-custom-roster-both =
-    let
-      claudeEntry = driverRegistry.entries.claude;
-      opencodeEntry = driverRegistry.entries.opencode;
-      roster = [
-        {
-          name = "scout";
-          model = "solo-scout-model";
-          mode = "subagent";
-          description = "fixture scout description";
-          tools = [ "Read" ];
-          promptFile = "scout-prompt.md";
-          prompt = null;
-        }
-        {
-          name = "auditor";
-          model = "audit-model";
-          mode = "subagent";
-          description = "Audit stuff";
-          tools = [ "Read" ];
-          promptFile = "auditor-prompt.md";
-          prompt = null;
-        }
-      ];
-      claudeRendered = builtins.fromJSON (claudeEntry.agentsJsonTemplate { inherit roster; });
-      opencodeRendered = opencodeEntry.agentFilesTemplate { inherit roster; };
-      auditorFile = opencodeRendered.".config/opencode/agents/auditor.md" or "";
-    in
-    assert assertMsg (claudeRendered ? auditor)
-      "claude agentsJsonTemplate must render the custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
-    assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
-      "claude agentsJsonTemplate's auditor entry must carry the roster model, got: ${
-        builtins.toJSON (claudeRendered.auditor or { })
-      }";
-    assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
-      "opencode agentFilesTemplate must render the custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
-    assert assertMsg (hasInfix ''model: "audit-model"'' auditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded model, got: ${auditorFile}";
-    assert assertMsg (hasInfix ''mode: "subagent"'' auditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded mode, got: ${auditorFile}";
-    assert assertMsg (hasInfix ''description: "Audit stuff"'' auditorFile)
-      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded description, got: ${auditorFile}";
-    pkgs.runCommand "drivers-render-custom-roster-both" { } "touch $out";
-
-  # ADR 0009: opencode reads .claude/skills/ directly rather than wiring its
-  # own skills directory. Compared across the registry rather than against a
-  # literal, so a rename of claude's skillsDirRelative still catches opencode
-  # drifting off it instead of passing silently.
-  drivers-opencode-skills-dir-matches-claude =
-    let
-      claudeEntry = driverRegistry.entries.claude;
-      opencodeEntry = driverRegistry.entries.opencode;
-    in
-    assert assertMsg (opencodeEntry.skillsDirRelative == claudeEntry.skillsDirRelative)
-      "opencode Driver's skillsDirRelative must match claude's (ADR 0009), got opencode: ${opencodeEntry.skillsDirRelative}, claude: ${claudeEntry.skillsDirRelative}";
-    pkgs.runCommand "drivers-opencode-skills-dir-matches-claude" { } "touch $out";
-
   # Issue #2534: assertArgvShape validates argvShape's internal structure,
   # where assertShape only checks the attribute is present. Each throws-case
   # below perturbs exactly one field of stubDriverBase's well-formed
@@ -512,7 +420,7 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "assertArgvShape must throw when argvShape.modelOmitEmpty is not a bool";
     pkgs.runCommand "drivers-assert-argv-shape-non-bool-model-omit-empty-throws" { } "touch $out";
 
-  # The nullable slot (issue #2534): absent entirely is valid (opencode has
+  # The nullable slot (issue #2534): absent entirely is valid (a Driver may have
   # no --agents equivalent), but present-and-empty is a violation.
   drivers-assert-argv-shape-empty-agents-flag-throws =
     let
