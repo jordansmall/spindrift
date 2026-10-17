@@ -24,14 +24,7 @@ func eventsOfType(events []map[string]any, typ string) []map[string]any {
 // resultText joins the text parts of a tool_execution_end result.
 func resultText(ev map[string]any) string {
 	res, _ := ev["result"].(map[string]any)
-	parts, _ := res["content"].([]any)
-	var sb strings.Builder
-	for _, p := range parts {
-		if m, _ := p.(map[string]any); m["type"] == "text" {
-			sb.WriteString(fmt.Sprint(m["text"]))
-		}
-	}
-	return sb.String()
+	return textParts(res["content"])
 }
 
 // toolRoleMessages returns the content of every tool-role message in a request.

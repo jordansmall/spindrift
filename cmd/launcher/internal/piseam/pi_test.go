@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,8 @@ const (
 
 	stubProvider = "stub"
 	stubModel    = "stub-model"
+	// stubModelRef is the --model value selecting the stub Provider's model.
+	stubModelRef = stubProvider + "/" + stubModel
 )
 
 type piBin struct {
@@ -36,21 +39,12 @@ type piBin struct {
 }
 
 var lockedPi = sync.OnceValue(func() piBin {
-	if _, err := exec.LookPath("nix"); err != nil {
-		return piBin{skipReason: fmt.Sprintf("%s is unset and nix is not on PATH; set %s to a pi binary", BinEnv, BinEnv)}
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return piBin{err: err}
-	}
-	root, err := seamtest.FindFlakeRoot(wd)
-	if err != nil {
-		return piBin{err: err}
-	}
 	// --inputs-from pins nixpkgs to the flake's lock, not the registry's.
-	out, err := seamtest.NixBuild("--inputs-from", root, "nixpkgs#pi-coding-agent")
-	if err != nil {
-		return piBin{err: fmt.Errorf("build pi-coding-agent: %w", err)}
+	out, skip, err := seamtest.ResolveBuild(BinEnv, "a pi binary", func(root string) []string {
+		return []string{"--inputs-from", root, "nixpkgs#pi-coding-agent"}
+	})
+	if err != nil || skip != "" {
+		return piBin{skipReason: skip, err: err}
 	}
 	return piBin{path: filepath.Join(out, "bin", "pi")}
 })
@@ -58,7 +52,12 @@ var lockedPi = sync.OnceValue(func() piBin {
 func piPath(t *testing.T) string {
 	t.Helper()
 	if v := os.Getenv(BinEnv); v != "" {
-		return v
+		// pi runs with cmd.Dir set to a temp dir, so a relative path would break.
+		abs, err := filepath.Abs(v)
+		if err != nil {
+			t.Fatalf("resolve %s=%q: %v", BinEnv, v, err)
+		}
+		return abs
 	}
 	res := lockedPi()
 	switch {
@@ -83,15 +82,57 @@ type run struct {
 // so callers read the events too. seedWork prepares the work dir first.
 func runPi(t *testing.T, s *stub, prompt string, seedWork ...func(work string)) run {
 	t.Helper()
+	return runPiWith(t, s, piOpts{}, prompt, seedWork...)
+}
+
+// piDirs are the directories one pi invocation sees; reusing them across runs
+// is what lets a second run find the first run's session.
+type piDirs struct{ home, agentDir, work string }
+
+func newPiDirs(t *testing.T) piDirs {
+	t.Helper()
+	return piDirs{home: t.TempDir(), agentDir: t.TempDir(), work: t.TempDir()}
+}
+
+// piOpts varies a runPiWith invocation; the zero value is runPi's.
+type piOpts struct {
+	// args replace the default "--model stub/stub-model --thinking off".
+	args []string
+	// reasoning marks the stub model as a reasoning model in models.json.
+	reasoning bool
+	// noAPIKey leaves apiKey out of the stub Provider, so a key can only come
+	// from auth.json.
+	noAPIKey bool
+	// approve trusts project-local files (--approve) instead of ignoring them.
+	approve bool
+	// dirs, when set, are reused instead of fresh temp dirs.
+	dirs *piDirs
+}
+
+func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...func(work string)) run {
+	t.Helper()
 	bin := piPath(t)
-	home, agentDir, work := t.TempDir(), t.TempDir(), t.TempDir()
+	var dirs piDirs
+	if opts.dirs != nil {
+		dirs = *opts.dirs
+	} else {
+		dirs = newPiDirs(t)
+	}
+	home, agentDir, work := dirs.home, dirs.agentDir, dirs.work
+	model := map[string]any{"id": stubModel}
+	if opts.reasoning {
+		model["reasoning"] = true
+	}
+	provider := map[string]any{
+		"baseUrl": s.URL + "/v1",
+		"api":     "openai-completions",
+		"models":  []map[string]any{model},
+	}
+	if !opts.noAPIKey {
+		provider["apiKey"] = "stub-key"
+	}
 	writeJSON(t, filepath.Join(agentDir, "models.json"), map[string]any{
-		"providers": map[string]any{stubProvider: map[string]any{
-			"baseUrl": s.URL + "/v1",
-			"api":     "openai-completions",
-			"apiKey":  "stub-key",
-			"models":  []map[string]any{{"id": stubModel}},
-		}},
+		"providers": map[string]any{stubProvider: provider},
 	})
 	for _, seed := range seedWork {
 		seed(work)
@@ -103,8 +144,16 @@ func runPi(t *testing.T, s *stub, prompt string, seedWork ...func(work string)) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "--print", "--mode", "json", "--no-approve",
-		"--model", stubProvider+"/"+stubModel, "--thinking", "off", prompt)
+	args := opts.args
+	if args == nil {
+		args = []string{"--model", stubModelRef, "--thinking", "off"}
+	}
+	trust := "--no-approve"
+	if opts.approve {
+		trust = "--approve"
+	}
+	args = append(append([]string{"--print", "--mode", "json", trust}, args...), prompt)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = work
 	cmd.Env = append(os.Environ(),
 		"HOME="+home,
@@ -118,17 +167,16 @@ func runPi(t *testing.T, s *stub, prompt string, seedWork ...func(work string)) 
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 
-	capturePath := filepath.Join(t.TempDir(), "stream.jsonl")
 	if dir := os.Getenv(CaptureEnv); dir != "" {
 		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
 			t.Fatalf("create %s: %v", CaptureEnv, mkErr)
 		}
-		capturePath = filepath.Join(dir, strings.ReplaceAll(t.Name(), "/", "_")+".jsonl")
+		capturePath := filepath.Join(dir, captureName(t.Name(), nextCaptureRun(t.Name())))
+		if wErr := os.WriteFile(capturePath, stdout.Bytes(), 0o644); wErr != nil {
+			t.Fatalf("write capture: %v", wErr)
+		}
+		t.Logf("pi event stream: %s", capturePath)
 	}
-	if wErr := os.WriteFile(capturePath, stdout.Bytes(), 0o644); wErr != nil {
-		t.Fatalf("write capture: %v", wErr)
-	}
-	t.Logf("pi event stream: %s", capturePath)
 
 	r := run{stdout: stdout.String(), stderr: stderr.String(), err: err}
 	for i, line := range strings.Split(strings.TrimRight(r.stdout, "\n"), "\n") {
@@ -186,22 +234,107 @@ func TestPiPlainAnswer(t *testing.T) {
 
 // finalAssistantText returns the text of the last assistant message_end event.
 func finalAssistantText(events []map[string]any) string {
-	var text string
-	for _, ev := range events {
-		if ev["type"] != "message_end" {
-			continue
-		}
-		msg, _ := ev["message"].(map[string]any)
-		if msg["role"] != "assistant" {
-			continue
-		}
-		text = ""
-		parts, _ := msg["content"].([]any)
-		for _, p := range parts {
-			if m, _ := p.(map[string]any); m["type"] == "text" {
-				text += fmt.Sprint(m["text"])
-			}
+	return textParts(lastAssistantMessage(events)["content"])
+}
+
+// textParts joins the "text" parts of a message or tool-result content list.
+func textParts(content any) string {
+	parts, _ := content.([]any)
+	var sb strings.Builder
+	for _, p := range parts {
+		if m, _ := p.(map[string]any); m["type"] == "text" {
+			sb.WriteString(fmt.Sprint(m["text"]))
 		}
 	}
-	return text
+	return sb.String()
+}
+
+// lastAssistantMessage returns the last assistant message_end message from the
+// event stream.
+func lastAssistantMessage(events []map[string]any) map[string]any {
+	var out map[string]any
+	for _, ev := range events {
+		if msg, _ := ev["message"].(map[string]any); ev["type"] == "message_end" && msg["role"] == "assistant" {
+			out = msg
+		}
+	}
+	return out
+}
+
+// messagesJSON renders a request's messages for substring checks.
+func messagesJSON(t *testing.T, req map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(req["messages"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+var (
+	captureMu   sync.Mutex
+	captureRuns = map[string]int{}
+)
+
+// nextCaptureRun counts the pi runs a test has made, so a test that runs pi
+// more than once does not overwrite its own capture.
+func nextCaptureRun(testName string) int {
+	captureMu.Lock()
+	defer captureMu.Unlock()
+	captureRuns[testName]++
+	return captureRuns[testName]
+}
+
+// captureName is the capture file for the nth run of a test: subtest slashes
+// become "_", and later runs carry a ".<n>" suffix.
+func captureName(testName string, n int) string {
+	name := strings.ReplaceAll(testName, "/", "_")
+	if n > 1 {
+		name += "." + strconv.Itoa(n)
+	}
+	return name + ".jsonl"
+}
+
+func TestCaptureNameSuffixesLaterRuns(t *testing.T) {
+	for _, tc := range []struct {
+		test string
+		n    int
+		want string
+	}{
+		{"TestA", 1, "TestA.jsonl"},
+		{"TestA", 2, "TestA.2.jsonl"},
+		{"TestA/sub case", 1, "TestA_sub case.jsonl"},
+		{"TestA/sub", 3, "TestA_sub.3.jsonl"},
+	} {
+		if got := captureName(tc.test, tc.n); got != tc.want {
+			t.Errorf("captureName(%q, %d) = %q, want %q", tc.test, tc.n, got, tc.want)
+		}
+	}
+}
+
+func TestCaptureKeepsEveryRunInATest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CaptureEnv, dir)
+	s := newStub(t, textReply("one"), textReply("two"))
+	var stdouts []string
+	for range 2 {
+		r := runPi(t, s, "hi")
+		if r.err != nil {
+			t.Fatalf("pi failed (%s)\nstderr:\n%s", exitDetail(r.err), r.stderr)
+		}
+		stdouts = append(stdouts, r.stdout)
+	}
+	if stdouts[0] == stdouts[1] {
+		t.Fatal("the two runs produced identical stdout, so a swapped capture would go unnoticed")
+	}
+	for i, name := range []string{"TestCaptureKeepsEveryRunInATest.jsonl", "TestCaptureKeepsEveryRunInATest.2.jsonl"} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Errorf("missing capture: %v", err)
+			continue
+		}
+		if string(got) != stdouts[i] {
+			t.Errorf("%s = %q, want run %d's stdout %q", name, got, i+1, stdouts[i])
+		}
+	}
 }
