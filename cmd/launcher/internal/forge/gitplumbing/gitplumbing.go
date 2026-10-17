@@ -105,10 +105,26 @@ func wrapForcePushError(err error, stderr string) error {
 	if s != "" {
 		suffix = ": " + forge.RedactURLCredentials(s)
 	}
-	if !isStalePushRejection(s) && isPushTransient(s) {
-		return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
+	var sentinel error
+	switch {
+	case isWorkflowPermissionDenied(s):
+		sentinel = forge.ErrWorkflowPermissionDenied
+	case !isStalePushRejection(s) && isPushTransient(s):
+		sentinel = forge.ErrTransientPushFailure
+	}
+	if sentinel != nil {
+		return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, sentinel)
 	}
 	return fmt.Errorf("git push --force-with-lease: %w%s", err, suffix)
+}
+
+// isWorkflowPermissionDenied matches GitHub's refusal to let a credential touch
+// `.github/workflows/*`. The PAT form ends "without `workflow` scope" and the
+// App form "without `workflows` permission"; only the shared stem is stable.
+func isWorkflowPermissionDenied(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "refusing to allow a") &&
+		strings.Contains(lower, "to create or update workflow")
 }
 
 var stalePushRejectionMarkers = []string{

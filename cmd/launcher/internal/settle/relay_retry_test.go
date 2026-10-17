@@ -207,6 +207,24 @@ func TestRetryingRelay_BundleNotFoundIsNotRetried(t *testing.T) {
 	}
 }
 
+func TestRetryingRelay_WorkflowPermissionDeniedIsNotRetried(t *testing.T) {
+	sleeps, clock := recordingClock()
+	fc := forge.NewFake()
+	fc.RelayBundleErr = fmt.Errorf("push: %w", forge.ErrWorkflowPermissionDenied)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = newRelay(fakeRelay(fc), clock, 3).RelayBundle(t.TempDir(), "r")
+	})
+
+	if !errors.Is(err, forge.ErrWorkflowPermissionDenied) {
+		t.Errorf("err = %v, want ErrWorkflowPermissionDenied", err)
+	}
+	if len(fc.RelayBundleCalls) != 1 || len(*sleeps) != 0 || len(relayRetryLines(out)) != 0 {
+		t.Errorf("calls=%d sleeps=%v retry lines=%d, want a single un-retried call", len(fc.RelayBundleCalls), *sleeps, len(relayRetryLines(out)))
+	}
+}
+
 func TestRetryingRelay_StopDuringBackoffAbandons(t *testing.T) {
 	stop := false
 	slept := 0

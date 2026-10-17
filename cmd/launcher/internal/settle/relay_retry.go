@@ -27,11 +27,14 @@ type retryingBundleRelay struct {
 // fixed bundle and force-pushes the same ref with a lease, so a repeat is safe,
 // and a transient forge outage (a ~40s GitHub SSH auth blip stranded #4600 and
 // #4606) is indistinguishable from a permanent one at this layer.
-// ErrBundleNotFound is the exception: it is the local fact that the Box wrote
-// no bundle, which no amount of waiting changes.
+// Two failures are not retried, since waiting cannot change them:
+// ErrBundleNotFound (the Box wrote no bundle) and ErrWorkflowPermissionDenied
+// (the credential lacks Workflows permission, so every repeat is refused).
 func (r *retryingBundleRelay) RelayBundle(outboxDir, ref string) error {
 	return r.run("relay-retry", "", ref, // "": exhaustion returns at once
 		func() error { return r.inner.RelayBundle(outboxDir, ref) },
-		func(err error) bool { return errors.Is(err, forge.ErrBundleNotFound) },
+		func(err error) bool {
+			return errors.Is(err, forge.ErrBundleNotFound) || errors.Is(err, forge.ErrWorkflowPermissionDenied)
+		},
 		nil) // no afterBackoff hook
 }
