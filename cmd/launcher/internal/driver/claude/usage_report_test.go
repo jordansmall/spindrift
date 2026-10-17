@@ -19,7 +19,7 @@ func TestExtractUsage_EventSpanFromTimestampedLines(t *testing.T) {
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
 	path := claude.WriteLog(t, assistantStart, userMid, result, assistantEnd)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestExtractUsage_NoEventSpanWithoutTimestamps(t *testing.T) {
 	line := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	path := claude.WriteLog(t, line)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	path := claude.WriteLog(t, mainLine, result)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestExtractUsage_MainLoopOutputFromResultEvent(t *testing.T) {
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`
 	path := claude.WriteLog(t, mainLine, result)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
 	path := claude.WriteLog(t, spawnLine, subLine, result)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix(t *testing.T) {
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99,"cache_read_input_tokens":7,"cache_creation_input_tokens":3}}}`
 	path := claude.WriteLog(t, spawnLine, subLine, result)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) 
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
 	path := claude.WriteLog(t, oversizedSpawn, subLine, resultLine())
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) 
 func TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown(t *testing.T) {
 	path := claude.WriteLog(t, resultLine())
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -251,7 +251,7 @@ func agentRows(t *testing.T, rows []usage.AgentUsage, subagent string) (main, su
 func TestExtractUsage_NoResultEventReturnsZeroReport(t *testing.T) {
 	path := claude.WriteLog(t, "some output", "no result event here")
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

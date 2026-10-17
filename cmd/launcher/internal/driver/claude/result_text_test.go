@@ -22,7 +22,7 @@ const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 
 func TestOutcomeFixtureResultText(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	text, err := newDriver(t).ResultText(path)
+	text, err := newDriver().ResultText(path)
 	if err != nil {
 		t.Fatalf("ResultText(%s): %v", path, err)
 	}
@@ -42,14 +42,14 @@ func TestOutcomeFixtureResultText(t *testing.T) {
 func TestResultText_Envelope(t *testing.T) {
 	line := func(s string) string { return fmt.Sprintf(`{"type":"result","result":"%s"}`, s) }
 	t.Run("missing log is empty", func(t *testing.T) {
-		got, err := newDriver(t).ResultText(filepath.Join(t.TempDir(), "absent.log"))
+		got, err := newDriver().ResultText(filepath.Join(t.TempDir(), "absent.log"))
 		if err != nil || got != "" {
 			t.Errorf("ResultText(missing) = %q, %v; want \"\", nil", got, err)
 		}
 	})
 	t.Run("skips non-JSON and drops empty values", func(t *testing.T) {
 		path := claude.WriteLog(t, "not json at all", line(""), line("one"), `{"type":"other","result":"x"}`, line("two"))
-		got, err := newDriver(t).ResultText(path)
+		got, err := newDriver().ResultText(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func TestResultText_Envelope(t *testing.T) {
 		null := strings.NewReplacer(`"%s"`, "null").Replace(`{"type":"result","result":"%s"}`)
 		num := strings.NewReplacer(`"%s"`, "7").Replace(`{"type":"result","result":"%s"}`)
 		path := claude.WriteLog(t, null, num, line("kept"))
-		got, err := newDriver(t).ResultText(path)
+		got, err := newDriver().ResultText(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +76,7 @@ func TestResultText_MistypedTotalsKeepText(t *testing.T) {
 		`{"type":"result","result":"SPINDRIFT_OUTCOME status=done","num_turns":"3"}`,
 		`{"type":"result","result":"second","duration_ms":12.5}`,
 	)
-	got, err := newDriver(t).ResultText(path)
+	got, err := newDriver().ResultText(path)
 	if err != nil {
 		t.Fatal(err)
 	}

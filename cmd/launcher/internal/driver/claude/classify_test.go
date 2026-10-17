@@ -485,7 +485,7 @@ var classifyTests = []struct {
 func TestClassify_RateLimitBeatsBareOverloaded_SameLine(t *testing.T) {
 	logPath := claude.WriteLog(t, `Error: 429 Too Many Requests — server Overloaded`)
 
-	c, err := newDriver(t).ClassifyTransient(logPath)
+	c, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
 	}
 	f.Close()
 
-	c, err := newDriver(t).ClassifyTransient(path)
+	c, err := newDriver().ClassifyTransient(path)
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestClassify_DispatchStartStampIsNotScanned(t *testing.T) {
 	})
 	logPath := claude.WriteLog(t, strings.TrimSuffix(stamp, "\n"))
 
-	c, err := newDriver(t).ClassifyTransient(logPath)
+	c, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestClassify_DispatchSettledIsNotScanned(t *testing.T) {
 	})
 	logPath := claude.WriteLog(t, strings.TrimSuffix(settled, "\n"))
 
-	c, err := newDriver(t).ClassifyTransient(logPath)
+	c, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
@@ -574,7 +574,7 @@ func TestClassify_SyntheticThinkingBlockDoesNotClearItsOwnError(t *testing.T) {
 	logPath := claude.WriteLog(t,
 		`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"API Error: rate_limit_error"}]},"error":"rate_limit"}`)
 
-	c, err := newDriver(t).ClassifyTransient(logPath)
+	c, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
@@ -591,7 +591,7 @@ func TestClassify_AnyHostOpIsNotScanned(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}`,
 		strings.TrimSuffix(op, "\n"))
 
-	c, err := newDriver(t).ClassifyTransient(logPath)
+	c, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify() error: %v", err)
 	}
@@ -610,7 +610,7 @@ func TestClassify(t *testing.T) {
 				logPath = claude.WriteLog(t, tc.lines...)
 			}
 
-			c, err := newDriver(t).ClassifyTransient(logPath)
+			c, err := newDriver().ClassifyTransient(logPath)
 			if err != nil {
 				t.Fatalf("Classify() error: %v", err)
 			}

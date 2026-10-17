@@ -15,7 +15,7 @@ import (
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript(%s): %v", path, err)
 	}
@@ -29,7 +29,7 @@ func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 func TestOutcomeFixtureExtractUsage(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}

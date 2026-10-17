@@ -18,7 +18,7 @@ func TestExtractUsageByModel_DedupByMessageID(t *testing.T) {
 	}
 	path := opencode.WriteLog(t, lines...)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestExtractUsageByModel_UnknownModel(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","tokens":{"input":5,"output":2}}}`
 	path := opencode.WriteLog(t, line)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestExtractUsageByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 	}
 	path := opencode.WriteLog(t, lines...)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestExtractUsageByModel_CacheWriteTo5m(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":1,"output":1,"cache":{"write":77,"read":0}}}}`
 	path := opencode.WriteLog(t, line)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestExtractUsageByModel_TwoModels(t *testing.T) {
 	}
 	path := opencode.WriteLog(t, lines...)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestExtractUsageByModel_TwoModels(t *testing.T) {
 // A missing log file degrades to no error and a nil breakdown, matching
 // ExtractUsage's own missing-log contract.
 func TestExtractUsageByModel_FileNotFound(t *testing.T) {
-	report, err := newDriver(t).ExtractUsage("/nonexistent/x.log")
+	report, err := newDriver().ExtractUsage("/nonexistent/x.log")
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}

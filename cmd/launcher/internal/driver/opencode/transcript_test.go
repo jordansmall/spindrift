@@ -20,7 +20,7 @@ func TestRenderTranscript_SurfacesTextEvents(t *testing.T) {
 		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"}}`,
 	)
 
-	got, err := newDriver(t).RenderTranscript(logPath, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(logPath, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestRenderTranscript_SurfacesTextEvents(t *testing.T) {
 // TestRenderTranscript_MissingFile verifies the missing-log-file contract
 // shared with the claude Driver's RenderTranscript.
 func TestRenderTranscript_MissingFile(t *testing.T) {
-	got, err := newDriver(t).RenderTranscript("/does/not/exist.log", driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript("/does/not/exist.log", driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestRenderTranscript_AttributesRole(t *testing.T) {
 		`{"type":"text","part":{"text":"  \n"}}`,
 	)
 
-	got, err := newDriver(t).RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: "reviewer"})
+	got, err := newDriver().RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: "reviewer"})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestRenderTranscript_ReviewerSubagentVerdictReachesLegacyScan(t *testing.T)
 		`{"type":"tool_use","part":{"callID":"c1","tool":"task","state":{"status":"completed","input":{"description":"review","prompt":"p","subagent_type":"reviewer"},"output":"VERDICT: BLOCK\n- fix it"}}}`,
 	)
 
-	got, err := newDriver(t).RenderTranscript(logPath, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(logPath, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 // carried an event span, and whether any result event was found.
 func totals(t *testing.T, path string) (usage.Usage, bool, bool, error) {
 	t.Helper()
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	return report.Totals, report.HasEventSpan, report.Found, err
 }
 
@@ -22,7 +22,7 @@ func totals(t *testing.T, path string) (usage.Usage, bool, bool, error) {
 // event's output_tokens (500) lands on the main-loop row only (issue #3213).
 func agentBreakdown(t *testing.T, lines ...string) []usage.AgentUsage {
 	t.Helper()
-	report, err := newDriver(t).ExtractUsage(claude.WriteLog(t, append(lines, resultLine())...))
+	report, err := newDriver().ExtractUsage(claude.WriteLog(t, append(lines, resultLine())...))
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestExtractUsage_AgentBreakdown_MainLoopVsSubagent(t *testing.T) {
 // A missing log file degrades to a zero Report, for a pass that crashes before
 // producing any usage events.
 func TestExtractUsage_AgentBreakdown_FileNotFound(t *testing.T) {
-	report, err := newDriver(t).ExtractUsage("/nonexistent/x.log")
+	report, err := newDriver().ExtractUsage("/nonexistent/x.log")
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestExtractUsage_OutputIsMainLoopOnly(t *testing.T) {
 		`{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`,
 	)
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
