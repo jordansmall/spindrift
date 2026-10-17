@@ -55,14 +55,8 @@ func (claudeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return driverkit.ExtractUsage(logPath, claude.NewDecoder, driverkit.SessionTotals, claudeUsageByModel, claudeUsageByAgent)
 }
 
-// RenderTranscript ends a non-empty transcript with a newline, which the other
-// Drivers' transcripts do not.
 func (claudeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
-	out, err := driverkit.RenderTranscript(logPath, claude.NewDecoder, opts.TopLevelRole)
-	if err != nil || out == "" {
-		return "", err
-	}
-	return out + "\n", nil
+	return driverkit.RenderTranscript(logPath, claude.NewDecoder, opts.TopLevelRole)
 }
 
 // ResolveExit returns the caller's exitCode unchanged: claude's stream-json
