@@ -1,5 +1,7 @@
 package driver
 
+import "strings"
+
 // Descriptor is the Go mirror of a lib/drivers/*.nix registry row's shared
 // facts, rendered into descriptor_gen.go by `nix run .#regen` (issue #5503).
 type Descriptor struct {
@@ -8,4 +10,47 @@ type Descriptor struct {
 	// ProviderNamespacedModels is set when the Driver's model ids are
 	// <provider>/<model>.
 	ProviderNamespacedModels bool
+	// Credentials are the rules by which the Driver is authenticated; a run
+	// is authenticated when every rule that applies to its models is met.
+	Credentials []CredentialRule
+}
+
+// CredentialRule is one way a Driver is authenticated. It is plain data
+// (ADR 0066 decision 7) so it can travel in the launcher input document
+// (ADR 0020) should the registry ever open.
+type CredentialRule struct {
+	// Env lists the env vars that satisfy the rule, either-or, in fetch order.
+	Env []string
+	// ModelPrefix gates the rule to runs using a model with this prefix;
+	// empty means the rule always applies.
+	ModelPrefix string
+	// Remedy is shown when the rule is unmet.
+	Remedy string
+	// SetupCommand is the argv that obtains the credential for Env[0]; empty
+	// when the Driver offers none.
+	SetupCommand []string
+}
+
+// Satisfied reports whether any of the rule's env vars has a non-empty value
+// under lookup.
+func (r CredentialRule) Satisfied(lookup func(string) string) bool {
+	for _, env := range r.Env {
+		if lookup(env) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// AppliesTo reports whether the rule is in force for a run using these models.
+func (r CredentialRule) AppliesTo(models ...string) bool {
+	if r.ModelPrefix == "" {
+		return true
+	}
+	for _, m := range models {
+		if strings.HasPrefix(m, r.ModelPrefix) {
+			return true
+		}
+	}
+	return false
 }
