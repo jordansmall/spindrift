@@ -176,8 +176,8 @@ func TestDecodeRoleAttribution(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	d(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Role: "review"}))
 	evs := d(`{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
-	if evs[2].Role != ReviewerRole {
-		t.Errorf("top-level role = %q, want %q", evs[2].Role, ReviewerRole)
+	if evs[2].Role != driverkit.ReviewerRole {
+		t.Errorf("top-level role = %q, want %q", evs[2].Role, driverkit.ReviewerRole)
 	}
 	evs = d(`{"type":"assistant","parent_tool_use_id":"task1","message":{"id":"m2","content":[{"type":"text","text":"x"}]}}`)
 	if evs[2].Role != "scout" {

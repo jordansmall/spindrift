@@ -21,11 +21,11 @@ func (claudeDriver) ClassifyTransient(logPath string) (Classification, error) {
 
 // NewHeartbeatWriter attributes top-level messages to opts.TopLevelRole, for a
 // pass the orchestrator owns as something other than implementation (issue
-// #2092); an empty role keeps the claude.ImplementorRole default.
+// #2092); an empty role keeps the driverkit.ImplementorRole default.
 func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
 	role := opts.TopLevelRole
 	if role == "" {
-		role = claude.ImplementorRole
+		role = driverkit.ImplementorRole
 	}
 	return driverkit.NewHeartbeatWriter(raw, issue, out, claude.NewDecoder, role).Track(claude.HeartbeatTracking).OnModel(opts.OnModel)
 }

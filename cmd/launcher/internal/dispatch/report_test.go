@@ -13,7 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -311,9 +311,9 @@ func TestDispatch_Run_ClaudeStreamEmitsModelRecordPerPairChange(t *testing.T) {
 		got = append(got, pair{rec.Model, rec.ModelRole})
 	}
 	want := []pair{
-		{"claude-opus-4-7", claude.ImplementorRole},
+		{"claude-opus-4-7", driverkit.ImplementorRole},
 		{"claude-haiku-4-5", "scout"},
-		{"claude-opus-4-7", claude.ImplementorRole},
+		{"claude-opus-4-7", driverkit.ImplementorRole},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("model records = %v, want %v", got, want)

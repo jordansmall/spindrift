@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"spindrift.dev/launcher/internal/driver/claude"
 )
 
 // TestExtractUsage_MultiSessionFixture pins ExtractUsage's aggregation over a
@@ -191,7 +189,7 @@ func naivePerMessageOutputSum(t *testing.T, path string) int {
 	seenIDs := make(map[string]bool)
 	sum := 0
 	forEachLine(t, path, func(line []byte) {
-		var ev claude.Event
+		var ev naiveAssistantLine
 		if err := json.Unmarshal(line, &ev); err != nil || ev.Type != "assistant" || ev.Message == nil {
 			return
 		}
@@ -215,4 +213,15 @@ type resultEvent struct {
 
 type usageData struct {
 	OutputTokens int `json:"output_tokens"`
+}
+
+// naiveAssistantLine is the independent decode of an assistant line that
+// naivePerMessageOutputSum uses, so the cross-check shares no code with the
+// production decoder.
+type naiveAssistantLine struct {
+	Type    string `json:"type"`
+	Message *struct {
+		ID    string    `json:"id"`
+		Usage usageData `json:"usage"`
+	} `json:"message"`
 }

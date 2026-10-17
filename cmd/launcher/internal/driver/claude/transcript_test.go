@@ -1,61 +1,77 @@
-package claude
+package claude_test
 
 import (
-	"encoding/json"
+	"fmt"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
-func TestResolveRole_ImplementorHasNoParent(t *testing.T) {
-	ev := Event{Type: "assistant", ParentToolUseID: ""}
-	taskRole := map[string]string{}
-	got := ResolveRole(ev, taskRole, "")
-	if got != ImplementorRole {
-		t.Errorf("ResolveRole() = %q, want %q", got, ImplementorRole)
-	}
+func spawnLine(parent, tool, id, input string) string {
+	return fmt.Sprintf(`{"type":"assistant","parent_tool_use_id":%q,"message":{"id":"s-%s","content":[{"type":"tool_use","id":%q,"name":%q,"input":%s}]}}`, parent, id, id, tool, input)
 }
 
-func TestResolveRole_UnknownParentDefaultsToSubagent(t *testing.T) {
-	ev := Event{Type: "assistant", ParentToolUseID: "toolu_unknown"}
-	taskRole := map[string]string{}
-	got := ResolveRole(ev, taskRole, "")
-	if got != DefaultRole {
-		t.Errorf("ResolveRole() = %q, want %q", got, DefaultRole)
-	}
+func textLine(parent, text string) string {
+	return fmt.Sprintf(`{"type":"assistant","parent_tool_use_id":%q,"message":{"id":"t-%s","content":[{"type":"text","text":%q}]}}`, parent, text, text)
 }
 
-func TestResolveRole_KnownParentReturnsRecordedRole(t *testing.T) {
-	ev := Event{Type: "assistant", ParentToolUseID: "toolu_1"}
-	taskRole := map[string]string{"toolu_1": "scout"}
-	got := ResolveRole(ev, taskRole, "")
-	if got != "scout" {
-		t.Errorf("ResolveRole() = %q, want %q", got, "scout")
+// TestTranscriptRoleAttribution drives the role rules through the Driver's
+// transcript: a spawn block records its role under its tool-use ID, and a
+// later message attributes to the role recorded for its parent.
+func TestTranscriptRoleAttribution(t *testing.T) {
+	cases := []struct {
+		name         string
+		topLevelRole string
+		lines        []string
+		want         string
+	}{
+		{"no parent is the implementor", "", []string{textLine("", "hi")}, "[implementor] hi"},
+		{"unknown parent defaults to subagent", "", []string{textLine("toolu_unknown", "hi")}, "[subagent] hi"},
+		{"known parent returns the recorded role", "", []string{
+			spawnLine("", "Task", "toolu_1", `{"subagent_type":"scout"}`),
+			textLine("toolu_1", "hi"),
+		}, "[implementor] Task(scout)\n[scout] hi"},
+		{"top-level role applies when the parent is empty", "reviewer", []string{textLine("", "hi")}, "[reviewer] hi"},
+		{"empty top-level role falls back to the implementor", "", []string{textLine("", "hi")}, "[implementor] hi"},
+		{"top-level role does not affect a real parent", "reviewer", []string{
+			spawnLine("", "Task", "toolu_1", `{"subagent_type":"scout"}`),
+			textLine("toolu_1", "hi"),
+		}, "[reviewer] Task(scout)\n[scout] hi"},
+		{"Agent spawn records its subagent_type", "", []string{
+			spawnLine("", "Agent", "toolu_1", `{"subagent_type":"reviewer"}`),
+			textLine("toolu_1", "hi"),
+		}, "[implementor] Agent(reviewer)\n[reviewer] hi"},
+		{"empty subagent_type defaults to subagent", "", []string{
+			spawnLine("", "Task", "toolu_2", `{}`),
+			textLine("toolu_2", "hi"),
+		}, "[implementor] Task()\n[subagent] hi"},
+		{"spawn from a nested event is recorded", "", []string{
+			spawnLine("", "Task", "toolu_1", `{"subagent_type":"scout"}`),
+			spawnLine("toolu_1", "Task", "toolu_2", `{"subagent_type":"scout2"}`),
+			textLine("toolu_2", "hi"),
+		}, "[implementor] Task(scout)\n[scout] Task(scout2)\n[scout2] hi"},
+		{"spawn from a nested event via the Agent tool name is recorded", "", []string{
+			spawnLine("", "Task", "toolu_1", `{"subagent_type":"scout"}`),
+			spawnLine("toolu_1", "Agent", "toolu_2", `{"subagent_type":"worker"}`),
+			textLine("toolu_2", "hi"),
+		}, "[implementor] Task(scout)\n[scout] Agent(worker)\n[worker] hi"},
+		{"nested spawn with an empty subagent_type defaults to subagent", "", []string{
+			spawnLine("toolu_A", "Task", "toolu_C", `{}`),
+			textLine("toolu_C", "hi"),
+		}, "[subagent] Task()\n[subagent] hi"},
 	}
-}
-
-func TestResolveRole_TopLevelRoleAppliesWhenParentEmpty(t *testing.T) {
-	ev := Event{Type: "assistant", ParentToolUseID: ""}
-	taskRole := map[string]string{}
-	got := ResolveRole(ev, taskRole, "reviewer")
-	if got != ReviewerRole {
-		t.Errorf("ResolveRole() = %q, want %q", got, ReviewerRole)
-	}
-}
-
-func TestResolveRole_EmptyTopLevelRoleFallsBackToImplementor(t *testing.T) {
-	ev := Event{Type: "assistant", ParentToolUseID: ""}
-	taskRole := map[string]string{}
-	got := ResolveRole(ev, taskRole, "")
-	if got != ImplementorRole {
-		t.Errorf("ResolveRole() = %q, want %q", got, ImplementorRole)
-	}
-}
-
-func TestResolveRole_TopLevelRoleDoesNotAffectRealParent(t *testing.T) {
-	ev := Event{Type: "assistant", ParentToolUseID: "toolu_1"}
-	taskRole := map[string]string{"toolu_1": "scout"}
-	got := ResolveRole(ev, taskRole, "reviewer")
-	if got != "scout" {
-		t.Errorf("ResolveRole() = %q, want %q", got, "scout")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := claude.WriteLog(t, tc.lines...)
+			got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: tc.topLevelRole})
+			if err != nil {
+				t.Fatalf("RenderTranscript: %v", err)
+			}
+			if got != tc.want+"\n" {
+				t.Errorf("RenderTranscript = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -64,142 +80,17 @@ func TestAttributionRoleForPass(t *testing.T) {
 		passRole string
 		want     string
 	}{
-		{"review", ReviewerRole},
-		{"delta-review", ReviewerRole},
-		{"implement", ImplementorRole},
-		{"fix", ImplementorRole},
-		{"land", ImplementorRole},
+		{"review", driverkit.ReviewerRole},
+		{"delta-review", driverkit.ReviewerRole},
+		{"implement", driverkit.ImplementorRole},
+		{"fix", driverkit.ImplementorRole},
+		{"land", driverkit.ImplementorRole},
 		{"", ""},
 		{"unrecognized", ""},
 	}
 	for _, tc := range cases {
-		if got := AttributionRoleForPass(tc.passRole); got != tc.want {
+		if got := claude.AttributionRoleForPass(tc.passRole); got != tc.want {
 			t.Errorf("AttributionRoleForPass(%q) = %q, want %q", tc.passRole, got, tc.want)
 		}
-	}
-}
-
-func TestCollectTaskRoles_RecordsSubagentTypeFromTaskInput(t *testing.T) {
-	ev := Event{
-		Type: "assistant",
-		Message: &Message{
-			Content: []ContentBlock{
-				{Type: "tool_use", Name: "Task", ID: "toolu_1", Input: []byte(`{"subagent_type":"reviewer"}`)},
-			},
-		},
-	}
-	taskRole := map[string]string{}
-	CollectTaskRoles(ev, taskRole)
-	if got := taskRole["toolu_1"]; got != "reviewer" {
-		t.Errorf("taskRole[toolu_1] = %q, want %q", got, "reviewer")
-	}
-}
-
-func TestCollectTaskRoles_RecordsSubagentTypeFromAgentInput(t *testing.T) {
-	ev := Event{
-		Type: "assistant",
-		Message: &Message{
-			Content: []ContentBlock{
-				{Type: "tool_use", Name: "Agent", ID: "toolu_1", Input: []byte(`{"subagent_type":"reviewer"}`)},
-			},
-		},
-	}
-	taskRole := map[string]string{}
-	CollectTaskRoles(ev, taskRole)
-	if got := taskRole["toolu_1"]; got != "reviewer" {
-		t.Errorf("taskRole[toolu_1] = %q, want %q", got, "reviewer")
-	}
-}
-
-func TestCollectTaskRoles_EmptySubagentTypeDefaultsToSubagent(t *testing.T) {
-	ev := Event{
-		Type: "assistant",
-		Message: &Message{
-			Content: []ContentBlock{
-				{Type: "tool_use", Name: "Task", ID: "toolu_2", Input: []byte(`{}`)},
-			},
-		},
-	}
-	taskRole := map[string]string{}
-	CollectTaskRoles(ev, taskRole)
-	if got := taskRole["toolu_2"]; got != DefaultRole {
-		t.Errorf("taskRole[toolu_2] = %q, want %q", got, DefaultRole)
-	}
-}
-
-func TestCollectTaskRoles_RecordsSpawnFromNestedEvent(t *testing.T) {
-	ev := Event{
-		Type:            "assistant",
-		ParentToolUseID: "toolu_1",
-		Message: &Message{
-			Content: []ContentBlock{
-				{Type: "tool_use", Name: "Task", ID: "toolu_2", Input: []byte(`{"subagent_type":"scout"}`)},
-			},
-		},
-	}
-	taskRole := map[string]string{}
-	CollectTaskRoles(ev, taskRole)
-	if got := taskRole["toolu_2"]; got != "scout" {
-		t.Errorf("taskRole[toolu_2] = %q, want %q", got, "scout")
-	}
-}
-
-func TestCollectTaskRoles_RecordsNestedSpawnFromChildEvent(t *testing.T) {
-	ev := Event{
-		Type:            "assistant",
-		ParentToolUseID: "toolu_A",
-		Message: &Message{
-			Content: []ContentBlock{
-				{Type: "tool_use", Name: "Agent", ID: "toolu_B", Input: []byte(`{"subagent_type":"worker"}`)},
-			},
-		},
-	}
-	taskRole := map[string]string{}
-	CollectTaskRoles(ev, taskRole)
-	if got := taskRole["toolu_B"]; got != "worker" {
-		t.Errorf("taskRole[toolu_B] = %q, want %q", got, "worker")
-	}
-}
-
-func TestCollectTaskRoles_NestedSpawnEmptySubagentTypeDefaultsToSubagent(t *testing.T) {
-	ev := Event{
-		Type:            "assistant",
-		ParentToolUseID: "toolu_A",
-		Message: &Message{
-			Content: []ContentBlock{
-				{Type: "tool_use", Name: "Task", ID: "toolu_C", Input: []byte(`{}`)},
-			},
-		},
-	}
-	taskRole := map[string]string{}
-	CollectTaskRoles(ev, taskRole)
-	if got := taskRole["toolu_C"]; got != DefaultRole {
-		t.Errorf("taskRole[toolu_C] = %q, want %q", got, DefaultRole)
-	}
-}
-
-func TestTokenUsage_CacheCreationTTLSplit(t *testing.T) {
-	const withSplit = `{"content":null,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":20,"ephemeral_1h_input_tokens":10}}}`
-	var m Message
-	if err := json.Unmarshal([]byte(withSplit), &m); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-	if m.Usage.CacheCreation == nil {
-		t.Fatal("Usage.CacheCreation = nil, want non-nil")
-	}
-	if got := m.Usage.CacheCreation.Ephemeral5mInputTokens; got != 20 {
-		t.Errorf("Ephemeral5mInputTokens = %d, want 20", got)
-	}
-	if got := m.Usage.CacheCreation.Ephemeral1hInputTokens; got != 10 {
-		t.Errorf("Ephemeral1hInputTokens = %d, want 10", got)
-	}
-
-	const withoutSplit = `{"content":null,"usage":{"input_tokens":10,"output_tokens":5}}`
-	var m2 Message
-	if err := json.Unmarshal([]byte(withoutSplit), &m2); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-	if m2.Usage.CacheCreation != nil {
-		t.Errorf("Usage.CacheCreation = %+v, want nil", m2.Usage.CacheCreation)
 	}
 }

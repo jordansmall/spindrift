@@ -41,11 +41,7 @@ func toolKind(name string) string {
 // the single authoritative place for phase heuristics.
 func toolToPhase(name string, input json.RawMessage) string {
 	if isSubagentSpawnTool(name) {
-		var ti TaskInput
-		if len(input) > 0 {
-			_ = json.Unmarshal(input, &ti)
-		}
-		switch strings.ToLower(ti.SubagentType) {
+		switch strings.ToLower(subagentType(input)) {
 		case "reviewer", "review-axis":
 			return "review"
 		case "scout", "plan":
