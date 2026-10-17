@@ -398,6 +398,34 @@ func TestSettledOpFollowedByOrchestratorOpIsIgnored(t *testing.T) {
 	}
 }
 
+// A real stamp carries the whole knob set and can pass 4 KiB; the parse loop
+// reads it, so ReadStamp must too.
+func longStampLine() string {
+	return opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{
+		RecordID:    RecordID("work", "42", stampClaim),
+		Kind:        "work",
+		DispatchKey: "42",
+		ClaimTime:   stampClaim,
+		Started:     stampClaim,
+		Driver:      "claude",
+		Knobs:       map[string]string{"MERGE_GUARD_PATHS": strings.Repeat("a/b ", 1400)},
+	}})
+}
+
+func TestParseLogIngestsStampLongerThanAReadBuffer(t *testing.T) {
+	line := longStampLine()
+	if len(line) <= 4096 {
+		t.Fatalf("stamp is %d bytes, want over 4096", len(line))
+	}
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", append([]string{line}, workLog("2026-05-01T09:00:00Z", 1)...)...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := RecordID("work", "42", stampClaim); rec.ID != want {
+		t.Fatalf("record ID = %q, want %q", rec.ID, want)
+	}
+}
+
 func TestReadStamp(t *testing.T) {
 	id := RecordID("work", "42", stampClaim)
 	dir := t.TempDir()
@@ -420,6 +448,7 @@ func TestReadStamp(t *testing.T) {
 		{"empty record_id", write("noid.log", opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{HostToken: "tok"}})), "", "", false},
 		{"unstamped", write("unstamped.log", workLog("2026-05-01T09:00:00Z", 1)...), "", "", false},
 		{"stamp not first", write("late.log", append(workLog("2026-05-01T09:00:00Z", 1), stampLine(stampClaim))...), "", "", false},
+		{"long stamp", write("long.log", append([]string{longStampLine()}, workLog("2026-05-01T09:00:00Z", 1)...)...), id, "", true},
 		{"empty", write("empty.log"), "", "", false},
 		{"missing", filepath.Join(dir, "missing.log"), "", "", false},
 	}

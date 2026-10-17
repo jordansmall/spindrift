@@ -1,6 +1,6 @@
 // Package logscan scans Box logs line by line for the launcher. Every caller
-// goes through ForEachLine so the 4 MiB buffer and the oversized-line handling
-// live in one place.
+// goes through ForEachLine or ForEachLineUntil so the 4 MiB buffer and the
+// oversized-line handling live in one place.
 package logscan
 
 import (
@@ -28,6 +28,15 @@ const bufSize = 4 * 1024 * 1024
 // line longer than bufSize. It returns the os.Open error unchanged, so a caller
 // can test it with errors.Is(err, os.ErrNotExist).
 func ForEachLine(path string, policy Policy, fn func(line string)) error {
+	return ForEachLineUntil(path, policy, func(line string) bool {
+		fn(line)
+		return true
+	})
+}
+
+// ForEachLineUntil is ForEachLine for a caller that needs only a log's leading
+// lines: it stops reading once fn returns false.
+func ForEachLineUntil(path string, policy Policy, fn func(line string) bool) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -37,14 +46,14 @@ func ForEachLine(path string, policy Policy, fn func(line string)) error {
 	br := bufio.NewReaderSize(f, bufSize)
 	for {
 		line, isPrefix, err := br.ReadLine()
-		if err == nil && (!isPrefix || policy == ChunkOversized) {
-			fn(string(line))
+		if err == nil && (!isPrefix || policy == ChunkOversized) && !fn(string(line)) {
+			return nil
 		}
 		for isPrefix && err == nil {
 			var chunk []byte
 			chunk, isPrefix, err = br.ReadLine()
-			if err == nil && policy == ChunkOversized {
-				fn(string(chunk))
+			if err == nil && policy == ChunkOversized && !fn(string(chunk)) {
+				return nil
 			}
 		}
 		if err != nil {

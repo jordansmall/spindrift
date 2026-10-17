@@ -116,3 +116,16 @@ func TestParseLogStampNotFirstTypedLineIsReported(t *testing.T) {
 		t.Fatalf("ParseLog err = %v, want a stamp-not-first error", err)
 	}
 }
+
+func TestParseLogUntimestampedTypedLineBeforeClaudeStampStillStamped(t *testing.T) {
+	// ReadStamp cannot see past the typed line, but the loop accepts the stamp;
+	// both read it in the claude grammar, so the log ingests as stamped.
+	lines := append([]string{`{"type":"system"}` + "\n", driverStamp("claude")}, workLog("2026-05-01T09:00:00Z", 1)...)
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Attribution != AttributionStamped || rec.ID != RecordID("work", "42", stampClaim) {
+		t.Fatalf("record = %+v, want the stamped Record", rec)
+	}
+}
