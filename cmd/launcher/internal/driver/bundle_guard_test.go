@@ -41,8 +41,6 @@ var bundleAllowList = []string{
 	module + "/internal/butler",
 	module + "/internal/dispatchrecord",
 	module + "/internal/settle",
-	module + "/internal/terminate",
-	module + "/internal/waves",
 }
 
 // isBundleOrDriver reports whether path is the bundle or a Driver package or
