@@ -133,8 +133,8 @@ type Config struct {
 	// feature off, and runOnce then starts no proxy and mounts no socket.
 	RegistryProxyRoutes []registryproxy.Route
 
-	// Kind is the dispatch kind ("work", "research" or "butler"). Its
-	// descriptor's axes reach the Box as DISPATCH_KEYING and
+	// Kind is the dispatch kind, a name from dispatchkind.All ("work",
+	// "research", "butler" or "recover"). Its descriptor's axes reach the Box as DISPATCH_KEYING and
 	// DISPATCH_ANNOUNCE_VERB (issue #3996); the name itself rides along as
 	// DISPATCH_KIND, which box resolves to its descriptor in-process (issue
 	// #3901). Empty defaults to "work".
@@ -319,9 +319,10 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	}
 	kind := cfg.kindName()
 	env["DISPATCH_KIND"] = kind
-	// The Box reads DISPATCH_KEY/DISPATCH_KEYING/DISPATCH_ANNOUNCE_VERB, never
-	// DISPATCH_KIND (display-only there); an unrecognized kind falls back to
-	// Work's axes rather than leaving them unset (issue #3996).
+	// The Box rejects an unrecognized DISPATCH_KIND (see Kind), but its env
+	// guard first requires DISPATCH_KEY, DISPATCH_KEYING and
+	// DISPATCH_ANNOUNCE_VERB. This host-side Work fallback keeps the latter
+	// two set, so an unknown kind reaches that clearer error (issue #3996).
 	d, ok := dispatchkind.ByName(kind)
 	if !ok {
 		d = dispatchkind.Work
