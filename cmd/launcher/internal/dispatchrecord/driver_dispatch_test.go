@@ -7,18 +7,26 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
+	"spindrift.dev/launcher/internal/seamtest"
 )
 
-const opencodeCorpus = "../driver/opencode/testdata/corpus/"
+// altDriver names a second registration of the seamtest Strategy. A stamp
+// naming it proves the stamped Driver, not the default, reads the log.
+const altDriver = "seam-alt"
 
-func readCorpus(t *testing.T, name string) string {
-	t.Helper()
-	b, err := os.ReadFile(opencodeCorpus + name + "/pass.jsonl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(b)
+func TestMain(m *testing.M) {
+	// claude sums its result summaries, like the real claude Driver; seam-alt
+	// sums per call, like the opencode Driver the stamped tests replaced.
+	claude := seamtest.Strategy
+	claude.Totals = driverkit.SessionTotals
+	driver.Register(claude)
+	alt := seamtest.Strategy
+	alt.Name = altDriver
+	driver.Register(alt)
+	os.Exit(m.Run())
 }
 
 func driverStamp(driver string) string {
@@ -29,29 +37,49 @@ func driverStamp(driver string) string {
 		ClaimTime:   stampClaim,
 		Started:     stampClaim,
 		Driver:      driver,
+		RoleModels:  map[string]string{"main": "provider/model-x"},
 	}
 	return opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &start})
 }
 
-func TestParseLogReadsOpencodePassLogThroughItsDriver(t *testing.T) {
-	p := writeLog(t, "issue-longest-line.log", readCorpus(t, "real-normal"))
+func usageCall(msgID, model string, in, out, cacheRead, cacheWrite int, cost float64) string {
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindUsage, MessageID: msgID, Model: model,
+		Tokens: driverkit.Tokens{Input: in, Output: out, CacheRead: cacheRead, CacheWrite5m: cacheWrite, CostUSD: cost}})
+}
+
+func TestParseLogStampedDriverReadsThePassLog(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	p := writeLog(t, "issue-42.log",
+		driverStamp(altDriver),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		usageCall("m1", "", 1, 100, 1000, 200, 0.01),
+		usageCall("m2", "", 2, 200, 2000, 300, 0.02),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+		usageCall("m3", "", 4, 400, 4000, 500, 0.03),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
+		usageCall("m4", "", 8, 800, 8000, 700, 0.04),
+		usageCall("m5", "", 16, 1600, 16000, 900, 0.05),
+		outcomeResult("ready"),
+		opLine(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
+			RecordID: id, State: "complete", Reason: "merged"}}),
+	)
 	rec, _, err := ParseLog(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Driver != "opencode" || rec.Attribution != AttributionStamped {
+	if rec.Driver != altDriver || rec.Attribution != AttributionStamped {
 		t.Fatalf("record = %+v", rec)
 	}
 	if rec.Outcome != "complete" || rec.OutcomeSource != OutcomeSourceSettled || rec.BoxStatus != "ready" {
 		t.Fatalf("outcome = %q/%q status %q", rec.Outcome, rec.OutcomeSource, rec.BoxStatus)
 	}
-	if rec.RoleModels["main"] != "github-copilot/claude-sonnet-5.5" {
+	if rec.RoleModels["main"] != "provider/model-x" {
 		t.Fatalf("role models = %v", rec.RoleModels)
 	}
 	var in, out, read, write, calls int
 	var usd float64
 	for _, ps := range rec.Passes {
-		// The corpus reports no model on any step, so each pass names none.
+		// No call names a model, so each pass names none.
 		if ps.Models == nil || len(ps.Models) != 0 {
 			t.Fatalf("pass %d models = %#v, want empty", ps.Ordinal, ps.Models)
 		}
@@ -62,13 +90,17 @@ func TestParseLogReadsOpencodePassLogThroughItsDriver(t *testing.T) {
 		calls += ps.APICalls
 		usd += ps.USD
 	}
-	if len(rec.Passes) != 3 || in != 32 || out != 2489 || read != 221311 || write != 54014 || calls != 13 || usd <= 0 {
+	if len(rec.Passes) != 3 || in != 31 || out != 3100 || read != 31000 || write != 2600 || calls != 5 || usd <= 0 {
 		t.Fatalf("passes = %+v (in %d out %d read %d write %d calls %d usd %v)", rec.Passes, in, out, read, write, calls, usd)
 	}
 }
 
-func TestParseLogOpencodePassNamesItsModels(t *testing.T) {
-	p := writeLog(t, "issue-42.log", driverStamp("opencode"), readCorpus(t, "run-usage-sample"))
+func TestParseLogStampedDriverPassNamesItsModels(t *testing.T) {
+	p := writeLog(t, "issue-42.log", driverStamp(altDriver),
+		usageCall("m1", "gpt-5", 100, 50, 200, 20, 0.01),
+		usageCall("m2", "claude-sonnet-4", 200, 100, 300, 30, 0.02),
+		usageCall("m3", "gpt-5", 300, 150, 500, 50, 0.03),
+	)
 	rec, _, err := ParseLog(p)
 	if err != nil {
 		t.Fatal(err)
@@ -110,8 +142,8 @@ func TestParseLogEmptyDriverStampReadsAsClaude(t *testing.T) {
 
 func TestParseLogStampNotFirstTypedLineIsReported(t *testing.T) {
 	// A typed JSON line that is not an event precedes the stamp, so ReadStamp
-	// cannot see it and would pick the claude grammar for an opencode log.
-	p := writeLog(t, "issue-42.log", `{"type":"unknown"}`+"\n", driverStamp("opencode"), readCorpus(t, "run-usage-sample"))
+	// cannot see it and would pick the default Driver for a log stamped with another.
+	p := writeLog(t, "issue-42.log", `{"type":"unknown"}`+"\n", driverStamp(altDriver), usageCall("m1", "gpt-5", 1, 1, 1, 1, 0))
 	if _, _, err := ParseLog(p); err == nil || !strings.Contains(err.Error(), "not first") {
 		t.Fatalf("ParseLog err = %v, want a stamp-not-first error", err)
 	}

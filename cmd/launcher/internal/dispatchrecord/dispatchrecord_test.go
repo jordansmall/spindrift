@@ -3,7 +3,6 @@ package dispatchrecord
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,24 +12,34 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/seamtest"
 )
 
 func opLine(op hostop.SpindriftOp) string { return hostop.EncodeSpindriftOp(op) }
 
-func assistant(id string) string {
-	return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"m","content":[]}}`+"\n", id)
+// ms is the RFC3339 ts as epoch milliseconds, the canonical Event's Timestamp unit.
+func ms(ts string) int64 {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		panic(err)
+	}
+	return t.UnixMilli()
 }
 
+func assistant(id string) string {
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindUsage, MessageID: id})
+}
+
+// result is a Pass's session summary at ts: one result event carrying the
+// totals the CLI reports (cost, a fixed token tally, turns, durations) and the
+// models it ran.
 func result(ts string, cost float64, turns int, dur, apiDur int64, models ...string) string {
-	mu := make([]string, 0, len(models))
-	for _, m := range models {
-		mu = append(mu, fmt.Sprintf("%q:{}", m))
-	}
-	return fmt.Sprintf(`{"type":"result","timestamp":%q,"num_turns":%d,"total_cost_usd":%g,"duration_ms":%d,"duration_api_ms":%d,`+
-		`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},`+
-		`"modelUsage":{%s}}`+"\n", ts, turns, cost, dur, apiDur, strings.Join(mu, ","))
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: ms(ts), NumTurns: turns,
+		Tokens:     driverkit.Tokens{Input: 10, Output: 20, CacheRead: 30, CacheWrite5m: 40, CostUSD: cost},
+		DurationMs: dur, DurationAPIMs: apiDur, Models: models})
 }
 
 func writeLog(t *testing.T, name string, lines ...string) string {
@@ -57,7 +66,7 @@ func TestParseLog(t *testing.T) {
 			file: "issue-42.log",
 			lines: []string{
 				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
-				`{"type":"system","timestamp":"2026-10-07T12:34:56.789123Z"}` + "\n",
+				seamtest.Line(driverkit.Event{Kind: driverkit.KindStart, Timestamp: ms("2026-10-07T12:34:56.789123Z")}),
 				assistant("a"), assistant("a"), assistant("b"),
 				result("2026-10-07T12:35:00Z", 1.5, 7, 4000, 3000, "claude-opus", "claude-haiku"),
 				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
@@ -293,24 +302,23 @@ func TestChoreKeyedKindFollowsDescriptor(t *testing.T) {
 }
 
 func resultText(ts, text string) string {
-	b, _ := json.Marshal(text)
-	return fmt.Sprintf(`{"type":"result","timestamp":%q,"num_turns":1,"result":%s}`+"\n", ts, b)
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: ms(ts), NumTurns: 1, Text: text})
 }
 
-// assistantTool is one assistant event carrying a single tool_use block whose
-// tool_use ID is the message ID.
+// assistantTool is one tool call event whose tool ID is the message ID.
 func assistantTool(id, name string, input map[string]string) string {
 	return assistantToolUse(id, id, name, input)
 }
 
 func assistantToolUse(msgID, toolID, name string, input map[string]string) string {
 	in, _ := json.Marshal(input)
-	return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"m","content":[{"type":"tool_use","id":%q,"name":%q,"input":%s}]}}`+"\n", msgID, toolID, name, in)
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindToolCall, MessageID: msgID, ToolID: toolID,
+		ToolName: name, ToolInput: in, ToolTarget: input["file_path"]})
 }
 
-// toolResult is the user event that answers the tool_use with the given ID.
+// toolResult answers the tool call with the given ID.
 func toolResult(toolID string, isError bool) string {
-	return fmt.Sprintf(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":%q,"content":"x","is_error":%t}]}}`+"\n", toolID, isError)
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindToolResult, ToolID: toolID, IsError: isError})
 }
 
 func TestParseLogReviewEvidence(t *testing.T) {
