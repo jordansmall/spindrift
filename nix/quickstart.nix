@@ -15,9 +15,10 @@ pkgs.buildGoModule {
   src = ../cmd/launcher;
   subPackages = [ "quickstart" ];
   vendorHash = buildConstants.launcherVendorHash;
-  # The launcher-go-test check (nix/checks/go.nix) already runs go test over
-  # the same source, and running it here would fail on a docs/-relative path
-  # one test resolves: this derivation's src has no docs/ sibling.
+  # The launcher-binaries-go-test check (nix/checks/go.nix) already runs go
+  # test over the same source, and running it here would fail on a
+  # docs/-relative path one test resolves: this derivation's src has no docs/
+  # sibling.
   doCheck = false;
   meta.license = pkgs.lib.licenses.mit;
 }
