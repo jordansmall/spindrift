@@ -165,6 +165,10 @@
                 models.roster = dogfoodDefaults.opencode.roster;
                 bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
               };
+              agents.drivers.pi = {
+                models.default = dogfoodDefaults.pi.model;
+                models.roster = dogfoodDefaults.pi.roster;
+              };
               dispatch.maxParallel = dogfoodDefaults.defaults.maxParallel;
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
               dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;

@@ -151,6 +151,28 @@ let
     }
   );
 
+  # The pi Driver's Harness, mirroring dogfoodOpencodeHarness. flake.nix sets
+  # no bashTimeoutMs for pi (its row declares no timeout variable), so nothing
+  # is re-added.
+  dogfoodPiHarness = import ../lib/mkHarness.nix (
+    dogfoodHarnessArgs
+    // {
+      driver = "pi";
+      roster = dogfoodDefaults.pi.roster;
+      imageAttrName = "agent-image-pi";
+      defaults =
+        removeAttrs dogfoodHarnessArgs.defaults [
+          "effort"
+          "driverBashTimeoutMs"
+        ]
+        // {
+          model = dogfoodDefaults.pi.model;
+          daemonApp = ".#pi";
+          daemonSelfApp = ".#pi-daemon";
+        };
+    }
+  );
+
   # Used by template-fixture: the template module consumer has a stub self with
   # no shortRev, so its revision is "unknown" and this call must match by
   # leaving `revision` unset.
@@ -600,6 +622,7 @@ in
     harness
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
+    dogfoodPiHarness
     nonRustHarness
     leanHarness
     nixStoreWritableHarness

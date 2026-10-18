@@ -13,6 +13,7 @@ let
   inherit (fixtures)
     harness
     dogfoodOpencodeHarness
+    dogfoodPiHarness
     nonRustHarness
     leanHarness
     customHarness
@@ -140,21 +141,25 @@ in
 
   # The dogfood adopts the Driver map (ADR 0064, issue #5054): claude stays the
   # default Driver, so the unsuffixed apps are the claude ones
-  # (flakemodule-equivalence above pins the Harness itself), and opencode
-  # exposes its own apps and, on Linux, its own image, each equal to a direct
-  # opencode mkHarness call so a wrong model, roster, or daemon ref fails here
-  # rather than passing on the image name alone (issue #5090).
+  # (flakemodule-equivalence above pins the Harness itself), and opencode and
+  # pi each expose their own apps and, on Linux, their own image, each equal to
+  # a direct mkHarness call for that Driver so a wrong model, roster, or daemon
+  # ref fails here rather than passing on the image name alone (issue #5090).
   flakemodule-dogfood-drivers =
     let
       inherit (pkgs.lib) assertMsg;
       names = builtins.toJSON (builtins.attrNames config.apps);
     in
-    assert assertMsg (
-      config.apps ? claude
-      && config.apps ? claude-daemon
-      && config.apps ? opencode
-      && config.apps ? opencode-daemon
-    ) "dogfood must expose apps.{claude,claude-daemon,opencode,opencode-daemon}, got: ${names}";
+    assert assertMsg
+      (
+        config.apps ? claude
+        && config.apps ? claude-daemon
+        && config.apps ? opencode
+        && config.apps ? opencode-daemon
+        && config.apps ? pi
+        && config.apps ? pi-daemon
+      )
+      "dogfood must expose apps.{claude,claude-daemon,opencode,opencode-daemon,pi,pi-daemon}, got: ${names}";
     assert assertMsg (
       config.apps.claude.program == config.apps.default.program
     ) "apps.claude must be the default Driver's app (apps.default)";
@@ -173,6 +178,16 @@ in
           == dogfoodOpencodeHarness.packages.agent-image-opencode.drvPath
       )
       "agent-image-opencode must be the direct opencode mkHarness call's image (fixtures.dogfoodOpencodeHarness)";
+    assert assertMsg (
+      config.apps.pi.program == dogfoodPiHarness.apps.default.program
+    ) "apps.pi must be the direct pi mkHarness call's app (fixtures.dogfoodPiHarness)";
+    assert assertMsg (
+      config.apps.pi-daemon.program == dogfoodPiHarness.apps.daemon.program
+    ) "apps.pi-daemon must be the direct pi mkHarness call's daemon (fixtures.dogfoodPiHarness)";
+    assert assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux
+      || config.packages.agent-image-pi.drvPath == dogfoodPiHarness.packages.agent-image-pi.drvPath
+    ) "agent-image-pi must be the direct pi mkHarness call's image (fixtures.dogfoodPiHarness)";
     pkgs.runCommand "flakemodule-dogfood-drivers" { } "touch $out";
 
   # A minimal flake-parts consumer that imports the shim evaluates and
