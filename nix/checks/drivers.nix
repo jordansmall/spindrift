@@ -407,6 +407,103 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "assertShape must accept an empty envFiles list and a well-formed entry";
     pkgs.runCommand "drivers-assert-shape-env-files" { } "touch $out";
 
+  # assertShape validates authContent when present: { env, oauthProviders,
+  # apiKeyProviders? } with a non-empty env string, a non-empty list of
+  # non-empty provider strings, and an optional string -> string map.
+  drivers-assert-shape-auth-content =
+    let
+      ok = {
+        env = "A_VAR";
+        oauthProviders = [ "p" ];
+      };
+      # authContent.env must be declared by the row (a credentials rule or an
+      # envFiles entry), so the fixture row declares A_VAR as a credential.
+      row = stubDriverComplete // {
+        credentials = [
+          {
+            env = [ "A_VAR" ];
+            remedy = "set A_VAR";
+          }
+        ];
+      };
+      throws =
+        v: !(builtins.tryEval (driverRegistry.assertShape "stub" (row // { authContent = v; }))).success;
+      bad = [
+        "not-an-attrset"
+        (ok // { env = "NOWHERE"; })
+        { env = "A_VAR"; }
+        { oauthProviders = [ "p" ]; }
+        (ok // { env = ""; })
+        (ok // { env = 1; })
+        (ok // { oauthProviders = [ ]; })
+        (ok // { oauthProviders = "p"; })
+        (ok // { oauthProviders = [ "" ]; })
+        (ok // { oauthProviders = [ 1 ]; })
+        (ok // { extra = "x"; })
+        (ok // { apiKeyProviders = "p"; })
+        (ok // { apiKeyProviders = [ "p" ]; })
+        (
+          ok
+          // {
+            apiKeyProviders = {
+              "" = "q";
+            };
+          }
+        )
+        (
+          ok
+          // {
+            apiKeyProviders = {
+              p = "";
+            };
+          }
+        )
+        (
+          ok
+          // {
+            apiKeyProviders = {
+              p = 1;
+            };
+          }
+        )
+      ];
+      notThrown = filter (e: !(throws e)) bad;
+    in
+    assert assertMsg (
+      !(throws (
+        ok
+        // {
+          apiKeyProviders = {
+            p = "q";
+          };
+        }
+      ))
+    ) "assertShape must accept a non-empty apiKeyProviders map";
+    assert assertMsg (
+      !(throws (ok // { apiKeyProviders = { }; }))
+    ) "assertShape must accept an empty apiKeyProviders map";
+    assert assertMsg ((builtins.tryEval (
+      driverRegistry.assertShape "stub" (
+        stubDriverComplete
+        // {
+          envFiles = [
+            {
+              env = "A_VAR";
+              pathRelative = ".a/auth.json";
+            }
+          ];
+          authContent = ok;
+        }
+      )
+    )).success
+    ) "assertShape must accept an authContent.env declared only by an envFiles entry";
+    assert assertMsg (notThrown == [ ])
+      "assertShape must throw for every malformed authContent, but did not for: ${
+        concatStringsSep ", " (map (e: generators.toPretty { } e) notThrown)
+      }";
+    assert assertMsg (!(throws ok)) "assertShape must accept a well-formed authContent";
+    pkgs.runCommand "drivers-assert-shape-auth-content" { } "touch $out";
+
   # Issue #3348: assertShape also validates sessionCacheDirRelative's shape
   # when present (absence stays valid -- a Driver with no resumable session
   # state omits it): a non-empty

@@ -16,6 +16,9 @@ type Descriptor struct {
 	// Credentials are the rules by which the Driver is authenticated; a run
 	// is authenticated when every rule that applies to its models is met.
 	Credentials []CredentialRule
+	// AuthContent constrains the Provider-keyed auth store a Driver reads from
+	// an env var; nil when the Driver has none.
+	AuthContent *AuthContent
 }
 
 // CredentialRule is one way a Driver is authenticated. It is plain data

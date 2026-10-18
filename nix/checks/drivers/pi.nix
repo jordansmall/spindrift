@@ -132,6 +132,23 @@ in
       "renderPreamble must bake pi's DRIVER_ENV_FILES, got: ${preamble}";
     pkgs.runCommand "drivers-pi-env-files" { } "touch $out";
 
+  # Preflight reads the OAuth allow-list from this datum (issue #5484).
+  drivers-pi-auth-content =
+    assert assertMsg
+      (
+        (entry.authContent or null) == {
+          env = "PI_AUTH_CONTENT";
+          oauthProviders = [ "github-copilot" ];
+          apiKeyProviders = {
+            "openai-codex" = "openai";
+          };
+        }
+      )
+      "pi Driver must allow OAuth in PI_AUTH_CONTENT for github-copilot only, got: ${
+        builtins.toJSON (entry.authContent or null)
+      }";
+    pkgs.runCommand "drivers-pi-auth-content" { } "touch $out";
+
   drivers-pi-argv-shape-pinned =
     let
       shape = entry.argvShape;
