@@ -31,13 +31,6 @@ var bundleFixtures = []string{
 	module + "/internal/seamtest/bundled",
 }
 
-// bundleAllowList is the ADR 0066 decision 8 migration's to-do list: the
-// library packages whose tests still blank-import the bundle (or a Driver)
-// for lack of a Strategy. Each entry leaves as its package moves onto
-// seamtest's Strategy; a package that no longer reaches a Driver is reported
-// stale.
-var bundleAllowList = []string{}
-
 // isBundleOrDriver reports whether path is the bundle or a Driver package or
 // subpackage, for every registered Driver in names.
 func isBundleOrDriver(path string, names []string) bool {
@@ -85,9 +78,8 @@ func bundleReach(out string, names []string) map[string][]string {
 }
 
 // bundleProblems names each package that reaches the bundle or a Driver
-// without being a binary or on the allow-list, and each allow-list entry that
-// no longer does.
-func bundleProblems(reach map[string][]string, binaries, allow []string) []string {
+// without being listed in binaries.
+func bundleProblems(reach map[string][]string, binaries []string) []string {
 	var problems []string
 	pkgs := make([]string, 0, len(reach))
 	for pkg := range reach {
@@ -95,34 +87,25 @@ func bundleProblems(reach map[string][]string, binaries, allow []string) []strin
 	}
 	sort.Strings(pkgs)
 	for _, pkg := range pkgs {
-		reached := len(reach[pkg]) > 0
-		switch {
-		case reached && !slices.Contains(binaries, pkg) && !slices.Contains(allow, pkg):
-			problems = append(problems, fmt.Sprintf("%s's test closure reaches %s; only the binaries and the allow-list may", pkg, strings.Join(reach[pkg], ", ")))
-		case !reached && slices.Contains(allow, pkg):
-			problems = append(problems, pkg+" is on the allow-list but reaches no Driver; remove the stale entry")
-		}
-	}
-	for _, pkg := range allow {
-		if _, ok := reach[pkg]; !ok {
-			problems = append(problems, pkg+" is on the allow-list but is not a module package")
+		if len(reach[pkg]) > 0 && !slices.Contains(binaries, pkg) {
+			problems = append(problems, fmt.Sprintf("%s's test closure reaches %s; only bundleBinaries and bundleFixtures may", pkg, strings.Join(reach[pkg], ", ")))
 		}
 	}
 	return problems
 }
 
-// TestBundleImportsStayOnAllowList pins issue #5541: only the binaries and a
-// shrinking allow-list of library packages may reach the bundle or a Driver
-// in their tests; everything else tests through seamtest's Strategy. The scan
-// is one go list over the module, so it costs one invocation, not one per
+// TestOnlyBinariesReachTheBundle pins issues #5541 and #5545: only the
+// binaries (and the seamtest/bundled fixture) may reach the bundle or a Driver
+// in their tests; every library package tests through seamtest's Strategy. The
+// scan is one go list over the module, so it costs one invocation, not one per
 // package.
-func TestBundleImportsStayOnAllowList(t *testing.T) {
+func TestOnlyBinariesReachTheBundle(t *testing.T) {
 	names := driver.DescriptorNames()
 	if len(names) == 0 {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
 	out := goList(t, "-test", "-f", `{{.ImportPath}}|{{.ForTest}}|{{join .Deps " "}}`, module+"/...")
-	for _, p := range bundleProblems(bundleReach(out, names), slices.Concat(bundleBinaries, bundleFixtures), bundleAllowList) {
+	for _, p := range bundleProblems(bundleReach(out, names), slices.Concat(bundleBinaries, bundleFixtures)) {
 		t.Error(p)
 	}
 }
@@ -134,19 +117,15 @@ func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
 		m + "/internal/stray||fmt " + registry + "/claude",
 		m + "/internal/stray.test||fmt " + registry + "/claude",
 		m + "/internal/stray [" + m + "/internal/stray.test]|" + m + "/internal/stray|fmt",
-		m + "/internal/listed.test||fmt " + registry + "/bundle",
 		m + "/internal/clean.test||fmt " + registry,
-		m + "/internal/stale||fmt",
 		m + "/box||" + registry + "/bundle",
 		registry + "/claude.test||" + registry + "/opencode",
 		registry + "/bundle||" + registry + "/claude",
 	}, "\n")
 	reach := bundleReach(out, names)
-	got := bundleProblems(reach, []string{m + "/box"}, []string{m + "/internal/listed", m + "/internal/stale", m + "/internal/gone"})
+	got := bundleProblems(reach, []string{m + "/box"})
 	want := []string{
-		m + "/internal/stale is on the allow-list but reaches no Driver; remove the stale entry",
-		m + "/internal/stray's test closure reaches " + registry + "/claude; only the binaries and the allow-list may",
-		m + "/internal/gone is on the allow-list but is not a module package",
+		m + "/internal/stray's test closure reaches " + registry + "/claude; only bundleBinaries and bundleFixtures may",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("bundleProblems = %q, want %q", got, want)
