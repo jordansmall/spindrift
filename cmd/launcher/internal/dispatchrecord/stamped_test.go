@@ -236,8 +236,8 @@ func tokenSettledLine(recordID, state, reason, token string) string {
 }
 
 func outcomeResult(status string) string {
-	text := `done\n**SPINDRIFT_OUTCOME issue=42 landing=https://x/pr/1 status=` + status + ` note=hi**`
-	return `{"type":"result","timestamp":"2026-05-01T09:00:00Z","result":"` + text + `"}` + "\n"
+	text := "done\n**SPINDRIFT_OUTCOME issue=42 landing=https://x/pr/1 status=" + status + " note=hi**"
+	return resultText("2026-05-01T09:00:00Z", text)
 }
 
 func TestSettledOpSetsOutcomeAndBoxStatus(t *testing.T) {
