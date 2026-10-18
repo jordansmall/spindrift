@@ -12,6 +12,7 @@ let
   fs = pkgs.lib.fileset;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNames = builtins.attrNames driverRegistry.entries;
+  backendNames = map (row: row.name) (import ../../lib/backends/default.nix);
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
   adapterGoTestAttr = prefix: name: "${prefix}-${name}-go-test";
   driverGoTestAttr = adapterGoTestAttr "drivers";
@@ -109,7 +110,11 @@ let
   # adapter's package directory under cmd/launcher; `sharedFor name` the extra
   # packages its tests reach. `files` is the cmd/launcher fileset every source
   # is cut from; the independence check perturbs it. The vendor tree is
-  # `vendorFor files`, so one adapter's edits never move another's drvPath.
+  # `vendorFor files`, so one Driver's edits never move another's drvPath;
+  # coreFiles strips no backend, so a backend edit moves every backend's
+  # drvPath, though not its outPath.
+  # `setupFor name` is shell run after the copy for files outside cmd/launcher
+  # its tests read.
   adapterGoTests =
     {
       files,
@@ -117,6 +122,7 @@ let
       names,
       pkgFor,
       sharedFor,
+      setupFor ? _: "",
       nativeBuildInputs ? [ pkgs.go ],
     }:
     let
@@ -145,6 +151,7 @@ let
             mkdir -p src/cmd
             cp -r ${src} src/cmd/launcher
             chmod -R +w src
+            ${setupFor name}
             ${goTestPrologueWith vendor}
             go test ./${pkgFor name}/...
             touch $out
@@ -162,6 +169,83 @@ let
   driverGoTests = driverGoTestsFor {
     files = launcherDir;
     names = driverNames;
+  };
+  # Packages the backends' tests reach (go list -test -deps over every
+  # backend's package): the union of their closures, so one list serves
+  # every backend. Never a backend's directory. The forge and driver roots are
+  # listed file by file because backend and Driver directories lie beneath
+  # them; the driver root is seamtest's registry import, non-test files only.
+  rootGoFiles =
+    dir:
+    pkgs.lib.mapAttrsToList (n: _: dir + "/${n}") (
+      pkgs.lib.filterAttrs (
+        n: t: t == "regular" && pkgs.lib.hasSuffix ".go" n && !pkgs.lib.hasSuffix "_test.go" n
+      ) (builtins.readDir dir)
+    );
+  internalDir = launcherDir + "/internal";
+  backendGoTestShared =
+    map (p: internalDir + "/${p}") [
+      "agentpaths"
+      "backend"
+      "dispatchkey"
+      "dispatchkind"
+      "doctor"
+      "driver/driverkit"
+      "flock"
+      "forge/bundlerelay"
+      "forge/forgetest"
+      "forge/gitplumbing"
+      "forge/rest"
+      "gitexec"
+      "hostop"
+      "landdelta"
+      "ledger"
+      "logscan"
+      "outcome"
+      "panicguard"
+      "registrymanifest"
+      "registryprobe"
+      "registryvocab"
+      "report"
+      "retry"
+      "runner"
+      "seambundle"
+      "seamtest"
+      "testutil"
+      "unixsocket"
+      "usage"
+    ]
+    ++ rootGoFiles (internalDir + "/forge")
+    ++ rootGoFiles (internalDir + "/driver");
+  # `local` and forgejo build on the git backend's package as a library, not
+  # on the adapter: no other backend's fileset holds a sibling backend.
+  gitBackedBackends = [
+    "local"
+    "forgejo"
+  ];
+  backendGoTestSharedFor =
+    name:
+    backendGoTestShared
+    ++ pkgs.lib.optional (builtins.elem name gitBackedBackends) (internalDir + "/forge/git");
+  backendGoTestsFor =
+    { files, names }:
+    adapterGoTests {
+      inherit files names;
+      prefix = "backends";
+      pkgFor = name: "internal/forge/${name}";
+      sharedFor = backendGoTestSharedFor;
+      # forge/github's tests read the dispatch workflow beside cmd/launcher.
+      setupFor =
+        name:
+        pkgs.lib.optionalString (name == "github") ''
+          mkdir -p src/.github/workflows
+          cp ${../../.github/workflows/agent-dispatch.yml} src/.github/workflows/agent-dispatch.yml
+        '';
+      nativeBuildInputs = goTestInputs;
+    };
+  backendGoTests = backendGoTestsFor {
+    files = launcherDir;
+    names = backendNames;
   };
   # go test guards config-parsing regressions (#112). docs/, .github/,
   # .forgejo/, templates/, agent/, README.md (if present) and lib/ are copied
@@ -233,6 +317,7 @@ let
   '';
 in
 driverGoTests
+// backendGoTests
 // {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     unformatted=$(gofmt -l ${../../cmd/launcher})
@@ -415,6 +500,19 @@ driverGoTests
       "a stub registry row must yield drivers-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
     pkgs.runCommand "drivers-go-test-stub-row-yields-derivation" { } "touch $out";
 
+  # A backend registry row yields its per-backend go test derivation with no
+  # other edit (issue #5637); attr names only, as for the Drivers.
+  backends-go-test-stub-row-yields-derivation =
+    let
+      names = builtins.attrNames (backendGoTestsFor {
+        files = ../../cmd/launcher;
+        names = backendNames ++ [ "stub" ];
+      });
+    in
+    assert pkgs.lib.assertMsg (builtins.elem "backends-stub-go-test" names)
+      "a stub registry row must yield backends-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
+    pkgs.runCommand "backends-go-test-stub-row-yields-derivation" { } "touch $out";
+
   # Editing one Driver leaves every other Driver's go test derivation path, and
   # the core launcher-go-test's, unchanged (issues #5508, #5545): a vendor tree
   # or source shared across them would move them all. Each registry Driver in
@@ -448,6 +546,38 @@ driverGoTests
     in
     assert builtins.all independent driverNames;
     pkgs.runCommand "drivers-go-test-independent" { } "touch $out";
+
+  # No backend's go test source holds another backend's directory, bar the git
+  # backend's for `local` and forgejo (issue #5637). A fileset check, not the
+  # drvPath comparison the Drivers use: coreFiles strips no backend, so a
+  # backend edit moves every backend's vendor drvPath. The sensitivity assert
+  # keeps it from passing vacuously.
+  backends-go-test-independent =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      held =
+        name: other:
+        fs.toList (
+          fs.intersection (fs.unions (backendGoTestSharedFor name)) (internalDir + "/forge/${other}")
+        );
+      allowed = name: other: other == "git" && builtins.elem name gitBackedBackends;
+      leaks = concatStringsSep ", " (
+        builtins.concatMap (
+          name:
+          builtins.concatMap (
+            other:
+            pkgs.lib.optional (
+              other != name && !allowed name other && held name other != [ ]
+            ) "${name} holds ${other}"
+          ) backendNames
+        ) backendNames
+      );
+    in
+    assert assertMsg (
+      held "local" "git" != [ ]
+    ) "local's go test source no longer holds the git backend; the check is inert";
+    assert assertMsg (leaks == "") "backend go test sources hold sibling backends: ${leaks}";
+    pkgs.runCommand "backends-go-test-independent" { } "touch $out";
 
   # Seam tests (issue #4280): the integration-tagged packages run against the
   # rendered fixtures the bats harness produces, handed over via
