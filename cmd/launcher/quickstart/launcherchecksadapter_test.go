@@ -254,10 +254,14 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := forgejoAnswers()
 			tc.mutate(&a)
-			for _, row := range []string{"issue-tracker-config", "code-forge-config"} {
-				_, err := launcherRow(t, a, "forgejo", row).Probe()
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Errorf("%s Probe() = %v, want an error mentioning %s", row, err, tc.wantErr)
+			for _, r := range []struct{ row, knob, other string }{
+				{"issue-tracker-config", "ISSUE_TRACKER", "CODE_FORGE"},
+				{"code-forge-config", "CODE_FORGE", "ISSUE_TRACKER"},
+			} {
+				_, err := launcherRow(t, a, "forgejo", r.row).Probe()
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), r.knob+"=forgejo") ||
+					strings.Contains(err.Error(), r.other) {
+					t.Errorf("%s Probe() = %v, want an error mentioning %s and %s=forgejo, not %s", r.row, err, tc.wantErr, r.knob, r.other)
 				}
 			}
 		})

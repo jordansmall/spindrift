@@ -145,10 +145,10 @@ var backendRows = []backendRow{
 		Descriptor: backend.Forgejo,
 
 		validateTracker: func(c config) error {
-			return forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken)
+			return forgejo.ValidateForgejoEnv("ISSUE_TRACKER", c.forgejoBaseURL, c.forgejoToken)
 		},
 		validateCodeForge: func(c config) error {
-			return forgejo.ValidateForgejoEnv(c.forgejoBaseURL, c.forgejoToken)
+			return forgejo.ValidateForgejoEnv("CODE_FORGE", c.forgejoBaseURL, c.forgejoToken)
 		},
 
 		newIssueTracker: func(c config) forge.IssueTracker {

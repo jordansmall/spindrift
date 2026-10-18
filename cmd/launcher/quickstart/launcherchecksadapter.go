@@ -56,11 +56,12 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 			// backend declares no validator or reads a knob the wizard never
 			// collects, so its row checks axis membership only.
 			if name == backend.Forgejo.Name {
-				validateForgejo := func() error {
-					return forgejo.ValidateForgejoEnv(a.tracker.forgejoBaseURL, a.token)
+				b.ValidateTracker = func() error {
+					return forgejo.ValidateForgejoEnv("ISSUE_TRACKER", a.tracker.forgejoBaseURL, a.token)
 				}
-				b.ValidateTracker = validateForgejo
-				b.ValidateCodeForge = validateForgejo
+				b.ValidateCodeForge = func() error {
+					return forgejo.ValidateForgejoEnv("CODE_FORGE", a.tracker.forgejoBaseURL, a.token)
+				}
 			}
 			return b, true
 		},
