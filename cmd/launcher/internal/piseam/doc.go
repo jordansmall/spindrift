@@ -10,4 +10,9 @@
 // <dir>/<TestName>.jsonl (subtest slashes become "_"; a later run in the same
 // test is <TestName>.<n>.jsonl), which is how Pass logs for the driver corpus are
 // captured from the exact locked version.
+//
+// The hook-bridge tests run the bridge extension against the baked hooks:
+// SPINDRIFT_PI_BRIDGE and SPINDRIFT_PI_HOOKS_DIR name agent/pi-hook-bridge.js
+// and the hooks directory, defaulting to the repo's own agent/ directory. The
+// hooks parse their input with jq, so a local run needs jq on PATH.
 package piseam

@@ -438,7 +438,8 @@ driverGoTests
   # Seam tests (issue #4280): the integration-tagged packages run against the
   # rendered fixtures the bats harness produces, handed over via
   # SPINDRIFT_SEAM_FIXTURES_DIR since nix isn't callable in the sandbox; the
-  # locked pi reaches the piseam tests the same way, via SPINDRIFT_PI_BIN. The
+  # locked pi, its hook bridge and the baked hooks reach the piseam tests the
+  # same way, via SPINDRIFT_PI_BIN, _BRIDGE and _HOOKS_DIR. The
   # other integration tests self-skip without nix/bwrap/podman/docker. The
   # package list is derived from the tree, so a new tagged file is picked up.
   launcher-go-seam-test =
@@ -447,9 +448,15 @@ driverGoTests
         nativeBuildInputs = [
           pkgs.go
           pkgs.git
+          # The hook bridge's hooks parse their input with jq.
+          pkgs.jq
         ];
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
         SPINDRIFT_PI_BIN = "${pkgs.pi-coding-agent}/bin/pi";
+        # Handed in because only cmd/launcher is copied below; the hooks carry
+        # store-pinned shebangs, as the sandbox has no /usr/bin/env.
+        SPINDRIFT_PI_BRIDGE = ../../agent/pi-hook-bridge.js;
+        SPINDRIFT_PI_HOOKS_DIR = import ../../lib/agent-hooks.nix pkgs;
       }
       ''
         mkdir -p src/cmd

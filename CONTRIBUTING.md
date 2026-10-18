@@ -106,6 +106,13 @@ describes:
 SPINDRIFT_PI_CAPTURE_DIR=$(mktemp -d) go test -tags integration ./internal/piseam/
 ```
 
+The hook-bridge tests (issue #5482) run `agent/pi-hook-bridge.js` against the
+repo's own `agent/` hooks by default; `SPINDRIFT_PI_BRIDGE` and
+`SPINDRIFT_PI_HOOKS_DIR` point them at another bridge file or hooks directory,
+which `launcher-go-seam-test` sets to the store-pinned copies. The hooks parse
+their input with `jq`, so a local `go test -tags integration` run needs `jq` on
+`PATH`.
+
 The dogfood Box also bakes the upstream [`caveman`
 skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
 in-box as `/caveman`. It compresses agent narration ~65% in output tokens
