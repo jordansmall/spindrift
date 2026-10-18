@@ -379,12 +379,14 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The pi Driver's Harness: the pi roster bakes and the
-  # session-cache-mountpoint-baked-pi image check (issue #5481) share it.
+  # The pi Driver's Harness: the pi roster bakes, the
+  # session-cache-mountpoint-baked-pi image check (issue #5481), and the
+  # pi-hook-bridge image checks (issue #5482) share it.
   piHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     driver = "pi";
     packages = p: [ p.hello ];
+    # pi model ids are `<provider>/<model>`, like opencode's.
     defaults = opencodeNamespacedDefaults;
   };
 
