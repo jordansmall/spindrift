@@ -13,7 +13,7 @@ let
 in
 {
   driver = {
-    doc = "${deprecationNote "perSystem.spindrift.agents.drivers.<name>"} The attribute name is the Driver (see MIGRATING.md). The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" (default) and \"opencode\" are the Drivers today.";
+    doc = "${deprecationNote "perSystem.spindrift.agents.drivers.<name>"} The attribute name is the Driver (see MIGRATING.md). The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" (default), \"opencode\" and \"pi\" are the Drivers today.";
     docType = "string";
     docDefault = "`\"claude\"`";
   };
@@ -145,7 +145,7 @@ in
   drivers = {
     doc = ''
       Drivers built side by side (ADR 0064, issue #5052), keyed by Driver
-      name (a lib/drivers/ registry name: claude, opencode). Each entry
+      name (a lib/drivers/ registry name: claude, opencode, pi). Each entry
       holds only the Driver-valued settings, at the same agents-relative
       paths as their top-level spelling: models.default, models.effort,
       models.roster, models.byName, the per-agent models.* overrides, and

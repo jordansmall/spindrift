@@ -103,7 +103,7 @@
   imageAttrName ? (if runtime == "bwrap" then "agent-closure" else "agent-image"),
   # The agent CLI Driver (ADR 0009, issues #261/#262): selects one entry from
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
-  # to the Go launcher as DRIVER (host-side half). "claude" and "opencode".
+  # to the Go launcher as DRIVER (host-side half). "claude", "opencode" and "pi".
   driver ? "claude",
   # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
   # issue #5053): the wrapper then layers harness.<driver>.env over harness.env.

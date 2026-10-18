@@ -954,7 +954,7 @@ should retier the reviewer last, not first.
 Each profile states an effort *intent*, not a level, because the two
 Drivers don't share an effort vocabulary and spindrift normalizes neither
 value (claude's `--effort` ladder of `low`/`medium`/`high`/`xhigh`/`max`,
-opencode's provider-specific `--variant` set) — see the per-entry `effort`
+opencode's provider-specific `--variant` set, pi's `--thinking` levels) — see the per-entry `effort`
 pass-through described earlier in this section.
 
 ##### Default models
@@ -973,7 +973,7 @@ pass-through described earlier in this section.
 
 `perSystem.spindrift.agents.drivers` builds more than one Driver from a single
 flake, keyed by Driver name (a `lib/drivers/` registry name: `claude`,
-`opencode`; [ADR 0064](adr/0064-a-consumer-flake-declares-its-drivers-side-by-side.md)).
+`opencode`, `pi`; [ADR 0064](adr/0064-a-consumer-flake-declares-its-drivers-side-by-side.md)).
 Each entry carries only the settings whose valid values depend on the Driver,
 and everything else (`packages`, `runtime`, `prompt`, ...) stays shared at the
 top level:
@@ -1085,6 +1085,35 @@ With a single Driver (the `agents.driver` shorthand or a one-entry
 `agents.drivers`) no Driver file is read, even if present, and nothing warns.
 A Daemon's child dispatches re-run the Daemon's `DAEMON_APP`, which re-sources both files,
 so a child of a multi-Driver Daemon prints the warning too.
+
+#### The pi Driver
+
+`pi` is the nixpkgs `pi-coding-agent` build (locked at 1.1.0), taken from the
+Consumer's own nixpkgs. Declaring `agents.drivers.pi` publishes `.#pi`,
+`.#pi-daemon` and the `spindrift-pi` image. The Box runs
+`pi --print --mode json --no-approve --model <provider>/<model>`, with
+`EFFORT` passed to `--thinking` unnormalised (pi accepts `off`, `minimal`,
+`low`, `medium`, `high`, `xhigh` and `max`). Model ids are
+Provider-namespaced, so the bare-worker gate (issue #5331) and the bare-model
+evaluation failure (issue #5355) apply as they do for opencode.
+
+This first slice is deliberately narrow:
+
+- **No roster.** No scout, worker or Filer subagent is provisioned;
+  `SCOUT_PROVISIONED`, `WORKER_PROVISIONED` and `FILER_ENABLED` bake `false`.
+  Only the reviewer's model and effort are kept, for the orchestrator's review
+  pass.
+- **No session resume.** Every fix pass starts a fresh pi session.
+- **No hooks.** None of claude's tool hooks run under pi.
+- **No credential knob.** The row has no `credentials` rule and there is no
+  `PI_AUTH_CONTENT`; Provider API keys reach pi through the environment, as
+  the Provider's own API key variable.
+
+Baked skills land in pi's agent directory, `/home/agent/.pi/agent/skills`,
+where pi reads them. Under `--no-approve` pi ignores the Target repo's
+project-local `.pi/` config. Heartbeat lines and Dispatch Records report the
+observed model as `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix
+notation, so the effort in force shows next to the model.
 
 #### Authoring a new Driver
 
@@ -1964,6 +1993,8 @@ it drifts from them:
   `CLAUDE_CODE_OAUTH_TOKEN` first, then `ANTHROPIC_API_KEY` only if that
   fetch fails, so an OAuth-only (or API-key-only) vault works; it is an
   error only when both fetches fail.
+- `pi`: no credential rule yet, so nothing is fetched; Provider API keys
+  come from the environment.
 - `opencode`: `OPENCODE_AUTH_CONTENT`. A miss is an error only when `MODEL`
   or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
   `FILER_MODEL`) is `github-copilot/<model>`. When no tier visibly needs it

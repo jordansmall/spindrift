@@ -447,6 +447,25 @@ did not cover.
 
 Full findings and the testing plan live on issue #4945.
 
+## Amendment (issue #5479): the first pi slice
+
+The first `pi` slice registers the Driver, decodes its Pass logs and scrubs
+its corpus, and nothing more. It ships no roster (no scout, worker or Filer
+is provisioned; only the reviewer's model and effort survive, for the review
+pass), no session resume, no hooks and no credential knob; Provider API keys
+come from the environment. The choices above for the subagent extension,
+`--session-id`, the hook bridge and `PI_AUTH_CONTENT` are still the plan, not
+what ships. Two facts changed:
+
+- pi's skills directory is its agent directory, `~/.pi/agent/skills`, not
+  claude's. "Every Driver reads the first Driver's skills directory" was only
+  ever opencode's fact, so that check moved into opencode's own check file
+  (`drivers-opencode-skills-dir-matches-claude`) and `pi` has a check of its
+  own.
+- Heartbeat lines and Dispatch Records report pi's observed model as
+  `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix notation, which
+  is how the effort in force surfaces next to the model.
+
 ## Amendment (issue #5349): opencode corrective resumes continue the pinned session
 
 opencode's session half is no longer a no-op. It cannot pin a session id at

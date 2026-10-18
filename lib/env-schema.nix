@@ -175,7 +175,7 @@ in
   effort = {
     env = "EFFORT";
     group = "agents";
-    doc = "main/coordinator reasoning-effort level for the agent (zero-rebuild runtime switch); pass-through only, no normalization -- the value must be valid for the active Driver: claude accepts low/medium/high/xhigh/max (appended as --effort <level>), opencode's cross-provider variant selector accepts a provider-specific set (appended as --variant <level>); unset emits no argument for either Driver, leaving the Driver's own default effort in place";
+    doc = "main/coordinator reasoning-effort level for the agent (zero-rebuild runtime switch); pass-through only, no normalization -- the value must be valid for the active Driver: claude accepts low/medium/high/xhigh/max (appended as --effort <level>), opencode's cross-provider variant selector accepts a provider-specific set (appended as --variant <level>); pi passes the value to --thinking (off/minimal/low/medium/high/xhigh/max); unset emits no argument for any Driver, leaving the Driver's own default effort in place";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "models.effort";
