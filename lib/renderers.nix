@@ -726,6 +726,7 @@ rec {
         (required "name" "Name")
         (optional "providerNamespacedModels" "ProviderNamespacedModels" false)
         (required "credentials" "Credentials")
+        (optional "authContent" "AuthContent" null)
       ];
       goStrings = items: "[]string{${builtins.concatStringsSep ", " (map builtins.toJSON items)}}";
       # Optional rule keys render only when present, like empty scalar fields.
@@ -739,9 +740,28 @@ rec {
           ++ (if rule ? setupCommand then [ "SetupCommand: ${goStrings rule.setupCommand}" ] else [ ])
         )
         + "},\n";
+      authAPIKeyProviders =
+        m:
+        if m == { } then
+          ""
+        else
+          ", APIKeyProviderFor: map[string]string{"
+          + builtins.concatStringsSep ", " (
+            map (k: "${builtins.toJSON k}: ${builtins.toJSON m.${k}}") (builtins.attrNames m)
+          )
+          + "}";
       fieldLine =
         attr: goName: value:
-        if attr == "credentials" then
+        if attr == "authContent" then
+          (
+            if value == null then
+              ""
+            else
+              "\t${goName}: &AuthContent{Env: ${builtins.toJSON value.env}, OAuthProviders: ${goStrings value.oauthProviders}${
+                authAPIKeyProviders (value.apiKeyProviders or { })
+              }},\n"
+          )
+        else if attr == "credentials" then
           (
             if value == [ ] then
               ""

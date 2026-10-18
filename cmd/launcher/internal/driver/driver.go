@@ -96,12 +96,18 @@ var _ Driver = driverkit.Driver{}
 // default.
 const defaultName = "claude"
 
+// orDefault resolves an empty Driver name to defaultName.
+func orDefault(name string) string {
+	if name == "" {
+		return defaultName
+	}
+	return name
+}
+
 // New returns the registered Driver strategy for name. An empty name defaults
 // to "claude".
 func New(name string) (Driver, error) {
-	if name == "" {
-		name = defaultName
-	}
+	name = orDefault(name)
 	d, ok := registry[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown DRIVER %q; known drivers: %v", name, Names())
@@ -132,10 +138,7 @@ func ProviderNamespacedModels(name string) bool {
 // generated Descriptor. An empty name defaults to "claude", as New does; ok is
 // false for an unknown Driver.
 func CredentialRules(name string) (rules []CredentialRule, ok bool) {
-	if name == "" {
-		name = defaultName
-	}
-	d, ok := descriptor(name)
+	d, ok := descriptor(orDefault(name))
 	return d.Credentials, ok
 }
 

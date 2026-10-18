@@ -15,6 +15,11 @@ let
   # named environment value to a home-relative file (mode 0600) before the
   # Driver runs, for a CLI with no env-native credential store. assertShape
   # checks it via envFileErrors.
+  # authContent is { env, oauthProviders, apiKeyProviders? }: the env var holds
+  # a Provider-keyed auth store whose OAuth entries preflight limits to
+  # oauthProviders; apiKeyProviders maps an OAuth Provider id to the
+  # differently named Provider its API key is under (string -> string,
+  # default {}). assertShape checks it via authContentErrors.
   # credentials is a list of rules (possibly empty), shape-checked by
   # credentialRuleErrors.
   # configFiles (home-relative path -> content, baked by lib/image.nix) is
@@ -109,6 +114,37 @@ let
           "pathRelative must be a non-empty relative path with no whitespace and no empty, \".\" or \"..\" segment (so no leading, trailing or doubled \"/\")"
       ++ lib.optional (unknownKeys != [ ]) "unknown key(s): ${lib.concatStringsSep ", " unknownKeys}";
 
+  authContentKeys = [
+    "env"
+    "oauthProviders"
+    "apiKeyProviders"
+  ];
+
+  authContentErrors =
+    entry:
+    if !builtins.isAttrs entry then
+      [ "must be an attribute set, got a ${builtins.typeOf entry}" ]
+    else
+      let
+        unknownKeys = lib.filter (k: !(lib.elem k authContentKeys)) (builtins.attrNames entry);
+      in
+      lib.optional (
+        !(entry ? env && builtins.isString entry.env && entry.env != "")
+      ) "env must be a non-empty string"
+      ++ lib.optional (
+        !(entry ? oauthProviders && isNonEmptyStringList entry.oauthProviders)
+      ) "oauthProviders must be a non-empty list of non-empty strings"
+      ++ lib.optional (
+        entry ? apiKeyProviders
+        && !(
+          builtins.isAttrs entry.apiKeyProviders
+          && lib.all (
+            k: k != "" && builtins.isString entry.apiKeyProviders.${k} && entry.apiKeyProviders.${k} != ""
+          ) (builtins.attrNames entry.apiKeyProviders)
+        )
+      ) "apiKeyProviders must be an attribute set of non-empty strings to non-empty strings"
+      ++ lib.optional (unknownKeys != [ ]) "unknown key(s): ${lib.concatStringsSep ", " unknownKeys}";
+
   # Names both the Driver and every missing attribute, so an incomplete entry
   # dies at build time rather than in a live Box.
   assertShape =
@@ -150,6 +186,28 @@ let
               map (e: "Driver '${driverName}' has an invalid envFiles[${toString i}]: ${e}") (envFileErrors f)
             ) entry.envFiles
           );
+      # Tolerates malformed envFiles/credentials (those have their own errors)
+      # so the drift check never throws a type error.
+      declaredEnvs =
+        let
+          attrsOf = v: if builtins.isList v then lib.filter builtins.isAttrs v else [ ];
+          envFileEnvs = map (f: f.env or null) (attrsOf (entry.envFiles or [ ]));
+          credentialEnvs = lib.concatMap (r: if builtins.isList (r.env or null) then r.env else [ ]) (
+            attrsOf (entry.credentials or [ ])
+          );
+        in
+        envFileEnvs ++ credentialEnvs;
+      authContentErrs =
+        if !(entry ? authContent) then
+          [ ]
+        else
+          let
+            shapeErrors = authContentErrors entry.authContent;
+          in
+          map (e: "Driver '${driverName}' has an invalid authContent: ${e}") shapeErrors
+          ++
+            lib.optional (shapeErrors == [ ] && !(lib.elem entry.authContent.env declaredEnvs))
+              "Driver '${driverName}' authContent.env '${entry.authContent.env}' is not the env of any envFiles entry or credentials rule";
       errors =
         lib.optional (
           missing != [ ]
@@ -161,6 +219,7 @@ let
             "a ${builtins.typeOf entry.sessionCacheDirRelative}"
         }"
         ++ envFilesErrors
+        ++ authContentErrs
         ++ lib.optionals (!(lib.elem "credentials" missing)) credentialsErrors;
     in
     if errors != [ ] then throw (lib.concatStringsSep "; " errors) else entry;

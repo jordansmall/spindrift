@@ -580,11 +580,35 @@ func TestRequiredKnobChecks_DriverCredentials_PiCopilotAuthContent(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "PI_AUTH_CONTENT") {
 		t.Errorf("driver-credentials Probe() = %v, want the PI_AUTH_CONTENT remedy", err)
 	}
-	if err := piCredentialProbe(t, []string{"github-copilot/gpt-5"}, map[string]string{"PI_AUTH_CONTENT": `{"github-copilot":{}}`}); err != nil {
+	if err := piCredentialProbe(t, []string{"github-copilot/gpt-5"}, map[string]string{"PI_AUTH_CONTENT": piCopilotAuth}); err != nil {
 		t.Errorf("driver-credentials Probe() unexpected error with PI_AUTH_CONTENT set: %v", err)
 	}
 	// A Provider API key does not stand in for the OAuth auth store.
 	if err := piCredentialProbe(t, []string{"github-copilot/gpt-5"}, map[string]string{"OPENAI_API_KEY": "sk-x"}); err == nil {
 		t.Error("driver-credentials Probe() passed with only OPENAI_API_KEY for a github-copilot model")
+	}
+}
+
+const piCopilotAuth = `{"github-copilot":{"type":"oauth","access":"a","refresh":"r","expires":1}}`
+
+func TestRequiredKnobChecks_DriverCredentials_PiAuthContentRejectsOtherOAuth(t *testing.T) {
+	auth := `{"github-copilot":{"type":"oauth","access":"a","refresh":"r","expires":1},"anthropic":{"type":"oauth","access":"SECRET-A","refresh":"SECRET-R","expires":1}}`
+	for _, models := range [][]string{{"github-copilot/gpt-5"}, {"openai/gpt-5"}} {
+		creds := map[string]string{"PI_AUTH_CONTENT": auth, "OPENAI_API_KEY": "sk-x"}
+		err := piCredentialProbe(t, models, creds)
+		if err == nil {
+			t.Fatalf("models %v: want rejection of the anthropic OAuth entry, got nil", models)
+		}
+		for _, want := range []string{"anthropic", "ANTHROPIC_API_KEY"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("models %v: error %q lacks %q", models, err, want)
+			}
+		}
+		if strings.Contains(err.Error(), "SECRET") {
+			t.Errorf("error echoes credential content: %q", err)
+		}
+	}
+	if err := piCredentialProbe(t, []string{"github-copilot/gpt-5"}, map[string]string{"PI_AUTH_CONTENT": piCopilotAuth}); err != nil {
+		t.Errorf("copilot-only OAuth entry rejected: %v", err)
 	}
 }

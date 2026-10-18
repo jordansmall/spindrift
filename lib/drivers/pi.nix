@@ -64,6 +64,22 @@
       }
     ];
 
+  # PI_AUTH_CONTENT may hold OAuth entries only for these Providers. pi
+  # refreshes an OAuth token inside the Box; github-copilot's refresh token is
+  # a stable GitHub token, so that never invalidates the host's copy, while a
+  # Provider that rotates refresh tokens would have the Box burn the host's
+  # credential. Preflight rejects any other OAuth entry (use that Provider's
+  # API key instead).
+  authContent = {
+    env = "PI_AUTH_CONTENT";
+    oauthProviders = [ "github-copilot" ];
+    # pi's ChatGPT-subscription OAuth id differs from the Provider its API key
+    # is under; this lets preflight name the variable to set instead.
+    apiKeyProviders = {
+      "openai-codex" = "openai";
+    };
+  };
+
   # pi model ids are `<provider>/<model>`, so the bare-worker gate (issue
   # #5331) and the bare-model eval failure (issue #5355) apply as for opencode.
   providerNamespacedModels = true;
