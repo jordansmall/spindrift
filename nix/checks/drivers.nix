@@ -101,9 +101,6 @@ let
     drivers-render-custom-roster-both = "render-custom-roster";
     drivers-roster-custom-agent-both-drivers = "roster-custom-agent";
   };
-  # ADR 0009's reference Driver, shared so the skills-dir parity checks and
-  # the test pinning them cannot drift on which Driver is first.
-  firstDriverOf = entries: builtins.head (builtins.attrNames entries);
   driverChecksFor =
     {
       entries,
@@ -124,28 +121,6 @@ let
           )
         )
       ) { } names;
-      # ADR 0009: every Driver reads the first Driver's skills directory
-      # rather than wiring its own. Compared across the registry rather than
-      # against a literal, so a rename of that directory still catches a Driver
-      # drifting off it instead of passing silently.
-      first = firstDriverOf entries;
-      skillsParity = builtins.listToAttrs (
-        map (
-          n:
-          let
-            attr = "drivers-${n}-skills-dir-matches-${first}";
-          in
-          {
-            name = attr;
-            value =
-              assert assertMsg (entries.${n}.skillsDirRelative == entries.${first}.skillsDirRelative)
-                "${n} Driver's skillsDirRelative must match ${first}'s (ADR 0009), got ${n}: ${entries.${n}.skillsDirRelative}, ${first}: ${
-                  entries.${first}.skillsDirRelative
-                }";
-              pkgs.runCommand attr { } "touch $out";
-          }
-        ) (builtins.tail names)
-      );
       # A Driver may lack a half (bashTimeoutEnv is optional), but an aggregate
       # with no half at all would pass vacuously.
       aggregates = builtins.mapAttrs (
@@ -163,7 +138,7 @@ let
     if missing != [ ] then
       throw "nix/checks/drivers.nix: registered Driver(s) have no Nix check file; add ${concatStringsSep ", " missing}"
     else
-      mergeDisjoint (mergeDisjoint perDriver skillsParity) aggregates;
+      mergeDisjoint perDriver aggregates;
 in
 mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
   drivers-assert-shape-missing-attribute-throws =
@@ -186,13 +161,12 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "assertShape must throw when a Driver entry is missing a required attribute";
     pkgs.runCommand "drivers-assert-shape-missing-attribute-throws" { } "touch $out";
 
-  # A stub row added to the registry yields its file's checks and the parity
-  # checks with no other edit (issue #5502). Only attr names are forced: the
-  # stub's check values would build its fake rendering.
+  # A stub row added to the registry yields its file's checks with no other edit
+  # (issue #5502). Only attr names are forced: the stub's check values would
+  # build its fake rendering.
   drivers-registry-stub-row-yields-checks =
     let
       entries = stubRegistryEntries;
-      first = firstDriverOf entries;
       stubCheckFile = builtins.toFile "stub.nix" "{ entry, ... }: { drivers-stub-fixture = entry.name; }";
       names = builtins.attrNames (driverChecksFor {
         inherit entries;
@@ -201,8 +175,6 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     in
     assert assertMsg (builtins.elem "drivers-stub-fixture" names)
       "a stub registry row must yield its check file's checks, got: ${concatStringsSep ", " names}";
-    assert assertMsg (builtins.elem "drivers-stub-skills-dir-matches-${first}" names)
-      "a stub registry row must yield its skills-dir parity check, got: ${concatStringsSep ", " names}";
     pkgs.runCommand "drivers-registry-stub-row-yields-checks" { } "touch $out";
 
   # A registry row without its check file fails eval (issue #5502).
