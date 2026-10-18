@@ -1819,9 +1819,10 @@ func TestPoolSnapshotState(t *testing.T) {
 					revisions: []string{"rev1"},
 					onResolve: func(ctx context.Context, call int) error {
 						once.Do(func() {
-							// cancel() before the read (see TestAwaitWindowSkipsPublishOnNonTransitionIteration's
-							// r.onResolve): a readStatus failure must still
-							// unblock Loop rather than Goexit past the cancel.
+							// cancel() before the read (see
+							// TestAwaitWindowPublishesOnEveryIteration's r.onResolve):
+							// a readStatus failure must still unblock Loop rather
+							// than Goexit past the cancel.
 							cancel()
 							st = readStatus(t, dir)
 						})
