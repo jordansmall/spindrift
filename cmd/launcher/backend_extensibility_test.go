@@ -97,9 +97,9 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
 	}
 
-	// Do not re-add a read-only-token-gate assertion here. Issue #2942 retired
-	// it: gateRegistry holds fixed github/forgejo entries, so a third backend's
-	// gate was only ever reported, never enforced at dispatch.
+	// Do not re-add a read-only-token-gate assertion here: this row carries no
+	// readOnlyTokenGate closure, so it yields no gate. A row that sets one gets
+	// read-only-token-<Name> from readOnlyTokenGates (launchgates_test.go).
 }
 
 // TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend pins issue

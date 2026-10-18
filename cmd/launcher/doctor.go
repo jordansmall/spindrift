@@ -168,8 +168,8 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {
 		return err
 	}
-	// The two token gates are Applicable only under read-only (issue #2942), so
-	// walkSplitGateRegistry prints nothing for them here. Without this line
+	// The read-only token gates are Applicable only under read-only (issue
+	// #2942), so walkSplitGateRegistry prints nothing for them here. Without this line
 	// read-write would never mention the token gate. It stays doctor-only:
 	// printing it from gatedContext would add stdout noise to preview and
 	// bootstrap, which must stay quiet.

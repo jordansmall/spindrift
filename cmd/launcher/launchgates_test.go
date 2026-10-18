@@ -465,3 +465,57 @@ func gateNames(gates []launchGate) []string {
 	}
 	return names
 }
+
+// A row carrying a readOnlyTokenGate yields one network gate named for it, and
+// a row without one yields none, so no launch gate names a backend by hand.
+func TestReadOnlyTokenGates_OneGatePerRowWithClosure(t *testing.T) {
+	var calls int
+	fake := backendRow{
+		Descriptor: backend.Descriptor{Name: "fake", ValidAsCodeForge: true, TokenEnvVar: "FAKE_TOKEN"},
+		readOnlyTokenGate: func(config, io.Writer) error {
+			calls++
+			return nil
+		},
+	}
+	plain := backendRow{Descriptor: backend.Descriptor{Name: "plain", ValidAsCodeForge: true, TokenEnvVar: "PLAIN_TOKEN"}}
+	rows := []backendRow{plain, fake}
+
+	gates := readOnlyTokenGates(rows)
+	if len(gates) != 1 {
+		t.Fatalf("readOnlyTokenGates() = %v, want exactly one gate", gateNames(gates))
+	}
+	g := gates[0]
+	if g.Name != "read-only-token-fake" {
+		t.Errorf("Name = %q, want read-only-token-fake", g.Name)
+	}
+	if !g.Network {
+		t.Error("Network = false, want true")
+	}
+	if err := g.Check(config{}, io.Discard); err != nil || calls != 1 {
+		t.Errorf("Check() err = %v, calls = %d, want the row's closure invoked once", err, calls)
+	}
+
+	original := backendRows
+	backendRows = append(append([]backendRow{}, original...), fake, plain)
+	defer func() { backendRows = original }()
+
+	c := minimalValidConfig()
+	c.codeForge = "fake"
+	c.issueTracker = "local"
+	c.boxForgeAndIssueAccess = "read-only"
+	if !g.Applicable(c) {
+		t.Error("Applicable under read-only with the fake forge = false, want true")
+	}
+	c.boxForgeAndIssueAccess = "read-write"
+	if g.Applicable(c) {
+		t.Error("Applicable under read-write = true, want false")
+	}
+}
+
+func TestGateRegistry_TokenGatesComeFromBackendRowsInRowOrder(t *testing.T) {
+	_, network := splitGateRegistryByNetwork(gateRegistry)
+	want := []string{"read-only-token-github", "read-only-token-forgejo"}
+	if got := gateNames(network); !reflect.DeepEqual(got, want) {
+		t.Errorf("network gates = %v, want %v", got, want)
+	}
+}
