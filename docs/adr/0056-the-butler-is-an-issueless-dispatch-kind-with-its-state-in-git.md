@@ -185,3 +185,39 @@ only.** It holds claim and done state — `state.json`'s `lastSwept`, cursor,
 filed and promoted findings, token usage — and nothing else; scanning the
 Target checkout a run sweeps is a separate concern the Ledger never owns.
 Status moves to accepted.
+
+## Amendment (2026-10-18 architecture review): the kind descriptor is rendered from Nix rows
+
+The #3996 amendment made every kind fact a descriptor axis. The descriptor
+itself stayed hand-written Go, and the Nix side recovers the kind facts it
+needs from that Go:
+
+- it regex-extracts `FindingLabel:` and `PatchLabel:` from
+  `dispatchkind.go`'s source;
+- `Statuses` is a hand copy of `prompt-contract.nix`;
+- each kind's prompt is a separate `mkHarness` parameter plus a separate
+  `cp` line;
+- both kind-axis guard tests list `work|research|butler` by hand, which
+  already misses `recover`.
+
+Every other registry in the repo, the Drivers, backends, Chores and labels,
+is a Nix row rendered into Go.
+
+Each kind is now one row in `lib/dispatch-kinds/`, and regen renders the Go
+descriptor from the rows. The descriptor is all data, so nothing is lost.
+
+- **The rows feed the Nix side.** `image.nix` and `mkHarness` map over the
+  rows' prompt files. The Consumer `*Prompt` parameters stay versioned
+  surface, and each feeds its row.
+- **Statuses come from one place.** They are read from `prompt-contract.nix`.
+- **The guards are generated.** Their kind-name patterns are built from the
+  registry. The Go guard bans comparisons on every tag axis, not only Settle
+  and Labels. Callers that named one kind's literal walk `All` instead.
+
+The tag axes stay enums whose behaviour lives in the package that owns them:
+settle strategies in settle, demand sources in the daemon. A tag value only
+one kind uses is not a disguised name switch. Moving its behaviour into a
+function on the kind would pull those packages into `dispatchkind`, which
+moves the complexity rather than concentrating it.
+
+The per-kind workflow YAML is out of scope.
