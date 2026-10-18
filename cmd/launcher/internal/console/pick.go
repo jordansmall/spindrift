@@ -53,7 +53,7 @@ type PickState int
 
 const (
 	// PickQueued is promoted to Dispatchable but not yet claimed. It holds
-	// here while the single launch slot is occupied, and Unpick can still
+	// here while the session's parallelism cap is full, and Unpick can still
 	// remove it.
 	PickQueued PickState = iota
 	// PickClaiming has an atomic Dispatchable to InProgress claim in flight.
