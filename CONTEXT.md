@@ -803,9 +803,23 @@ promotes or patches, and a PR closing one of its findings always merges
 by hand.
 _Avoid_: retro, retrospective, self-improvement loop, tuner.
 
+**Scope source**:
+What a [[Chore]] sweeps and what its Ledger cursor counts (ADR 0070): the
+tree, with a commit for a cursor, or the Dispatch Records store, with a
+[[Record ID]]. A Chore's catalog row names its scope source. A
+Consumer-declared Chore is always tree-scoped. _Avoid_: chore mode, chore
+type, scope (alone: that is the slice one sweep covers).
+
+**Records digest**:
+The host-rendered input a records-scoped [[Chore]] argues from: a
+size-capped summary of the Dispatch Records past its cursor, with anchors
+its findings cite and the host checks at settle (ADR 0070). Each such Chore
+brings its own; the [[Tuning digest]] is the first. _Avoid_: digest
+(alone), report, records dump.
+
 **Tuning digest**:
-The fixed, size-capped summary of Dispatch Records the host renders for
-one [[Tuning]] sweep: the new window against a trailing baseline, with the
+The [[Tuning]] Chore's [[Records digest]]: the fixed, size-capped summary of
+Dispatch Records the host renders for one sweep: the new window against a trailing baseline, with the
 per-role cost and outcome table, splits, outliers, prior tuning findings,
 and fenced verdict evidence. Every row carries its sample size and an
 anchor that findings cite. Stored host-side, it is never pushed with the
