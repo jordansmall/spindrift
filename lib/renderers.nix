@@ -8,7 +8,7 @@ let
   cliFlags = import ./cli-flags.nix;
   skillNamePattern = (import ./skills.nix).namePattern;
   hasShort = e: (e.short or null) != null;
-  opencodePreToolUse = builtins.filter (r: r ? opencode && r.event == "PreToolUse");
+  preToolUseRows = column: builtins.filter (r: r ? ${column} && r.event == "PreToolUse");
   inherit (builtinsCompat) concatStrings mapAttrsToList oneLine;
   filterAttrs =
     pred: attrs:
@@ -874,29 +874,42 @@ rec {
       ) bakedSkills
     );
 
-  # agent/opencode-guards.js's generated HOOKS and SUMMARY_HOOK (issue #5408):
-  # the opencode rows of lib/bash-hooks.nix (whose opencodeHooks validates them),
-  # HOOKS in table order because each hook sees the args the earlier ones
-  # rewrote.
-  renderOpencodeHooksJs =
-    rows:
+  # The HOOKS array and SUMMARY_HOOK line shared by both generated hook files:
+  # `column`'s PreToolUse rows in table order (each hook sees the args the
+  # earlier ones rewrote), `fields` rendering one row's extra object members.
+  renderHooksJs =
+    column: fields: rows:
     "const HOOKS = [\n"
     + concatStrings (
       map (
-        r: "  { script: \"${r.script}\", rewrites: ${if r.opencode.rewrites then "true" else "false"} },\n"
-      ) (opencodePreToolUse rows)
+        r:
+        "  { script: \"${r.script}\", ${fields r}rewrites: ${
+            if r.${column}.rewrites then "true" else "false"
+          } },\n"
+      ) (preToolUseRows column rows)
     )
     + "];\n"
     + "const SUMMARY_HOOK = \"${
       (builtins.head (builtins.filter (r: r.event == "PostToolUse") rows)).script
     }\";\n";
 
+  # agent/opencode-guards.js's generated HOOKS and SUMMARY_HOOK (issue #5408):
+  # the opencode rows of lib/bash-hooks.nix (whose opencodeHooks validates them).
+  renderOpencodeHooksJs = renderHooksJs "opencode" (_: "");
+
+  # agent/pi-hook-bridge.js's generated HOOKS and SUMMARY_HOOK (issue #5482):
+  # the pi rows of lib/bash-hooks.nix (whose piHooks validates them). `tools`
+  # are the row's claude matchers named as pi names them.
+  renderPiHooksJs = renderHooksJs "pi" (
+    r: "tools: [${builtins.concatStringsSep ", " (map (m: "\"${toLower m}\"") r.matchers)}], "
+  );
+
   # docs/reference.md's opencode tool.execute.before run order (issue #5408):
   # the same HOOKS as renderOpencodeHooksJs, as a numbered list.
   renderOpencodeHookOrderDoc =
     rows:
     let
-      before = opencodePreToolUse rows;
+      before = preToolUseRows "opencode" rows;
     in
     concatStrings (
       builtins.genList (i: "${toString (i + 1)}. `${(builtins.elemAt before i).script}`\n") (

@@ -207,6 +207,15 @@ map assertMarkerShape [
     generated = renderers.renderOpencodeHooksJs bashHooks.opencodeHooks;
   }
   {
+    name = "pi-hook-bridge-hooks-gen";
+    docPath = "agent/pi-hook-bridge.js";
+    blockName = "PI HOOKS";
+    sourceDesc = "lib/bash-hooks.nix";
+    beginMarker = "// BEGIN GENERATED PI HOOKS -- nix run .#regen -- DO NOT EDIT\n";
+    endMarker = "// END GENERATED PI HOOKS";
+    generated = renderers.renderPiHooksJs bashHooks.piHooks;
+  }
+  {
     name = "opencode-guards-hook-order-doc";
     docPath = "docs/reference.md";
     blockName = "OPENCODE HOOK ORDER";
