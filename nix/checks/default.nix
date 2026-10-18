@@ -219,8 +219,9 @@ let
   # A driver check file is attributed to owner `drivers`: it enters the build
   # only through drivers.nix (it needs that module's entry/driverRegistry
   # args), so it cannot be named in docsCheckModules itself.
-  driverModule = text: {
+  driverModule = name: text: {
     owner = "drivers";
+    key = "drivers/${name}";
     dir = driversRel;
     inherit text;
   };
@@ -234,7 +235,9 @@ let
           dir = checksRel;
           text = builtins.readFile (./. + "/${f}");
         }) (nixFilesIn ./.)
-        ++ map (f: driverModule (builtins.readFile (driversPath + "/${f}"))) driverFiles;
+        ++ map (
+          f: driverModule (pkgs.lib.removeSuffix ".nix" f) (builtins.readFile (driversPath + "/${f}"))
+        ) driverFiles;
     in
     # The controls below feed hand-made records past scannedModules, so this is
     # the only thing that notices the driver enumeration being dropped.
@@ -252,6 +255,7 @@ let
 
   # Built, not spelled out: a literal path would make this file a reader.
   dotDotPath = n: pkgs.lib.concatStrings (pkgs.lib.replicate n "../");
+  dotPath = f: "." + "/${f}";
 
   # Owners (unique) of modules in `mods` that read a docs file but are not
   # in `listed`.
@@ -286,18 +290,19 @@ let
     assert assertMsg (stale == [ ])
       "docsCheckModules/docsGuardExemptModules names a module absent from nix/checks: ${concatStringsSep ", " stale}";
     assert assertMsg (
-      docsReadersMissing [ ] [ (driverModule "${dotDotPath 3}docs/x.md") ] == [ "drivers" ]
+      docsReadersMissing [ ] [ (driverModule "x" "${dotDotPath 3}docs/x.md") ] == [ "drivers" ]
     ) "negative control: a docs read from nix/checks/drivers/ must flag owner `drivers`";
     assert assertMsg (
-      docsReadersMissing [ ] [ (driverModule "${dotDotPath 2}docs/x.md") ] == [ ]
+      docsReadersMissing [ ] [ (driverModule "x" "${dotDotPath 2}docs/x.md") ] == [ ]
     ) "depth control: a two-level docs read from nix/checks/drivers/ is nix/docs, not the repo's";
     pkgs.runCommand "checks-docs-covers-docs-readers" { } "touch $out";
 
   # Coverage guard (issue #5158): a comment-only .go/.nix edit takes the docs
   # lane, so each such file a module outside docsCheckModules names (other
   # than to import it) must match .github/scripts/ci-comment-readers, and each
-  # named source tree must be reviewed into commentTreeReaders. Blind spots:
-  # as checks-docs-covers-docs-readers.
+  # named source tree must be reviewed into commentTreeReaders (a Driver check
+  # file's reads key under `drivers/<name>:`). Blind spots: as
+  # checks-docs-covers-docs-readers.
   commentTreeReaders = {
     "bats:.github/scripts" = "the classifier suite builds ci-go-tokens.go";
     "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
@@ -315,14 +320,15 @@ let
     "skills:nix/checks" = "a path value the skills validator must accept";
   };
 
-  ci-comment-readers-cover-checks =
+  # `uncovered` and `unreviewedTrees` (as { m, rel } reads) of the modules in
+  # `mods` whose owner is not in `listed`. `./` resolves against the module's own
+  # directory, and the repo root is `../` per component of it.
+  commentReadersFindings =
+    listed: mods:
     let
       inherit (pkgs.lib)
         any
-        assertMsg
-        attrNames
         concatMap
-        concatStringsSep
         elem
         elemAt
         filter
@@ -340,14 +346,13 @@ let
       );
       covered =
         p: any (g: builtins.match (builtins.replaceStrings [ "." "*" ] [ "\\." ".*" ] g) p != null) globs;
-      refRe = ''(^|[^./A-Za-z0-9_-])(import[[:space:]]+|callPackage[[:space:]]+|imports[[:space:]]*=[[:space:]]*\[[[:space:]]*)?(\.\./\.\./|\./)([A-Za-z0-9_.-][A-Za-z0-9_./-]*)'';
-      modules = filter (m: !(elem m docsCheckModules)) (
-        map (removeSuffix ".nix") (filter (hasSuffix ".nix") (attrNames (builtins.readDir ./.)))
-      );
+      refRe =
+        dir:
+        ''(^|[^./A-Za-z0-9_-])(import[[:space:]]+|callPackage[[:space:]]+|imports[[:space:]]*=[[:space:]]*\[[[:space:]]*)?(${repoRootPrefixRe dir}|\./)([A-Za-z0-9_.-][A-Za-z0-9_./-]*)'';
       relOf =
-        g:
+        dir: g:
         let
-          base = if elemAt g 2 == "./" then "nix/checks" else ".";
+          base = if elemAt g 2 == "./" then dir else ".";
           p = removeSuffix "/" (elemAt g 3);
         in
         if p == "." then
@@ -357,18 +362,12 @@ let
         else
           "${base}/${p}";
       reads =
-        m:
-        map
-          (g: {
-            inherit m;
-            rel = relOf g;
-          })
-          (
-            filter (g: isList g && elemAt g 1 == null) (
-              builtins.split refRe (builtins.readFile (./. + "/${m}.nix"))
-            )
-          );
-      allReads = unique (concatMap reads modules);
+        mod:
+        map (g: {
+          m = mod.key or mod.owner;
+          rel = relOf mod.dir g;
+        }) (filter (g: isList g && elemAt g 1 == null) (builtins.split (refRe mod.dir) mod.text));
+      allReads = unique (concatMap reads (filter (mod: !(elem mod.owner listed)) mods));
       isSource = p: hasSuffix ".go" p || hasSuffix ".nix" p;
       holdsSource =
         rel:
@@ -381,16 +380,37 @@ let
           && pathIsDirectory path
           && any (f: isSource (toString f)) (listFilesRecursive path)
         );
+    in
+    {
       uncovered = filter (r: isSource r.rel && !(covered r.rel)) allReads;
       unreviewedTrees = filter (
         r: !(isSource r.rel) && holdsSource r.rel && !(commentTreeReaders ? "${r.m}:${r.rel}")
       ) allReads;
+    };
+
+  ci-comment-readers-cover-checks =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      inherit (commentReadersFindings docsCheckModules scannedModules) uncovered unreviewedTrees;
       show = rs: concatStringsSep ", " (map (r: "${r.m}:${r.rel}") rs);
+      driverFindings = text: commentReadersFindings [ ] [ (driverModule "x" text) ];
+      driverUncovered = text: show (driverFindings text).uncovered;
     in
     assert assertMsg (uncovered == [ ])
       "nix/checks module(s) outside docsCheckModules read a .go/.nix file that .github/scripts/ci-comment-readers does not match, so a comment edit to it would skip the check: ${show uncovered}";
     assert assertMsg (unreviewedTrees == [ ])
       "nix/checks module(s) outside docsCheckModules name a .go/.nix tree absent from commentTreeReaders in nix/checks/default.nix; list any file in it the module reads as text in .github/scripts/ci-comment-readers, then add the tree: ${show unreviewedTrees}";
+    assert assertMsg
+      (
+        driverUncovered "${dotDotPath 3}cmd/launcher/fixture-uncovered.go"
+        == "drivers/x:cmd/launcher/fixture-uncovered.go"
+      )
+      "negative control: an unmatched .go read from nix/checks/drivers/ must be flagged under `drivers/<name>`";
+    assert assertMsg (
+      driverUncovered (dotPath "x.go") == "drivers/x:nix/checks/drivers/x.go"
+    ) "depth control: a ./ read from nix/checks/drivers/ must resolve against that directory";
+    assert assertMsg (show (driverFindings "${dotDotPath 3}lib").unreviewedTrees == "drivers/x:lib")
+      "negative control: an unlisted source tree named from nix/checks/drivers/ must be flagged under `drivers/<name>`";
     pkgs.runCommand "ci-comment-readers-cover-checks" { } "touch $out";
 
   # Stale-name guard: every linuxOnlyCheckName must name a real source check,
