@@ -1,5 +1,7 @@
-// Package dispatchrecord infers a Dispatch Record from a pass log file left
-// under .spindrift/logs (ADR 0061). It is pure parsing: no store, no CLI.
+// Package dispatchrecord infers Dispatch Records from pass logs under
+// .spindrift/logs (ADR 0061) and stores them in the per-root SQLite database
+// .spindrift/dispatch-records.db, where it also fills their maturity (reverts
+// and churn) and stores tuning snapshots. It has no CLI of its own.
 package dispatchrecord
 
 import (
