@@ -1,0 +1,13 @@
+{
+  "lines": [
+    "#42 · working on it",
+    "#42 ○ pass 1 (implement) started",
+    "#42 · 3 turns"
+  ],
+  "onModel": [
+    {
+      "model": "fake-model",
+      "role": ""
+    }
+  ]
+}

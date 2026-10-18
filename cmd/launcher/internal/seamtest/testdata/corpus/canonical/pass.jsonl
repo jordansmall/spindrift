@@ -1,0 +1,12 @@
+{"Kind":"start","MessageID":"m1","Timestamp":1000}
+{"Kind":"text","MessageID":"m1","Timestamp":1001,"Text":"working on it"}
+{"Kind":"reasoning","MessageID":"m1","Timestamp":1002,"Text":"considering the options"}
+{"Kind":"tool_call","MessageID":"m1","Timestamp":1003,"ToolID":"t1","ToolName":"Bash","ToolInput":{"command":"ls"},"ToolTarget":"ls"}
+{"Kind":"tool_result","MessageID":"m2","Timestamp":1004,"ToolID":"t1","ToolName":"Bash","ToolTarget":"ls","ToolOutput":"README.md"}
+{"Kind":"usage","MessageID":"m1","Timestamp":1005,"Model":"fake-model","Tokens":{"Input":10,"Output":20,"CacheRead":30,"CacheWrite5m":40,"CostUSD":0.5}}
+{"Kind":"model","MessageID":"m1","Timestamp":1006,"Model":"fake-model"}
+{"Kind":"effort","Effort":"high"}
+{"Kind":"error","Timestamp":1007,"Text":"tool failed once"}
+{"Kind":"unparsed","Text":"a stray stderr line"}
+{"Kind":"host_op","Timestamp":1008,"HostOp":{"op":"pass_start","pass":1,"role":"implement"}}
+{"Kind":"result","Timestamp":1009,"Text":"STATUS: done","DurationMs":2000,"DurationAPIMs":1500,"NumTurns":3}
