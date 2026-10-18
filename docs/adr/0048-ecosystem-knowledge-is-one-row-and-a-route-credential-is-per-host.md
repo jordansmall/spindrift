@@ -68,3 +68,35 @@ there without a migration.
   convention.
 - The containment scan covers every package that imports the ecosystem
   package plus the launcher's main package.
+
+## Amendment (2026-10-18 architecture review): credential stores stay one table; rows name the stores they read
+
+The decision above put each ecosystem's credential store on its row. The
+code never followed, and the review agreed it should not:
+
+- A store is not one ecosystem's. `npmrc` serves npm, yarn and pnpm.
+- The seven credential sources form the routes file's own grammar. Their
+  order is visible to operators in its errors and in its retired-key
+  renderer.
+
+A parser on npm's row that yarn and pnpm borrow would be the cross-row
+dependency this ADR rules out.
+
+Credential sources therefore stay one table in `credresolver`. Each
+Ecosystem row declares, by source key, which stores it reads, and the
+launcher wires that into `credresolver` as constructor input, the way it
+already wires rewrite rows into the proxy. That removes
+`f.Ecosystem == "cargo"`, the one name literal the containment scan could
+not reach.
+
+The same review added two things:
+
+- **Ecosystem corpora.** Each row's corpus is replayed by an
+  `ecosystemtest` kit through discovery, route resolution, path-set
+  derivation, binding and proxy rewrites, with a golden at each stage.
+  Consumer packages test their generic behaviour against a synthetic row
+  and stop naming real ecosystems.
+- **No per-row literals.** Env-export order derives from table position.
+  The reference prose about each ecosystem renders from the rows.
+
+File-per-ecosystem stands. None of the promotion triggers above has fired.
