@@ -1,3 +1,5 @@
 [implementor] subagent()
-[implementor]   -> \[REDACTED:tool-output]
+[scout] [REDACTED:agent-text]
+[scout] [REDACTED:agent-text]
+[implementor]   -> [scout,scout] \[REDACTED:tool-output]
 [implementor] parent done

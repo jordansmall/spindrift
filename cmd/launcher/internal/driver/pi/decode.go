@@ -26,6 +26,9 @@ func NewDecoder() driverkit.Decoder { return Decode }
 // and its usage with it, so reading any of those too would count a call more
 // than once; the retry events repeat the failed message's errorMessage.
 //
+// A subagent tool_execution_end also unpacks details.results[].messages into
+// InSubagent events with the agent as Role (see decodeSubagent).
+//
 // Every field the readers consume is strict except the tool fields and the
 // error payload, which are lenient (see the driverkit.Decoder contract).
 func Decode(line string) []driverkit.Event {
@@ -42,18 +45,80 @@ func Decode(line string) []driverkit.Event {
 	switch l.Type {
 	case "message_end":
 		if l.Message.Role == "assistant" {
-			return decodeAssistant(l.Message)
+			return decodeAssistant(l.Message, scope{})
 		}
 	case "tool_execution_end":
-		return []driverkit.Event{{
+		ev := driverkit.Event{
 			Kind:       driverkit.KindToolResult,
 			ToolID:     l.ToolCallID,
 			ToolName:   l.ToolName,
 			ToolOutput: resultText(l.Result),
 			IsError:    l.IsError,
-		}}
+		}
+		if l.ToolName == subagentTool {
+			return decodeSubagent(ev, l.Result)
+		}
+		return []driverkit.Event{ev}
 	}
 	return nil
+}
+
+// subagentTool is the tool name of pi's official subagent extension.
+const subagentTool = "subagent"
+
+// subagentResult is the part of a subagent tool_execution_end result Decode
+// reads. The per-child usage the extension sums beside the messages, and its
+// tool_execution_update events, repeat what the child messages already carry,
+// so reading them too would count the cost twice.
+type subagentResult struct {
+	Details struct {
+		Results []struct {
+			Agent    string    `json:"agent"`
+			Messages []message `json:"messages"`
+		} `json:"results"`
+	} `json:"details"`
+}
+
+// decodeSubagent returns each child's events, then the subagent tool's own
+// result tagged with the agents it ran: the model, text, tool calls and usage
+// of a child's assistant messages and its tool results, as InSubagent events
+// with the agent as Role, ahead of the result as in claude's log order. The
+// readers keep InSubagent text out of the heartbeat narration and the
+// last-message result. A result with no parsable details yields the bare tool
+// result.
+func decodeSubagent(res driverkit.Event, raw json.RawMessage) []driverkit.Event {
+	var d subagentResult
+	if json.Unmarshal(raw, &d) != nil {
+		return []driverkit.Event{res}
+	}
+	var agents []string
+	var children []driverkit.Event
+	for i, r := range d.Details.Results {
+		if r.Agent == "" {
+			continue
+		}
+		agents = append(agents, r.Agent)
+		for _, m := range r.Messages {
+			switch m.Role {
+			case "assistant":
+				// The index keeps a parallel run's children, whose timestamps can
+				// collide, and a chain's repeated agent apart.
+				children = append(children, decodeAssistant(m, scope{role: r.Agent, idPrefix: r.Agent + ":" + strconv.Itoa(i) + ":"})...)
+			case "toolResult":
+				children = append(children, driverkit.Event{
+					Kind:       driverkit.KindToolResult,
+					Role:       r.Agent,
+					InSubagent: true,
+					ToolID:     m.ToolCallID,
+					ToolName:   m.ToolName,
+					ToolOutput: contentText(m.Content, compact(m.Content)),
+					IsError:    m.IsError,
+				})
+			}
+		}
+	}
+	res.Subagent = strings.Join(agents, ",")
+	return append(children, res)
 }
 
 // logLine is one Pass-log line. The message's content stays raw because only an
@@ -80,6 +145,18 @@ type message struct {
 	Timestamp     int64           `json:"timestamp"`
 	DurationMs    float64         `json:"durationMs"`
 	ThinkingLevel string          `json:"thinkingLevel"`
+	// ToolCallID, ToolName and IsError are a toolResult message's, which only
+	// a subagent's child messages carry.
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	IsError    bool   `json:"isError"`
+}
+
+// scope attributes a decoded assistant message: the zero value is the main
+// loop, and a child's names its agent and keys its message ids.
+type scope struct {
+	role     string
+	idPrefix string
 }
 
 type usage struct {
@@ -111,7 +188,7 @@ type block struct {
 // The message id is its timestamp: pi's responseId is absent on a failed turn
 // and constant across a stub's, so it cannot key the usage dedup or the
 // last-message boundary.
-func decodeAssistant(m message) []driverkit.Event {
+func decodeAssistant(m message, sc scope) []driverkit.Event {
 	var blocks []block
 	if len(m.Content) > 0 && json.Unmarshal(m.Content, &blocks) != nil {
 		return nil
@@ -119,7 +196,7 @@ func decodeAssistant(m message) []driverkit.Event {
 	ts := m.Timestamp
 	id := ""
 	if ts != 0 {
-		id = strconv.FormatInt(ts, 10)
+		id = sc.idPrefix + strconv.FormatInt(ts, 10)
 	}
 	model := observedModel(m)
 	var events []driverkit.Event
@@ -168,7 +245,20 @@ func decodeAssistant(m message) []driverkit.Event {
 			},
 		})
 	}
-	return events
+	if sc.role == "" {
+		return events
+	}
+	// A child's failure does not fail the run and its reasoning is noise, so only
+	// its model, text, tool activity and usage are kept.
+	kept := events[:0]
+	for _, ev := range events {
+		switch ev.Kind {
+		case driverkit.KindModel, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage:
+			ev.Role, ev.InSubagent = sc.role, true
+			kept = append(kept, ev)
+		}
+	}
+	return kept
 }
 
 // observedModel composes the model id in force the way pi itself writes one,
@@ -222,11 +312,21 @@ func toolTarget(tool string, input json.RawMessage) string {
 // Driver's transcript does.
 func resultText(raw json.RawMessage) string {
 	var r struct {
-		Content []block `json:"content"`
+		Content json.RawMessage `json:"content"`
 	}
 	if json.Unmarshal(raw, &r) == nil {
+		return contentText(r.Content, compact(raw))
+	}
+	return compact(raw)
+}
+
+// contentText joins a content array's text blocks, or returns fallback when it
+// holds none.
+func contentText(content json.RawMessage, fallback string) string {
+	var blocks []block
+	if json.Unmarshal(content, &blocks) == nil {
 		var b strings.Builder
-		for _, c := range r.Content {
+		for _, c := range blocks {
 			if c.Type == "text" {
 				b.WriteString(c.Text)
 			}
@@ -235,7 +335,7 @@ func resultText(raw json.RawMessage) string {
 			return b.String()
 		}
 	}
-	return compact(raw)
+	return fallback
 }
 
 // errorText returns the string payload unquoted, or any other payload in
