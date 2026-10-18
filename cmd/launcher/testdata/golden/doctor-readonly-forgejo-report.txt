@@ -1,0 +1,30 @@
+ok: issue tracker confirmed — owner/repo is reachable
+ok: code forge confirmed — owner/repo is reachable
+ok: base branch "main" is protected
+ok: 0 recoverable issue(s) — run `spindrift recover <issue>` to land each
+advisory: RUNTIME not set — skipping runtime check
+ok: label "ready-for-agent" present
+ok: label "agent-in-progress" present
+ok: label "agent-failed" present
+ok: label "agent-complete" present
+ok: label "agent-research" present
+ok: label "agent-research-in-progress" present
+ok: label "agent-research-failed" present
+ok: label "agent-research-recommend" present
+ok: label "agent-research-reject" present
+ok: label "agent-research-unclear" present
+ok: label "agent-research-finding" present
+ok: label "agent-priority-critical" present
+ok: label "agent-priority-high" present
+ok: label "agent-priority-low" present
+ok: label "agent-ambiguous-spec" present
+ok: label "agent-butler-finding" present
+ok: label "agent-butler-patch" present
+ok: label "agent-tuning-finding" present
+ok: all triage, research, priority, ambiguous-spec, and butler labels present
+ok: recover kind: on — CODE_FORGE=forgejo relays a read-only Box's outbox bundle
+ok: read-only-capability
+ok: network-mode-runtime
+ok: signal-carrier-network-mode
+WARNING: Forgejo exposes no endpoint to introspect a token's granted scopes, so BOX_FORGEJO_TOKEN's write capability could not be determined. read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it.
+ok: read-only-token-forgejo

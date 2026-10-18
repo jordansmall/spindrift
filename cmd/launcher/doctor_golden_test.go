@@ -60,6 +60,54 @@ func TestRunDoctor_HealthyReport_Golden(t *testing.T) {
 	}
 }
 
+// TestRunDoctor_ReadOnlyGitHub_Golden and TestRunDoctor_ReadOnlyForgejo_Golden
+// pin the verbose report for a read-only deployment, where runDoctor runs the
+// read-only token gate for the active backend instead of the read-write no-op
+// line. The goldens were captured before the gates moved onto the backend rows.
+func TestRunDoctor_ReadOnlyGitHub_Golden(t *testing.T) {
+	f, c := healthyGoldenFixture()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "github"
+	c.issueTracker = "github"
+	c.ghToken = "launcher-gh-tok"
+	t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
+
+	original := ghTokenIntrospector
+	ghTokenIntrospector = func(string, string) (tokenIntrospectionResult, error) {
+		return tokenIntrospectionResult{Introspectable: true, WriteCapable: false}, nil
+	}
+	t.Cleanup(func() { ghTokenIntrospector = original })
+
+	assertDoctorGolden(t, f, c, "testdata/golden/doctor-readonly-github-report.txt")
+}
+
+func TestRunDoctor_ReadOnlyForgejo_Golden(t *testing.T) {
+	f, c := healthyGoldenFixture()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "forgejo"
+	c.issueTracker = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "launcher-fj-tok"
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
+
+	assertDoctorGolden(t, f, c, "testdata/golden/doctor-readonly-forgejo-report.txt")
+}
+
+func assertDoctorGolden(t *testing.T, f *forge.Fake, c config, goldenPath string) {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, nil); err != nil {
+		t.Fatalf("runDoctor() unexpected error: %v", err)
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("reading golden file: %v", err)
+	}
+	if got := buf.String(); got != string(want) {
+		t.Errorf("runDoctor() output does not match %s\n--- got ---\n%s\n--- want ---\n%s", goldenPath, got, want)
+	}
+}
+
 // TestRunDoctor_HealthyReport_Quiet_PrintsNothing is the golden test's quiet
 // sibling (issue #3777): the identical all-green fixture through a quiet
 // Reporter prints nothing at all, since every row it would emit is an ok:
