@@ -30,6 +30,12 @@
   # ~/.pi/agent), not from claude's.
   skillsDirRelative = ".pi/agent/skills";
 
+  # pi keeps sessions at sessions/<one dir per cwd>/<id>.jsonl under its agent
+  # dir. The per-issue mount takes the sessions subdir, not .pi/agent, or it
+  # would shadow auth.json and skills/ beside it (ADR 0009 amendment, issue
+  # #5481).
+  sessionCacheDirRelative = ".pi/agent/sessions";
+
   # Keeps pi from checking for updates or reporting telemetry from inside the
   # Box; the piseam integration tests set the same two.
   envCommon = {

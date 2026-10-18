@@ -2,8 +2,6 @@
 # registry row, plus the pi Harness's roster bakes.
 {
   pkgs,
-  nixpkgs,
-  system,
   fixtures,
   driverRegistry,
   entry,
@@ -11,12 +9,7 @@
 }:
 let
   inherit (pkgs.lib) assertMsg hasInfix;
-  piHarness = import ../../../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    driver = "pi";
-    packages = p: [ p.hello ];
-    defaults = fixtures.opencodeNamespacedDefaults;
-  };
+  inherit (fixtures) piHarness;
   preamble = driverRegistry.renderPreamble entry;
 in
 {
@@ -65,6 +58,16 @@ in
     assert assertMsg (hasInfix "DRIVER_SKILLS_DIR=/home/agent/.pi/agent/skills\n" preamble)
       "renderPreamble must bake pi's DRIVER_SKILLS_DIR, got: ${preamble}";
     pkgs.runCommand "drivers-pi-skills-dir" { } "touch $out";
+
+  # Issue #5481: the mount must stay the sessions subdir (see lib/drivers/pi.nix).
+  drivers-pi-session-cache-dir =
+    assert assertMsg ((entry.sessionCacheDirRelative or "") == ".pi/agent/sessions")
+      "pi Driver's sessionCacheDirRelative must be pi's sessions subdir, got: ${
+        entry.sessionCacheDirRelative or "<absent>"
+      }";
+    assert assertMsg (hasInfix "DRIVER_SESSION_CACHE_DIR=/home/agent/.pi/agent/sessions" preamble)
+      "renderPreamble must bake pi's DRIVER_SESSION_CACHE_DIR, got: ${preamble}";
+    pkgs.runCommand "drivers-pi-session-cache-dir" { } "touch $out";
 
   drivers-pi-argv-shape-pinned =
     let
