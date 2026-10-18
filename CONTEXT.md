@@ -170,6 +170,26 @@ differ — so a statement true of one is not automatically true of the other.
 Either way the Box runs one program, `box`, behind a generated shell shim.
 _Avoid_: runner (that is the adapter that drives a Box, not the Box), worker.
 
+**Runner Strategy**:
+A Box flavor's Go half as one literal exported by its family's package
+(ADR 0069): how it runs, stops and lists Boxes, and the Runner prerequisites
+it brings. Keyed by family (`oci`, `bwrap`), never by `runtime` value: the
+container CLIs one family drives are its own concern. _Avoid_: runtime
+adapter, runner kind switch.
+
+**Runner prerequisite**:
+A host condition a Box flavor needs before a Box can start — pasta on PATH,
+an unprivileged overlay mount, a running podman machine — declared by its
+Runner Strategy and checked at launch, by doctor, or both. _Avoid_:
+preflight (collides with the stale-base preflight), runner gate.
+
+**Box artifact**:
+What a Box boots from: an OCI image named by `repo:tag`, or a bare Nix
+store closure (ADR 0069). It decides how freshness identifies and compares
+a build, and whether a box-only rebuild can be swapped in without draining.
+A Box flavor names the artifact it boots; freshness never asks which flavor.
+_Avoid_: image (only one of the two), closure (only the other), build.
+
 **Harness plumbing**:
 The language-agnostic tools every Agent needs regardless of the Target — shell,
 git, gh, the Driver CLI, jq, CA certs, nix. Always baked into the image and
