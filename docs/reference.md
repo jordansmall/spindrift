@@ -6457,8 +6457,11 @@ line of every Pass log a Dispatch creates: each attempt's fresh log (a retry
 rotates the previous one to `<path>.N`), each host fix pass
 (`issue-<key>-fix-N.log`), and conflict-resolve. All carry the same Record ID,
 minted at claim; a Dispatch that reaches a fix or conflict-resolve pass
-without a claim (recover adopting an open PR) mints it on first use. The line
-is `{"type":"spindrift_op","spindrift_op":{"op":"dispatch_start","dispatch_start":{...}}}`
+without a claim (recover adopting an open PR) continues the primary log's
+stamped Record ID and claim time, minting one on first use only when no
+stamped primary log survives (an unreadable primary log also mints fresh,
+splitting the Record, and the host warns with a `??` line on stderr). The
+line is `{"type":"spindrift_op","spindrift_op":{"op":"dispatch_start","dispatch_start":{...}}}`
 with `record_id`, `kind`, `dispatch_key`, `claim_time`, `started` (this log's
 creation time), `revision`, `role_models` (role to model), `driver`,
 `driver_version`, `knobs`, and `host_token`, a random value minted fresh for
