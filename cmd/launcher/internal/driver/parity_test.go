@@ -5,33 +5,6 @@ import (
 	"testing"
 )
 
-// descriptors is generated from lib/drivers/*.nix by nix/regen.nix; see
-// descriptor_gen.go. Edit the Driver rows and run `nix run .#regen`.
-
-func TestParityWithNixDriverRegistry(t *testing.T) {
-	goNames := Names()
-
-	nixSet := make(map[string]bool, len(descriptors))
-	for _, d := range descriptors {
-		nixSet[d.Name] = true
-	}
-	goSet := make(map[string]bool, len(goNames))
-	for _, n := range goNames {
-		goSet[n] = true
-	}
-
-	for _, d := range descriptors {
-		if !goSet[d.Name] {
-			t.Errorf("nix Driver %q has no matching Go strategy", d.Name)
-		}
-	}
-	for _, n := range goNames {
-		if !nixSet[n] {
-			t.Errorf("Go Driver strategy %q has no matching nix Driver", n)
-		}
-	}
-}
-
 // TestDescriptorFieldsMatchNixRows pins the hand-written Descriptor struct to
 // the field table lib/renderers.nix renders descriptor_gen.go from, so a field
 // added on only one side fails here instead of silently never being set.

@@ -1,19 +1,21 @@
-package driver
+package bundle_test
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 // TestResultEventRoundTrip covers every registered Driver, so a new Driver's
 // ResultEvent is checked against its own ResultText without a new test.
 func TestResultEventRoundTrip(t *testing.T) {
 	text := "line one\n\"quoted\" \\ back\nSPINDRIFT_OUTCOME status=blocked"
-	for _, name := range Names() {
+	for _, name := range driver.Names() {
 		t.Run(name, func(t *testing.T) {
-			d, err := New(name)
+			d, err := driver.New(name)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
