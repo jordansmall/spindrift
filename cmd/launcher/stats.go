@@ -154,7 +154,7 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 	// Only a root that is itself a Target clone can answer for its merge
 	// commits; any other root leaves them unfilled.
 	if top, err := isCheckoutTop(root); err != nil {
-		fmt.Fprintf(stderr, "warning: not filling reverts or churn: %v\n", err)
+		warnEach(stderr, "not filling reverts or churn", err)
 	} else if top {
 		if err := store.FillMaturity(root, statsNow()); err != nil {
 			// FillMaturity fills what it can; the error lists only the
@@ -176,14 +176,15 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 }
 
 // warnEach prints one prefixed warning line per error an errors.Join value
-// carries, since its own message is newline-separated.
+// carries, since its own message is newline-separated. Each line is
+// sanitized (statsLabel), which is why every warning site goes through it.
 func warnEach(stderr io.Writer, prefix string, err error) {
 	errs := []error{err}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		errs = joined.Unwrap()
 	}
 	for _, e := range errs {
-		fmt.Fprintf(stderr, "warning: %s: %v\n", prefix, e)
+		fmt.Fprintf(stderr, "warning: %s: %s\n", prefix, statsLabel(e.Error()))
 	}
 }
 
@@ -374,9 +375,10 @@ func renderAgentTable(w io.Writer, records []dispatchrecord.Record) error {
 // name keeps its word breaks and cannot split a tabwriter cell.
 var statsLabelSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
 
-// statsLabel makes a record-derived group label (role, model, a Box-authored
-// subagent_type) safe to print: such a value is untrusted and could otherwise
-// forge table rows or drive the terminal. --json keeps the raw value. Not
+// statsLabel makes untrusted single-line text (a group label such as role,
+// model or a Box-authored subagent_type, or a warning's error text) safe to
+// print: it could otherwise forge table rows or drive the terminal. --json
+// keeps a label's raw value; warnings are sanitized regardless. Not
 // console.SanitizeControlSequences: it keeps \t and \n, which forge cells.
 func statsLabel(s string) string {
 	return driverkit.SanitizeLine(statsLabelSpaces.Replace(s))

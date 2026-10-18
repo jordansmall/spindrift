@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -101,6 +104,49 @@ func TestRenderStatsGroups_SanitizesGroupHeader(t *testing.T) {
 				t.Errorf("group header = %q, want %q", header, tc.want)
 			}
 		})
+	}
+}
+
+func TestWarnEach_SanitizesErrorText(t *testing.T) {
+	var buf bytes.Buffer
+	warnEach(&buf, "p", errors.Join(
+		errors.New("ok one"),
+		errors.New("bad\x1b[2J\x1b]0;t\x07\nline"),
+	))
+	out := buf.String()
+	statsAssertPlainText(t, out)
+	if !strings.Contains(out, "warning: p: ok one\n") {
+		t.Errorf("ordinary message changed:\n%q", out)
+	}
+	if !strings.Contains(out, "warning: p: bad line\n") {
+		t.Errorf("hostile message not cleaned to %q:\n%q", "bad line", out)
+	}
+	if n := strings.Count(out, "\n"); n != 2 {
+		t.Errorf("output = %d lines, want one per joined error:\n%q", n, out)
+	}
+}
+
+func TestCheckoutEvents_SanitizesWarning(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "r\x1b[2J\x1b]0;t\x07")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, root, "init")
+	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the file belongs makes ReadEvents fail with an error
+	// that quotes the hostile path.
+	if err := os.Mkdir(filepath.Join(gitDir, "spindrift-daemon.events"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	checkoutEvents(root, &buf)
+	out := buf.String()
+	statsAssertPlainText(t, out)
+	if !strings.Contains(out, "warning: not reading daemon events") {
+		t.Errorf("no events warning:\n%q", out)
 	}
 }
 
