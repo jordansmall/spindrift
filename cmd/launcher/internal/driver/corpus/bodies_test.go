@@ -244,3 +244,91 @@ func TestTallyCountsPatternsAndBodies(t *testing.T) {
 		t.Errorf("Tally(Scrub(x)) = %v, want none", got)
 	}
 }
+
+// piToolExchange is a pi tool-call exchange: the system message and its host
+// paths, the prompt, a tool call, its result, and the Driver-read assistant text.
+const piToolExchange = `{"type":"agent_end","willRetry":false,"messages":[` +
+	`{"role":"system","content":"","sections":{"cwd":"<cwd>\n/tmp/private-checkout\n</cwd>","docs":"/nix/store/abc-pi/README.md"},"toolsAdded":[{"name":"bash"}]},` +
+	`{"role":"user","content":[{"type":"text","text":"private issue brief"}]},` +
+	`{"role":"assistant","stopReason":"toolUse","content":[` +
+	`{"type":"thinking","thinking":"private reasoning"},` +
+	`{"type":"toolCall","id":"call_1","name":"write","arguments":{"path":"a.go","content":"private body"}},` +
+	`{"type":"text","text":"SPINDRIFT_OUTCOME issue=1 status=success"}]},` +
+	`{"role":"toolResult","toolCallId":"call_1","toolName":"read","isError":false,"content":[{"type":"text","text":"private file"}]}]}` + "\n"
+
+func TestScrubBlanksPiMessages(t *testing.T) {
+	out := Scrub([]byte(piToolExchange))
+	if bytes.Contains(out, []byte("private")) || bytes.Contains(out, []byte("/nix/store")) {
+		t.Errorf("Scrub left private text: %s", out)
+	}
+	got := decode(t, out)
+	if r := at(got, "messages", 0, "sections"); r != "[REDACTED:host-context]" {
+		t.Errorf("system sections = %v, want the host-context placeholder", r)
+	}
+	if r := at(got, "messages", 0, "role"); r != "system" {
+		t.Errorf("system role = %v, want it kept", r)
+	}
+	if r := at(got, "messages", 1, "content", 0, "text"); r != "[REDACTED:agent-text]" {
+		t.Errorf("user text = %v, want the agent-text placeholder", r)
+	}
+	if r := at(got, "messages", 2, "content", 1, "arguments", "path"); r != "a.go" {
+		t.Errorf("tool path = %v, want it kept", r)
+	}
+	if r := at(got, "messages", 2, "content", 1, "arguments", "content"); r != "[REDACTED:file-body]" {
+		t.Errorf("write content = %v, want the file-body placeholder", r)
+	}
+	if r := at(got, "messages", 2, "content", 2, "text"); !strings.Contains(r.(string), "SPINDRIFT_OUTCOME") {
+		t.Errorf("assistant text = %v, want it kept", r)
+	}
+	if r := at(got, "messages", 3, "content", 0, "text"); r != "[REDACTED:tool-output]" {
+		t.Errorf("toolResult text = %v, want the tool-output placeholder", r)
+	}
+	if r := at(got, "messages", 3, "toolName"); r != "read" {
+		t.Errorf("toolName = %v, want it kept", r)
+	}
+}
+
+func TestScrubBlanksPiToolExecutionAndStream(t *testing.T) {
+	in := strings.Join([]string{
+		`{"type":"session","version":3,"id":"s1","cwd":"/tmp/private-checkout"}`,
+		`{"type":"tool_execution_start","toolCallId":"c1","toolName":"write","args":{"path":"a.go","content":"private body"}}`,
+		`{"type":"tool_execution_update","toolCallId":"c1","toolName":"bash","args":{"command":"echo hi"},"partialResult":{"content":[{"type":"text","text":"private out"}],"details":{"k":"private"}}}`,
+		`{"type":"tool_execution_end","toolCallId":"c1","toolName":"bash","isError":false,"durationMs":3,` +
+			`"result":{"content":[{"type":"text","text":"private out"}],"structuredContent":{"output":"private out","exit_code":0}}}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":1,"delta":"{\"content\":\"private"}}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"private thought"}}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"thinking_end","contentIndex":0,"content":"private thought"}}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"status=success"}}`,
+	}, "\n") + "\n"
+	out := Scrub([]byte(in))
+	if bytes.Contains(out, []byte("private")) {
+		t.Errorf("Scrub left private text: %s", out)
+	}
+	lines := bytes.Split(bytes.TrimSuffix(out, []byte("\n")), []byte("\n"))
+	if c := decode(t, lines[0])["cwd"]; c != "[REDACTED:host-context]" {
+		t.Errorf("session cwd = %v, want the host-context placeholder", c)
+	}
+	if p := at(decode(t, lines[1]), "args", "path"); p != "a.go" {
+		t.Errorf("args path = %v, want it kept", p)
+	}
+	if c := at(decode(t, lines[2]), "args", "command"); c != "echo hi" {
+		t.Errorf("args command = %v, want it kept", c)
+	}
+	end := decode(t, lines[3])
+	if c := at(end, "result", "content", 0, "text"); c != "[REDACTED:tool-output]" {
+		t.Errorf("result text = %v, want the tool-output placeholder", c)
+	}
+	if c := at(end, "result", "structuredContent"); c != "[REDACTED:tool-output]" {
+		t.Errorf("structuredContent = %v, want the tool-output placeholder", c)
+	}
+	if d := at(decode(t, lines[7]), "assistantMessageEvent", "delta"); d != "status=success" {
+		t.Errorf("text_delta = %v, want it kept", d)
+	}
+}
+
+func TestScrubKeepsClaudeUserText(t *testing.T) {
+	in := `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"keep me"}]}}` + "\n"
+	if out := Scrub([]byte(in)); string(out) != in {
+		t.Errorf("Scrub changed a claude user message: %s", out)
+	}
+}

@@ -15,9 +15,12 @@ const (
 	fileBody   = "file-body"
 	agentText  = "agent-text"
 	inlineCode = "inline-code"
+	// hostContext is what pi writes about the machine it ran on: its system
+	// prompt (tool schemas, docs paths, cwd) and the session's cwd.
+	hostContext = "host-context"
 )
 
-var bodyNames = []string{toolOutput, fileBody, agentText, inlineCode}
+var bodyNames = []string{toolOutput, fileBody, agentText, inlineCode, hostContext}
 
 // fileBodyKeys are the tool-input keys that carry file contents or a free-form
 // brief. The readers key off file_path, command, pattern, url, query and
@@ -28,6 +31,8 @@ var fileBodyKeys = map[string]bool{
 	"new_string": true,
 	"oldString":  true,
 	"newString":  true,
+	"oldText":    true,
+	"newText":    true,
 	"new_source": true,
 	"prompt":     true,
 }
@@ -39,7 +44,8 @@ var taskTextKeys = []string{"prompt", "summary", "patch"}
 // redactBodies blanks, line by line, the JSON values that hold repo content:
 // claude tool_result content and tool_use_result, file-body tool inputs,
 // heredoc bodies in tool commands, thinking text and subagent task text, and
-// opencode tool state output and metadata. A line that is not one JSON object, or has nothing to blank,
+// opencode tool state output and metadata, and pi tool results, prompts, system
+// messages and cwd. A line that is not one JSON object, or has nothing to blank,
 // passes through byte for byte; a blanked line is re-encoded compactly, with
 // sorted keys and numbers kept verbatim.
 func redactBodies(data []byte) ([]byte, map[string]int) {
@@ -97,7 +103,92 @@ func (r *redactor) event(ev map[string]any) {
 			r.blank(ev, k, agentText)
 		}
 	}
+	switch ev["type"] {
+	case "session":
+		r.blank(ev, "cwd", hostContext)
+	case "tool_execution_start":
+		r.inputs(ev["args"])
+	case "tool_execution_update":
+		r.inputs(ev["args"])
+		r.piResult(ev["partialResult"])
+	case "tool_execution_end":
+		r.piResult(ev["result"])
+	case "message_update":
+		r.piStreamEvent(ev["assistantMessageEvent"])
+	case "message_start", "message_end":
+		r.piMessage(ev["message"])
+	case "turn_end":
+		r.piMessage(ev["message"])
+		r.piMessages(ev["toolResults"])
+	case "agent_end":
+		r.piMessages(ev["messages"])
+	}
 	r.walk(ev)
+}
+
+func (r *redactor) piMessages(v any) {
+	msgs, _ := v.([]any)
+	for _, m := range msgs {
+		r.piMessage(m)
+	}
+}
+
+// piMessage blanks what a pi system, user or toolResult message holds. It is
+// keyed on pi's event types, not the role alone: claude's user messages carry
+// the same role, with text its readers and goldens keep.
+func (r *redactor) piMessage(v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	switch m["role"] {
+	case "system":
+		r.blank(m, "sections", hostContext)
+		r.blank(m, "toolsAdded", hostContext)
+	case "user":
+		r.textBlocks(m["content"], agentText)
+	case "toolResult":
+		r.textBlocks(m["content"], toolOutput)
+	}
+}
+
+// piResult blanks a pi tool result's text blocks and its structured and
+// details payloads, keeping the result's shape for the Transcript reader.
+func (r *redactor) piResult(v any) {
+	res, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	r.blank(res, "structuredContent", toolOutput)
+	r.blank(res, "details", toolOutput)
+	r.textBlocks(res["content"], toolOutput)
+}
+
+// piStreamEvent blanks the streamed fragments of a pi assistant message that
+// the finished message blocks blank too: partial tool arguments and thinking.
+func (r *redactor) piStreamEvent(v any) {
+	e, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	switch e["type"] {
+	case "toolcall_delta":
+		r.blank(e, "delta", fileBody)
+	case "thinking_delta":
+		r.blank(e, "delta", agentText)
+	case "thinking_end":
+		r.blank(e, "content", agentText)
+	}
+}
+
+// textBlocks blanks the text of each text block in a content array.
+func (r *redactor) textBlocks(v any, name string) {
+	blocks, _ := v.([]any)
+	for _, b := range blocks {
+		if m, ok := b.(map[string]any); ok && m["type"] == "text" {
+			r.blank(m, "text", name)
+		}
+	}
 }
 
 func (r *redactor) walk(v any) {
@@ -108,6 +199,8 @@ func (r *redactor) walk(v any) {
 		}
 	case map[string]any:
 		switch x["type"] {
+		case "toolCall": // a pi tool call
+			r.inputs(x["arguments"])
 		case "tool_result":
 			r.blank(x, "content", toolOutput)
 		case "tool_use":
