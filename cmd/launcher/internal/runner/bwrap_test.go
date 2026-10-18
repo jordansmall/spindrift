@@ -1710,19 +1710,35 @@ func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
 	}
 }
 
+// offArgvKeys is exactly the non-Driver literal plus the generated Driver
+// credential env names, so a new Driver credential is off-argv without a hand
+// edit here (issue #5507).
+func TestOffArgvKeys_CoversDriverCredentialEnv(t *testing.T) {
+	want := map[string]bool{}
+	for k := range nonDriverOffArgvKeys {
+		want[k] = true
+	}
+	for _, k := range driverCredentialEnv {
+		want[k] = true
+	}
+	if !reflect.DeepEqual(offArgvKeys, want) {
+		t.Errorf("offArgvKeys = %v, want the non-Driver keys plus the Driver credential env %v", offArgvKeys, want)
+	}
+}
+
 // buildArgs's --setenv loop excludes every offArgvKeys name from argv
 // identically, so every one of them must be forwarded through the process
 // environment, not just GH_TOKEN.
 func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 	boxEnv := map[string]string{
 		"GH_TOKEN":                  "gh-token-value",
-		"CLAUDE_CODE_OAUTH_TOKEN":   "oauth-token-value",
-		"ANTHROPIC_API_KEY":         "anthropic-key-value",
-		"OPENCODE_AUTH_CONTENT":     "opencode-auth-value",
 		"REGISTRY_PROXY_TCP_SECRET": "registry-proxy-secret-value",
 		"SIGNAL_SOCKET_SECRET":      "signal-socket-secret-value",
 		"FORGEJO_TOKEN":             "forgejo-token-value",
 		"ISSUE_TEXT":                "issue-text-value",
+	}
+	for _, k := range driverCredentialEnv {
+		boxEnv[k] = k + "-value"
 	}
 
 	// Guards the "All" in this test's name: as the map grows, a fixture left
