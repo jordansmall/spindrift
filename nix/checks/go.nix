@@ -13,7 +13,8 @@ let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNames = builtins.attrNames driverRegistry.entries;
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
-  driverGoTestAttr = name: "drivers-${name}-go-test";
+  adapterGoTestAttr = prefix: name: "${prefix}-${name}-go-test";
+  driverGoTestAttr = adapterGoTestAttr "drivers";
   launcherDir = ../../cmd/launcher;
   allDriverDirs = map driverDir driverNames;
   # Everything that links the Driver bundle: the root package, its testdata,
@@ -102,50 +103,65 @@ let
     "testutil"
     "usage"
   ];
-  # One go test derivation per Driver (ADR 0066 decision 5), keyed by registry
-  # name so a new row yields one with no hand-pinned attr. `files` is the
-  # cmd/launcher fileset every source is cut from; the independence check
-  # perturbs it.
-  driverGoTestsFor =
+  # One go test derivation per adapter of any registry (ADR 0066 decision 5,
+  # ADR 0068 decision 7), keyed by registry name so a new row yields one with
+  # no hand-pinned attr: `${prefix}-${name}-go-test`. `pkgFor name` is the
+  # adapter's package directory under cmd/launcher; `sharedFor name` the extra
+  # packages its tests reach. `files` is the cmd/launcher fileset every source
+  # is cut from; the independence check perturbs it. The vendor tree is
+  # `vendorFor files`, so one adapter's edits never move another's drvPath.
+  adapterGoTests =
     {
       files,
-      entries,
+      prefix,
+      names,
+      pkgFor,
+      sharedFor,
+      nativeBuildInputs ? [ pkgs.go ],
     }:
     let
       vendor = vendorFor files;
     in
     pkgs.lib.listToAttrs (
       map (name: {
-        name = driverGoTestAttr name;
+        name = adapterGoTestAttr prefix name;
         value =
           let
             src = fs.toSource {
-              root = ../../cmd/launcher;
+              root = launcherDir;
               fileset = fs.intersection files (
                 fs.unions (
                   [
-                    ../../cmd/launcher/go.mod
-                    ../../cmd/launcher/go.sum
-                    (driverDir name)
+                    (launcherDir + "/go.mod")
+                    (launcherDir + "/go.sum")
+                    (launcherDir + "/${pkgFor name}")
                   ]
-                  ++ driverGoTestShared
+                  ++ sharedFor name
                 )
               );
             };
           in
-          pkgs.runCommand (driverGoTestAttr name) { nativeBuildInputs = [ pkgs.go ]; } ''
+          pkgs.runCommand (adapterGoTestAttr prefix name) { inherit nativeBuildInputs; } ''
             mkdir -p src/cmd
             cp -r ${src} src/cmd/launcher
             chmod -R +w src
             ${goTestPrologueWith vendor}
-            go test ./internal/driver/${name}/...
+            go test ./${pkgFor name}/...
             touch $out
           '';
-      }) (builtins.attrNames entries)
+      }) names
     );
+  driverGoTestsFor =
+    { files, names }:
+    adapterGoTests {
+      inherit files names;
+      prefix = "drivers";
+      pkgFor = name: "internal/driver/${name}";
+      sharedFor = _: driverGoTestShared;
+    };
   driverGoTests = driverGoTestsFor {
-    files = ../../cmd/launcher;
-    inherit (driverRegistry) entries;
+    files = launcherDir;
+    names = driverNames;
   };
   # go test guards config-parsing regressions (#112). docs/, .github/,
   # .forgejo/, templates/, agent/, README.md (if present) and lib/ are copied
@@ -392,9 +408,7 @@ driverGoTests
     let
       names = builtins.attrNames (driverGoTestsFor {
         files = ../../cmd/launcher;
-        entries = driverRegistry.entries // {
-          stub = { };
-        };
+        names = driverNames ++ [ "stub" ];
       });
     in
     assert pkgs.lib.assertMsg (builtins.elem "drivers-stub-go-test" names)
@@ -418,7 +432,7 @@ driverGoTests
           );
           after = driverGoTestsFor {
             files = fs.difference ../../cmd/launcher (driverDir p + "/${file}");
-            inherit (driverRegistry) entries;
+            names = driverNames;
           };
           moved = builtins.filter (n: n != p && drv driverGoTests n != drv after n) driverNames;
           core = launcherGoTestFor (fs.difference launcherDir (driverDir p + "/${file}"));
