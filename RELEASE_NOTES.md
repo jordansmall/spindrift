@@ -9,6 +9,57 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.28.0 — 2026-10-18
+
+pi joins claude and opencode as a third Driver, and it's the first one
+built on driverkit from day one.
+
+No breaking changes.
+
+- **pi is a new Driver.** Declare `agents.drivers.pi` and you get `.#pi`,
+  `.#pi-daemon` and a `spindrift-pi` image running the nixpkgs
+  `pi-coding-agent` build, beside any claude or opencode Drivers in the
+  same flake. No overlay or extra flake input needed. Models are named
+  with their Provider (`github-copilot/claude-opus-4.5`), and since the
+  default roster uses bare claude ids, a pi entry names its coordinator,
+  scout and reviewer models itself. See "The pi Driver" in
+  `docs/reference.md` and `MIGRATING.md`.
+- **driverkit passed its first real test.** 0.27.0 said a third Driver
+  would mostly be one decoder. pi was that test: its Pass logs feed the
+  same shared readers for outcomes, usage, the Transcript, the heartbeat
+  and Dispatch Records. Along the way every Driver became a single
+  declared value with its own test corpus and Nix check, so changing one
+  Driver no longer rebuilds the others' tests. Credential rules moved onto
+  the Driver rows too, and doctor, quickstart, the Bash scrub list and the
+  bwrap argv filter all read them from there.
+- **pi gets the same guards and roster.** pi has no hook config and no
+  built-in subagents, so spindrift brings both. A baked bridge extension
+  runs the shared credential deny, env scrub, background-Bash block and
+  output tee on every call, and fails closed. The roster renders as agent
+  files for pi's official subagent extension, each role with its own model
+  and effort. Fix passes resume the issue's own pi session. pi always runs
+  with `--no-approve`, so a Target repo's `.pi/` never loads, and PRs
+  touching `.pi/**` are merge-guarded by default.
+- **pi credentials.** API keys for eight Providers are checked before a
+  dispatch (only for Providers a model tier actually names), passed in
+  through the environment, kept off the bwrap argv and scrubbed from Bash.
+  GitHub Copilot takes `PI_AUTH_CONTENT` instead, written into pi's
+  `auth.json`, which the agent can't read. OAuth for other Providers isn't
+  supported yet; the reference lists this and pi's other known limits.
+- **Usage per agent.** `spindrift stats --by agent` groups usage by
+  subagent, and Dispatch Records store the split. Under pi each child's
+  usage lands on its own role. Stats text output also strips control
+  characters from labels that came from a Box, so a crafted role name
+  can't forge table rows or drive your terminal.
+- **Smaller fixes.** Doctor checks credentials against every model tier,
+  not just `MODEL`, so a Copilot reviewer model with no auth content fails
+  doctor instead of the dispatch. A pre-dispatch error that can never
+  succeed (a path too long, a symlink loop) fails right away instead of
+  burning the whole retry schedule while holding the issue claim. opencode
+  session resume honours `OPENCODE_DB`.
+
+---
+
 ## 0.27.0 — 2026-10-17
 
 A shared toolkit for Drivers, and the opencode Driver catching up with
