@@ -1509,8 +1509,10 @@ the rest of `command` and `subagent_type`, so the blanks show mainly in the
 Transcript golden. A heartbeat phase can also move when a heredoc body was
 the only place a phase word like `go test` appeared. Assistant text, the
 command lines themselves and result text stay as written, because the
-outcome line and heartbeat depend on them. Read those for private content
-before committing.
+outcome line and heartbeat depend on them. A pi `subagent` result keeps its
+`details` (mode, and each child's agent, model, step, exit code, usage and
+message structure), blanking only the free text inside; every other pi tool's
+`details` is blanked whole. Read those for private content before committing.
 
 ```sh
 cd cmd/launcher

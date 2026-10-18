@@ -1,0 +1,3 @@
+[implementor] subagent()
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] parent done

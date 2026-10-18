@@ -332,3 +332,69 @@ func TestScrubKeepsClaudeUserText(t *testing.T) {
 		t.Errorf("Scrub changed a claude user message: %s", out)
 	}
 }
+
+func TestScrubKeepsSubagentUsageAndBlanksItsText(t *testing.T) {
+	child := `{"agent":"scout","agentSource":"user","task":"private brief","exitCode":0,"stderr":"private stderr","model":"p/m:high","step":1,` +
+		`"usage":{"input":41,"output":5,"turns":1},` +
+		`"messages":[` +
+		`{"role":"system","content":"","sections":{"cwd":"/tmp/private-checkout"},"toolsAdded":[{"name":"read"}]},` +
+		`{"role":"user","content":[{"type":"text","text":"Task: private brief"}]},` +
+		`{"role":"assistant","content":[{"type":"text","text":"private answer"},{"type":"toolCall","id":"t","name":"write","arguments":{"path":"a.go","content":"private body"}}],` +
+		`"model":"m","provider":"p","stopReason":"toolUse","timestamp":7,"usage":{"input":41,"output":5,"totalTokens":46,"cost":{"total":0.5}}},` +
+		`{"role":"toolResult","toolCallId":"t","toolName":"write","content":[{"type":"text","text":"private out"}],"details":{"k":"private"}}]}`
+	details := `{"mode":"chain","agentScope":"user","projectAgentsDir":"/tmp/private-checkout/.pi/agents","results":[` + child + `]}`
+	in := strings.Join([]string{
+		`{"type":"tool_execution_update","toolCallId":"c","toolName":"subagent","args":{},"partialResult":{"content":[{"type":"text","text":"private answer"}],"details":` + details + `}}`,
+		`{"type":"tool_execution_end","toolCallId":"c","toolName":"subagent","isError":false,"result":{"content":[{"type":"text","text":"private answer"}],"details":` + details + `}}`,
+		`{"type":"message_end","message":{"role":"toolResult","toolCallId":"c","toolName":"subagent","content":[{"type":"text","text":"private answer"}],"details":` + details + `}}`,
+		`{"type":"tool_execution_end","toolCallId":"d","toolName":"bash","isError":false,"result":{"content":[{"type":"text","text":"x"}],"details":{"mode":"private","results":[{"agent":"x","task":"private brief","messages":[]}]}}}`,
+	}, "\n") + "\n"
+	out := Scrub([]byte(in))
+	lines := bytes.Split(bytes.TrimSuffix(out, []byte("\n")), []byte("\n"))
+	for i, base := range [][]any{
+		{"partialResult", "details"}, {"result", "details"}, {"message", "details"},
+	} {
+		ev := decode(t, lines[i])
+		det := func(path ...any) any { return at(ev, append(append([]any{}, base...), path...)...) }
+		for _, c := range []struct {
+			path []any
+			want any
+		}{
+			{[]any{"mode"}, "chain"},
+			{[]any{"agentScope"}, "user"},
+			{[]any{"projectAgentsDir"}, "[REDACTED:host-context]"},
+			{[]any{"results", 0, "agent"}, "scout"},
+			{[]any{"results", 0, "model"}, "p/m:high"},
+			{[]any{"results", 0, "step"}, float64(1)},
+			{[]any{"results", 0, "exitCode"}, float64(0)},
+			{[]any{"results", 0, "usage", "input"}, float64(41)},
+			{[]any{"results", 0, "task"}, "[REDACTED:agent-text]"},
+			{[]any{"results", 0, "stderr"}, "[REDACTED:tool-output]"},
+			{[]any{"results", 0, "messages", 0, "sections"}, "[REDACTED:host-context]"},
+			{[]any{"results", 0, "messages", 1, "content", 0, "text"}, "[REDACTED:agent-text]"},
+			{[]any{"results", 0, "messages", 2, "content", 0, "text"}, "[REDACTED:agent-text]"},
+			{[]any{"results", 0, "messages", 2, "content", 1, "arguments", "path"}, "a.go"},
+			{[]any{"results", 0, "messages", 2, "content", 1, "arguments", "content"}, "[REDACTED:file-body]"},
+			{[]any{"results", 0, "messages", 2, "usage", "input"}, float64(41)},
+			{[]any{"results", 0, "messages", 2, "usage", "cost", "total"}, float64(0.5)},
+			{[]any{"results", 0, "messages", 2, "model"}, "m"},
+			{[]any{"results", 0, "messages", 2, "provider"}, "p"},
+			{[]any{"results", 0, "messages", 2, "stopReason"}, "toolUse"},
+			{[]any{"results", 0, "messages", 2, "timestamp"}, float64(7)},
+			{[]any{"results", 0, "messages", 3, "content", 0, "text"}, "[REDACTED:tool-output]"},
+			{[]any{"results", 0, "messages", 3, "details"}, "[REDACTED:tool-output]"},
+		} {
+			if got := det(c.path...); got != c.want {
+				t.Errorf("line %d details %v = %v, want %v", i, c.path, got, c.want)
+			}
+		}
+	}
+	// Only a subagent result keeps its details: any other tool's are blanked,
+	// even one whose details borrow the subagent's mode and results shape.
+	if d := at(decode(t, lines[3]), "result", "details"); d != "[REDACTED:tool-output]" {
+		t.Errorf("bash details = %v, want the tool-output placeholder", d)
+	}
+	if bytes.Contains(out, []byte("private body")) || bytes.Contains(out, []byte("private brief")) || bytes.Contains(out, []byte("private answer")) || bytes.Contains(out, []byte("private out")) || bytes.Contains(out, []byte("private stderr")) {
+		t.Errorf("Scrub left private text: %s", out)
+	}
+}
