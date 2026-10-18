@@ -55,12 +55,12 @@ func (d *Dispatch) UsageReport() string {
 // CumulativeUsage sums every usage field across every attempt log this run has
 // produced, retried attempts included, so selfHealGate's budget gate reads the
 // run's true total spend (issues #561, #2001, #2575). Its DurationMs is the total
-// time across attempts, not the wall-clock span aggregatedReport derives. settle/
-// butler.go writes this sum whole into the ledger's State.Usage, so turns and
-// durations are summed too, not just tokens and cost. A caller that never
-// called Run() must call EnsureRunLineage first. An attempt log that fails to
-// parse, or has no result event, contributes nothing rather than aborting the
-// sum.
+// time across attempts, not the wall-clock span aggregatedReport derives.
+// internal/butler/settle.go writes this sum whole into the ledger's State.Usage,
+// so turns and durations are summed too, not just tokens and cost. A caller
+// that never called Run() must call EnsureRunLineage first. An attempt log that
+// fails to parse, or has no result event, contributes nothing rather than
+// aborting the sum.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
 	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
