@@ -1113,7 +1113,16 @@ Driver entry declares:
   tests never import the registry or another Driver, which
   `TestDriverTestClosuresStandAlone` guards. Its tests run in their own
   `drivers-<name>-go-test` check, generated from the registry row — build it
-  while iterating (`nix build .#checks.<system>.drivers-<name>-go-test -L`). If
+  while iterating (`nix build .#checks.<system>.drivers-<name>-go-test -L`).
+  A Driver edit reruns that Driver's own check; `launcher-binaries-go-test`
+  (the tests of the packages that link the bundle, the bundle's own tests,
+  and the registry's cross-Driver guards); and every derivation built from
+  the whole `cmd/launcher` tree or from the launcher binaries, such as the
+  binary packages (and so the image, the image-derived checks and the bats
+  shards), `launcher-go-fmt`, `launcher-go-vet`, `launcher-go-seam-test`,
+  `launcher-console-isolation` and the cross-build. It never reruns the core
+  `launcher-go-test` or another Driver's check, which
+  `drivers-go-test-independent` pins. If
   the tests import an internal package missing from that check's fileset, add
   it to `driverGoTestShared` in `nix/checks/go.nix`. The check vendors from a
   source without any Driver directory under the launcher's `launcherVendorHash`,
@@ -1266,12 +1275,12 @@ imports no Driver: only the binaries (launcher, box, driver-exec,
 orchestrator, quickstart and daemon) import the bundle. A library test that
 needs a Driver either calls `seamtest.RegisterDriver`, which registers seamtest's
 canonical-event `Strategy` under the `claude` name unless the bundle is
-linked, registers that `Strategy` itself once from a `TestMain` via
-`driver.Register`, or blank-imports the bundle in a test file.
-`TestBundleImportsStayOnAllowList` fails on any package outside the binaries
-and its allow-list whose tests reach the bundle or a Driver; the allow-list
-is what remains of ADR 0066 decision 8's migration. The fields are the
-contract:
+linked, or registers that `Strategy` itself once from a `TestMain` via
+`driver.Register`; it never imports the bundle or a Driver.
+`TestOnlyBinariesReachTheBundle` fails on any package outside the binaries
+and the `seamtest/bundled` fixture whose tests reach the bundle or a Driver,
+which is what lets the core `launcher-go-test` check build from a source
+holding no Driver (ADR 0066 decision 8). The fields are the contract:
 
 - `Name` — the Driver identifier; it must match a key in the Nix
   `lib/drivers/` registry.

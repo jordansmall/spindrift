@@ -19,7 +19,9 @@ declarative surface and the built image.
 nix flake check                 # everything CI runs, in one shot
 nix flake check -L              # same, streaming build logs (aka --print-build-logs)
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-go-test -L
-                                # launcher Go tests, minus the Driver packages (next line)
+                                # core launcher Go tests: no Driver, bundle or main in its source
+nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).launcher-binaries-go-test -L
+                                # the tests of the mains, which link every Driver through the bundle
 nix build .#checks.$(nix eval --raw --impure --expr builtins.currentSystem).drivers-claude-go-test -L
                                 # one Driver's own tests (drivers-<name>-go-test)
 nix build .#packages.x86_64-linux.agent-image -L

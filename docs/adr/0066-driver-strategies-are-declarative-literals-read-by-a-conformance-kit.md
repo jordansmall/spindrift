@@ -173,3 +173,14 @@ as `claude` when no Driver of that name is registered. Each
 library test package that still exercises a real Driver blank-imports the
 bundle in a test file, and an import guard holds those packages on an
 allow-list that the per-package migration shrinks.
+
+## Amendment (issue #5545): the contract step
+
+The allow-list is gone. `TestOnlyBinariesReachTheBundle` now forbids any
+library package's test closure from reaching the bundle or a Driver
+outright; only the binaries and the `seamtest/bundled` fixture may. The core
+`launcher-go-test` fileset excludes every Driver package and corpus, the
+bundle and the binaries, whose tests run in `launcher-binaries-go-test`. A
+Driver edit therefore reruns that Driver's own check and the derivations
+built from the whole launcher tree or the launcher binaries, and no longer
+the core suite or another Driver's check.
