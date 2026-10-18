@@ -1266,7 +1266,8 @@ imports no Driver: only the binaries (launcher, box, driver-exec,
 orchestrator, quickstart and daemon) import the bundle. A library test that
 needs a Driver either calls `seamtest.RegisterDriver`, which registers seamtest's
 canonical-event `Strategy` under the `claude` name unless the bundle is
-linked, or blank-imports the bundle in a test file.
+linked, registers that `Strategy` itself once from a `TestMain` via
+`driver.Register`, or blank-imports the bundle in a test file.
 `TestBundleImportsStayOnAllowList` fails on any package outside the binaries
 and its allow-list whose tests reach the bundle or a Driver; the allow-list
 is what remains of ADR 0066 decision 8's migration. The fields are the
