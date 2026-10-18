@@ -97,9 +97,10 @@ A Driver's host-side strategy is a **literal**, and the shared code reads it.
    decoder edit reruns the core suite regardless of (5). In the second
    stage the registry package stops importing the Driver packages; a small
    bundle package registers the bundled Strategies and only the four
-   binaries (launcher, box, driver-exec, orchestrator) import it. Core
-   tests build Drivers from a seamtest Strategy whose decoder reads
-   canonical events as JSON lines, and the inline `claude` stream-json
+   binaries (launcher, box, driver-exec, orchestrator) import it.
+   *Amended by issue #5541:* quickstart and daemon import it too (see the
+   amendment below). Core tests build Drivers from a seamtest Strategy
+   whose decoder reads canonical events as JSON lines, and the inline `claude` stream-json
    fixtures in core tests (29 files on `main`) become canonical-event
    fixtures. When the last Driver import leaves the core tests, the core
    fileset drops the Driver sources. The first stage lands before `pi`'s
@@ -160,3 +161,15 @@ A Driver's host-side strategy is a **literal**, and the shared code reads it.
 - The seamtest fake's canonical-event decoder makes the canonical events a
   test-only wire format. That is a step toward, not a decision for, the
   process seam ADR 0067 describes.
+
+## Amendment (issue #5541): the second stage's expand step
+
+The registry package imports no Driver, and the bundle package registers
+the bundled Strategies. quickstart and daemon import it too: quickstart
+validates `DRIVER` through `driver.New` and would otherwise refuse every
+name, and daemon links dispatchrecord's Driver log parsing through chore.
+seamtest gains the canonical-event Strategy and a helper that registers it
+as `claude` when no Driver of that name is registered. Each
+library test package that still exercises a real Driver blank-imports the
+bundle in a test file, and an import guard holds those packages on an
+allow-list that the per-package migration shrinks.
