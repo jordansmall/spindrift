@@ -1,16 +1,18 @@
 package dispatch
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
-	driverclaude "spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -60,24 +62,44 @@ func writeOutcomeOnFinalCall(fr *runner.Fake, errs []error, line []byte) {
 	}
 }
 
-// fakeDriver is a test double for driver.Driver. ClassifyFn, when set,
-// overrides the default Terminal/TaskFailed classification. ExtractUsage calls
-// the real claude log parsing, so dispatch's UsageReport tests run genuine
-// claude-format stream-json fixtures through the Driver seam.
+// testStrategy is the seamtest Strategy plus what a real Driver always has and
+// the canonical grammar leaves out: tool calls tally on the heartbeat under
+// their lowercased name, and the top-level role defaults to implement.
+var testStrategy = func() driverkit.Strategy {
+	s := seamtest.Strategy
+	s.Heartbeat = driverkit.HeartbeatTracking{Kind: strings.ToLower}
+	s.DefaultTopLevelRole = driverkit.ImplementorRole
+	return s
+}()
+
+// fakeDriver is a test double for driver.Driver over the seamtest Strategy, so
+// dispatch's tests read canonical-event fixtures and never a CLI's grammar.
+// ClassifyFn, when set, overrides the default Terminal/TaskFailed
+// classification; DriverName overrides the Strategy's Name.
 type fakeDriver struct {
 	ClassifyFn func(logPath string) (driver.Classification, error)
-	// DriverName is the registered Driver name; empty reads as claude.
+	// DriverName is the Driver name the stamp records; empty keeps the
+	// Strategy's. Dispatch Records ingest the logs these tests stamp through the
+	// registered Driver the stamp names, so a test that ingests registers it.
 	DriverName string
+	// SessionTotals sums KindResult events for the run totals instead of every
+	// KindUsage, for tests asserting a session summary's API time, turns or wall
+	// time, which per-call totals cannot express.
+	SessionTotals bool
 }
 
-// Name is a registered Driver's: Dispatch Records ingest the logs these tests
-// stamp through the Driver the stamp names.
-func (d fakeDriver) Name() string {
+func (d fakeDriver) base() driverkit.Driver {
+	s := testStrategy
 	if d.DriverName != "" {
-		return d.DriverName
+		s.Name = d.DriverName
 	}
-	return "claude"
+	if d.SessionTotals {
+		s.Totals = driverkit.SessionTotals
+	}
+	return driverkit.New(s)
 }
+
+func (d fakeDriver) Name() string { return d.base().Name() }
 
 func (d fakeDriver) ClassifyTransient(logPath string) (driver.Classification, error) {
 	if d.ClassifyFn != nil {
@@ -91,33 +113,47 @@ func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Write
 }
 
 func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
-	return claudeDriver().ExtractUsage(logPath)
+	return d.base().ExtractUsage(logPath)
 }
 
 func (d fakeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
-	return claudeDriver().RenderTranscript(logPath, opts)
+	return d.base().RenderTranscript(logPath, opts)
 }
 
-// ResolveExit trusts the passed exitCode unchanged, matching claudeDriver
-// (issue #2263), since fakeDriver replaces the claude strategy in these tests.
 func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
-	return exitCode, nil
+	return d.base().ResolveExit(logPath, exitCode)
 }
 
 func (d fakeDriver) ResultText(logPath string) (string, error) {
-	return claudeDriver().ResultText(logPath)
+	return d.base().ResultText(logPath)
 }
 
 func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
-	return driverclaude.ResultEvent(text)
+	return d.base().ResultEvent(text)
 }
 
 func (d fakeDriver) ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
-	return driverkit.ReadPasses(logPath, driverkit.PassOptions{NewDecoder: driverclaude.NewDecoder, Totals: driverkit.SessionTotals, WriteTool: driverclaude.WriteTool}, trackWrite, visit)
+	return d.base().ReadPasses(logPath, trackWrite, visit)
 }
 
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
-	return driverclaude.SessionFlags(mode, repoSlug, issue, home)
+	return d.base().SessionFlags(mode, repoSlug, issue, home)
+}
+
+// usageLine is one canonical per-call usage event (the seamtest Strategy's
+// token tally); model may be empty.
+func usageLine(model string, input, output int, costUSD float64) string {
+	return eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: model, Tokens: driverkit.Tokens{Input: input, Output: output, CostUSD: costUSD}})
+}
+
+// eventLine is ev as one newline-terminated canonical log line, as the seamtest
+// Strategy decodes; callers concatenate lines without adding separators.
+func eventLine(ev driverkit.Event) string {
+	b, err := json.Marshal(ev)
+	if err != nil {
+		panic(err)
+	}
+	return string(b) + "\n"
 }
 
 // ok reports whether d is a Succeeded disposition. Test-only: production code
@@ -126,13 +162,3 @@ func (d Disposition) ok() bool { return d.kind == dispositionSucceeded }
 
 // skipped reports whether d is the Skipped disposition. Test-only.
 func (d Disposition) skipped() bool { return d.kind == dispositionSkipped }
-
-// claudeDriver is the registered claude Driver, whose usage and transcript
-// readers fakeDriver reuses.
-func claudeDriver() driver.Driver {
-	d, err := driver.New("claude")
-	if err != nil {
-		panic(err)
-	}
-	return d
-}

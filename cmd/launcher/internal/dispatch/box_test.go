@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -37,20 +38,15 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 	fr.RunFunc = func(box runner.Box) error {
 		calls++
 		if calls == 1 {
-			box.Output.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error"}}` + "\n")) //nolint:errcheck
+			box.Output.Write([]byte(eventLine(driverkit.Event{Kind: driverkit.KindError, Text: "connection refused"}))) //nolint:errcheck
 			return boxErr
 		}
 		box.Output.Write([]byte("SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n")) //nolint:errcheck
 		return nil
 	}
 
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
-	d.driver = drv // exercise the real classifier against on-disk content
+	d.driver = driverkit.New(testStrategy) // classify the canonical KindError event the first attempt wrote
 
 	result := d.Run()
 
@@ -68,7 +64,7 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read current log: %v", err)
 	}
-	if strings.Contains(string(cur), "rate_limit_error") {
+	if strings.Contains(string(cur), "connection refused") {
 		t.Errorf("current log still carries the first attempt's marker: %q", cur)
 	}
 
@@ -86,7 +82,7 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", e.Name(), err)
 		}
-		if strings.Contains(string(b), "rate_limit_error") {
+		if strings.Contains(string(b), "connection refused") {
 			preserved = true
 		}
 	}
@@ -157,10 +153,10 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
 	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")
 
-	priorInitial := `{"type":"result","num_turns":1,"total_cost_usd":9.00,"usage":{"input_tokens":90000,"output_tokens":9000}}` + "\n"
-	priorRetry := `{"type":"result","num_turns":1,"total_cost_usd":5.00,"usage":{"input_tokens":50000,"output_tokens":5000}}` + "\n"
-	priorFix := `{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":30000,"output_tokens":3000}}` + "\n"
-	priorConflictResolve := `{"type":"result","num_turns":1,"total_cost_usd":1.00,"usage":{"input_tokens":10000,"output_tokens":1000}}` + "\n"
+	priorInitial := usageLine("", 90000, 9000, 9.00)
+	priorRetry := usageLine("", 50000, 5000, 5.00)
+	priorFix := usageLine("", 30000, 3000, 3.00)
+	priorConflictResolve := usageLine("", 10000, 1000, 1.00)
 	if err := writeFile(d.logPath(), priorInitial); err != nil {
 		t.Fatalf("seed prior initial log: %v", err)
 	}
@@ -173,12 +169,6 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 	if err := writeFile(d.conflictLogPath(), priorConflictResolve); err != nil {
 		t.Fatalf("seed prior conflict-resolve log: %v", err)
 	}
-
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-	d.driver = drv
 
 	result := d.Run()
 
@@ -507,7 +497,7 @@ func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 	// This leftover lands on disk before any Dispatch for this issue exists in
 	// the process, so nothing has had a chance to quarantine it, and it carries
 	// no run-lineage marker either.
-	leftover := `{"type":"result","num_turns":1,"total_cost_usd":7.00,"usage":{"input_tokens":70000,"output_tokens":7000}}` + "\n"
+	leftover := usageLine("", 70000, 7000, 7.00)
 	if err := writeFile(logPathFor(dir, "20")+".1", leftover); err != nil {
 		t.Fatalf("seed leftover rotated log: %v", err)
 	}
@@ -546,7 +536,7 @@ func TestEnsureRunLineage_QuarantinesWhenMarkerAbsent(t *testing.T) {
 func TestEnsureRunLineage_TrustsExistingLogsWhenMarkerPresent(t *testing.T) {
 	dir := tempLogDir(t)
 
-	initial := `{"type":"result","num_turns":1,"total_cost_usd":1.50,"usage":{"input_tokens":1000,"output_tokens":200}}` + "\n"
+	initial := usageLine("", 1000, 200, 1.50)
 	if err := writeFile(logPathFor(dir, "20"), initial); err != nil {
 		t.Fatalf("seed initial log: %v", err)
 	}

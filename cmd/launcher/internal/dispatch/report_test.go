@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
@@ -265,25 +264,23 @@ func TestDispatch_BoxRecordNamesUnsuffixedLogAfterStaleRotation(t *testing.T) {
 	}
 }
 
-// modelSwitchStream is a Claude stream-json transcript that goes coordinator
-// -> worker (a spawned scout) -> coordinator, each side repeating a message.
-const modelSwitchStream = `{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"plan"}]}}
-{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"tool_use","name":"Task","id":"tu_w","input":{"subagent_type":"scout"}}]}}
-{"type":"assistant","parent_tool_use_id":"tu_w","message":{"model":"claude-haiku-4-5","content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}
-{"type":"assistant","parent_tool_use_id":"tu_w","message":{"model":"claude-haiku-4-5","content":[{"type":"tool_use","name":"Read","id":"r2","input":{}}]}}
-{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"back"}]}}
-{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"again"}]}}
-`
-
-func runClaudeModelSwitch(t *testing.T) string {
-	t.Helper()
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
+// modelSwitchStream is a canonical-event transcript that goes coordinator ->
+// worker (a spawned scout) -> coordinator, each side repeating a model event.
+var modelSwitchStream = func() string {
+	model := func(id, role string) string {
+		return eventLine(driverkit.Event{Kind: driverkit.KindModel, Model: id, Role: role, InSubagent: role != driverkit.ImplementorRole})
 	}
+	const opus, haiku = "claude-opus-4-7", "claude-haiku-4-5"
+	return model(opus, driverkit.ImplementorRole) + model(opus, driverkit.ImplementorRole) +
+		model(haiku, "scout") + model(haiku, "scout") +
+		model(opus, driverkit.ImplementorRole) + model(opus, driverkit.ImplementorRole)
+}()
+
+func runModelSwitch(t *testing.T) string {
+	t.Helper()
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(modelSwitchStream)
-	f, err := NewFactory(retryConfig(3, 0, 0), tempLogDir(t), fr, drv, RealClock())
+	f, err := NewFactory(retryConfig(3, 0, 0), tempLogDir(t), fr, driverkit.New(testStrategy), RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -292,12 +289,12 @@ func runClaudeModelSwitch(t *testing.T) string {
 	return testutil.CaptureStdout(t, func() { d.Run() })
 }
 
-// Under the Claude driver a coordinator -> worker -> coordinator stream yields
+// Over a canonical event stream a coordinator -> worker -> coordinator stream yields
 // exactly three model records carrying exact ids; repeats yield none.
-func TestDispatch_Run_ClaudeStreamEmitsModelRecordPerPairChange(t *testing.T) {
+func TestDispatch_Run_StreamEmitsModelRecordPerPairChange(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
-	runClaudeModelSwitch(t)
+	runModelSwitch(t)
 
 	type pair struct{ model, role string }
 	var got []pair
@@ -327,8 +324,8 @@ func TestDispatch_Run_ClaudeStreamEmitsModelRecordPerPairChange(t *testing.T) {
 
 // With no reporter installed a model change is a silent no-op: it neither
 // panics nor disturbs the human output.
-func TestDispatch_Run_ClaudeStreamModelChangeWithoutReporter(t *testing.T) {
-	if out := runClaudeModelSwitch(t); !strings.Contains(out, "    -> #1: t\n") {
+func TestDispatch_Run_StreamModelChangeWithoutReporter(t *testing.T) {
+	if out := runModelSwitch(t); !strings.Contains(out, "    -> #1: t\n") {
 		t.Errorf("human output lost the announce line: %q", out)
 	}
 }
