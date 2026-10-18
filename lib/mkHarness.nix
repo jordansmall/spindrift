@@ -882,7 +882,7 @@ let
   # inside it. Same tight-fileset invariant as driverExecBin: the fileset is
   # exactly box's transitive internal import closure (`go list -deps ./box`),
   # so host-side launcher churn leaves the image drvPath alone. internal/driver
-  # is walked recursively and so covers driverkit, claude and opencode.
+  # is walked recursively and so covers driverkit, claude, opencode and pi.
   boxBin = pkgs.buildGoModule {
     pname = "box";
     version = spindriftVersion;

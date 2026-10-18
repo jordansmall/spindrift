@@ -27,7 +27,7 @@ picks one option for each of these at build time:
 
 | component | choices |
 | --------- | ------- |
-| Driver, the agent CLI | [Claude Code](https://claude.com/claude-code) (default), or [opencode](https://opencode.ai) with any Provider it supports, such as GitHub Copilot |
+| Driver, the agent CLI | [Claude Code](https://claude.com/claude-code) (default), [opencode](https://opencode.ai) or pi; opencode takes any Provider it supports, pi a fixed set ([limits](docs/reference.md#pi-known-limits)), both including GitHub Copilot |
 | Issue Tracker, where work comes from | GitHub (default), Forgejo or Codeberg, Jira, local offline files |
 | Code Forge, where work lands | GitHub (default), Forgejo or Codeberg, a plain git remote, a bundle kept on the host |
 | Runtime, what confines the Box | podman (default), docker, Rancher Desktop (`rancher`), bubblewrap (`bwrap`, Linux only, needs no daemon) |
@@ -45,7 +45,8 @@ picks one option for each of these at build time:
   is the recommended alternative.
 - Agent auth. Run `claude setup-token` to get a `CLAUDE_CODE_OAUTH_TOKEN`, or
   use an `ANTHROPIC_API_KEY`. To use opencode with GitHub Copilot instead, see
-  [opencode github-copilot credential](docs/reference.md#opencode-driver-github-copilot-provider-credential).
+  [opencode github-copilot credential](docs/reference.md#opencode-driver-github-copilot-provider-credential);
+  for pi, see [the pi Driver](docs/reference.md#the-pi-driver).
 - Branch protection on the Target repo's base branch. See
   [Before you deploy](#before-you-deploy), and don't skip it.
 
@@ -162,8 +163,8 @@ perSystem = { config, pkgs, ... }: {
     git.merge.policy = "immediate";   # manual (default) | immediate | auto
     dispatch.maxParallel = 3;         # Boxes at once
     infra.runtime = "podman";         # podman | docker | rancher | bwrap
-    # agents.drivers.opencode = { models = ...; };  # default: claude; opencode
-    #   needs every model id as <provider>/<model>; see docs/reference.md
+    # agents.drivers.opencode = { models = ...; };  # default: claude; opencode and pi
+    #   need every model id as <provider>/<model>; see docs/reference.md
   };
 
   devShells.default = pkgs.mkShell {

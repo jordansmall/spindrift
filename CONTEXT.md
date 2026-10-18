@@ -28,13 +28,14 @@ it stays a distinct role from the Consumer flake even when they are the same rep
 _Avoid_: source repo, project repo.
 
 **Agent**:
-A single headless Driver process — `claude -p …` or `opencode run …`, run with
-permission prompts skipped — working one issue inside one container.
+A single headless Driver process — `claude -p …`, `opencode run …` or
+`pi --print …`, run with permission prompts skipped — working one issue
+inside one container.
 The Agent is the running process; the Driver is which CLI it is.
 
 **Driver**:
-The swappable agent CLI baked into the Box. `claude` (the default) and
-`opencode` are the Drivers today. A
+The swappable agent CLI baked into the Box. `claude` (the default),
+`opencode` and `pi` are the Drivers today. A
 build-time seam (one Driver per image, picked beside `runtime`), analogous to
 the Forge and runner seams. Each Driver normalizes its tool's quirks at its own
 boundary and has two coordinated halves keyed by one name — a nix-generated
