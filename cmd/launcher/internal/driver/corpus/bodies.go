@@ -110,9 +110,9 @@ func (r *redactor) event(ev map[string]any) {
 		r.inputs(ev["args"])
 	case "tool_execution_update":
 		r.inputs(ev["args"])
-		r.piResult(ev["partialResult"])
+		r.piResult(ev["partialResult"], ev["toolName"])
 	case "tool_execution_end":
-		r.piResult(ev["result"])
+		r.piResult(ev["result"], ev["toolName"])
 	case "message_update":
 		r.piStreamEvent(ev["assistantMessageEvent"])
 	case "message_start", "message_end":
@@ -149,19 +149,57 @@ func (r *redactor) piMessage(v any) {
 		r.textBlocks(m["content"], agentText)
 	case "toolResult":
 		r.textBlocks(m["content"], toolOutput)
+		r.piDetails(m, m["toolName"])
 	}
 }
 
 // piResult blanks a pi tool result's text blocks and its structured and
 // details payloads, keeping the result's shape for the Transcript reader.
-func (r *redactor) piResult(v any) {
+func (r *redactor) piResult(v any, toolName any) {
 	res, ok := v.(map[string]any)
 	if !ok {
 		return
 	}
 	r.blank(res, "structuredContent", toolOutput)
-	r.blank(res, "details", toolOutput)
+	r.piDetails(res, toolName)
 	r.textBlocks(res["content"], toolOutput)
+}
+
+// piDetails blanks a pi tool result's details payload. The subagent tool's
+// details are the exception: each child's usage, model and step are what a
+// Driver reads to cost the children, so only the free text inside is blanked.
+func (r *redactor) piDetails(m map[string]any, toolName any) {
+	if d, ok := m["details"].(map[string]any); ok && toolName == "subagent" && d["mode"] != nil {
+		if results, ok := d["results"].([]any); ok {
+			r.subagentDetails(d, results)
+			return
+		}
+	}
+	r.blank(m, "details", toolOutput)
+}
+
+// subagentDetails blanks the free text of each child result: its brief, its
+// stderr and its messages, which hold the child's whole conversation including
+// the system prompt and the host's cwd. An assistant message keeps its usage,
+// model, provider, timestamp and stopReason; unlike the parent's, its text is
+// blanked, since only the result's own blanked content block is read for it.
+func (r *redactor) subagentDetails(d map[string]any, results []any) {
+	r.blank(d, "projectAgentsDir", hostContext)
+	for _, e := range results {
+		child, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		r.blank(child, "task", agentText)
+		r.blank(child, "stderr", toolOutput)
+		msgs, _ := child["messages"].([]any)
+		r.piMessages(msgs)
+		for _, m := range msgs {
+			if mm, ok := m.(map[string]any); ok && mm["role"] == "assistant" {
+				r.textBlocks(mm["content"], agentText)
+			}
+		}
+	}
 }
 
 // piStreamEvent blanks the streamed fragments of a pi assistant message that
