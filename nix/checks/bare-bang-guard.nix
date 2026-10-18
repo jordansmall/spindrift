@@ -1,4 +1,5 @@
-# Rejects a standalone `! cmd` shell command in nix/checks/*.nix (issue #5102).
+# Rejects a standalone `! cmd` shell command in any *.nix under nix/checks/,
+# subdirectories included (issues #5102, #5549).
 # bash errexit ignores a negated pipeline, so a bare `! grep -q X f` inside a
 # runCommand can never fail the build; write `! cmd || { ...; exit 1; }`, or
 # make it the tail of a function body's `&&`/`||` list so it sets the return.
@@ -37,7 +38,7 @@ in
     scan() { awk -f ${scanner} "$@"; }
 
     # Fixtures are built with printf so this file holds no `!`-led line itself,
-    # and live outside the scanned glob.
+    # and live outside the scanned tree.
     printf '%s\n' 'echo a' '! grep -q X f' 'echo b' > neg.sh
     printf '%s\n' \
       '! grep -q X f \' '  || { echo bad >&2; exit 1; }' \
@@ -50,7 +51,7 @@ in
     [ "$(wc -l < neg.out)" = 1 ] || { echo "negative control: expected one hit" >&2; cat neg.out >&2; exit 1; }
     scan pos.sh || { echo "positive fixture rejected" >&2; exit 1; }
 
-    scan ${./.}/*.nix || { echo "standalone '!' without '||' (errexit ignores it)" >&2; exit 1; }
+    scan $(find ${./.} -name '*.nix' | sort) || { echo "standalone '!' without '||' (errexit ignores it)" >&2; exit 1; }
     touch $out
   '';
 }

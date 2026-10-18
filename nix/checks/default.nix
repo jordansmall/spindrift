@@ -180,8 +180,8 @@ let
   # change left alone substitutes from main's cache anyway.
   docsCheckModules = [
     "adr-numbers"
-    # Reads no docs, but scans every nix/checks/*.nix, which a comment-only
-    # edit (issue #5158) can reach.
+    # Reads no docs, but scans every *.nix under nix/checks/, which a
+    # comment-only edit (issue #5158) can reach.
     "bare-bang-guard"
     "changelog"
     "driver-map"
