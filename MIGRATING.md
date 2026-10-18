@@ -1,5 +1,46 @@
 # Migration Guide
 
+## Adding the pi Driver to an existing Consumer flake (issue #5486)
+
+This is an opt-in addition, not a breaking change: a Consumer that does not
+declare `agents.drivers.pi` evaluates, builds and dispatches exactly as before.
+To add `pi` (the nixpkgs `pi-coding-agent` build, taken from your own locked
+nixpkgs, with no overlay or extra flake input), declare it beside the Drivers
+you already have:
+
+```nix
+perSystem.spindrift.agents.drivers.pi.models = {
+  default = "github-copilot/claude-opus-4.5";
+  byName.scout = { model = "github-copilot/claude-haiku-4.5"; effort = "low"; };
+  byName.reviewer.model = "github-copilot/claude-opus-4.5";
+};
+```
+
+Two things change in evaluation once the flake declares more than one Driver.
+A flake still on the single-Driver form (top-level `agents.models.*`,
+`agents.bashTimeoutMs` or `agents.driver`) must first move those settings
+under `agents.drivers.claude`, since the two forms cannot be mixed. And
+`agents.defaultDriver` becomes required: it is inferred only while a single
+Driver is declared, so set it to your current Driver (`"claude"`). The new
+Driver adds the `.#pi` and `.#pi-daemon` apps and the `spindrift-pi` image;
+`nix run .`, `.#daemon` and CI stay on the default Driver.
+
+- Every model pi runs must be `<provider>/<model>`; a bare id such as
+  `claude-sonnet-5` fails evaluation. The coordinator, scout and reviewer
+  defaults are bare claude ids, so name all three, as above (the review axis
+  follows the reviewer).
+  The Filer stays off until you give it a model, and a roster `worker` with a
+  bare model (its default) is simply not provisioned.
+- A role that sets an `effort` needs a model to carry it, and the level must be
+  one of `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`.
+- Credentials: a Provider API key goes in the Provider's own environment
+  variable, required only when a model tier names that Provider. GitHub
+  Copilot has no API key and takes `PI_AUTH_CONTENT` instead.
+
+See [The pi Driver](docs/reference.md#the-pi-driver) for the roster, hooks and
+[known limits](docs/reference.md#pi-known-limits), and [the Copilot
+credential](docs/reference.md#pi-driver-github-copilot-provider-credential).
+
 ## The opencode review pass runs at the roster reviewer's effort (issue #5350)
 
 Under `DRIVER=opencode`, the code-owned review pass now runs at the roster
