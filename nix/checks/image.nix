@@ -857,6 +857,49 @@ in
         touch $out
       '';
 
+  # The pi Driver carries claude's tool hooks through a bridge extension baked
+  # into pi's agent directory (issue #5482), where child pi processes load it
+  # too. This realizes only agentFiles, not the image; piseam's hooks tests
+  # prove the extension loads under a real pi.
+  pi-hook-bridge-baked-into-agent-files =
+    pkgs.runCommand "pi-hook-bridge-baked-into-agent-files" { }
+      ''
+        bridge=${piHarness.internals.agentFiles}/home/agent/.pi/agent/extensions/spindrift-hooks.js
+        [ -f "$bridge" ] || {
+          echo "pi agentFiles missing .pi/agent/extensions/spindrift-hooks.js" >&2
+          exit 1
+        }
+        cmp "$bridge" ${../../agent/pi-hook-bridge.js} || {
+          echo "baked pi hook bridge differs from agent/pi-hook-bridge.js" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # Only the pi Driver bakes the bridge; claude has its own hook table and
+  # opencode its guard plugin (issue #5482).
+  non-pi-agent-files-have-no-pi-hook-bridge =
+    let
+      checked = [
+        nonRustHarness
+        opencodeHarness
+      ];
+      covered = map (h: h.internals.driverEntry.name) checked;
+      expected = builtins.filter (n: n != "pi") (builtins.attrNames driverRegistry.entries);
+      missing = builtins.filter (n: !(builtins.elem n covered)) expected;
+    in
+    assert pkgs.lib.assertMsg (missing == [ ])
+      "non-pi-agent-files-have-no-pi-hook-bridge does not check Driver(s): ${builtins.concatStringsSep ", " missing}";
+    pkgs.runCommand "non-pi-agent-files-have-no-pi-hook-bridge" { } ''
+      ${pkgs.lib.concatMapStringsSep "\n" (h: ''
+        ! [ -e ${h.internals.agentFiles}/home/agent/.pi ] || {
+          echo "${h.internals.driverEntry.name} agentFiles carries a .pi dir" >&2
+          exit 1
+        }
+      '') checked}
+      touch $out
+    '';
+
   # The Bash command-output interceptor (issue #1988) is a pair:
   # bash-output-tee.sh tees each Bash call's output to a per-command log, and
   # bash-output-summary.sh replaces the tool result with a bounded tail once

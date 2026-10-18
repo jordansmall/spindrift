@@ -84,8 +84,10 @@ in
             model = "p/m";
           }
         ];
-      } == { }
-    ) "pi Driver bakes no subagent files yet";
+      } == {
+        ".pi/agent/extensions/spindrift-hooks.js" = builtins.readFile ../../../agent/pi-hook-bridge.js;
+      }
+    ) "pi Driver bakes only the hook bridge (issue #5482), no subagent files yet";
     pkgs.runCommand "drivers-pi-attributes-pinned" { } "touch $out";
 
   # pi reads skills from its agent directory (PI_CODING_AGENT_DIR, default

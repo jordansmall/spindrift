@@ -85,9 +85,15 @@
     PI_TELEMETRY = "0";
   };
 
-  # pi has no --agents equivalent and no subagent files are baked yet.
+  # pi has no --agents equivalent and no subagent files are baked yet. The
+  # hook bridge (issue #5482) is an extension in pi's agent directory, not
+  # the Box's cwd, so child pi processes load it too once subagents exist.
   agentsJsonTemplate = { roster }: "";
-  agentFilesTemplate = { roster }: { };
+  agentFilesTemplate =
+    { roster }:
+    {
+      ".pi/agent/extensions/spindrift-hooks.js" = builtins.readFile ../../agent/pi-hook-bridge.js;
+    };
 
   # agentsFlag is omitted. Effort values pass through to --thinking
   # unnormalised.
