@@ -1,20 +1,18 @@
 {
   "lastSwept": "e60ff9fe21b7684452b14ceeebfd6f9036ec1660",
-  "cursor": "cmd/launcher/internal/driver/opencode/testdata/corpus/real-box-failed/result.golden.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-18T06:14:54.541692038-04:00"
-  },
+  "cursor": "cmd/launcher/internal/driver/opencode/testdata/corpus/real-review-approved/usage.golden.json",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/5573"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 90,
+    "output_tokens": 16130,
+    "cache_read_input_tokens": 2603966,
+    "cache_creation_input_tokens": 79653,
+    "total_cost_usd": 1.4863141950000005,
+    "duration_ms": 205456,
+    "duration_api_ms": 205160,
+    "num_turns": 48
   }
 }
