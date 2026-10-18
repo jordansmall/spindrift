@@ -34,6 +34,8 @@ let
   choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
   agentPathsFile = renderers.renderAgentPathsGo agentPaths;
+  credentialVarsFile = renderers.renderCredentialVarsFile driverRegistry.credentialEnv;
+  driverCredentialEnvFile = renderers.renderDriverCredentialEnvGo driverRegistry.credentialEnv;
   runtimeValues = import ../lib/runtime-values.nix;
   runtimeValuesFile = renderers.renderRuntimeValuesGo runtimeValues;
   quickstartPathTable = import ../lib/quickstart-path-table.nix;
@@ -176,6 +178,8 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/runtimevalues_gen.go" runtimeValuesFile}
+    ${writeGenerated "agent/credential-vars" credentialVarsFile}
+    ${writeGenerated "cmd/launcher/internal/runner/credentialenv_gen.go" driverCredentialEnvFile}
     ${writeGenerated "cmd/launcher/quickstart/quickstart_paths_gen.go" quickstartPathsFile}
     ${writeGenerated "cmd/launcher/subcommands_gen.go" subcommandsFile}
     ${writeGenerated "cmd/launcher/cliflags_gen.go" cliFlagsFile}

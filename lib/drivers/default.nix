@@ -201,6 +201,18 @@ let
     else
       name;
 
+  # Every env var any Driver credential rule names (ADR 0066 decision 7): the
+  # Box's Bash scrub list and the bwrap runner's off-argv set both derive from
+  # it. Sorted and deduplicated so a render is stable across row order.
+  credentialEnv = lib.sort (a: b: a < b) (
+    lib.unique (
+      lib.concatMap (
+        driverEntry:
+        lib.concatMap (rule: map (assertShellIdent "credentials env name") rule.env) driverEntry.credentials
+      ) (builtins.attrValues entries)
+    )
+  );
+
   # envCommon (issue #2011) renders as `export`, unlike the plain DRIVER_*
   # assignments, because the value has to reach a child process (claude, via
   # driver-exec's env inheritance) rather than entrypoint.sh's own
@@ -302,5 +314,6 @@ in
     assertArgvShape
     requiredAttrs
     renderPreamble
+    credentialEnv
     ;
 }
