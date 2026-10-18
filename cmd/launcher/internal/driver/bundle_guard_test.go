@@ -38,7 +38,6 @@ var bundleFixtures = []string{
 // stale.
 var bundleAllowList = []string{
 	registry,
-	module + "/internal/butler",
 }
 
 // isBundleOrDriver reports whether path is the bundle or a Driver package or

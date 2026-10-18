@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -28,6 +29,7 @@ import (
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/promptfence"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil"
@@ -65,9 +67,9 @@ func seedRecordsSettled(t *testing.T, root string, keyBase, n int, first time.Ti
 	}
 	op := hostop.EncodeSpindriftOp
 	result := func(ts string, cost float64) string {
-		return fmt.Sprintf(`{"type":"result","timestamp":%q,"num_turns":3,"total_cost_usd":%g,"duration_ms":1000,"duration_api_ms":800,`+
-			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},`+
-			`"modelUsage":{"opus":{}}}`+"\n", ts, cost)
+		return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: tsMillis(ts), NumTurns: 3,
+			Tokens:     driverkit.Tokens{Input: 10, Output: 20, CacheRead: 30, CacheWrite5m: 40, CostUSD: cost},
+			DurationMs: 1000, DurationAPIMs: 800, Models: []string{"opus"}})
 	}
 	var ids []string
 	for i := range n {
@@ -655,14 +657,17 @@ func ingestRecords(t *testing.T, root string) {
 
 func resultLine(t *testing.T, ts string, cost float64, text string) string {
 	t.Helper()
-	b, err := json.Marshal(map[string]any{
-		"type": "result", "timestamp": ts, "num_turns": 3, "total_cost_usd": cost, "duration_ms": 1000,
-		"duration_api_ms": 800, "result": text, "modelUsage": map[string]any{"opus": map[string]any{}},
-	})
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: tsMillis(ts), NumTurns: 3, Text: text,
+		Tokens:     driverkit.Tokens{CostUSD: cost},
+		DurationMs: 1000, DurationAPIMs: 800, Models: []string{"opus"}})
+}
+
+func tsMillis(ts string) int64 {
+	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
-	return string(b) + "\n"
+	return t.UnixMilli()
 }
 
 // A window with a blocked Record, an ambiguous Record and a Record whose
@@ -691,8 +696,9 @@ func TestSweep_Tuning_InputCarriesOutliersAndFencedEvidence(t *testing.T) {
 		op(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
 		op(hostop.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}), resultLine(t, ts, 1, hostileVerdict),
 		op(hostop.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
-		fmt.Sprintf(`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"w1","name":"Write","input":%s}]}}`+"\n", dispJSON),
-		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"ok","is_error":false}]}}`+"\n",
+		seamtest.Line(driverkit.Event{Kind: driverkit.KindToolCall, MessageID: "m1", ToolID: "w1", ToolName: "Write",
+			ToolInput: dispJSON, ToolTarget: "/tmp/dispositions.md"}),
+		seamtest.Line(driverkit.Event{Kind: driverkit.KindToolResult, ToolID: "w1", ToolOutput: "ok"}),
 		resultLine(t, ts, 1, "fixed"))
 	ingestRecords(t, root)
 	tr := newTuningRun(t)
