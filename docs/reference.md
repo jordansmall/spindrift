@@ -877,7 +877,8 @@ process-lifetime, per-issue host directory and mounts it writable over the
 Driver's declared session-cache dir — `sessionCacheDirRelative` in its
 `lib/drivers/` entry (`/home/agent/.claude/projects` for claude, where its
 session transcripts live; `/home/agent/.local/share/opencode/spindrift-session`
-for opencode, which holds its relocated session database), narrow enough that
+for opencode, which holds its relocated session database;
+`/home/agent/.pi/agent/sessions` for pi), narrow enough that
 it can never shadow the baked skills dir above (the only writable host mount
 the runner seam has — the prompt/skills mounts above are read-only). A Driver that omits
 `sessionCacheDirRelative` has no resumable session state: the launcher
@@ -929,6 +930,16 @@ session carrying the pinned title and renders `--session <id>`. A missing
 database, no matching session, or any read error renders nothing and the pass
 runs cold, with no error; `--continue` is never used, since it resumes the
 last session rather than this issue's.
+
+pi pins the session id itself: both the initial run and every resume render
+`--session-id <id>`, where the id is the same `REPO_SLUG` + `ISSUE_NUMBER`
+derived UUID the claude Driver pins. pi opens that session when its file
+exists and creates it otherwise, so the Box does no store lookup: a missing
+session (an evicted cache, or a first fix pass after a crash) starts a fresh
+pi session under that id, with a stderr warning and no error. pi keeps its
+sessions under its agent directory, so the mounted directory is
+`/home/agent/.pi/agent/sessions`, never the agent directory itself, which
+would shadow `auth.json` and the baked skills beside it.
 
 ##### Role capability profiles
 
@@ -1103,11 +1114,14 @@ This first slice is deliberately narrow:
   `SCOUT_PROVISIONED`, `WORKER_PROVISIONED` and `FILER_ENABLED` bake `false`.
   Only the reviewer's model and effort are kept, for the orchestrator's review
   pass.
-- **No session resume.** Every fix pass starts a fresh pi session.
 - **No hooks.** None of claude's tool hooks run under pi.
 - **No credential knob.** The row has no `credentials` rule and there is no
   `PI_AUTH_CONTENT`; Provider API keys reach pi through the environment, as
   the Provider's own API key variable.
+
+Fix passes and nudges resume the first pass's pi session with `--session-id`,
+and a missing session starts fresh instead of failing, as the fix box's session
+resume notes above describe.
 
 Baked skills land in pi's agent directory, `/home/agent/.pi/agent/skills`,
 where pi reads them. Under `--no-approve` pi ignores the Target repo's
