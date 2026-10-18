@@ -47,6 +47,19 @@ const (
 	OutcomeSourceNone = "none"
 )
 
+// PassAgent is one agent's usage within a pass: the main loop
+// (usage.MainLoopAgent) or a subagent role. InputTokens is uncached input, like
+// Pass.InputTokens. How agent rows relate to the pass totals: see
+// recordstats.GroupAgents.
+type PassAgent struct {
+	Agent                    string `json:"agent"`
+	APICalls                 int    `json:"api_calls"`
+	InputTokens              int    `json:"input_tokens"`
+	OutputTokens             int    `json:"output_tokens"`
+	CacheReadInputTokens     int    `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int    `json:"cache_creation_input_tokens"`
+}
+
 // Pass is the spend of one pass within a Dispatch.
 type Pass struct {
 	Ordinal                  int      `json:"ordinal"`
@@ -61,7 +74,10 @@ type Pass struct {
 	Turns                    int      `json:"turns"`
 	DurationMs               int64    `json:"duration_ms"`
 	APIDurationMs            int64    `json:"api_duration_ms"`
-	Verdict                  string   `json:"verdict,omitempty"`
+	// Agents breaks the pass down by agent: the main loop first, then the
+	// costliest subagent first. Empty when the Driver reported no usage.
+	Agents  []PassAgent `json:"agents,omitempty"`
+	Verdict string      `json:"verdict,omitempty"`
 	// VerdictText and Dispositions are Box-written, untrusted prose stored
 	// verbatim.
 	VerdictText  string `json:"verdict_text,omitempty"`
@@ -204,6 +220,10 @@ func mergePasses(shells []*passShell, tallies []driverkit.PassTally, log string)
 		}
 		if p.Models == nil {
 			p.Models = []string{}
+		}
+		for _, a := range t.Agents {
+			p.Agents = append(p.Agents, PassAgent{Agent: a.Agent, APICalls: a.APICalls, InputTokens: a.UncachedInputTokens,
+				OutputTokens: a.OutputTokens, CacheReadInputTokens: a.CacheReadInputTokens, CacheCreationInputTokens: a.CacheCreationInputTokens})
 		}
 		if sh.opCalls > 0 {
 			p.APICalls = sh.opCalls
