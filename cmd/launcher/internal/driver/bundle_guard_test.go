@@ -36,9 +36,7 @@ var bundleFixtures = []string{
 // for lack of a Strategy. Each entry leaves as its package moves onto
 // seamtest's Strategy; a package that no longer reaches a Driver is reported
 // stale.
-var bundleAllowList = []string{
-	registry,
-}
+var bundleAllowList = []string{}
 
 // isBundleOrDriver reports whether path is the bundle or a Driver package or
 // subpackage, for every registered Driver in names.

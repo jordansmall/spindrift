@@ -77,9 +77,9 @@ func forbiddenInClosure(out string, forbidden func(path string) bool) []string {
 // tested without the others. The Driver list comes from the registry, so a
 // new Driver is covered the moment it registers.
 func TestDriverTestClosuresStandAlone(t *testing.T) {
-	names := driver.Names()
+	names := driver.DescriptorNames()
 	if len(names) == 0 {
-		t.Fatal("driver.Names() is empty; nothing to guard")
+		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
@@ -188,9 +188,9 @@ func corpusProblems(root string, names []string) []string {
 // a corpus and the test that replays it must fail, and so must a corpus no
 // registered Driver owns.
 func TestEveryDriverRunsItsCorpus(t *testing.T) {
-	names := driver.Names()
+	names := driver.DescriptorNames()
 	if len(names) == 0 {
-		t.Fatal("driver.Names() is empty; nothing to guard")
+		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
 	for _, p := range corpusProblems(".", names) {
 		t.Error(p)
