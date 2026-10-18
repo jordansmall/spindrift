@@ -151,6 +151,10 @@ func TestParseLog(t *testing.T) {
 			if rec.Attribution != "inferred" || rec.Outcome != "unknown" {
 				t.Errorf("attribution/outcome = %q/%q", rec.Attribution, rec.Outcome)
 			}
+			// The per-agent breakdown is pinned in agents_test.go.
+			for i := range rec.Passes {
+				rec.Passes[i].Agents = nil
+			}
 			for i := range tc.passes {
 				tc.passes[i].Log = tc.file
 			}

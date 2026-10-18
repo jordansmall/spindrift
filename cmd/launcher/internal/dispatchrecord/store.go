@@ -225,6 +225,25 @@ var migrations = []string{
 		rendered   TEXT NOT NULL,
 		created_at INTEGER NOT NULL -- unix ms, UTC
 	);`,
+	// v12: each pass's per-agent usage (issue #5485), keyed by the pass's
+	// segment key plus the agent. rank keeps the Driver's order (main loop,
+	// then costliest first), which the agent name alone cannot reproduce.
+	`CREATE TABLE pass_agents (
+		record_id                   TEXT NOT NULL,
+		log_start                   INTEGER NOT NULL, -- unix ms, UTC
+		log                         TEXT NOT NULL,
+		ordinal                     INTEGER NOT NULL,
+		agent                       TEXT NOT NULL,
+		rank                        INTEGER NOT NULL,
+		api_calls                   INTEGER NOT NULL,
+		input_tokens                INTEGER NOT NULL,
+		output_tokens               INTEGER NOT NULL,
+		cache_read_input_tokens     INTEGER NOT NULL,
+		cache_creation_input_tokens INTEGER NOT NULL,
+		PRIMARY KEY (record_id, log_start, log, ordinal, agent)
+	);
+	-- Existing rows were parsed before agents were tallied, so re-read them (mtime -1 never matches a real file).
+	UPDATE ingested_files SET mtime_ns = -1;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -247,7 +266,7 @@ type Store struct {
 const forceReparseSize int64 = -1
 
 // segmentTables are the per-segment child tables upsert clears alongside a Record.
-var segmentTables = []string{"passes", "prompt_hashes"}
+var segmentTables = []string{"passes", "prompt_hashes", "pass_agents"}
 
 // busyTimeoutMs is how long a connection waits on another process's write lock
 // before failing.
@@ -808,6 +827,16 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 				p.APIDurationMs, p.Verdict, p.VerdictText, p.Dispositions); err != nil {
 				return "", err
 			}
+			for rank, a := range p.Agents {
+				if _, err := tx.Exec(
+					`INSERT INTO pass_agents (record_id, log_start, log, ordinal, agent, rank, api_calls, input_tokens,
+						output_tokens, cache_read_input_tokens, cache_creation_input_tokens)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					newID, logStart, p.Log, p.Ordinal, a.Agent, rank, a.APICalls, a.InputTokens, a.OutputTokens,
+					a.CacheReadInputTokens, a.CacheCreationInputTokens); err != nil {
+					return "", err
+				}
+			}
 		}
 	}
 	if _, err := tx.Exec(
@@ -930,6 +959,7 @@ func (s *Store) Records() ([]Record, error) {
 		return nil, err
 	}
 	defer prows.Close()
+	passAt := map[passKey]passIndex{}
 	for prows.Next() {
 		var id, models string
 		var logStart int64
@@ -947,13 +977,54 @@ func (s *Store) Records() ([]Record, error) {
 		if !ok {
 			return nil, fmt.Errorf("dispatchrecord: passes row for unknown record %q", id)
 		}
+		passAt[passKey{id, p.Log, logStart, p.Ordinal}] = passIndex{rec: i, pass: len(out[i].Passes)}
 		p.Ordinal = len(out[i].Passes) + 1
 		out[i].Passes = append(out[i].Passes, p)
 	}
 	if err := prows.Err(); err != nil {
 		return nil, err
 	}
+	if err := loadPassAgents(tx, out, passAt); err != nil {
+		return nil, err
+	}
 	return out, loadPromptHashes(tx, out, byID)
+}
+
+// passKey is a pass's stored identity; Pass.Ordinal is renumbered per Record on
+// read, so pass_agents rows find their pass by this instead.
+type passKey struct {
+	id, log  string
+	logStart int64
+	ordinal  int
+}
+
+// passIndex locates a pass: its Record's index and its index within that Record.
+type passIndex struct{ rec, pass int }
+
+func loadPassAgents(tx *sql.Tx, recs []Record, passAt map[passKey]passIndex) error {
+	rows, err := tx.Query(
+		`SELECT record_id, log_start, log, ordinal, agent, api_calls, input_tokens, output_tokens,
+			cache_read_input_tokens, cache_creation_input_tokens
+		 FROM pass_agents ORDER BY record_id, log_start, log, ordinal, rank`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k passKey
+		var a PassAgent
+		if err := rows.Scan(&k.id, &k.logStart, &k.log, &k.ordinal, &a.Agent, &a.APICalls, &a.InputTokens,
+			&a.OutputTokens, &a.CacheReadInputTokens, &a.CacheCreationInputTokens); err != nil {
+			return err
+		}
+		at, ok := passAt[k]
+		if !ok {
+			return fmt.Errorf("dispatchrecord: pass_agents row for unknown pass %q/%d/%q/%d", k.id, k.logStart, k.log, k.ordinal)
+		}
+		p := &recs[at.rec].Passes[at.pass]
+		p.Agents = append(p.Agents, a)
+	}
+	return rows.Err()
 }
 
 // marshalMap stores a nil or empty map as "", the column default.
