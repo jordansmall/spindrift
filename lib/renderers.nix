@@ -1118,6 +1118,41 @@ rec {
       items = runtimeValues;
     };
 
+  # agent/credential-vars content (ADR 0066 decision 7): the env vars the Box's
+  # Bash tool must never inherit. An empty list throws because the scrub hooks
+  # fail closed on it, so an empty render would deny every Bash call.
+  renderCredentialVarsFile =
+    names:
+    if names == [ ] then
+      throw "renderCredentialVarsFile: no Driver credential env names; an empty agent/credential-vars would deny every Bash call"
+    else
+      "# Environment variables the Box's Bash tool must never inherit (issue #5346).\n"
+      + "# The one list both Drivers' Bash scrub reads: claude through the PreToolUse\n"
+      + "# hooks env-credential-scrub.sh and bash-output-tee.sh, opencode through its\n"
+      + "# plugin, which runs that same hook. One name per line; `#` lines and blank\n"
+      + "# lines are ignored.\n"
+      + "#\n"
+      + "# Generated from the credential rules in lib/drivers/*.nix by nix/regen.nix.\n"
+      + "# DO NOT EDIT; regenerate with `nix run .#regen`.\n"
+      + concatStrings (map (name: "${name}\n") names);
+
+  # cmd/launcher/internal/runner/credentialenv_gen.go content (ADR 0066
+  # decision 7): the Driver-derived half of the bwrap runner's off-argv set.
+  renderDriverCredentialEnvGo =
+    names:
+    renderGoStringSliceFile {
+      generator = "nix/regen.nix";
+      source = "lib/drivers/*.nix";
+      package = "runner";
+      varName = "driverCredentialEnv";
+      docLines = [
+        "driverCredentialEnv is every env var a Driver credential rule names, the"
+        "Driver-derived half of the off-argv set: the bwrap runner passes these"
+        "keys through the environment, never on argv."
+      ];
+      items = names;
+    };
+
   # cmd/launcher/quickstart/quickstart_paths_gen.go content (issue #2556): one Go
   # const per lib/quickstart-path-table.nix key, so the wizard's rendered
   # flake.nix reads the same option paths the schema resolves to and a

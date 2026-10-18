@@ -12,6 +12,7 @@
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
+  driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   inherit (import ../../lib/driver-map.nix) placeEntry exampleDriver;
   schema = import ../../lib/env-schema.nix;
   # Shared with nix/regen.nix's marker-splice loop so a block's marker
@@ -556,7 +557,6 @@ checkedMerge {
   # same way regen normalizes it.
   driver-descriptors-gen =
     let
-      driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
       raw = pkgs.writeText "descriptor_gen.go.raw" (
         renderers.renderDriverDescriptorsGo driverRegistry.entries
       );
@@ -812,6 +812,50 @@ checkedMerge {
           || { echo "cmd/launcher/internal/runner/runtimevalues_gen.go is out of sync with lib/runtime-values.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
+
+  # Regenerate with `nix run .#regen` when a Driver's credential rules change
+  # (ADR 0066 decision 7). One check per output: the scrub list is read only
+  # by bash, the off-argv set only by Go.
+  credential-vars-gen =
+    let
+      generated = pkgs.writeText "credential-vars.generated" (
+        renderers.renderCredentialVarsFile driverRegistry.credentialEnv
+      );
+    in
+    pkgs.runCommand "credential-vars-gen"
+      {
+        inherit generated;
+        committed = ../../agent/credential-vars;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "agent/credential-vars is out of sync with the credential rules in lib/drivers/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
+  credential-env-gen =
+    let
+      generated = pkgs.writeText "credentialenv_gen.go.generated" (
+        renderers.renderDriverCredentialEnvGo driverRegistry.credentialEnv
+      );
+    in
+    pkgs.runCommand "credential-env-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/internal/runner/credentialenv_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/internal/runner/credentialenv_gen.go is out of sync with the credential rules in lib/drivers/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
+  # Pins the empty-list throw in renderCredentialVarsFile (lib/renderers.nix).
+  credential-vars-empty-throws =
+    assert pkgs.lib.assertMsg (
+      !(builtins.tryEval (renderers.renderCredentialVarsFile [ ])).success
+    ) "renderCredentialVarsFile must throw on an empty credential list";
+    pkgs.runCommand "credential-vars-empty-throws" { } "touch $out";
 
   # Regenerate with `nix run .#regen` when a quickstart knob's nix option path
   # changes, that is, lib/nixpath.nix over lib/env-schema.nix's
@@ -1219,14 +1263,14 @@ checkedMerge {
       schema = assertChoiceKnobSetOk (assertSchemaChoicesOk (import ../../lib/env-schema.nix));
       inherit (pkgs.lib) assertMsg;
     in
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.mergeMode.choices or [ ] == [
         "immediate"
         "auto"
         "manual"
       ]
     ) "lib/env-schema.nix: mergeMode.choices must be [ immediate auto manual ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.codeForge.choices or [ ] == [
         "github"
         "git"
@@ -1234,7 +1278,7 @@ checkedMerge {
         "forgejo"
       ]
     ) "lib/env-schema.nix: codeForge.choices must be [ github git local forgejo ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.issueTracker.choices or [ ] == [
         "github"
         "local"
@@ -1242,32 +1286,32 @@ checkedMerge {
         "forgejo"
       ]
     ) "lib/env-schema.nix: issueTracker.choices must be [ github local jira forgejo ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.overlapGate.choices or [ ] == [
         "defer"
         "off"
       ]
     ) "lib/env-schema.nix: overlapGate.choices must be [ defer off ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.mergeMethod.choices or [ ] == [
         "merge"
         "squash"
         "rebase"
       ]
     ) "lib/env-schema.nix: mergeMethod.choices must be [ merge squash rebase ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.syncMethod.choices or [ ] == [
         "rebase"
         "merge"
       ]
     ) "lib/env-schema.nix: syncMethod.choices must be [ rebase merge ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.boxForgeAndIssueAccess.choices or [ ] == [
         "read-write"
         "read-only"
       ]
     ) "lib/env-schema.nix: boxForgeAndIssueAccess.choices must be [ read-write read-only ]";
-    assert assertMsg (
+    assert pkgs.lib.assertMsg (
       schema.networkMode.choices or [ ] == [
         "open"
         "no-host-loopback"
