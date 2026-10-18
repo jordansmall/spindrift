@@ -1,0 +1,11 @@
+{
+  "lines": [
+    "#42 · VERDICT: APPROVE"
+  ],
+  "onModel": [
+    {
+      "model": "stub/stub-model:high",
+      "role": ""
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "lines": [
+    "#42 · The stubbed model says hello."
+  ],
+  "onModel": [
+    {
+      "model": "stub/stub-model:off",
+      "role": ""
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+All work is finished.
+SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=ready note=stub

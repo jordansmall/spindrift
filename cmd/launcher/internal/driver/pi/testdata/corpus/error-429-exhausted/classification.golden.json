@@ -1,0 +1,5 @@
+{
+  "Class": "transient",
+  "Reason": "rateLimit",
+  "ResetAt": null
+}

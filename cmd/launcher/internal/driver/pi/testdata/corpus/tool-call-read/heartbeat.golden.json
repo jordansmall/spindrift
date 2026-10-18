@@ -1,0 +1,11 @@
+{
+  "lines": [
+    "#42 · Tool done."
+  ],
+  "onModel": [
+    {
+      "model": "stub/stub-model:off",
+      "role": ""
+    }
+  ]
+}

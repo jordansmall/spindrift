@@ -1,0 +1,3 @@
+[implementor] bash(echo hi-from-bash)
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Tool done.

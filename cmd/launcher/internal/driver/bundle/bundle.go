@@ -7,9 +7,11 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/opencode"
+	"spindrift.dev/launcher/internal/driver/pi"
 )
 
 func init() {
 	driver.Register(claude.Strategy)
 	driver.Register(opencode.Strategy)
+	driver.Register(pi.Strategy)
 }

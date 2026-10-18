@@ -1,0 +1,3 @@
+[implementor] read(fixture.txt)
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Tool done.
