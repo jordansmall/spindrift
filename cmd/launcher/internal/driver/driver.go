@@ -68,9 +68,10 @@ type Driver interface {
 	ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error)
 
 	// SessionFlags renders the CLI's session flags for mode. "initial" pins the
-	// session, "resume" resumes it only when its session store holds it, and any
-	// other mode renders nothing. home is the Box's HOME; a Driver whose store
-	// path comes from elsewhere ignores it.
+	// session, "resume" resumes it (rendering nothing when the Driver's session
+	// store lacks it and its CLI cannot create one), and any other mode renders
+	// nothing. home is the Box's HOME; a Driver whose store path comes from
+	// elsewhere ignores it.
 	SessionFlags(mode, repoSlug, issue, home string) string
 }
 
