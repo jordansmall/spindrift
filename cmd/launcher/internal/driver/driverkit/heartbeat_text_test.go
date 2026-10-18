@@ -35,6 +35,14 @@ func TestSanitizeLineDropsBidiAndSeparators(t *testing.T) {
 func TestTrimNarration(t *testing.T) {
 	for _, tc := range []struct{ name, in, want string }{
 		{"first sentence", "Reading the file. Then more.", "Reading the file."},
+		{"dot in identifier", "Counts.longest plus more.", "Counts.longest plus more."},
+		{"dot inside code span", "in `a/b.py` now.", "in `a/b.py` now."},
+		{"leading dot path", ".github/workflows now pins the action", ".github/workflows now pins the action"},
+		{"bang then space", "Done! Next", "Done!"},
+		{"dot then tab", "Done.\tNext step.", "Done."},
+		{"abbreviation still cuts", "e.g. foo", "e.g."},
+		{"dot before closing paren", "Done.) next", "Done.) next"},
+		{"question at end of line", "Why?\nmore", "Why?"},
 		{"skips blank lines", "\n  \nhello", "hello"},
 		{"lone CR is a line break", "ok\r#99 · x", "ok"},
 		{"CSI stripped", "\x1b[2K\x1b[1Ago on", "go on"},

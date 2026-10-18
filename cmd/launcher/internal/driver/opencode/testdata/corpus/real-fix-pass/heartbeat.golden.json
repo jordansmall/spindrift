@@ -3,7 +3,7 @@
     "#42 ○ dispatch_start",
     "#42 ○ prompt_hashes",
     "#42 ○ pass 1 (implement) started",
-    "#42 · Committed b8617ed on `agent/issue-encoding`: `--encoding NAME` is implemented in `tally/__main__.",
+    "#42 · Committed b8617ed on `agent/issue-encoding`: `--encoding NAME` is implemented in `tally/__main__.py`, with tests in `...",
     "#42 ○ pass 1 (implement) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
     "#42 ○ pass 1 ended with no outcome (exit 0)",
     "#42 ○ continue: no cap fired, entering review pass",

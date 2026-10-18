@@ -10,7 +10,7 @@
     "#42 [explore] Quick targeted go test first.",
     "#42 [explore] · 2 skills",
     "#42 [test] · 1 bash",
-    "#42 [explore] The rebase of `agent/issue-5263` onto `main` is finished, and the `nix build .",
+    "#42 [explore] The rebase of `agent/issue-5263` onto `main` is finished, and the `nix build .#checks-inbox -L` gate passed.",
     "#42 [explore] · 1 bash",
     "#42 [explore] · 14 turns",
     "#42 ○ pass 1 usage: 9 calls, 18 in, 2267 out (main loop), 260190 cache read, 26494 cache write · main 288969",

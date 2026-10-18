@@ -7,7 +7,7 @@
     "#42 [explore] · 1 skill",
     "#42 [git] · 1 bash",
     "#42 ○ signal comment accepted · 2091 bytes · sha256:b0ffff93d725e7afdba7a8c856e3ea78e82f2e07b1902d879c166ad59d6f8dd7",
-    "#42 [explore] SPINDRIFT_OUTCOME issue=4994 landing=none status=recommend note=Still accurate on main: docs/reference.",
+    "#42 [explore] SPINDRIFT_OUTCOME issue=4994 landing=none status=recommend note=Still accurate on main: docs/reference.md:4628-4630 a...",
     "#42 [explore] · 2 bashes",
     "#42 [explore] · 6 turns",
     "#42 ○ pass 1 usage: 4 calls, 8 in, 1648 out (main loop), 100889 cache read, 23558 cache write · main 126103",

@@ -97,7 +97,7 @@
     "#42 [test] · 1 bash",
     "#42 [git] · 1 bash",
     "#42 ○ signal pr-intent accepted · 1152 bytes · sha256:25bbf8235424c5ba6fcea3f140d168f06b5031f488f4023d685d93f03c14f93f",
-    "#42 [explore] SPINDRIFT_OUTCOME issue=4940 landing=agent/issue-4940 status=ready note=Reworded the session_test.",
+    "#42 [explore] SPINDRIFT_OUTCOME issue=4940 landing=agent/issue-4940 status=ready note=Reworded the session_test.go comment so it no...",
     "#42 [explore] · 2 bashes",
     "#42 [explore] · 10 turns",
     "#42 ○ decisions budget: round 3 mean 55.0/entry (ceiling 50), total 55 tokens (ceiling 400)",
