@@ -390,6 +390,18 @@ let
     defaults = opencodeNamespacedDefaults;
   };
 
+  # The pi Harness with a Provider-namespaced worker too, so the bare-worker
+  # gate (issue #5331) drops nothing and the full roster provisions (issue
+  # #5483).
+  piFullRosterHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "pi";
+    packages = p: [ p.hello ];
+    defaults = opencodeNamespacedDefaults // {
+      workerModel = "anthropic/claude-sonnet-5";
+    };
+  };
+
   # Exercises the run knobs (#3) with non-default baked `defaults`.
   customHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
@@ -599,6 +611,7 @@ in
     forgejoHarness
     opencodeHarness
     piHarness
+    piFullRosterHarness
     customHarness
     dockerHarness
     rancherHarness

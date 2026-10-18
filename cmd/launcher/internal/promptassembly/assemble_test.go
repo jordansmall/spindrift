@@ -3330,36 +3330,46 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 	})
 }
 
-// Issue #5350: both Drivers surface the roster reviewer's model and effort on
-// the Handoff. Claude reads them from the --agents JSON entry; opencode only
-// has the baked reviewer.md frontmatter (`model:` / `reasoningEffort:`).
+// Issue #5350: every Driver surfaces the roster reviewer's model and effort on
+// the Handoff. Claude reads them from the --agents JSON entry; opencode and pi
+// only have the baked reviewer.md frontmatter (`model:` / `reasoningEffort:`),
+// pi's model carrying its effort as a `:<level>` suffix that is kept verbatim.
 func TestAssembleReviewerModelAndEffortExtraction(t *testing.T) {
 	reg := loadTestRegistry(t)
 
 	tests := []struct {
 		name          string
-		opencode      bool   // false: claude, reading jsonTemplate
-		jsonTemplate  string // claude path: AgentsJSONTemplate
-		reviewerExtra string // opencode path: extra reviewer.md frontmatter
+		driver        string // "claude", "opencode" or "pi"
+		jsonTemplate  string // claude: AgentsJSONTemplate
+		reviewerExtra string // opencode: extra reviewer.md frontmatter
+		reviewerFile  string // pi: verbatim reviewer.md
 		wantModel     string
 		wantEffort    string
 	}{
 		{
 			name:         "claude: JSON reviewer entry",
+			driver:       "claude",
 			jsonTemplate: `{"reviewer":{"model":"json-model","effort":"json-effort"}}`,
 			wantModel:    "json-model",
 			wantEffort:   "json-effort",
 		},
 		{
 			name:          "opencode: reviewer.md model and reasoningEffort",
-			opencode:      true,
+			driver:        "opencode",
 			reviewerExtra: "reasoningEffort: \"high\"\n",
 			wantModel:     "opus",
 			wantEffort:    "high",
 		},
 		{
+			name:         "pi: reviewer.md keeps the model suffix and reads reasoningEffort",
+			driver:       "pi",
+			reviewerFile: "---\nname: \"reviewer\"\ndescription: \"r\"\nmodel: \"anthropic/m:high\"\nreasoningEffort: \"high\"\n---\nbody\n",
+			wantModel:    "anthropic/m:high",
+			wantEffort:   "high",
+		},
+		{
 			name:       "opencode: reviewer.md without reasoningEffort leaves effort empty",
-			opencode:   true,
+			driver:     "opencode",
 			wantModel:  "opus",
 			wantEffort: "",
 		},
@@ -3367,12 +3377,21 @@ func TestAssembleReviewerModelAndEffortExtraction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := coveredEnv()
-			if tt.opencode {
+			switch tt.driver {
+			case "claude":
+				env.AgentsJSONTemplate = tt.jsonTemplate
+			case "opencode":
 				dir := t.TempDir()
 				writeAgentFileFrontmatter(t, filepath.Join(dir, "reviewer.md"), "reviewer", tt.reviewerExtra)
 				env.DriverAgentFilesDir = dir
-			} else {
-				env.AgentsJSONTemplate = tt.jsonTemplate
+			case "pi":
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte(tt.reviewerFile), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+				env.DriverAgentFilesDir = dir
+			default:
+				t.Fatalf("unknown driver %q", tt.driver)
 			}
 
 			result, err := Assemble(env, reg)
