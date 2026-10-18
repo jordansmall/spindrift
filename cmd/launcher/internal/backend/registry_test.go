@@ -173,7 +173,7 @@ func TestDescriptorFieldsMatchNixRows(t *testing.T) {
 	}
 	for name := range structFields {
 		if !nixFields[name] {
-			t.Errorf("Descriptor.%s has no entry in rowFields (lib/renderers.nix); add the row attribute there and set it on the lib/backends/default.nix rows that need a non-default value, then run `nix run .#regen`", name)
+			t.Errorf("Descriptor.%s has no entry in rowFields (lib/renderers.nix); add the row attribute there and set it on the lib/backends/<name>.nix rows that need a non-default value, then run `nix run .#regen`", name)
 		}
 	}
 	for name := range nixFields {

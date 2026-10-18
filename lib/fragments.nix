@@ -332,7 +332,7 @@ let
     }
     # Step 2's tracker search commands fork on the read axis (issue #5127),
     # not FILER_FILE_DIRECT_GH: a relay Filer still reads through the tracker.
-    # jira has no read axis (lib/backends/default.nix, no trackerAxisRead), so
+    # jira has no read axis (lib/backends/jira.nix, no trackerAxisRead), so
     # it takes the GitHub arm like every other ISSUE_TRACKER_GITHUB fragment.
     {
       gate = "ISSUE_TRACKER_GITHUB";

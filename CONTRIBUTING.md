@@ -190,7 +190,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `launcher-env-coverage` check fails if the launcher and the schema drift,
   and internal non-knob env names sit on that check's own allowlist),
   `backends/default.nix` (the backend descriptor registry — one row per
-  ISSUE_TRACKER/CODE_FORGE backend; `env-schema.nix`'s tracker/forge choices derive from it),
+  ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
+  file; `env-schema.nix`'s tracker/forge choices derive from it),
   `baked-skills.nix` (the registry of skills `box` probes at
   `DRIVER_SKILLS_DIR/<name>/SKILL.md` — one row per skill drives every
   hand-mirrored consumer copy), `labels.nix` (the label registry — one row

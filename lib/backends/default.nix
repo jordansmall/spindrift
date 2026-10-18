@@ -1,5 +1,6 @@
 # The backend descriptor registry (issue #2521; ADR 0005/0007, "nix computes,
-# generated code executes"): one row per ISSUE_TRACKER/CODE_FORGE backend.
+# generated code executes"): one row per ISSUE_TRACKER/CODE_FORGE backend,
+# each in its own sibling file and listed in order below.
 # lib/renderers.nix's renderBackendRegistryGo writes it into
 # cmd/launcher/internal/backend/registry_gen.go on `nix run .#regen`, and
 # nix/checks/schema-drift.nix's backend-registry-gen check guards it.
@@ -16,7 +17,8 @@
 # Declaration order is load-bearing. lib/env-schema.nix derives
 # issueTracker.choices and codeForge.choices as an order-preserving filter over
 # this list, and this order reproduces both axes' pinned choice orders without
-# a separate per-axis ordering table.
+# a separate per-axis ordering table. Keep it an explicit list: builtins.readDir
+# would sort the files by name and silently reorder both axes.
 
 # An omitted bool means false. An omitted trackerAxisRead means "GITHUB"; an
 # omitted trackerAxisWrite means "GITHUB" too (only reachable when
@@ -61,69 +63,9 @@
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [
-  {
-    name = "github";
-    goVar = "GitHub";
-    validAsTracker = true;
-    validAsCodeForge = true;
-    tokenEnvVar = "GH_TOKEN";
-    outboxRelayCapable = true;
-    inBoxOpenPRQueryable = true;
-    inBoxGHCredentialHelper = true;
-    relayCapable = true;
-    hostPostingCapable = true;
-    labelRegistry = true;
-  }
-  {
-    name = "git";
-    goVar = "Git";
-    validAsCodeForge = true;
-    inBoxGHCredentialHelper = true;
-  }
-  {
-    name = "local";
-    goVar = "Local";
-    validAsTracker = true;
-    validAsCodeForge = true;
-    # ADR 0033: local has no writable remote to push to.
-    hostMediatedRemote = true;
-    # ADR 0032: local is not reachable from inside the Box at all.
-    inBoxUnreachableTracker = true;
-    relayCapable = true;
-    hostPostingCapable = true;
-    trackerAxisRead = "LOCAL";
-    # Explicitly empty, not omitted: local has no write step, so
-    # gates_tracker.go's ISSUE_TRACKER_*_READWRITE/READONLY gates match neither
-    # the "GITHUB" nor the "FORGEJO" arm.
-    trackerAxisWrite = "";
-  }
-  {
-    name = "jira";
-    goVar = "Jira";
-    validAsTracker = true;
-    tokenEnvVar = "JIRA_TOKEN";
-    doctorTokenHint = "JIRA_TOKEN";
-    doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
-    # The Box has no Jira client and JIRA_TOKEN is host-only, so the research
-    # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)
-    # relay through the host.
-    inBoxUnwritableTracker = true;
-  }
-  {
-    name = "forgejo";
-    goVar = "Forgejo";
-    validAsTracker = true;
-    validAsCodeForge = true;
-    tokenEnvVar = "FORGEJO_TOKEN";
-    doctorTokenHint = "FORGEJO_TOKEN";
-    doctorSlugHint = "FORGEJO_BASE_URL";
-    outboxRelayCapable = true;
-    relayCapable = true;
-    hostPostingCapable = true;
-    labelRegistry = true;
-    trackerAxisRead = "FORGEJO";
-    trackerAxisWrite = "FORGEJO";
-    trackerAxisFiler = "FORGEJO";
-    forgeBackend = "FORGEJO";
-  }
+  (import ./github.nix)
+  (import ./git.nix)
+  (import ./local.nix)
+  (import ./jira.nix)
+  (import ./forgejo.nix)
 ]
