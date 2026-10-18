@@ -44,7 +44,7 @@ func writeLogAt(t *testing.T, root, key string, ts time.Time, state, reason, prU
 	body := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
 		RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: ts, Started: ts, HostToken: "tok-" + key,
 	}}) +
-		canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-05-01T09:00:00Z"), Text: "done"}) +
+		seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-05-01T09:00:00Z"), Text: "done"}) +
 		hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{
 			RecordID: id, State: state, Reason: reason, PRURL: prURL, HostToken: "tok-" + key,
 		}})

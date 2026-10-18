@@ -95,3 +95,15 @@ func TestStrategyDecodesHostOpLine(t *testing.T) {
 		t.Errorf("host op payload = %+v, want pass_start pass 2 role review", got)
 	}
 }
+
+func TestLineRoundTripsThroughTheDecoder(t *testing.T) {
+	want := driverkit.Event{Kind: driverkit.KindUsage, MessageID: "m1", Model: "m", Timestamp: 1700000000000}
+	line := Line(want)
+	if !strings.HasSuffix(line, "\n") {
+		t.Fatalf("Line %q has no trailing newline", line)
+	}
+	got := Strategy.NewDecoder()(line)
+	if len(got) != 1 || got[0].Kind != want.Kind || got[0].MessageID != want.MessageID || got[0].Model != want.Model || got[0].Timestamp != want.Timestamp {
+		t.Errorf("decoded %+v, want %+v", got, want)
+	}
+}

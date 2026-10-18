@@ -2,7 +2,6 @@ package settle
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -132,15 +131,6 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// canonLine is ev as the seamtest Strategy's log line: one JSON Event.
-func canonLine(ev driverkit.Event) string {
-	b, err := json.Marshal(ev)
-	if err != nil {
-		panic(err)
-	}
-	return string(b) + "\n"
-}
-
 // canonMs is the RFC3339 ts as epoch milliseconds, the Event's Timestamp unit.
 func canonMs(ts string) int64 {
 	t, err := time.Parse(time.RFC3339, ts)
@@ -159,9 +149,9 @@ func seamTranscript(role, msgID, ts, outcomeLine string) string {
 		tail = outcomeLine + "\n"
 	}
 	return hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: role}) +
-		canonLine(driverkit.Event{Kind: driverkit.KindUsage, MessageID: msgID, Model: "m",
+		seamtest.Line(driverkit.Event{Kind: driverkit.KindUsage, MessageID: msgID, Model: "m",
 			Tokens: driverkit.Tokens{Input: 1, Output: 1, CostUSD: 1}}) +
-		canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs(ts), Text: outcomeLine}) +
+		seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs(ts), Text: outcomeLine}) +
 		tail
 }
 
@@ -436,7 +426,7 @@ func TestSettle_UnreadableUnrelatedLogDoesNotBlockIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := filepath.Join(dir, "issue-1.log")
-	line := canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
+	line := seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
 	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +477,7 @@ func TestSettle_UnreadableOwnLogWarnsButRecordLands(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := filepath.Join(dir, "issue-"+num+"-fix-1.log")
-	line := canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
+	line := seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
 	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}

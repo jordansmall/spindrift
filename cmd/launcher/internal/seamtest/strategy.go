@@ -24,6 +24,7 @@ var Strategy = driverkit.Strategy{
 	Name:         fakeDriverName,
 	NewDecoder:   newDecoder,
 	Totals:       driverkit.PerCallTotals,
+	WriteTool:    "Write",
 	Result:       driverkit.ResultEvents,
 	ResultEvent:  resultEvent,
 	SessionFlags: func(mode, repoSlug, issue, home string) string { return "" },
@@ -45,6 +46,15 @@ func newDecoder() driverkit.Decoder {
 		}
 		return []driverkit.Event{ev}
 	}
+}
+
+// Line is ev as the Strategy's log line: one JSON-encoded Event and a newline.
+func Line(ev driverkit.Event) string {
+	b, err := json.Marshal(ev)
+	if err != nil {
+		panic(err)
+	}
+	return string(b) + "\n"
 }
 
 func resultEvent(text string) ([]byte, error) {

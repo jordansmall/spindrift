@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -153,7 +154,7 @@ func TestSettled_MissingLogAppendsNothing(t *testing.T) {
 func TestSettled_UnstampedLogAppendsNothing(t *testing.T) {
 	testutil.InstallPipeReporter(t)
 	path := filepath.Join(t.TempDir(), "issue-7.log")
-	if err := os.WriteFile(path, []byte(canonLine(driverkit.Event{Kind: driverkit.KindText})), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(seamtest.Line(driverkit.Event{Kind: driverkit.KindText})), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
