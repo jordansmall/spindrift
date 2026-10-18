@@ -379,6 +379,15 @@ let
     packages = p: [ p.hello ];
   };
 
+  # The pi Driver's Harness: the pi roster bakes and the
+  # session-cache-mountpoint-baked-pi image check (issue #5481) share it.
+  piHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "pi";
+    packages = p: [ p.hello ];
+    defaults = opencodeNamespacedDefaults;
+  };
+
   # Exercises the run knobs (#3) with non-default baked `defaults`.
   customHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
@@ -587,6 +596,7 @@ in
     workerOnlyHarness
     forgejoHarness
     opencodeHarness
+    piHarness
     customHarness
     dockerHarness
     rancherHarness

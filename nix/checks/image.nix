@@ -20,6 +20,7 @@ let
     extraClosuresHarness
     harness
     opencodeHarness
+    piHarness
     forgejoHarness
     ;
   agentPaths = import ../../lib/agent-paths.nix;
@@ -943,6 +944,9 @@ in
 
   # opencode's session cache dir (issue #5349) needs the same uid-1000 bake.
   session-cache-mountpoint-baked-opencode = mountpointBaked "session-cache-mountpoint-baked-opencode" opencodeHarness;
+
+  # pi's session cache dir (issue #5481) needs the same uid-1000 bake.
+  session-cache-mountpoint-baked-pi = mountpointBaked "session-cache-mountpoint-baked-pi" piHarness;
 
   # nix/var must be owned by uid 1000 so the non-root agent can lock the
   # SQLite store DB inside the unprivileged container (issue #356).
