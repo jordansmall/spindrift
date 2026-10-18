@@ -207,34 +207,90 @@ let
     removeAttrs portableSourceChecks imageOnlyCheckNames
   );
 
+  nixFilesIn =
+    dir: pkgs.lib.filter (pkgs.lib.hasSuffix ".nix") (builtins.attrNames (builtins.readDir dir));
+  # Built, not spelled out: a literal path would make this file a reader.
+  driversPath = ./. + "/drivers";
+  driverFiles = nixFilesIn driversPath;
+
+  checksRel = "nix/checks";
+  driversRel = "${checksRel}/drivers";
+
+  # A driver check file is attributed to owner `drivers`: it enters the build
+  # only through drivers.nix (it needs that module's entry/driverRegistry
+  # args), so it cannot be named in docsCheckModules itself.
+  driverModule = text: {
+    owner = "drivers";
+    dir = driversRel;
+    inherit text;
+  };
+
+  # Every nix/checks module the coverage guards scan.
+  scannedModules =
+    let
+      mods =
+        map (f: {
+          owner = pkgs.lib.removeSuffix ".nix" f;
+          dir = checksRel;
+          text = builtins.readFile (./. + "/${f}");
+        }) (nixFilesIn ./.)
+        ++ map (f: driverModule (builtins.readFile (driversPath + "/${f}"))) driverFiles;
+    in
+    # The controls below feed hand-made records past scannedModules, so this is
+    # the only thing that notices the driver enumeration being dropped.
+    assert pkgs.lib.assertMsg (
+      driverFiles != [ ]
+      &&
+        builtins.length (pkgs.lib.filter (m: m.owner == "drivers" && m.dir == driversRel) mods)
+        == builtins.length driverFiles
+    ) "scannedModules must hold one `drivers` record per file in nix/checks/drivers";
+    mods;
+
+  # A `../` per component of `dir` reaches the repo root from a module in it,
+  # as a regex fragment.
+  repoRootPrefixRe = dir: pkgs.lib.concatMapStrings (_: ''\.\./'') (pkgs.lib.splitString "/" dir);
+
+  # Built, not spelled out: a literal path would make this file a reader.
+  dotDotPath = n: pkgs.lib.concatStrings (pkgs.lib.replicate n "../");
+
+  # Owners (unique) of modules in `mods` that read a docs file but are not
+  # in `listed`.
+  docsReadersMissing =
+    listed: mods:
+    let
+      inherit (pkgs.lib) filter unique;
+      docsRef =
+        dir:
+        ''${repoRootPrefixRe dir}(docs([^a-zA-Z0-9_-]|$)|[^/ "}]+\.md|\.release-please-manifest\.json)'';
+      readsDocs = m: builtins.length (builtins.split (docsRef m.dir) m.text) > 1;
+    in
+    unique (map (m: m.owner) (filter (m: readsDocs m && !(builtins.elem m.owner listed)) mods));
+
   # Coverage guard (issue #5155): a module reads a docs file when it names a
   # repo-root path on the ci-changes.sh allowlist: docs/, a root *.md, or the
-  # release-please manifest. Blind spots: a path built by string
-  # concatenation, a whole-repo source (`../../.`), and a read made inside
-  # lib/ (mkHarness's manifest version).
+  # release-please manifest, at the depth its directory implies. Blind spots:
+  # a path built by string concatenation, a whole-repo source (the root named
+  # as a bare `.` after the `../` hops, from a module or a Driver check file),
+  # a path that stops at nix/checks/ or nix/ (a Driver check file's one or two
+  # `../` match neither pattern), and a read made inside lib/ (mkHarness's
+  # manifest version).
   checks-docs-covers-docs-readers =
     let
-      inherit (pkgs.lib)
-        assertMsg
-        concatStringsSep
-        filter
-        hasSuffix
-        removeSuffix
-        ;
-      docsRef = ''\.\./\.\./(docs([^a-zA-Z0-9_-]|$)|[^/ "}]+\.md|\.release-please-manifest\.json)'';
-      modules = map (removeSuffix ".nix") (
-        filter (hasSuffix ".nix") (builtins.attrNames (builtins.readDir ./.))
-      );
-      readsDocs = m: builtins.length (builtins.split docsRef (builtins.readFile (./. + "/${m}.nix"))) > 1;
-      missing = filter (
-        m: readsDocs m && !(builtins.elem m docsCheckModules) && !(builtins.elem m docsGuardExemptModules)
-      ) modules;
-      stale = filter (m: !(builtins.elem m modules)) (docsCheckModules ++ docsGuardExemptModules);
+      inherit (pkgs.lib) assertMsg concatStringsSep filter;
+      moduleNames = map (m: m.owner) (filter (m: m.dir == checksRel) scannedModules);
+      missing = docsReadersMissing (docsCheckModules ++ docsGuardExemptModules) scannedModules;
+      stale = filter (m: !(builtins.elem m moduleNames)) (docsCheckModules ++ docsGuardExemptModules);
     in
     assert assertMsg (missing == [ ])
       "nix/checks module(s) read a docs file but are missing from docsCheckModules in nix/checks/default.nix: ${concatStringsSep ", " missing}";
     assert assertMsg (stale == [ ])
       "docsCheckModules/docsGuardExemptModules names a module absent from nix/checks: ${concatStringsSep ", " stale}";
+    assert assertMsg (
+      docsReadersMissing [ ] [ (driverModule "${dotDotPath 3}docs/x.md") ] == [ "drivers" ]
+    ) "negative control: a docs read from nix/checks/drivers/ must flag owner `drivers`";
+    assert assertMsg (
+      docsReadersMissing [ ] [ (driverModule "${dotDotPath 2}docs/x.md") ] == [ ]
+    ) "depth control: a two-level docs read from nix/checks/drivers/ is nix/docs, not the repo's";
     pkgs.runCommand "checks-docs-covers-docs-readers" { } "touch $out";
 
   # Coverage guard (issue #5158): a comment-only .go/.nix edit takes the docs
