@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/term"
+
+	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 )
 
 // forceFlagUsage deliberately names no fixed "*.bak" backup file: the scheme

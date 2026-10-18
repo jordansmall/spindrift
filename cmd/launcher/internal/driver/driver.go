@@ -74,13 +74,15 @@ type Driver interface {
 	SessionFlags(mode, repoSlug, issue, home string) string
 }
 
-// registry is populated by each Driver's init().
+// registry is populated by the bundle package's init(); this package imports
+// no Driver, so a binary links the Drivers by importing the bundle (ADR 0066
+// decision 8).
 var registry = map[string]Driver{}
 
-// register adds the Driver that runs s to the registry, keyed on s.Name. It
+// Register adds the Driver that runs s to the registry, keyed on s.Name. It
 // panics on a duplicate name, which is a programming error rather than a
 // runtime condition.
-func register(s driverkit.Strategy) {
+func Register(s driverkit.Strategy) {
 	if _, exists := registry[s.Name]; exists {
 		panic("driver: duplicate registration for " + s.Name)
 	}

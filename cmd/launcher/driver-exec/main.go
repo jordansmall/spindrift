@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/driver"
+	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/promptassembly"
 )

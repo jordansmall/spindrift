@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 
+	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
