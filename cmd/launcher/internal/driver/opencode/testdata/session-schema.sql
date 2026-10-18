@@ -1,12 +1,10 @@
--- `project` and `session` tables, last regenerated from opencode 1.18.35
--- (pkgs.opencode in the flake's locked nixpkgs), verbatim from sqlite_master,
--- each with a `;` appended.
--- The nix check `opencode-session-schema` fails when pkgs.opencode's
--- project/session columns drift from this file. To regenerate, run this from
--- the repo root, replace the statements below this header with its output, and
--- update the version above:
---
---   nix shell --inputs-from . nixpkgs#opencode nixpkgs#sqlite -c sh -c 'd=$(mktemp -d) && HOME=$d OPENCODE_DB=$d/opencode.db opencode session list >/dev/null && sqlite3 $d/opencode.db "SELECT sql || '"'"';'"'"' FROM sqlite_master WHERE name IN ('"'"'project'"'"', '"'"'session'"'"') ORDER BY name"'
+-- `project` and `session` tables, last regenerated from opencode
+-- 1.18.35 (pkgs.opencode in the flake's locked nixpkgs), verbatim
+-- from sqlite_master, each with a `;` appended. Rendered by
+-- lib/opencode-session-schema.nix; do not edit by hand. The nix check
+-- `opencode-session-schema` fails when pkgs.opencode's project/session
+-- columns drift from this file. Regenerate it from the repo root with
+-- `nix run .#regen-opencode-schema`.
 --
 CREATE TABLE `project` (
           `id` text PRIMARY KEY,
