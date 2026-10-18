@@ -293,6 +293,13 @@ row — an absence, not a stub.
 _Avoid_: ecosystem support, extractor table, plugin, driver (that is the
 agent CLI seam).
 
+**Ecosystem corpus**:
+The worked examples that prove one Ecosystem row: small Target-repo trees
+with their committed registry config, each with the routes, enforced
+path-set, binding and proxy rewrites it must produce. The ecosystem
+counterpart of a Driver's corpus (ADR 0048 amendment). _Avoid_: ecosystem
+fixtures, registry test data.
+
 **Route discovery**:
 How a routes file gets written without hand-transcription (ADR 0045):
 `spindrift registry discover` parses the Target repo's own committed registry
