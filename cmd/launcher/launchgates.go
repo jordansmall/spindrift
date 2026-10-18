@@ -17,7 +17,7 @@ type launchGate struct {
 	// Applicable reports whether g is relevant to c at all; nil means always.
 	// An inapplicable gate is skipped entirely, with no Check call and no
 	// report line, so doctor never prints "ok" for a check that never ran.
-	// The token gates reuse their own self-noop condition here.
+	// The token gates derive it from their backend row (readOnlyTokenGates).
 	Applicable func(c config) bool
 	// Network marks a gate whose Check makes a live network call. Once one
 	// fails, walkGateRegistry stops even in collectAll mode, since a later
@@ -37,12 +37,38 @@ func tokenGateApplicable(c config, desc backend.Descriptor) bool {
 	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
 }
 
+// readOnlyTokenGates returns one network gate per row carrying a
+// readOnlyTokenGate, in row order and named read-only-token-<Name>. The gate
+// applies under read-only access when c's codeForge or issueTracker shares the
+// row's token (tokenGateApplicable), so a renamed row on the same token still
+// triggers it.
+func readOnlyTokenGates(rows []backendRow) []launchGate {
+	var gates []launchGate
+	for _, r := range rows {
+		if r.readOnlyTokenGate == nil {
+			continue
+		}
+		desc := r.Descriptor
+		gates = append(gates, launchGate{
+			Name: "read-only-token-" + r.Name,
+			Applicable: func(c config) bool {
+				return c.boxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, desc)
+			},
+			Network: true,
+			Check:   r.readOnlyTokenGate,
+		})
+	}
+	return gates
+}
+
 // gateRegistry is the ordered set of launch gates shared by the gated tier's
 // enforcement path and doctor's reporting path. The two bwrap gates are
 // excluded on purpose: doctor reports them separately, with richer dynamic
 // Tier and remedy semantics, via bwrapCapabilityChecks in
-// bwrap_doctor_checks.go.
-var gateRegistry = []launchGate{
+// bwrap_doctor_checks.go. The read-only token gates follow, one per backend
+// row that carries one. It is built once at package init, so a test that swaps
+// backendRows at runtime changes tokenGateApplicable but not the gate set.
+var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
 	}},
@@ -52,35 +78,7 @@ var gateRegistry = []launchGate{
 	{Name: "signal-carrier-network-mode", Check: func(c config, _ io.Writer) error {
 		return checkSignalCarrierNetworkModeGate(c)
 	}},
-	{
-		Name: "read-only-token-github",
-		Applicable: func(c config) bool {
-			if c.boxForgeAndIssueAccess != "read-only" {
-				return false
-			}
-			return tokenGateApplicable(c, backend.GitHub)
-		},
-		Network: true,
-		Check: func(c config, w io.Writer) error {
-			_, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
-			return err
-		},
-	},
-	{
-		Name: "read-only-token-forgejo",
-		Applicable: func(c config) bool {
-			if c.boxForgeAndIssueAccess != "read-only" {
-				return false
-			}
-			return tokenGateApplicable(c, backend.Forgejo)
-		},
-		Network: true,
-		Check: func(c config, w io.Writer) error {
-			_, err := checkReadOnlyForgejoTokenGate(c, w)
-			return err
-		},
-	},
-}
+}, readOnlyTokenGates(backendRows)...)
 
 // splitGateRegistryByNetwork partitions registry into its non-network and
 // network gates, preserving registry order within each. The split reads each

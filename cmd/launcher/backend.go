@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -43,6 +44,11 @@ type backendRow struct {
 	// boxTokenEnvVar is the ADR 0016 Box-side token override name; empty when
 	// the backend carries no bearer token (git, local).
 	boxTokenEnvVar string
+
+	// readOnlyTokenGate checks the Box's own token for this backend under
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1950); gateRegistry runs it
+	// as read-only-token-<Name>. nil means the backend has no Box token to gate.
+	readOnlyTokenGate func(c config, w io.Writer) error
 }
 
 // remoteLedger builds a Ledger against a hosted forge: a fresh scratch repo
@@ -109,9 +115,7 @@ func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
 
 // backendRows is the registry of every named backend the ISSUE_TRACKER and
 // CODE_FORGE knobs select among; callers resolve per-backend behavior through
-// backendByName instead of a name switch. The read-only token gates are the
-// one exception: gateRegistry (launchgates.go, issue #2942) hardcodes the
-// github and forgejo gates rather than walking this slice.
+// backendByName instead of a name switch.
 var backendRows = []backendRow{
 	{
 		Descriptor: backend.GitHub,
@@ -131,6 +135,11 @@ var backendRows = []backendRow{
 		},
 
 		boxTokenEnvVar: "BOX_GH_TOKEN",
+		readOnlyTokenGate: func(c config, w io.Writer) error {
+			// ghTokenIntrospector is a var tests swap, so read it at call time.
+			_, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
+			return err
+		},
 	},
 	{
 		Descriptor: backend.Forgejo,
@@ -156,6 +165,10 @@ var backendRows = []backendRow{
 		},
 
 		boxTokenEnvVar: "BOX_FORGEJO_TOKEN",
+		readOnlyTokenGate: func(c config, w io.Writer) error {
+			_, err := checkReadOnlyForgejoTokenGate(c, w)
+			return err
+		},
 	},
 	{
 		Descriptor: backend.Jira,
