@@ -15,11 +15,13 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -130,21 +132,36 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// seamTranscript is one Pass's stream-json: pass_start, an assistant turn and a
-// result. A non-empty outcomeLine rides in the result and also leads a raw line
-// after it, which is what the host's outcome.Resolve reads.
+// canonLine is ev as the seamtest Strategy's log line: one JSON Event.
+func canonLine(ev driverkit.Event) string {
+	b, err := json.Marshal(ev)
+	if err != nil {
+		panic(err)
+	}
+	return string(b) + "\n"
+}
+
+// canonMs is the RFC3339 ts as epoch milliseconds, the Event's Timestamp unit.
+func canonMs(ts string) int64 {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		panic(err)
+	}
+	return t.UnixMilli()
+}
+
+// seamTranscript is one Pass's canonical-event log: pass_start, a usage turn
+// and a result. A non-empty outcomeLine rides in the result and also leads a
+// raw line after it, which is what the host's outcome.Resolve reads.
 func seamTranscript(role, msgID, ts, outcomeLine string) string {
-	resultField := ""
 	tail := ""
 	if outcomeLine != "" {
-		result, _ := json.Marshal(outcomeLine)
-		resultField = `,"result":` + string(result)
 		tail = outcomeLine + "\n"
 	}
 	return hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: role}) +
-		`{"type":"assistant","message":{"id":"` + msgID + `","model":"m","content":[]}}` + "\n" +
-		`{"type":"result","timestamp":"` + ts + `","num_turns":1,"total_cost_usd":1,` +
-		`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}}` + resultField + "}\n" +
+		canonLine(driverkit.Event{Kind: driverkit.KindUsage, MessageID: msgID, Model: "m",
+			Tokens: driverkit.Tokens{Input: 1, Output: 1, CostUSD: 1}}) +
+		canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs(ts), Text: outcomeLine}) +
 		tail
 }
 
@@ -419,7 +436,7 @@ func TestSettle_UnreadableUnrelatedLogDoesNotBlockIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := filepath.Join(dir, "issue-1.log")
-	line := `{"type":"result","timestamp":"2026-03-01T10:00:00.000Z","total_cost_usd":1}` + "\n"
+	line := canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
 	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +487,7 @@ func TestSettle_UnreadableOwnLogWarnsButRecordLands(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := filepath.Join(dir, "issue-"+num+"-fix-1.log")
-	line := `{"type":"result","timestamp":"2026-03-01T10:00:00.000Z","total_cost_usd":1}` + "\n"
+	line := canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
 	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}

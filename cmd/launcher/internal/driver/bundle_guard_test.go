@@ -40,7 +40,6 @@ var bundleAllowList = []string{
 	registry,
 	module + "/internal/butler",
 	module + "/internal/dispatchrecord",
-	module + "/internal/settle",
 }
 
 // isBundleOrDriver reports whether path is the bundle or a Driver package or
