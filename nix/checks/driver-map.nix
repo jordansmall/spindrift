@@ -929,4 +929,27 @@ in
         done
         touch $out
       '';
+
+  # A Consumer declaring agents.drivers.pi gets pi's own apps and an image
+  # named spindrift-pi; models are Provider-namespaced as under opencode.
+  flakemodule-driver-map-pi =
+    let
+      isLinux = pkgs.stdenv.hostPlatform.isLinux;
+      withPi = {
+        agents.drivers.claude.models.default = "x";
+        agents.defaultDriver = "claude";
+        agents.drivers.pi = ocModels;
+      };
+      apps = appsOf withPi;
+      pkgsOut = outputs withPi;
+    in
+    assert assertMsg (apps ? pi && apps ? pi-daemon)
+      "a Consumer declaring agents.drivers.pi must publish .#pi and .#pi-daemon, got ${builtins.toJSON (attrNames apps)}";
+    assert assertMsg (
+      apps.pi.program != apps.claude.program
+    ) "the pi app must be its own Harness's, not the default's";
+    assert assertMsg (
+      !isLinux || pkgsOut.agent-image-pi.imageName == "spindrift-pi"
+    ) "the pi Driver's image must be named spindrift-pi";
+    pkgs.runCommand "flakemodule-driver-map-pi" { } "touch $out";
 }

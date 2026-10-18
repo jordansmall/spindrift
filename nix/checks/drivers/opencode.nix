@@ -482,6 +482,14 @@ in
       "opencode agentFilesTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${workerFile}";
     pkgs.runCommand "drivers-opencode-agent-files-default-roster-effort" { } "touch $out";
 
+  # ADR 0009: opencode reads claude's skills directory natively, so it wires
+  # none of its own. Compared against claude's row rather than a literal, so a
+  # rename of that directory still catches opencode drifting off it.
+  drivers-opencode-skills-dir-matches-claude =
+    assert assertMsg (entry.skillsDirRelative == driverRegistry.entries.claude.skillsDirRelative)
+      "opencode Driver's skillsDirRelative must match claude's (ADR 0009), got opencode: ${entry.skillsDirRelative}, claude: ${driverRegistry.entries.claude.skillsDirRelative}";
+    pkgs.runCommand "drivers-opencode-skills-dir-matches-claude" { } "touch $out";
+
   # Pins the real opencode entry's argvShape the same way: agentsFlag stays
   # absent (opencode has no --agents equivalent) and order stays the 5-slot
   # permutation excluding "agents".

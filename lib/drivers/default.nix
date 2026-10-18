@@ -14,7 +14,8 @@ let
   # credentials is a list of rules (possibly empty), shape-checked by
   # credentialRuleErrors.
   # configFiles (home-relative path -> content, baked by lib/image.nix) is
-  # optional and unvalidated.
+  # optional and unvalidated. So is `subagents` (default true): false marks a
+  # Driver that provisions no subagent yet (read by lib/mkHarness.nix).
   requiredAttrs = [
     "name"
     "package"
@@ -190,6 +191,7 @@ let
     opencode = assertArgvShape "opencode" (
       assertShape "opencode" (import ./opencode.nix { inherit lib; })
     );
+    pi = assertArgvShape "pi" (assertShape "pi" (import ./pi.nix { inherit lib; }));
   };
 
   # Names rendered into the preamble are interpolated into shell, so each must

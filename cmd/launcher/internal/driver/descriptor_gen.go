@@ -16,6 +16,10 @@ var descriptors = []Descriptor{
 			{Env: []string{"OPENCODE_AUTH_CONTENT"}, ModelPrefix: "github-copilot/", Remedy: "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver"},
 		},
 	},
+	{
+		Name:                     "pi",
+		ProviderNamespacedModels: true,
+	},
 }
 
 // descriptorRowFields lists the Descriptor fields the nix table renders, for

@@ -423,6 +423,18 @@ let
   # downstream consumer of finalRoster sees the roster (issue #2571).
   keptRoster = rosterLib.dropOptedOut resolvedRoster;
 
+  # A Driver with `subagents = false` provisions no subagent yet, so only the
+  # reviewer stays: the orchestrator's own review pass reads its model and
+  # effort. Every subagent role drops, which bakes SCOUT_PROVISIONED,
+  # WORKER_PROVISIONED and FILER_ENABLED false. Dropping before the
+  # namespaced-model check keeps the inherited bare claude ids on those roles
+  # from failing the build.
+  provisionedRoster =
+    if driverEntry.subagents or true then
+      keptRoster
+    else
+      lib.filter (e: e.name == "reviewer") keptRoster;
+
   # A provisioned worker makes the coordinator delegate every IMPLEMENT slice
   # to it, so a worker on a model the Provider cannot serve breaks the whole
   # implement phase. Under a Driver with Provider-namespaced model ids, drop a
@@ -432,12 +444,12 @@ let
   bareWorker = e: e.name == "worker" && !(providerNamespacedModelsLib.namespaced e.model);
   rosterWithoutBareWorker =
     if driverEntry.providerNamespacedModels or false then
-      lib.filter (e: !bareWorker e) keptRoster
+      lib.filter (e: !bareWorker e) provisionedRoster
     else
-      keptRoster;
+      provisionedRoster;
 
   # Every other model, the default included, must be namespaced too: the
-  # inherited claude ids are bare and opencode would reject them at run time,
+  # inherited claude ids are bare and a Provider-namespaced Driver would reject them at run time,
   # so a bare one fails the build (issue #5355). The worker is exempt above.
   bareModelOffenders =
     if driverEntry.providerNamespacedModels or false then

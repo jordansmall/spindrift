@@ -19,6 +19,7 @@ func TestNewUnknownDriverErrors(t *testing.T) {
 func TestProviderNamespacedModels(t *testing.T) {
 	for name, want := range map[string]bool{
 		"opencode": true,
+		"pi":       true,
 		"claude":   false,
 		"":         false,
 		"nope":     false,
