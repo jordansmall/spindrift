@@ -59,9 +59,10 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   expected to hold fetch recipes rather than live credentials. Under
   the claude Driver, two always-on `PreToolUse` hooks then close the loop
   inside the Box, not operator configuration: one rewrites every Bash call
-  to `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` /
-  `OPENCODE_AUTH_CONTENT` before it runs, so a spawned subprocess never
-  inherits a credential in the first place, and the other denies any
+  to `unset` every Driver credential variable (`ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, and the rest of `agent/credential-vars`)
+  before it runs, so a spawned subprocess never inherits a credential
+  in the first place, and the other denies any
   `Read`/`Bash` call targeting a known credential path
   (`~/.claude/.credentials.json`, `**/.env`, `~/.config/gh/hosts.yml`) —
   both enforced independently of `--dangerously-skip-permissions`. The
