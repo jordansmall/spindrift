@@ -729,8 +729,7 @@ func TestTea_gLeader_NonGKey_CancelsAndStillActsNormally(t *testing.T) {
 }
 
 // TestTea_gLeader_Timeout_CancelsPendingG verifies a lone "g" left
-// unanswered cancels the pending leader once the 200ms window times out,
-// mirroring TestTea_PickKey_Timeout_ClearsPendingIndicator for the "gg" chord
+// unanswered cancels the pending leader once the 200ms window times out
 // (issue #1628 AC).
 func TestTea_gLeader_Timeout_CancelsPendingG(t *testing.T) {
 	f := forge.NewFake()

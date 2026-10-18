@@ -386,9 +386,9 @@ func TestView_Header_RendersBordered(t *testing.T) {
 }
 
 // Issue #843 and ADR 0025: alert lines group with the header status line, ahead of
-// ephemeral operator prompts like an in-progress filter edit. Rebuilding and
-// RebuildErr share the grouping and are covered by TestView_Rebuilding_ShowsProgress
-// and TestView_RebuildErr_Surfaced.
+// ephemeral operator prompts like an in-progress filter edit.
+// RebuildStatus.Rebuilding and RebuildStatus.Err share the grouping and are
+// covered by TestView_Rebuilding_ShowsProgress and TestView_RebuildErr_Surfaced.
 func TestView_Header_AlertsRenderBeforeEphemeralPrompts(t *testing.T) {
 	m := NewModel()
 	m = Update(m, StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Message: "rebuild needed"}})
@@ -1360,7 +1360,7 @@ func TestView_DetailModal_FullscreenFallback_NarrowWidth_FooterFitsWidth(t *test
 // row. It keys on "╭" plus the title rather than a bare "╭" search: once the header
 // and sidebar panels grew their own rounded border (issue #1756), a bare search finds
 // whichever box comes first, which depends on whether termenv degrades to ASCII.
-// detailModalBoxTopBorder renders "#number title" into its border line and nowhere else.
+// renderDetailModalBox passes "#number title" as its border title and nowhere else.
 func detailModalBoxTopBorderLine(t *testing.T, out, title string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {
