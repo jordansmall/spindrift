@@ -515,3 +515,18 @@ Drivers; or a Consumer variant that overlays and the per-Driver options (ADR
 0064) cannot express, which opens the Nix half alone. ADR 0066 makes the
 host-side strategy a declarative literal, so the per-Driver code this ADR
 anticipated is smaller than it described.
+
+## Amendment (issue #5484): pi's Copilot credential ships
+
+`PI_AUTH_CONTENT` ships as planned in the #4945 amendment. The
+env-value-to-in-Box-file primitive is a Driver entry's `envFiles`, a list of
+`{ env; pathRelative; }` the Box writes under `$HOME` with mode `0600` before
+the first pass. It is Driver-neutral, so the Vertex leg the #267 amendment
+found missing can declare its credential file the same way. The OAuth
+allow-list is a separate row datum, `authContent = { env; oauthProviders;
+apiKeyProviders?; }` (`apiKeyProviders` maps an OAuth id to the Provider
+holding its API key), rendered into the Driver Descriptor so preflight reads
+it from Nix rather than a Go literal. pi lists `github-copilot` alone;
+preflight refuses any other OAuth entry and names that Provider's API-key
+variable where spindrift has one, else says the Provider is unsupported.
+`api_key` entries in the auth store are not restricted.
