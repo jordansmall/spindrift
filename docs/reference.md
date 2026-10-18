@@ -669,8 +669,10 @@ effort/reasoning-level string — spindrift does not normalize it, so the value
 must already be one the target driver accepts (e.g. `"high"`). The claude
 Driver emits it as an `"effort"` key beside `model` in the agent's `--agents`
 JSON object; the opencode Driver emits it as a `reasoningEffort:` key beside
-`model:` in the agent's YAML frontmatter. Omitting `effort` omits the
-key/line entirely on both Drivers — the same inherit-session-effort behavior
+`model:` in the agent's YAML frontmatter; the pi Driver folds it into the
+agent file's `model:` as a `:<level>` suffix and requires a model for it (see
+[The pi Driver](#the-pi-driver)). Omitting `effort` omits the
+key/line entirely on every Driver — the same inherit-session-effort behavior
 as today. `byName.<name>.effort = ""` is accepted, not rejected, but is not
 an opt-out the way `models.<name> = ""`/`byName.<name>.model = ""` is: it
 still overrides `defaultRoster`'s own per-agent default effort with an
@@ -1108,12 +1110,42 @@ Consumer's own nixpkgs. Declaring `agents.drivers.pi` publishes `.#pi`,
 Provider-namespaced, so the bare-worker gate (issue #5331) and the bare-model
 evaluation failure (issue #5355) apply as they do for opencode.
 
-This first slice is deliberately narrow:
+What the Driver carries:
 
-- **No roster.** No scout, worker or Filer subagent is provisioned;
-  `SCOUT_PROVISIONED`, `WORKER_PROVISIONED` and `FILER_ENABLED` bake `false`.
-  Only the reviewer's model and effort are kept, for the orchestrator's review
-  pass.
+- **Roster (issue #5483).** pi has no built-in subagents. The image links the
+  locked package's official subagent extension (`examples/extensions/subagent`)
+  into `~/.pi/agent/extensions/subagent`, user-level only: the hook bridge
+  refuses a `subagent` call whose `agentScope` is `project` or `both`, so pi
+  never reads a project `.pi/agents`, and child `pi` processes ignore project
+  `.pi/` files as the coordinator does. Each roster entry renders to
+  `~/.pi/agent/agents/<name>.md`, so the scout, worker, Filer and reviewer are
+  provisioned as under the other Drivers, with the bare-worker gate above.
+  The frontmatter holds JSON-quoted `name`, `description`, `model`, `tools`
+  and, when the role has an effort, `reasoningEffort`. Claude tool names map to
+  pi's: `Read` to `read`, `Bash` to `bash`, `Edit` and `MultiEdit` to `edit`,
+  `Write` to `write`, `Glob` to `find` and `ls`, `Grep` to `grep`, `Agent` and
+  `Task` to `subagent`; `WebFetch`, `WebSearch`, `TodoWrite` and `Skill` map to
+  nothing. An unknown tool name
+  fails evaluation, as does a non-empty `tools` list that maps to nothing,
+  because an empty `tools` line would grant every tool.
+- **Per-role model and effort.** A role's `effort` is sent as a suffix on the
+  role's model, `model: "<provider>/<model>:<level>"`, because the extension
+  forwards the coordinator's `--thinking` only to agents with no model. The
+  file also carries `reasoningEffort: "<level>"`, which the extension ignores;
+  the review pass reads it so its `--thinking` matches the suffix rather than
+  falling back to the coordinator's effort. `<level>` is one of
+  `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; any other value
+  fails evaluation, since pi would read it as part of the model id. A role
+  that sets an effort needs a model to carry it: an entry with an effort and
+  no model takes the coordinator's (default) model, and with neither,
+  evaluation fails naming the role. The rule runs after the `model = ""`
+  opt-out drop, so an opted-out role is removed together with its effort. The
+  default roster sets an effort on every role, so under pi each one renders
+  with a model suffix. The review pass reads `reviewer.md`'s model with its
+  suffix, so pi applies the reviewer's effort from it.
+- **Usage by role.** The decoder attributes each child's usage to the agent's
+  role, read from the child's own messages; the extension's summed per-agent
+  totals are ignored.
 - **API keys, plus Copilot.** The row declares one `credentials` rule per
   supported Provider (see the `pi` credential list under the secret
   knobs); a key is required only when some model tier names that Provider.

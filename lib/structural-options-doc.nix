@@ -44,8 +44,12 @@ in
       `effort` (issue #2242) is an optional pass-through, driver-specific
       effort/reasoning-level string: the claude Driver emits it as the
       `effort` key in the agent's `--agents` JSON entry, the opencode
-      Driver as the `reasoningEffort` key in the agent-file frontmatter;
-      omitted entirely when not set.
+      Driver as the `reasoningEffort` key in the agent-file frontmatter,
+      the pi Driver as a `:<level>` suffix on the agent file's `model` plus
+      a `reasoningEffort` key for the reviewer handoff (a
+      role with an effort needs a model, else the default model, and the
+      level must be one of off/minimal/low/medium/high/xhigh/max, or
+      evaluation fails); omitted entirely when not set.
     '';
     docType = "list of subagent-entry attrs";
     docDefault = "`lib/roster.nix`'s `defaultRoster`";
