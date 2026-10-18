@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -105,6 +106,9 @@ type piOpts struct {
 	noAPIKey bool
 	// approve trusts project-local files (--approve) instead of ignoring them.
 	approve bool
+	// defaultAgentDir leaves PI_CODING_AGENT_DIR unset, so pi uses
+	// $HOME/.pi/agent; dirs.agentDir must be that path for the config to land.
+	defaultAgentDir bool
 	// dirs, when set, are reused instead of fresh temp dirs.
 	dirs *piDirs
 }
@@ -160,11 +164,16 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 	cmd.Dir = work
 	cmd.Env = append(os.Environ(),
 		"HOME="+home,
-		"PI_CODING_AGENT_DIR="+agentDir,
 		"PI_OFFLINE=1",
 		"PI_SKIP_VERSION_CHECK=1",
 		"PI_TELEMETRY=0",
 	)
+	if opts.defaultAgentDir {
+		// Drop an inherited value so pi really falls back to its default.
+		cmd.Env = slices.DeleteFunc(cmd.Env, func(e string) bool { return strings.HasPrefix(e, "PI_CODING_AGENT_DIR=") })
+	} else {
+		cmd.Env = append(cmd.Env, "PI_CODING_AGENT_DIR="+agentDir)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
