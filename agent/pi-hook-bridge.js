@@ -3,6 +3,8 @@
 // backgrounded work and reach credential files. This runs the very same baked
 // hooks around each call, so the guard logic, its messages, and the credential
 // list (credential-vars) stay single-sourced rather than re-implemented here.
+// It also blocks a `subagent` call whose agentScope is not "user", keeping the
+// roster to the baked agents.
 // Plain ESM with node: builtins only, because the Box is offline and pi loads
 // the file as is.
 import { execFileSync } from "node:child_process";
@@ -78,6 +80,12 @@ function runHook(script, toolName, args, timeout, onFailure = "") {
 
 export default function (pi) {
   pi.on("tool_call", async (event) => {
+    // agentScope is model-supplied and the extension confirms project agents
+    // only when a UI exists, which a Box lacks: "project" or "both" would let
+    // the Target repo's .pi/agents override the baked roster.
+    if (event.toolName === "subagent" && (event.input?.agentScope ?? "user") !== "user") {
+      return { block: true, reason: "Refusing agentScope other than user: project-local agents are untrusted, since the Target repo is untrusted" };
+    }
     if (!Object.hasOwn(CLAUDE_TOOLS, event.toolName)) return;
     requireJq();
     for (const { script, tools, rewrites } of HOOKS) {

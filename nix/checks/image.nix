@@ -880,6 +880,27 @@ in
         touch $out
       '';
 
+  # The pi Driver links its package's bundled subagent extension into the agent
+  # directory (issue #5483); the link must survive into the image's cp -r.
+  pi-subagent-extension-linked-into-agent-files =
+    pkgs.runCommand "pi-subagent-extension-linked-into-agent-files" { }
+      ''
+        ext=${piHarness.internals.agentFiles}/home/agent/.pi/agent/extensions/subagent
+        [ -L "$ext" ] || {
+          echo "pi agentFiles .pi/agent/extensions/subagent is not a symlink" >&2
+          exit 1
+        }
+        [ -f "$ext/index.ts" ] || {
+          echo "pi subagent extension link has no index.ts" >&2
+          exit 1
+        }
+        case "$(readlink "$ext")" in
+          ${pkgs.pi-coding-agent}/*) ;;
+          *) echo "pi subagent extension is not linked from the pi package" >&2; exit 1 ;;
+        esac
+        touch $out
+      '';
+
   # Only the pi Driver bakes the bridge; claude has its own hook table and
   # opencode its guard plugin (issue #5482).
   non-pi-agent-files-have-no-pi-hook-bridge =

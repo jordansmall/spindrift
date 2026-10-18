@@ -104,6 +104,13 @@ in
       (entry.agentFilesTemplate { roster = [ ]; }).".pi/agent/extensions/spindrift-hooks.js"
       == builtins.readFile ../../../agent/pi-hook-bridge.js
     ) "pi Driver must bake agent/pi-hook-bridge.js verbatim as the hook bridge (issue #5482)";
+    assert assertMsg
+      (
+        (entry.packageLinks or { }) == {
+          ".pi/agent/extensions/subagent" = "lib/node_modules/pi-monorepo/examples/extensions/subagent";
+        }
+      )
+      "pi Driver must link the package's bundled subagent extension into the agent directory (issue #5483)";
     pkgs.runCommand "drivers-pi-attributes-pinned" { } "touch $out";
 
   # Issue #5483: each role renders as a Markdown agent file the subagent
