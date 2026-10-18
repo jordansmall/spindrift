@@ -6967,7 +6967,9 @@ output is recorded nowhere, neither in the agent rows nor in the totals.
 Text output prints the role and agent table cells, and every `--by` group key,
 with tabs and line breaks turned into spaces and other control characters and
 terminal escape sequences removed, since a label such as a subagent role comes
-from the Box; `--json` keeps the recorded value.
+from the Box; `--json` keeps the recorded value. The `warning:` lines
+`spindrift stats` writes to stderr get the same treatment, with or without
+`--json`, since a log path or git's own stderr can carry any byte.
 
 A landed key is a distinct (kind, Dispatch key) pair with at least one
 Record settled `complete` with reason `merged`: a PR left open (`manual`,
