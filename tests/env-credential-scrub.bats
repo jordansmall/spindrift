@@ -15,7 +15,7 @@ setup() {
   echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
   echo "$output" | jq -e '.hookSpecificOutput | has("permissionDecision") | not' >/dev/null
   new_command="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
-  [[ "$new_command" == *"unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN DEEPSEEK_API_KEY GEMINI_API_KEY GROQ_API_KEY MISTRAL_API_KEY OPENAI_API_KEY OPENCODE_AUTH_CONTENT OPENROUTER_API_KEY XAI_API_KEY;"* ]]
+  [[ "$new_command" == *"unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN DEEPSEEK_API_KEY GEMINI_API_KEY GROQ_API_KEY MISTRAL_API_KEY OPENAI_API_KEY OPENCODE_AUTH_CONTENT OPENROUTER_API_KEY PI_AUTH_CONTENT XAI_API_KEY;"* ]]
   [[ "$new_command" == *"echo hello"* ]]
 }
 

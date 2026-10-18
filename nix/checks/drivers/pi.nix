@@ -61,6 +61,10 @@ in
             modelPrefix = "deepseek/";
             env = [ "DEEPSEEK_API_KEY" ];
           }
+          {
+            modelPrefix = "github-copilot/";
+            env = [ "PI_AUTH_CONTENT" ];
+          }
         ]
       )
       "pi Driver must declare one modelPrefix-gated rule per Provider API key (mapping per pi upstream), got: ${builtins.toJSON entry.credentials}";
