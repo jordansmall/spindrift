@@ -457,6 +457,7 @@ driverGoTests
         # store-pinned shebangs, as the sandbox has no /usr/bin/env.
         SPINDRIFT_PI_BRIDGE = ../../agent/pi-hook-bridge.js;
         SPINDRIFT_PI_HOOKS_DIR = import ../../lib/agent-hooks.nix pkgs;
+        SPINDRIFT_PI_ENV_FILES = driverRegistry.renderEnvFiles driverRegistry.entries.pi.envFiles;
       }
       ''
         mkdir -p src/cmd
