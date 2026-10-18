@@ -35,6 +35,12 @@ type PassTally struct {
 	Usage usage.Usage
 	// Models is the sorted, deduped model ids the segment named.
 	Models []string
+	// Agents is the segment's per-agent breakdown, keyed, deduped and sorted as
+	// UsageByAgent does the whole log, so rows summed across segments are its
+	// rows. Under SessionTotals the main-loop row's OutputTokens is the
+	// segment's own result output; subagent rows stay 0. Nil when the segment
+	// saw no usage event.
+	Agents []usage.AgentUsage
 	// Results is each result's text in order: one per result whose totals
 	// decoded under SessionTotals (a NoTotals result contributes nothing), and
 	// under PerCallTotals the segment's last assistant message (see
@@ -61,6 +67,7 @@ type passState struct {
 	tally   PassTally
 	seenIDs map[string]bool
 	models  map[string]bool
+	agents  map[string]*usage.AgentUsage
 	pending map[string]string // write ToolID -> content, until its result
 
 	// PerCallTotals only.
@@ -71,12 +78,16 @@ type passState struct {
 }
 
 func newPassState() *passState {
-	return &passState{seenIDs: map[string]bool{}, models: map[string]bool{}, pending: map[string]string{}}
+	return &passState{seenIDs: map[string]bool{}, models: map[string]bool{}, agents: map[string]*usage.AgentUsage{}, pending: map[string]string{}}
 }
 
 func (s *passState) finish(src TotalsSource) PassTally {
 	t := s.tally
 	t.Models = slices.Sorted(maps.Keys(s.models))
+	t.Agents = sortedAgents(s.agents)
+	if src == SessionTotals {
+		t.Agents = withMainLoopOutput(t.Agents, t.Usage.OutputTokens)
+	}
 	if src == PerCallTotals {
 		// A start with no usage event would yield a negative epoch figure.
 		if s.haveStart && t.Usage.NumTurns > 0 {
@@ -150,6 +161,7 @@ func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
 		s.sawCall = true
 		if firstSighting(s.seenIDs, ev.MessageID) {
 			s.tally.APICalls++
+			addAgentCall(s.agents, ev, opts.Totals)
 		}
 		if perCall {
 			addTokens(&s.tally.Usage, ev.Tokens)
