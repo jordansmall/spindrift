@@ -9,8 +9,20 @@
 }:
 let
   inherit (pkgs.lib) assertMsg hasInfix;
-  inherit (fixtures) piHarness;
+  inherit (fixtures) piFullRosterHarness;
   preamble = driverRegistry.renderPreamble entry;
+  piFixtureEntry = {
+    name = "fixture";
+    model = "p/m";
+    mode = "subagent";
+    description = "fixture description: a\nb";
+    tools = [
+      "Read"
+      "Bash"
+    ];
+    promptFile = "fixture-prompt.md";
+    prompt = null;
+  };
 in
 {
   drivers-pi-attributes-pinned =
@@ -23,9 +35,12 @@ in
       "pi Driver's flagsCommon must stay \"--print --mode json --no-approve\", got: ${entry.flagsCommon}";
     assert assertMsg (entry.providerNamespacedModels or false
     ) "pi Driver must declare providerNamespacedModels so the bare-worker gate (issue #5331) applies";
-    assert assertMsg (
-      (entry.subagents or true) == false
-    ) "pi Driver must declare subagents = false until a roster ships";
+    assert assertMsg (entry.subagents or false)
+      "pi Driver must declare subagents = true so the full roster provisions through pi's subagent extension (issue #5483)";
+    assert assertMsg ((entry.agentFilesDirRelative or "") == ".pi/agent/agents")
+      "pi Driver's agentFilesDirRelative must be the directory the subagent extension scans, got: ${
+        entry.agentFilesDirRelative or "<absent>"
+      }";
     assert assertMsg
       (
         map (r: { inherit (r) modelPrefix env; }) entry.credentials == [
@@ -81,18 +96,106 @@ in
       entry.agentsJsonTemplate { roster = [ ]; } == ""
     ) "pi Driver has no --agents equivalent, so agentsJsonTemplate must render \"\"";
     assert assertMsg (
-      entry.agentFilesTemplate {
-        roster = [
-          {
-            name = "scout";
-            model = "p/m";
-          }
-        ];
-      } == {
-        ".pi/agent/extensions/spindrift-hooks.js" = builtins.readFile ../../../agent/pi-hook-bridge.js;
-      }
-    ) "pi Driver bakes only the hook bridge (issue #5482), no subagent files yet";
+      builtins.attrNames (entry.agentFilesTemplate { roster = [ ]; }) == [
+        ".pi/agent/extensions/spindrift-hooks.js"
+      ]
+    ) "pi Driver's agent files for an empty roster must be only the hook bridge (issue #5482)";
+    assert assertMsg (
+      (entry.agentFilesTemplate { roster = [ ]; }).".pi/agent/extensions/spindrift-hooks.js"
+      == builtins.readFile ../../../agent/pi-hook-bridge.js
+    ) "pi Driver must bake agent/pi-hook-bridge.js verbatim as the hook bridge (issue #5482)";
     pkgs.runCommand "drivers-pi-attributes-pinned" { } "touch $out";
+
+  # Issue #5483: each role renders as a Markdown agent file the subagent
+  # extension discovers. Pins the frontmatter keys and the effort suffix; the
+  # why is in lib/drivers/pi.nix's agentFilesTemplate.
+  drivers-pi-agent-files-render =
+    let
+      rendered = entry.agentFilesTemplate {
+        roster = [
+          (piFixtureEntry // { effort = "high"; })
+          (
+            piFixtureEntry
+            // {
+              name = "plain";
+              effort = "";
+              tools = [
+                "Glob"
+                "Grep"
+                "Agent"
+                "WebFetch"
+                "Edit"
+                "MultiEdit"
+              ];
+            }
+          )
+          (removeAttrs piFixtureEntry [ "tools" ] // { name = "notools"; })
+        ];
+      };
+      file = name: rendered.".pi/agent/agents/${name}.md" or "";
+      effortFile = file "fixture";
+      plainFile = file "plain";
+      lines = f: pkgs.lib.splitString "\n" f;
+    in
+    assert assertMsg (builtins.elem "name: \"fixture\"" (
+      lines effortFile
+    )) "pi agent file must carry a JSON-encoded name, got: ${effortFile}";
+    assert assertMsg (builtins.elem "description: \"fixture description: a\\nb\"" (lines effortFile))
+      "pi agent file must carry a JSON-encoded description (no YAML key injection), got: ${effortFile}";
+    assert assertMsg (builtins.elem "model: \"p/m:high\"" (lines effortFile))
+      "pi agent file for a role with an effort must carry the <model>:<level> suffix, got: ${effortFile}";
+    assert assertMsg (builtins.elem "reasoningEffort: \"high\"" (lines effortFile))
+      "pi agent file for a role with an effort must carry reasoningEffort for the reviewer handoff, got: ${effortFile}";
+    assert assertMsg (!(hasInfix "reasoningEffort" plainFile))
+      "pi agent file for a role with an empty effort must carry no reasoningEffort line, got: ${plainFile}";
+    assert assertMsg (!(hasInfix "reasoningEffort" (file "notools")))
+      "pi agent file for a role without an effort key must carry no reasoningEffort line, got: ${file "notools"}";
+    assert assertMsg (builtins.elem "tools: \"read, bash\"" (
+      lines effortFile
+    )) "pi agent file must map Claude tool names to pi's, got: ${effortFile}";
+    assert assertMsg (builtins.elem "model: \"p/m\"" (
+      lines plainFile
+    )) "pi agent file for a role with an empty effort must carry the bare model, got: ${plainFile}";
+    assert assertMsg (builtins.elem "tools: \"find, ls, grep, subagent, edit\"" (
+      lines plainFile
+    )) "pi agent file must dedupe mapped tools and drop ones pi has no tool for, got: ${plainFile}";
+    assert assertMsg (!(hasInfix "tools:" (file "notools")))
+      "pi agent file for a role without tools must carry no tools line (full tool set), got: ${file "notools"}";
+    assert assertMsg (builtins.elem "model: \"p/m\"" (lines (file "notools")))
+      "pi agent file for a role without an effort key must carry the bare model, got: ${file "notools"}";
+    assert assertMsg (pkgs.lib.hasPrefix "---\nname: " effortFile)
+      "pi agent file must open with its frontmatter fence, got: ${effortFile}";
+    assert assertMsg (hasInfix "DRIVER_AGENT_FILES_DIR=/home/agent/.pi/agent/agents\n" preamble)
+      "renderPreamble must bake pi's DRIVER_AGENT_FILES_DIR, got: ${preamble}";
+    pkgs.runCommand "drivers-pi-agent-files-render" { } "touch $out";
+
+  # An unmapped tool name must fail eval rather than silently change what the
+  # subagent may do; a list mapping to no pi tool must too, since an empty
+  # tools line would grant pi's whole tool set.
+  drivers-pi-agent-files-unmapped-tool-throws =
+    let
+      renderWith =
+        tools:
+        let
+          r = entry.agentFilesTemplate { roster = [ (piFixtureEntry // { inherit tools; }) ]; };
+        in
+        builtins.tryEval (builtins.deepSeq r r);
+    in
+    assert assertMsg (renderWith [ "Read" ]).success
+      "pi agentFilesTemplate control (tools = [ Read ]) must render";
+    assert assertMsg (
+      !(renderWith [
+        "Read"
+        "NotebookEdit"
+      ]).success
+    ) "pi agentFilesTemplate must throw on a tool name with no pi mapping";
+    assert assertMsg (
+      !(renderWith [ "WebFetch" ]).success
+    ) "pi agentFilesTemplate must throw when no listed tool maps to a pi tool";
+    assert assertMsg (
+      !(renderWith [ ]).success
+    ) "pi agentFilesTemplate must throw on an empty tools list";
+    pkgs.runCommand "drivers-pi-agent-files-unmapped-tool-throws" { } "touch $out";
 
   # pi reads skills from its agent directory (PI_CODING_AGENT_DIR, default
   # ~/.pi/agent), unlike opencode, which reads claude's directory.
@@ -192,19 +295,35 @@ in
       "renderPreamble must export PI_TELEMETRY=0, got: ${preamble}";
     pkgs.runCommand "drivers-pi-render-preamble-argv" { } "touch $out";
 
-  # Under pi no subagent is provisioned yet: every subagent role in the
-  # default roster drops, so the bakes say so. The reviewer stays for the
-  # review pass.
-  drivers-pi-provisions-no-subagents =
-    assert assertMsg (
-      map (e: e.name) piHarness.internals.roster == [ "reviewer" ]
-    ) "pi roster must hold only the reviewer: ${builtins.toJSON piHarness.internals.roster}";
-    pkgs.runCommand "drivers-pi-provisions-no-subagents" { } ''
-      runDoc=${piHarness.internals.runInputDocumentFile}
+  # Issue #5483: provisioning follows the roster under pi as under the other
+  # Drivers. piFullRosterHarness has Provider-namespaced models for every role, so the
+  # bare-worker gate (issue #5331) drops nothing.
+  drivers-pi-provisions-full-roster =
+    let
+      inherit (piFullRosterHarness.internals) roster driverEntry;
+      names = map (e: e.name) roster;
+      # Rendered at eval rather than read from internals.agentFiles, which is
+      # built for Linux and so cannot be realized by a darwin flake check.
+      agentFiles = builtins.attrNames (driverEntry.agentFilesTemplate { inherit roster; });
+      roles = [
+        "scout"
+        "reviewer"
+        "filer"
+        "worker"
+      ];
+    in
+    assert assertMsg (builtins.all (
+      n: builtins.elem n names
+    ) roles) "pi roster must hold the full roster: ${builtins.toJSON names}";
+    assert assertMsg (builtins.all (
+      n: builtins.elem ".pi/agent/agents/${n}.md" agentFiles
+    ) roles) "pi agentFiles must hold an agent file per role: ${builtins.toJSON agentFiles}";
+    pkgs.runCommand "drivers-pi-provisions-full-roster" { } ''
+      runDoc=${piFullRosterHarness.internals.runInputDocumentFile}
 
-      grep -q '"SCOUT_PROVISIONED":"false"' "$runDoc"
-      grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
-      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+      grep -q '"SCOUT_PROVISIONED":"true"' "$runDoc"
+      grep -q '"WORKER_PROVISIONED":"true"' "$runDoc"
+      grep -q '"FILER_ENABLED":"true"' "$runDoc"
 
       touch $out
     '';

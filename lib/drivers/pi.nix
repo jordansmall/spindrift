@@ -1,7 +1,48 @@
 # The pi Driver: pure data only (ADR 0009, ADR 0066). ./default.nix validates
 # this entry's shape and renders it into what lib/mkHarness.nix bakes into the
 # image.
-{ ... }:
+{ lib }:
+let
+  # Claude Code roster tool names to pi tool names, the one home of the
+  # mapping. pi's `--tools` is an allowlist that also gates extension tools, so
+  # `subagent` (the subagent extension's tool) must be listed to be callable.
+  # A name with no pi tool (web access, todo list, skills) maps to nothing
+  # rather than throwing, so the default roster still renders.
+  rosterToolNames = {
+    Read = [ "read" ];
+    Bash = [ "bash" ];
+    Edit = [ "edit" ];
+    MultiEdit = [ "edit" ];
+    Write = [ "write" ];
+    Glob = [
+      "find"
+      "ls"
+    ];
+    Grep = [ "grep" ];
+    Agent = [ "subagent" ];
+    Task = [ "subagent" ];
+    WebFetch = [ ];
+    WebSearch = [ ];
+    TodoWrite = [ ];
+    Skill = [ ];
+  };
+
+  # An empty `tools` makes the extension omit --tools, which grants pi's whole
+  # tool set, so a list mapping to nothing throws rather than widen access.
+  # An unmapped name throws too, as opencode's permissionLineFor does.
+  toolsLineFor =
+    e:
+    let
+      unmapped = lib.filter (t: !(rosterToolNames ? ${t})) e.tools;
+      mapped = lib.unique (lib.concatMap (t: rosterToolNames.${t}) e.tools);
+    in
+    if unmapped != [ ] then
+      throw "pi Driver: roster agent '${e.name}' lists tools with no pi tool mapping: ${lib.concatStringsSep ", " unmapped}"
+    else if mapped == [ ] then
+      throw "pi Driver: roster agent '${e.name}' lists no tool pi can grant, and an empty tools line would grant them all"
+    else
+      "tools: ${builtins.toJSON (lib.concatStringsSep ", " mapped)}\n";
+in
 {
   name = "pi";
 
@@ -84,9 +125,9 @@
   # #5331) and the bare-model eval failure (issue #5355) apply as for opencode.
   providerNamespacedModels = true;
 
-  # No subagent is provisioned under pi yet, so lib/mkHarness.nix drops the
-  # scout, worker and filer roles and bakes their flags false.
-  subagents = false;
+  # The roster runs through pi's subagent extension, so scout, worker and filer
+  # provision as under the other Drivers.
+  subagents = true;
 
   # Only the flags shared by every invocation; driver-exec adds --model,
   # --thinking and the positional prompt around them.
@@ -119,15 +160,49 @@
     PI_TELEMETRY = "0";
   };
 
-  # pi has no --agents equivalent and no subagent files are baked yet. The
-  # hook bridge (issue #5482) is an extension in pi's agent directory, not
-  # the Box's cwd, so child pi processes load it too once subagents exist.
+  # The path promptassembly's file-rewrite loop rewrites bodies through; keep it
+  # in lockstep with the agents/ paths agentFilesTemplate bakes.
+  agentFilesDirRelative = ".pi/agent/agents";
+
+  # pi has no --agents equivalent; the subagent extension scans agent files.
   agentsJsonTemplate = { roster }: "";
+
+  # The hook bridge (issue #5482) is an extension in pi's agent directory, not
+  # the Box's cwd, so the subagents' child pi processes load it too.
+  # Frontmatter scalars are JSON-encoded so a colon or newline cannot inject a
+  # YAML key, and promptassembly's frontmatterScalar still reads `model:`.
+  # Effort rides as a `<model>:<level>` suffix because the extension passes the
+  # parent's --thinking only to agents without a model; `reasoningEffort`, which
+  # the extension ignores, lets promptassembly's reviewer handoff read the effort
+  # so driver-exec's --thinking matches the suffix. An entry with no `tools` gets
+  # no line, which keeps pi's full tool set.
   agentFilesTemplate =
     { roster }:
     {
       ".pi/agent/extensions/spindrift-hooks.js" = builtins.readFile ../../agent/pi-hook-bridge.js;
-    };
+    }
+    // lib.listToAttrs (
+      map (
+        e:
+        let
+          effort = e.effort or "";
+          suffix = lib.optionalString (effort != "") ":${effort}";
+          effortLine = lib.optionalString (effort != "") "reasoningEffort: ${builtins.toJSON effort}\n";
+          toolsLine = lib.optionalString (e ? tools) (toolsLineFor e);
+        in
+        {
+          name = ".pi/agent/agents/${e.name}.md";
+          value = ''
+            ---
+            name: ${builtins.toJSON e.name}
+            description: ${builtins.toJSON (e.description or "")}
+            model: ${builtins.toJSON (e.model + suffix)}
+            ${effortLine}${toolsLine}---
+            ${e.description or ""}
+          '';
+        }
+      ) roster
+    );
 
   # agentsFlag is omitted. Effort values pass through to --thinking
   # unnormalised.
