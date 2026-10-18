@@ -107,3 +107,25 @@ func TestLineRoundTripsThroughTheDecoder(t *testing.T) {
 		t.Errorf("decoded %+v, want %+v", got, want)
 	}
 }
+
+func TestRegisterStrategyKeepsAnExistingName(t *testing.T) {
+	first := Strategy
+	first.Name = "seam-register-strategy"
+	RegisterStrategy(first)
+	second := first
+	second.ResultEvent = func(string) ([]byte, error) { return []byte("other"), nil }
+	RegisterStrategy(second)
+	d, err := driver.New(first.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev, err := d.ResultEvent("x"); err != nil || string(ev) == "other" {
+		t.Errorf("ResultEvent = %q, %v; want the first registration kept", ev, err)
+	}
+}
+
+func TestMillisParsesRFC3339(t *testing.T) {
+	if got := Millis("2026-10-07T12:34:56.789Z"); got != 1791376496789 {
+		t.Errorf("Millis = %d, want 1791376496789", got)
+	}
+}

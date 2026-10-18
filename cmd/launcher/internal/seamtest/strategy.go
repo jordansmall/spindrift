@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -57,6 +58,16 @@ func Line(ev driverkit.Event) string {
 	return string(b) + "\n"
 }
 
+// Millis is the RFC3339 ts as epoch milliseconds, the canonical Event's
+// Timestamp unit. It panics on a malformed ts.
+func Millis(rfc3339 string) int64 {
+	t, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		panic(err)
+	}
+	return t.UnixMilli()
+}
+
 func resultEvent(text string) ([]byte, error) {
 	b, err := json.Marshal(driverkit.Event{Kind: driverkit.KindResult, Text: text})
 	if err != nil {
@@ -74,10 +85,17 @@ var registerMu sync.Mutex
 // so call it before any parallel test reads the registry.
 func RegisterDriver(tb testing.TB) {
 	tb.Helper()
+	RegisterStrategy(Strategy)
+}
+
+// RegisterStrategy installs s under its own Name when no Driver of that name
+// is registered, and does nothing when one is. It takes no testing.TB so a
+// TestMain can call it; the same ordering caveat as RegisterDriver applies.
+func RegisterStrategy(s driverkit.Strategy) {
 	registerMu.Lock()
 	defer registerMu.Unlock()
-	if _, err := driver.New(fakeDriverName); err == nil {
+	if _, err := driver.New(s.Name); err == nil {
 		return
 	}
-	driver.Register(Strategy)
+	driver.Register(s)
 }

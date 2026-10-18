@@ -4,7 +4,6 @@ import (
 	"os"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/seamtest"
 )
@@ -15,6 +14,6 @@ func TestMain(m *testing.M) {
 	// off result lines still count.
 	claude := seamtest.Strategy
 	claude.Totals = driverkit.SessionTotals
-	driver.Register(claude)
+	seamtest.RegisterStrategy(claude)
 	os.Exit(m.Run())
 }
