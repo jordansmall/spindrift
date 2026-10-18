@@ -3,7 +3,7 @@
 # the equivalence checks compare two wiring paths rather than two hand-copied
 # value sets (issue #459): flakemodule-equivalence for the default (claude)
 # Harness from the top-level values, flakemodule-dogfood-drivers for the
-# opencode one from the `opencode` block.
+# opencode and pi ones from their blocks.
 { system, lib }:
 let
   isLinux = builtins.match ".*-linux" system != null;
@@ -65,6 +65,35 @@ in
         filer = "github-copilot/claude-haiku-4.5";
         reviewer = "github-copilot/claude-opus-4.5";
         worker = "";
+      };
+    };
+  };
+  # The pi Driver entry mirrors opencode's: github-copilot ids, so the one
+  # credential is PI_AUTH_CONTENT. Unlike opencode's, the worker has a
+  # namespaced model, so it provisions, and each role pins an effort, which
+  # rides on its model id as `<model>:<level>`. byName leaves review-axis
+  # unpinned: it follows the reviewer's model and inherits its effort from
+  # rosterDefaults, and the Driver-level coordinator sets no models.effort.
+  pi = {
+    model = "github-copilot/claude-opus-4.5";
+    roster = rosterLib.defaultRoster {
+      byName = {
+        scout = {
+          model = "github-copilot/claude-haiku-4.5";
+          effort = "low";
+        };
+        filer = {
+          model = "github-copilot/claude-haiku-4.5";
+          effort = "low";
+        };
+        reviewer = {
+          model = "github-copilot/claude-opus-4.5";
+          effort = "high";
+        };
+        worker = {
+          model = "github-copilot/claude-sonnet-4.5";
+          effort = "medium";
+        };
       };
     };
   };
