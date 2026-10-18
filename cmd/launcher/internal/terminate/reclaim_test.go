@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/terminate"
 )
 
@@ -37,6 +38,7 @@ func newReclaimFixture(t *testing.T) (fc *forge.Fake, fr *runner.Fake, factory *
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	seamtest.RegisterDriver(t)
 	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
