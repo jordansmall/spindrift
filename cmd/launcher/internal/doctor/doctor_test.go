@@ -1242,8 +1242,9 @@ func TestRun_RequiredLabels_MissingFailsRun(t *testing.T) {
 	}
 }
 
-// Only the named labels are fatal: naming the butler finding label leaves its
-// tier's patch label advisory, and the tier summary counts only that one.
+// Only the named labels are fatal: naming the butler finding label leaves
+// its tier's patch and tuning labels advisory, and the tier summary counts
+// those two.
 func TestRun_RequiredLabels_RestOfTierStaysAdvisory(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -1258,6 +1259,9 @@ func TestRun_RequiredLabels_RestOfTierStaysAdvisory(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "advisory: label \"agent-butler-patch\" missing") {
 		t.Errorf("want advisory row for the patch label, got:\n%s", out)
+	}
+	if !strings.Contains(out, "advisory: label \"agent-tuning-finding\" missing") {
+		t.Errorf("want advisory row for the tuning label, got:\n%s", out)
 	}
 	if !strings.Contains(out, "2 butler label(s) missing") {
 		t.Errorf("want butler summary counting the patch and tuning labels, got:\n%s", out)
