@@ -346,5 +346,25 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 		fmt.Fprintf(tw, "%s\t%d\t$%.2f\t$%.2f\t%.1f\t%d\t%s\n",
 			row.Role, row.Passes, row.USD, row.USD/n, (time.Duration(row.DurationMs)*time.Millisecond).Minutes()/n, row.APICalls, row.BlockRate())
 	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	return renderAgentTable(w, records)
+}
+
+// renderAgentTable prints the per-agent token table below the role table. It
+// has no USD column: a Driver prices a pass, not the agent inside it.
+func renderAgentTable(w io.Writer, records []dispatchrecord.Record) error {
+	rows := recordstats.AggregateAgents(records)
+	if len(rows) == 0 {
+		return nil
+	}
+	fmt.Fprintln(w)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "AGENT\tPASSES\tAPI_CALLS\tINPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE")
+	for _, row := range rows {
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", row.Agent, row.Passes, row.APICalls,
+			row.InputTokens, row.OutputTokens, row.CacheReadInputTokens, row.CacheCreationInputTokens)
+	}
 	return tw.Flush()
 }

@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // Group is the Records (or, for a pass-level key, the slices of Records)
@@ -32,7 +33,17 @@ func GroupRecords(records []dispatchrecord.Record, key func(dispatchrecord.Recor
 // (none) group so it never vanishes. Groups keep first-appearance order, (none)
 // last.
 func GroupPasses(records []dispatchrecord.Record, key func(dispatchrecord.Pass) string) []Group {
-	g := grouper{index: map[string]int{}}
+	g := splitPasses(records, func(p dispatchrecord.Pass, add func(string, dispatchrecord.Pass)) {
+		add(key(p), p)
+	})
+	return g.finish()
+}
+
+// splitPasses copies each Record into every group its passes are filed under,
+// carrying only those passes. split files a pass under zero or more keys, each
+// with the (possibly projected) pass to carry there.
+func splitPasses(records []dispatchrecord.Record, split func(p dispatchrecord.Pass, add func(key string, p dispatchrecord.Pass))) *grouper {
+	g := &grouper{index: map[string]int{}}
 	for _, r := range records {
 		if len(r.Passes) == 0 {
 			g.add(None, r)
@@ -40,12 +51,14 @@ func GroupPasses(records []dispatchrecord.Record, key func(dispatchrecord.Pass) 
 		}
 		var keys []string
 		byKey := map[string][]dispatchrecord.Pass{}
-		for _, p := range r.Passes {
-			k := key(p)
+		add := func(k string, p dispatchrecord.Pass) {
 			if _, ok := byKey[k]; !ok {
 				keys = append(keys, k)
 			}
 			byKey[k] = append(byKey[k], p)
+		}
+		for _, p := range r.Passes {
+			split(p, add)
 		}
 		for _, k := range keys {
 			sub := r
@@ -53,7 +66,7 @@ func GroupPasses(records []dispatchrecord.Record, key func(dispatchrecord.Pass) 
 			g.add(k, sub)
 		}
 	}
-	return g.finish()
+	return g
 }
 
 type grouper struct {
@@ -181,4 +194,62 @@ func MeanChurnPercent(records []dispatchrecord.Record) (pct float64, filled int)
 		return 0, 0
 	}
 	return 100 * sum / float64(filled), filled
+}
+
+// GroupAgents splits claim-time-sorted Records into groups by agent. Like
+// GroupPasses, a Record is copied into every group one of its passes belongs
+// to, but each pass is projected onto that agent: its token and API-call
+// figures become the agent's own row. USD, durations, turns and the verdict
+// have no per-agent source, so they stay whole on the main loop's projection
+// and are cleared on a subagent's, so they sum across groups to the ungrouped
+// total, as do output tokens and API calls. Input and cache tokens sum to the
+// agent rows instead, which can exceed it: a Driver's own pass totals may leave
+// a subagent's input and cache tokens out (claude's result usage covers only
+// the main loop's input and cache tokens). Output is the main loop's alone
+// under claude, whose Driver records subagent output as 0 (issue #3213). A pass
+// with no Agents lands whole in the (none) group, as does a Record with no
+// passes. The main loop comes first, then agents in first-appearance order,
+// (none) last.
+func GroupAgents(records []dispatchrecord.Record) []Group {
+	g := splitPasses(records, func(p dispatchrecord.Pass, add func(string, dispatchrecord.Pass)) {
+		if len(p.Agents) == 0 {
+			add(None, p)
+			return
+		}
+		for _, a := range p.Agents {
+			add(a.Agent, projectPassOntoAgent(p, a))
+		}
+	})
+	slices.SortStableFunc(g.groups, func(a, b Group) int {
+		if c := noneLast(a, b); c != 0 {
+			return c
+		}
+		return mainFirst(a.Key, b.Key)
+	})
+	return g.groups
+}
+
+// mainFirst orders the main loop's agent label before any other.
+func mainFirst(a, b string) int {
+	switch am, bm := a == usage.MainLoopAgent, b == usage.MainLoopAgent; {
+	case am == bm:
+		return 0
+	case am:
+		return -1
+	}
+	return 1
+}
+
+// projectPassOntoAgent is p narrowed to agent a's share. Only the main loop
+// keeps the figures a Driver reports for the whole pass.
+func projectPassOntoAgent(p dispatchrecord.Pass, a dispatchrecord.PassAgent) dispatchrecord.Pass {
+	out := p
+	out.Agents = []dispatchrecord.PassAgent{a}
+	out.APICalls, out.InputTokens, out.OutputTokens = a.APICalls, a.InputTokens, a.OutputTokens
+	out.CacheReadInputTokens, out.CacheCreationInputTokens = a.CacheReadInputTokens, a.CacheCreationInputTokens
+	if a.Agent != usage.MainLoopAgent {
+		out.USD, out.DurationMs, out.APIDurationMs, out.Turns = 0, 0, 0, 0
+		out.Verdict, out.VerdictText, out.Dispositions = "", "", ""
+	}
+	return out
 }

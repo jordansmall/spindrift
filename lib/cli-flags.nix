@@ -109,7 +109,7 @@
   }
   {
     flag = "by";
-    doc = "group the summary and --json by one or more comma-separated dimensions (nested in the order given), merged across every --root: role, revision, model, driver, prompt:<role>, or knob:<NAME>; the default table groups by role, and any explicit --by adds a group field to --json; Records lacking it fall in a (none) group";
+    doc = "group the summary and --json by one or more comma-separated dimensions (nested in the order given), merged across every --root: role, agent, revision, model, driver, prompt:<role>, or knob:<NAME>; the default table groups by role, and any explicit --by adds a group field to --json; Records lacking it fall in a (none) group";
     verb = "stats";
     arg = "dimension";
   }

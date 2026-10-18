@@ -2,3 +2,6 @@ Records: 2  Passes: 2  Notional USD: $0.60 (API-equivalent)  Landed keys: 0  USD
 
 ROLE    PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 (none)  2       $0.60  $0.30    2.0      1          -
+
+AGENT  PASSES  API_CALLS  INPUT  OUTPUT  CACHE_READ  CACHE_WRITE
+main   1       1          0      20      0           0
