@@ -105,6 +105,26 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "denies a Read of pi's ~/.pi/agent/auth.json" {
+  run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Read","tool_input":{"file_path":"/home/agent/.pi/agent/auth.json"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a Bash call catting pi's ~/.pi/agent/auth.json" {
+  run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"cat ~/.pi/agent/auth.json"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows pi auth.json lookalikes with a longer name on either side" {
+  for cmd in 'cat ~/.pi/agent/auth.json.bak' 'cat ~/my.pi/agent/auth.json' 'cat ~/.pi/agent/auth.jsonl'; do
+    run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<"$(jq -nc --arg c "$cmd" '{tool_name:"Bash",tool_input:{command:$c}}')"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
 @test "allows malformed non-JSON stdin" {
   run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'not json at all'
   [ "$status" -eq 0 ]
