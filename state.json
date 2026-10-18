@@ -1,20 +1,18 @@
 {
-  "lastSwept": "56c59f31886105388d874ef4f6f763c478f1a9a2",
-  "cursor": "cmd/launcher/internal/driver/claude/testdata/corpus/real-rate-limit-recovered/result.golden.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-18T12:49:46.632884677-04:00"
-  },
+  "lastSwept": "4066970ab2335dce665d1f501920accbbccc32ca",
+  "cursor": "cmd/launcher/internal/driver/corpus/credentials.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/5619"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 34,
+    "output_tokens": 5111,
+    "cache_read_input_tokens": 785331,
+    "cache_creation_input_tokens": 57548,
+    "total_cost_usd": 0.72281287,
+    "duration_ms": 60800,
+    "duration_api_ms": 58327,
+    "num_turns": 19
   }
 }
