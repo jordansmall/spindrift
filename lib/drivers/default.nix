@@ -384,6 +384,10 @@ let
     + lib.escapeShellArg (lib.concatStringsSep " " shape.order)
     + "\n";
 
+  # The ENV=path word list DRIVER_ENV_FILES carries, which the Box's
+  # homelayout.ParseEnvFiles reads back; the piseam seam check reuses it.
+  renderEnvFiles = lib.concatMapStringsSep " " (f: "${f.env}=${f.pathRelative}");
+
   # /home/agent is the image's fixed HOME (lib/image.nix's passwdFile), so these
   # paths bake in as absolute rather than depending on $HOME at run time.
   renderPreamble =
@@ -420,11 +424,7 @@ let
     )
     # Home-relative on purpose: the Box joins its own HOME.
     + lib.optionalString (driverEntry ? envFiles) (
-      "DRIVER_ENV_FILES="
-      + lib.escapeShellArg (
-        lib.concatMapStringsSep " " (f: "${f.env}=${f.pathRelative}") driverEntry.envFiles
-      )
-      + "\n"
+      "DRIVER_ENV_FILES=" + lib.escapeShellArg (renderEnvFiles driverEntry.envFiles) + "\n"
     )
     + renderEnvCommon driverEntry
     + renderBashTimeoutEnv driverEntry
@@ -437,6 +437,7 @@ in
     assertArgvShape
     requiredAttrs
     renderPreamble
+    renderEnvFiles
     credentialEnv
     ;
 }

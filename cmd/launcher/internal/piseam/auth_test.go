@@ -3,12 +3,20 @@
 package piseam
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/homelayout"
 )
+
+// envFilesEnv carries the pi Driver's envFiles in the DRIVER_ENV_FILES wire
+// format, rendered from lib/drivers/pi.nix so the seam cannot drift from the
+// row the Box reads.
+const envFilesEnv = "SPINDRIFT_PI_ENV_FILES"
 
 // A bump must re-run this seam's checks against ADR 0009's pi amendment and
 // update it.
@@ -115,4 +123,63 @@ func TestPiAuthJSON(t *testing.T) {
 			t.Errorf("auth.json after run: %v, %v; want mode 0666 untouched", st, err)
 		}
 	})
+}
+
+// The path the Box takes for PI_AUTH_CONTENT: the Driver's envFiles write it
+// into $HOME/.pi/agent/auth.json, which pi reads with PI_CODING_AGENT_DIR unset.
+func TestPiAuthContentReachesPi(t *testing.T) {
+	spec := os.Getenv(envFilesEnv)
+	if spec == "" {
+		t.Skipf("%s unset: nix/checks/go.nix renders it from the pi Driver's envFiles", envFilesEnv)
+	}
+	files, err := homelayout.ParseEnvFiles(spec)
+	if err != nil {
+		t.Fatalf("parse %s=%q: %v", envFilesEnv, spec, err)
+	}
+
+	const key = "auth-content-key"
+	b, err := json.Marshal(authJSON(key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+
+	dirs := newPiDirs(t)
+	dirs.agentDir = filepath.Join(dirs.home, ".pi", "agent")
+	getenv := func(name string) string {
+		if name == "PI_AUTH_CONTENT" {
+			return content
+		}
+		return ""
+	}
+	if err := homelayout.WriteEnvFiles(dirs.home, files, getenv); err != nil {
+		t.Fatalf("WriteEnvFiles: %v", err)
+	}
+
+	s := newStub(t, textReply("ok"))
+	r := runPiWith(t, s, piOpts{
+		args:            sessionArgs("initial"),
+		noAPIKey:        true,
+		defaultAgentDir: true,
+		dirs:            &dirs,
+	}, "hi")
+	if r.err != nil {
+		t.Fatalf("pi exit = %v, stderr = %q", r.err, r.stderr)
+	}
+
+	if got := authHeader(t, s); got != "Bearer "+key {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer "+key)
+	}
+	p := filepath.Join(dirs.agentDir, "auth.json")
+	if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("auth.json: %v, %v; want mode 0600", st, err)
+	}
+	if got, err := os.ReadFile(p); err != nil || string(got) != content {
+		t.Errorf("auth.json = %q, %v; want %q", got, err, content)
+	}
+	for _, a := range r.argv {
+		if strings.Contains(a, key) {
+			t.Errorf("pi argv holds the key: %q", a)
+		}
+	}
 }

@@ -74,7 +74,9 @@ type run struct {
 	events []map[string]any
 	stdout string
 	stderr string
-	err    error
+	// argv is the full command line pi was launched with.
+	argv []string
+	err  error
 }
 
 // runPi writes a per-test agent dir pointing a custom Provider at the stub,
@@ -200,7 +202,7 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 		t.Logf("pi event stream: %s", capturePath)
 	}
 
-	r := run{stdout: stdout.String(), stderr: stderr.String(), err: err}
+	r := run{stdout: stdout.String(), stderr: stderr.String(), argv: cmd.Args, err: err}
 	for i, line := range strings.Split(strings.TrimRight(r.stdout, "\n"), "\n") {
 		if line == "" {
 			continue
