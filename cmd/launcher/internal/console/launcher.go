@@ -251,10 +251,10 @@ func (l *Launcher) PollInterval() time.Duration {
 }
 
 // Resize adjusts the live parallelism cap by delta, clamped to at least 1.
-// Raising it takes effect immediately, so a held pick launches into the freed
-// slot without waiting for a running Dispatch to settle. Lowering it never
-// terminates a running Dispatch; it only gates new launches until the live count
-// sinks under the new cap on its own (ADR 0023).
+// Raising it takes effect immediately, so a held or queued pick launches into
+// the added slot without waiting for a running Dispatch to settle. Lowering it
+// never terminates a running Dispatch; it only gates new launches until the
+// live count sinks under the new cap on its own (ADR 0023).
 func (l *Launcher) Resize(delta int) {
 	l.limiter().ResizeDelta(delta)
 }
