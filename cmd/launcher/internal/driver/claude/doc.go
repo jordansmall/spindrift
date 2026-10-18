@@ -6,5 +6,6 @@
 // options, the heartbeat tracking, and the per-model usage ordering. Claude has
 // no exit resolution of its own; its ResolveExit passes the code through. The
 // readers (classify, usage, transcript, heartbeat, result text) live in
-// driverkit and are wired to this decoder in driver/claude.go.
+// driverkit and are wired to this decoder through Strategy (strategy.go), which
+// driverkit.New turns into the Driver, and which the bundle package registers.
 package claude
