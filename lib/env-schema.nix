@@ -667,7 +667,56 @@ in
     env = "ANTHROPIC_API_KEY";
     secret = true;
     hostConfig = true;
-    doc = "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN";
+    doc = "Anthropic API key; set this or CLAUDE_CODE_OAUTH_TOKEN. It is also the pi Driver's anthropic Provider key, required when DRIVER=pi and any model tier is anthropic/<model>";
+    boxEnv = true;
+  };
+  openaiAPIKey = {
+    env = "OPENAI_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "OpenAI API key for the pi Driver's openai Provider; required when DRIVER=pi and any model tier is openai/<model>; forwarded into every Box when set, whatever the Driver";
+    boxEnv = true;
+  };
+  geminiAPIKey = {
+    env = "GEMINI_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "Google API key for the pi Driver's google Provider; required when DRIVER=pi and any model tier is google/<model>; forwarded into every Box when set, whatever the Driver";
+    boxEnv = true;
+  };
+  openrouterAPIKey = {
+    env = "OPENROUTER_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "OpenRouter API key for the pi Driver's openrouter Provider; required when DRIVER=pi and any model tier is openrouter/<model>; forwarded into every Box when set, whatever the Driver";
+    boxEnv = true;
+  };
+  groqAPIKey = {
+    env = "GROQ_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "Groq API key for the pi Driver's groq Provider; required when DRIVER=pi and any model tier is groq/<model>; forwarded into every Box when set, whatever the Driver";
+    boxEnv = true;
+  };
+  xaiAPIKey = {
+    env = "XAI_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "xAI API key for the pi Driver's xai Provider; required when DRIVER=pi and any model tier is xai/<model>; forwarded into every Box when set, whatever the Driver";
+    boxEnv = true;
+  };
+  mistralAPIKey = {
+    env = "MISTRAL_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "Mistral API key for the pi Driver's mistral Provider; required when DRIVER=pi and any model tier is mistral/<model>; forwarded into every Box when set, whatever the Driver";
+    boxEnv = true;
+  };
+  deepseekAPIKey = {
+    env = "DEEPSEEK_API_KEY";
+    secret = true;
+    hostConfig = true;
+    doc = "DeepSeek API key for the pi Driver's deepseek Provider; required when DRIVER=pi and any model tier is deepseek/<model>; forwarded into every Box when set, whatever the Driver";
     boxEnv = true;
   };
   jiraToken = {

@@ -46,16 +46,16 @@ setup() {
 }
 
 @test "unsets the credential env vars itself, independent of env-credential-scrub.sh" {
-  run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"[$ANTHROPIC_API_KEY][$CLAUDE_CODE_OAUTH_TOKEN][$OPENCODE_AUTH_CONTENT]\""}}'
+  run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"[$ANTHROPIC_API_KEY][$CLAUDE_CODE_OAUTH_TOKEN][$OPENCODE_AUTH_CONTENT][$OPENAI_API_KEY]\""}}'
   [ "$status" -eq 0 ]
 
   rewritten="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
 
   ANTHROPIC_API_KEY=leaked-key CLAUDE_CODE_OAUTH_TOKEN=leaked-token \
-    OPENCODE_AUTH_CONTENT=leaked-opencode \
+    OPENCODE_AUTH_CONTENT=leaked-opencode OPENAI_API_KEY=leaked-openai \
     run bash -c "$rewritten"
   [ "$status" -eq 0 ]
-  [ "$output" = "[][][]" ]
+  [ "$output" = "[][][][]" ]
 }
 
 @test "handles a command whose last line ends in a line-continuation backslash" {

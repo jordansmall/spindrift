@@ -49,13 +49,16 @@ type schemaConfig struct {
 	daemonIdleFloor              string
 	daemonProbeInterval          string
 	daemonSelfApp                string
+	deepseekAPIKey               string
 	failedLabel                  string
 	forgejoBaseURL               string
 	forgejoToken                 string
+	geminiAPIKey                 string
 	ghToken                      string
 	ghTokenRefreshFile           string
 	gitUserEmail                 string
 	gitUserName                  string
+	groqAPIKey                   string
 	holdJitterSecs               int
 	inProgressLabel              string
 	issueNumber                  string
@@ -81,9 +84,12 @@ type schemaConfig struct {
 	mergeMode                    string
 	mergePollInterval            int
 	mergePollTimeout             int
+	mistralAPIKey                string
 	model                        string
 	networkMode                  string
+	openaiAPIKey                 string
 	opencodeAuthContent          string
+	openrouterAPIKey             string
 	overlapGate                  string
 	pidsLimit                    string
 	podmanNetwork                string
@@ -98,6 +104,7 @@ type schemaConfig struct {
 	syncMethod                   string
 	transientBackoffSecs         int
 	transientRetryMax            int
+	xaiAPIKey                    string
 }
 
 // loadSchemaConfig reads schemaConfig's fields from the environment.
@@ -147,11 +154,14 @@ func loadSchemaConfig() schemaConfig {
 		daemonIdleFloor:           getenvSchema("DAEMON_IDLE_FLOOR"),
 		daemonProbeInterval:       getenvSchema("DAEMON_PROBE_INTERVAL"),
 		daemonSelfApp:             getenvSchema("DAEMON_SELF_APP"),
+		deepseekAPIKey:            os.Getenv("DEEPSEEK_API_KEY"),
 		failedLabel:               getenvSchema("FAILED_LABEL"),
 		forgejoBaseURL:            getenvSchema("FORGEJO_BASE_URL"),
 		forgejoToken:              os.Getenv("FORGEJO_TOKEN"),
+		geminiAPIKey:              os.Getenv("GEMINI_API_KEY"),
 		ghToken:                   os.Getenv("GH_TOKEN"),
 		ghTokenRefreshFile:        getenvSchema("GH_TOKEN_REFRESH_FILE"),
+		groqAPIKey:                os.Getenv("GROQ_API_KEY"),
 		holdJitterSecs:            atoiNonnegSchema("HOLD_JITTER_SECS"),
 		inProgressLabel:           getenvSchema("IN_PROGRESS_LABEL"),
 		issueNumber:               getenvSchema("ISSUE_NUMBER"),
@@ -177,9 +187,12 @@ func loadSchemaConfig() schemaConfig {
 		mergeMode:                 getenvSchema("MERGE_MODE"),
 		mergePollInterval:         atoiNonnegSchema("MERGE_POLL_INTERVAL"),
 		mergePollTimeout:          atoiNonnegSchema("MERGE_POLL_TIMEOUT"),
+		mistralAPIKey:             os.Getenv("MISTRAL_API_KEY"),
 		model:                     getenvSchema("MODEL"),
 		networkMode:               getenvSchema("NETWORK_MODE"),
+		openaiAPIKey:              os.Getenv("OPENAI_API_KEY"),
 		opencodeAuthContent:       os.Getenv("OPENCODE_AUTH_CONTENT"),
+		openrouterAPIKey:          os.Getenv("OPENROUTER_API_KEY"),
 		overlapGate:               getenvSchema("OVERLAP_GATE"),
 		pidsLimit:                 getenvSchema("PIDS_LIMIT"),
 		podmanNetwork:             getenvSchema("PODMAN_NETWORK"),
@@ -194,5 +207,6 @@ func loadSchemaConfig() schemaConfig {
 		syncMethod:                getenvSchema("SYNC_METHOD"),
 		transientBackoffSecs:      atoiSchema("TRANSIENT_BACKOFF_SECS"),
 		transientRetryMax:         atoiSchema("TRANSIENT_RETRY_MAX"),
+		xaiAPIKey:                 os.Getenv("XAI_API_KEY"),
 	}
 }

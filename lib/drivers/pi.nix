@@ -11,8 +11,50 @@
 
   bin = "pi";
 
-  # No credential rule: pi's auth knob is out of scope for this row.
-  credentials = [ ];
+  # One rule per Provider pi reads an API key for, gated on that Provider's
+  # model prefix (ADR 0066 decision 7). The OAuth tokens pi also accepts are
+  # left out. github-copilot (PI_AUTH_CONTENT) is a separate ticket.
+  credentials =
+    builtins.map
+      (p: {
+        env = [ p.env ];
+        modelPrefix = "${p.provider}/";
+        remedy = "set ${p.env} for the ${p.provider} Provider under the pi Driver";
+      })
+      [
+        {
+          provider = "anthropic";
+          env = "ANTHROPIC_API_KEY";
+        }
+        {
+          provider = "openai";
+          env = "OPENAI_API_KEY";
+        }
+        {
+          provider = "google";
+          env = "GEMINI_API_KEY";
+        }
+        {
+          provider = "openrouter";
+          env = "OPENROUTER_API_KEY";
+        }
+        {
+          provider = "groq";
+          env = "GROQ_API_KEY";
+        }
+        {
+          provider = "xai";
+          env = "XAI_API_KEY";
+        }
+        {
+          provider = "mistral";
+          env = "MISTRAL_API_KEY";
+        }
+        {
+          provider = "deepseek";
+          env = "DEEPSEEK_API_KEY";
+        }
+      ];
 
   # pi model ids are `<provider>/<model>`, so the bare-worker gate (issue
   # #5331) and the bare-model eval failure (issue #5355) apply as for opencode.

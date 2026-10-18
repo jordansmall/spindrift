@@ -47,6 +47,13 @@ func launcherCredentials(c config) map[string]string {
 		"CLAUDE_CODE_OAUTH_TOKEN": c.claudeOAuthToken,
 		"ANTHROPIC_API_KEY":       c.anthropicAPIKey,
 		"OPENCODE_AUTH_CONTENT":   c.opencodeAuthContent,
+		"OPENAI_API_KEY":          c.openaiAPIKey,
+		"GEMINI_API_KEY":          c.geminiAPIKey,
+		"OPENROUTER_API_KEY":      c.openrouterAPIKey,
+		"GROQ_API_KEY":            c.groqAPIKey,
+		"XAI_API_KEY":             c.xaiAPIKey,
+		"MISTRAL_API_KEY":         c.mistralAPIKey,
+		"DEEPSEEK_API_KEY":        c.deepseekAPIKey,
 	}
 }
 

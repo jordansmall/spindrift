@@ -19,6 +19,16 @@ var descriptors = []Descriptor{
 	{
 		Name:                     "pi",
 		ProviderNamespacedModels: true,
+		Credentials: []CredentialRule{
+			{Env: []string{"ANTHROPIC_API_KEY"}, ModelPrefix: "anthropic/", Remedy: "set ANTHROPIC_API_KEY for the anthropic Provider under the pi Driver"},
+			{Env: []string{"OPENAI_API_KEY"}, ModelPrefix: "openai/", Remedy: "set OPENAI_API_KEY for the openai Provider under the pi Driver"},
+			{Env: []string{"GEMINI_API_KEY"}, ModelPrefix: "google/", Remedy: "set GEMINI_API_KEY for the google Provider under the pi Driver"},
+			{Env: []string{"OPENROUTER_API_KEY"}, ModelPrefix: "openrouter/", Remedy: "set OPENROUTER_API_KEY for the openrouter Provider under the pi Driver"},
+			{Env: []string{"GROQ_API_KEY"}, ModelPrefix: "groq/", Remedy: "set GROQ_API_KEY for the groq Provider under the pi Driver"},
+			{Env: []string{"XAI_API_KEY"}, ModelPrefix: "xai/", Remedy: "set XAI_API_KEY for the xai Provider under the pi Driver"},
+			{Env: []string{"MISTRAL_API_KEY"}, ModelPrefix: "mistral/", Remedy: "set MISTRAL_API_KEY for the mistral Provider under the pi Driver"},
+			{Env: []string{"DEEPSEEK_API_KEY"}, ModelPrefix: "deepseek/", Remedy: "set DEEPSEEK_API_KEY for the deepseek Provider under the pi Driver"},
+		},
 	},
 }
 

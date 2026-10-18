@@ -26,9 +26,47 @@ in
     assert assertMsg (
       (entry.subagents or true) == false
     ) "pi Driver must declare subagents = false until a roster ships";
-    assert assertMsg (
-      entry.credentials == [ ]
-    ) "pi Driver declares no credential rule, got: ${builtins.toJSON entry.credentials}";
+    assert assertMsg
+      (
+        map (r: { inherit (r) modelPrefix env; }) entry.credentials == [
+          {
+            modelPrefix = "anthropic/";
+            env = [ "ANTHROPIC_API_KEY" ];
+          }
+          {
+            modelPrefix = "openai/";
+            env = [ "OPENAI_API_KEY" ];
+          }
+          {
+            modelPrefix = "google/";
+            env = [ "GEMINI_API_KEY" ];
+          }
+          {
+            modelPrefix = "openrouter/";
+            env = [ "OPENROUTER_API_KEY" ];
+          }
+          {
+            modelPrefix = "groq/";
+            env = [ "GROQ_API_KEY" ];
+          }
+          {
+            modelPrefix = "xai/";
+            env = [ "XAI_API_KEY" ];
+          }
+          {
+            modelPrefix = "mistral/";
+            env = [ "MISTRAL_API_KEY" ];
+          }
+          {
+            modelPrefix = "deepseek/";
+            env = [ "DEEPSEEK_API_KEY" ];
+          }
+        ]
+      )
+      "pi Driver must declare one modelPrefix-gated rule per Provider API key (mapping per pi upstream), got: ${builtins.toJSON entry.credentials}";
+    assert assertMsg (builtins.all (r: !(r ? setupCommand))
+      entry.credentials
+    ) "pi Driver's rules must carry no setupCommand, got: ${builtins.toJSON entry.credentials}";
     assert assertMsg (
       entry.envCommon == {
         PI_SKIP_VERSION_CHECK = "1";
