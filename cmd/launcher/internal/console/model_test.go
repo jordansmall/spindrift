@@ -451,9 +451,9 @@ func TestUpdate_SidebarLoadedMsg_FreshOpenWhileFollowing_StartsAtBottom(t *testi
 	}
 }
 
-// Pre-splitting into Sidebar.Lines once keeps clampSidebarOffset and the
-// render functions from re-splitting the full content on every Update and View
-// call (issue #722, inherited from DrillInState.Lines).
+// Pre-splitting into Sidebar.Lines once keeps Update's Sidebar.Offset clamp
+// and the render functions from re-splitting the full content on every Update
+// and View call (issue #722, inherited from DrillInState.Lines).
 func TestUpdate_SidebarLoadedMsg_CachesLineSplit(t *testing.T) {
 	m := NewModel()
 	activity := []ActivityLine{{Text: "l0"}, {Text: "l1"}, {Text: "l2"}}
