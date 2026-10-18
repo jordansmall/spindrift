@@ -76,6 +76,18 @@ type stub struct {
 	script   []reply
 	requests []map[string]any
 	headers  []http.Header
+	// pick, when set, chooses the reply from the request, and the script is
+	// not used. Concurrent children reach the Provider in no fixed order, so a
+	// parallel run needs routing by content, not by arrival.
+	pick func(req map[string]any) reply
+}
+
+// newRoutedStub serves each request the reply pick returns for it.
+func newRoutedStub(t *testing.T, pick func(req map[string]any) reply) *stub {
+	t.Helper()
+	s := newStub(t)
+	s.pick = pick
+	return s
 }
 
 func newStub(t *testing.T, script ...reply) *stub {
@@ -112,7 +124,9 @@ func (s *stub) serve(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	n := len(s.requests)
 	var rep reply
 	ok := len(s.script) > 0
-	if ok {
+	if s.pick != nil {
+		rep, ok = s.pick(req), true
+	} else if ok {
 		rep, s.script = s.script[0], s.script[1:]
 	}
 	s.mu.Unlock()
