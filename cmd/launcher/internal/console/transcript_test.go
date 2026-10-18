@@ -15,12 +15,15 @@ func TestDrillIn_SinglePass_RendersWithBoundary(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"text","Text":"hi"}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	drv, err := driver.New("claude")
+	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}
@@ -54,12 +57,15 @@ func TestDrillIn_ControlSequences_StrippedFromRendered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":` + string(textJSON) + `}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"text","Text":` + string(textJSON) + `}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	drv, err := driver.New("claude")
+	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}
@@ -88,8 +94,14 @@ func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) 
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	initial := `{"type":"assistant","message":{"content":[{"type":"text","text":"first pass"}]}}` + "\n"
-	fix := `{"type":"assistant","message":{"content":[{"type":"text","text":"fix pass"}]}}` + "\n"
+	initial := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"text","Text":"first pass"}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
+	fix := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"text","Text":"fix pass"}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +109,7 @@ func TestDrillIn_MultiplePasses_ConcatenatesInOrderWithBoundaries(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	drv, err := driver.New("claude")
+	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}
@@ -120,7 +132,10 @@ func TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"text","Text":"hi"}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +168,7 @@ func TestSidebarTranscriptCache_UnchangedStat_SkipsReDrillIn(t *testing.T) {
 // transcript a reader could mistake for a Dispatch that ran and said nothing.
 func TestDrillIn_NoLogsOnDisk_ReturnsErr(t *testing.T) {
 	dir := t.TempDir()
-	drv, err := driver.New("claude")
+	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}

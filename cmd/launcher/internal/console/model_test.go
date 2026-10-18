@@ -389,7 +389,7 @@ func TestFormatActivityLine_RendersTextOnly(t *testing.T) {
 func TestUpdate_SidebarLoadedMsg_OpensSidebar_ActivityDefault(t *testing.T) {
 	m := NewModel()
 	activity := []ActivityLine{{Text: "#42 · hi"}}
-	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: "[implementor] hi\n", Raw: `{"type":"assistant"}` + "\n"})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: activity, Rendered: "[implementor] hi\n", Raw: `{"Kind":"start"}` + "\n"})
 
 	if m.Sidebar == nil {
 		t.Fatal("Sidebar = nil, want non-nil after SidebarLoadedMsg")

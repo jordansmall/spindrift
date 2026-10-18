@@ -33,7 +33,7 @@ func TestTailer_ReadAppended_MissingFile_ReturnsNotOk(t *testing.T) {
 func TestTailer_ReadAppended_AdvancesOffsetByBytesRead(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "issue-9.log")
-	log := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	log := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":7}` + "\n"
 	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -57,17 +57,17 @@ func TestTailer_ReadAppended_AdvancesOffsetByBytesRead(t *testing.T) {
 	}
 }
 
-// An opencode dispatch's tailer feeds the live Console view, so it shows the
-// host's spindrift_op lines as the claude tailer does.
-func TestTailer_ReadAppended_OpencodeShowsHostOpLines(t *testing.T) {
+// The tailer feeds the live Console view, so it shows the host's host_op
+// events.
+func TestTailer_ReadAppended_ShowsHostOpLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "issue-9.log")
-	log := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
+	log := `{"Kind":"host_op","HostOp":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
 	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	drv, err := driver.New("opencode")
+	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}
@@ -111,7 +111,10 @@ func TestTailer_ReadAppended_DirectoryPath_ReturnsNotOkAndLeavesOffsetUnchanged(
 func TestTailer_ReadAppended_SecondCall_FeedsOnlyAppendedBytes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "issue-9.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"tool_call","ToolID":"r1","ToolName":"Read","ToolInput":{}}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +131,7 @@ func TestTailer_ReadAppended_SecondCall_FeedsOnlyAppendedBytes(t *testing.T) {
 		t.Fatal("first readAppended() ok = false, want true")
 	}
 
-	second := first + `{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	second := first + `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":3}` + "\n"
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}

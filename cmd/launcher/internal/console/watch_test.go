@@ -216,7 +216,7 @@ func TestTea_LogWrite_RefreshesRunningRowHeartbeat_NotPoll(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	first := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":17}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestTea_LogWrite_RefreshesRunningRowHeartbeat_NotPoll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := `{"type":"result","num_turns":99,"total_cost_usd":0.02,"duration_ms":9000}` + "\n"
+	second := `{"Kind":"result","Tokens":{"CostUSD":0.02},"DurationMs":9000,"NumTurns":99}` + "\n"
 	if _, err := logFile.WriteString(second); err != nil {
 		t.Fatal(err)
 	}

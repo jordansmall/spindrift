@@ -79,17 +79,21 @@ func BenchmarkUpdateView_DrillInScroll_LargeTranscript(b *testing.B) {
 }
 
 // largeHeartbeatLog returns a synthetic pass log of at least minBytes: valid
-// input for driver.Driver's heartbeat parser (repeated tool_use events, one
-// terminal result event), big enough that the ReadFile and reparse a
-// HeartbeatCache miss pays for show up in a benchmark (issue #731).
+// input for driver.Driver's heartbeat parser (repeated start/model/tool_call/
+// usage canonical frames, one terminal result event), big enough that the
+// ReadFile and reparse a HeartbeatCache miss pays for show up in a benchmark
+// (issue #731).
 func largeHeartbeatLog(minBytes int) string {
-	const line = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
+	const line = `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"tool_call","ToolName":"Edit","ToolInput":{"file_path":"main.go"},"ToolTarget":"main.go"}` + "\n" +
+		`{"Kind":"usage"}` + "\n"
 	var b strings.Builder
 	b.Grow(minBytes + len(line))
 	for b.Len() < minBytes {
 		b.WriteString(line)
 	}
-	b.WriteString(`{"type":"result","num_turns":42,"total_cost_usd":0.01,"duration_ms":5000}` + "\n")
+	b.WriteString(`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":42}` + "\n")
 	return b.String()
 }
 

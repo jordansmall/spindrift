@@ -1294,7 +1294,7 @@ func sidebarOpen(t *testing.T) *teatest.TestModel {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1326,7 +1326,7 @@ func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1342,7 +1342,7 @@ func TestTea_PollTick_AdvancesOpenSidebarActivityFeed(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "first update")
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1413,12 +1413,12 @@ func TestTea_Sidebar_RetainsPositionAcrossDispatchSwitch(t *testing.T) {
 	}
 	var lines strings.Builder
 	for i := 0; i < 50; i++ {
-		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+		fmt.Fprintf(&lines, `{"Kind":"start"}`+"\n"+`{"Kind":"model"}`+"\n"+`{"Kind":"text","Text":"line-%02d"}`+"\n"+`{"Kind":"usage"}`+"\n", i)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(lines.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	other := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	other := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-43.log"), []byte(other), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1477,7 +1477,7 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1493,7 +1493,7 @@ func TestTea_PollTick_DoesNotRefreshSettledSidebar(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "first update")
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1528,7 +1528,7 @@ func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1544,7 +1544,7 @@ func TestTea_SidebarActivityTick_AdvancesWithoutKeypressOrPoll(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "first update")
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1568,7 +1568,7 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1587,7 +1587,7 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
 	sendKey(tm, "t")
 	waitForOutput(t, tm, "transcript #42", "[implementor] first update")
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1611,7 +1611,7 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T)
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1633,7 +1633,7 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed(t *testing.T)
 	sendKey(tm, "z")
 	waitForOutput(t, tm, "first update") // zoomed render still shows the transcript
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1656,7 +1656,7 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1665,7 +1665,7 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	// Wide enough that the floating log modal's box (issue #1845) shows this
-	// fixture's full raw JSON line without clipping it before the "text"
+	// fixture's full raw JSON line without clipping it before the "Text"
 	// value, yet narrower than sidebarFits' docked threshold, so the sidebar
 	// still opens through the narrow-terminal path this test exercises.
 	tm := teatest.NewTestModel(t, newTeaModel(f, dir, launch), teatest.WithInitialTermSize(110, 24))
@@ -1679,13 +1679,13 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 	sendKey(tm, "t")
 	waitForOutput(t, tm, "transcript #42", "[implementor] first update")
 	sendKey(tm, "t")
-	waitForOutput(t, tm, "(raw)", `"text":"first update"`)
+	waitForOutput(t, tm, "(raw)", `"Text":"first update"`)
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	waitForOutput(t, tm, `"text":"second update"`)
+	waitForOutput(t, tm, `"Text":"second update"`)
 
 	sendKey(tm, "q")
 	waitFinished(t, tm)
@@ -1704,7 +1704,7 @@ func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1723,7 +1723,7 @@ func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
 	sendKey(tm, "z")
 	waitForOutput(t, tm, "first update") // zoomed render still shows the feed
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1749,7 +1749,7 @@ func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
 	var lines strings.Builder
 	for i := 0; i < 50; i++ {
-		fmt.Fprintf(&lines, `{"type":"assistant","message":{"content":[{"type":"text","text":"line-%02d"}]}}`+"\n", i)
+		fmt.Fprintf(&lines, `{"Kind":"start"}`+"\n"+`{"Kind":"model"}`+"\n"+`{"Kind":"text","Text":"line-%02d"}`+"\n"+`{"Kind":"usage"}`+"\n", i)
 	}
 	if err := os.WriteFile(logPath, []byte(lines.String()), 0o644); err != nil {
 		t.Fatal(err)
@@ -1766,7 +1766,7 @@ func TestTea_SidebarActivityTick_FollowAutoScrollsToNewLines(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "line-49", "[follow]")
 
-	grown := lines.String() + `{"type":"assistant","message":{"content":[{"type":"text","text":"line-50"}]}}` + "\n"
+	grown := lines.String() + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"line-50"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(grown), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1946,7 +1946,7 @@ func TestTea_FocusKeys_MoveBetweenListAndDockedSidebar(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2004,7 +2004,7 @@ func TestTea_SidebarKey_ClosesFromDockedListFocus(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+			line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 			if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -2088,7 +2088,7 @@ func TestTea_EnterKey_OnStaticRow_OpensSidebar(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+			line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 			if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -2204,7 +2204,7 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2224,7 +2224,7 @@ func TestTea_SidebarToggleKey_CyclesActivityTranscriptRaw(t *testing.T) {
 	waitForOutput(t, tm, "transcript #42", "[implementor] hi")
 
 	sendKey(tm, "t")
-	waitForOutput(t, tm, "(raw)", `"type":"assistant"`)
+	waitForOutput(t, tm, "(raw)", `"Kind":"start"`)
 
 	sendKey(tm, "t")
 	waitForOutput(t, tm, "activity #42")
@@ -4512,7 +4512,7 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	first := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":17}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4537,7 +4537,7 @@ func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 		t.Fatalf("first Update heartbeat = %q, want it to contain %q", first1, want)
 	}
 
-	second := `{"type":"result","num_turns":99,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	second := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":99}` + "\n"
 	if len(second) != len(first) {
 		t.Fatalf("test setup: second log must be same length as first, got %d want %d", len(second), len(first))
 	}
@@ -4570,7 +4570,7 @@ func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4583,7 +4583,7 @@ func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
 	tm.m = Update(tm.m, SidebarLoadedMsg{Number: "42"})
 	tm.m = Update(tm.m, SidebarToggleMsg{}) // switch to the rendered Transcript
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4609,7 +4609,7 @@ func TestTea_Update_RefreshesSidebar_ForRepickedNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4623,7 +4623,7 @@ func TestTea_Update_RefreshesSidebar_ForRepickedNumber(t *testing.T) {
 	tm.m = Update(tm.m, SidebarLoadedMsg{Number: "42"})
 	tm.m = Update(tm.m, SidebarToggleMsg{}) // switch to the rendered Transcript
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4653,7 +4653,7 @@ func TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4666,7 +4666,7 @@ func TestTea_Update_DoesNotRefreshTranscript_ForSettledSidebar(t *testing.T) {
 	tm.m = Update(tm.m, SidebarLoadedMsg{Number: "42", Rendered: "=== pass: initial ===\n[implementor] first\n"})
 	tm.m = Update(tm.m, SidebarToggleMsg{})
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4857,7 +4857,7 @@ func TestTea_EnterOnOrphanRow_OpensSidebarReadOnly(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"hi"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4930,7 +4930,7 @@ func TestTea_OrphanRow_ShowsLiveHeartbeat(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	line := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":17}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4971,7 +4971,7 @@ func TestTea_OrphanAdopted_ClearsOrphanHeartbeats(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	line := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	line := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":17}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -5089,7 +5089,7 @@ func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T)
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "no local logs for this dispatch")
 
-	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"box is alive"}]}}` + "\n"
+	line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"box is alive"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-42.log"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -5121,7 +5121,7 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first pass"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first pass"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -5153,7 +5153,7 @@ func TestTea_ReopenOrphanSidebar_PicksUpTranscriptGrowth(t *testing.T) {
 	// Grown while the sidebar was closed: a Transcript-only load's own #719
 	// case, not the live Activity feed, which advances only while the sidebar
 	// stays open.
-	grown := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second pass"}]}}` + "\n"
+	grown := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second pass"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(grown), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -5179,7 +5179,7 @@ func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	logPath := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first update"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -5206,7 +5206,7 @@ func TestTea_PollTick_AdvancesOpenOrphanSidebarActivityFeed(t *testing.T) {
 	sendKey(tm, "enter")
 	waitForOutput(t, tm, "activity #42", "first update")
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second update"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second update"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
