@@ -43,14 +43,15 @@ type ForgejoConfig struct {
 	HTTPClient *http.Client
 }
 
-// ValidateForgejoEnv checks the FORGEJO_* knobs required when
-// ISSUE_TRACKER=forgejo and returns an error for the first unmet requirement.
-func ValidateForgejoEnv(baseURL, token string) error {
+// ValidateForgejoEnv checks the FORGEJO_* knobs required when <knob>=forgejo
+// and returns an error for the first unmet requirement. knob names the
+// selecting env var and is quoted in the error.
+func ValidateForgejoEnv(knob, baseURL, token string) error {
 	if baseURL == "" {
-		return fmt.Errorf("set FORGEJO_BASE_URL (Forgejo instance base URL) when ISSUE_TRACKER=forgejo")
+		return fmt.Errorf("set FORGEJO_BASE_URL (Forgejo instance base URL) when %s=forgejo", knob)
 	}
 	if token == "" {
-		return fmt.Errorf("set FORGEJO_TOKEN when ISSUE_TRACKER=forgejo")
+		return fmt.Errorf("set FORGEJO_TOKEN when %s=forgejo", knob)
 	}
 	return nil
 }

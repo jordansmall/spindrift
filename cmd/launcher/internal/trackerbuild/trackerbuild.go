@@ -63,7 +63,7 @@ var GitHub = Tracker{
 // Forgejo builds the Forgejo REST tracker.
 var Forgejo = Tracker{
 	Validate: func(s Settings) error {
-		if err := forgejo.ValidateForgejoEnv(s.ForgejoBaseURL, s.ForgejoToken); err != nil {
+		if err := forgejo.ValidateForgejoEnv("ISSUE_TRACKER", s.ForgejoBaseURL, s.ForgejoToken); err != nil {
 			return err
 		}
 		return requireSlug(s, backend.Forgejo.Name)

@@ -2542,14 +2542,18 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_TOKEN when ISSUE_TRACKER=forgejo")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
-		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN", err.Error())
+	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN and ISSUE_TRACKER=forgejo", err.Error())
 	}
 
 	c = base
 	c.forgejoBaseURL = ""
-	if err := validate(c); err == nil {
-		t.Errorf("validate() must require FORGEJO_BASE_URL when ISSUE_TRACKER=forgejo")
+	err = validate(c)
+	if err == nil {
+		t.Fatalf("validate() must require FORGEJO_BASE_URL when ISSUE_TRACKER=forgejo")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), "ISSUE_TRACKER=forgejo") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_BASE_URL and ISSUE_TRACKER=forgejo", err.Error())
 	}
 }
 
@@ -2570,8 +2574,20 @@ func TestValidate_ForgejoCodeForge(t *testing.T) {
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_TOKEN when CODE_FORGE=forgejo")
 	}
-	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
-		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN", err.Error())
+	if !strings.Contains(err.Error(), "FORGEJO_TOKEN") || !strings.Contains(err.Error(), "CODE_FORGE=forgejo") ||
+		strings.Contains(err.Error(), "ISSUE_TRACKER") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN and CODE_FORGE=forgejo, not ISSUE_TRACKER", err.Error())
+	}
+
+	c.forgejoToken = "tok"
+	c.forgejoBaseURL = ""
+	err = validate(c)
+	if err == nil {
+		t.Fatalf("validate() must require FORGEJO_BASE_URL when CODE_FORGE=forgejo")
+	}
+	if !strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), "CODE_FORGE=forgejo") ||
+		strings.Contains(err.Error(), "ISSUE_TRACKER") {
+		t.Errorf("validate() error = %q, want it to name FORGEJO_BASE_URL and CODE_FORGE=forgejo, not ISSUE_TRACKER", err.Error())
 	}
 }
 
