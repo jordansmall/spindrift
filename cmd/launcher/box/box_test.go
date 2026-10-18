@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -1502,7 +1503,7 @@ func allFlags() []string {
 		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5",
-		"--driver-session-cache-dir=/session-cache", "--branch-prefix=agent/issue-",
+		"--driver-session-cache-dir=/session-cache", "--driver-env-files=A=.a/x B=y", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=600000", "--driver-bash-timeout-env=A B",
 		"--dev-shell-name=ci", "--dev-shell-probe-timeout=300",
 		"--run-state-file=/run-state.json",
@@ -1519,6 +1520,7 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		OutboxDir:             "/o",
 		ForbiddenMarkersFile:  "/forbidden.json",
 		DriverSessionCacheDir: "/session-cache",
+		DriverEnvFiles:        []homelayout.EnvFile{{Env: "A", Path: ".a/x"}, {Env: "B", Path: "y"}},
 		RunStateFile:          "/run-state.json",
 		BranchPrefix:          "agent/issue-",
 		DriverBashTimeoutMS:   "600000",
@@ -2304,5 +2306,42 @@ func TestRecoveryGates_PRIntentNudgeFiresOnBackstopReady(t *testing.T) {
 				t.Errorf("PR-intent nudge did not carry the backstop line:\n%s", f.calls[1].prompt)
 			}
 		})
+	}
+}
+
+func TestHomeLayout_WritesEnvFilesBeforeAssembly(t *testing.T) {
+	f := newFixture(t)
+	f.in.DriverEnvFiles = []homelayout.EnvFile{
+		{Env: "BOX_SECRET", Path: ".drv/auth.json"},
+		{Env: "BOX_UNSET", Path: ".drv/unset.json"},
+	}
+	f.knobs["BOX_SECRET"] = `{"token":"t"}`
+	path := filepath.Join(f.knobs["HOME"], ".drv", "auth.json")
+	checked := false
+	assemble := f.d.Assemble
+	f.d.Assemble = func(in assemblyInputs, env promptassembly.Env, w io.Writer) (string, error) {
+		checked = true
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != `{"token":"t"}` {
+			t.Errorf("at Assemble, %s = %q, %v; want the env value", path, got, err)
+		}
+		if fi, err := os.Stat(path); err == nil && fi.Mode().Perm() != 0o600 {
+			t.Errorf("mode = %v, want 0600", fi.Mode().Perm())
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(path), "unset.json")); !os.IsNotExist(err) {
+			t.Errorf("unset env value wrote a file: %v", err)
+		}
+		return assemble(in, env, w)
+	}
+	f.run()
+	if !checked {
+		t.Fatal("Assemble never ran")
+	}
+}
+
+func TestParseFlags_MalformedEnvFilesRejected(t *testing.T) {
+	args := append(allFlags(), "--driver-env-files=NOEQUALS")
+	if _, err := parseFlags(args, io.Discard); err == nil {
+		t.Fatal("parseFlags accepted a malformed --driver-env-files word")
 	}
 }

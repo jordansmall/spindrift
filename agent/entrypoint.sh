@@ -21,6 +21,7 @@ exec box \
   --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE" \
   --driver-skills-dir "$DRIVER_SKILLS_DIR" \
   --driver-session-cache-dir "${DRIVER_SESSION_CACHE_DIR:-}" \
+  --driver-env-files "${DRIVER_ENV_FILES:-}" \
   --prompts-dir "$PROMPTS_DIR" \
   --agents-prompt-files "${AGENTS_PROMPT_FILES:-}" \
   --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}" \

@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // PopulateSkills copies each src into dst in order, so a later src wins a name
@@ -225,4 +226,69 @@ func copyFile(src, dst string, perm fs.FileMode) (err error) {
 		return fmt.Errorf("copy %s: %w", src, err)
 	}
 	return nil
+}
+
+// EnvFile names one environment value to write to a home-relative file: the
+// Driver-neutral primitive behind a Driver entry's envFiles (lib/drivers).
+type EnvFile struct {
+	Env  string
+	Path string
+}
+
+// ParseEnvFiles reads the space-separated ENV=path words lib/drivers renders
+// into DRIVER_ENV_FILES. Empty input is no files.
+func ParseEnvFiles(s string) ([]EnvFile, error) {
+	var files []EnvFile
+	for _, word := range strings.Fields(s) {
+		env, path, ok := strings.Cut(word, "=")
+		if !ok || env == "" || path == "" {
+			return nil, fmt.Errorf("malformed env file %q: want ENV=path", word)
+		}
+		files = append(files, EnvFile{Env: env, Path: path})
+	}
+	return files, nil
+}
+
+// WriteEnvFiles writes each file's environment value to its path under home,
+// owner-only (0600 in a 0700 parent), for a Driver CLI that reads a secret
+// only from a file. An unset or empty value is skipped: preflight owns
+// requiring it. A path that is absolute or leaves home is refused. Errors name
+// the path, never the value.
+func WriteEnvFiles(home string, files []EnvFile, getenv func(string) string) error {
+	for _, f := range files {
+		value := getenv(f.Env)
+		if value == "" {
+			continue
+		}
+		if !filepath.IsLocal(f.Path) {
+			return fmt.Errorf("env file path %q for %s is not a path inside home", f.Path, f.Env)
+		}
+		dst := filepath.Join(home, f.Path)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return fmt.Errorf("create parent of %s: %w", dst, err)
+		}
+		if err := writePrivate(dst, value); err != nil {
+			return fmt.Errorf("write %s: %w", dst, err)
+		}
+	}
+	return nil
+}
+
+// writePrivate replaces dst via a 0600 temp file in the same directory, so the
+// value is never readable under a laxer mode, and a pre-existing file or
+// symlink at dst is replaced rather than written through.
+func writePrivate(dst, value string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".envfile-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(value); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), dst)
 }
