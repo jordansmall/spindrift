@@ -249,6 +249,17 @@ let
         cp ${p.writeText (baseNameOf relPath) content} $out/home/agent/${relPath}
       '') allDriverFiles
     )}
+    ${lib.concatStrings (
+      lib.mapAttrsToList (relPath: inPackage: ''
+        target=${driver.driverEntry.package p}/${inPackage}
+        [ -e "$target" ] || {
+          echo "Driver ${driver.driverEntry.name}: package has no ${inPackage} to link at ${relPath}" >&2
+          exit 1
+        }
+        mkdir -p "$(dirname $out/home/agent/${relPath})"
+        ln -s "$target" $out/home/agent/${relPath}
+      '') (driver.driverEntry.packageLinks or { })
+    )}
   '';
 
   homeLayoutFor = p: p.runCommand "spindrift-home-layout" { } (homeLayoutScript p);

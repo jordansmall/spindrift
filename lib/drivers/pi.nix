@@ -52,6 +52,16 @@ in
 
   bin = "pi";
 
+  # pi's official subagent extension is a bundled example, not a package
+  # feature (ADR 0009 amendment): linked from the package so a nixpkgs bump
+  # moves it, and found by the agent directory's extensions scan, which child
+  # pi processes run too. pi loads only the directory's index.ts; the sample
+  # agents/ and prompts/ beside it are never discovered (agents load from
+  # <agentDir>/agents only). Agent scope stays user-level because the hook
+  # bridge refuses a subagent call asking for "project" or "both".
+  packageLinks.".pi/agent/extensions/subagent" =
+    "lib/node_modules/pi-monorepo/examples/extensions/subagent";
+
   # One rule per Provider pi reads an API key for, gated on that Provider's
   # model prefix (ADR 0066 decision 7). The OAuth tokens pi also accepts are
   # left out; the one OAuth Provider, github-copilot, reads PI_AUTH_CONTENT.

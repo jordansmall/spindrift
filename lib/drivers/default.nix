@@ -26,7 +26,10 @@ let
   # optional and unvalidated. So is `subagents` (default true): false marks a
   # Driver that provisions no subagent yet (read by lib/mkHarness.nix). Also
   # optional and unvalidated: `effortOnModelLevels`, the valid levels of a
-  # Driver whose effort rides on the model (lib/effort-on-model.nix).
+  # Driver whose effort rides on the model (lib/effort-on-model.nix). And
+  # `packageLinks` (home-relative path -> path inside the Driver's package):
+  # lib/image.nix symlinks each into the home layout, failing the build when the
+  # package has no such path.
   requiredAttrs = [
     "name"
     "package"
