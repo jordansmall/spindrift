@@ -9,7 +9,7 @@ type TerminateRequestedMsg struct {
 func (TerminateRequestedMsg) isConsoleMsg() {}
 
 // TerminateConfirmedMsg reports that the operator confirmed a pending
-// terminate with "y"/"yes". The run loop has already called
+// terminate with a "y" or "Y" keypress. The run loop has already called
 // Launcher.TerminateAsync (issue #745), which may still be in flight, so
 // Update only clears the pending confirm.
 type TerminateConfirmedMsg struct {
@@ -19,7 +19,7 @@ type TerminateConfirmedMsg struct {
 func (TerminateConfirmedMsg) isConsoleMsg() {}
 
 // TerminateCancelledMsg reports that the operator declined a pending
-// terminate confirm with anything other than "y"/"yes".
+// terminate confirm with any keypress other than "y"/"Y".
 type TerminateCancelledMsg struct{}
 
 func (TerminateCancelledMsg) isConsoleMsg() {}
