@@ -29,12 +29,6 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 			access: "read-write",
 		},
 		{
-			name:         "read-only but neither backend is forgejo is a no-op",
-			access:       "read-only",
-			codeForge:    "github",
-			issueTracker: "github",
-		},
-		{
 			name:          "unset Box token fails",
 			access:        "read-only",
 			codeForge:     "forgejo",
@@ -102,9 +96,9 @@ func TestCheckReadOnlyForgejoTokenGate(t *testing.T) {
 
 // This is the Forgejo counterpart to
 // TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName.
-// The gate used to compare c.codeForge to the literal "forgejo", so it no-opped
-// on a backend that shares Forgejo's TokenEnvVar under another name even though
-// gateRegistry reported the gate as applicable.
+// The custom-forgejo row shares Forgejo's TokenEnvVar and feeds only the
+// tokenGateApplicable assertion (the registry's Applicable); the check itself
+// no longer reads backendRows and must still enforce.
 func TestCheckReadOnlyForgejoTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), backendRow{
