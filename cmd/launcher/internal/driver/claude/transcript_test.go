@@ -74,23 +74,3 @@ func TestTranscriptRoleAttribution(t *testing.T) {
 		})
 	}
 }
-
-func TestAttributionRoleForPass(t *testing.T) {
-	cases := []struct {
-		passRole string
-		want     string
-	}{
-		{"review", driverkit.ReviewerRole},
-		{"delta-review", driverkit.ReviewerRole},
-		{"implement", driverkit.ImplementorRole},
-		{"fix", driverkit.ImplementorRole},
-		{"land", driverkit.ImplementorRole},
-		{"", ""},
-		{"unrecognized", ""},
-	}
-	for _, tc := range cases {
-		if got := claude.AttributionRoleForPass(tc.passRole); got != tc.want {
-			t.Errorf("AttributionRoleForPass(%q) = %q, want %q", tc.passRole, got, tc.want)
-		}
-	}
-}

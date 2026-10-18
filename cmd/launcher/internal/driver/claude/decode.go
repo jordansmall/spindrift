@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 )
@@ -381,30 +382,16 @@ func (d *decoder) subagentRole(parent string) string {
 	return driverkit.DefaultRole
 }
 
-// AttributionRoleForPass maps a pass_start op's Role to an attribution role:
-// "review"/"delta-review" to driverkit.ReviewerRole, "implement"/"fix"/"land"
-// to driverkit.ImplementorRole, and anything else to "" so a caller can tell
-// "no role info" from "implementor".
-// The literals are not passmachine's constants because driverExecBin's fileset
-// (lib/mkHarness.nix) excludes that package, so importing it breaks the build.
-func AttributionRoleForPass(passRole string) string {
-	switch passRole {
-	case "review", "delta-review":
-		return driverkit.ReviewerRole
-	case "implement", "fix", "land":
-		return driverkit.ImplementorRole
-	default:
-		return ""
-	}
-}
-
 // nextActiveTopLevelRole returns the top-level attribution role in effect after
 // op (issue #2382). An op that maps to no role leaves current unchanged.
 func nextActiveTopLevelRole(current string, op *hostop.SpindriftOp) string {
 	if op == nil || op.Op != hostop.OpPassStart {
 		return current
 	}
-	if role := AttributionRoleForPass(op.Role); role != "" {
+	// A transcript's pass_start op names no dispatch kind, and every kind's row
+	// carries the same table (dispatchkind TestPassRolesRows), so work's row
+	// stands for all.
+	if role := dispatchkind.Work.PassRoles[op.Role]; role != "" {
 		return role
 	}
 	return current
