@@ -1659,13 +1659,15 @@ Box, so they never need to *read* these files or *dump* their own
 environment.
 
 The variables the Bash tool must never inherit live in one baked file,
-`/home/agent/.claude/hooks/credential-vars` (`ANTHROPIC_API_KEY`,
-`CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`), parsed by the sibling
-`credential-vars-parse`, which both `env-credential-scrub.sh` and
-`bash-output-tee.sh` source so the two `unset` lists cannot drift. The
-`CREDENTIAL_VARS_FILE` environment variable overrides the path. A missing or
-empty list, or a missing helper, fails closed: the scrub hook denies the Bash
-call and the tee hook exits 2.
+`/home/agent/.claude/hooks/credential-vars`: every env var a Driver's
+credential rules name, which `nix run .#regen` renders from the rows in
+`lib/drivers/*.nix` (the bwrap runner's `offArgvKeys` takes its Driver half
+from the same render), so a new Driver's keys cannot miss either list. It is
+parsed by the sibling `credential-vars-parse`, which both
+`env-credential-scrub.sh` and `bash-output-tee.sh` source so the two `unset`
+lists cannot drift. The `CREDENTIAL_VARS_FILE` environment variable overrides
+the path. A missing or empty list, or a missing helper, fails closed: the
+scrub hook denies the Bash call and the tee hook exits 2.
 
 #### The opencode Driver guards Bash through a plugin
 
