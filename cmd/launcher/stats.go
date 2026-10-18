@@ -16,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/recordstats"
 )
 
@@ -344,7 +345,7 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 	for _, row := range rows {
 		n := float64(row.Passes)
 		fmt.Fprintf(tw, "%s\t%d\t$%.2f\t$%.2f\t%.1f\t%d\t%s\n",
-			row.Role, row.Passes, row.USD, row.USD/n, (time.Duration(row.DurationMs)*time.Millisecond).Minutes()/n, row.APICalls, row.BlockRate())
+			statsLabel(row.Role), row.Passes, row.USD, row.USD/n, (time.Duration(row.DurationMs)*time.Millisecond).Minutes()/n, row.APICalls, row.BlockRate())
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -363,8 +364,20 @@ func renderAgentTable(w io.Writer, records []dispatchrecord.Record) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "AGENT\tPASSES\tAPI_CALLS\tINPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE")
 	for _, row := range rows {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", row.Agent, row.Passes, row.APICalls,
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", statsLabel(row.Agent), row.Passes, row.APICalls,
 			row.InputTokens, row.OutputTokens, row.CacheReadInputTokens, row.CacheCreationInputTokens)
 	}
 	return tw.Flush()
+}
+
+// statsLabelSpaces maps the separators SanitizeLine would delete outright, so a
+// name keeps its word breaks and cannot split a tabwriter cell.
+var statsLabelSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
+
+// statsLabel makes a record-derived group label (role, model, a Box-authored
+// subagent_type) safe to print: such a value is untrusted and could otherwise
+// forge table rows or drive the terminal. --json keeps the raw value. Not
+// console.SanitizeControlSequences: it keeps \t and \n, which forge cells.
+func statsLabel(s string) string {
+	return driverkit.SanitizeLine(statsLabelSpaces.Replace(s))
 }
