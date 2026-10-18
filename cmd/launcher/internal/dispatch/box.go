@@ -716,9 +716,10 @@ const spindriftSignalSocketDirPattern = "spindrift-signal-socket-*"
 // RemoveAll failure branch below is reachable only through an
 // EACCES/EROFS/EBUSY-class error no test can provoke deterministically. Both
 // the registry proxy's and the Signal socket's directories are created
-// through registryProxyMkdirTemp (via mkSocketDir below), but only the
-// registry proxy's removal goes through registryProxyRemoveAll -- the Signal
-// socket's cleanup calls os.RemoveAll directly (signal_socket.go).
+// through registryProxyMkdirTemp (via mkSocketDir below).
+// registryProxyRemoveAll covers only socketDirWithFallback's removal of an
+// over-long directory, which both sockets share; every other removal of these
+// directories calls os.RemoveAll directly (runOnce, signal_socket.go).
 var (
 	registryProxyMkdirTemp = os.MkdirTemp
 	registryProxyRemoveAll = os.RemoveAll
