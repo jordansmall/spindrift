@@ -1101,6 +1101,37 @@ so a child of a multi-Driver Daemon prints the warning too.
 
 #### The pi Driver
 
+This section is the adoption overview for pi: what to declare, and where each
+facet is documented. A minimal Consumer entry, beside any other Drivers (see
+[Several Drivers side by side](#several-drivers-side-by-side)):
+
+```nix
+perSystem.spindrift.agents.drivers.pi.models = {
+  default = "github-copilot/claude-opus-4.5";
+  byName.scout = { model = "github-copilot/claude-haiku-4.5"; effort = "low"; };
+  byName.reviewer.model = "github-copilot/claude-opus-4.5";
+};
+```
+
+There is no overlay, npm hash or extra flake input: the package is
+`pi-coding-agent` from the Consumer's own locked nixpkgs. Model ids are
+`<provider>/<model>`, and the Provider needs a credential (below). The facets
+are linked here and described in the bullets that follow:
+
+- Roster and per-role effort: [Subagent roster](#subagent-roster) and the first
+  two bullets below.
+- Provider keys: the `pi` entry in the credential list under the secret knobs
+  ([Runtime configuration](#runtime-configuration)); GitHub Copilot: [pi
+  Driver: github-copilot Provider
+  credential](#pi-driver-github-copilot-provider-credential).
+- Hooks: the bridge bullet below, and [Self-inflicted secret reads are denied
+  per Driver](#self-inflicted-secret-reads-are-denied-per-driver).
+- Project trust: the paragraph after the bullets, and [Merge
+  guard](#merge-guard).
+- Session resume: the `--session-id` pin in [Subagent
+  roster](#subagent-roster), which also covers the `sessions/` mount.
+- Known limits: [the list at the end of this section](#pi-known-limits).
+
 `pi` is the nixpkgs `pi-coding-agent` build (locked at 1.1.0), taken from the
 Consumer's own nixpkgs. Declaring `agents.drivers.pi` publishes `.#pi`,
 `.#pi-daemon` and the `spindrift-pi` image. The Box runs
@@ -1108,7 +1139,11 @@ Consumer's own nixpkgs. Declaring `agents.drivers.pi` publishes `.#pi`,
 `EFFORT` passed to `--thinking` unnormalised (pi accepts `off`, `minimal`,
 `low`, `medium`, `high`, `xhigh` and `max`). Model ids are
 Provider-namespaced, so the bare-worker gate (issue #5331) and the bare-model
-evaluation failure (issue #5355) apply as they do for opencode.
+evaluation failure (issue #5355) apply as they do for opencode. The
+coordinator, scout and reviewer defaults are bare claude ids, so a pi entry
+must name all three models (`default`, `byName.scout` and `byName.reviewer`,
+as the example above does; the review axis follows the reviewer). The Filer
+is off until given a model, and a bare worker is not provisioned.
 
 What the Driver carries:
 
@@ -1181,6 +1216,29 @@ files regardless of trust). A PR adding a `.pi/` path is still merge-guarded
 (see [Merge guard](#merge-guard)). Heartbeat lines and Dispatch Records report the
 observed model as `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix
 notation, so the effort in force shows next to the model.
+
+<a id="pi-known-limits"></a>
+**Known limits.**
+
+- `PI_AUTH_CONTENT` accepts OAuth only for `github-copilot`. Providers that
+  rotate the refresh token on each use (Anthropic Pro/Max, ChatGPT
+  subscriptions) must use API keys, since pi refreshes inside the Box and the
+  host would keep a spent token. Host-side refresh is not supported yet.
+- Only the eight API-key Providers in the credential list and Copilot get a
+  preflight check and key forwarding; a model on any other Provider cannot
+  authenticate.
+- `--no-approve` is fixed. There is no opt-in to trust a Target repo's
+  `.pi/`, so its settings, extensions, MCP servers, skills and prompts never
+  load.
+- Only the official subagent extension is provisioned, at user scope. A
+  community subagent package, or an `agentScope` of `project` or `both`, is
+  not supported.
+- `DRIVER_BASH_TIMEOUT_MS` (`bashTimeoutMs`) has no effect under pi: its row
+  declares no timeout variable to export it under.
+- Each Daemon runs one Driver (`.#pi-daemon`); a pool does not mix pi with
+  other Drivers.
+- The post-tool Bash summary hook fails open: if it throws, pi only logs it,
+  and the full output stays in the log.
 
 #### Authoring a new Driver
 
@@ -7562,12 +7620,21 @@ efforts, and its orchestrator review effort, are all set via `roster` in
 `nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
 mechanism and dogfood's specific values.
 
+**pi Driver.** The dogfood config also declares `agents.drivers.pi`, with
+`github-copilot/*` models for every role (the worker included) and a per-role
+effort, so `PI_AUTH_CONTENT` is its credential (see [pi Driver:
+github-copilot Provider
+credential](#pi-driver-github-copilot-provider-credential)). `claude` stays
+the default Driver and the one CI uses; run pi with `nix run .#pi-daemon`. The
+overview is [The pi Driver](#the-pi-driver).
+
 **Bash timeout.** The dogfood config sets both
 `agents.drivers.claude.bashTimeoutMs` and
 `agents.drivers.opencode.bashTimeoutMs` to `1800000` (30 minutes) from
 `nix/dogfood-defaults.nix`'s `driverBashTimeoutMs`, because a cold
 `checks-inbox` gate outruns Claude Code's stock 10-minute Bash cap (issue
-#4409) and opencode's 2-minute default, shorter still (issue #5351). Other
+#4409) and opencode's 2-minute default, shorter still (issue #5351). The pi
+entry leaves it unset, since pi's row declares no timeout variable. Other
 Consumers leave it unset and keep each Driver's own limit — see the
 `DRIVER_BASH_TIMEOUT_MS` row in the env-var table.
 
