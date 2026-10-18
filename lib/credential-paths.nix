@@ -5,6 +5,7 @@
 [
   ".claude/.credentials.json"
   ".config/gh/hosts.yml"
+  ".pi/agent/auth.json"
   ".env"
   ".env.*"
 ]
