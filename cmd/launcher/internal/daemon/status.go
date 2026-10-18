@@ -123,8 +123,8 @@ type SlotStatus struct {
 	Revision string   `json:"revision,omitempty"`
 	Issues   []string `json:"issues,omitempty"`
 	// Chore names the Chore a butler slot's child last boxed (ADR 0056,
-	// issue #3923), kept apart from Issues as slotFlight.chore explains.
-	// Only the name: a Chore's class, allow-list disposition, and promotion
+	// issue #3923), kept apart from Issues as the slotFlight type doc
+	// explains. Only the name: a Chore's class, allow-list disposition, and promotion
 	// budget live in the Box and host-side settle config, never the pool.
 	Chore string `json:"chore,omitempty"`
 	// Pass is the Pass label (Record.Phase) of the running child's most
