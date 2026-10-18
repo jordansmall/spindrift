@@ -1,4 +1,4 @@
-package driver
+package opencode_test
 
 import (
 	"bytes"
@@ -16,11 +16,8 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-func TestNewSelectsOpencodeByName(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+func TestNewDriverIsNamedOpencode(t *testing.T) {
+	d := newDriver()
 	if d.Name() != "opencode" {
 		t.Errorf("Name(): got %q, want %q", d.Name(), "opencode")
 	}
@@ -29,10 +26,7 @@ func TestNewSelectsOpencodeByName(t *testing.T) {
 // The raw sink must stay byte-exact, which is what the opencode heartbeat
 // writer promises at the Driver seam (issue #2092).
 func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	var raw, out bytes.Buffer
 	w := d.NewHeartbeatWriter(&raw, "77", &out, driverkit.RenderOptions{})
@@ -56,10 +50,7 @@ func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 // opencode's heartbeat carries no role attribution, so topLevelRole must
 // change nothing (issue #2092).
 func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	var raw, out bytes.Buffer
 	w := d.NewHeartbeatWriter(&raw, "77", &out, driverkit.RenderOptions{TopLevelRole: "reviewer"})
@@ -78,10 +69,7 @@ func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 }
 
 func TestOpencodeDriverHeartbeatWriterForwardsOnModel(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	type call struct{ model, role string }
 	var got []call
@@ -104,10 +92,7 @@ func TestOpencodeDriverHeartbeatWriterForwardsOnModel(t *testing.T) {
 // A non-zero exitCode is never resolved to 0, even when the log carries a
 // valid outcome line (crash after the agent wrote its outcome).
 func TestOpencodeDriverResolveExitNonZeroRC_KeptDespiteOutcome(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -128,10 +113,7 @@ func TestOpencodeDriverResolveExitNonZeroRC_KeptDespiteOutcome(t *testing.T) {
 // opencode exits 0 even on a mid-run error, so the passed-in exitCode is 0
 // here and the log's error event turns it into a failure (issue #2263).
 func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -153,10 +135,7 @@ func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
 }
 
 func TestOpencodeDriverResolveExitMissingLog_PassesRCThrough(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	logPath := filepath.Join(t.TempDir(), "does-not-exist.log")
 	got, err := d.ResolveExit(logPath, 0)
@@ -171,10 +150,7 @@ func TestOpencodeDriverResolveExitMissingLog_PassesRCThrough(t *testing.T) {
 // The error event between the two text events pins that RenderTranscript
 // joins only text bodies.
 func TestOpencodeDriverRenderTranscript(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -220,7 +196,7 @@ func openOpencodeStore(t *testing.T, create string) *sql.DB {
 // missing from opencode's schema fail a test.
 func seedOpencodeStore(t *testing.T, rows [][5]any) *sql.DB {
 	t.Helper()
-	ddl, err := os.ReadFile(filepath.Join("opencode", "testdata", "session-schema.sql"))
+	ddl, err := os.ReadFile(filepath.Join("testdata", "session-schema.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,16 +235,13 @@ func TestOpencodeSchemaFixtureHasLookupColumns(t *testing.T) {
 	}
 	for _, col := range []string{"id", "title", "parent_id", "time_archived", "time_created"} {
 		if !have[col] {
-			t.Errorf("session table in opencode/testdata/session-schema.sql has no %q column, which lookupSession queries", col)
+			t.Errorf("session table in testdata/session-schema.sql has no %q column, which lookupSession queries", col)
 		}
 	}
 }
 
 func TestOpencodeSessionFlags(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 	title := func(t *testing.T, slug, issue string) string {
 		t.Helper()
 		got := d.SessionFlags("initial", slug, issue, t.TempDir())
@@ -399,13 +372,10 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	})
 }
 
-// The registered opencode Driver carries the error event's reset time to the
+// The opencode Driver carries the error event's reset time to the
 // retry hold, the same way claude's resetsAt does.
 func TestOpencodeDriverClassifyTransientCarriesResetAt(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 	logPath := filepath.Join(t.TempDir(), "box.log")
 	line := `{"type":"error","timestamp":1760610000000,"error":{"name":"APIError","data":{"statusCode":429,"responseHeaders":{"retry-after":"3600"}}}}` + "\n"
 	if err := os.WriteFile(logPath, []byte(line), 0o644); err != nil {
@@ -416,8 +386,8 @@ func TestOpencodeDriverClassifyTransientCarriesResetAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClassifyTransient: %v", err)
 	}
-	if got.Class != Transient || got.Reason != RateLimit {
-		t.Fatalf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, RateLimit)
+	if got.Class != driverkit.Transient || got.Reason != driverkit.RateLimit {
+		t.Fatalf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.RateLimit)
 	}
 	want := time.UnixMilli(1760610000000).Add(time.Hour).UTC()
 	if got.ResetAt == nil || !got.ResetAt.Equal(want) {
