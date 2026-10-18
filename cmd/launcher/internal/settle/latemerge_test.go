@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/seamtest"
 )
 
 // lateMergeClaim is the claim time writeSettledLog stamps; lateMergeNow is a
@@ -42,7 +44,7 @@ func writeLogAt(t *testing.T, root, key string, ts time.Time, state, reason, prU
 	body := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
 		RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: ts, Started: ts, HostToken: "tok-" + key,
 	}}) +
-		`{"type":"result","timestamp":"2026-05-01T09:00:00Z","num_turns":1,"result":"done"}` + "\n" +
+		canonLine(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-05-01T09:00:00Z"), Text: "done"}) +
 		hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{
 			RecordID: id, State: state, Reason: reason, PRURL: prURL, HostToken: "tok-" + key,
 		}})
