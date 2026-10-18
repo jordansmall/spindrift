@@ -1114,14 +1114,17 @@ This first slice is deliberately narrow:
   `SCOUT_PROVISIONED`, `WORKER_PROVISIONED` and `FILER_ENABLED` bake `false`.
   Only the reviewer's model and effort are kept, for the orchestrator's review
   pass.
-- **API keys only.** The row declares one `credentials` rule per supported
-  Provider (see the `pi` credential list under the secret knobs); a key is
-  required only when some model tier names that Provider. Keys reach the Box
-  through the environment as the Provider's own variable, stay off the bwrap
-  argv, and are in the shared Bash scrub list (`agent/credential-vars`),
+- **API keys, plus Copilot.** The row declares one `credentials` rule per
+  supported Provider (see the `pi` credential list under the secret
+  knobs); a key is required only when some model tier names that Provider.
+  Keys reach the Box through the environment as the Provider's own
+  variable, stay off the bwrap argv, and are in the shared Bash scrub list
+  (`agent/credential-vars`),
   which the bridge's scrub hook below enforces on every `bash` call. A
   Provider outside the eight gets no preflight check and its key is not
-  forwarded into the Box. There is no `PI_AUTH_CONTENT` (Copilot).
+  forwarded into the Box. GitHub Copilot, which has no API key, takes
+  `PI_AUTH_CONTENT` instead; see [pi Driver: github-copilot Provider
+  credential](#pi-driver-github-copilot-provider-credential).
 - **Hooks through a bridge extension (issue #5482).** pi has no hook config,
   so claude's five tool hooks (credential deny on `read` and `bash`, env
   credential scrub, background-Bash rejection, Bash output tee and summary) run
@@ -1213,6 +1216,24 @@ Driver entry declares:
   whose config lives in hooks (`claude`) omits it. `lib/image.nix` fails the
   build if a path collides with an `agentFilesTemplate` path. opencode uses
   it for `.config/opencode/opencode.json`, its credential deny rules.
+- `envFiles` — a list of `{ env; pathRelative; }`, for a Driver CLI that
+  reads a secret only from a file. Optional. The `box` binary writes each
+  set `env` value to `$HOME/<pathRelative>` (mode `0600`, parent `0700`)
+  before the first pass, and skips an unset one; preflight owns requiring
+  it. `assertShape` requires `env` to be a variable name and `pathRelative`
+  a `$HOME`-relative path with no `..` segment or whitespace. pi uses it to
+  write `PI_AUTH_CONTENT` to `.pi/agent/auth.json`. Unlike `configFiles`,
+  the value arrives at run time, so it can carry a secret.
+- `authContent` — `{ env; oauthProviders; apiKeyProviders?; }`, naming an
+  env var that holds a Provider-keyed auth store and the Providers allowed
+  an OAuth entry in it. Optional. It renders into the Driver Descriptor,
+  and preflight's `driver-credentials` row rejects any other OAuth entry,
+  naming the Provider and its API-key variable where spindrift has one,
+  else saying the Provider is unsupported. `apiKeyProviders` (string to
+  string, default `{}`) maps an OAuth Provider id to the differently
+  named Provider its API key is under. pi declares
+  `{ env = "PI_AUTH_CONTENT"; oauthProviders = [ "github-copilot" ];
+  apiKeyProviders = { "openai-codex" = "openai"; }; }`.
 - `argvShape` (ADR 0009, issue #2534) — the Driver's CLI argv-assembly
   shape, an attrset the Go/bash side walks to build the CLI invocation:
   `promptStyle` (`"flag"` or `"positional"`); `promptFlag` (required only
@@ -2180,6 +2201,50 @@ missing or expired credential produces, with no "model not found" in the
 NDJSON stream. So if a Copilot run fails with that bare envelope, check the
 `<model>` against the live catalog above — it is a distinct failure mode from
 a missing/expired `OPENCODE_AUTH_CONTENT`, not just an auth problem.
+
+### pi Driver: github-copilot Provider credential
+
+pi's `github-copilot` Provider is OAuth-only, like opencode's. Unlike
+opencode, pi has no env-native auth store: it reads credentials only from
+`auth.json` in its agent directory. So `PI_AUTH_CONTENT` carries the contents
+of a pi `auth.json`, and the Box writes it to `/home/agent/.pi/agent/auth.json`
+(mode `0600`) before the Driver runs, through the pi row's `envFiles` (see
+[Authoring a new Driver](#authoring-a-new-driver)). The per-issue session mount
+takes `.pi/agent/sessions`, so it never shadows the file.
+
+Log in once on a **host**: run `pi`, enter `/login`, and pick GitHub Copilot.
+That writes `~/.pi/agent/auth.json`, keyed by Provider. Export only the
+`github-copilot` entry:
+
+```sh
+PI_AUTH_CONTENT=$(jq -c '{"github-copilot": .["github-copilot"]}' ~/.pi/agent/auth.json)
+```
+
+`PI_AUTH_CONTENT` is a secret knob like `OPENCODE_AUTH_CONTENT` above: set it
+in `harness.env`, source it with `PI_AUTH_CONTENT_CMD`/`--pi-auth-content-cmd`
+(preferred), or pass `--pi-auth-content-file`. It never reaches argv, the
+generated config, completions or the `dispatch_start` knobs, and it is in the
+Bash scrub list (`agent/credential-vars`). The written file is on the
+credential-deny list (`lib/credential-paths.nix`), so the agent's own `read`
+and `bash` calls cannot open it. Preflight requires it only when
+`DRIVER=pi` and some model tier is `github-copilot/<model>`.
+
+**Why only Copilot OAuth.** pi refreshes an expired OAuth access token itself,
+inside the Box, and writes the new tokens back to the Box's `auth.json`. For
+Copilot that is harmless: the refresh token is a stable GitHub token that does
+not change on refresh, so the host's copy stays valid. A Provider that rotates
+its refresh token on every use (Anthropic Pro/Max, ChatGPT subscriptions)
+would leave the host holding a spent token after one run. So the pi row's
+`authContent.oauthProviders` lists `github-copilot` alone, and preflight's
+`driver-credentials` row rejects an OAuth entry for any other Provider, naming
+it and its API-key variable where spindrift has one, else calling the
+Provider unsupported (for example, `set ANTHROPIC_API_KEY for anthropic
+instead`). A ChatGPT-subscription `openai-codex` entry, whose Provider id
+differs from the one its API key is under, maps through
+`authContent.apiKeyProviders` and gets `set OPENAI_API_KEY for openai
+instead`. `api_key` entries in `PI_AUTH_CONTENT` are accepted for any
+Provider. Host-side refresh for rotating Providers is a later decision (ADR
+0009's pi amendment).
 
 ### Advanced tuning
 
