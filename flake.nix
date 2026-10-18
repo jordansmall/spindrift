@@ -206,6 +206,14 @@
                 program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
               };
 
+              # Rewrites the opencode session-store fixture from the baked
+              # opencode (issue #5492); nix/checks/opencode-session-schema.nix
+              # pins it to the derivation built here.
+              regen-opencode-schema = {
+                type = "app";
+                program = "${import ./nix/regen-opencode-schema.nix { inherit pkgs; }}/bin/regen-opencode-schema";
+              };
+
               # The pre-CLI interactive setup (ADR 0027), standalone from the
               # Consumer-facing lib/mkHarness.nix pipeline.
               quickstart = {

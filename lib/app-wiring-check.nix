@@ -1,9 +1,10 @@
-# Two checks (nix/checks/schema-drift.nix's regen-app-wiring, issue #3128, and
-# nix/checks/promptassembly.nix's regen-goldens-app-wiring, issue #2951) guard
-# the identical shape: flake.nix's top-level apps.<name> must resolve to the
-# same derivation this check itself built. Each `*Reason` is a sentence
-# fragment -- what breaks, in the caller's own words -- that the shared
-# diagnostic tail continues, so it takes no trailing punctuation.
+# Three checks (nix/checks/schema-drift.nix's regen-app-wiring, issue #3128,
+# nix/checks/promptassembly.nix's regen-goldens-app-wiring, issue #2951, and
+# nix/checks/opencode-session-schema.nix's regen-opencode-schema-app-wiring,
+# issue #5492) guard the identical shape: flake.nix's top-level apps.<name>
+# must resolve to the same derivation this check itself built. Each `*Reason`
+# is a sentence fragment -- what breaks, in the caller's own words -- that the
+# shared diagnostic tail continues, so it takes no trailing punctuation.
 # nix/checks/equivalence.nix's dogfood-bwrap-app-wiring is deliberately not a
 # caller: its program path comes from a fixture, not from a derivation the
 # check itself built.
