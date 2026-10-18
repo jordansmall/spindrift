@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 // Run must go through the package-level execCommand seam, not a hardcoded
@@ -4470,5 +4472,48 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 	}
 	if !existedAfter {
 		t.Error("cgroup dir missing after the in-window reclaim attempt")
+	}
+}
+
+// The pi Driver's Provider keys (issue #5480) are credentials like
+// OPENCODE_AUTH_CONTENT: off the bwrap command line, in the process env.
+func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
+	rules, ok := driver.CredentialRules("pi")
+	if !ok || len(rules) == 0 {
+		t.Fatal("pi Driver has no credential rules")
+	}
+	var names []string
+	for _, r := range rules {
+		names = append(names, r.Env...)
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			sentinel := strings.ToLower(name) + "-sentinel-value"
+			t.Setenv(name, sentinel)
+
+			script, _ := newFakeCLI(t, fakeCall{exit: 0})
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
+			var gotCmd *exec.Cmd
+			execCommand = func(_ string, args ...string) *exec.Cmd {
+				gotCmd = exec.Command(script, args...)
+				return gotCmd
+			}
+
+			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+			box := Box{Env: map[string]string{name: sentinel}}
+			if err := a.Run(box); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+				if strings.Contains(arg, sentinel) {
+					t.Errorf("%s sentinel found in bwrap argv: %v", name, arg)
+				}
+			}
+			if !slices.Contains(gotCmd.Env, name+"="+sentinel) {
+				t.Errorf("sandbox process env missing %s sentinel", name)
+			}
+		})
 	}
 }
