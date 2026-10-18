@@ -1,7 +1,7 @@
 {
   "lines": [
     "#42 · Looking into issue #42.",
-    "#42 · Reading main.",
+    "#42 · Reading main.go and applying a fix.",
     "#42 · Fixed the issue and verified the tests pass."
   ],
   "onModel": [

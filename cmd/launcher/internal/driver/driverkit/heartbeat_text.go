@@ -59,15 +59,35 @@ func SanitizeLine(s string) string {
 // NarrationMaxRunes caps the narration text, ellipsis included.
 const NarrationMaxRunes = 120
 
+// sentenceEnd returns the byte index of the first ".", "!" or "?" followed by
+// whitespace or end of line, or -1. A terminator inside a token ("a.b",
+// "b.py") does not end a sentence.
+func sentenceEnd(line string) int {
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '.', '!', '?':
+			if i+1 == len(line) {
+				return i
+			}
+			if r, _ := utf8.DecodeRuneInString(line[i+1:]); unicode.IsSpace(r) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // TrimNarration returns the first sentence of the first line of text with
 // visible content, capped at NarrationMaxRunes, with control and escape
 // sequences stripped (the text is agent-controlled). It sanitizes before
-// cutting the sentence so a "." inside a CSI or OSC sequence cannot end it. It
-// does not filter by source; the caller decides which text to pass.
+// cutting the sentence so a "." inside a CSI or OSC sequence cannot end it, and
+// maps tabs to spaces first since SanitizeLine drops them, which would glue a
+// "." to the next word. It does not filter by source; the caller decides which
+// text to pass.
 func TrimNarration(text string) string {
 	for _, line := range strings.FieldsFunc(text, func(r rune) bool { return r == '\r' || r == '\n' }) {
-		line = SanitizeLine(line)
-		if i := strings.IndexAny(line, ".!?"); i >= 0 {
+		line = SanitizeLine(strings.ReplaceAll(line, "\t", " "))
+		if i := sentenceEnd(line); i >= 0 {
 			line = line[:i+1]
 		}
 		line = strings.TrimSpace(line)

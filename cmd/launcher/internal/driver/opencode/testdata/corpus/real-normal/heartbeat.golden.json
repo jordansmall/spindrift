@@ -15,7 +15,7 @@
     "#42 ○ pass 2 (review) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
     "#42 ○ continue: no verdict; running terminal land pass",
     "#42 ○ pass 3 (land) started",
-    "#42 · SPINDRIFT_OUTCOME issue=longest-line landing=agent/issue-longest-line status=ready note=Counts.",
+    "#42 · SPINDRIFT_OUTCOME issue=longest-line landing=agent/issue-longest-line status=ready note=Counts.longest plus a fourth...",
     "#42 ○ pass 3 (land) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
     "#42 ○ post-approval land delta: none — landing did not alter the reviewed tree",
     "#42 ○ stop: outcome reached",
