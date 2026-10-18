@@ -1,4 +1,4 @@
-package driver
+package claude_test
 
 import (
 	"bytes"
@@ -12,10 +12,7 @@ import (
 )
 
 func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	var raw, out bytes.Buffer
 	w := d.NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
@@ -34,10 +31,7 @@ func TestClaudeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 }
 
 func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -49,16 +43,13 @@ func TestClaudeDriverClassifyTransientDelegatesToClaudeClassify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClassifyTransient: %v", err)
 	}
-	if got.Class != Transient || got.Reason != RateLimit {
-		t.Errorf("got %+v, want Class=%s Reason=%s", got, Transient, RateLimit)
+	if got.Class != driverkit.Transient || got.Reason != driverkit.RateLimit {
+		t.Errorf("got %+v, want Class=%s Reason=%s", got, driverkit.Transient, driverkit.RateLimit)
 	}
 }
 
 func TestClaudeDriverExtractUsage(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -87,10 +78,7 @@ func TestClaudeDriverExtractUsage(t *testing.T) {
 }
 
 func TestClaudeDriverClassifyTransient(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	writeLog := func(t *testing.T, content string) string {
 		t.Helper()
@@ -107,8 +95,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != Transient || got.Reason != RateLimit {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, RateLimit)
+		if got.Class != driverkit.Transient || got.Reason != driverkit.RateLimit {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.RateLimit)
 		}
 		if got.ResetAt == nil {
 			t.Fatal("ResetAt: got nil, want non-nil")
@@ -125,8 +113,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != Transient || got.Reason != Overloaded {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, Overloaded)
+		if got.Class != driverkit.Transient || got.Reason != driverkit.Overloaded {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.Overloaded)
 		}
 		if got.ResetAt != nil {
 			t.Errorf("ResetAt: got %v, want nil", got.ResetAt)
@@ -139,8 +127,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != Transient || got.Reason != Network {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, Network)
+		if got.Class != driverkit.Transient || got.Reason != driverkit.Network {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, driverkit.Network)
 		}
 		if got.ResetAt != nil {
 			t.Errorf("ResetAt: got %v, want nil", got.ResetAt)
@@ -153,8 +141,8 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ClassifyTransient: %v", err)
 		}
-		if got.Class != Terminal || got.Reason != TaskFailed {
-			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Terminal, TaskFailed)
+		if got.Class != driverkit.Terminal || got.Reason != driverkit.TaskFailed {
+			t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Terminal, driverkit.TaskFailed)
 		}
 		if got.ResetAt != nil {
 			t.Errorf("ResetAt: got %v, want nil", got.ResetAt)
@@ -166,10 +154,7 @@ func TestClaudeDriverClassifyTransient(t *testing.T) {
 // event already carries a trustworthy is_error/subtype pair, so ResolveExit
 // derives nothing from the log, unlike opencode (issue #2263).
 func TestClaudeDriverResolveExitTrustsPassedExitCode(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	logPath := filepath.Join(t.TempDir(), "does-not-exist.log")
 	got, err := d.ResolveExit(logPath, 17)
@@ -184,10 +169,7 @@ func TestClaudeDriverResolveExitTrustsPassedExitCode(t *testing.T) {
 // This test pins the transcript-rendering capability the Driver seam gained
 // in #648.
 func TestClaudeDriverRenderTranscript(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
@@ -211,10 +193,7 @@ func TestClaudeDriverRenderTranscript(t *testing.T) {
 // event attributed to the "implementor" default. A non-default role here
 // catches that.
 func TestClaudeDriverRenderTranscript_TopLevelRoleOptionCarriesThrough(t *testing.T) {
-	d, err := New("claude")
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")

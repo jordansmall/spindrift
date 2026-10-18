@@ -41,6 +41,7 @@ let
   # stale list fails the build loudly. Never the registry root internal/driver
   # or another Driver's directory (internal/driver/closure_test.go).
   driverGoTestShared = map (p: ../../cmd/launcher/internal + "/${p}") [
+    "dispatchkey"
     "dispatchkind"
     "driver/corpus"
     "driver/driverkit"
@@ -50,6 +51,8 @@ let
     "logscan"
     "outcome"
     "passmachine"
+    "report"
+    "testutil"
     "usage"
   ];
   # One go test derivation per Driver (ADR 0066 decision 5), keyed by registry

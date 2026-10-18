@@ -1,4 +1,4 @@
-package driver
+package opencode_test
 
 import (
 	"os"
@@ -12,10 +12,7 @@ import (
 // divergence issue #2085 records. SummedByModel sorts by raw model id, so the
 // assertions read claude-sonnet-4 at index 0 and gpt-5 at index 1.
 func TestOpencodeDriverExtractUsage(t *testing.T) {
-	d, err := New("opencode")
-	if err != nil {
-		t.Fatalf("New(opencode): %v", err)
-	}
+	d := newDriver()
 
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "issue-1.log")
