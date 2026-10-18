@@ -3,7 +3,9 @@ package dispatch
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -18,21 +20,27 @@ func writeRunLog(t *testing.T, d *Dispatch, lines ...string) {
 			parts = append(parts, l)
 		}
 	}
-	if err := writeFile(d.logPath(), strings.Join(parts, "\n")+"\n"); err != nil {
+	if err := writeFile(d.logPath(), strings.Join(parts, "")); err != nil {
 		t.Fatal(err)
 	}
 }
 
+// sessionResult is one canonical session summary, the totals a
+// fakeDriver{SessionTotals: true} sums.
+func sessionResult(turns int, durationMs, apiMs int64, tok driverkit.Tokens) string {
+	return eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: turns, DurationMs: durationMs, DurationAPIMs: apiMs, Tokens: tok})
+}
+
 func TestUsageReport_HumanReadableDurations(t *testing.T) {
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 	d := f.New("88", "test issue")
 
-	resultEvent := `{"type":"result","num_turns":3,"total_cost_usd":0.10,"duration_ms":3665000,"duration_api_ms":65000,"usage":{"input_tokens":100,"output_tokens":50}}`
+	resultEvent := sessionResult(3, 3665000, 65000, driverkit.Tokens{Input: 100, Output: 50, CostUSD: 0.10})
 	writeRunLog(t, d, resultEvent)
 
 	body := d.UsageReport()
@@ -52,14 +60,14 @@ func TestUsageReport_HumanReadableDurations(t *testing.T) {
 // Turns while showing none of those.
 func TestUsageReport_OmitsCostAndHeaderTokens(t *testing.T) {
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 	d := f.New("42", "test issue")
 
-	resultEvent := `{"type":"result","num_turns":5,"total_cost_usd":0.25,"duration_ms":3000,"duration_api_ms":2000,"usage":{"input_tokens":500,"output_tokens":100,"cache_read_input_tokens":50,"cache_creation_input_tokens":10}}`
+	resultEvent := sessionResult(5, 3000, 2000, driverkit.Tokens{Input: 500, Output: 100, CacheRead: 50, CacheWrite5m: 10, CostUSD: 0.25})
 	writeRunLog(t, d, resultEvent)
 
 	body := d.UsageReport()
@@ -115,8 +123,8 @@ func TestCumulativeUsage_SumsAcrossInitialAndFixPasses(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("9", "test issue")
 
-	writeRunLog(t, d, `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`)
-	if err := writeFile(d.fixLogPath(1), `{"type":"result","num_turns":1,"total_cost_usd":0.20,"usage":{"input_tokens":200,"output_tokens":75}}`+"\n"); err != nil {
+	writeRunLog(t, d, usageLine("", 100, 50, 0.10))
+	if err := writeFile(d.fixLogPath(1), usageLine("", 200, 75, 0.20)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,8 +153,8 @@ func TestCumulativeUsage_SumsMultipleSessionsWithinOnePassLog(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("11", "test issue")
 
-	session1 := `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`
-	session2 := `{"type":"result","num_turns":1,"total_cost_usd":5.00,"usage":{"input_tokens":9000,"output_tokens":500}}`
+	session1 := usageLine("", 100, 50, 0.10)
+	session2 := usageLine("", 9000, 500, 5.00)
 	writeRunLog(t, d, session1, session2)
 
 	got := d.CumulativeUsage()
@@ -169,8 +177,8 @@ func TestCumulativeUsage_PassWithNoResultEventContributesNothing(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("10", "test issue")
 
-	writeRunLog(t, d, `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`)
-	if err := writeFile(d.fixLogPath(1), `{"type":"assistant","message":{"content":[]}}`+"\n"); err != nil {
+	writeRunLog(t, d, usageLine("", 100, 50, 0.10))
+	if err := writeFile(d.fixLogPath(1), eventLine(driverkit.Event{Kind: driverkit.KindStart})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -197,10 +205,10 @@ func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 
 	// This is what rotateStaleLog leaves behind: the abandoned first attempt at
 	// logPath().1 and the current attempt at the bare logPath().
-	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
+	if err := writeFile(d.logPath()+".1", usageLine("", 5000, 250, 3.00)); err != nil {
 		t.Fatal(err)
 	}
-	writeRunLog(t, d, `{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	writeRunLog(t, d, usageLine("", 100, 50, 0.10))
 
 	got := d.CumulativeUsage()
 	if diff := got.TotalCostUSD - 3.10; diff > 0.0001 || diff < -0.0001 {
@@ -218,7 +226,7 @@ func TestCumulativeUsage_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 // cost, since the butler writes it into the ledger whole.
 func TestCumulativeUsage_SumsDurationAndTurnsAcrossAttempts(t *testing.T) {
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
@@ -226,10 +234,10 @@ func TestCumulativeUsage_SumsDurationAndTurnsAcrossAttempts(t *testing.T) {
 	d := f.New("15", "test issue")
 
 	// logPath().1 is what rotateStaleLog leaves behind for an abandoned attempt.
-	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"duration_ms":5000,"duration_api_ms":1000,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
+	if err := writeFile(d.logPath()+".1", sessionResult(1, 5000, 1000, driverkit.Tokens{Input: 5000, Output: 250, CostUSD: 3.00})); err != nil {
 		t.Fatal(err)
 	}
-	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	writeRunLog(t, d, sessionResult(2, 1000, 500, driverkit.Tokens{Input: 100, Output: 50, CostUSD: 0.10}))
 
 	got := d.CumulativeUsage()
 	if got.NumTurns != 3 {
@@ -248,18 +256,18 @@ func TestCumulativeUsage_SumsDurationAndTurnsAcrossAttempts(t *testing.T) {
 // fix-pass log too.
 func TestUsageReport_SumsAcrossFixPasses(t *testing.T) {
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 	d := f.New("13", "test issue")
 
-	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
-	if err := writeFile(d.fixLogPath(1), `{"type":"result","num_turns":3,"total_cost_usd":0.20,"duration_ms":2000,"duration_api_ms":700,"usage":{"input_tokens":200,"output_tokens":75}}`+"\n"); err != nil {
+	writeRunLog(t, d, sessionResult(2, 1000, 500, driverkit.Tokens{Input: 100, Output: 50, CostUSD: 0.10}))
+	if err := writeFile(d.fixLogPath(1), sessionResult(3, 2000, 700, driverkit.Tokens{Input: 200, Output: 75, CostUSD: 0.20})); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeFile(d.fixLogPath(2), `{"type":"result","num_turns":4,"total_cost_usd":0.30,"duration_ms":3000,"duration_api_ms":900,"usage":{"input_tokens":300,"output_tokens":90}}`+"\n"); err != nil {
+	if err := writeFile(d.fixLogPath(2), sessionResult(4, 3000, 900, driverkit.Tokens{Input: 300, Output: 90, CostUSD: 0.30})); err != nil {
 		t.Fatal(err)
 	}
 
@@ -278,17 +286,17 @@ func TestUsageReport_SumsAcrossFixPasses(t *testing.T) {
 // TestCumulativeUsage_ChargesRotatedAsideRetryAttempt.
 func TestUsageReport_ChargesRotatedAsideRetryAttempt(t *testing.T) {
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 	d := f.New("14", "test issue")
 
-	if err := writeFile(d.logPath()+".1", `{"type":"result","num_turns":1,"total_cost_usd":3.00,"duration_ms":5000,"duration_api_ms":1000,"usage":{"input_tokens":5000,"output_tokens":250}}`+"\n"); err != nil {
+	if err := writeFile(d.logPath()+".1", sessionResult(1, 5000, 1000, driverkit.Tokens{Input: 5000, Output: 250, CostUSD: 3.00})); err != nil {
 		t.Fatal(err)
 	}
-	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	writeRunLog(t, d, sessionResult(2, 1000, 500, driverkit.Tokens{Input: 100, Output: 50, CostUSD: 0.10}))
 
 	body := d.UsageReport()
 	if !strings.Contains(body, "| Turns | 3 |") {
@@ -310,9 +318,10 @@ func TestUsageReport_MissingFixPassDegrades(t *testing.T) {
 	defer f.Cleanup()
 	d := f.New("15", "test issue")
 
-	writeRunLog(t, d, `{"type":"result","num_turns":2,"total_cost_usd":0.10,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`)
-	// fix-1 exists but crashed before writing a result event.
-	if err := writeFile(d.fixLogPath(1), `{"type":"assistant","message":{"content":[]}}`+"\n"); err != nil {
+	writeRunLog(t, d, usageLine("", 100, 50, 0.10), usageLine("", 100, 50, 0.10))
+	// Two identical per-call lines make Turns 2 under per-call totals. fix-1
+	// exists but holds no usage.
+	if err := writeFile(d.fixLogPath(1), eventLine(driverkit.Event{Kind: driverkit.KindStart})); err != nil {
 		t.Fatal(err)
 	}
 	// fix-2 never ran, so it leaves no file on disk.
@@ -331,21 +340,24 @@ func TestUsageReport_MissingFixPassDegrades(t *testing.T) {
 // values and not one pass's value alone.
 func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 	d := f.New("16", "test issue")
 
+	// at is hour h of the run's day in epoch milliseconds.
+	at := func(h int) int64 { return time.Date(2026, 8, 11, h, 0, 0, 0, time.UTC).UnixMilli() }
+
 	// Pass 1 spans an hour of timestamps while its own duration_ms claims only
 	// 10 minutes.
 	pass1 := []string{
-		`{"type":"assistant","timestamp":"2026-08-11T10:00:00.000Z","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
-		`{"type":"user","timestamp":"2026-08-11T11:00:00.000Z","message":{"content":[]}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"duration_ms":600000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`,
+		eventLine(driverkit.Event{Kind: driverkit.KindUsage, Timestamp: at(10), Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 10, Output: 5}}),
+		eventLine(driverkit.Event{Kind: driverkit.KindStart, Timestamp: at(11)}),
+		sessionResult(1, 600000, 500, driverkit.Tokens{Input: 100, Output: 50, CostUSD: 0.10}),
 	}
-	if err := writeFile(d.logPath(), strings.Join(pass1, "\n")+"\n"); err != nil {
+	if err := writeFile(d.logPath(), strings.Join(pass1, "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -353,11 +365,11 @@ func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 	// combined span is 4 hours: far longer than either pass's own duration_ms
 	// and than their sum of 20 minutes.
 	pass2 := []string{
-		`{"type":"assistant","timestamp":"2026-08-11T13:00:00.000Z","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
-		`{"type":"user","timestamp":"2026-08-11T14:00:00.000Z","message":{"content":[]}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"duration_ms":600000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":50}}`,
+		eventLine(driverkit.Event{Kind: driverkit.KindUsage, Timestamp: at(13), Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 10, Output: 5}}),
+		eventLine(driverkit.Event{Kind: driverkit.KindStart, Timestamp: at(14)}),
+		sessionResult(1, 600000, 500, driverkit.Tokens{Input: 100, Output: 50, CostUSD: 0.10}),
 	}
-	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "\n")+"\n"); err != nil {
+	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -373,21 +385,22 @@ func TestUsageReport_WallTimeSpansAcrossPasses(t *testing.T) {
 func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 	t.Setenv("MODEL", "claude-opus-4-8")
 	dir := tempLogDir(t)
-	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{}, RealClock())
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
 	}
 	defer f.Cleanup()
 	d := f.New("300", "test issue")
 
-	opus1 := `{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":100}}}}`
-	haiku1 := `{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":500,"cache_creation_input_tokens":50,"cache_creation":{"ephemeral_5m_input_tokens":50,"ephemeral_1h_input_tokens":0}}}}`
-	opus2 := `{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":40,"output_tokens":20,"cache_read_input_tokens":2000,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":60,"ephemeral_1h_input_tokens":40}}}}`
-	resultEvent := `{"type":"result","num_turns":3,"total_cost_usd":0.30,"duration_ms":3665000,"duration_api_ms":65000,"usage":{"input_tokens":40,"output_tokens":20}}`
+	opus1 := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 100, Output: 50, CacheRead: 1000, CacheWrite5m: 200, CacheWrite1h: 100}})
+	haiku1 := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-haiku-4-5-20251001", Tokens: driverkit.Tokens{Input: 10, Output: 5, CacheRead: 500, CacheWrite5m: 50}})
+	opus2 := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 40, Output: 20, CacheRead: 2000, CacheWrite5m: 60, CacheWrite1h: 40}})
+	resultEvent := sessionResult(3, 3665000, 65000, driverkit.Tokens{Input: 40, Output: 20, CostUSD: 0.30})
 	writeRunLog(t, d, opus1, haiku1, opus2, resultEvent)
 
 	body := d.UsageReport()
 
+	// The canonical Driver ranks no model family, so rows sort by exact id.
 	want := "## Run usage\n\n" +
 		"| Field | Value |\n" +
 		"| --- | --- |\n" +
@@ -398,8 +411,8 @@ func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 		"### Per-model token usage\n\n" +
 		"| Model | Uncached input | Output | Cache read | Cache write (5m) | Cache write (1h) |\n" +
 		"| --- | --- | --- | --- | --- | --- |\n" +
-		"| claude-opus-4-8 | 140 | 70 | 3000 | 260 | 140 |\n" +
-		"| claude-haiku-4-5-20251001 | 10 | 5 | 500 | 50 | 0 |\n"
+		"| claude-haiku-4-5-20251001 | 10 | 5 | 500 | 50 | 0 |\n" +
+		"| claude-opus-4-8 | 140 | 70 | 3000 | 260 | 140 |\n"
 
 	if body != want {
 		t.Errorf("UsageReport() =\n%q\nwant:\n%q", body, want)
@@ -427,17 +440,15 @@ func TestUsageReport_MergesPerModelTokensAcrossPasses(t *testing.T) {
 	d := f.New("17", "test issue")
 
 	pass1 := []string{
-		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`,
+		usageLine("claude-opus-4-8", 100, 50, 0),
 	}
-	if err := writeFile(d.logPath(), strings.Join(pass1, "\n")+"\n"); err != nil {
+	if err := writeFile(d.logPath(), strings.Join(pass1, "")); err != nil {
 		t.Fatal(err)
 	}
 	pass2 := []string{
-		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":40,"output_tokens":20}}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":40,"output_tokens":20}}`,
+		usageLine("claude-opus-4-8", 40, 20, 0),
 	}
-	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "\n")+"\n"); err != nil {
+	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -465,17 +476,15 @@ func TestUsageReport_MergedModelOrderIsFirstAppearance(t *testing.T) {
 	// The initial pass uses haiku only and the fix pass opus only, so haiku
 	// comes first chronologically and must render first.
 	pass1 := []string{
-		`{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":10,"output_tokens":5}}`,
+		usageLine("claude-haiku-4-5-20251001", 10, 5, 0),
 	}
-	if err := writeFile(d.logPath(), strings.Join(pass1, "\n")+"\n"); err != nil {
+	if err := writeFile(d.logPath(), strings.Join(pass1, "")); err != nil {
 		t.Fatal(err)
 	}
 	pass2 := []string{
-		`{"type":"assistant","message":{"model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.10,"usage":{"input_tokens":100,"output_tokens":50}}`,
+		usageLine("claude-opus-4-8", 100, 50, 0),
 	}
-	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "\n")+"\n"); err != nil {
+	if err := writeFile(d.fixLogPath(1), strings.Join(pass2, "")); err != nil {
 		t.Fatal(err)
 	}
 

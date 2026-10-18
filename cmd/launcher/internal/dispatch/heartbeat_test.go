@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -17,16 +17,13 @@ import (
 func TestRun_HeartbeatRawLogExact(t *testing.T) {
 	dir := tempLogDir(t)
 
-	streamJSON := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n" +
-		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":1000}` + "\n"
+	streamJSON := eventLine(driverkit.Event{Kind: driverkit.KindToolCall, ToolName: "Edit", ToolTarget: "main.go"}) +
+		eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: 3, DurationMs: 1000})
 
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(streamJSON)
 
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
+	drv := driverkit.New(testStrategy)
 	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -51,16 +48,14 @@ func TestRun_HeartbeatRawLogExact(t *testing.T) {
 func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	dir := tempLogDir(t)
 
-	streamJSON := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}` + "\n" +
-		`{"type":"result","num_turns":5,"duration_ms":2000}` + "\n"
+	streamJSON := eventLine(driverkit.Event{Kind: driverkit.KindModel, Model: "m"}) +
+		eventLine(driverkit.Event{Kind: driverkit.KindToolCall, ToolName: "Bash", ToolTarget: "go test ./..."}) +
+		eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: 5, DurationMs: 2000})
 
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(streamJSON)
 
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
+	drv := driverkit.New(testStrategy)
 	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -113,16 +108,14 @@ func TestRun_AnnounceEmitsToStdout(t *testing.T) {
 func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 	dir := tempLogDir(t)
 
-	streamJSON := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}` + "\n" +
-		`{"type":"result","num_turns":5,"duration_ms":2000}` + "\n"
+	streamJSON := eventLine(driverkit.Event{Kind: driverkit.KindModel, Model: "m"}) +
+		eventLine(driverkit.Event{Kind: driverkit.KindToolCall, ToolName: "Bash", ToolTarget: "go test ./..."}) +
+		eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: 5, DurationMs: 2000})
 
 	fr := runner.NewFake()
 	fr.WriteToOutput = []byte(streamJSON)
 
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
+	drv := driverkit.New(testStrategy)
 	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -266,10 +259,7 @@ func TestFactory_SetHeartbeatOutPanicsAfterNew(t *testing.T) {
 	dir := tempLogDir(t)
 
 	fr := runner.NewFake()
-	drv, err := driver.New("claude")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
+	drv := driverkit.New(testStrategy)
 	f, err := NewFactory(Config{}, dir, fr, drv, RealClock())
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)

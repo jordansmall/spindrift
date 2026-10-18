@@ -645,7 +645,7 @@ func TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage(t *testing.T) {
 	var sleeps []time.Duration
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps)) // holdJitter=0 for determinism
 
-	firstAttemptResult := []byte(`{"type":"result","num_turns":1,"total_cost_usd":3.00,"usage":{"input_tokens":5000,"output_tokens":250}}` + "\n")
+	firstAttemptResult := []byte(usageLine("", 5000, 250, 3.00))
 	secondAttemptOutcome := nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")
 
 	calls := 0

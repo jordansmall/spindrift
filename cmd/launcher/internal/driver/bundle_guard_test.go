@@ -40,7 +40,6 @@ var bundleAllowList = []string{
 	registry,
 	module + "/internal/butler",
 	module + "/internal/console",
-	module + "/internal/dispatch",
 	module + "/internal/dispatchrecord",
 	module + "/internal/settle",
 	module + "/internal/terminate",

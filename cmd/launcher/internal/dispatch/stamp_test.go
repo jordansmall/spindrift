@@ -12,18 +12,32 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
+// stampDriverName is a Driver name no real Driver uses: the stamp test records
+// it and the ingester resolves it through the registry, so the test proves the
+// stamp carries the Dispatch's Driver name rather than a hard-coded one.
+const stampDriverName = "stamp-fake"
+
+// Not seamtest.RegisterDriver: it registers only the default name "claude",
+// which would not prove the stamp records the Dispatch's own Driver name.
+var registerStampDriver = sync.OnceFunc(func() {
+	s := testStrategy
+	s.Name = stampDriverName
+	driver.Register(s)
+})
+
 // stampBoxOutput is what each fake Box writes: one pass with a turn and a
 // result, enough for the ingester to count a pass in that log.
 func stampBoxOutput(n int) []byte {
 	return []byte(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
-		`{"type":"assistant","message":{"id":"a` + fmt.Sprint(n) + `","model":"m","content":[]}}` + "\n" +
-		`{"type":"result","timestamp":"2026-05-01T09:00:00Z","num_turns":1,"total_cost_usd":1,` +
-		`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}}}` + "\n")
+		eventLine(driverkit.Event{Kind: driverkit.KindStart, MessageID: "a" + fmt.Sprint(n)}) +
+		usageLine("", 1, 1, 1) +
+		eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: 1}))
 }
 
 // TestDispatchStamp_EveryPassLogCarriesOneRecordID drives a real Factory
@@ -31,6 +45,7 @@ func stampBoxOutput(n int) []byte {
 // logs back through the ingester: all four are one stamped Record whose ID
 // matches the record_id every box report carried.
 func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
+	registerStampDriver()
 	readRecords := testutil.InstallPipeReporter(t)
 
 	cfg := retryConfig(3, 0, 0)
@@ -59,7 +74,7 @@ func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
 	// Only the first attempt's failure is transient; a later classification
 	// is terminal so the retry loop ends after the one rotated attempt.
 	classified := false
-	drv := fakeDriver{DriverName: "opencode", ClassifyFn: func(string) (driver.Classification, error) {
+	drv := fakeDriver{DriverName: stampDriverName, ClassifyFn: func(string) (driver.Classification, error) {
 		if !classified {
 			classified = true
 			return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
@@ -125,7 +140,7 @@ func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
 	if r.Kind != "work" || r.DispatchKey != "1" {
 		t.Errorf("kind/key = %q/%q, want work/1", r.Kind, r.DispatchKey)
 	}
-	if r.Revision != "abc123" || r.Driver != "opencode" || r.DriverVersion != "9.9.9" ||
+	if r.Revision != "abc123" || r.Driver != stampDriverName || r.DriverVersion != "9.9.9" ||
 		!reflect.DeepEqual(r.RoleModels, cfg.Stamp.RoleModels) || !reflect.DeepEqual(r.Knobs, cfg.Stamp.Knobs) {
 		t.Errorf("stamp facts lost: %+v", r)
 	}
@@ -176,6 +191,7 @@ func TestDispatchStart_ReadOnlyBoxKindStampsEffectiveAccess(t *testing.T) {
 // head of the primary log, so its fix and conflict logs and a later
 // dispatch_settled op land on that Record, not a fresh one.
 func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
+	registerStampDriver()
 	cfg := retryConfig(1, 0, 0)
 	cfg.Kind = "work"
 	claim := time.Date(2026, 5, 1, 7, 0, 0, 0, time.UTC)
@@ -187,9 +203,9 @@ func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
 		return nil
 	}
 	clock := Clock{Now: func() time.Time { return time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC) }, Sleep: func(time.Duration) {}}
-	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+	d := newTestDispatch(t, cfg, fr, fakeDriver{DriverName: stampDriverName}, clock)
 	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
-		RecordID: prior, Kind: "work", DispatchKey: "1", ClaimTime: claim, Started: claim,
+		RecordID: prior, Kind: "work", DispatchKey: "1", Driver: stampDriverName, ClaimTime: claim, Started: claim,
 	}})
 	if err := writeFile(d.logPath(), stamp+string(stampBoxOutput(0))); err != nil {
 		t.Fatal(err)
