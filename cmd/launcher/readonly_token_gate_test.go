@@ -88,13 +88,6 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			wantErrSubstr:        "introspecting BOX_GH_TOKEN failed",
 			wantErrIs:            doctor.ErrConnectivity,
 		},
-		{
-			name:                 "read-only pure-forgejo deployment is a no-op",
-			access:               "read-only",
-			codeForge:            "forgejo",
-			issueTracker:         "forgejo",
-			expectIntrospectCall: false,
-		},
 	}
 
 	for _, tc := range cases {
@@ -175,8 +168,9 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedP
 // Before the fix, checkReadOnlyTokenGate compared c.codeForge to the literal
 // string "github" and returned (false, nil), so the gate reported itself
 // Applicable yet enforced nothing and accepted a missing BOX_GH_TOKEN. The
-// fake "custom-github" row shares backend.GitHub's TokenEnvVar, so both sides
-// must key off tokenGateApplicable rather than the backend name.
+// fake "custom-github" row shares backend.GitHub's TokenEnvVar and feeds only
+// the tokenGateApplicable assertion (the registry's Applicable); the check
+// itself no longer reads backendRows and must still enforce.
 func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), backendRow{

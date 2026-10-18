@@ -345,6 +345,58 @@ func TestGateRegistry_TokenGatesInapplicableWhenNeitherBackendMatches(t *testing
 	}
 }
 
+// The token checks no longer guard on the active backend themselves, so the
+// registry's Applicable closures alone keep a gate off a deployment whose
+// backends use the other token.
+func TestGateRegistry_GitHubTokenGateInapplicableOnPureForgejo(t *testing.T) {
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "forgejo"
+	c.issueTracker = "forgejo"
+	c.forgejoToken = "launcher-forgejo-token"
+	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
+
+	var buf bytes.Buffer
+	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true); err != nil {
+		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "read-only-token-github") {
+		t.Errorf("walkGateRegistry() output = %q, want no mention of read-only-token-github on a pure-forgejo deployment", out)
+	}
+	if !strings.Contains(out, "read-only-token-forgejo") {
+		t.Errorf("walkGateRegistry() output = %q, want read-only-token-forgejo to run", out)
+	}
+}
+
+func TestGateRegistry_ForgejoTokenGateInapplicableOnPureGitHub(t *testing.T) {
+	originalIntrospector := ghTokenIntrospector
+	ghTokenIntrospector = func(string, string) (tokenIntrospectionResult, error) {
+		return tokenIntrospectionResult{Introspectable: true, WriteCapable: false}, nil
+	}
+	defer func() { ghTokenIntrospector = originalIntrospector }()
+
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	c.codeForge = "github"
+	c.issueTracker = "github"
+	t.Setenv("BOX_GH_TOKEN", "box-gh-token-distinct-from-launcher-token")
+
+	var buf bytes.Buffer
+	if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true); err != nil {
+		t.Fatalf("walkGateRegistry() unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if strings.Contains(out, "read-only-token-forgejo") {
+		t.Errorf("walkGateRegistry() output = %q, want no mention of read-only-token-forgejo on a pure-github deployment", out)
+	}
+	if !strings.Contains(out, "read-only-token-github") {
+		t.Errorf("walkGateRegistry() output = %q, want read-only-token-github to run", out)
+	}
+}
+
 // readonly_token_gate_test.go pins this scenario against checkReadOnlyTokenGate
 // alone. This one walks the real gateRegistry, so the read-only-token-github
 // entry's Applicable closure and its Check have to agree: Applicable says the

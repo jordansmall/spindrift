@@ -4,20 +4,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-
-	"spindrift.dev/launcher/internal/backend"
 )
 
 // checkReadOnlyForgejoTokenGate requires the Box to hold a FORGEJO_TOKEN distinct from
-// the Launcher's own; otherwise the Box holds the very token that can write. It governs
-// only an active backend keyed to Forgejo's TokenEnvVar, matching gateRegistry's
-// "read-only-token-forgejo" Applicable closure so the two cannot disagree. Forgejo has
-// no scope-introspection endpoint, so verified is always false and the token is trusted.
+// the Launcher's own; otherwise the Box holds the very token that can write. The
+// access-mode guard is this check's own; whether a Forgejo-keyed backend is active is
+// gateRegistry's "read-only-token-forgejo" Applicable decision. Forgejo has no
+// scope-introspection endpoint, so verified is always false and the token is trusted.
 func checkReadOnlyForgejoTokenGate(c config, w io.Writer) (verified bool, err error) {
 	if c.boxForgeAndIssueAccess != "read-only" {
-		return false, nil
-	}
-	if !tokenGateApplicable(c, backend.Forgejo) {
 		return false, nil
 	}
 	boxToken := os.Getenv("BOX_FORGEJO_TOKEN")
