@@ -34,7 +34,7 @@ in
     doc = ''
       The first-class N-agent roster (issue #264, lib/roster.nix): a list of
       `{ name; model; effort; mode; description; tools; promptFile; prompt }`
-      attrsets that both Drivers render subagents from, replacing the four
+      attrsets that every Driver renders subagents from, replacing the four
       hardcoded scout/reviewer/filer/worker model knobs. An explicit
       `roster` always wins over the legacy per-agent model knobs
       (scoutModel/reviewModel/filerModel/workerModel), the same precedence

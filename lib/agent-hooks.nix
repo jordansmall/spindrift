@@ -1,4 +1,4 @@
-# The baked claude/opencode Bash hooks directory. The Box has no
+# The baked claude/opencode/pi Bash hooks directory. The Box has no
 # /usr/bin/env, so each hook's `#!/usr/bin/env bash` is pinned to the store
 # bash (issue #5399). Helpers and data files stay beside the scripts: the
 # hooks source credential-vars-parse from their own dirname, and it finds

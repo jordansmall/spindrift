@@ -109,6 +109,6 @@ rec {
   # `*.sh` hook globs in the image and opencode checks skip them.
   helpers = [ "credential-vars-parse" ];
 
-  # Non-script files baked beside the hooks (read by both Drivers).
+  # Non-script files baked beside the hooks (read by every Driver).
   dataFiles = [ "credential-vars" ];
 }

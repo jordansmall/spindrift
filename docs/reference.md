@@ -354,7 +354,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `skills`    | `perSystem.spindrift.agents.skills` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body; the name must match `[A-Za-z0-9._-]+` and not be `.` or `..`, else evaluation fails, issue #5022) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | `perSystem.spindrift.infra.runtime` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-| `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | **Deprecated** (ADR 0064): set `agents.drivers.<name>` instead; the top-level form still works and warns. The attribute name is the Driver; see [Several Drivers side by side](#several-drivers-side-by-side). The agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
+| `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | **Deprecated** (ADR 0064): set `agents.drivers.<name>` instead; the top-level form still works and warns. The attribute name is the Driver; see [Several Drivers side by side](#several-drivers-side-by-side). The agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default), `"opencode"` and `"pi"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
 | `nixInBox`  | `perSystem.spindrift.infra.nix.inBox` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixStoreWritable` | `perSystem.spindrift.infra.nix.storeWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
 | `extraClosures` | `perSystem.spindrift.infra.image.extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
@@ -523,7 +523,7 @@ entry (issue #3447) that has no legacy model arg of its own — see
 [ADR 0049](adr/0049-role-capability-profiles-are-provider-neutral.md).
 
 Every roster — explicit or default — passes through `lib/roster.nix`'s
-`normalizeRoster` before either Driver renders it, and `normalizeRoster` is
+`normalizeRoster` before any Driver renders it, and `normalizeRoster` is
 strict (issue #2571): the entry key set is closed, so an unrecognized key
 throws at eval time the same way an unknown `defaults` key does. `model`
 must be present as a *key* on every entry — an explicit `model = ""` is
@@ -532,7 +532,7 @@ omitting the `model` key entirely throws. `normalizeRoster` itself only
 validates: it never drops the `model = ""` entry, which passes through as
 an ordinary, valid entry. The drop is a separate step —
 `rosterLib.dropOptedOut` — that `lib/mkHarness.nix` applies once, right
-after `normalizeRoster` succeeds and before either Driver ever sees the
+after `normalizeRoster` succeeds and before any Driver ever sees the
 roster (see below). `promptFile` must resolve to a
 real file on disk under `templates/default/prompts/`, or the entry must
 carry a non-null, non-empty inline `prompt`; an entry with neither — a
@@ -637,10 +637,10 @@ knob is set (`lib/mkHarness.nix` applies `reviewEffort` as a post-processing
 step on the fully resolved roster, downstream of `defaultRoster` and
 everything it produces, `byName` included).
 
-An entry with an empty `model` is dropped upstream of both Drivers, by
+An entry with an empty `model` is dropped upstream of every Driver, by
 `rosterLib.dropOptedOut` (`lib/roster.nix`), which `lib/mkHarness.nix` applies
 once right after `normalizeRoster` succeeds — the same per-agent omission the
-four legacy knobs give today (#392), just resolved once before either Driver
+four legacy knobs give today (#392), just resolved once before any Driver
 sees the roster rather than inside each Driver's own render function.
 `lib/drivers/claude.nix` renders the roster it's handed into the `--agents`
 JSON flag; `lib/drivers/opencode.nix` renders it into
@@ -676,7 +676,7 @@ key/line entirely on every Driver — the same inherit-session-effort behavior
 as today. `byName.<name>.effort = ""` is accepted, not rejected, but is not
 an opt-out the way `models.<name> = ""`/`byName.<name>.model = ""` is: it
 still overrides `defaultRoster`'s own per-agent default effort with an
-empty string, which both Drivers then treat as "omit the key/line" the same
+empty string, which every Driver then treats as "omit the key/line" the same
 as never setting `effort` at all — net effect, an explicit empty string
 silently drops that agent's differentiated default effort down to the
 target driver's inherited session effort.
@@ -1062,15 +1062,18 @@ overrides), not `.#<driver>` / `.#<driver>-daemon`; both names resolve to the
 same Harness, so a Daemon never mixes Drivers. The other Harnesses contribute
 just those three outputs.
 
-spindrift's own dogfood declares `claude` (the default) and `opencode`, so
-`nix run .#opencode` and `nix run .#opencode-daemon` dispatch through
-opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
-opencode entry inherits that Driver's limits: a worker is provisioned only
-when the roster names a Provider-namespaced worker model (an inherited
-non-namespaced default is dropped); every other model must be namespaced
-or evaluation fails. Running both Drivers' Daemons at once
-(`nix run .#daemon` and `nix run .#opencode-daemon`) needs two checkouts,
-for example two `git worktree`s, because both take the same per-checkout
+spindrift's own dogfood declares `claude` (the default), `opencode` and `pi`,
+so `nix run .#opencode` and `nix run .#opencode-daemon` dispatch through
+opencode (and `.#pi`, `.#pi-daemon` through pi) while `nix run .`,
+`nix run .#daemon` and CI stay on claude. The opencode entry inherits
+that Driver's limits: a worker is provisioned only when the roster names a
+Provider-namespaced worker model (an inherited non-namespaced default is
+dropped); every other model must be namespaced or evaluation fails. The pi
+entry namespaces every role, the worker included (github-copilot ids), so its
+worker is provisioned.
+Running two Drivers' Daemons at once (`nix run .#daemon` and
+`nix run .#opencode-daemon` or `.#pi-daemon`) needs two checkouts, for
+example two `git worktree`s, because both take the same per-checkout
 **Instance lock** (see [Daemon](#daemon)); from one checkout the second
 halts (`halt` event reason `instance-lock`).
 
@@ -1258,7 +1261,7 @@ Driver entry declares:
   decoder its Pass-log readers share (see [Host-side event layer](#host-side-event-layer)).
   That package (`cmd/launcher/internal/driver/<name>`) also ships a
   canonical `testdata/outcome-fixture.jsonl` pinned by an
-  `outcome_fixture_test.go`, as claude and opencode do.
+  `outcome_fixture_test.go`, as claude, opencode and pi do.
   It proves itself with the conformance kit
   (`cmd/launcher/internal/driver/driverkit/conformance`): its corpus lives in
   `testdata/corpus/<case>/` there (see [Driver Pass-log
@@ -1529,7 +1532,7 @@ line itself.
 
 Canonical events never leave the driver packages. The `Driver` interface is
 the one seam: no caller outside them decodes a line or sees an `Event`.
-Both `opencode` and `claude` are built on this layer, and every reader,
+`opencode`, `claude` and `pi` are all built on this layer, and every reader,
 `claude`'s heartbeat included, runs on it.
 
 ###### opencode's strict and lenient fields
@@ -2188,8 +2191,8 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `SYNC_METHOD`             | `rebase` (baked)       | how a behind branch is brought current before landing: `rebase` (linear history) or `merge` (merge the base in); governs both the preflight-stale-base proactive sync and the reactive on-conflict sync during an immediate merge (`github` Code Forge PR-landing path only; the sync commits as `GIT_USER_NAME`/`GIT_USER_EMAIL`) |
 | `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` and `forgejo` Code Forges only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | (baked; see [Default models](#default-models)) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
-| `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
-| `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; on `opencode`, `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` (issue #5351), which sets only the default: a per-call `timeout` the model passes overrides it and opencode applies no cap, unlike Claude Code's maximum. A Driver declaring none ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: a 10-minute maximum; opencode: a 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log |
+| `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector), on `pi` it becomes `--thinking <level>` (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`); unset emits no flag either way, so the Driver's own default effort applies |
+| `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; on `opencode`, `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` (issue #5351), which sets only the default: a per-call `timeout` the model passes overrides it and opencode applies no cap, unlike Claude Code's maximum. A Driver declaring none (pi) ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: a 10-minute maximum; opencode: a 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log |
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`); image-time only — a change needs a rebuild, and a dispatch-time value neither retiers nor drops the baked scout. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty at image time drops the reviewer entry from `--agents`; empty at dispatch sets no override and leaves the baked roster unchanged); the `--agents` reviewer entry is image-time only — a change needs a rebuild, and a dispatch-time value neither retiers, adds, nor drops the `--agents` reviewer entry itself. **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset); an explicit dispatch-time `REVIEW_MODEL=...`/`--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback |
 | `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, an explicit dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged |

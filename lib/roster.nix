@@ -1,11 +1,11 @@
-# The agent roster (issue #264) that both Drivers render from. Model
+# The agent roster (issue #264) that every Driver renders from. Model
 # precedence per name: `models.<name>` (an explicit `""` opt-out included,
 # issue #2426) beats a legacy positional knob, which beats the
 # lib/env-schema.nix default (issue #2434). lib/mkHarness.nix applies the
 # `reviewEffort` knob (issue #2512) after this function, not through it.
 { lib }:
 rec {
-  # An empty inline prompt satisfies neither Driver, so it must not
+  # An empty inline prompt satisfies no Driver, so it must not
   # short-circuit normalizeRosterResult's missing-promptfile check (issue
   # #2555 user story 23).
   hasInlinePrompt = e: (e.prompt or null) != null && e.prompt != "";
