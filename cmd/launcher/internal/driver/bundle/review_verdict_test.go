@@ -30,6 +30,15 @@ var reviewPassFixtures = map[string]func(msg string) any{
 			"part": map[string]any{"text": msg},
 		}
 	},
+	"pi": func(msg string) any {
+		return map[string]any{
+			"type": "message_end",
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "text", "text": msg}},
+			},
+		}
+	},
 }
 
 // toolCallFixtures seeds a native log per Driver holding one ordinary Bash tool
@@ -69,6 +78,25 @@ var toolCallFixtures = map[string]func(command, output string) []any{
 				},
 			},
 		}}
+	},
+	"pi": func(command, output string) []any {
+		return []any{
+			map[string]any{
+				"type": "message_end",
+				"message": map[string]any{
+					"role": "assistant",
+					"content": []map[string]any{{
+						"type": "toolCall", "id": "c1", "name": "bash",
+						"arguments": map[string]any{"command": command},
+					}},
+				},
+			},
+			map[string]any{
+				"type": "tool_execution_end", "toolCallId": "c1", "toolName": "bash",
+				"result":  map[string]any{"content": []map[string]any{{"type": "text", "text": output}}},
+				"isError": false,
+			},
+		}
 	},
 }
 

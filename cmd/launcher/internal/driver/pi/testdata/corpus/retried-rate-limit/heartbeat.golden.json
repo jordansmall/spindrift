@@ -1,0 +1,11 @@
+{
+  "lines": [
+    "#42 · Recovered after retry."
+  ],
+  "onModel": [
+    {
+      "model": "stub/stub-model:off",
+      "role": ""
+    }
+  ]
+}
