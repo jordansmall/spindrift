@@ -2020,7 +2020,7 @@ func TestView_DetailModal_SanitizesTitleLabelsBodyAndBlockerTitles(t *testing.T)
 func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
 	m = Update(m, IssuesLoadedMsg{Issues: []forge.Issue{{Number: "1", Title: "should not show"}}})
-	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"Kind":"start"}`})
 
 	out := View(m)
 	if strings.Contains(out, "should not show") {
@@ -2032,27 +2032,27 @@ func TestView_SidebarOpen_RendersActivityInsteadOfBacklog(t *testing.T) {
 	if !strings.Contains(out, "hi") {
 		t.Errorf("View() = %q, want the Activity feed", out)
 	}
-	if strings.Contains(out, "[implementor] hi") || strings.Contains(out, `{"type":"assistant"}`) {
+	if strings.Contains(out, "[implementor] hi") || strings.Contains(out, `{"Kind":"start"}`) {
 		t.Errorf("View() = %q, want the Transcript forms hidden while showing the Activity feed by default", out)
 	}
 }
 
 func TestView_SidebarToggle_RendersTranscriptThenRaw(t *testing.T) {
 	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 24})
-	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"type":"assistant"}`})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}, Rendered: "[implementor] hi", Raw: `{"Kind":"start"}`})
 	m = Update(m, SidebarToggleMsg{})
 
 	out := View(m)
 	if !strings.Contains(out, "[implementor] hi") {
 		t.Errorf("View() = %q, want the rendered Transcript shown after one toggle", out)
 	}
-	if strings.Contains(out, `{"type":"assistant"}`) {
+	if strings.Contains(out, `{"Kind":"start"}`) {
 		t.Errorf("View() = %q, want the raw form still hidden after one toggle", out)
 	}
 
 	m = Update(m, SidebarToggleMsg{})
 	out = View(m)
-	if !strings.Contains(out, `{"type":"assistant"}`) {
+	if !strings.Contains(out, `{"Kind":"start"}`) {
 		t.Errorf("View() = %q, want the raw form shown after two toggles", out)
 	}
 }

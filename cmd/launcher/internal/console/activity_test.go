@@ -17,10 +17,18 @@ func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testin
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Like every result fixture in this package, this omits the KindError echo
+	// claude's decoder appends after a result; no console path reads it.
 	log := strings.Join([]string{
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}`,
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","id":"e1","input":{}}]}}`,
-		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"text","Text":"Reading the config file."}`,
+		`{"Kind":"usage"}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"tool_call","ToolID":"e1","ToolName":"Edit","ToolInput":{}}`,
+		`{"Kind":"usage"}`,
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":3}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
@@ -61,7 +69,7 @@ func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"aaaaa"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"aaaaa"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +88,7 @@ func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 		t.Fatal("first Refresh: activity = empty, want at least one line")
 	}
 
-	second := `{"type":"assistant","message":{"content":[{"type":"text","text":"bbbbb"}]}}` + "\n"
+	second := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"bbbbb"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if len(second) != len(first) {
 		t.Fatalf("test setup: second log must be same length as first, got %d want %d", len(second), len(first))
 	}
@@ -105,7 +113,7 @@ func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	first := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"first"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +129,7 @@ func TestSidebarActivityCache_ChangedStat_Reparses(t *testing.T) {
 		t.Fatal("first Refresh: ok = false, want true")
 	}
 
-	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	second := first + `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"second"}` + "\n" + `{"Kind":"usage"}` + "\n"
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +163,7 @@ func TestSidebarActivityCache_NumberChange_Reparses(t *testing.T) {
 	}
 	writeLog := func(number, text string) {
 		t.Helper()
-		line := `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+		line := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"` + text + `"}` + "\n" + `{"Kind":"usage"}` + "\n"
 		if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-"+number+".log"), []byte(line), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -204,7 +212,7 @@ func TestSidebarActivityCache_DuplicateNarrationAcrossIncrementalBoundary_Collap
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	narration := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}` + "\n"
+	narration := `{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"text","Text":"Reading the config file."}` + "\n" + `{"Kind":"usage"}` + "\n"
 
 	drv, err := driver.New("")
 	if err != nil {
@@ -253,8 +261,11 @@ func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	long := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
-		`{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	long := `{"Kind":"start"}` + "\n" +
+		`{"Kind":"model"}` + "\n" +
+		`{"Kind":"tool_call","ToolID":"r1","ToolName":"Read","ToolInput":{}}` + "\n" +
+		`{"Kind":"usage"}` + "\n" +
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":7}` + "\n"
 	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +280,7 @@ func TestSidebarActivityCache_FileShorterThanOffset_ResetsAndReparses(t *testing
 		t.Fatal("first Refresh: ok = false, want true")
 	}
 
-	short := `{"type":"result","num_turns":2,"total_cost_usd":0.01,"duration_ms":1000}` + "\n"
+	short := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":1000,"NumTurns":2}` + "\n"
 	if len(short) >= len(long) {
 		t.Fatalf("test setup: short log must be shorter than long, got %d want < %d", len(short), len(long))
 	}
@@ -313,9 +324,9 @@ func TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes(t *testin
 	cache := NewSidebarActivityCache()
 
 	chunks := []string{
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n",
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","id":"g1","input":{}}]}}` + "\n",
-		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}` + "\n",
+		`{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"tool_call","ToolID":"r1","ToolName":"Read","ToolInput":{}}` + "\n" + `{"Kind":"usage"}` + "\n",
+		`{"Kind":"start"}` + "\n" + `{"Kind":"model"}` + "\n" + `{"Kind":"tool_call","ToolID":"g1","ToolName":"Grep","ToolInput":{}}` + "\n" + `{"Kind":"usage"}` + "\n",
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":3}` + "\n",
 	}
 
 	var written string
@@ -361,9 +372,15 @@ func TestActivityFeed_ConsecutiveIdenticalNarration_CollapsesToOneLine(t *testin
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}`,
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the config file."}]}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":5000}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"text","Text":"Reading the config file."}`,
+		`{"Kind":"usage"}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"text","Text":"Reading the config file."}`,
+		`{"Kind":"usage"}`,
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":1}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
@@ -424,18 +441,16 @@ func TestActivityFeed_UnreadableLog_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// An opencode dispatch's pass log carries the host's spindrift_op lines; the
-// feed shows them as the claude feed does.
-func TestActivityFeed_OpencodeShowsHostOpLines(t *testing.T) {
+func TestActivityFeed_ShowsHostOpLines(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	log := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
+	log := `{"Kind":"host_op","HostOp":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	drv, err := driver.New("opencode")
+	drv, err := driver.New("")
 	if err != nil {
 		t.Fatalf("driver.New: %v", err)
 	}

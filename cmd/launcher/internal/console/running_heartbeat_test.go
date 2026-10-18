@@ -1,6 +1,7 @@
 package console
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/seamtest"
 )
 
 // RunningHeartbeat must reuse the Driver's own heartbeat parser, the same one
@@ -19,7 +21,7 @@ func TestRunningHeartbeat_ReplaysLatestPassLog_ReturnsLastEmittedLine(t *testing
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	log := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	log := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":7}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -49,9 +51,15 @@ func TestRunningHeartbeat_RoleSwitchMidLog_ReturnsRoleContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","id":"tu_s1","input":{"subagent_type":"scout"}}]}}`,
-		`{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}`,
-		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"tool_call","ToolID":"tu_s1","ToolName":"Task","ToolInput":{"subagent_type":"scout"},"ToolTarget":"scout"}`,
+		`{"Kind":"usage"}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model","Role":"scout","InSubagent":true}`,
+		`{"Kind":"tool_call","Role":"scout","InSubagent":true,"ToolID":"r1","ToolName":"Read","ToolInput":{}}`,
+		`{"Kind":"usage","Role":"scout","InSubagent":true}`,
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":3}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
@@ -81,18 +89,29 @@ func TestRunningHeartbeat_LogEndsOnScoutCountLine_ReturnsRoleContext(t *testing.
 		t.Fatal(err)
 	}
 	log := strings.Join([]string{
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","id":"tu_s1","input":{"subagent_type":"scout"}}]}}`,
-		`{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}`,
-		`{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Grep","id":"g1","input":{}}]}}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"tool_call","ToolID":"tu_s1","ToolName":"Task","ToolInput":{"subagent_type":"scout"},"ToolTarget":"scout"}`,
+		`{"Kind":"usage"}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model","Role":"scout","InSubagent":true}`,
+		`{"Kind":"tool_call","Role":"scout","InSubagent":true,"ToolID":"r1","ToolName":"Read","ToolInput":{}}`,
+		`{"Kind":"usage","Role":"scout","InSubagent":true}`,
+		`{"Kind":"start"}`,
+		`{"Kind":"model","Role":"scout","InSubagent":true}`,
+		`{"Kind":"tool_call","Role":"scout","InSubagent":true,"ToolID":"g1","ToolName":"Grep","ToolInput":{}}`,
+		`{"Kind":"usage","Role":"scout","InSubagent":true}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	drv, err := driver.New("")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
+	// Count lines exist only when Heartbeat.Kind is set, and in this log only
+	// a Phase change flushes; the registered canonical Strategy sets neither,
+	// so this local copy sets both (Phase is the tool name).
+	s := seamtest.Strategy
+	s.Heartbeat.Kind = func(string) string { return "tool" }
+	s.Heartbeat.Phase = func(tool string, _ json.RawMessage) string { return tool }
+	drv := driverkit.New(s)
 
 	got := NewHeartbeatCache().RunningHeartbeat(drv, dir, "9")
 
@@ -124,7 +143,7 @@ func TestHeartbeatCache_UnchangedStat_SkipsReparse(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	first := `{"type":"result","num_turns":17,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	first := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":17}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +163,7 @@ func TestHeartbeatCache_UnchangedStat_SkipsReparse(t *testing.T) {
 		t.Fatalf("first call = %q, want it to contain %q", first1, want)
 	}
 
-	second := `{"type":"result","num_turns":99,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	second := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":99}` + "\n"
 	if len(second) != len(first) {
 		t.Fatalf("test setup: second log must be same length as first, got %d want %d", len(second), len(first))
 	}
@@ -169,7 +188,7 @@ func TestHeartbeatCache_ChangedStat_Reparses(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	first := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	first := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":7}` + "\n"
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +204,7 @@ func TestHeartbeatCache_ChangedStat_Reparses(t *testing.T) {
 		t.Fatalf("first call = %q, want it to contain %q", first1, want)
 	}
 
-	second := first + `{"type":"result","num_turns":42,"total_cost_usd":0.02,"duration_ms":9000}` + "\n"
+	second := first + `{"Kind":"result","Tokens":{"CostUSD":0.02},"DurationMs":9000,"NumTurns":42}` + "\n"
 	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -241,9 +260,19 @@ func TestRunningHeartbeat_IncrementalAppend_FeedsOnlyAppendedBytes(t *testing.T)
 	cache := NewHeartbeatCache()
 
 	chunks := []string{
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n",
-		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","id":"g1","input":{}}]}}` + "\n",
-		`{"type":"result","num_turns":3,"total_cost_usd":0.01,"duration_ms":5000}` + "\n",
+		strings.Join([]string{
+			`{"Kind":"start"}`,
+			`{"Kind":"model"}`,
+			`{"Kind":"tool_call","ToolID":"r1","ToolName":"Read","ToolInput":{}}`,
+			`{"Kind":"usage"}`,
+		}, "\n") + "\n",
+		strings.Join([]string{
+			`{"Kind":"start"}`,
+			`{"Kind":"model"}`,
+			`{"Kind":"tool_call","ToolID":"g1","ToolName":"Grep","ToolInput":{}}`,
+			`{"Kind":"usage"}`,
+		}, "\n") + "\n",
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":3}` + "\n",
 	}
 
 	var written, got string
@@ -272,8 +301,13 @@ func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) 
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ".spindrift", "logs", "issue-9.log")
-	long := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
-		`{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	long := strings.Join([]string{
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"tool_call","ToolID":"r1","ToolName":"Read","ToolInput":{}}`,
+		`{"Kind":"usage"}`,
+	}, "\n") + "\n" +
+		`{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":7}` + "\n"
 	if err := os.WriteFile(path, []byte(long), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +323,7 @@ func TestRunningHeartbeat_FileShorterThanOffset_ResetsAndReparses(t *testing.T) 
 		t.Fatalf("first call = %q, want it to contain %q", first, want)
 	}
 
-	short := `{"type":"result","num_turns":2,"total_cost_usd":0.01,"duration_ms":1000}` + "\n"
+	short := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":1000,"NumTurns":2}` + "\n"
 	if len(short) >= len(long) {
 		t.Fatalf("test setup: short log must be shorter than long, got %d want < %d", len(short), len(long))
 	}
@@ -313,7 +347,7 @@ func TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	initial := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
+	initial := `{"Kind":"result","Tokens":{"CostUSD":0.01},"DurationMs":5000,"NumTurns":7}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -329,8 +363,13 @@ func TestRunningHeartbeat_NewPassPath_ResetsOffsetAndReparses(t *testing.T) {
 		t.Fatalf("first call = %q, want it to contain %q", first, want)
 	}
 
-	fix1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n" +
-		`{"type":"result","num_turns":4,"total_cost_usd":0.02,"duration_ms":6000}` + "\n"
+	fix1 := strings.Join([]string{
+		`{"Kind":"start"}`,
+		`{"Kind":"model"}`,
+		`{"Kind":"tool_call","ToolID":"r1","ToolName":"Read","ToolInput":{}}`,
+		`{"Kind":"usage"}`,
+	}, "\n") + "\n" +
+		`{"Kind":"result","Tokens":{"CostUSD":0.02},"DurationMs":6000,"NumTurns":4}` + "\n"
 	if len(fix1) <= len(initial) {
 		t.Fatalf("test setup: fix-1 log must be longer than the initial pass log, got %d want > %d", len(fix1), len(initial))
 	}
