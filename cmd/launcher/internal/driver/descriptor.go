@@ -1,6 +1,9 @@
 package driver
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Descriptor is the Go mirror of a lib/drivers/*.nix registry row's shared
 // facts, rendered into descriptor_gen.go by `nix run .#regen` (issue #5503).
@@ -53,4 +56,16 @@ func (r CredentialRule) AppliesTo(models ...string) bool {
 		}
 	}
 	return false
+}
+
+// DescriptorNames returns the sorted names of the generated Descriptors, one
+// per Driver in the Nix registry. A binary that links the bundle registers
+// exactly this set.
+func DescriptorNames() []string {
+	names := make([]string, 0, len(descriptors))
+	for _, d := range descriptors {
+		names = append(names, d.Name)
+	}
+	sort.Strings(names)
+	return names
 }
