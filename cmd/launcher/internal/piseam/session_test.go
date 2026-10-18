@@ -8,7 +8,36 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/pi"
 )
+
+const sessionSlug, sessionIssue = "owner/repo", "5481"
+
+// sessionArgs are the pi args that run the stub model under the Driver's own
+// session flags for mode.
+func sessionArgs(mode string) []string {
+	return append([]string{"--model", stubModelRef}, strings.Fields(pi.SessionFlags(mode, sessionSlug, sessionIssue, ""))...)
+}
+
+// assertOneSession fails unless agentDir holds exactly one session file, named
+// for id.
+func assertOneSession(t *testing.T, agentDir, id string) {
+	t.Helper()
+	files := sessionFiles(t, agentDir)
+	if len(files) != 1 || !strings.HasSuffix(files[0], "_"+id+".jsonl") {
+		t.Errorf("session files = %v, want exactly one ending _%s.jsonl", files, id)
+	}
+}
+
+// assertSessionEvent fails unless the run's first event announces session id.
+func assertSessionEvent(t *testing.T, r run, id string) {
+	t.Helper()
+	if got := r.events[0]; got["type"] != "session" || got["id"] != id {
+		t.Errorf("first event = %v, want a session event with id %q", got, id)
+	}
+}
 
 // sessionFiles lists the persisted sessions under the agent dir. Pi groups
 // them in one directory per working directory.
@@ -101,19 +130,21 @@ func TestPiModelThinkingSuffix(t *testing.T) {
 }
 
 func TestPiSessionIDOpenOrCreate(t *testing.T) {
-	const id = "0194c0de-5e55-7a11-9d00-5e551d5e551d"
+	id := driverkit.SessionUUID(sessionSlug, sessionIssue)
 	s := newStub(t, textReply("first-answer"), textReply("second-answer"))
 	dirs := newPiDirs(t)
-	opts := piOpts{args: []string{"--model", stubModelRef, "--session-id", id}, dirs: &dirs}
+	withFlags := func(mode string) piOpts {
+		return piOpts{args: sessionArgs(mode), dirs: &dirs}
+	}
 
-	first := runPiWith(t, s, opts, "first-prompt")
+	first := runPiWith(t, s, withFlags("initial"), "first-prompt")
 	if first.err != nil {
 		t.Fatalf("first run failed (%s)\nstderr:\n%s", exitDetail(first.err), first.stderr)
 	}
 	if !strings.Contains(first.stderr, "creating a new session with that id") {
 		t.Errorf("first run stderr = %q, want a warning that the session is being created", first.stderr)
 	}
-	second := runPiWith(t, s, opts, "second-prompt")
+	second := runPiWith(t, s, withFlags("resume"), "second-prompt")
 	if second.err != nil {
 		t.Fatalf("second run failed (%s)\nstderr:\n%s", exitDetail(second.err), second.stderr)
 	}
@@ -121,11 +152,8 @@ func TestPiSessionIDOpenOrCreate(t *testing.T) {
 		t.Errorf("second run stderr = %q, want empty (the session exists)", second.stderr)
 	}
 
-	for i, r := range []run{first, second} {
-		if got := r.events[0]; got["type"] != "session" || got["id"] != id {
-			t.Errorf("run %d first event = %v, want a session event with id %q", i+1, got, id)
-		}
-	}
+	assertSessionEvent(t, first, id)
+	assertSessionEvent(t, second, id)
 	reqs := s.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("stub got %d requests, want 2", len(reqs))
@@ -140,10 +168,48 @@ func TestPiSessionIDOpenOrCreate(t *testing.T) {
 		}
 	}
 
-	files := sessionFiles(t, dirs.agentDir)
-	if len(files) != 1 || !strings.HasSuffix(files[0], "_"+id+".jsonl") {
-		t.Errorf("session files = %v, want exactly one ending _%s.jsonl", files, id)
+	assertOneSession(t, dirs.agentDir, id)
+}
+
+func TestPiResumeWithoutStoredSessionStartsFresh(t *testing.T) {
+	id := driverkit.SessionUUID(sessionSlug, sessionIssue)
+	s := newStub(t, textReply("answer"))
+	dirs := newPiDirs(t)
+
+	r := runPiWith(t, s, piOpts{args: sessionArgs("resume"), dirs: &dirs}, "only-prompt")
+	if r.err != nil {
+		t.Fatalf("resume with no stored session failed (%s)\nstderr:\n%s", exitDetail(r.err), r.stderr)
 	}
+	if !strings.Contains(r.stderr, "creating a new session with that id") {
+		t.Errorf("stderr = %q, want a warning that the session is being created", r.stderr)
+	}
+	assertSessionEvent(t, r, id)
+	assertOneSession(t, dirs.agentDir, id)
+	reqs := s.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("stub got %d requests, want 1", len(reqs))
+	}
+	if msgs := messagesJSON(t, reqs[0]); !strings.Contains(msgs, "only-prompt") || strings.Contains(msgs, `"role":"assistant"`) {
+		t.Errorf("request = %s, want the prompt and no earlier turns", msgs)
+	}
+}
+
+// Pins the Box's layout: no PI_CODING_AGENT_DIR, so sessions land in
+// $HOME/.pi/agent/sessions, the path lib/drivers/pi.nix bind-mounts.
+func TestPiSessionsLandInDefaultAgentDir(t *testing.T) {
+	id := driverkit.SessionUUID(sessionSlug, sessionIssue)
+	s := newStub(t, textReply("answer"))
+	dirs := newPiDirs(t)
+	dirs.agentDir = filepath.Join(dirs.home, ".pi", "agent")
+	if err := os.MkdirAll(dirs.agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := runPiWith(t, s, piOpts{args: sessionArgs("initial"), dirs: &dirs, defaultAgentDir: true}, "a-prompt")
+	if r.err != nil {
+		t.Fatalf("run failed (%s)\nstderr:\n%s", exitDetail(r.err), r.stderr)
+	}
+	assertOneSession(t, dirs.agentDir, id)
 }
 
 func TestPiSessionIDRejectsInvalid(t *testing.T) {
