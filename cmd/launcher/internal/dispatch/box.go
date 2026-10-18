@@ -545,9 +545,11 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	if needRegistryProxy {
 		// manifestEndpoint is what REGISTRY_PROXY_MANIFEST carries, and is
 		// deliberately not always registryProxyLocation.Endpoint: that one is
-		// the mount SOURCE (a host path buildMountSpecs reads), while a
-		// Box-side reader can only dial the mount TARGET, a host path being
-		// meaningless inside the Box. See runner.RegistryProxySocketTarget.
+		// the host-side address, while a Box-side reader can only dial the
+		// mount TARGET, a host path being meaningless inside the Box. The
+		// mount SOURCE is the host socket path listed in boxSockets
+		// (Box.Sockets), which is what buildMountSpecs reads. See
+		// runner.RegistryProxySocketTarget.
 		var manifestEndpoint registrymanifest.Endpoint
 
 		switch {
