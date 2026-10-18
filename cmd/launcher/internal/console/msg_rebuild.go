@@ -10,7 +10,8 @@ type StaleStatusMsg struct {
 func (StaleStatusMsg) isConsoleMsg() {}
 
 // RebuildOutputOpenMsg opens the rebuild-output pane on "o" (issue #1128). It
-// is a no-op while RebuildOutput is "", before any rebuild captures output.
+// is a no-op while RebuildStatus.Output is "", before any rebuild captures
+// output.
 type RebuildOutputOpenMsg struct{}
 
 func (RebuildOutputOpenMsg) isConsoleMsg() {}
