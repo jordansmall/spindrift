@@ -1,6 +1,7 @@
 package recordstats
 
 import (
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
@@ -56,5 +57,33 @@ func TestAggregateRolesSumsAPICalls(t *testing.T) {
 	rows, _, _ := AggregateRoles([]dispatchrecord.Record{rec})
 	if len(rows) != 2 || rows[0].APICalls != 17 || rows[1].APICalls != 2 {
 		t.Fatalf("rows = %+v, want implement APICalls=17 and review APICalls=2", rows)
+	}
+}
+
+func TestAggregateAgentsOrdersAndTotals(t *testing.T) {
+	recs := []dispatchrecord.Record{
+		{Passes: []dispatchrecord.Pass{
+			{Agents: []dispatchrecord.PassAgent{
+				{Agent: "scout", APICalls: 1, InputTokens: 5},
+				{Agent: "main", APICalls: 2, InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
+				{Agent: "worker", APICalls: 3, InputTokens: 50},
+			}},
+			{Agents: []dispatchrecord.PassAgent{{Agent: "main", APICalls: 1, OutputTokens: 7}, {Agent: "worker", APICalls: 1, InputTokens: 50}}},
+			{},
+		}},
+		{Passes: []dispatchrecord.Pass{{Agents: []dispatchrecord.PassAgent{{Agent: "alpha", InputTokens: 5}}}}},
+	}
+	got := AggregateAgents(recs)
+	want := []AgentRow{
+		{Agent: "main", Passes: 2, APICalls: 3, InputTokens: 1, OutputTokens: 9, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
+		{Agent: "worker", Passes: 2, APICalls: 4, InputTokens: 100},
+		{Agent: "alpha", Passes: 1, InputTokens: 5},
+		{Agent: "scout", Passes: 1, APICalls: 1, InputTokens: 5},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("rows = %+v, want %+v", got, want)
+	}
+	if rows := AggregateAgents([]dispatchrecord.Record{{Passes: []dispatchrecord.Pass{{}}}}); len(rows) != 0 {
+		t.Errorf("agentless passes gave rows %+v", rows)
 	}
 }

@@ -98,3 +98,99 @@ func TestRevertedAndChurnPercent(t *testing.T) {
 		t.Fatalf("MeanChurnPercent unfilled filled = %d, want 0", n)
 	}
 }
+
+func agentRecord() dispatchrecord.Record {
+	return dispatchrecord.Record{DispatchKey: "1", Passes: []dispatchrecord.Pass{
+		{
+			Ordinal: 1, Role: "implement", Models: []string{"m"}, USD: 2, Turns: 3, DurationMs: 4000, APIDurationMs: 500,
+			InputTokens: 30, OutputTokens: 40, CacheReadInputTokens: 50, CacheCreationInputTokens: 60, APICalls: 7,
+			Verdict: "block", VerdictText: "no", Dispositions: "d", Log: "l.log",
+			Agents: []dispatchrecord.PassAgent{
+				{Agent: "main", APICalls: 3, InputTokens: 30, OutputTokens: 40, CacheReadInputTokens: 50, CacheCreationInputTokens: 60},
+				{Agent: "worker", APICalls: 4, InputTokens: 20, CacheReadInputTokens: 30, CacheCreationInputTokens: 30},
+			},
+		},
+		{
+			Ordinal: 2, Role: "review", USD: 1, InputTokens: 1, OutputTokens: 2, APICalls: 1,
+			Agents: []dispatchrecord.PassAgent{{Agent: "main", APICalls: 1, InputTokens: 1, OutputTokens: 2}},
+		},
+	}}
+}
+
+func TestGroupAgentsProjectsEachPassOntoItsAgent(t *testing.T) {
+	rec := agentRecord()
+	gs := GroupAgents([]dispatchrecord.Record{rec})
+	if got, want := keysOf(gs), []string{"main", "worker"}; !slices.Equal(got, want) {
+		t.Fatalf("keys = %v, want %v", got, want)
+	}
+	main, worker := gs[0].Records[0], gs[1].Records[0]
+	if len(main.Passes) != 2 || len(worker.Passes) != 1 {
+		t.Fatalf("passes: main %d, worker %d", len(main.Passes), len(worker.Passes))
+	}
+	if p := main.Passes[0]; p.USD != 2 || p.Verdict != "block" || p.Dispositions != "d" || p.Turns != 3 ||
+		p.DurationMs != 4000 || p.APICalls != 3 || p.InputTokens != 30 || p.OutputTokens != 40 ||
+		len(p.Agents) != 1 || p.Agents[0].Agent != "main" {
+		t.Errorf("main projection = %+v", p)
+	}
+	w := worker.Passes[0]
+	if w.USD != 0 || w.Verdict != "" || w.VerdictText != "" || w.Dispositions != "" ||
+		w.Turns != 0 || w.DurationMs != 0 || w.APIDurationMs != 0 {
+		t.Errorf("worker projection kept an unsplittable figure: %+v", w)
+	}
+	if w.APICalls != 4 || w.InputTokens != 20 || w.OutputTokens != 0 || w.CacheReadInputTokens != 30 ||
+		w.CacheCreationInputTokens != 30 || len(w.Agents) != 1 || w.Agents[0].Agent != "worker" {
+		t.Errorf("worker projection tokens = %+v", w)
+	}
+	if w.Role != "implement" || w.Ordinal != 1 || w.Log != "l.log" || !slices.Equal(w.Models, []string{"m"}) {
+		t.Errorf("worker projection lost its identity: %+v", w)
+	}
+	if len(rec.Passes[0].Agents) != 2 || rec.Passes[0].USD != 2 {
+		t.Fatal("grouping mutated the input Record")
+	}
+}
+
+// The main row carries the Pass's own totals (claude's result usage covers the
+// main loop only for input and cache tokens) and a subagent's row adds on top.
+func TestGroupAgentsSumsToUngroupedTotalPlusSubagentTokens(t *testing.T) {
+	recs := []dispatchrecord.Record{agentRecord()}
+	_, _, wantUSD := AggregateRoles(recs)
+	var usd float64
+	var in, out, cr, cc, calls int
+	for _, g := range GroupAgents(recs) {
+		for _, r := range g.Records {
+			usd += RecordUSD(r)
+			for _, p := range r.Passes {
+				in += p.InputTokens
+				out += p.OutputTokens
+				cr += p.CacheReadInputTokens
+				cc += p.CacheCreationInputTokens
+				calls += p.APICalls
+			}
+		}
+	}
+	if math.Abs(usd-wantUSD) > 1e-9 {
+		t.Errorf("USD across groups = %v, want %v", usd, wantUSD)
+	}
+	// Ungrouped: 31/42/50/60 and 8 calls; the worker row adds 20/0/30/30 of its own.
+	if in != 51 || out != 42 || cr != 80 || cc != 90 || calls != 8 {
+		t.Errorf("tokens across groups = %d/%d/%d/%d calls %d, want 51/42/80/90 calls 8", in, out, cr, cc, calls)
+	}
+}
+
+func TestGroupAgentsNoneAndOrdering(t *testing.T) {
+	recs := []dispatchrecord.Record{
+		{DispatchKey: "1", Passes: []dispatchrecord.Pass{
+			{USD: 5, InputTokens: 9},
+			{Agents: []dispatchrecord.PassAgent{{Agent: "scout", APICalls: 1}, {Agent: "main", APICalls: 1}}},
+		}},
+		{DispatchKey: "2"},
+	}
+	gs := GroupAgents(recs)
+	if got, want := keysOf(gs), []string{"main", "scout", None}; !slices.Equal(got, want) {
+		t.Fatalf("keys = %v, want %v", got, want)
+	}
+	none := gs[2].Records
+	if len(none) != 2 || len(none[0].Passes) != 1 || none[0].Passes[0].USD != 5 || none[0].Passes[0].InputTokens != 9 {
+		t.Fatalf("(none) group = %+v, want the unprojected agentless pass and the pass-less Record", none)
+	}
+}

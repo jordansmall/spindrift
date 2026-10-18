@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 // None groups a pass or Record with no value for the grouped field.
@@ -127,4 +128,62 @@ func RecordUSD(r dispatchrecord.Record) float64 {
 		total += p.USD
 	}
 	return total
+}
+
+// AgentRow is the token and API-call totals of one agent across every pass it
+// appeared in. There is no USD: Drivers price a pass, not an agent.
+type AgentRow struct {
+	Agent                    string
+	Passes                   int
+	APICalls                 int
+	InputTokens              int
+	OutputTokens             int
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
+}
+
+func (a AgentRow) totalTokens() int {
+	return usage.AgentUsage{
+		UncachedInputTokens:      a.InputTokens,
+		OutputTokens:             a.OutputTokens,
+		CacheReadInputTokens:     a.CacheReadInputTokens,
+		CacheCreationInputTokens: a.CacheCreationInputTokens,
+	}.TotalTokens()
+}
+
+// AggregateAgents totals the per-agent rows of every pass by agent: the main
+// loop first, then the heaviest agent by total tokens, ties by name.
+func AggregateAgents(records []dispatchrecord.Record) []AgentRow {
+	byAgent := map[string]*AgentRow{}
+	for _, r := range records {
+		for _, p := range r.Passes {
+			for _, a := range p.Agents {
+				row := byAgent[a.Agent]
+				if row == nil {
+					row = &AgentRow{Agent: a.Agent}
+					byAgent[a.Agent] = row
+				}
+				row.Passes++
+				row.APICalls += a.APICalls
+				row.InputTokens += a.InputTokens
+				row.OutputTokens += a.OutputTokens
+				row.CacheReadInputTokens += a.CacheReadInputTokens
+				row.CacheCreationInputTokens += a.CacheCreationInputTokens
+			}
+		}
+	}
+	var rows []AgentRow
+	for _, row := range byAgent {
+		rows = append(rows, *row)
+	}
+	slices.SortFunc(rows, func(a, b AgentRow) int {
+		if c := mainFirst(a.Agent, b.Agent); c != 0 {
+			return c
+		}
+		if c := b.totalTokens() - a.totalTokens(); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Agent, b.Agent)
+	})
+	return rows
 }

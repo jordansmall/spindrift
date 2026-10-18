@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/recordstats"
 )
 
 // statsStampedLog is a stamped work Dispatch log: dispatch_start, optional
@@ -35,17 +37,34 @@ func statsStampedLog(key string, claim time.Time, start hostop.DispatchStart, ha
 			continue
 		}
 		ts := claim.Add(time.Duration(i+1) * time.Minute).Format(time.RFC3339)
+		modelSpec, subagent, _ := strings.Cut(p[1], "@")
 		models := make([]string, 0, 2)
-		for _, m := range strings.Split(p[1], "+") {
+		for _, m := range strings.Split(modelSpec, "+") {
 			models = append(models, `"`+m+`":{}`)
 		}
-		out += statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: i + 1, Role: p[0]}) +
-			`{"type":"system","timestamp":"` + ts + `"}` + "\n" +
+		out += statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: i + 1, Role: p[0]})
+		if subagent != "" {
+			out += statsSubagentLines(i+1, subagent)
+		}
+		out += `{"type":"system","timestamp":"` + ts + `"}` + "\n" +
 			`{"type":"result","result":"","timestamp":"` + ts + `","num_turns":2,"total_cost_usd":1.5,"duration_ms":60000,"duration_api_ms":900,` +
 			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},` +
 			`"modelUsage":{` + strings.Join(models, ",") + `}}` + "\n"
 	}
 	return out
+}
+
+// statsSubagentLines is a main-loop spawn of a subagent role and one subagent
+// call, so the pass carries a main and a subagent usage row. As in a real
+// claude log, the main row's input and cache tokens equal the result's and the
+// subagent's come on top. The claude driver drops the subagent's
+// `output_tokens: 99` (the goldens show worker output 0). A pass opts in by
+// suffixing its models with "@<role>"; the models stay those of the result.
+func statsSubagentLines(pass int, role string) string {
+	id := fmt.Sprintf("toolu_%d", pass)
+	return fmt.Sprintf(`{"type":"assistant","message":{"id":"msg_main_%d","content":[{"type":"tool_use","id":%q,"name":"Task","input":{"subagent_type":%q}}],"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":30,"cache_creation_input_tokens":40}}}`+"\n"+
+		`{"type":"assistant","parent_tool_use_id":%q,"message":{"id":"msg_sub_%d","content":[],"usage":{"input_tokens":3,"output_tokens":99,"cache_read_input_tokens":5,"cache_creation_input_tokens":7}}}`+"\n",
+		pass, id, role, id, pass)
 }
 
 // statsOpencodePass is the opencode counterpart of the claude result line: two
@@ -109,7 +128,7 @@ func statsStampedRoot(t *testing.T) string {
 		"issue-70.log": statsStampedLog("70", day,
 			hostop.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
 			map[string]string{"implement": "hash-i1", "review": "hash-r1"},
-			[2]string{"implement", "claude-opus"}, [2]string{"review", "claude-sonnet"}),
+			[2]string{"implement", "claude-opus@worker"}, [2]string{"review", "claude-sonnet"}),
 		"issue-71.log": statsStampedLog("71", day.Add(time.Hour),
 			hostop.DispatchStart{Revision: "rev-b", Driver: "opencode", Knobs: map[string]string{"MERGE_MODE": "manual"}},
 			map[string]string{"implement": "hash-i2"},
@@ -147,6 +166,9 @@ func TestStats_ByGolden(t *testing.T) {
 		{"role", "role"},
 		{"driver", "driver"},
 		{"driver-role", "driver,role"},
+		{"agent", "agent"},
+		{"role-agent", "role,agent"},
+		{"driver-agent", "driver,agent"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text, _ := runStats(t, root, "--by", tc.by)
@@ -154,6 +176,65 @@ func TestStats_ByGolden(t *testing.T) {
 			jsonl, _ := runStats(t, root, "--by="+tc.by, "--json")
 			statsGolden(t, "stats-by-"+tc.name+".jsonl", statsNormalize(jsonl, roots))
 		})
+	}
+}
+
+func passUsage(p dispatchrecord.Pass) dispatchrecord.PassAgent {
+	return dispatchrecord.PassAgent{APICalls: p.APICalls, InputTokens: p.InputTokens, OutputTokens: p.OutputTokens,
+		CacheReadInputTokens: p.CacheReadInputTokens, CacheCreationInputTokens: p.CacheCreationInputTokens}
+}
+
+func addUsage(dst *dispatchrecord.PassAgent, src dispatchrecord.PassAgent) {
+	dst.APICalls += src.APICalls
+	dst.InputTokens += src.InputTokens
+	dst.OutputTokens += src.OutputTokens
+	dst.CacheReadInputTokens += src.CacheReadInputTokens
+	dst.CacheCreationInputTokens += src.CacheCreationInputTokens
+}
+
+// Over a real claude log, grouping by agent adds the subagents' input and cache
+// tokens on top of the ungrouped total (see recordstats.GroupAgents).
+func TestGroupAgentsOverRealClaudeLogAddsSubagentTokens(t *testing.T) {
+	rec := corpusRecord(t, "claude", "claude/testdata/corpus/real-fix-pass-subagents")
+	var want, got, sub dispatchrecord.PassAgent
+	var wantUSD, gotUSD float64
+	var wantTurns, gotTurns int
+	var wantMs, gotMs int64
+	for _, p := range rec.Passes {
+		addUsage(&want, passUsage(p))
+		wantUSD += p.USD
+		wantTurns += p.Turns
+		wantMs += p.DurationMs
+		for _, a := range p.Agents[1:] {
+			addUsage(&sub, a)
+		}
+	}
+	for _, g := range recordstats.GroupAgents([]dispatchrecord.Record{rec}) {
+		for _, r := range g.Records {
+			for _, p := range r.Passes {
+				addUsage(&got, passUsage(p))
+				gotUSD += p.USD
+				gotTurns += p.Turns
+				gotMs += p.DurationMs
+			}
+		}
+	}
+	if sub.InputTokens == 0 || sub.CacheReadInputTokens == 0 || sub.CacheCreationInputTokens == 0 {
+		t.Fatalf("corpus has no subagent tokens: %+v", sub)
+	}
+	if got.OutputTokens != want.OutputTokens || got.APICalls != want.APICalls ||
+		math.Abs(gotUSD-wantUSD) > 1e-9 || gotTurns != wantTurns || gotMs != wantMs {
+		t.Errorf("across groups output %d calls %d usd %v turns %d ms %d; ungrouped %d %d %v %d %d",
+			got.OutputTokens, got.APICalls, gotUSD, gotTurns, gotMs,
+			want.OutputTokens, want.APICalls, wantUSD, wantTurns, wantMs)
+	}
+	if got.InputTokens != want.InputTokens+sub.InputTokens ||
+		got.CacheReadInputTokens != want.CacheReadInputTokens+sub.CacheReadInputTokens ||
+		got.CacheCreationInputTokens != want.CacheCreationInputTokens+sub.CacheCreationInputTokens {
+		t.Errorf("input/cache across groups = %d/%d/%d, want ungrouped %d/%d/%d plus subagents %d/%d/%d",
+			got.InputTokens, got.CacheReadInputTokens, got.CacheCreationInputTokens,
+			want.InputTokens, want.CacheReadInputTokens, want.CacheCreationInputTokens,
+			sub.InputTokens, sub.CacheReadInputTokens, sub.CacheCreationInputTokens)
 	}
 }
 
@@ -190,7 +271,7 @@ func TestStats_ByRejectsBadDimension(t *testing.T) {
 	root := statsStampedRoot(t)
 	t.Chdir(root)
 	for _, tc := range []struct{ by, want string }{
-		{"flavour", `invalid --by "flavour": element "flavour": want role, revision, model, driver, prompt:<role> or knob:<NAME>`},
+		{"flavour", `invalid --by "flavour": element "flavour": want role, agent, revision, model, driver, prompt:<role> or knob:<NAME>`},
 		{"prompt:nonsense", `unknown prompt role "nonsense", want one of legacy, implement, fix, land, review, delta-review, research, butler`},
 		{"prompt:", `unknown prompt role ""`},
 		{"knob:NO_SUCH_KNOB", `unknown knob "NO_SUCH_KNOB"`},

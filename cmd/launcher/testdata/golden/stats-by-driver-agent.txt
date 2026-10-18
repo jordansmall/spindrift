@@ -1,0 +1,40 @@
+driver = claude, agent = main
+Records: 1  Passes: 1  Notional USD: $1.50 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  1       $1.50  $1.50    1.0      1          -
+
+AGENT  PASSES  API_CALLS  INPUT  OUTPUT  CACHE_READ  CACHE_WRITE
+main   1       1          10     20      30          40
+
+driver = claude, agent = worker
+Records: 1  Passes: 1  Notional USD: $0.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  1       $0.00  $0.00    0.0      1          -
+
+AGENT   PASSES  API_CALLS  INPUT  OUTPUT  CACHE_READ  CACHE_WRITE
+worker  1       1          3      0       5           7
+
+driver = claude, agent = (none)
+Records: 2  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 2
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  1       $1.50  $1.50    1.0      0          -
+review     1       $1.50  $1.50    1.0      0          -
+
+driver = opencode, agent = main
+Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  1       $1.50  $1.50    1.0      2          -
+review     1       $1.50  $1.50    1.0      2          -
+
+AGENT  PASSES  API_CALLS  INPUT  OUTPUT  CACHE_READ  CACHE_WRITE
+main   2       4          20     40      60          80
+
+driver = (none), agent = (none)
+Records: 1  Passes: 1  Notional USD: $0.10 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
+
+ROLE    PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+(none)  1       $0.10  $0.10    0.1      0          -

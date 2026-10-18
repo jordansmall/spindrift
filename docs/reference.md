@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
-| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, agent (subagent), prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -6755,6 +6755,10 @@ upgrading the binary) before pruning `.spindrift/logs`. A log deleted before
 any ingest is lost, and so is anything a later parser could have extracted
 from it.
 
+A store written before per-agent rows existed re-reads every log still on disk
+on its next ingest to fill them in, with no `--reingest` needed; a Record whose
+log is gone keeps no agent rows.
+
 **Incremental ingest.** Each run first parses only the logs that are new or
 changed. A log is skipped, unopened, when its path, size, and mtime match what
 was recorded at its last ingest. A re-parsed log replaces its Record's passes
@@ -6851,10 +6855,25 @@ described under Output. The others:
 - `model`: the Pass's models, sorted and joined with `+`.
 - `driver`: the Record's stamped Driver. An inferred Record, or one stamped
   before Driver stamping existed, has none and lands in `(none)`.
+- `agent`: the agent a Pass's tokens belong to, `main` for the main loop or a
+  subagent role such as `worker` or `review-axis` (see Output). A Record is
+  copied into every agent group one of its Passes names, each Pass projected
+  onto that agent, so its token and API-call figures become that agent's row.
+  USD, durations, turns, and the verdict cannot be split per agent: they stay
+  whole on the `main` projection and are zero or cleared on a subagent's, so
+  they sum across agent groups to the ungrouped total, as do output tokens and
+  API calls. Input and cache tokens sum to the agent rows instead, which can
+  exceed it: `claude`'s result usage, which supplies a Pass's own input and
+  cache token totals, covers the main loop only, so its subagents' input and
+  cache tokens appear in agent rows but never in the ungrouped totals. Under
+  `claude` a subagent's output is unrecorded: its rows show 0 output. A Pass
+  with no agent rows (no usage, or a log no longer on disk to re-read) lands
+  whole in `(none)`. Groups run `main` first, then by first appearance,
+  `(none)` last.
 
 `revision`, `driver`, `prompt:<role>`, and `knob:<NAME>` group whole Records,
-while `role` and `model` are per Pass: a Record is split across the groups its
-Passes fall in, and one with no Passes lands whole in `(none)`. Landed keys
+while `role`, `model`, and `agent` are per Pass: a Record is split across the
+groups its Passes fall in, and one with no Passes lands whole in `(none)`. Landed keys
 count per group, so a split Record counts in every group it appears in. A
 Record lacking the dimension (an inferred Record under `driver`, `prompt:`, or
 `knob:`, a Pass with no model) lands in `(none)`. An unknown dimension, prompt
@@ -6862,7 +6881,7 @@ role, or knob, an empty name, an empty element, or a repeated dimension prints
 an error and usage and exits 1.
 
 `--by` takes one or more dimensions separated by commas, such as `--by
-driver,role`; whitespace around a comma is ignored. They nest in the order
+driver,role` or `--by role,agent`; whitespace around a comma is ignored. They nest in the order
 given: the first dimension's groups, each split by the next, so a Pass-level
 dimension after another sees only its group's Passes. Each group's header joins
 one `<by> = <key>` pair per dimension with `, `, such as `role = implement,
@@ -6891,6 +6910,19 @@ rate, the share of verdict-bearing passes that ended in `BLOCK`, is shown only
 for `review` and `delta-review`; other roles show `-`. USD is the
 API-equivalent list price of the tokens used, not money spent: on a
 subscription plan you are not billed per token.
+
+When any pass carries agent rows, the summary (plain and every `--by` group)
+adds a second table after the role table, one row per agent: `AGENT`,
+`PASSES`, `API_CALLS`, `INPUT`, `OUTPUT`, `CACHE_READ`, and `CACHE_WRITE`,
+with `main` first, then descending total tokens, ties by name. It has no USD
+column: Drivers report no per-agent cost. The rows are read through the
+Driver named in `dispatch_start`: one for the main loop (`main`) plus one per
+subagent role. They are additive per call (deduped by message id), so the
+`main` row never includes subagent usage. A Driver that does not attribute
+subagents (`opencode` today) shows only `main`. Under `claude` output tokens
+come from the result event, which covers the main loop only, so `main`'s
+output is the main loop's alone and subagent rows show 0 output; subagents'
+output is recorded nowhere, neither in the agent rows nor in the totals.
 
 A landed key is a distinct (kind, Dispatch key) pair with at least one
 Record settled `complete` with reason `merged`: a PR left open (`manual`,
@@ -6970,7 +7002,11 @@ and, on stamped Records only
 any). Each pass carries `ordinal`, `role`, `models`, `usd`, `input_tokens`,
 `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`,
 `api_calls`, `turns`, `duration_ms`, `api_duration_ms`, (when present)
-`verdict`, and `log`, the base name of the log file it was read from. Review
+`verdict`, `log`, the base name of the log file it was read from, and
+(when not empty) `agents`, an array of `{agent, api_calls, input_tokens,
+output_tokens, cache_read_input_tokens, cache_creation_input_tokens}` objects
+(`input_tokens` is uncached), the main loop first, then the costliest
+subagent. Review
 and delta-review passes also carry `verdict_text`, and fix passes
 `dispositions`, when present. Passes run in the order their log files began,
 and `ordinal` numbers them 1..n across the whole Record. The

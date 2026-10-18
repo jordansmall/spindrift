@@ -15,6 +15,7 @@ type statsDim string
 
 const (
 	statsByRole     statsDim = "role"
+	statsByAgent    statsDim = "agent"
 	statsByRevision statsDim = "revision"
 	statsByModel    statsDim = "model"
 	statsByDriver   statsDim = "driver"
@@ -97,6 +98,9 @@ var statsDims = []statsDimSpec{
 		groups := recordstats.GroupPasses(records, recordstats.RoleKey)
 		recordstats.SortRoleGroups(groups)
 		return groups
+	}},
+	{dim: statsByAgent, group: func(records []dispatchrecord.Record, _ string) []recordstats.Group {
+		return recordstats.GroupAgents(records)
 	}},
 	{dim: statsByRevision, group: func(records []dispatchrecord.Record, _ string) []recordstats.Group {
 		return recordstats.GroupRecords(records, recordstats.RevisionKey)
@@ -226,7 +230,7 @@ func groupStats(records []dispatchrecord.Record, dims []statsBy) []statsGroup {
 
 // groupStatsBy splits claim-time-sorted Records into ordered groups by one
 // dimension. Groups keep first-appearance order (the pipeline order for role),
-// (none) last; a pass-level dimension (role, model) is split per pass.
+// (none) last; a pass-level dimension (role, agent, model) is split per pass.
 func groupStatsBy(records []dispatchrecord.Record, by statsBy) []recordstats.Group {
 	for _, s := range statsDims {
 		if s.dim == by.dim {
