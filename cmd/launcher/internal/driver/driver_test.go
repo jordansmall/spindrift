@@ -71,14 +71,15 @@ func TestCredentialRulesPiOnePerProvider(t *testing.T) {
 		t.Fatal("CredentialRules(pi) not found")
 	}
 	want := map[string]string{
-		"anthropic":  "ANTHROPIC_API_KEY",
-		"openai":     "OPENAI_API_KEY",
-		"google":     "GEMINI_API_KEY",
-		"openrouter": "OPENROUTER_API_KEY",
-		"groq":       "GROQ_API_KEY",
-		"xai":        "XAI_API_KEY",
-		"mistral":    "MISTRAL_API_KEY",
-		"deepseek":   "DEEPSEEK_API_KEY",
+		"anthropic":      "ANTHROPIC_API_KEY",
+		"openai":         "OPENAI_API_KEY",
+		"google":         "GEMINI_API_KEY",
+		"openrouter":     "OPENROUTER_API_KEY",
+		"groq":           "GROQ_API_KEY",
+		"xai":            "XAI_API_KEY",
+		"mistral":        "MISTRAL_API_KEY",
+		"deepseek":       "DEEPSEEK_API_KEY",
+		"github-copilot": "PI_AUTH_CONTENT",
 	}
 	if len(rules) != len(want) {
 		t.Fatalf("CredentialRules(pi) has %d rules, want %d", len(rules), len(want))
@@ -103,7 +104,7 @@ func TestCredentialRulesPiOnePerProvider(t *testing.T) {
 		}
 	}
 	for _, r := range rules {
-		if r.AppliesTo() || r.AppliesTo("bare-model", "github-copilot/gpt-5") {
+		if r.AppliesTo() || r.AppliesTo("bare-model", "cohere/command") {
 			t.Errorf("rule over %v must not apply without its Provider's model", r.Env)
 		}
 	}

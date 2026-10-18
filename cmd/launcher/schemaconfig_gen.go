@@ -91,6 +91,7 @@ type schemaConfig struct {
 	opencodeAuthContent          string
 	openrouterAPIKey             string
 	overlapGate                  string
+	piAuthContent                string
 	pidsLimit                    string
 	podmanNetwork                string
 	preflightStaleBase           bool
@@ -194,6 +195,7 @@ func loadSchemaConfig() schemaConfig {
 		opencodeAuthContent:       os.Getenv("OPENCODE_AUTH_CONTENT"),
 		openrouterAPIKey:          os.Getenv("OPENROUTER_API_KEY"),
 		overlapGate:               getenvSchema("OVERLAP_GATE"),
+		piAuthContent:             os.Getenv("PI_AUTH_CONTENT"),
 		pidsLimit:                 getenvSchema("PIDS_LIMIT"),
 		podmanNetwork:             getenvSchema("PODMAN_NETWORK"),
 		preflightStaleBase:        getenvSchema("PREFLIGHT_STALE_BASE") != "",

@@ -28,6 +28,7 @@ var descriptors = []Descriptor{
 			{Env: []string{"XAI_API_KEY"}, ModelPrefix: "xai/", Remedy: "set XAI_API_KEY for the xai Provider under the pi Driver"},
 			{Env: []string{"MISTRAL_API_KEY"}, ModelPrefix: "mistral/", Remedy: "set MISTRAL_API_KEY for the mistral Provider under the pi Driver"},
 			{Env: []string{"DEEPSEEK_API_KEY"}, ModelPrefix: "deepseek/", Remedy: "set DEEPSEEK_API_KEY for the deepseek Provider under the pi Driver"},
+			{Env: []string{"PI_AUTH_CONTENT"}, ModelPrefix: "github-copilot/", Remedy: "set PI_AUTH_CONTENT to a pi auth.json holding a github-copilot OAuth entry under the pi Driver"},
 		},
 	},
 }

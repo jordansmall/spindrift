@@ -47,6 +47,7 @@ func launcherCredentials(c config) map[string]string {
 		"CLAUDE_CODE_OAUTH_TOKEN": c.claudeOAuthToken,
 		"ANTHROPIC_API_KEY":       c.anthropicAPIKey,
 		"OPENCODE_AUTH_CONTENT":   c.opencodeAuthContent,
+		"PI_AUTH_CONTENT":         c.piAuthContent,
 		"OPENAI_API_KEY":          c.openaiAPIKey,
 		"GEMINI_API_KEY":          c.geminiAPIKey,
 		"OPENROUTER_API_KEY":      c.openrouterAPIKey,
