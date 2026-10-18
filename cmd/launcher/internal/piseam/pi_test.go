@@ -111,6 +111,11 @@ type piOpts struct {
 	defaultAgentDir bool
 	// dirs, when set, are reused instead of fresh temp dirs.
 	dirs *piDirs
+	// hooks, when set, installs the hook bridge extension into the agent dir
+	// with that directory as the hooks it runs.
+	hooks string
+	// env is appended to pi's environment, after the process's own.
+	env []string
 }
 
 func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...func(work string)) run {
@@ -149,6 +154,10 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 		"retry": map[string]any{"maxRetries": 3, "baseDelayMs": 10},
 	})
 
+	if opts.hooks != "" {
+		installBridge(t, agentDir, opts.hooks)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	args := opts.args
@@ -174,6 +183,7 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 	} else {
 		cmd.Env = append(cmd.Env, "PI_CODING_AGENT_DIR="+agentDir)
 	}
+	cmd.Env = append(cmd.Env, opts.env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
