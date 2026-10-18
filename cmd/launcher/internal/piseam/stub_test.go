@@ -22,8 +22,31 @@ type reply struct {
 func textReply(text string) reply {
 	return reply{chunks: []map[string]any{
 		delta(map[string]any{"role": "assistant", "content": text}, nil),
-		delta(map[string]any{}, "stop"),
+		finalDelta("stop"),
 	}}
+}
+
+// reasoningTextReply streams reasoning_content, which pi maps to a thinking
+// content block, ahead of the answer text.
+func reasoningTextReply(reasoning, text string) reply {
+	return reply{chunks: []map[string]any{
+		delta(map[string]any{"role": "assistant", "reasoning_content": reasoning}, nil),
+		delta(map[string]any{"content": text}, nil),
+		finalDelta("stop"),
+	}}
+}
+
+// finalDelta closes a successful reply with finish_reason and a usage block:
+// 120 prompt tokens of which 40 were cached, 30 completion tokens of which 10
+// were reasoning, so pi reports input 80, cacheRead 40, output 30.
+func finalDelta(finish string) map[string]any {
+	c := delta(map[string]any{}, finish)
+	c["usage"] = map[string]any{
+		"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150,
+		"prompt_tokens_details":     map[string]any{"cached_tokens": 40},
+		"completion_tokens_details": map[string]any{"reasoning_tokens": 10},
+	}
+	return c
 }
 
 func toolCallReply(id, name, argsJSON string) reply {
@@ -32,7 +55,7 @@ func toolCallReply(id, name, argsJSON string) reply {
 			"index": 0, "id": id, "type": "function",
 			"function": map[string]any{"name": name, "arguments": argsJSON},
 		}}}, nil),
-		delta(map[string]any{}, "tool_calls"),
+		finalDelta("tool_calls"),
 	}}
 }
 

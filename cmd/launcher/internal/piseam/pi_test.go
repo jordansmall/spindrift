@@ -119,7 +119,10 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 		dirs = newPiDirs(t)
 	}
 	home, agentDir, work := dirs.home, dirs.agentDir, dirs.work
-	model := map[string]any{"id": stubModel}
+	// Non-zero per-million prices make pi's computed usage.cost non-zero.
+	model := map[string]any{"id": stubModel, "cost": map[string]any{
+		"input": 1.0, "output": 2.0, "cacheRead": 0.1, "cacheWrite": 0.0,
+	}}
 	if opts.reasoning {
 		model["reasoning"] = true
 	}
