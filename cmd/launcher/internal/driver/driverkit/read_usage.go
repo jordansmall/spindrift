@@ -198,27 +198,34 @@ func UsageByAgent(path string, newDecoder func() Decoder, src TotalsSource) ([]u
 		if ev.Kind != KindUsage || !firstSighting(seenIDs, ev.MessageID) {
 			return
 		}
-		name := usage.MainLoopAgent
-		if ev.InSubagent && ev.Role != "" {
-			name = ev.Role
-		}
-		a, ok := agents[name]
-		if !ok {
-			a = &usage.AgentUsage{Agent: name}
-			agents[name] = a
-		}
-		a.APICalls++
-		a.UncachedInputTokens += ev.Tokens.Input
-		if src == PerCallTotals {
-			a.OutputTokens += ev.Tokens.Output
-		}
-		a.CacheReadInputTokens += ev.Tokens.CacheRead
-		a.CacheCreationInputTokens += ev.Tokens.CacheWrite5m + ev.Tokens.CacheWrite1h
+		addAgentCall(agents, ev, src)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return sortedAgents(agents), nil
+}
+
+// addAgentCall books one already-deduped KindUsage event onto its agent's row
+// in agents, creating it: the keying and per-call arithmetic UsageByAgent and
+// ReadPasses share.
+func addAgentCall(agents map[string]*usage.AgentUsage, ev Event, src TotalsSource) {
+	name := usage.MainLoopAgent
+	if ev.InSubagent && ev.Role != "" {
+		name = ev.Role
+	}
+	a, ok := agents[name]
+	if !ok {
+		a = &usage.AgentUsage{Agent: name}
+		agents[name] = a
+	}
+	a.APICalls++
+	a.UncachedInputTokens += ev.Tokens.Input
+	if src == PerCallTotals {
+		a.OutputTokens += ev.Tokens.Output
+	}
+	a.CacheReadInputTokens += ev.Tokens.CacheRead
+	a.CacheCreationInputTokens += ev.Tokens.CacheWrite5m + ev.Tokens.CacheWrite1h
 }
 
 // ExtractUsage returns the totals of the log at logPath (see SumTotals) with
