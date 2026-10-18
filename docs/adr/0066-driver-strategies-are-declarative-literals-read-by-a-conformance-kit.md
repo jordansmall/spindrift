@@ -80,7 +80,8 @@ A Driver's host-side strategy is a **literal**, and the shared code reads it.
 6. **One Nix check file per Driver**, unioned over the registry's names.
    The generic shape checks and the pairwise parity checks become maps over
    every entry, so "opencode's skills dir matches claude's" reads "every
-   Driver's skills dir matches the first".
+   Driver's skills dir matches the first". (Amended by issue #5479: the
+   skills parity is opencode's alone; see the amendment below.)
 7. **Driver facts are one generated Descriptor**, rendered from the Nix
    rows the way the backend Descriptor is, replacing both generated name
    lists. Credentials are rule rows on the Nix entry: the env vars that
@@ -184,3 +185,11 @@ bundle and the binaries, whose tests run in `launcher-binaries-go-test`. A
 Driver edit therefore reruns that Driver's own check and the derivations
 built from the whole launcher tree or the launcher binaries, and no longer
 the core suite or another Driver's check.
+
+## Amendment (issue #5479): the skills parity is opencode's
+
+`pi` reads skills from its own agent directory, so "every Driver's skills dir
+matches the first" in item 6 no longer holds. The fact was only ever
+opencode's: that check moved into opencode's check file as
+`drivers-opencode-skills-dir-matches-claude`, and `pi`'s file pins its own
+directory.
