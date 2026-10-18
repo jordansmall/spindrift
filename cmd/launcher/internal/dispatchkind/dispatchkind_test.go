@@ -114,6 +114,9 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		if d.FindingLabel == "" {
 			t.Fatalf("%s: FindingLabel unset", d.Name)
 		}
+		if len(d.PassRoles) == 0 {
+			t.Fatalf("%s: PassRoles unset", d.Name)
+		}
 		if d.Contract == 0 {
 			t.Fatalf("%s: Contract unset", d.Name)
 		}
@@ -336,4 +339,46 @@ func TestRecoverMirrorsWorkBoxFacingFields(t *testing.T) {
 
 func isRecoverWorkPair(a, b *Descriptor) bool {
 	return (a == Recover && b == Work) || (a == Work && b == Recover)
+}
+
+// TestPassRolesRows pins the table every row carries: a kind-blind transcript
+// decoder reads any one row, so they must all hold the same five entries.
+func TestPassRolesRows(t *testing.T) {
+	cases := []struct {
+		passRole string
+		want     string
+	}{
+		{"review", ReviewerRole},
+		{"delta-review", ReviewerRole},
+		{"implement", ImplementorRole},
+		{"fix", ImplementorRole},
+		{"land", ImplementorRole},
+		{"", ""},
+		{"unrecognized", ""},
+	}
+	for _, d := range All {
+		if len(d.PassRoles) != 5 {
+			t.Errorf("%s: len(PassRoles) = %d, want 5", d.Name, len(d.PassRoles))
+		}
+		for _, tc := range cases {
+			if got := d.PassRoles[tc.passRole]; got != tc.want {
+				t.Errorf("%s: PassRoles[%q] = %q, want %q", d.Name, tc.passRole, got, tc.want)
+			}
+		}
+	}
+}
+
+// TestPassRolesNotShared guards against the rows aliasing one map: a write
+// through one kind's PassRoles must not change another's.
+func TestPassRolesNotShared(t *testing.T) {
+	t.Cleanup(func() { delete(Research.PassRoles, "leak") })
+	Research.PassRoles["leak"] = "x"
+	for _, d := range All {
+		if d == Research {
+			continue
+		}
+		if _, ok := d.PassRoles["leak"]; ok {
+			t.Errorf("%s: PassRoles shares storage with Research", d.Name)
+		}
+	}
 }
