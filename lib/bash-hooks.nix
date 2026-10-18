@@ -2,12 +2,13 @@
 # lib/image.nix renders the claude settings.json hooks from it and
 # lib/agent-hooks.nix bakes the ~/.claude/hooks files from it (the image and
 # the opencode-guards check both use that directory); `nix run .#regen` renders
-# the opencode plugin's hook list and its docs/reference.md copy;
-# nix/checks/bats.nix's shellcheck lints `scripts`.
+# the opencode plugin's hook list and its docs/reference.md copy, and the pi
+# bridge extension's hook list; nix/checks/bats.nix's shellcheck lints `scripts`.
 #
 # Row order is load-bearing: it is the claude settings.json order within an
-# event, and the opencode plugin's run order, where each hook sees the args the
-# earlier ones rewrote (the tee must stay last to wrap the scrubbed command).
+# event, and the opencode plugin's and pi bridge's run order, where each hook
+# sees the args the earlier ones rewrote (the tee must stay last to wrap the
+# scrubbed command).
 #
 # A row with an `opencode` attr is run by the opencode plugin
 # (agent/opencode-guards.js): a PreToolUse row in its tool.execute.before
@@ -16,6 +17,11 @@
 # tool.execute.after SUMMARY_HOOK. A row without one has no plugin
 # counterpart: credential-deny.sh is stood in for by opencode's own deny config
 # (lib/drivers/opencode.nix).
+#
+# A row with a `pi` attr is run the same way by the pi bridge extension
+# (agent/pi-hook-bridge.js), which has no deny config to lean on and so also
+# carries credential-deny.sh. A PreToolUse row's pi tools are its `matchers`,
+# lowercased to pi's tool names (Bash -> bash, Read -> read).
 rec {
   hooks = [
     # reject-background-bash.sh (issue #1609): --disallowedTools strips whole
@@ -28,6 +34,7 @@ rec {
       event = "PreToolUse";
       matchers = [ "Bash" ];
       opencode.rewrites = false;
+      pi.rewrites = false;
     }
     # credential-deny.sh (issue #1909, spec #1907) rejects a Read or Bash call
     # targeting a known credential path. Read and Bash each need their own matcher
@@ -40,6 +47,7 @@ rec {
         "Read"
         "Bash"
       ];
+      pi.rewrites = false;
     }
     # env-credential-scrub.sh (issue #1927, spec #1907) unsets every variable
     # agent/credential-vars names for every Bash call and denies any reference to
@@ -51,6 +59,7 @@ rec {
       event = "PreToolUse";
       matchers = [ "Bash" ];
       opencode.rewrites = true;
+      pi.rewrites = true;
     }
     # bash-output-tee.sh and bash-output-summary.sh (issue #1988) tee every Bash
     # call's combined output to a log file and replace the tool result with a
@@ -62,31 +71,38 @@ rec {
       event = "PreToolUse";
       matchers = [ "Bash" ];
       opencode.rewrites = true;
+      pi.rewrites = true;
     }
     {
       script = "bash-output-summary.sh";
       event = "PostToolUse";
       matchers = [ "Bash" ];
       opencode = { };
+      pi = { };
     }
   ];
 
   scripts = map (r: r.script) hooks;
 
-  # The opencode plugin runs exactly one PostToolUse hook and needs `rewrites`
-  # on every PreToolUse one; checked here so every renderer sees a valid table.
-  opencodeHooks =
+  # The opencode plugin and the pi bridge each run exactly one PostToolUse hook
+  # and need `rewrites` on every PreToolUse one; checked here so every renderer
+  # sees a valid table.
+  consumerHooks =
+    name: label:
     let
-      rows = builtins.filter (r: r ? opencode) hooks;
+      rows = builtins.filter (r: r ? ${name}) hooks;
       after = builtins.filter (r: r.event == "PostToolUse") rows;
-      unset = builtins.filter (r: r.event == "PreToolUse" && !(r.opencode ? rewrites)) rows;
+      unset = builtins.filter (r: r.event == "PreToolUse" && !(r.${name} ? rewrites)) rows;
     in
     if builtins.length after != 1 then
-      throw "lib/bash-hooks.nix: the opencode plugin runs exactly one PostToolUse hook, got ${toString (builtins.length after)} -- give exactly one PostToolUse row an opencode attr"
+      throw "lib/bash-hooks.nix: the ${label} runs exactly one PostToolUse hook, got ${toString (builtins.length after)} -- give exactly one PostToolUse row a ${name} attr"
     else if unset != [ ] then
-      throw "lib/bash-hooks.nix: ${(builtins.head unset).script}: a PreToolUse opencode row has no opencode.rewrites -- set it true when the hook rewrites the command"
+      throw "lib/bash-hooks.nix: ${(builtins.head unset).script}: a PreToolUse ${name} row has no ${name}.rewrites -- set it true when the hook rewrites the command"
     else
       rows;
+
+  opencodeHooks = consumerHooks "opencode" "opencode plugin";
+  piHooks = consumerHooks "pi" "pi bridge";
 
   # Bash the hooks source from beside themselves: baked verbatim (no shebang
   # to pin), never a settings.json entry, and named without .sh so the
