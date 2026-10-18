@@ -6938,6 +6938,11 @@ come from the result event, which covers the main loop only, so `main`'s
 output is the main loop's alone and subagent rows show 0 output; subagents'
 output is recorded nowhere, neither in the agent rows nor in the totals.
 
+Text output prints the role and agent table cells, and every `--by` group key,
+with tabs and line breaks turned into spaces and other control characters and
+terminal escape sequences removed, since a label such as a subagent role comes
+from the Box; `--json` keeps the recorded value.
+
 A landed key is a distinct (kind, Dispatch key) pair with at least one
 Record settled `complete` with reason `merged`: a PR left open (`manual`,
 `auto-merge-enqueued`, `merge-guard-hit`, `tuning-provenance`,
