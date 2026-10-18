@@ -230,7 +230,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   which `checks/go.nix` generates from the same row. Also here:
   `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
-  schema-artifact regenerator), and `regen-goldens.nix` (`nix run
+  schema-artifact regenerator), `regen-opencode-schema.nix` (`nix run
+  .#regen-opencode-schema`, which rewrites the opencode session-store fixture
+  from the baked opencode), and `regen-goldens.nix` (`nix run
   .#regen-goldens`, which reruns the Go golden test
   `cmd/launcher/internal/promptassembly/golden_integration_test.go` with
   `UPDATE_GOLDENS=1` to overwrite `tests/testdata/prompt-assembly-golden/`,
