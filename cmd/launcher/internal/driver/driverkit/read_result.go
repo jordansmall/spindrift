@@ -13,7 +13,8 @@ import "strings"
 // the last one; other ID-less events do not. Empty text is dropped. A
 // KindResult event replaces everything gathered so far with its own Text (no
 // trailing newline added), for a CLI that reports its result as an event.
-// A missing log is "" with no error. It is separate from ResultText, which
+// An InSubagent event is skipped: it is not the main loop's message. A missing
+// log is "" with no error. It is separate from ResultText, which
 // gathers every result event rather than only the last message.
 func LastMessageText(logPath string, newDecoder func() Decoder) (string, error) {
 	var m lastMessage
@@ -34,6 +35,11 @@ func (m *lastMessage) apply(ev Event) {
 	if ev.Kind == KindResult {
 		m.b.Reset()
 		m.b.WriteString(ev.Text)
+		return
+	}
+	if ev.InSubagent {
+		// A subagent's messages are not the main loop's, so they never become
+		// or displace the last one.
 		return
 	}
 	id := ev.MessageID
