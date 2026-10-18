@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/runner"
 )
+
+// isPermanentPreDispatchErr reports whether err carries an errno no retry can
+// clear: the path itself is unusable, unlike a transient I/O or permission
+// error. EACCES stays out because a log directory's mode can be fixed
+// mid-run (issue #5451).
+func isPermanentPreDispatchErr(err error) bool {
+	return errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, syscall.ELOOP)
+}
 
 // dispatchWithRetry calls once until it exits zero, the failure is terminal, or
 // a cap is exhausted. A 429 with a known reset holds until that time, consuming
@@ -66,6 +75,10 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				// The attempt failed before dispatching anything (issues #2575,
 				// #5444), so logPath may still hold earlier content: neither
 				// settledOutcome nor ClassifyTransient may be trusted against it.
+				if isPermanentPreDispatchErr(pErr) {
+					fmt.Fprintf(d.humanOut(), "    !! #%s: pre-dispatch failed permanently\n", d.number)
+					return Failed(Result{Err: pErr})
+				}
 				transientCount++
 				if transientCount > d.cfg.Policy.Max {
 					fmt.Fprintf(d.humanOut(), "    !! #%s: pre-dispatch retry cap exhausted (%d)\n",
