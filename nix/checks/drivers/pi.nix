@@ -327,4 +327,81 @@ in
 
       touch $out
     '';
+
+  # Issue #5483: evaluation rejects an unknown effort level (rationale in
+  # lib/drivers/pi.nix). A bad reviewEffort is the reject fixture; it differs
+  # from the passing one by that single value.
+  drivers-pi-rejects-unknown-effort-level =
+    let
+      evalsWith =
+        reviewEffort:
+        builtins.tryEval (
+          builtins.deepSeq (map (e: e.effort or "") (
+            (fixtures.piHarnessWith (fixtures.opencodeNamespacedDefaults // { inherit reviewEffort; }))
+            .internals.roster
+          )) true
+        );
+    in
+    assert assertMsg (evalsWith "high").success "a valid reviewEffort must evaluate under pi";
+    assert assertMsg (
+      !(evalsWith "bogus").success
+    ) "an unknown reviewEffort level must fail eval under pi, not reach the model id";
+    pkgs.runCommand "drivers-pi-rejects-unknown-effort-level" { } "touch $out";
+
+  # An opted-out role (model "") loses its default effort with it, rather than
+  # tripping the rule or being resurrected by the fallback.
+  drivers-pi-opt-out-role-drops-its-effort =
+    let
+      names = map (e: e.name) (
+        (fixtures.piHarnessWith (fixtures.opencodeNamespacedDefaults // { filerModel = ""; }))
+        .internals.roster
+      );
+    in
+    assert assertMsg (
+      !(builtins.elem "filer" names)
+    ) "an opted-out filer must stay dropped under pi, got roster: ${builtins.toJSON names}";
+    pkgs.runCommand "drivers-pi-opt-out-role-drops-its-effort" { } "touch $out";
+
+  # A kept entry cannot reach finalRoster with model "" through mkHarness (the
+  # opt-out drops it first), so the resolution is exercised directly.
+  drivers-pi-effort-resolves-model-or-fails =
+    let
+      effortLib = import ../../../lib/effort-on-model.nix { inherit (pkgs) lib; };
+      resolve =
+        coordinatorModel: effort:
+        effortLib.resolve {
+          roster = [
+            (
+              piFixtureEntry
+              // {
+                model = "";
+                inherit effort;
+              }
+            )
+          ];
+          levels = entry.effortOnModelLevels;
+          inherit coordinatorModel;
+        };
+      rejects =
+        coordinatorModel: effort:
+        !(builtins.tryEval (builtins.deepSeq (resolve coordinatorModel effort) true)).success;
+      resolved = builtins.head (resolve "anthropic/x" "high");
+      files = entry.agentFilesTemplate { roster = [ resolved ]; };
+      rendered = files.".pi/agent/agents/fixture.md";
+    in
+    assert assertMsg (rejects "" "high") "an effort with no model and no coordinator model must fail";
+    assert assertMsg (rejects "anthropic/x" "bogus") "an unknown level must fail even with a model";
+    assert assertMsg (
+      resolved.model == "anthropic/x"
+    ) "a role with an effort and no model must inherit the coordinator's, got: ${resolved.model}";
+    assert assertMsg (hasInfix ''model: "anthropic/x:high"'' rendered)
+      "the inherited model must render with the effort suffix, got: ${rendered}";
+    assert assertMsg (
+      (builtins.head (resolve "" "")).model == ""
+    ) "a role with no effort passes through untouched, even with no model";
+    assert assertMsg (
+      hasInfix "fixture" (effortLib.message.noModel "fixture" "high")
+      && hasInfix "high" (effortLib.message.noModel "fixture" "high")
+    ) "the no-model message must name the role and the effort";
+    pkgs.runCommand "drivers-pi-effort-resolves-model-or-fails" { } "touch $out";
 }

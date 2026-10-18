@@ -379,6 +379,16 @@ let
     packages = p: [ p.hello ];
   };
 
+  # The pi Harness over arbitrary defaults, for the effort-on-model checks
+  # (issue #5483): a bad `reviewEffort` is the reject fixture.
+  piHarnessWith =
+    defaults:
+    import ../lib/mkHarness.nix {
+      inherit nixpkgs system defaults;
+      driver = "pi";
+      packages = p: [ p.hello ];
+    };
+
   # The pi Driver's Harness: the pi roster bakes, the
   # session-cache-mountpoint-baked-pi image check (issue #5481), and the
   # pi-hook-bridge image checks (issue #5482) share it.
@@ -611,6 +621,7 @@ in
     forgejoHarness
     opencodeHarness
     piHarness
+    piHarnessWith
     piFullRosterHarness
     customHarness
     dockerHarness
