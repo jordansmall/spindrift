@@ -3,6 +3,7 @@ package driver
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +62,50 @@ func TestCredentialRulesOpencodeAppliesOnlyToCopilot(t *testing.T) {
 	}
 	if !r.AppliesTo("anthropic/claude", "github-copilot/gpt-5") {
 		t.Error("opencode rule must apply when any model is github-copilot")
+	}
+}
+
+func TestCredentialRulesPiOnePerProvider(t *testing.T) {
+	rules, ok := CredentialRules("pi")
+	if !ok {
+		t.Fatal("CredentialRules(pi) not found")
+	}
+	want := map[string]string{
+		"anthropic":  "ANTHROPIC_API_KEY",
+		"openai":     "OPENAI_API_KEY",
+		"google":     "GEMINI_API_KEY",
+		"openrouter": "OPENROUTER_API_KEY",
+		"groq":       "GROQ_API_KEY",
+		"xai":        "XAI_API_KEY",
+		"mistral":    "MISTRAL_API_KEY",
+		"deepseek":   "DEEPSEEK_API_KEY",
+	}
+	if len(rules) != len(want) {
+		t.Fatalf("CredentialRules(pi) has %d rules, want %d", len(rules), len(want))
+	}
+	for provider, env := range want {
+		model := provider + "/some-model"
+		var hit []CredentialRule
+		for _, r := range rules {
+			if r.AppliesTo(model) {
+				hit = append(hit, r)
+			}
+		}
+		if len(hit) != 1 || !slices.Equal(hit[0].Env, []string{env}) {
+			t.Errorf("%s: rules applying = %v, want exactly one over %s", model, hit, env)
+			continue
+		}
+		if len(hit[0].SetupCommand) != 0 {
+			t.Errorf("%s: SetupCommand = %v, want none", provider, hit[0].SetupCommand)
+		}
+		if !strings.Contains(hit[0].Remedy, env) {
+			t.Errorf("%s: remedy %q does not name %s", provider, hit[0].Remedy, env)
+		}
+	}
+	for _, r := range rules {
+		if r.AppliesTo() || r.AppliesTo("bare-model", "github-copilot/gpt-5") {
+			t.Errorf("rule over %v must not apply without its Provider's model", r.Env)
+		}
 	}
 }
 

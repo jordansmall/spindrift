@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
@@ -1813,6 +1814,97 @@ func TestApplySecretCmdFallback_DriverCredentials(t *testing.T) {
 			}
 			if got := os.Getenv("OPENCODE_AUTH_CONTENT"); got != tc.wantOpencode {
 				t.Errorf("OPENCODE_AUTH_CONTENT = %q, want %q", got, tc.wantOpencode)
+			}
+		})
+	}
+}
+
+// Under pi each Provider key is its own rule: the template fetches every
+// Provider's key, a miss errors only when a visible tier selects that
+// Provider, and a miss for a Provider no tier uses is tolerated.
+func TestApplySecretCmdFallback_PiProviderKeys(t *testing.T) {
+	rules, ok := driver.CredentialRules("pi")
+	if !ok || len(rules) == 0 {
+		t.Fatal("pi Driver has no credential rules")
+	}
+	var piKeys []string
+	for _, r := range rules {
+		piKeys = append(piKeys, r.Env...)
+	}
+	tests := []struct {
+		name          string
+		model         string
+		reviewModel   string
+		failItems     []string
+		wantErrNaming []string
+	}{
+		{
+			name:  "openai tier fetches every Provider key the vault holds",
+			model: "openai/gpt-5",
+		},
+		{
+			name:      "a miss for a Provider no tier uses is tolerated",
+			model:     "openai/gpt-5",
+			failItems: []string{"gemini-api-key", "groq-api-key"},
+		},
+		{
+			name:          "a miss for the selected Provider is an error",
+			model:         "openai/gpt-5",
+			failItems:     []string{"openai-api-key"},
+			wantErrNaming: []string{"OPENAI_API_KEY"},
+		},
+		{
+			name:          "a later tier selects its own Provider",
+			model:         "openai/gpt-5",
+			reviewModel:   "google/gemini-3",
+			failItems:     []string{"gemini-api-key"},
+			wantErrNaming: []string{"GEMINI_API_KEY"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := secretCmdRunner
+			t.Cleanup(func() { secretCmdRunner = orig })
+			secretCmdRunner = func(cmd string) (string, error) {
+				for _, item := range tc.failItems {
+					if strings.HasSuffix(cmd, "-"+item) {
+						return "", errors.New("exit status 1")
+					}
+				}
+				return "value-" + strings.TrimPrefix(cmd, "rbw get spindrift-"), nil
+			}
+			for _, k := range piKeys {
+				t.Setenv(k, "")
+			}
+			t.Setenv("GH_TOKEN", "already-set")
+			t.Setenv("DRIVER", "pi")
+			t.Setenv("MODEL", tc.model)
+			review := tc.reviewModel
+			if review == "" {
+				review = tc.model
+			}
+			t.Setenv("REVIEW_MODEL", review)
+			for _, tier := range []string{"WORKER_MODEL", "SCOUT_MODEL", "FILER_MODEL"} {
+				t.Setenv(tier, tc.model)
+			}
+			err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"})
+			if (err != nil) != (len(tc.wantErrNaming) > 0) {
+				t.Fatalf("err = %v, want error naming %v", err, tc.wantErrNaming)
+			}
+			for _, want := range tc.wantErrNaming {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %s", err, want)
+				}
+			}
+			// An error stops the walk at the first miss, so set-ness is only
+			// asserted on a clean run.
+			if err == nil {
+				for _, k := range piKeys {
+					want := !slices.Contains(tc.failItems, strings.ToLower(strings.ReplaceAll(k, "_", "-")))
+					if got := os.Getenv(k) != ""; got != want {
+						t.Errorf("%s set = %v, want %v", k, got, want)
+					}
+				}
 			}
 		})
 	}

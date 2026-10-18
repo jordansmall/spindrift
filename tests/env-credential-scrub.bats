@@ -15,7 +15,7 @@ setup() {
   echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
   echo "$output" | jq -e '.hookSpecificOutput | has("permissionDecision") | not' >/dev/null
   new_command="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
-  [[ "$new_command" == *"unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT;"* ]]
+  [[ "$new_command" == *"unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN DEEPSEEK_API_KEY GEMINI_API_KEY GROQ_API_KEY MISTRAL_API_KEY OPENAI_API_KEY OPENCODE_AUTH_CONTENT OPENROUTER_API_KEY XAI_API_KEY;"* ]]
   [[ "$new_command" == *"echo hello"* ]]
 }
 
@@ -95,6 +95,7 @@ setup() {
   ANTHROPIC_API_KEY="leaked-api-key-value" \
     CLAUDE_CODE_OAUTH_TOKEN="leaked-oauth-token-value" \
     OPENCODE_AUTH_CONTENT="leaked-opencode-auth-value" \
+    OPENAI_API_KEY="leaked-openai-key-value" \
     bash -c "$new_command" >"$exec_output_file" 2>&1
   exec_status=$?
   exec_output="$(cat "$exec_output_file")"
@@ -106,9 +107,11 @@ setup() {
   [[ "$exec_output" != *"leaked-api-key-value"* ]]
   [[ "$exec_output" != *"leaked-oauth-token-value"* ]]
   [[ "$exec_output" != *"leaked-opencode-auth-value"* ]]
+  [[ "$exec_output" != *"leaked-openai-key-value"* ]]
   [[ "$exec_output" != *"ANTHROPIC_API_KEY"* ]]
   [[ "$exec_output" != *"CLAUDE_CODE_OAUTH_TOKEN"* ]]
   [[ "$exec_output" != *"OPENCODE_AUTH_CONTENT"* ]]
+  [[ "$exec_output" != *"OPENAI_API_KEY"* ]]
 }
 
 # `set`, `export -p`, `declare -p`, command substitution, and `&&`-chaining

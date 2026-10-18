@@ -352,6 +352,51 @@ func TestRequiredKnobChecks_DriverCredentials_OpencodeCopilotInLaterTier(t *test
 	}
 }
 
+func piCredentialProbe(t *testing.T, models []string, creds map[string]string) error {
+	t.Helper()
+	c := minimalValidConfig()
+	c.Driver = "pi"
+	c.Models = models
+	c.Credentials = creds
+	_, err := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials").Probe()
+	return err
+}
+
+func TestRequiredKnobChecks_DriverCredentials_PiProviderKey(t *testing.T) {
+	err := piCredentialProbe(t, []string{"openai/gpt-5"}, nil)
+	want := "set OPENAI_API_KEY for the openai Provider under the pi Driver"
+	if err == nil || err.Error() != want {
+		t.Errorf("driver-credentials Probe() = %v, want %q", err, want)
+	}
+	if err := piCredentialProbe(t, []string{"openai/gpt-5"}, map[string]string{"OPENAI_API_KEY": "sk-x"}); err != nil {
+		t.Errorf("driver-credentials Probe() unexpected error with OPENAI_API_KEY set: %v", err)
+	}
+	// Another Provider's key does not satisfy this one.
+	if err := piCredentialProbe(t, []string{"openai/gpt-5"}, map[string]string{"GEMINI_API_KEY": "k"}); err == nil {
+		t.Error("driver-credentials Probe() passed with only GEMINI_API_KEY for an openai model")
+	}
+}
+
+func TestRequiredKnobChecks_DriverCredentials_PiLaterTier(t *testing.T) {
+	err := piCredentialProbe(t, []string{"openai/gpt-5", "google/gemini-3"}, map[string]string{"OPENAI_API_KEY": "sk-x"})
+	if err == nil || !strings.Contains(err.Error(), "GEMINI_API_KEY") {
+		t.Errorf("driver-credentials Probe() = %v, want the google Provider remedy", err)
+	}
+}
+
+func TestRequiredKnobChecks_DriverCredentials_PiReportsEveryMissingProvider(t *testing.T) {
+	err := piCredentialProbe(t, []string{"openai/gpt-5", "groq/llama"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") || !strings.Contains(err.Error(), "GROQ_API_KEY") {
+		t.Errorf("driver-credentials Probe() = %v, want both OPENAI_API_KEY and GROQ_API_KEY named", err)
+	}
+}
+
+func TestRequiredKnobChecks_DriverCredentials_PiUnlistedProviderPasses(t *testing.T) {
+	if err := piCredentialProbe(t, []string{"github-copilot/gpt-5"}, nil); err != nil {
+		t.Errorf("driver-credentials Probe() unexpected error for a Provider with no rule: %v", err)
+	}
+}
+
 func TestRequiredKnobChecks_DriverCredentials_UnknownDriverFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.Driver = "not-a-real-driver"

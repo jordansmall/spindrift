@@ -44,12 +44,14 @@ func TestReferenceGuide_DriverCredentialListMatchesRules(t *testing.T) {
 		}
 	}
 
-	owner := map[string]string{}
+	// A variable may be shared (ANTHROPIC_API_KEY is both claude's and pi's),
+	// so each maps to the set of Drivers that own it.
+	owners := map[string][]string{}
 	for _, name := range names {
 		rules, _ := driver.CredentialRules(name)
 		for _, r := range rules {
 			for _, env := range r.Env {
-				owner[env] = name
+				owners[env] = append(owners[env], name)
 			}
 		}
 	}
@@ -71,9 +73,9 @@ func TestReferenceGuide_DriverCredentialListMatchesRules(t *testing.T) {
 				t.Errorf("docs/reference.md bullet for %q omits model prefix `%s`; update the bullet from lib/drivers/%s.nix", name, r.ModelPrefix, name)
 			}
 		}
-		for env, o := range owner {
-			if o != name && strings.Contains(bullet, "`"+env+"`") {
-				t.Errorf("docs/reference.md bullet for %q names `%s`, which belongs to Driver %q; update the bullet from lib/drivers/%s.nix", name, env, o, name)
+		for env, drivers := range owners {
+			if !slices.Contains(drivers, name) && strings.Contains(bullet, "`"+env+"`") {
+				t.Errorf("docs/reference.md bullet for %q names `%s`, which belongs to Driver(s) %q; update the bullet from lib/drivers/%s.nix", name, env, drivers, name)
 			}
 		}
 	}

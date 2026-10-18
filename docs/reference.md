@@ -2007,8 +2007,16 @@ it drifts from them:
   `CLAUDE_CODE_OAUTH_TOKEN` first, then `ANTHROPIC_API_KEY` only if that
   fetch fails, so an OAuth-only (or API-key-only) vault works; it is an
   error only when both fetches fail.
-- `pi`: no credential rule yet, so nothing is fetched; Provider API keys
-  come from the environment.
+- `pi`: one Provider API key per `<provider>/` model prefix —
+  `ANTHROPIC_API_KEY` (`anthropic/`), `OPENAI_API_KEY` (`openai/`),
+  `GEMINI_API_KEY` (`google/`), `OPENROUTER_API_KEY` (`openrouter/`),
+  `GROQ_API_KEY` (`groq/`), `XAI_API_KEY` (`xai/`), `MISTRAL_API_KEY`
+  (`mistral/`), `DEEPSEEK_API_KEY` (`deepseek/`). A miss is an error only
+  when `MODEL` or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`,
+  `SCOUT_MODEL`, `FILER_MODEL`) uses that Provider. Like opencode, the
+  lookup still runs for each key that has no value (a tier baked into the
+  image may select it), a miss for a Provider no tier visibly uses is
+  ignored, and a hit is passed into the Box anyway.
 - `opencode`: `OPENCODE_AUTH_CONTENT`. A miss is an error only when `MODEL`
   or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
   `FILER_MODEL`) is `github-copilot/<model>`. When no tier visibly needs it
