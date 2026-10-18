@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/driverkit/conformance"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 func TestStrategyCorpus(t *testing.T) {
@@ -81,5 +82,16 @@ func TestRegisterDriverInstallsStrategyWithoutBundle(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(ev), `{"Kind":"result"`) {
 		t.Errorf("claude Driver encoded %q, want the seamtest canonical grammar", ev)
+	}
+}
+
+func TestStrategyDecodesHostOpLine(t *testing.T) {
+	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Pass: 2, Role: "review"})
+	evs := Strategy.NewDecoder()(line)
+	if len(evs) != 1 || evs[0].Kind != driverkit.KindHostOp || evs[0].HostOp == nil {
+		t.Fatalf("host op line decoded to %+v, want one host_op event", evs)
+	}
+	if got := evs[0].HostOp; got.Op != hostop.OpPassStart || got.Pass != 2 || got.Role != "review" {
+		t.Errorf("host op payload = %+v, want pass_start pass 2 role review", got)
 	}
 }

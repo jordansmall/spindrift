@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // fakeDriverName is the name the fake CLI is invoked under, so the Strategy
@@ -15,9 +16,10 @@ import (
 const fakeDriverName = "claude"
 
 // Strategy declares a Driver whose log grammar is the canonical Event itself:
-// one JSON-encoded driverkit.Event per line. It proves the shared readers
-// work over the canonical grammar only, not the real claude decoder, and is
-// read-only by convention like every Strategy.
+// one JSON-encoded driverkit.Event per line, plus the host-written spindrift_op
+// lines every Pass log carries. It proves the shared readers work over the
+// canonical grammar only, not the real claude decoder, and is read-only by
+// convention like every Strategy.
 var Strategy = driverkit.Strategy{
 	Name:         fakeDriverName,
 	NewDecoder:   newDecoder,
@@ -32,6 +34,10 @@ func newDecoder() driverkit.Decoder {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			return nil
+		}
+		var op hostop.Event
+		if json.Unmarshal([]byte(line), &op) == nil && op.Type == hostop.TypeSpindriftOp && op.SpindriftOp != nil {
+			return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op.SpindriftOp}}
 		}
 		var ev driverkit.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Kind == "" {
