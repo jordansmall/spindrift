@@ -1375,7 +1375,7 @@ _Avoid_: path filter, merge block, review gate.
 
 **Instruction surface**:
 The repo-carried files a Driver reads as trusted instructions on every fresh
-clone — `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.opencode/` — plus the CI config
+clone — `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.opencode/`, `.pi/` — plus the CI config
 under `.github/` and `.forgejo/`. The cross-run persistence vector: a poisoned
 instruction file merged once feeds every future Agent as trusted input. Guarded
 by the Merge guard's default path set.

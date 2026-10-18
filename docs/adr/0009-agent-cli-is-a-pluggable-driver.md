@@ -454,8 +454,8 @@ its corpus, and nothing more. It ships no roster (no scout, worker or Filer
 is provisioned; only the reviewer's model and effort survive, for the review
 pass), no session resume, no hooks and no credential knob; Provider API keys
 come from the environment. The choices above for the subagent extension,
-`--session-id`, the hook bridge and `PI_AUTH_CONTENT` are still the plan, not
-what ships. Two facts changed:
+`--session-id` and `PI_AUTH_CONTENT` are still the plan, not what ships; the
+hook bridge shipped under issue #5482 (below). Two facts changed:
 
 - pi's skills directory is its agent directory, `~/.pi/agent/skills`, not
   claude's. "Every Driver reads the first Driver's skills directory" was only
@@ -465,6 +465,16 @@ what ships. Two facts changed:
 - Heartbeat lines and Dispatch Records report pi's observed model as
   `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix notation, which
   is how the effort in force surfaces next to the model.
+
+## Amendment (issue #5482): pi gets the hook bridge
+
+Issue #5482 supersedes "no hooks" from the first pi slice:
+`agent/pi-hook-bridge.js`, baked into the agent directory, with its hook table
+generated from the `pi` column of `lib/bash-hooks.nix`, carries claude's five
+tool hooks
+(fail closed, except the post-tool summary). pi runs with `--no-approve`, so
+the Target repo's `.pi/` is ignored while `AGENTS.md` and `CLAUDE.md` are
+still read.
 
 ## Amendment (issue #5349): opencode corrective resumes continue the pinned session
 

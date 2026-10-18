@@ -1435,7 +1435,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 		{name: "pidsLimit unset falls back to schema default", env: "PIDS_LIMIT", useRealTable: true, setEnv: false, want: "512", getGot: func(c config) string { return c.pidsLimit }},
 		{name: "pidsLimit empty override disables the limit", env: "PIDS_LIMIT", setEnv: true, envVal: "", dflt: "512", want: "", getGot: func(c config) string { return c.pidsLimit }},
 		{name: "pidsLimit non-empty override passes through verbatim", env: "PIDS_LIMIT", setEnv: true, envVal: "4096", dflt: "512", want: "4096", getGot: func(c config) string { return c.pidsLimit }},
-		{name: "mergeGuardPaths unset falls back to schema default", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: false, want: ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**", getGot: func(c config) string { return c.mergeGuardPaths }},
+		{name: "mergeGuardPaths unset falls back to schema default", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: false, want: ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**", getGot: func(c config) string { return c.mergeGuardPaths }},
 		{name: "mergeGuardPaths empty override disables the guard", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: true, envVal: "", want: "", getGot: func(c config) string { return c.mergeGuardPaths }},
 		{name: "mergeGuardPaths non-empty override passes through verbatim", env: "MERGE_GUARD_PATHS", useRealTable: true, setEnv: true, envVal: "docs/**", want: "docs/**", getGot: func(c config) string { return c.mergeGuardPaths }},
 		{name: "memoryLimit unset falls back to schema default", env: "MEMORY_LIMIT", useRealTable: true, setEnv: false, want: "5g", getGot: func(c config) string { return c.memoryLimit }},

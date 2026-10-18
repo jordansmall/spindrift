@@ -237,7 +237,7 @@ The first three are on by default. The rest are off until you enable them.
 
 - **Merge guard.** The launcher never auto-merges a PR that touches
   `.github/**`, `.forgejo/**`, `**/CLAUDE.md`, `**/AGENTS.md`, `.claude/**`,
-  or `.opencode/**`. See [Merge guard](docs/reference.md#merge-guard).
+  `.opencode/**`, or `.pi/**`. See [Merge guard](docs/reference.md#merge-guard).
 - **Blockers.** An issue waits until each issue blocking it reaches
   `agent-complete`. The launcher reads the tracker's own dependency links, or
   `depends on #N` in the issue body. See

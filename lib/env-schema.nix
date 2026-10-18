@@ -165,7 +165,7 @@ in
   mergeGuardPaths = {
     env = "MERGE_GUARD_PATHS";
     group = "git";
-    default = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
+    default = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**";
     doc = "comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github and forgejo Code Forge merge paths only)";
     flakeOption = true;
     nixSubPath = "merge.guardPaths";
