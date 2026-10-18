@@ -206,10 +206,11 @@ func blankHeredocs(cmd string) (string, int) {
 				}
 				n++
 			}
-			if end < len(lines) {
-				out.WriteString(lines[end])
-			}
 			i = end
+			if end == len(lines) {
+				break // unterminated: no lines left for later openers
+			}
+			out.WriteString(lines[end])
 		}
 	}
 	return out.String(), n
