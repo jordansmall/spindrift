@@ -1,20 +1,15 @@
 {
-  "lastSwept": "8d5fb0969aa95ca67eb7a95d5d65d897c437dc84",
-  "cursor": "cmd/launcher/internal/driver/claude/decode.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-17T20:00:03.422410643-04:00"
-  },
+  "lastSwept": "54e84ff24132f4852da00a5d599b9e19ebc881de",
+  "cursor": "cmd/launcher/internal/driver/claude/testdata/corpus/real-conflict-resolve-error/resolve-exit.golden.json",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 36,
+    "output_tokens": 4363,
+    "cache_read_input_tokens": 711181,
+    "cache_creation_input_tokens": 45209,
+    "total_cost_usd": 0.5913122,
+    "duration_ms": 64685,
+    "duration_api_ms": 58361,
+    "num_turns": 19
   }
 }
