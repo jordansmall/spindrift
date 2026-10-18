@@ -129,26 +129,29 @@ func TestBlankHeredocs(t *testing.T) {
 	const p = "[REDACTED:inline-code]"
 	cases := []struct {
 		name, in, want string
+		wantN          int
 	}{
 		{"quoted tag", "cat > a_test.go <<'EOF'\npackage private\nfunc f() {}\nEOF\ngo test ./...",
-			"cat > a_test.go <<'EOF'\n" + p + "\nEOF\ngo test ./..."},
-		{"double-quoted tag", "python3 - <<\"PY\"\nprivate()\nPY", "python3 - <<\"PY\"\n" + p + "\nPY"},
-		{"bare tag", "git commit -F - <<MSG\nprivate msg\nMSG\n", "git commit -F - <<MSG\n" + p + "\nMSG\n"},
-		{"dash strips tabs", "cat <<-EOF\n\tprivate\n\tEOF\necho ok", "cat <<-EOF\n" + p + "\n\tEOF\necho ok"},
-		{"two on one line", "paste <<A <<'B'\nprivate a\nA\nprivate b\nB", "paste <<A <<'B'\n" + p + "\nA\n" + p + "\nB"},
-		{"tag text inside body", "cat <<EOF\nnot EOF yet\nEOF", "cat <<EOF\n" + p + "\nEOF"},
-		{"unterminated", "cat <<EOF\nprivate\nmore private", "cat <<EOF\n" + p},
-		{"empty body", "cat <<EOF\nEOF", "cat <<EOF\nEOF"},
-		{"here-string", "grep x <<<\"$s\"", "grep x <<<\"$s\""},
-		{"shift", "echo $((1<<3))", "echo $((1<<3))"},
-		{"no heredoc", "go test ./...", "go test ./..."},
-		{"already blanked", "cat <<EOF\n" + p + "\nEOF", "cat <<EOF\n" + p + "\nEOF"},
+			"cat > a_test.go <<'EOF'\n" + p + "\nEOF\ngo test ./...", 1},
+		{"double-quoted tag", "python3 - <<\"PY\"\nprivate()\nPY", "python3 - <<\"PY\"\n" + p + "\nPY", 1},
+		{"bare tag", "git commit -F - <<MSG\nprivate msg\nMSG\n", "git commit -F - <<MSG\n" + p + "\nMSG\n", 1},
+		{"dash strips tabs", "cat <<-EOF\n\tprivate\n\tEOF\necho ok", "cat <<-EOF\n" + p + "\n\tEOF\necho ok", 1},
+		{"two on one line", "paste <<A <<'B'\nprivate a\nA\nprivate b\nB", "paste <<A <<'B'\n" + p + "\nA\n" + p + "\nB", 2},
+		{"tag text inside body", "cat <<EOF\nnot EOF yet\nEOF", "cat <<EOF\n" + p + "\nEOF", 1},
+		{"unterminated", "cat <<EOF\nprivate\nmore private", "cat <<EOF\n" + p, 1},
+		{"shift-like openers with no body", `python3 -c "print(1 << a << b)"`, `python3 -c "print(1 << a << b)"`, 0},
+		{"unterminated first of two", "cat <<A <<B\nprivate", "cat <<A <<B\n" + p, 1},
+		{"empty body", "cat <<EOF\nEOF", "cat <<EOF\nEOF", 0},
+		{"here-string", "grep x <<<\"$s\"", "grep x <<<\"$s\"", 0},
+		{"shift", "echo $((1<<3))", "echo $((1<<3))", 0},
+		{"no heredoc", "go test ./...", "go test ./...", 0},
+		{"already blanked", "cat <<EOF\n" + p + "\nEOF", "cat <<EOF\n" + p + "\nEOF", 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, _ := blankHeredocs(c.in)
-			if got != c.want {
-				t.Errorf("blankHeredocs(%q)\n got: %q\nwant: %q", c.in, got, c.want)
+			got, n := blankHeredocs(c.in)
+			if got != c.want || n != c.wantN {
+				t.Errorf("blankHeredocs(%q)\n got: %q, %d\nwant: %q, %d", c.in, got, n, c.want, c.wantN)
 			}
 		})
 	}
