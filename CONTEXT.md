@@ -598,6 +598,28 @@ as their sub-issue links land — an issue with no such link is simply its own
 broad ticket rather than an unspecified case.
 _Avoid_: preset, profile, mode.
 
+**Backend Strategy**:
+An Issue Tracker or Code Forge backend's Go half as one declarative literal
+exported by that backend's own package (ADR 0068): how to build and validate
+its adapters, how its remote is identified, how the Box sets up its CLI, and
+the optional hooks a shared reader calls when present. The Backend
+counterpart of a Driver's [[Strategy]]; every binary reaches it through the
+Bundle, so no caller spells a backend's name. _Avoid_: backend row (that is
+the Nix half), backend registry entry, adapter config.
+
+**Bundle**:
+The one package that registers the Strategies spindrift ships — Drivers and
+backends alike — and that only the shipped binaries import, so core packages
+and their tests never import a concrete adapter (ADR 0066, ADR 0068).
+_Avoid_: registry (the lookup it fills), plugin set.
+
+**Row-owned knob**:
+A knob declared on the registry row of the one adapter it configures — a
+backend's base URL, a runner's network flag, a Driver-only timeout — rather
+than in the shared knob schema, which folds every row's knobs in (ADR 0068).
+Its Consumer-facing path is unchanged by where it is declared. _Avoid_:
+backend setting, adapter option, per-backend knob.
+
 **Launcher input**:
 The nix-rendered JSON document that carries every nix-computed value from the
 generated wrapper to the launcher through a single `--input` store path: a
