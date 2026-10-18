@@ -34,7 +34,7 @@ in
   # Extending the dogfood must not widen what every consumer gets by default.
   merge-guard-paths-schema-default-unchanged =
     assert assertMsg
-      (schemaDefault == ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**")
+      (schemaDefault == ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**")
       "lib/env-schema.nix mergeGuardPaths.default must stay the shipped default; extend the dogfood in nix/dogfood-defaults.nix instead, or update this pin if the shipped default is meant to change";
     pkgs.runCommand "merge-guard-paths-schema-default-unchanged" { } "touch $out";
 

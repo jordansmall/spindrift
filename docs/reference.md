@@ -405,7 +405,7 @@ issues.labels.complete   = "agent-complete";
 git.baseBranch         = "main";
 git.branchPrefix       = "agent/issue-";
 git.merge.policy       = "manual";
-git.merge.guardPaths   = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
+git.merge.guardPaths   = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**";
 git.merge.pollInterval = 30;
 git.merge.pollTimeout  = 3600;
 dispatch.maxParallel   = 3;
@@ -1114,23 +1114,36 @@ This first slice is deliberately narrow:
   `SCOUT_PROVISIONED`, `WORKER_PROVISIONED` and `FILER_ENABLED` bake `false`.
   Only the reviewer's model and effort are kept, for the orchestrator's review
   pass.
-- **No hooks.** None of claude's tool hooks run under pi.
 - **API keys only.** The row declares one `credentials` rule per supported
   Provider (see the `pi` credential list under the secret knobs); a key is
   required only when some model tier names that Provider. Keys reach the Box
   through the environment as the Provider's own variable, stay off the bwrap
   argv, and are in the shared Bash scrub list (`agent/credential-vars`),
-  though that scrub is not enforced in a pi Box while no hooks run. A
+  which the bridge's scrub hook below enforces on every `bash` call. A
   Provider outside the eight gets no preflight check and its key is not
   forwarded into the Box. There is no `PI_AUTH_CONTENT` (Copilot).
+- **Hooks through a bridge extension (issue #5482).** pi has no hook config,
+  so claude's five tool hooks (credential deny on `read` and `bash`, env
+  credential scrub, background-Bash rejection, Bash output tee and summary) run
+  through `agent/pi-hook-bridge.js`, baked at
+  `~/.pi/agent/extensions/spindrift-hooks.js`. Its hook list is generated from
+  the `pi` column of `lib/bash-hooks.nix` by `nix run .#regen`. pi's `bash`
+  has no `run_in_background` argument, so background rejection detects shell
+  backgrounding in the command instead. A hook that fails or prints malformed
+  output blocks the call (fail closed); the post-tool summary hook fails open,
+  because pi only logs a throwing `tool_result` handler, and the full output
+  stays in the log.
 
 Fix passes and nudges resume the first pass's pi session with `--session-id`,
 and a missing session starts fresh instead of failing, as the fix box's session
 resume notes above describe.
 
 Baked skills land in pi's agent directory, `/home/agent/.pi/agent/skills`,
-where pi reads them. Under `--no-approve` pi ignores the Target repo's
-project-local `.pi/` config. Heartbeat lines and Dispatch Records report the
+where pi reads them. pi always runs with `--no-approve`, so it ignores the
+Target repo's project-local `.pi/` (settings, extensions, MCP servers, skills,
+prompts), while `AGENTS.md` and `CLAUDE.md` are still read (pi loads context
+files regardless of trust). A PR adding a `.pi/` path is still merge-guarded
+(see [Merge guard](#merge-guard)). Heartbeat lines and Dispatch Records report the
 observed model as `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix
 notation, so the effort in force shows next to the model.
 
@@ -2059,7 +2072,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `MERGE_MODE`              | `manual` (baked)       | post-green merge policy: `manual` (leave the green PR for a human), `immediate` (rebase-merge on green), `auto` (enqueue the forge's native auto-merge — meaningful on any `PRForge` backend, `github` or `forgejo`; on `github` the repo must have auto-merge enabled, on `forgejo` the repo must allow the merge style `MERGE_METHOD` selects). Under `CODE_FORGE=git`, `manual`/`immediate` map to remote pushes instead (leave the pushed branch / push straight to the target branch); `auto` has no meaning off a `PRForge` backend and fails fast at startup. Under `CODE_FORGE=local`, only `immediate` relays the seam bundle into the Accumulation repo — `manual`/`auto` have no meaning under `local` and fail fast at startup. |
 | `MERGE_METHOD`            | `rebase` (baked)       | how the final integration commits land on green: `merge` (merge commit), `squash`, or `rebase`; maps to GitHub's native `merge_method` on `github` and to the Forgejo merge API's `Do` field on `forgejo` (`github` and `forgejo` Code Forge merge paths only) |
 | `SYNC_METHOD`             | `rebase` (baked)       | how a behind branch is brought current before landing: `rebase` (linear history) or `merge` (merge the base in); governs both the preflight-stale-base proactive sync and the reactive on-conflict sync during an immediate merge (`github` Code Forge PR-landing path only; the sync commits as `GIT_USER_NAME`/`GIT_USER_EMAIL`) |
-| `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` and `forgejo` Code Forges only; empty disables — see [Merge guard](#merge-guard)) |
+| `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` and `forgejo` Code Forges only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | (baked; see [Default models](#default-models)) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
 | `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; on `opencode`, `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` (issue #5351), which sets only the default: a per-call `timeout` the model passes overrides it and opencode applies no cap, unlike Claude Code's maximum. A Driver declaring none ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: a 10-minute maximum; opencode: a 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log |
@@ -3829,11 +3842,11 @@ downgrades, it never blocks: the cost of a hit is one human read.
 The default is:
 
 ```
-.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**
+.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**
 ```
 
 — CI config for both forges plus the instruction surface (`CLAUDE.md`, `AGENTS.md`,
-`.claude/`, `.opencode/`). Those files are a cross-run persistence vector: a
+`.claude/`, `.opencode/`, `.pi/`). Those files are a cross-run persistence vector: a
 poisoned instruction file merged once feeds every future Agent as trusted
 input on its next fresh clone, so the default set is deliberately broad.
 Setting `MERGE_GUARD_PATHS=""` disables the guard entirely — an explicit

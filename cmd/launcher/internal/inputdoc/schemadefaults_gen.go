@@ -54,7 +54,7 @@ var schemaDefaults = map[string]string{
 	"MAX_REBASE_ATTEMPTS":           "3",
 	"MAX_RECOVER_ATTEMPTS":          "3",
 	"MEMORY_LIMIT":                  "5g",
-	"MERGE_GUARD_PATHS":             ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**",
+	"MERGE_GUARD_PATHS":             ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**",
 	"MERGE_METHOD":                  "rebase",
 	"MERGE_MODE":                    "manual",
 	"MERGE_POLL_INTERVAL":           "30",

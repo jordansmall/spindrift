@@ -16,7 +16,7 @@ func TestMatchedGuardPaths_HitReturnsMatchedFiles(t *testing.T) {
 // no-match, a deleted file's (still-reported) path, a nested CLAUDE.md, and
 // the empty-string opt-out that disables the guard entirely.
 func TestMatchedGuardPaths(t *testing.T) {
-	const defaultPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**"
+	const defaultPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**,.pi/**"
 
 	cases := []struct {
 		name  string
