@@ -11,6 +11,10 @@ let
   # session state omits it (see lib/preambles.nix's renderDriverMountPreamble).
   # When present, assertShape checks its shape: a non-empty relative path with
   # no empty, "." or ".." segment (so no leading/trailing/doubled slash either).
+  # envFiles is a list of { env, pathRelative } entries: the Box writes each
+  # named environment value to a home-relative file (mode 0600) before the
+  # Driver runs, for a CLI with no env-native credential store. assertShape
+  # checks it via envFileErrors.
   # credentials is a list of rules (possibly empty), shape-checked by
   # credentialRuleErrors.
   # configFiles (home-relative path -> content, baked by lib/image.nix) is
@@ -61,6 +65,50 @@ let
       ) "setupCommand must be a non-empty list of non-empty strings when present"
       ++ lib.optional (unknownKeys != [ ]) "unknown key(s): ${lib.concatStringsSep ", " unknownKeys}";
 
+  # Refuses "", "." and ".." segments, which also covers a leading, trailing
+  # or doubled "/". Callers guard with isString.
+  hasBadPathSegment =
+    path:
+    lib.any (
+      seg:
+      lib.elem seg [
+        ""
+        "."
+        ".."
+      ]
+    ) (lib.splitString "/" path);
+
+  envFileKeys = [
+    "env"
+    "pathRelative"
+  ];
+
+  # The Box receives the entries as one space-separated "ENV=path" word list
+  # (DRIVER_ENV_FILES), so an env that is not a shell-style name, or a path
+  # with whitespace, would not round-trip.
+  envFileErrors =
+    entry:
+    if !builtins.isAttrs entry then
+      [ "must be an attribute set, got a ${builtins.typeOf entry}" ]
+    else
+      let
+        unknownKeys = lib.filter (k: !(lib.elem k envFileKeys)) (builtins.attrNames entry);
+        envOk =
+          entry ? env
+          && builtins.isString entry.env
+          && builtins.match "[A-Za-z_][A-Za-z0-9_]*" entry.env != null;
+        pathOk =
+          entry ? pathRelative
+          && builtins.isString entry.pathRelative
+          && builtins.match "[^[:space:]]+" entry.pathRelative != null
+          && !(hasBadPathSegment entry.pathRelative);
+      in
+      lib.optional (!envOk) "env must be a shell-style variable name"
+      ++
+        lib.optional (!pathOk)
+          "pathRelative must be a non-empty relative path with no whitespace and no empty, \".\" or \"..\" segment (so no leading, trailing or doubled \"/\")"
+      ++ lib.optional (unknownKeys != [ ]) "unknown key(s): ${lib.concatStringsSep ", " unknownKeys}";
+
   # Names both the Driver and every missing attribute, so an incomplete entry
   # dies at build time rather than in a live Box.
   assertShape =
@@ -76,14 +124,7 @@ let
         entry ? sessionCacheDirRelative
         && !(
           builtins.isString entry.sessionCacheDirRelative
-          && !(lib.any (
-            seg:
-            lib.elem seg [
-              ""
-              "."
-              ".."
-            ]
-          ) (lib.splitString "/" entry.sessionCacheDirRelative))
+          && !(hasBadPathSegment entry.sessionCacheDirRelative)
         );
       credentialsErrors =
         if !builtins.isList entry.credentials then
@@ -97,6 +138,18 @@ let
               )
             ) entry.credentials
           );
+      envFilesErrors =
+        if !(entry ? envFiles) then
+          [ ]
+        else if !builtins.isList entry.envFiles then
+          [ "Driver '${driverName}' envFiles must be a list of { env, pathRelative } entries" ]
+        else
+          lib.concatLists (
+            lib.imap0 (
+              i: f:
+              map (e: "Driver '${driverName}' has an invalid envFiles[${toString i}]: ${e}") (envFileErrors f)
+            ) entry.envFiles
+          );
       errors =
         lib.optional (
           missing != [ ]
@@ -107,6 +160,7 @@ let
           else
             "a ${builtins.typeOf entry.sessionCacheDirRelative}"
         }"
+        ++ envFilesErrors
         ++ lib.optionals (!(lib.elem "credentials" missing)) credentialsErrors;
     in
     if errors != [ ] then throw (lib.concatStringsSep "; " errors) else entry;
@@ -303,6 +357,14 @@ let
     + lib.optionalString (driverEntry ? sessionCacheDirRelative) (
       "DRIVER_SESSION_CACHE_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.sessionCacheDirRelative}"
+      + "\n"
+    )
+    # Home-relative on purpose: the Box joins its own HOME.
+    + lib.optionalString (driverEntry ? envFiles) (
+      "DRIVER_ENV_FILES="
+      + lib.escapeShellArg (
+        lib.concatMapStringsSep " " (f: "${f.env}=${f.pathRelative}") driverEntry.envFiles
+      )
       + "\n"
     )
     + renderEnvCommon driverEntry

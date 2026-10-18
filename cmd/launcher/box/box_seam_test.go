@@ -231,7 +231,7 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--argv-order=prompt model agents session driverFlags effort",
 		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
-		"--driver-session-cache-dir=", "--branch-prefix=agent/issue-",
+		"--driver-session-cache-dir=", "--driver-env-files=", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=", "--driver-bash-timeout-env=",
 		"--dev-shell-name=", "--dev-shell-probe-timeout=",
 		// A nonexistent temp path: the backstop reads no verdict, and an

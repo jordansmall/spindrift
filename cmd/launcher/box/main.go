@@ -42,6 +42,7 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/signalclient"
@@ -68,6 +69,8 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.StringVar(&in.ForbiddenMarkersFile, "forbidden-markers-registry", "", "path to the prompt-contract forbiddenMarkers registry JSON file, read by the read-only guards")
 	fs.StringVar(&a.SkillsDir, "driver-skills-dir", "", "DRIVER_SKILLS_DIR, probed for baked skills")
 	fs.StringVar(&in.DriverSessionCacheDir, "driver-session-cache-dir", "", "DRIVER_SESSION_CACHE_DIR, empty when the Driver has none")
+	var envFiles string
+	fs.StringVar(&envFiles, "driver-env-files", "", "DRIVER_ENV_FILES, space-separated ENV=home-relative-path words, empty when the Driver has none")
 	a.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return inputs{}, err
@@ -91,6 +94,11 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	// holds the budgets BindFlags parsed.
 	a.Passthrough.Caps.MaxSlices = promptassembly.DefaultMaxSlices
 	a.Passthrough.Caps.MaxReviewRounds = promptassembly.DefaultMaxReviewRounds
+	files, err := homelayout.ParseEnvFiles(envFiles)
+	if err != nil {
+		return inputs{}, fmt.Errorf("--driver-env-files: %w", err)
+	}
+	in.DriverEnvFiles = files
 	return in, nil
 }
 

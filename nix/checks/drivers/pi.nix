@@ -113,6 +113,25 @@ in
       "renderPreamble must bake pi's DRIVER_SESSION_CACHE_DIR, got: ${preamble}";
     pkgs.runCommand "drivers-pi-session-cache-dir" { } "touch $out";
 
+  # pi has no env-native auth store: PI_AUTH_CONTENT is written to auth.json
+  # (see lib/drivers/pi.nix).
+  drivers-pi-env-files =
+    assert assertMsg
+      (
+        (entry.envFiles or [ ]) == [
+          {
+            env = "PI_AUTH_CONTENT";
+            pathRelative = ".pi/agent/auth.json";
+          }
+        ]
+      )
+      "pi Driver must declare PI_AUTH_CONTENT -> .pi/agent/auth.json in envFiles, got: ${
+        builtins.toJSON (entry.envFiles or [ ])
+      }";
+    assert assertMsg (hasInfix "DRIVER_ENV_FILES='PI_AUTH_CONTENT=.pi/agent/auth.json'\n" preamble)
+      "renderPreamble must bake pi's DRIVER_ENV_FILES, got: ${preamble}";
+    pkgs.runCommand "drivers-pi-env-files" { } "touch $out";
+
   drivers-pi-argv-shape-pinned =
     let
       shape = entry.argvShape;

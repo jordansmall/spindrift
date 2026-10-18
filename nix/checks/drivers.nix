@@ -333,6 +333,80 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
       "renderPreamble must omit DRIVER_SESSION_CACHE_DIR entirely for a Driver entry with no sessionCacheDirRelative, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-omits-session-cache-dir-when-absent" { } "touch $out";
 
+  drivers-render-preamble-omits-env-files-when-absent =
+    let
+      out = driverRegistry.renderPreamble stubDriverBase;
+    in
+    assert assertMsg (!(hasInfix "DRIVER_ENV_FILES" out))
+      "renderPreamble must omit DRIVER_ENV_FILES entirely for a Driver entry with no envFiles, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-omits-env-files-when-absent" { } "touch $out";
+
+  drivers-render-preamble-env-files =
+    let
+      out = driverRegistry.renderPreamble (
+        stubDriverBase
+        // {
+          envFiles = [
+            {
+              env = "A_VAR";
+              pathRelative = ".a/auth.json";
+            }
+            {
+              env = "B_VAR";
+              pathRelative = "b.json";
+            }
+          ];
+        }
+      );
+    in
+    assert assertMsg (hasInfix "DRIVER_ENV_FILES='A_VAR=.a/auth.json B_VAR=b.json'\n" out)
+      "renderPreamble must render envFiles as one escaped ENV=path word list, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-env-files" { } "touch $out";
+
+  # assertShape validates envFiles when present: a list of exactly
+  # { env, pathRelative } with a shell-style env name and a non-empty,
+  # whitespace-free relative path with no empty, "." or ".." segment.
+  drivers-assert-shape-env-files =
+    let
+      ok = {
+        env = "A_VAR";
+        pathRelative = ".a/auth.json";
+      };
+      throws =
+        v:
+        !(builtins.tryEval (driverRegistry.assertShape "stub" (stubDriverComplete // { envFiles = v; })))
+        .success;
+      badEntries = [
+        "not-an-attrset"
+        { env = "A_VAR"; }
+        { pathRelative = ".a/x"; }
+        (ok // { env = ""; })
+        (ok // { env = "bad name"; })
+        (ok // { env = 1; })
+        (ok // { pathRelative = ""; })
+        (ok // { pathRelative = "/abs/x"; })
+        (ok // { pathRelative = "../x"; })
+        (ok // { pathRelative = "a/../x"; })
+        (ok // { pathRelative = "a b"; })
+        (ok // { pathRelative = "a//b"; })
+        (ok // { pathRelative = ".pi/agent/"; })
+        (ok // { pathRelative = "./x"; })
+        (ok // { pathRelative = "x/."; })
+        (ok // { pathRelative = 3; })
+        (ok // { extra = "x"; })
+      ];
+      notThrown = filter (e: !(throws [ e ])) badEntries;
+    in
+    assert assertMsg (notThrown == [ ])
+      "assertShape must throw for every malformed envFiles entry, but did not for: ${
+        concatStringsSep ", " (map (e: generators.toPretty { } e) notThrown)
+      }";
+    assert assertMsg (throws "oops") "assertShape must throw when envFiles is not a list";
+    assert assertMsg (
+      !(throws [ ]) && !(throws [ ok ])
+    ) "assertShape must accept an empty envFiles list and a well-formed entry";
+    pkgs.runCommand "drivers-assert-shape-env-files" { } "touch $out";
+
   # Issue #3348: assertShape also validates sessionCacheDirRelative's shape
   # when present (absence stays valid -- a Driver with no resumable session
   # state omits it): a non-empty

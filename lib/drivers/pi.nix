@@ -86,6 +86,16 @@
   # #5481).
   sessionCacheDirRelative = ".pi/agent/sessions";
 
+  # pi reads its OAuth credentials only from auth.json under its agent dir.
+  # The sessions mount above takes .pi/agent/sessions, so it does not shadow
+  # this file.
+  envFiles = [
+    {
+      env = "PI_AUTH_CONTENT";
+      pathRelative = ".pi/agent/auth.json";
+    }
+  ];
+
   # Keeps pi from checking for updates or reporting telemetry from inside the
   # Box; the piseam integration tests set the same two.
   envCommon = {

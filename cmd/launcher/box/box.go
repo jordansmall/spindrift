@@ -61,6 +61,9 @@ type inputs struct {
 	OperatorSkillsDir     string
 	HarnessHomeAgentDir   string
 	DriverSessionCacheDir string
+	// DriverEnvFiles are the Driver's envFiles: environment values written to
+	// home-relative files before the Driver runs.
+	DriverEnvFiles []homelayout.EnvFile
 	// RunStateFile is the run-state handoff artifact the backstop reads the
 	// reviewer's last verdict from; a missing file degrades inside the
 	// backstop (issue #2459). Box also hands it to every orchestrator pass as
@@ -697,6 +700,9 @@ func (r *boxRun) layOutHome() error {
 		return phaseErr("home-layout", err)
 	}
 	if err := homelayout.PopulateHome(home, in.HarnessHomeAgentDir, in.DriverSessionCacheDir); err != nil {
+		return phaseErr("home-layout", err)
+	}
+	if err := homelayout.WriteEnvFiles(home, in.DriverEnvFiles, r.d.Getenv); err != nil {
 		return phaseErr("home-layout", err)
 	}
 	return nil

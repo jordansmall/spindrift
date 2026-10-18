@@ -3,6 +3,8 @@ package homelayout
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -399,4 +401,104 @@ func TestPopulateHome(t *testing.T) {
 			t.Error("agents dir not owner-writable")
 		}
 	})
+}
+
+func envOf(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func TestWriteEnvFiles(t *testing.T) {
+	skipIfRoot(t)
+
+	t.Run("writes the value at the home-relative path, private, with its parent", func(t *testing.T) {
+		home := t.TempDir()
+		files := []EnvFile{{Env: "SECRET", Path: ".x/agent/auth.json"}}
+		if err := WriteEnvFiles(home, files, envOf(map[string]string{"SECRET": `{"k":"v"}`})); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(home, ".x", "agent", "auth.json")
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != `{"k":"v"}` {
+			t.Fatalf("ReadFile = %q, %v; want the env value", got, err)
+		}
+		if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+			t.Errorf("file mode = %v, want 0600", fi.Mode().Perm())
+		}
+		if fi, _ := os.Stat(filepath.Dir(path)); fi.Mode().Perm() != 0o700 {
+			t.Errorf("parent mode = %v, want 0700", fi.Mode().Perm())
+		}
+	})
+
+	t.Run("an unset or empty value writes nothing", func(t *testing.T) {
+		home := t.TempDir()
+		files := []EnvFile{{Env: "UNSET", Path: ".x/a"}, {Env: "EMPTY", Path: ".y/b"}}
+		if err := WriteEnvFiles(home, files, envOf(map[string]string{"EMPTY": ""})); err != nil {
+			t.Fatal(err)
+		}
+		entries, _ := os.ReadDir(home)
+		if len(entries) != 0 {
+			t.Errorf("home has %d entries, want none", len(entries))
+		}
+	})
+
+	t.Run("a path that is absolute or escapes home is refused", func(t *testing.T) {
+		for _, p := range []string{"/etc/passwd", "../outside", "a/../../outside", ".."} {
+			home := t.TempDir()
+			err := WriteEnvFiles(home, []EnvFile{{Env: "S", Path: p}}, envOf(map[string]string{"S": "v"}))
+			if err == nil {
+				t.Errorf("path %q: WriteEnvFiles succeeded, want an error", p)
+			}
+		}
+	})
+
+	t.Run("overwriting an existing file leaves it private and replaced", func(t *testing.T) {
+		home := t.TempDir()
+		path := filepath.Join(home, "auth.json")
+		if err := os.WriteFile(path, []byte("old-and-longer-content"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteEnvFiles(home, []EnvFile{{Env: "S", Path: "auth.json"}}, envOf(map[string]string{"S": "new"})); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != "new" {
+			t.Errorf("content = %q, want %q", got, "new")
+		}
+		if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+			t.Errorf("file mode = %v, want 0600", fi.Mode().Perm())
+		}
+	})
+
+	t.Run("a write failure names the path but not the value", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.WriteFile(filepath.Join(home, "blocker"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := WriteEnvFiles(home, []EnvFile{{Env: "S", Path: "blocker/auth.json"}}, envOf(map[string]string{"S": "s3cret"}))
+		if err == nil {
+			t.Fatal("WriteEnvFiles succeeded under a non-directory parent")
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("error leaks the value: %v", err)
+		}
+	})
+}
+
+func TestParseEnvFiles(t *testing.T) {
+	got, err := ParseEnvFiles("A=.a/x B=y.json")
+	want := []EnvFile{{Env: "A", Path: ".a/x"}, {Env: "B", Path: "y.json"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseEnvFiles = %v, %v; want %v", got, err, want)
+	}
+	if got, err := ParseEnvFiles(""); err != nil || len(got) != 0 {
+		t.Errorf("ParseEnvFiles(empty) = %v, %v; want none", got, err)
+	}
+	for _, bad := range []string{"NOEQUALS", "=path", "A=", "A=x B"} {
+		if _, err := ParseEnvFiles(bad); err == nil {
+			t.Errorf("ParseEnvFiles(%q) succeeded, want an error", bad)
+		}
+	}
 }
