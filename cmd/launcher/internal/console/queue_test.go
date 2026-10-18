@@ -112,7 +112,7 @@ func TestQueue_Discover_WiresSeedScopeContainmentOnlyUnderLocalForge(t *testing.
 // Empty reports false while any pick is still eligible to launch (PickQueued
 // or PickHeld); tryLaunch in launcher.go gates its drain spawn on that
 // predicate (#754). Queue.Empty's doc comment (#650) says why a held pick
-// counts as non-empty, unlike hasQueued.
+// counts as non-empty, unlike hasQueuedForKinds.
 func TestQueue_Empty(t *testing.T) {
 	tests := []struct {
 		name  string
