@@ -202,13 +202,15 @@ type Dispatcher interface {
 	// Disposition for that contract.
 	ResolveConflict(pr string) error
 
-	// UsageReport returns the Markdown usage-summary comment body for the
-	// initial run.
+	// UsageReport returns the Markdown usage-summary comment body aggregated
+	// across every attempt log: each pass (conflict-resolve included) and each
+	// rotated-aside retry within a pass.
 	UsageReport() string
 
 	// CumulativeUsage sums every usage field — tokens, cost, durations, and
-	// turns — across the initial run and every fix pass. selfHealGate's
-	// budget gate (issue #2001) reads it before dispatching another fix pass.
+	// turns — across the same attempt logs UsageReport aggregates.
+	// selfHealGate's budget gate (issue #2001) reads it before dispatching
+	// another fix pass.
 	CumulativeUsage() usage.Usage
 
 	// RecordID returns the Dispatch's Record ID, "" until one is minted.
