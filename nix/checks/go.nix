@@ -14,6 +14,53 @@ let
   driverNames = builtins.attrNames driverRegistry.entries;
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
   driverGoTestAttr = name: "drivers-${name}-go-test";
+  launcherDir = ../../cmd/launcher;
+  allDriverDirs = map driverDir driverNames;
+  # Everything that links the Driver bundle: the root package, its testdata,
+  # the mains and the bundled fixture. The root's *.go files are listed one by
+  # one because internal/ lies beneath it. They run in launcher-binaries-go-test,
+  # so the core go test derivation compiles without any Driver (ADR 0066
+  # decision 8). bundle-binaries-match-guard pins the mains and fixture to
+  # bundleBinaries and bundleFixtures in internal/driver/bundle_guard_test.go.
+  bundleMains = [
+    "box"
+    "daemon"
+    "driver-exec"
+    "orchestrator"
+    "quickstart"
+  ];
+  bundleFixtureDirs = [ "internal/seamtest/bundled" ];
+  bundleBinaryDirs =
+    pkgs.lib.mapAttrsToList (n: _: launcherDir + "/${n}") (
+      pkgs.lib.filterAttrs (n: t: t == "regular" && pkgs.lib.hasSuffix ".go" n) (
+        builtins.readDir launcherDir
+      )
+    )
+    ++ map (d: launcherDir + "/${d}") ([ "testdata" ] ++ bundleMains ++ bundleFixtureDirs);
+  # `files` without the Drivers (and so their corpora), the bundle and the
+  # binaries.
+  coreFiles =
+    files:
+    fs.difference files (
+      fs.unions (allDriverDirs ++ [ (launcherDir + "/internal/driver/bundle") ] ++ bundleBinaryDirs)
+    );
+  # The vendor tree is re-derived from a source without any Driver, bundle or
+  # binary, so editing one Driver never changes another's drvPath nor the core
+  # go test's (a plain launcherGoModules would, its src being the whole tree).
+  # Fixed-output with the same vendorHash, so its outPath equals
+  # launcherGoModules' and nothing is fetched twice. `go mod vendor -e`
+  # tolerates the packages that import the absent directories. Gotcha: a Driver
+  # or main importing a third-party module no other package uses changes the
+  # vendored set, and the narrowed derivation then mismatches launcherVendorHash.
+  vendorFor =
+    files:
+    launcherGoModules.overrideAttrs (_: {
+      src = fs.toSource {
+        root = launcherDir;
+        fileset = coreFiles files;
+      };
+      preBuild = "goModVendorFlags=(-e)";
+    });
   nixSrc = fs.toSource {
     root = ../..;
     fileset = fs.fileFilter (f: f.hasExt "nix") ../..;
@@ -59,29 +106,13 @@ let
   # name so a new row yields one with no hand-pinned attr. `files` is the
   # cmd/launcher fileset every source is cut from; the independence check
   # perturbs it.
-  #
-  # The vendor tree is re-derived from a source without any Driver directory,
-  # so editing one Driver never changes another's drvPath (a plain
-  # launcherGoModules would, its src being the whole tree). Fixed-output with
-  # the same vendorHash, so its outPath equals launcherGoModules' and nothing
-  # is fetched twice. `go mod vendor -e` tolerates the packages that import the
-  # absent Driver directories. Gotcha: a Driver importing a third-party module
-  # no other package uses changes the vendored set, and the narrowed derivation
-  # then mismatches launcherVendorHash.
   driverGoTestsFor =
     {
       files,
       entries,
     }:
     let
-      allDriverDirs = fs.unions (map driverDir driverNames);
-      vendor = launcherGoModules.overrideAttrs (_: {
-        src = fs.toSource {
-          root = ../../cmd/launcher;
-          fileset = fs.difference files allDriverDirs;
-        };
-        preBuild = "goModVendorFlags=(-e)";
-      });
+      vendor = vendorFor files;
     in
     pkgs.lib.listToAttrs (
       map (name: {
@@ -116,6 +147,64 @@ let
     files = ../../cmd/launcher;
     inherit (driverRegistry) entries;
   };
+  # go test guards config-parsing regressions (#112). docs/, .github/,
+  # .forgejo/, templates/, agent/, README.md (if present) and lib/ are copied
+  # beside cmd/launcher, mirroring the repo layout, so the tests resolve their relative
+  # paths (#611, #1985, #2038, #2507, #2566, #2741, #2743, #3988). forge's tests shell out to git;
+  # the RUNTIME=bwrap tests LookPath "bwrap" (#2441), and bubblewrap is Linux-only.
+  sideTrees = ''
+    cp -r ${../../docs} src/docs
+    cp -r ${../../.github} src/.github
+    cp -r ${../../.forgejo} src/.forgejo
+    cp -r ${../../templates} src/templates
+    cp -r ${../../agent} src/agent
+    mkdir -p src/tests/testdata
+    cp -r ${../../tests/testdata/prompt-assembly-golden} src/tests/testdata/prompt-assembly-golden
+    # Skipped only when docs-edit-isolation removes README.md from the root;
+    # a real deletion still fails go test via collectMarkdownDocs in
+    # cmd/launcher/main_test.go.
+    ${pkgs.lib.optionalString (builtins.pathExists ../../README.md) "cp ${../../README.md} src/README.md"}
+    cp -r ${../../lib} src/lib
+  '';
+  goTestInputs = [
+    pkgs.go
+    pkgs.git
+  ];
+  # The core run: every package that needs no Driver, bundle or main. It cuts
+  # its source from coreFiles, so a Driver edit never reaches this derivation;
+  # the assert fails if the copied tree still holds one. The corpus find is
+  # defence in depth, for a corpus landing under internal/driver outside a
+  # Driver directory.
+  launcherGoTestFor =
+    files:
+    pkgs.runCommand "launcher-go-test" { nativeBuildInputs = goTestInputs; } ''
+      mkdir -p src/cmd
+      cp -r ${
+        fs.toSource {
+          root = launcherDir;
+          fileset = coreFiles files;
+        }
+      } src/cmd/launcher
+      ${sideTrees}
+      chmod -R +w src
+      for held in bundle ${pkgs.lib.concatStringsSep " " driverNames}; do
+        if [ -e "src/cmd/launcher/internal/driver/$held" ]; then
+          echo "launcher-go-test's source holds internal/driver/$held" >&2
+          exit 1
+        fi
+      done
+      corpora=$(find src/cmd/launcher/internal/driver -path '*/testdata/corpus')
+      if [ -n "$corpora" ]; then
+        echo "launcher-go-test's source holds a Driver corpus: $corpora" >&2
+        exit 1
+      fi
+      ${goTestPrologueWith (vendorFor files)}
+      module=$(go list -m)
+      # The registry root's guard tests need every Driver, and run in
+      # launcher-binaries-go-test.
+      go test $(go list ./... | grep -vxF "$module/internal/driver")
+      touch $out
+    '';
   # The Dashboard is a separate dependency-free module (ADR 0060), so the
   # vendored-launcher GOFLAGS=-mod=vendor from goCheckEnv is reset: it has no
   # vendor/ tree. Ends with src as the working directory.
@@ -238,42 +327,63 @@ driverGoTests
     touch $out
   '';
 
-  # go test guards config-parsing regressions (#112). docs/, .github/,
-  # .forgejo/, templates/, agent/, README.md (if present) and lib/ are copied
-  # beside cmd/launcher, mirroring the repo layout, so the tests resolve their relative
-  # paths (#611, #1985, #2038, #2507, #2566, #2741, #2743, #3988). forge's tests shell out to git;
-  # the RUNTIME=bwrap tests LookPath "bwrap" (#2441), and bubblewrap is Linux-only.
-  launcher-go-test =
-    pkgs.runCommand "launcher-go-test"
+  launcher-go-test = launcherGoTestFor launcherDir;
+
+  # The packages that link every Driver through the bundle (bundleBinaryDirs),
+  # the bundle's own tests, plus the registry root's cross-Driver guard tests;
+  # the whole tree is copied, so a Driver edit reruns this.
+  launcher-binaries-go-test =
+    pkgs.runCommand "launcher-binaries-go-test"
       {
-        nativeBuildInputs = [
-          pkgs.go
-          pkgs.git
-        ];
+        nativeBuildInputs = goTestInputs;
       }
       ''
         mkdir -p src/cmd
-        cp -r ${../../cmd/launcher} src/cmd/launcher
-        cp -r ${../../docs} src/docs
-        cp -r ${../../.github} src/.github
-        cp -r ${../../.forgejo} src/.forgejo
-        cp -r ${../../templates} src/templates
-        cp -r ${../../agent} src/agent
-        mkdir -p src/tests/testdata
-        cp -r ${../../tests/testdata/prompt-assembly-golden} src/tests/testdata/prompt-assembly-golden
-        # Skipped only when docs-edit-isolation removes README.md from the root;
-        # a real deletion still fails go test via collectMarkdownDocs in
-        # cmd/launcher/main_test.go.
-        ${pkgs.lib.optionalString (builtins.pathExists ../../README.md) "cp ${../../README.md} src/README.md"}
-        cp -r ${../../lib} src/lib
+        cp -r ${launcherDir} src/cmd/launcher
+        ${sideTrees}
         chmod -R +w src
         ${goTestPrologue}
-        module=$(go list -m)
-        listed=$(go list ./...)
-        # Driver packages run in their own drivers-<name>-go-test derivations.
-        go test $(printf '%s\n' "$listed" | grep -vE "^$module/internal/driver/(${pkgs.lib.concatStringsSep "|" driverNames})(/|\$)")
+        go test . ${
+          pkgs.lib.concatMapStringsSep " " (d: "./${d}/...") (bundleMains ++ bundleFixtureDirs)
+        } ./internal/driver ./internal/driver/bundle/...
         touch $out
       '';
+
+  # bundleMains and bundleFixtureDirs are the module-relative entries of
+  # bundleBinaries and bundleFixtures in bundle_guard_test.go (its bare `module`
+  # entry is the root package, which bundleBinaryDirs lists separately). A list
+  # edited without the other would move a package between the core and
+  # binaries derivations.
+  bundle-binaries-match-guard =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        lessThan
+        sort
+        ;
+      guard = builtins.readFile ../../cmd/launcher/internal/driver/bundle_guard_test.go;
+      # Only the two list bodies: a module + "/..." elsewhere in the file is no entry.
+      blockBody =
+        name:
+        let
+          found = builtins.filter builtins.isList (builtins.split "var ${name} = [^{]*[{]([^}]*)[}]" guard);
+        in
+        assert assertMsg (found != [ ]) "bundle_guard_test.go has no `var ${name} = []string{...}` block";
+        builtins.head (builtins.head found);
+      entries =
+        body:
+        map builtins.head (
+          builtins.filter builtins.isList (builtins.split "module \\+ \"/([^\"]+)\"" body)
+        );
+      guarded = sort lessThan (
+        entries (blockBody "bundleBinaries") ++ entries (blockBody "bundleFixtures")
+      );
+      listed = sort lessThan (bundleMains ++ bundleFixtureDirs);
+    in
+    assert assertMsg (guarded == listed)
+      "bundleMains ++ bundleFixtureDirs (nix/checks/go.nix) must equal the module + \"/<dir>\" entries of bundleBinaries and bundleFixtures (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " listed}; the guard has: ${concatStringsSep ", " guarded}";
+    pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
 
   # A registry row yields its per-Driver go test derivation with no other edit
   # (issue #5508). Only attr names are forced: building the stub's derivation
@@ -291,10 +401,11 @@ driverGoTests
       "a stub registry row must yield drivers-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
     pkgs.runCommand "drivers-go-test-stub-row-yields-derivation" { } "touch $out";
 
-  # Editing one Driver leaves every other Driver's go test derivation path
-  # unchanged (issue #5508): a vendor tree or source shared across Drivers
-  # would move them all. Each registry Driver in turn has one file removed; the
-  # sensitivity assert keeps the check from passing vacuously.
+  # Editing one Driver leaves every other Driver's go test derivation path, and
+  # the core launcher-go-test's, unchanged (issues #5508, #5545): a vendor tree
+  # or source shared across them would move them all. Each registry Driver in
+  # turn has one file removed; the sensitivity assert keeps the check from
+  # passing vacuously.
   drivers-go-test-independent =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep filterAttrs;
@@ -310,12 +421,16 @@ driverGoTests
             inherit (driverRegistry) entries;
           };
           moved = builtins.filter (n: n != p && drv driverGoTests n != drv after n) driverNames;
+          core = launcherGoTestFor (fs.difference launcherDir (driverDir p + "/${file}"));
         in
         assertMsg (drv driverGoTests p != drv after p)
           "removing ${file} from the ${p} Driver did not change its own go test derivation; the perturbation is inert"
         && assertMsg (
           moved == [ ]
-        ) "editing the ${p} Driver changed the go test derivation of: ${concatStringsSep ", " moved}";
+        ) "editing the ${p} Driver changed the go test derivation of: ${concatStringsSep ", " moved}"
+        && assertMsg (
+          core.drvPath == (launcherGoTestFor launcherDir).drvPath
+        ) "editing the ${p} Driver changed launcher-go-test";
     in
     assert builtins.all independent driverNames;
     pkgs.runCommand "drivers-go-test-independent" { } "touch $out";
@@ -352,7 +467,8 @@ driverGoTests
           exit 1
         fi
         # Run each package with only its own tagged test names: its untagged
-        # tests need the full repo tree and already run in launcher-go-test.
+        # tests need the full repo tree and already run in launcher-go-test or
+        # launcher-binaries-go-test.
         # A name scraped from the sources is a heuristic, so a tagged test
         # sharing a name with an untagged one in its package would run both.
         for pkg in $(echo "$files" | xargs -n1 dirname | sort -u); do

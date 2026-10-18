@@ -71,7 +71,7 @@ let
 
   # Genuine reader of docs/ and README.md (nix/checks/go.nix); if it does not
   # move, the perturbation never reached the checkset and the pin is vacuous.
-  docsReaderControl = "launcher-go-test";
+  docsReaderControl = "launcher-binaries-go-test";
 in
 {
   docs-edit-isolation =
