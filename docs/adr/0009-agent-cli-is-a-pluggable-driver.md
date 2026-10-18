@@ -194,19 +194,22 @@ The three legs fall into three distinct auth shapes:
 
 **env-schema / gating shape owed (per leg):** each new knob follows the
 `opencodeAuthContent`/`anthropicAPIKey` pattern in `lib/env-schema.nix`
-(`env`, `secret`, `doc`, `boxEnv`); the gating itself is a `MODEL`-prefix
-branch inside the existing `case "opencode":` arm of the launcher's
+(`env`, `secret`, `doc`, `boxEnv`); the gating itself is a `modelPrefix`
+credential rule on `lib/drivers/opencode.nix`, walked by the launcher's
 `driver-credentials` check, not in `lib/env-schema.nix`, and keys on
 **both** Driver and Provider — required only when `DRIVER=opencode` *and*
-`MODEL` carries the matching Provider prefix, ignored otherwise, exactly as
-`opencodeAuthContent` is scoped to `MODEL=github-copilot/<model>`. Bedrock:
+any model tier the gate walks (the #5505 amendment above) carries the
+matching Provider prefix, ignored otherwise, exactly as the
+`modelPrefix = "github-copilot/"` rule scopes `opencodeAuthContent`. Bedrock:
 one `awsBedrockBearerToken` (`AWS_BEARER_TOKEN_BEDROCK`) secret + non-secret
 `AWS_REGION`. Vertex: a `googleVertexCredentials` **content** secret
 (feeding the file primitive above, *not* a raw path knob) + non-secret
 `GOOGLE_CLOUD_PROJECT`/`VERTEX_LOCATION`. Azure: reuse `opencodeAuthContent`
 (pending the spike) + non-secret `AZURE_RESOURCE_NAME`, or a fallback
-`azureAPIKey` secret. Each secret env var joins the `offArgvKeys` allowlist
-in `bwrap.go` when its knob lands.
+`azureAPIKey` secret. Each secret env var named in a rule's `env` gets its
+off-argv entry from that rule: `bwrap.go`'s `offArgvKeys` takes the Driver credential half from
+`credentialenv_gen.go`, rendered from those rules (regenerate with
+`nix run .#regen`), so no hand edit to `bwrap.go` is owed.
 
 **Egress / netns:** none of the three needs new runner-netns wiring under the
 current coarse network model (`lib/env-schema.nix:268-283`'s `NETWORK_MODE` is a
@@ -228,8 +231,8 @@ AI SDK at — Ollama (`ollama`), LM Studio (`lmstudio`), and a llama.cpp server 
 all three OpenAI-compatible endpoints loaded through the same
 `@ai-sdk/openai-compatible` npm shim. Unlike Tiers 1–4 (#260, #267), this tier
 has **no secret-injection axis at all**: the endpoints need no `apiKey` or
-credential, so there is no env-schema knob, no branch in the launcher's
-`driver-credentials` check, no `offArgvKeys` entry, and nothing for the
+credential, so there is no env-schema knob, no credential rule for the
+launcher's `driver-credentials` check, no `offArgvKeys` entry, and nothing for the
 content→file primitive #267 called for. What the tier *does* need is the one
 thing the cloud tiers get for free — the Box being able to **reach** the model
 server — and that reachability is a runner-netns question (ADR 0006), not a
