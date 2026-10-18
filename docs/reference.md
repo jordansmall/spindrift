@@ -1115,9 +1115,14 @@ This first slice is deliberately narrow:
   Only the reviewer's model and effort are kept, for the orchestrator's review
   pass.
 - **No hooks.** None of claude's tool hooks run under pi.
-- **No credential knob.** The row has no `credentials` rule and there is no
-  `PI_AUTH_CONTENT`; Provider API keys reach pi through the environment, as
-  the Provider's own API key variable.
+- **API keys only.** The row declares one `credentials` rule per supported
+  Provider (see the `pi` credential list under the secret knobs); a key is
+  required only when some model tier names that Provider. Keys reach the Box
+  through the environment as the Provider's own variable, stay off the bwrap
+  argv, and are in the shared Bash scrub list (`agent/credential-vars`),
+  though that scrub is not enforced in a pi Box while no hooks run. A
+  Provider outside the eight gets no preflight check and its key is not
+  forwarded into the Box. There is no `PI_AUTH_CONTENT` (Copilot).
 
 Fix passes and nudges resume the first pass's pi session with `--session-id`,
 and a missing session starts fresh instead of failing, as the fix box's session
@@ -1623,8 +1628,8 @@ and the guard plugin described after this list (issue #5346):
   `hookSpecificOutput.updatedInput` — a documented PreToolUse capability,
   independent of `permissionDecision` in Claude Code's own hook-output
   schema, that lets a hook replace a tool call's input before it runs — to
-  `unset` every variable in the shared credential list (`ANTHROPIC_API_KEY`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`; see below) ahead of the
+  `unset` every variable in the shared credential list (every Driver
+  credential rule's variables, `agent/credential-vars`; see below) ahead of the
   Driver's original command, and asserts no `permissionDecision` of its own on that
   path (the same silent, no-explicit-opinion posture `reject-background-bash.sh`
   and `credential-deny.sh` use for a call they don't deny — three hooks
@@ -1951,8 +1956,8 @@ from one flake, each Driver's apps also read an optional
 side](#several-drivers-side-by-side).
 
 Every secret knob (`GH_TOKEN`, `BOX_GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
-`ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`, `JIRA_TOKEN`) can also be
-sourced from an external command instead of a plaintext value — **the preferred, highly encouraged
+`ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`, each pi Provider key,
+`JIRA_TOKEN`) can also be sourced from an external command instead of a plaintext value — **the preferred, highly encouraged
 way to supply secrets**, since it keeps live credentials out of any file at
 rest on the host. Set `<SECRET>_CMD` (e.g. `GH_TOKEN_CMD="rbw get
 spindrift-gh-token"`) in `harness.env`, your shell, or direnv, or pass a
@@ -5365,7 +5370,7 @@ boundary does and does not promise.
 2. **The Box can't read its own credentials (per Driver).** Under the claude Driver, a
    `PreToolUse` hook (`env-credential-scrub.sh`, issue #1927) rewrites every
    Bash call to `unset` every variable in the shared credential list
-   (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`)
+   (every Driver credential rule's variables, `agent/credential-vars`)
    before it runs, so a spawned subprocess never inherits a credential, and
    a second `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash`
    call targeting a known credential path. Both are always-on Harness
