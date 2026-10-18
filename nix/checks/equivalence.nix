@@ -1077,10 +1077,11 @@ in
 
         # Capability-signal registry derivation (issue #2527 review fix):
         # github/github (the schema default, $defaultDoc) must resolve to
-        # lib/backends/default.nix's "github" row -- outboxRelayCapable
-        # only -- and local/local ($localForgeAndTrackerDoc) must resolve to
-        # its "local" row -- hostMediatedRemote and inBoxUnreachableTracker
-        # only, which is also the sole pairing where fullyLocal is true.
+        # lib/backends/github.nix's row -- outboxRelayCapable only -- and
+        # local/local ($localForgeAndTrackerDoc) must resolve to
+        # lib/backends/local.nix's row -- hostMediatedRemote and
+        # inBoxUnreachableTracker only, which is also the sole pairing where
+        # fullyLocal is true.
         grep -q '"HOST_MEDIATED_REMOTE":"false"' "$defaultDoc" \
           || { echo "HOST_MEDIATED_REMOTE must be false for CODE_FORGE=github, registry derivation broken?" >&2; exit 1; }
         grep -q '"OUTBOX_RELAY_CAPABLE":"true"' "$defaultDoc" \

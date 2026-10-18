@@ -1023,13 +1023,13 @@ rec {
           ) backendRegistryForbiddenEmptyFields;
         in
         if unknown != [ ] then
-          throw "lib/backends/default.nix: row '${row.name or "?"}' has unknown field(s): ${builtins.concatStringsSep ", " unknown}"
+          throw "lib/backends/${row.name or "?"}.nix: row has unknown field(s): ${builtins.concatStringsSep ", " unknown}"
         else if explicitlyEmpty != [ ] then
-          throw "lib/backends/default.nix: row '${row.name or "?"}' explicitly sets field(s) to \"\": ${builtins.concatStringsSep ", " explicitlyEmpty} -- omit the field instead to request its default"
+          throw "lib/backends/${row.name or "?"}.nix: row explicitly sets field(s) to \"\": ${builtins.concatStringsSep ", " explicitlyEmpty} -- omit the field instead to request its default"
         else if (row ? trackerAxisWrite || row ? trackerAxisFiler) && !(row ? trackerAxisRead) then
-          throw "lib/backends/default.nix: row '${row.name or "?"}' sets trackerAxisWrite/trackerAxisFiler without trackerAxisRead -- set trackerAxisRead explicitly when declaring a write or filer axis (issue #4183)"
+          throw "lib/backends/${row.name or "?"}.nix: row sets trackerAxisWrite/trackerAxisFiler without trackerAxisRead -- set trackerAxisRead explicitly when declaring a write or filer axis (issue #4183)"
         else if row ? trackerAxisRead && !(row ? trackerAxisWrite) then
-          throw "lib/backends/default.nix: row '${row.name or "?"}' sets trackerAxisRead without trackerAxisWrite -- set trackerAxisWrite explicitly, a real axis or \"\" as local does (issue #2673)"
+          throw "lib/backends/${row.name or "?"}.nix: row sets trackerAxisRead without trackerAxisWrite -- set trackerAxisWrite explicitly, a real axis or \"\" as local does (issue #2673)"
         else
           row;
       fieldLine =
