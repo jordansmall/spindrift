@@ -20,15 +20,6 @@ import (
 
 func opLine(op hostop.SpindriftOp) string { return hostop.EncodeSpindriftOp(op) }
 
-// ms is the RFC3339 ts as epoch milliseconds, the canonical Event's Timestamp unit.
-func ms(ts string) int64 {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		panic(err)
-	}
-	return t.UnixMilli()
-}
-
 func assistant(id string) string {
 	return seamtest.Line(driverkit.Event{Kind: driverkit.KindUsage, MessageID: id})
 }
@@ -37,7 +28,7 @@ func assistant(id string) string {
 // totals the CLI reports (cost, a fixed token tally, turns, durations) and the
 // models it ran.
 func result(ts string, cost float64, turns int, dur, apiDur int64, models ...string) string {
-	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: ms(ts), NumTurns: turns,
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: seamtest.Millis(ts), NumTurns: turns,
 		Tokens:     driverkit.Tokens{Input: 10, Output: 20, CacheRead: 30, CacheWrite5m: 40, CostUSD: cost},
 		DurationMs: dur, DurationAPIMs: apiDur, Models: models})
 }
@@ -66,7 +57,7 @@ func TestParseLog(t *testing.T) {
 			file: "issue-42.log",
 			lines: []string{
 				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
-				seamtest.Line(driverkit.Event{Kind: driverkit.KindStart, Timestamp: ms("2026-10-07T12:34:56.789123Z")}),
+				seamtest.Line(driverkit.Event{Kind: driverkit.KindStart, Timestamp: seamtest.Millis("2026-10-07T12:34:56.789123Z")}),
 				assistant("a"), assistant("a"), assistant("b"),
 				result("2026-10-07T12:35:00Z", 1.5, 7, 4000, 3000, "claude-opus", "claude-haiku"),
 				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
@@ -302,7 +293,7 @@ func TestChoreKeyedKindFollowsDescriptor(t *testing.T) {
 }
 
 func resultText(ts, text string) string {
-	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: ms(ts), NumTurns: 1, Text: text})
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: seamtest.Millis(ts), NumTurns: 1, Text: text})
 }
 
 // assistantTool is one tool call event whose tool ID is the message ID.

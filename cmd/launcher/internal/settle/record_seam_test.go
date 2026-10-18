@@ -131,15 +131,6 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// canonMs is the RFC3339 ts as epoch milliseconds, the Event's Timestamp unit.
-func canonMs(ts string) int64 {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		panic(err)
-	}
-	return t.UnixMilli()
-}
-
 // seamTranscript is one Pass's canonical-event log: pass_start, a usage turn
 // and a result. A non-empty outcomeLine rides in the result and also leads a
 // raw line after it, which is what the host's outcome.Resolve reads.
@@ -151,7 +142,7 @@ func seamTranscript(role, msgID, ts, outcomeLine string) string {
 	return hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: role}) +
 		seamtest.Line(driverkit.Event{Kind: driverkit.KindUsage, MessageID: msgID, Model: "m",
 			Tokens: driverkit.Tokens{Input: 1, Output: 1, CostUSD: 1}}) +
-		seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs(ts), Text: outcomeLine}) +
+		seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: seamtest.Millis(ts), Text: outcomeLine}) +
 		tail
 }
 
@@ -426,7 +417,7 @@ func TestSettle_UnreadableUnrelatedLogDoesNotBlockIngest(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := filepath.Join(dir, "issue-1.log")
-	line := seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
+	line := seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: seamtest.Millis("2026-03-01T10:00:00Z")})
 	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +468,7 @@ func TestSettle_UnreadableOwnLogWarnsButRecordLands(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := filepath.Join(dir, "issue-"+num+"-fix-1.log")
-	line := seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: canonMs("2026-03-01T10:00:00Z")})
+	line := seamtest.Line(driverkit.Event{Kind: driverkit.KindResult, Timestamp: seamtest.Millis("2026-03-01T10:00:00Z")})
 	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -2,12 +2,10 @@ package dispatchrecord
 
 import (
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/seamtest"
@@ -16,18 +14,6 @@ import (
 // altDriver names a second registration of the seamtest Strategy. A stamp
 // naming it proves the stamped Driver, not the default, reads the log.
 const altDriver = "seam-alt"
-
-func TestMain(m *testing.M) {
-	// claude sums its result summaries, like the real claude Driver; seam-alt
-	// sums per call, like the opencode Driver the stamped tests replaced.
-	claude := seamtest.Strategy
-	claude.Totals = driverkit.SessionTotals
-	driver.Register(claude)
-	alt := seamtest.Strategy
-	alt.Name = altDriver
-	driver.Register(alt)
-	os.Exit(m.Run())
-}
 
 func driverStamp(driver string) string {
 	start := hostop.DispatchStart{
