@@ -12,9 +12,25 @@
       "CacheReadInputTokens": 80,
       "OutputTokens": 60,
       "UncachedInputTokens": 160
+    },
+    {
+      "APICalls": 2,
+      "Agent": "scout",
+      "CacheCreationInputTokens": 0,
+      "CacheReadInputTokens": 0,
+      "OutputTokens": 7,
+      "UncachedInputTokens": 132
     }
   ],
   "SummedByModel": [
+    {
+      "CacheReadInputTokens": 0,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 0,
+      "Model": "stub/stub-model:high",
+      "OutputTokens": 7,
+      "UncachedInputTokens": 132
+    },
     {
       "CacheReadInputTokens": 80,
       "CacheWrite1hTokens": 0,
@@ -29,9 +45,9 @@
     "cache_read_input_tokens": 80,
     "duration_api_ms": 0,
     "duration_ms": 756,
-    "input_tokens": 160,
-    "num_turns": 2,
-    "output_tokens": 60,
-    "total_cost_usd": 0.00028799999999999995
+    "input_tokens": 292,
+    "num_turns": 4,
+    "output_tokens": 67,
+    "total_cost_usd": 0.000434
   }
 }

@@ -6,6 +6,14 @@
     {
       "model": "stub/stub-model:off",
       "role": ""
+    },
+    {
+      "model": "stub/stub-model:high",
+      "role": "scout"
+    },
+    {
+      "model": "stub/stub-model:off",
+      "role": ""
     }
   ]
 }
