@@ -469,7 +469,7 @@ let
   # already-resolved roster's reviewer entry whatever the roster's source,
   # unlike the four model knobs above. Applied post-normalize so it reaches
   # the defaultRoster branch and an explicit roster identically.
-  finalRoster =
+  effortAppliedRoster =
     let
       reviewEffort = mergedDefaults.reviewEffort or "";
     in
@@ -479,6 +479,19 @@ let
       map (
         e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e
       ) rosterWithoutBareWorker;
+
+  # A Driver whose effort rides on the model resolves each role's model here,
+  # after the opt-out drop and reviewEffort, so the agent files, roleModels and
+  # flags all see the resolved model (issue #5483).
+  finalRoster =
+    if driverEntry ? effortOnModelLevels then
+      (import ./effort-on-model.nix { inherit lib; }).resolve {
+        roster = effortAppliedRoster;
+        levels = driverEntry.effortOnModelLevels;
+        coordinatorModel = mergedDefaults.model or "";
+      }
+    else
+      effortAppliedRoster;
 
   # --agents JSON, rendered by the selected Driver (ADR 0009) so a Driver with
   # a different agent-config shape (opencode's agents/*.md) can supply its own

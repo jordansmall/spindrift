@@ -24,7 +24,9 @@ let
   # credentialRuleErrors.
   # configFiles (home-relative path -> content, baked by lib/image.nix) is
   # optional and unvalidated. So is `subagents` (default true): false marks a
-  # Driver that provisions no subagent yet (read by lib/mkHarness.nix).
+  # Driver that provisions no subagent yet (read by lib/mkHarness.nix). Also
+  # optional and unvalidated: `effortOnModelLevels`, the valid levels of a
+  # Driver whose effort rides on the model (lib/effort-on-model.nix).
   requiredAttrs = [
     "name"
     "package"

@@ -204,6 +204,20 @@ in
       ) roster
     );
 
+  # Effort rides on the model (`<model>:<level>`, see agentFilesTemplate), so
+  # mkHarness requires a role effort to have a model, falling back to the
+  # default model, and one of these levels: pi sends an unknown level as part
+  # of the model id (ADR 0009 amendment).
+  effortOnModelLevels = [
+    "off"
+    "minimal"
+    "low"
+    "medium"
+    "high"
+    "xhigh"
+    "max"
+  ];
+
   # agentsFlag is omitted. Effort values pass through to --thinking
   # unnormalised.
   argvShape = {
