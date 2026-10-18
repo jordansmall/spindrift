@@ -21,6 +21,21 @@ import (
 // restated here.
 var registry = reflect.TypeOf(driver.Descriptor{}).PkgPath()
 
+// goList runs `go list args...` and returns its stdout, failing the test with
+// go's stderr when it exits non-zero.
+func goList(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("go", append([]string{"list"}, args...)...).Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			t.Fatalf("go list %s: %v\n%s", strings.Join(args, " "), err, ee.Stderr)
+		}
+		t.Fatalf("go list %s: %v", strings.Join(args, " "), err)
+	}
+	return string(out)
+}
+
 // forbiddenFor reports the import paths a Driver's test closure must not
 // reach: the registry itself, and any other Driver's package or subpackage.
 // The Driver's own subpackages stay allowed.
@@ -69,15 +84,8 @@ func TestDriverTestClosuresStandAlone(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			pkg := registry + "/" + name
-			out, err := exec.Command("go", "list", "-deps", "-test", "-f", "{{.ImportPath}}", pkg+"/...").Output()
-			if err != nil {
-				var ee *exec.ExitError
-				if errors.As(err, &ee) {
-					t.Fatalf("go list -deps -test %s: %v\n%s", pkg, err, ee.Stderr)
-				}
-				t.Fatalf("go list -deps -test %s: %v", pkg, err)
-			}
-			for _, path := range forbiddenInClosure(string(out), forbiddenFor(name, names)) {
+			out := goList(t, "-deps", "-test", "-f", "{{.ImportPath}}", pkg+"/...")
+			for _, path := range forbiddenInClosure(out, forbiddenFor(name, names)) {
 				t.Errorf("%s's test closure contains %s", pkg, path)
 			}
 		})
