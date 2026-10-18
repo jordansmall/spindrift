@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +20,7 @@ import (
 func checkoutEvents(root string, stderr io.Writer) []daemon.Event {
 	top, err := isCheckoutTop(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "warning: not reading daemon events: %v\n", err)
+		warnEach(stderr, "not reading daemon events", err)
 		return nil
 	}
 	if !top {
@@ -35,7 +34,7 @@ func checkoutEvents(root string, stderr io.Writer) []daemon.Event {
 	if err != nil {
 		// Without events every inferred Record lands in (none); say why
 		// rather than let that pass for a real answer.
-		fmt.Fprintf(stderr, "warning: not reading daemon events: %v\n", err)
+		warnEach(stderr, "not reading daemon events", err)
 		return nil
 	}
 	return events
