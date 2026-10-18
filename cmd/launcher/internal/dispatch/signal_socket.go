@@ -10,18 +10,9 @@ import (
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/signalclient"
 	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/signalwire"
-)
-
-// signalSocketEndpointEnv and signalSocketSecretEnv name the two env vars
-// driver-exec/signal_cmd.go reads in-Box (signalEndpointEnv/signalSecretEnv
-// there). The two packages cannot share the constant -- driver-exec is a
-// separate binary that must not link this package's dependencies -- so the
-// literal is pinned on both sides instead.
-const (
-	signalSocketEndpointEnv = "SIGNAL_SOCKET_ENDPOINT"
-	signalSocketSecretEnv   = "SIGNAL_SOCKET_SECRET"
 )
 
 // tcpFallbackBlockedReason is the clause the Signal-socket (here) and
@@ -73,7 +64,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		// can only dial the path it sees inside its own mount namespace, the
 		// same reason box.go's registry-proxy manifestEndpoint names
 		// RegistryProxySocketTarget rather than the minted host path.
-		env[signalSocketEndpointEnv] = "unix://" + runner.SignalSocketTarget
+		env[signalclient.EndpointEnv] = "unix://" + runner.SignalSocketTarget
 		d.signalBuffer = buf
 
 		mount := runner.SocketMount{Source: socketPath, Target: runner.SignalSocketTarget}
@@ -113,11 +104,11 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 			return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: TCP listener address %v is not a *net.TCPAddr", l.Addr())
 		}
 
-		env[signalSocketEndpointEnv] = fmt.Sprintf("http://%s:%d", transport.Host(), tcpAddr.Port)
+		env[signalclient.EndpointEnv] = fmt.Sprintf("http://%s:%d", transport.Host(), tcpAddr.Port)
 		// SIGNAL_SOCKET_SECRET stays its own env var, exactly like
 		// REGISTRY_PROXY_TCP_SECRET (box.go): it is a bearer-token-shaped
 		// credential, so bwrap.go's offArgvKeys keeps it off argv.
-		env[signalSocketSecretEnv] = secret
+		env[signalclient.SecretEnv] = secret
 		d.signalBuffer = buf
 
 		loc := runner.SignalSocketLocation{
