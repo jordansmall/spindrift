@@ -823,7 +823,8 @@ func rotateStaleLog(logPath string) error {
 // "<path><stem>.<n>" that does not exist yet. A stat failure other
 // than not-found (EACCES on the log dir, ENAMETOOLONG, ELOOP) never yields
 // os.IsNotExist, so treating it as a free slot would spin this uncapped loop
-// (issues #2575, #5444).
+// (issues #2575, #5444). Which of these dispatchWithRetry fails at once is
+// isPermanentPreDispatchErr's call.
 func renameToFirstFreeSuffix(path, stem string) error {
 	for n := 1; ; n++ {
 		dest := fmt.Sprintf("%s%s.%d", path, stem, n)

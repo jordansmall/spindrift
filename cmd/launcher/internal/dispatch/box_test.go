@@ -300,12 +300,13 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 	}
 }
 
-// TestRun_RotateFailureRetriesWithoutClassifyingStaleLog verifies a stale-log
-// rotation failure on a retry attempt is routed like a quarantine failure
+// TestRun_RotateFailurePermanentErrnoFailsWithoutReclassifyingStaleLog verifies
+// a stale-log rotation failure on a retry attempt is a pre-dispatch failure
 // (issue #5444): attempt 2 never wrote a log of its own, so logPath still holds
-// attempt 1's transient-looking content and must not be classified again. The
-// run retries with backoff, then ends with the rotate error on Result.Err.
-func TestRun_RotateFailureRetriesWithoutClassifyingStaleLog(t *testing.T) {
+// attempt 1's transient-looking content and must not be classified again. ELOOP
+// is permanent (issue #5451), so the run fails at once with the rotate error on
+// Result.Err instead of retrying.
+func TestRun_RotateFailurePermanentErrnoFailsWithoutReclassifyingStaleLog(t *testing.T) {
 	var d *Dispatch
 	fr := runner.NewFake()
 	fr.RunFunc = func(runner.Box) error {
@@ -329,7 +330,7 @@ func TestRun_RotateFailureRetriesWithoutClassifyingStaleLog(t *testing.T) {
 	result := d.Run()
 
 	if result.ok() {
-		t.Errorf("Run: want failed once the retry cap is exhausted, got %+v", result)
+		t.Errorf("Run: want failed on the permanent rotate error, got %+v", result)
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Errorf("runner.Run: want exactly 1 call (attempt 2 must not dispatch), got %d", len(fr.RunCalls))
@@ -337,10 +338,10 @@ func TestRun_RotateFailureRetriesWithoutClassifyingStaleLog(t *testing.T) {
 	if classified != 1 {
 		t.Errorf("ClassifyTransient calls = %d, want 1 (attempt 1 only; the stale log must not be reclassified)", classified)
 	}
-	// The transient cap is shared: attempt 1's own backoff plus the rotate
-	// failures' retries add up to Policy.Max.
-	if len(sleeps) != 3 {
-		t.Errorf("Sleep calls = %d, want 3 (Policy.Max)", len(sleeps))
+	// Only attempt 1's own ClassifyTransient backoff sleeps; the permanent
+	// rotate failure does not.
+	if len(sleeps) != 1 {
+		t.Errorf("Sleep calls = %d, want 1 (attempt 1's backoff only)", len(sleeps))
 	}
 	if res := result.result; res.Err == nil || !strings.Contains(res.Err.Error(), "rotate stale log") {
 		t.Errorf("Result.Err = %v, want it to name the rotate stale log failure", res.Err)

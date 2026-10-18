@@ -3,11 +3,14 @@ package dispatch
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1484,5 +1487,57 @@ func TestDispatchWithRetry_LogRemovedMidRunBehavesAsBefore(t *testing.T) {
 	}
 	if strings.Contains(stderr, "moved mid-run") {
 		t.Errorf("must not print a moved diagnostic for a genuinely removed log, got: %s", stderr)
+	}
+}
+
+// A pre-dispatch failure whose errno no retry can clear fails on first
+// occurrence, without consuming the transient cap or sleeping; transient errnos
+// keep the backoff-and-retry path up to Policy.Max (issue #5451).
+func TestDispatchWithRetry_PreDispatchErrno(t *testing.T) {
+	const policyMax = 3
+	const permanentLine, capLine = "pre-dispatch failed permanently", "pre-dispatch retry cap exhausted"
+	cases := []struct {
+		name       string
+		errno      syscall.Errno
+		wantSleeps int
+		wantCalls  int
+		wantLine   string
+	}{
+		{"ENAMETOOLONG is permanent", syscall.ENAMETOOLONG, 0, 1, permanentLine},
+		{"ELOOP is permanent", syscall.ELOOP, 0, 1, permanentLine},
+		{"EIO is transient", syscall.EIO, policyMax, policyMax + 1, capLine},
+		{"ESTALE is transient", syscall.ESTALE, policyMax, policyMax + 1, capLine},
+		{"EACCES is transient", syscall.EACCES, policyMax, policyMax + 1, capLine},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sleeps []time.Duration
+			d := newTestDispatch(t, retryConfig(policyMax, 5, 0), runner.NewFake(), fakeDriver{}, fakeClock(time.Now(), &sleeps))
+			calls := 0
+			once := func(bool) error {
+				calls++
+				return preDispatchErr{err: fmt.Errorf("rotate stale log: %w",
+					&fs.PathError{Op: "stat", Path: "x", Err: tc.errno})}
+			}
+
+			var disp Disposition
+			out := testutil.CaptureStdout(t, func() { disp = d.dispatchWithRetry(d.logPath(), once) })
+
+			if disp.kind != dispositionFailed {
+				t.Fatalf("disposition kind = %v, want failed", disp.kind)
+			}
+			if !errors.Is(disp.result.Err, tc.errno) {
+				t.Errorf("Result.Err = %v, want it to wrap %v", disp.result.Err, tc.errno)
+			}
+			if len(sleeps) != tc.wantSleeps {
+				t.Errorf("Sleep calls = %d, want %d", len(sleeps), tc.wantSleeps)
+			}
+			if calls != tc.wantCalls {
+				t.Errorf("once calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if !strings.Contains(out, tc.wantLine) {
+				t.Errorf("stdout = %q, want it to contain %q", out, tc.wantLine)
+			}
+		})
 	}
 }
