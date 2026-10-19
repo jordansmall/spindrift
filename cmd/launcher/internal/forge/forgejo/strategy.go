@@ -1,6 +1,8 @@
 package forgejo
 
 import (
+	"fmt"
+
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
@@ -11,6 +13,12 @@ var Strategy = backendkit.Strategy{
 	Descriptor:        backend.Forgejo,
 	ValidateTracker:   validateTracker,
 	ValidateCodeForge: validate("CODE_FORGE"),
+	LandedBanner: func(s backendkit.Shared) string {
+		return "branches pushed on " + s.RepoSlug
+	},
+	AutoMergeRemedy: func(s backendkit.Shared) string {
+		return fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`, MergeStyle(s.MergeMethod))
+	},
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
 		k, err := ReadKnobs(Lookup(l))
 		if err != nil {

@@ -9,6 +9,7 @@ package backendkit
 
 import (
 	"fmt"
+	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -62,6 +63,37 @@ type Strategy struct {
 	NewCodeForge         func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
 	NewReadOnlyCodeForge func(Shared, Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error)
 	NewLedger            func(Shared, Lookup) (LedgerSite, error)
+
+	// LandedBanner is the clause the all-delivered banner puts after "==> all
+	// agents finished — ", for a backend that is a Code Forge. Nil on a
+	// tracker-only backend.
+	LandedBanner func(Shared) string
+	// AutoMergeRemedy is the fix to name when the repo does not allow
+	// auto-merge. Nil means the backend has no native auto-merge, so the
+	// preflight names no remedy and leaves the backend out of its
+	// "CODE_FORGE=..." list.
+	AutoMergeRemedy func(Shared) string
+}
+
+// AutoMergeForges names, in slice order, every Strategy that offers an
+// auto-merge remedy, joined with " or ".
+func AutoMergeForges(ss []Strategy) string {
+	var names []string
+	for _, s := range ss {
+		if s.AutoMergeRemedy != nil {
+			names = append(names, s.Name)
+		}
+	}
+	return strings.Join(names, " or ")
+}
+
+// AutoMergeRemedyClause is " — <remedy>", or "" without the hook so the
+// caller can splice it in without a dangling dash.
+func (s Strategy) AutoMergeRemedyClause(sh Shared) string {
+	if s.AutoMergeRemedy == nil {
+		return ""
+	}
+	return " — " + s.AutoMergeRemedy(sh)
 }
 
 // registry keeps registration order: the Bundle's order is the launcher's
