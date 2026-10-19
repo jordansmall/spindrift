@@ -113,7 +113,13 @@ func splitKey(key string) (prefix string, n int, ok bool) {
 func mergingRecord(settled []dispatchrecord.Record, issue string, merged MergeLookup) (rec dispatchrecord.Record, commit string, ok bool) {
 	var held *dispatchrecord.Record
 	for _, r := range slices.Backward(settled) {
-		if d, ok := dispatchkind.ByName(r.Kind); !ok || d.Contract != dispatchkind.ContractLanding || r.DispatchKey != issue {
+		d, known := dispatchkind.ByName(r.Kind)
+		if !known || r.DispatchKey != issue {
+			continue
+		}
+		switch d.Contract {
+		case dispatchkind.ContractLanding:
+		default:
 			continue
 		}
 		if recordstats.Merged(r) {

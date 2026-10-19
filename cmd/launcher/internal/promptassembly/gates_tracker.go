@@ -33,7 +33,7 @@ func trackerGates(e Env) map[string]bool {
 	}
 	d := e.descriptor()
 	researchForceRelay := (d.AdviseOnly && e.FilerEnabled) ||
-		(d.Contract == dispatchkind.ContractVerdict && backend.ResearchVerdictRelayed(trackerName, e.FilerEnabled))
+		(verdictContract(d) && backend.ResearchVerdictRelayed(trackerName, e.FilerEnabled))
 
 	// Exactly one of these three ever fires.
 	g["ISSUE_TRACKER_GITHUB"] = itRead == "GITHUB"
@@ -61,7 +61,7 @@ func trackerGates(e Env) map[string]bool {
 	// union of the paths that render a relayed research-verdict fragment,
 	// scoped to ContractVerdict because the butler is AdviseOnly too but
 	// posts no verdict.
-	g["RESEARCH_VERDICT_RELAYED"] = e.descriptor().Contract == dispatchkind.ContractVerdict &&
+	g["RESEARCH_VERDICT_RELAYED"] = verdictContract(e.descriptor()) &&
 		(g["ISSUE_TRACKER_GITHUB_READONLY"] || g["ISSUE_TRACKER_LOCAL"] || g["ISSUE_TRACKER_FORGEJO_READONLY"])
 
 	// On a work dispatch the relay activates on a read-only Box; a writable
@@ -133,4 +133,15 @@ func issueTrackerAxisFallback(issueTracker string) (itRead, itWrite, itFiler str
 	default:
 		return "GITHUB", "GITHUB", "GH"
 	}
+}
+
+// verdictContract reports whether d posts a research verdict comment. The
+// butler is AdviseOnly too but posts none, so callers scope to this rather
+// than AdviseOnly.
+func verdictContract(d *dispatchkind.Descriptor) bool {
+	switch d.Contract {
+	case dispatchkind.ContractVerdict:
+		return true
+	}
+	return false
 }
