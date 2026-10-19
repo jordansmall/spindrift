@@ -18,7 +18,11 @@ var registryProxyTransportFn = func(c config) (registrymanifest.Endpoint, error)
 	if err != nil {
 		return registrymanifest.Endpoint{}, err
 	}
-	endpoint, _, err := runnerForKind(c, runnerConfig(c), pwd).RegistryProxyTransport()
+	r, err := runnerForKind(c, runnerConfig(c), pwd)
+	if err != nil {
+		return registrymanifest.Endpoint{}, err
+	}
+	endpoint, _, err := r.RegistryProxyTransport()
 	return endpoint, err
 }
 
