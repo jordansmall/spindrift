@@ -230,7 +230,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   from `lib/dispatch-kinds/default.nix`),
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
   `lib/backends/default.nix`), `backendkit` (the Backend Strategy type and
-  registry every binary builds and validates adapters through), `usage`. The
+  registry every binary builds and validates adapters through),
+  `recordsdigest` (the Records digest Strategy type and registry records-scoped
+  Chores render through, [ADR 0070](docs/adr/0070-a-chores-scope-source-is-a-seam-and-records-chores-plug-in-a-digest.md)),
+  `hostbundle` (the host-side bundle registering built-in Digests; only the
+  butler-sweep binaries import it), `usage`. The
   flag table (`flagtable_gen.go`),
   which also carries each knob's baked-in default (`schemaFlags[].dflt`), is
   generated and pinned by a check; don't hand-edit it — neither are

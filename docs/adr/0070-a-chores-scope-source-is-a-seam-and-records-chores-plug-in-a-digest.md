@@ -31,12 +31,16 @@ Chore is planned, so the hook is built now rather than on a trigger.
    `Stage`, so a failure there (the `tree` file listing) leaves the Ledger
    unclaimed. It no longer branches on the scope.
 2. **A records Chore plugs in a Records digest.** Each built-in records
-   Chore registers a Digest Strategy in the Bundle under its own name. The
-   Strategy has a `Render` function, which returns the digest text and the
-   latest Record ID it covers, plus two optional functions:
+   Chore registers a Digest Strategy in the Host bundle under its own name
+   (see the amendment below). The Strategy has a `Render` function, which
+   takes the Records, the prior cursor, the claim time, the parsed prior
+   findings and a merge lookup, and returns the digest text and the latest
+   Record ID it covers. Its other functions are optional, and a nil one
+   means the Chore does without it:
    - `ParsePrior`, which reads a prior finding;
    - `Validate`, which applies the Chore's own settle rules, such as tuning's
-     sample floor and its `evidence-gap` exemption.
+     sample floor and its `evidence-gap` exemption;
+   - `DedupTerms`, which supplies the Chore's dedup pattern terms.
 
    The `records` adapter owns everything else:
    - the check that a Chore is due once enough new settled Records exist;
@@ -78,3 +82,12 @@ Chore is planned, so the hook is built now rather than on a trigger.
   its corpus.
 - This ships incrementally with no release gate. The knob names do not
   change.
+
+## Amendment (issue #5696): the Digest registers in a Host bundle
+
+Decision 2 first said the Digest Strategy registers in the Bundle. The
+Box and `driver-exec` import that Bundle for their Drivers, so a Digest
+there would link settle, tuning and the Records store into both. Built-in
+Digests register instead from a separate Host bundle
+(`internal/hostbundle`), which only the binaries that run the butler sweep
+import. The bundle guard pins that list the way it pins the Bundle's.

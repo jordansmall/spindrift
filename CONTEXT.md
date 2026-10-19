@@ -637,8 +637,16 @@ the Nix half), backend registry entry, adapter config.
 **Bundle**:
 The one package that registers the Strategies spindrift ships — Drivers and
 backends alike — and that only the shipped binaries import, so core packages
-and their tests never import a concrete adapter (ADR 0066, ADR 0068).
+and their tests never import a concrete adapter (ADR 0066, ADR 0068). The
+built-in [[Records digest]]s register from the [[Host bundle]] instead.
 _Avoid_: registry (the lookup it fills), plugin set.
+
+**Host bundle**:
+The package that registers each built-in [[Records digest]]'s Strategy under
+its [[Chore]]'s name. Only the binaries that run the butler sweep import it,
+so the Box and `driver-exec` never link settle, tuning or the Records store
+(ADR 0070). _Avoid_: host-side bundle (that is the git bundle a read-only
+Box's branch is relayed in), butler bundle.
 
 **Row-owned knob**:
 A knob declared on the registry row of the one adapter it configures — a
