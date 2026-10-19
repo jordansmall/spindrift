@@ -1,20 +1,18 @@
 {
-  "lastSwept": "8eb585545ade2b54093d761d879b52d69cb5b11c",
-  "cursor": "cmd/launcher/internal/driver/pi/testhelpers_test.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-19T13:12:01.282562991-04:00"
-  },
+  "lastSwept": "e59aded328bd4e03470a9ca27501eb9c2aa65551",
+  "cursor": "cmd/launcher/internal/ecosystem/testdata/corpus/cargo/private-matched/discovery.golden.toml",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/5785"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 38,
+    "output_tokens": 10723,
+    "cache_read_input_tokens": 1057253,
+    "cache_creation_input_tokens": 73572,
+    "total_cost_usd": 1.0179324649999997,
+    "duration_ms": 128454,
+    "duration_api_ms": 118752,
+    "num_turns": 21
   }
 }
