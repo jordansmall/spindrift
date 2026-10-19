@@ -1,6 +1,9 @@
 package runner
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Descriptor is one runner family, rendered into families_gen.go from the
 // lib/runners rows. TestDescriptorFieldsMatchNixRows fails if the struct and
@@ -38,4 +41,20 @@ func DescriptorFor(kind string) (Descriptor, error) {
 		}
 	}
 	return Descriptor{}, fmt.Errorf("unknown RUNNER_KIND %q; registered runner families: %v", kind, Names())
+}
+
+// CheckNetworkMode returns nil when mode is empty or listed in d.NetworkModes.
+// lib/runners/index.nix's unsupportedNetworkModeMessage builds the same text
+// for mkHarness's assert, and both are pinned to one literal (see
+// nix/checks/network-mode.nix), so change them together.
+func (d Descriptor) CheckNetworkMode(mode NetworkMode) error {
+	if mode == "" {
+		return nil
+	}
+	for _, m := range d.NetworkModes {
+		if m == string(mode) {
+			return nil
+		}
+	}
+	return fmt.Errorf("NETWORK_MODE=%s is unsupported on runner family %s, which supports: %s", mode, d.Name, strings.Join(d.NetworkModes, ", "))
 }

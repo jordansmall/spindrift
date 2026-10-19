@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // Pins issue #2562: NETWORK_MODE is runtime-overridable but RUNNER_KIND is
@@ -19,11 +21,29 @@ func TestNetworkModeRuntimeGate_BwrapNoHostLoopbackFails(t *testing.T) {
 
 	err := checkNetworkModeRuntimeGate(c)
 	if err == nil {
-		t.Fatal("checkNetworkModeRuntimeGate() = nil, want an error naming NETWORK_MODE=no-host-loopback and RUNNER_KIND=bwrap")
+		t.Fatal("checkNetworkModeRuntimeGate() = nil, want the bwrap row's unsupported-mode error")
 	}
-	for _, substr := range []string{"NETWORK_MODE", "no-host-loopback", "bwrap"} {
-		if !strings.Contains(err.Error(), substr) {
-			t.Errorf("error %q should contain %q", err.Error(), substr)
+	const want = "NETWORK_MODE=no-host-loopback is unsupported on runner family bwrap, which supports: open, none, host"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q should contain %q", err.Error(), want)
+	}
+}
+
+// Every mode a runner.Families row lists must clear the gate for that family
+// with no raw knob set, so the row and the gate cannot drift apart.
+func TestNetworkModeRuntimeGate_EveryListedModePasses(t *testing.T) {
+	for _, f := range runner.Families {
+		for _, mode := range f.NetworkModes {
+			t.Run(f.Name+"/"+mode, func(t *testing.T) {
+				c := minimalValidConfig()
+				c.runnerKind = f.Name
+				c.networkMode = mode
+				c.podmanNetwork = ""
+				c.bwrapUnshareNet = false
+				if err := checkNetworkModeRuntimeGate(c); err != nil {
+					t.Errorf("checkNetworkModeRuntimeGate() = %v, want nil", err)
+				}
+			})
 		}
 	}
 }
