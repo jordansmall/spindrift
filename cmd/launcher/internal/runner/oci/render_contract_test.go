@@ -32,8 +32,8 @@ func (ociRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 		runnertest.Call{Stdout: contract.Stdout},
 		runnertest.Call{Exit: 1},
 	)
-	// networkArg renders no-host-loopback as pasta only for a CLI literally
-	// named "podman", so the fake is reached through a podman-named link.
+	// a.cli is exec'd by name from PATH, so the fake is reached through a
+	// podman-named link; the plan below resolves against Runtime "podman".
 	bin := t.TempDir()
 	if err := os.Symlink(script, filepath.Join(bin, "podman")); err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func (ociRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       contractImage,
-		networkMode: l.Network,
+		network:     runner.Config{Runtime: "podman", NetworkMode: l.Network}.OCINetwork(),
 		mountParams: runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
 	}
 	if err := a.Run(l.Box); err != nil {

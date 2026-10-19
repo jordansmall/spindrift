@@ -401,43 +401,10 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 	}
 }
 
-// TestNetworkArg covers networkArg across cli x networkMode plus the raw
-// podmanNetwork escape hatch (issue #2562). Raw podmanNetwork wins whenever
-// set: for a non-open networkMode nix eval-rejects that combination, but
-// networkArg cannot observe that and still needs a deterministic answer; for
-// "open" the raw-wins case is genuinely reachable, not defense-in-depth.
-func TestNetworkArg(t *testing.T) {
-	cases := []struct {
-		name          string
-		cli           string
-		networkMode   runner.NetworkMode
-		podmanNetwork string
-		want          string
-	}{
-		{name: "podman no-host-loopback", cli: "podman", networkMode: "no-host-loopback", want: "pasta"},
-		{name: "docker no-host-loopback", cli: "docker", networkMode: "no-host-loopback", want: "bridge"},
-		{name: "nerdctl no-host-loopback", cli: "nerdctl", networkMode: "no-host-loopback", want: "bridge"},
-		{name: "none any cli", cli: "podman", networkMode: "none", want: "none"},
-		{name: "none docker", cli: "docker", networkMode: "none", want: "none"},
-		{name: "open no flag", cli: "podman", networkMode: "open", want: ""},
-		{name: "unset no flag", cli: "podman", networkMode: "", want: ""},
-		{name: "raw wins over mode", cli: "podman", networkMode: "no-host-loopback", podmanNetwork: "slirp4netns:allow_host_loopback=true", want: "slirp4netns:allow_host_loopback=true"},
-		{name: "raw wins over open mode", cli: "podman", networkMode: "open", podmanNetwork: "slirp4netns:allow_host_loopback=true", want: "slirp4netns:allow_host_loopback=true"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			a := &ociAdapter{cli: tc.cli, networkMode: tc.networkMode, podmanNetwork: tc.podmanNetwork}
-			if got := a.networkArg(); got != tc.want {
-				t.Errorf("networkArg() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// buildRunArgs itself wires networkMode through to --network, not just the
-// networkArg helper.
-func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
-	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "no-host-loopback"}
+// buildRunArgs renders the plan's resolved network Arg; the mode-to-Arg
+// decision table lives in runner.Config.OCINetwork.
+func TestBuildRunArgs_NetworkArgRendersNetworkFlag(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.OCINetwork{Arg: "pasta"}}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 	if !runnertest.ContainsArg(args, "--network") {
@@ -452,9 +419,9 @@ func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 	}
 }
 
-// A raw podmanNetwork renders verbatim as the --network value.
+// A raw PODMAN_NETWORK value resolved by the plan renders verbatim.
 func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
-	a := &ociAdapter{cli: "podman", image: "spindrift:test", podmanNetwork: "pasta"}
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.Config{Runtime: "podman", PodmanNetwork: "pasta"}.OCINetwork()}
 	args := a.buildRunArgs(runner.Box{Name: "agent-issue-1", Env: map[string]string{}})
 	for i, arg := range args {
 		if arg == "--network" {
@@ -469,12 +436,12 @@ func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
 
 // The default or unset mode renders no --network flag at all when no raw knob
 // is set either.
-func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
-	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "open"}
+func TestBuildRunArgs_EmptyNetworkArgOmitsFlag(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.OCINetwork{Mode: "open"}}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 	if runnertest.ContainsArg(args, "--network") {
-		t.Errorf("--network must be absent for networkMode=open; args: %v", args)
+		t.Errorf("--network must be absent for an empty network Arg; args: %v", args)
 	}
 }
 
@@ -1189,7 +1156,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 	for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
 			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable})
-			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
+			a := &ociAdapter{cli: script, image: "spindrift:test", network: runner.OCINetwork{Mode: mode}}
 
 			endpoint, _, err := a.RegistryProxyTransport()
 			if err == nil {
@@ -1220,7 +1187,7 @@ func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *test
 	for _, mode := range []runner.NetworkMode{"open", ""} {
 		t.Run("mode="+string(mode), func(t *testing.T) {
 			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
-			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
+			a := &ociAdapter{cli: script, image: "spindrift:test", network: runner.OCINetwork{Mode: mode}}
 
 			// a.cli is a fake-script path, not literally "podman", so
 			// hostGatewayHostname falls into its docker/nerdctl branch. Pin
@@ -1372,7 +1339,7 @@ func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
 func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
-	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, networkMode: "open"}
+	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, network: runner.OCINetwork{Mode: "open"}}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (first call): %v", err)
 	}
@@ -1380,7 +1347,7 @@ func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) 
 		t.Fatalf("callCount after first call = %d, want 1", got)
 	}
 
-	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, networkMode: ""}
+	b := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, network: runner.OCINetwork{Mode: ""}}
 	if _, _, err := b.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (second call): %v", err)
 	}
@@ -1634,7 +1601,7 @@ func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_Returns
 	for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
 			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125}, runnertest.Call{Exit: registryprobe.ExitIncapable})
-			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
+			a := &ociAdapter{cli: script, image: "spindrift:test", network: runner.OCINetwork{Mode: mode}}
 
 			endpoint, _, err := a.RegistryProxyTransport()
 			if err == nil {
@@ -1674,7 +1641,7 @@ func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing
 			}
 			t.Run(outcome+"/"+string(mode), func(t *testing.T) {
 				script, _ := runnertest.NewFakeCLI(t, calls...)
-				a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
+				a := &ociAdapter{cli: script, image: "spindrift:test", network: runner.OCINetwork{Mode: mode}}
 
 				endpoint, _, err := a.probeRegistryProxyTransport()
 				if endpoint.IsTCP() {

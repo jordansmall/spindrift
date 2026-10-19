@@ -39,11 +39,10 @@ type ociAdapter struct {
 	// mountParams passes host-mount facts from Config to BuildMountSpecs
 	// unmodified. DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local
 	// mount specs are issue #1697.
-	mountParams   runner.MountParams
-	podmanNetwork string             // optional raw --network value; empty omits the flag
-	networkMode   runner.NetworkMode // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/"host"/"")
-	pidsLimit     string             // --pids-limit value; empty disables the flag
-	memoryLimit   string             // --memory value; empty disables the flag
+	mountParams runner.MountParams
+	network     runner.OCINetwork // from runner.Config.OCINetwork
+	pidsLimit   string            // --pids-limit value; empty disables the flag
+	memoryLimit string            // --memory value; empty disables the flag
 }
 
 // Strategy is the oci family's entry in the runner registry; its build
@@ -65,8 +64,7 @@ func New(cfg runner.Config, pwd string) runner.Runner {
 		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             pwd,
 		mountParams:     cfg.MountParams,
-		podmanNetwork:   cfg.PodmanNetwork,
-		networkMode:     cfg.NetworkMode,
+		network:         cfg.OCINetwork(),
 		pidsLimit:       cfg.PidsLimit,
 		memoryLimit:     cfg.MemoryLimit,
 	}
@@ -422,34 +420,12 @@ func (a *ociAdapter) mountSpecs(box runner.Box) []runner.MountSpec {
 	return runner.BuildMountSpecs(a.mountParams, box)
 }
 
-// networkArg resolves `--network` from the raw podmanNetwork escape hatch and
-// the NETWORK_MODE knob (issue #2562). Raw wins: mkHarness and main.go's
-// checkNetworkModeRuntimeGate already reject both being set for a non-open
-// mode. On docker/nerdctl "no-host-loopback" renders "bridge", their own
-// default, so only podman's `pasta` without `--map-gw` denies the route.
-func (a *ociAdapter) networkArg() string {
-	if a.podmanNetwork != "" {
-		return a.podmanNetwork
-	}
-	switch a.networkMode {
-	case runner.NetworkModeNoHostLoopback:
-		if a.cli == "podman" {
-			return "pasta"
-		}
-		return "bridge"
-	case runner.NetworkModeNone:
-		return string(runner.NetworkModeNone)
-	default:
-		return ""
-	}
-}
-
 // buildRunArgs assembles the argument slice for `podman/docker run`. Split out
 // of Run so the arg construction can be tested without exec.
 func (a *ociAdapter) buildRunArgs(box runner.Box) []string {
 	args := []string{"run", "--name", box.Name}
-	if network := a.networkArg(); network != "" {
-		args = append(args, "--network", network)
+	if a.network.Arg != "" {
+		args = append(args, "--network", a.network.Arg)
 	}
 	for k, v := range box.Env {
 		if runner.OffArgvKeys[k] {
@@ -585,7 +561,7 @@ var registryProxyProbeTimeout = 30 * time.Second
 // probeRegistryProxyTransport under the same runtime+image+networkMode key, so
 // dispatch and the doctor row (#3114) agree; an error is never cached.
 func (a *ociAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
-	key := registryProbeCacheKey{runtime: a.cli, image: a.image, networkMode: a.networkMode}
+	key := registryProbeCacheKey{runtime: a.cli, image: a.image, networkMode: a.network.Mode}
 	if endpoint, tcpAddHost, ok := loadRegistryProbeCache(a.pwd, key); ok {
 		return endpoint, tcpAddHost, nil
 	}
@@ -682,12 +658,12 @@ func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, b
 		// once it knows the transport decision.
 		return registrymanifest.NewUnixEndpoint(""), false, nil
 	}
-	if a.networkMode.DeniesHostLoopback() {
+	if a.network.Mode.DeniesHostLoopback() {
 		// Falling back silently would either leave a pasta Box unable to
 		// reach the proxy with no diagnostic, or wire a host-loopback route
 		// the operator's NETWORK_MODE explicitly denied (issue #3111
 		// finding B).
-		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.networkMode)
+		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: %s: socket transport unavailable and NETWORK_MODE=%s denies the host-loopback route the TCP fallback requires", a.cli, a.network.Mode)
 	}
 	host := hostGatewayHostname(a.cli)
 	addHost, err := a.probeRegistryTCPReachable(host)

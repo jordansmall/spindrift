@@ -44,8 +44,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		flakeImageAttr:  a.flakeImageAttr,
 		pwd:             a.pwd,
 		mountParams:     a.mountParams,
-		podmanNetwork:   a.podmanNetwork,
-		networkMode:     a.networkMode,
+		network:         a.network,
 		pidsLimit:       a.pidsLimit,
 		memoryLimit:     a.memoryLimit,
 	}
@@ -60,8 +59,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             "/pwd",
 		mountParams:     cfg.MountParams,
-		podmanNetwork:   cfg.PodmanNetwork,
-		networkMode:     cfg.NetworkMode,
+		network:         cfg.OCINetwork(),
 		pidsLimit:       cfg.PidsLimit,
 		memoryLimit:     cfg.MemoryLimit,
 	}

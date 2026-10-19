@@ -82,7 +82,7 @@ func TestNetworkModeRuntimeGate_OpenModeIsNoOp(t *testing.T) {
 // The second gap this gate backstops (review finding on issue #2562): a
 // runtime override can set a non-open NETWORK_MODE on an image already baked
 // with a raw knob (PODMAN_NETWORK / BWRAP_UNSHARE_NET), past mkHarness's
-// networkModeCoherenceOk assert, and runner/oci/oci.go's networkArg() then picks
+// networkModeCoherenceOk assert, and runner.Config.OCINetwork then picks
 // the raw knob over the mode and renders full egress instead of isolation.
 func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 	cases := []struct {
@@ -133,7 +133,7 @@ func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 // A raw knob paired with networkMode "open" or "" (unset, the zero value,
 // distinct from minimalValidConfig()'s "open" default) is the escape hatch
 // docs/reference.md documents for users who never set NETWORK_MODE, and
-// raw-wins in networkArg() has nothing to disagree with. Without both cases,
+// raw-wins in runner.Config.OCINetwork has nothing to disagree with. Without both cases,
 // deleting either half of the guard's mode condition leaves go test green.
 func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 	cases := []struct {
