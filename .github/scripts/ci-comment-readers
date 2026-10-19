@@ -12,7 +12,7 @@ cmd/launcher/main.go
 cmd/launcher/main_test.go
 cmd/launcher/removedknobs.go
 cmd/launcher/internal/daemon/pool.go
-cmd/launcher/internal/dispatchkind/dispatchkind.go
+cmd/launcher/internal/dispatchkind/kinds_gen.go
 cmd/launcher/internal/doctor/*.go
 cmd/launcher/internal/forge/jira/jira.go
 cmd/launcher/internal/promptassembly/*.go
