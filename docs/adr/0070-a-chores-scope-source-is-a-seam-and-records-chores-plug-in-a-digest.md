@@ -41,7 +41,10 @@ Chore is planned, so the hook is built now rather than on a trigger.
    - `ParsePrior`, which reads a prior finding;
    - `Validate`, which applies the Chore's own settle rules, such as tuning's
      sample floor and its `evidence-gap` exemption;
-   - `DedupTerms`, which supplies the Chore's dedup pattern terms.
+   - `DedupTerms`, which supplies the Chore's dedup pattern terms;
+   - `ReadKnobs`, which reads the Chore's row-owned knobs, the Digest's
+     limits and the dedup cooldown, through the host's knob lookup (decision
+     3, issue #5700).
 
    The `records` adapter owns everything else:
    - the check that a Chore is due once enough new settled Records exist;
