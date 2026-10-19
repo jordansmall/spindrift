@@ -245,7 +245,7 @@ func groupRows(prefix, tag string, window, baseline []dispatchrecord.Record) []r
 	workOnly := func(rs []dispatchrecord.Record) []dispatchrecord.Record {
 		var out []dispatchrecord.Record
 		for _, r := range rs {
-			if r.Kind == dispatchkind.Work.Name {
+			if k, _ := dispatchkind.ByName(r.Kind); k == dispatchkind.Default {
 				out = append(out, r)
 			}
 		}

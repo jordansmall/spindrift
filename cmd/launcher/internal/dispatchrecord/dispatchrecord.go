@@ -456,12 +456,14 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 
 	kind := KindUnknown
 	sk := statusKind(status)
+	announcedDesc, _ := dispatchkind.ByName(announced)
 	switch {
 	case dispatchkey.IsChoreKey(key):
 		kind = choreKeyedKind()
-	case announced != "" && announced != dispatchkind.Work.Name:
-		// Only work's verb is ambiguous: logs before #734 announce research as
-		// "implementing" too, so a kind-unique status must outrank that verb.
+	case announced != "" && announcedDesc != dispatchkind.Default:
+		// Only the default kind's verb is ambiguous: logs before #734
+		// announce research as "implementing" too, so a kind-unique status
+		// must outrank that verb.
 		// A frozen quirk of old logs, not a kind fact, so it stays off the
 		// descriptor.
 		kind = announced
