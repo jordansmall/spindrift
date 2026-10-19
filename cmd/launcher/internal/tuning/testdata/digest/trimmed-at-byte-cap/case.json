@@ -1,0 +1,20 @@
+{
+  "cursor": "",
+  "now": "2026-10-09T12:00:00Z",
+  "min_sample": 2,
+  "max_bytes": 3000,
+  "prior": [
+    {
+      "Number": "3",
+      "Open": true,
+      "Metric": "usd-per-record"
+    },
+    {
+      "Number": "4",
+      "Open": false,
+      "NotPlanned": true,
+      "Metric": "churn"
+    }
+  ],
+  "merged": null
+}
