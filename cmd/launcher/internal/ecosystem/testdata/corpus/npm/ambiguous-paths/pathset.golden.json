@@ -1,16 +1,38 @@
-[
-  {
-    "Host": "acme.jfrog.test",
-    "Origin": "https://acme.jfrog.test",
-    "Subtrees": [
-      {
-        "ecosystem": "npm",
-        "path": "/artifactory/api/npm/npm-remote"
-      },
-      {
-        "ecosystem": "npm",
-        "path": "/artifactory/api/npm/npm-local"
-      }
-    ]
-  }
-]
+{
+  "derived": [
+    {
+      "Host": "acme.jfrog.test",
+      "Origin": "https://acme.jfrog.test",
+      "Subtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/artifactory/api/npm/npm-remote"
+        },
+        {
+          "ecosystem": "npm",
+          "path": "/artifactory/api/npm/npm-local"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/artifactory/api/npm/npm-remote",
+        "/artifactory/api/npm/npm-local"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/artifactory/api/npm/npm-remote"
+        },
+        {
+          "ecosystem": "npm",
+          "path": "/artifactory/api/npm/npm-local"
+        }
+      ],
+      "matchHost": "acme.jfrog.test",
+      "upstream": "https://acme.jfrog.test"
+    }
+  ]
+}

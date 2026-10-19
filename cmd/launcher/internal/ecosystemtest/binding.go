@@ -37,6 +37,22 @@ type inTreeOutput struct {
 	Content    string `json:"content,omitempty"`
 }
 
+// env is the case's env.json, the prior environment EnvExports reads, and
+// whether the case ships one; a case without one has an empty environment.
+func (c *replay) env() (env map[string]string, shipped bool, err error) {
+	raw, err := os.ReadFile(filepath.Join(c.dir, "env.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, false, fmt.Errorf("env.json: %w", err)
+	}
+	return env, true, nil
+}
+
 // binding calls the row's renderers directly: bindregistry's BindHomes and
 // ApplyInTree need a Gate, which only a live Forwarder and manifest env build.
 // Like BindHomes, every renderer gets the first route's prefix.
@@ -52,9 +68,16 @@ func (c *replay) binding() ([]byte, error) {
 	rewrites, inTreeRoutes, collisionWarnings := bindregistry.InTreeRoutes(routes, port)
 
 	out := bindingOutput{Warnings: collisionWarnings}
+	env, shipped, err := c.env()
+	if err != nil {
+		return nil, err
+	}
+	if shipped && c.row.EnvExports == nil {
+		return nil, fmt.Errorf("env.json is shipped but row %q has no EnvExports to read it", c.row.Name)
+	}
 	if c.row.EnvExports != nil {
 		var warnings []string
-		out.EnvExports, warnings = c.row.EnvExports(port, prefix, func(string) string { return "" }, routes)
+		out.EnvExports, warnings = c.row.EnvExports(port, prefix, func(k string) string { return env[k] }, routes)
 		out.Warnings = append(out.Warnings, warnings...)
 	}
 	if hc := c.row.HomeConfig; hc != nil {

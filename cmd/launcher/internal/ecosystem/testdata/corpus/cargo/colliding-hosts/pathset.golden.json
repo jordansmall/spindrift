@@ -1,12 +1,28 @@
-[
-  {
-    "Host": "crates.acme.test",
-    "Origin": "https://crates.acme.test",
-    "Subtrees": [
-      {
-        "ecosystem": "cargo",
-        "path": "/index"
-      }
-    ]
-  }
-]
+{
+  "derived": [
+    {
+      "Host": "crates.acme.test",
+      "Origin": "https://crates.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/index"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": null,
+      "enforcedSubtrees": null,
+      "matchHost": "one.acme.test",
+      "upstream": "https://Crates.Acme.Test"
+    },
+    {
+      "enforcedPaths": null,
+      "enforcedSubtrees": null,
+      "matchHost": "two.acme.test",
+      "upstream": "https://crates.acme.test"
+    }
+  ]
+}

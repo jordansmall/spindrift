@@ -1,22 +1,52 @@
-[
-  {
-    "Host": "registry.npmjs.org",
-    "Origin": "https://registry.npmjs.org",
-    "Subtrees": [
-      {
-        "ecosystem": "yarn",
-        "path": "/"
-      }
-    ]
-  },
-  {
-    "Host": "npm.acme.test",
-    "Origin": "https://npm.acme.test",
-    "Subtrees": [
-      {
-        "ecosystem": "yarn",
-        "path": "/"
-      }
-    ]
-  }
-]
+{
+  "derived": [
+    {
+      "Host": "registry.npmjs.org",
+      "Origin": "https://registry.npmjs.org",
+      "Subtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/"
+        }
+      ]
+    },
+    {
+      "Host": "npm.acme.test",
+      "Origin": "https://npm.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/"
+        }
+      ],
+      "matchHost": "registry.npmjs.org",
+      "upstream": "https://registry.npmjs.org"
+    },
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/"
+        }
+      ],
+      "matchHost": "npm.acme.test",
+      "upstream": "https://npm.acme.test"
+    }
+  ]
+}
