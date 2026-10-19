@@ -1,4 +1,4 @@
-{
+rec {
   name = "work";
   verb = "dispatch";
   keying = "ByIssue";
@@ -15,12 +15,7 @@
   preflight = {
     when = "none";
   };
-  statuses = [
-    "ready"
-    "blocked"
-    "ambiguous"
-    "already-resolved"
-  ];
+  statuses = (import ../prompt-contract.nix).outcomeStatusesFor name;
   goVar = "Work";
   default = true;
 }

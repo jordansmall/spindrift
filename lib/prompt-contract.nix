@@ -649,7 +649,8 @@ rec {
 
   # The single source of truth for the status= words a Box may print per
   # dispatch kind (issue #2504, parent #2498); regen renders it into Go
-  # constants and into every prompt spelling of the valid values. Host-side
+  # constants, into the lib/dispatch-kinds rows' statuses (issue #5670), and
+  # into every prompt spelling of the valid values. Host-side
   # dispositions (ADR 0039) and `merged` are deliberately absent: no prompt
   # fragment ever instructs a Box to print them.
   outcomeStatusSets = [
@@ -672,8 +673,10 @@ rec {
     }
   ];
 
+  # A kind with no set (butler, recover) gets [ ]; a misspelt kind is still
+  # caught, by the dispatch-kinds-gen drift check on kinds_gen.go.
   outcomeStatusesFor =
-    kind: (builtins.head (builtins.filter (r: r.kind == kind) outcomeStatusSets)).statuses;
+    kind: builtins.concatMap (r: r.statuses) (builtins.filter (r: r.kind == kind) outcomeStatusSets);
 
   # The 5 marker channels a Box's output can carry (issue #2974, parent
   # #2972), rendered into Go by lib/renderers.nix's renderMarkerChannelsGo.
