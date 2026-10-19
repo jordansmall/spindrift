@@ -228,7 +228,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				} else {
 					return settle.Decoration{
 						Backlink:    backlink,
-						ExtraLabels: s.extraLabels(dispatchkind.Butler.PatchLabel),
+						ExtraLabels: s.extraLabels(dispatchkind.MustBySettle(dispatchkind.SettleLedger).PatchLabel),
 						// Spend the slot, push, and open the PR only in
 						// OnFiled, after PostIssue succeeds -- a failed post
 						// must not push a branch or open a PR for an issue
@@ -399,7 +399,7 @@ func (s *settleRun) landPatch(chorenum string, pc PatchCommit, subject, head str
 }
 
 // fallBackToPromote is landPatch's failure path (issue #4074): a finding
-// already filed with dispatchkind.Butler.PatchLabel, whose push or PR-create
+// already filed with the butler kind's PatchLabel, whose push or PR-create
 // then failed, is judged exactly as decidePromote would judge it with no
 // Patch, via s.patch.forge's own forge.IssueLabeler rather than PostIssue's
 // own labels (the issue already exists) -- reachable only because

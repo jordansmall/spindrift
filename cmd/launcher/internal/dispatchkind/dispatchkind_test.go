@@ -413,3 +413,26 @@ func TestPromptsShape(t *testing.T) {
 		t.Errorf("Work.Prompts = %+v, want a by-pass Issue/Fix pair and no Base", Work.Prompts)
 	}
 }
+
+func TestBySettle(t *testing.T) {
+	for _, s := range []Settle{SettleMerge, SettleVerdict, SettleLedger} {
+		d, ok := BySettle(s)
+		if !ok || d.Settle != s {
+			t.Fatalf("BySettle(%v) = %v, %v", s, d, ok)
+		}
+		for _, o := range All {
+			if o.Settle == s && (o.FindingLabel != d.FindingLabel || o.PatchLabel != d.PatchLabel) {
+				t.Errorf("rows sharing Settle %v disagree on FindingLabel/PatchLabel: %s vs %s", s, o.Name, d.Name)
+			}
+		}
+	}
+	if _, ok := BySettle(Settle(-1)); ok {
+		t.Error("BySettle found a row for an unknown strategy")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Error("MustBySettle did not panic for an unknown strategy")
+		}
+	}()
+	MustBySettle(Settle(-1))
+}

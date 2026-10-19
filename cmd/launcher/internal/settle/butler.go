@@ -64,7 +64,7 @@ type ButlerFiling struct {
 // FileButlerFindings caps result's issue-intent findings at maxPerSweep (0
 // means no cap; see capIntents), hands the kept well-formed findings to plan
 // before filing anything, then files the capped result under
-// dispatchkind.Butler.FindingLabel's provenance label using the Decoration
+// the butler kind's FindingLabel provenance label using the Decoration
 // the plan's returned callback produces per finding. It prints the same
 // filed/dropped lines internal/butler's settle step always has, and returns
 // only successful filings in payload order, plus the dropped count and the
@@ -86,7 +86,7 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 	}
 	decide := plan(findings)
 
-	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, dispatchkind.Butler.FindingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
+	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, dispatchkind.MustBySettle(dispatchkind.SettleLedger).FindingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
 		d := decide(in.finding())
 		return d.Backlink, d.ExtraLabels, d.OnFiled
 	})
