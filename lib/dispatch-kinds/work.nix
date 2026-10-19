@@ -3,6 +3,10 @@
   verb = "dispatch";
   keying = "ByIssue";
   labels = "LabelsConfigured";
+  prompts = {
+    issue = "issue-prompt.md";
+    fix = "fix-prompt.md";
+  };
   settle = "SettleMerge";
   daemonPriority = "PriorityNormal";
   enablement = "EnabledAlways";

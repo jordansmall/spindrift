@@ -8,6 +8,7 @@ var (
 		Verb:           "dispatch",
 		Keying:         ByIssue,
 		Labels:         LabelsConfigured,
+		Prompts:        Prompts{Issue: "issue-prompt.md", Fix: "fix-prompt.md"},
 		Settle:         SettleMerge,
 		DaemonPriority: PriorityNormal,
 		DemandSource:   DemandTrackerProbe,

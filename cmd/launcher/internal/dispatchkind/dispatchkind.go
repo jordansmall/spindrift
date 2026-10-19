@@ -153,11 +153,14 @@ func (p DoctorPreflight) Flag(explicitSelector bool) string {
 	panic("dispatchkind: doctor preflight unset")
 }
 
-// Prompts names the kind's prompt templates. A zero value means "defer to
-// work's selection" for Base, and "no self-contained sub-mode" for
-// SelfContainedBase.
+// Prompts names the kind's prompt templates. A kind owns its prompt (Base
+// set), selects between Issue and Fix by pass (Base empty, both set), or has
+// none (all empty: recover runs no Box). SelfContainedBase is "" for a
+// kind with no --self-contained sub-mode.
 type Prompts struct {
-	Base              string // "" = work's pass-dependent issue-prompt.md / fix-prompt.md selection
+	Base              string // "" = the kind has no prompt of its own; Issue/Fix apply, or none at all
+	Issue             string // landing kind's initial-pass prompt; "" for a kind with its own Base
+	Fix               string // landing kind's fix-pass prompt; "" for a kind with its own Base
 	SelfContainedBase string // "" = kind has no --self-contained sub-mode
 	// Reviewer is "" for the roster's own reviewer prompt (review-prompt.md),
 	// dropped when the orchestrator's review pass replaces it; else the

@@ -489,16 +489,19 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		}
 		sessionMode = "initial"
 	case e.FixPass > 0:
-		baseName = "fix-prompt.md"
+		baseName = d.Prompts.Fix
 		sessionMode = "resume"
 	default:
-		baseName = "issue-prompt.md"
+		baseName = d.Prompts.Issue
 		sessionMode = "initial"
 		if e.ResumeAfterHold {
 			sessionMode = "resume"
 		}
 	}
 
+	if baseName == "" {
+		return promptBodies{}, fmt.Errorf("kind %s has no prompt", d.Name)
+	}
 	basePath := filepath.Join(e.PromptsDir, baseName)
 	baseSource := Source{Kind: SourceTemplate, Name: baseName}
 	baseText, err := os.ReadFile(basePath)

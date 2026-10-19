@@ -382,3 +382,21 @@ func TestPassRolesNotShared(t *testing.T) {
 		}
 	}
 }
+
+// TestPromptsShape pins the shapes prompt assembly switches on: a non-empty
+// Base is the "kind owns its prompt" discriminator so it never coexists with
+// Issue/Fix, and the by-pass pair is set together or not at all.
+func TestPromptsShape(t *testing.T) {
+	for _, d := range All {
+		p := d.Prompts
+		if p.Base != "" && (p.Issue != "" || p.Fix != "") {
+			t.Errorf("%s: Prompts %+v sets Base alongside Issue/Fix", d.Name, p)
+		}
+		if (p.Issue == "") != (p.Fix == "") {
+			t.Errorf("%s: Prompts %+v sets only one of Issue/Fix", d.Name, p)
+		}
+	}
+	if Work.Prompts.Base != "" || Work.Prompts.Issue == "" {
+		t.Errorf("Work.Prompts = %+v, want a by-pass Issue/Fix pair and no Base", Work.Prompts)
+	}
+}
