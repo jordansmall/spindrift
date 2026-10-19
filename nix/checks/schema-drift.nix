@@ -574,6 +574,66 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when lib/dispatch-kinds/*.nix changes
+  # (issue #5668). Same gofmt normalization as driver-descriptors-gen.
+  dispatch-kinds-gen =
+    let
+      raw = pkgs.writeText "kinds_gen.go.raw" (
+        renderers.renderDispatchKindsGo (import ../../lib/dispatch-kinds)
+      );
+    in
+    pkgs.runCommand "dispatch-kinds-gen"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/dispatchkind/kinds_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/dispatchkind/kinds_gen.go is out of sync with lib/dispatch-kinds/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
+  # dispatchkind.Default is rendered from the one row that sets `default =
+  # true` (issue #5668), so the renderer must throw on zero or several. The
+  # control proves the real rows render, so the negatives are not vacuous. Also
+  # covers the unknown-attribute guards (misspelled attr, unknown prompts key,
+  # row-set passRoles).
+  dispatch-kinds-default-count =
+    let
+      inherit (pkgs.lib) assertMsg imap0;
+      rows = import ../../lib/dispatch-kinds;
+      render = rs: builtins.tryEval (renderers.renderDispatchKindsGo rs);
+      noDefault = map (r: removeAttrs r [ "default" ]) rows;
+      twoDefaults = imap0 (i: r: if i == 1 then r // { default = true; } else r) rows;
+      tweakFirst = f: imap0 (i: r: if i == 0 then f r else r) rows;
+      misspelledAttr = tweakFirst (r: r // { findinglabel = "x"; });
+      unknownPrompt = tweakFirst (
+        r:
+        r
+        // {
+          prompts = (r.prompts or { }) // {
+            reveiwer = "x.md";
+          };
+        }
+      );
+      setsPassRoles = tweakFirst (r: r // { passRoles = { }; });
+    in
+    assert assertMsg (render rows).success
+      "dispatch-kinds-default-count (issue #5668): the real lib/dispatch-kinds rows must render successfully, but they failed -- the guard would be vacuous";
+    assert assertMsg (!(render noDefault).success)
+      "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject rows where none sets `default = true`, but it rendered successfully";
+    assert assertMsg (!(render twoDefaults).success)
+      "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject rows where two set `default = true`, but it rendered successfully";
+    assert assertMsg (!(render misspelledAttr).success)
+      "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject a row with a misspelled attribute, but it rendered successfully";
+    assert assertMsg (!(render unknownPrompt).success)
+      "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject a row with an unknown prompts key, but it rendered successfully";
+    assert assertMsg (!(render setsPassRoles).success)
+      "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject a row that sets the renderer-supplied passRoles, but it rendered successfully";
+    pkgs.runCommand "dispatch-kinds-default-count" { } "touch $out";
+
   # Regenerate with `nix run .#regen` when lib/chore-catalog.nix changes
   # (issue #3991).
   chore-builtins-gen =
