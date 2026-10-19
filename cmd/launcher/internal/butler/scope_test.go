@@ -2,6 +2,7 @@ package butler
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"reflect"
@@ -13,8 +14,10 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 func TestTreeSourceDue(t *testing.T) {
@@ -176,7 +179,7 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 	}
 
 	d := dispatch.NewFake()
-	d.RecordIDResult = dispatchrecord.RecordID("tuning", "tuning", tuningNow)
+	d.RecordIDResult = dispatchrecord.RecordID(tuning.Strategy.Name, tuning.Strategy.Name, tuningNow)
 	step := &settleRun{}
 	if err := p.arm(d, step); err != nil {
 		t.Fatalf("arm: %v", err)
@@ -187,7 +190,7 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 	if step.tuning == nil || step.tuning.ref != want {
 		t.Fatalf("step.tuning = %+v, want ref %+v", step.tuning, want)
 	}
-	snap, ok, err := r.policy.loadSnapshot("tuning", d.RecordIDResult)
+	snap, ok, err := r.policy.loadSnapshot(tuning.Strategy.Name, d.RecordIDResult)
 	if err != nil || !ok {
 		t.Fatalf("snapshot not stored: ok=%v err=%v", ok, err)
 	}
@@ -197,7 +200,8 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 }
 
 func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
-	src, _, _ := newTestRecordsSource(t, t.TempDir(), 5, 1)
+	root := t.TempDir()
+	src, _, _ := newTestRecordsSource(t, root, 5, 1)
 	p, err := src.Prepare(ledger.Tip{})
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +212,84 @@ func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), "butler: tuning: dispatch has no record ID") {
 		t.Fatalf("err = %v, want the no-record-ID error", err)
 	}
+	if n := countSnapshots(t, root); n != 0 {
+		t.Errorf("a failed arm must store nothing: snapshots rows = %d", n)
+	}
 	if step.tuning != nil {
 		t.Error("a failed arm must leave the settle step unarmed")
+	}
+}
+
+func TestRecordsSourceSnapshotsKeyedByChore(t *testing.T) {
+	_, r, _ := newTestRecordsSource(t, t.TempDir(), 5, 1)
+	id := dispatchrecord.RecordID("shared", "shared", tuningNow)
+	steps := map[string]*settleRun{tuning.Strategy.Name: {}, noPriorChore: {}}
+	for name, step := range steps {
+		src, err := newRecordsSource(r, name, "head1", tuningNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := dispatch.NewFake()
+		d.RecordIDResult = id
+		if err := src.armSnapshot(d, step, name+" digest"); err != nil {
+			t.Fatalf("armSnapshot %s: %v", name, err)
+		}
+	}
+	for name, step := range steps {
+		if err := step.tuning.load(); err != nil || step.tuning.rendered != name+" digest" {
+			t.Errorf("%s load: rendered %q, err %v; want %q", name, step.tuning.rendered, err, name+" digest")
+		}
+	}
+}
+
+func openRecordsDB(t *testing.T, root string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", hostpaths.DispatchRecordsDB(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func countSnapshots(t *testing.T, root string) int {
+	t.Helper()
+	var n int
+	if err := openRecordsDB(t, root).QueryRow("SELECT COUNT(*) FROM snapshots").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A claim made before the upgrade left its digest in tuning_snapshots; the
+// settle after the upgrade must still load it, under the Chore's name.
+func TestTuningSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
+	root := t.TempDir()
+	s, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	const digest = "pre-upgrade digest"
+	sum := sha256.Sum256([]byte(digest))
+	ref := ledger.Snapshot{Sweep: dispatchrecord.RecordID(tuning.Strategy.Name, tuning.Strategy.Name, tuningNow), SHA256: hex.EncodeToString(sum[:])}
+	db := openRecordsDB(t, root)
+	for _, q := range []string{
+		"DROP TABLE snapshots",
+		"CREATE TABLE tuning_snapshots (record_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, rendered TEXT NOT NULL, created_at INTEGER NOT NULL)",
+		"INSERT INTO tuning_snapshots VALUES ('" + ref.Sweep + "', '" + ref.SHA256 + "', '" + digest + "', 5)",
+		"PRAGMA user_version = 12",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snap := &tuningSnapshot{chore: tuning.Strategy.Name, ref: ref, policy: tuningPolicy(root, 1)}
+	if err := snap.load(); err != nil || snap.rendered != digest {
+		t.Fatalf("load: rendered %q, err %v; want %q", snap.rendered, err, digest)
 	}
 }
