@@ -38,10 +38,11 @@ func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 }
 
 // TestLauncherCheckDeps_BackendNilValidatorsStayNil proves a backendRow with
-// nil validateTracker/validateCodeForge (github is axis membership only)
-// adapts to a Backend with nil funcs. A non-nil no-op wrapper would turn
-// crossKnobCheck's "no extra validation" arm into a no-op that always
-// succeeds, breaking any test that asserts a row has no validator.
+// nil validateTracker/validateCodeForge (github has no code-forge validator,
+// local no tracker validator) adapts to a Backend with a nil func. A non-nil
+// no-op wrapper would turn crossKnobCheck's "no extra validation" arm into a
+// no-op that always succeeds, breaking any test that asserts a row has no
+// validator.
 func TestLauncherCheckDeps_BackendNilValidatorsStayNil(t *testing.T) {
 	c := minimalValidConfig()
 	deps := launcherCheckDeps(c)
@@ -49,11 +50,15 @@ func TestLauncherCheckDeps_BackendNilValidatorsStayNil(t *testing.T) {
 	if !ok {
 		t.Fatal("launcherCheckDeps(c).Backend(\"github\") ok = false, want true")
 	}
-	if b.ValidateTracker != nil {
-		t.Error("launcherCheckDeps(c).Backend(\"github\").ValidateTracker != nil, want nil")
-	}
 	if b.ValidateCodeForge != nil {
 		t.Error("launcherCheckDeps(c).Backend(\"github\").ValidateCodeForge != nil, want nil")
+	}
+	b, ok = deps.Backend("local")
+	if !ok {
+		t.Fatal("launcherCheckDeps(c).Backend(\"local\") ok = false, want true")
+	}
+	if b.ValidateTracker != nil {
+		t.Error("launcherCheckDeps(c).Backend(\"local\").ValidateTracker != nil, want nil")
 	}
 }
 
