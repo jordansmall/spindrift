@@ -715,7 +715,13 @@ checkedMerge {
       preambles = import ../../lib/preambles.nix;
       stub = import ../fixtures/stub-runner-row.nix;
       rows = (import ../../lib/runners/index.nix { rows = [ stub ]; }).rows;
-      out = preambles.runArtifacts (preambles.dummyRunArtifactArgs // { row = builtins.head rows; });
+      out = preambles.runArtifacts (
+        preambles.dummyRunArtifactArgs
+        // {
+          row = builtins.head rows;
+          runtime = builtins.head (builtins.head rows).runtimes;
+        }
+      );
       keys = preambles.documentArtifactKeysFor rows;
     in
     assert assertMsg

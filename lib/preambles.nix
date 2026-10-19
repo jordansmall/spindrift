@@ -82,7 +82,7 @@ rec {
   # (ADR 0020, issue #625). The keys only one runner family renders come from
   # that family's row (lib/runners, `runArtifacts`, ADR 0069 decision 7), so
   # this function names no family; `...` carries the row-only inputs through,
-  # and `runArtifacts` below rejects any name no row or this trailer takes.
+  # so callers use `runArtifacts` below, which rejects the unknown names.
   renderRunArtifacts =
     {
       # The runner row (lib/runners): its name and artifact (which Box artifact
@@ -168,17 +168,26 @@ rec {
   # Restores the unknown-argument error that `...` above would swallow: every
   # name must be a formal of the trailer or of some row's `runArtifacts`
   # (mkHarness passes the union of all rows' inputs, whichever row it picked).
+  # `flakeImageAttr` is a row formal but derived above from systems.linux and
+  # imageAttrName, so a caller-passed one would be silently overwritten.
   runArtifacts =
+    let
+      withoutDerived = fns: removeAttrs fns [ "flakeImageAttr" ];
+      sharedInputs = withoutDerived (
+        builtins.foldl' (
+          acc: row: acc // builtins.functionArgs row.runArtifacts
+        ) (builtins.functionArgs renderRunArtifacts) runnerRows
+      );
+    in
     args:
     let
-      allowed =
-        builtins.foldl' (acc: fn: acc // builtins.functionArgs fn)
-          (builtins.functionArgs renderRunArtifacts)
-          (map (row: row.runArtifacts) (runnerRows ++ [ args.row ]));
+      allowed = sharedInputs // withoutDerived (builtins.functionArgs args.row.runArtifacts);
       unknown = builtins.filter (n: !(allowed ? ${n})) (builtins.attrNames args);
     in
     if unknown != [ ] then
-      throw "preambles.runArtifacts: unknown argument(s) ${builtins.concatStringsSep ", " unknown}: neither the shared trailer nor any runner row (lib/runners) takes them"
+      throw "preambles.runArtifacts: unknown argument(s) ${builtins.concatStringsSep ", " unknown}: neither the shared trailer nor any runner row (lib/runners) takes them (flakeImageAttr is derived from systems.linux and imageAttrName, never passed)"
+    else if !(builtins.elem args.runtime args.row.runtimes) then
+      throw "preambles.runArtifacts: runtime ${args.runtime} is not one of runner row ${args.row.name}'s runtimes (${builtins.concatStringsSep ", " args.row.runtimes}); the document would name a family and a runtime that contradict each other"
     else
       renderRunArtifacts args;
 
@@ -204,7 +213,6 @@ rec {
     imagePath = "dummy";
     imageHash = "dummy";
     imageAttrName = "dummy";
-    flakeImageAttr = "dummy";
     launcherCurrencyHash = "dummy";
     imageName = "dummy";
     runtime = "dummy";
@@ -236,6 +244,11 @@ rec {
     syscallFilterDrv = "dummy";
   };
 
+  # The run-document keys one row renders by itself (without the shared
+  # trailer), for checks that compare a row against the whole document.
+  rowArtifactKeys =
+    row: builtins.attrNames (row.runArtifacts (dummyRunArtifactArgs // { flakeImageAttr = "dummy"; }));
+
   # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
   # what actually renders instead of a parallel list that can silently drift
   # (issue #810). IMAGE and GITHUB_OUTPUT (#2324) are env-only escape hatches
@@ -245,7 +258,16 @@ rec {
     builtins.sort builtins.lessThan (
       unique (
         builtins.concatMap (
-          row: builtins.attrNames (runArtifacts (dummyRunArtifactArgs // { inherit row; }))
+          row:
+          builtins.attrNames (
+            runArtifacts (
+              dummyRunArtifactArgs
+              // {
+                inherit row;
+                runtime = builtins.head row.runtimes;
+              }
+            )
+          )
         ) rows
         ++ [
           "IMAGE"
@@ -254,7 +276,7 @@ rec {
       )
     );
 
-  documentArtifactKeys = documentArtifactKeysFor (import ./runners/index.nix { }).rows;
+  documentArtifactKeys = documentArtifactKeysFor runnerRows;
 
   # The Launcher input document (ADR 0020): a `settings` section of resolved
   # knob values keyed by env var name, and an `artifacts` section of

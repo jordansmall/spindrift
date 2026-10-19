@@ -21,7 +21,7 @@ let
         let
           runtime = builtins.head row.runtimes;
           out = preambles.runArtifacts (preambles.dummyRunArtifactArgs // { inherit row runtime; });
-          rowKeys = builtins.attrNames (row.runArtifacts preambles.dummyRunArtifactArgs);
+          rowKeys = preambles.rowArtifactKeys row;
           missing = builtins.filter (k: !(out ? ${k})) rowKeys;
           name = "preambles-run-artifacts-row-${row.name}";
         in
@@ -774,9 +774,7 @@ runArtifactsRowChecks allRows
         "TRACKER_AXIS_WRITE"
         "WORKER_PROVISIONED"
       ];
-      rowKeys = builtins.concatMap (
-        row: builtins.attrNames (row.runArtifacts preambles.dummyRunArtifactArgs)
-      ) allRows;
+      rowKeys = builtins.concatMap preambles.rowArtifactKeys allRows;
       expected = pkgs.lib.unique (builtins.sort builtins.lessThan (sharedKeys ++ rowKeys));
     in
     assert assertMsg (out == expected)
@@ -790,10 +788,18 @@ runArtifactsRowChecks allRows
     let
       args = preambles.dummyRunArtifactArgs // {
         row = ociRow;
-        runtime = "podman";
+        runtime = builtins.head ociRow.runtimes;
       };
       bad = builtins.tryEval (
         builtins.deepSeq (preambles.runArtifacts (args // { imageNmae = "typo"; })) true
+      );
+      badDerived = builtins.tryEval (
+        builtins.deepSeq (preambles.runArtifacts (args // { flakeImageAttr = "caller"; })) true
+      );
+      # A runtime another row lists would render a self-contradictory document
+      # (the bwrap row's keys under an OCI RUNTIME).
+      badRuntime = builtins.tryEval (
+        builtins.deepSeq (preambles.runArtifacts (args // { row = bwrapRow; })) true
       );
     in
     assert assertMsg (builtins.isAttrs (
@@ -802,6 +808,10 @@ runArtifactsRowChecks allRows
     assert assertMsg (
       !bad.success
     ) "runArtifacts must throw on an argument no row or the trailer takes";
+    assert assertMsg (
+      !badDerived.success
+    ) "runArtifacts must throw on a caller-passed flakeImageAttr, which it derives itself";
+    assert assertMsg (!badRuntime.success) "runArtifacts must throw on a runtime the row does not list";
     pkgs.runCommand "preambles-run-artifacts-rejects-unknown-arg" { } "touch $out";
 
   # A stub row yields its per-row check with no test written for it; its
