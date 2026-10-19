@@ -175,7 +175,7 @@ var table = []row{
 	{"Network/no-host-loopback", networkField, network(runner.NetworkModeNoHostLoopback), nil},
 	{"Network/none", networkField, network(runner.NetworkModeNone), nil},
 	{"Network/host", networkField, network(runner.NetworkModeHost),
-		&familyOnly{runner.KindBwrap, "OCI has no host-netns rendering; networkArg treats host as open"}},
+		&familyOnly{runner.KindBwrap, "OCI has no host-netns rendering; Config.OCINetwork treats host as open"}},
 }
 
 // facets compare what a decoder recovered against only what the spec asks
