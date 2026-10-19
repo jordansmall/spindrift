@@ -67,7 +67,7 @@ func (l *localCodeForge) LandingRef() (string, error) {
 // construction-time parent, to its "<branch>@<sha>" reference for reconcile's
 // healing path (forge.LandingRepair; ADR 0029, ADR 0033, issue #1809).
 func (l *localCodeForge) IntegrationTip(parent string) (string, error) {
-	return landingRef(l.repoPath, IntegrationBranch(SanitizedParent{token: parent}))
+	return landingRef(l.repoPath, IntegrationBranch(ResolveParent("", parent)))
 }
 
 // LandingContained reports without network access whether landing sits in
@@ -80,7 +80,7 @@ func (l *localCodeForge) LandingContained(landing forge.Landing, scope forge.See
 	if err != nil || !ok {
 		return false, err
 	}
-	integrationBranch := IntegrationBranch(SanitizedParent{token: scope.Parent()})
+	integrationBranch := IntegrationBranch(ResolveParent("", scope.Parent()))
 	contained, err := isMergedIntoIntegration(l.repoPath, sha, integrationBranch)
 	if err != nil || contained {
 		return contained, err
