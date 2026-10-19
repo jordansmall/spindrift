@@ -388,10 +388,9 @@ func nextActiveTopLevelRole(current string, op *hostop.SpindriftOp) string {
 	if op == nil || op.Op != hostop.OpPassStart {
 		return current
 	}
-	// A transcript's pass_start op names no dispatch kind, and every kind's row
-	// carries the same table (dispatchkind TestPassRolesRows), so work's row
-	// stands for all.
-	if role := dispatchkind.Work.PassRoles[op.Role]; role != "" {
+	// A pass_start op names no dispatch kind; every kind shares one pass-role
+	// table, which dispatchkind.PassRole serves.
+	if role := dispatchkind.PassRole(op.Role); role != "" {
 		return role
 	}
 	return current
