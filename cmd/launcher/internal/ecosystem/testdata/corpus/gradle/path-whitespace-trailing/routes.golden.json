@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.gradle.path \"/maven \" must not contain whitespace"
+}

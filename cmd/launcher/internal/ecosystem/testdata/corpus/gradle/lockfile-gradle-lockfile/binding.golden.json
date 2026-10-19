@@ -1,0 +1,7 @@
+{
+  "homeConfig": {
+    "configPath": "init.d/spindrift-registry-proxy.init.gradle",
+    "content": "// spindrift: gradle has no discoverable per-registry path to redirect\n// onto (no in-tree config file to derive one from, and no path key in a\n// [routes.ecosystems.gradle] block of the routes file) -- this init\n// script intentionally installs no repository redirection, so the\n// build falls through to whatever repositories it declares itself.\n",
+    "homeEnvVar": "GRADLE_USER_HOME"
+  }
+}

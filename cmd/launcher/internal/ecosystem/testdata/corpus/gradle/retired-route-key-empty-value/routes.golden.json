@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": gradle-path is retired (ADR 0048, issue #3405): the routes file's per-ecosystem keys become one [routes.ecosystems.<name>] block with one typed key, path -- the row validates any further keys; equivalent routes-file stanza:\n\n[[routes]]\nmatch-host = \"repo.acme.test\"\nupstream-origin = \"https://repo.acme.test\"\nauth-scheme = \"bearer\"\ncredential = { env = \"GRADLE_TOKEN\" }\n"
+}

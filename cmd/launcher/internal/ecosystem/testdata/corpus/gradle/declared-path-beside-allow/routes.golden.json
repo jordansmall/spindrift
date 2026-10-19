@@ -1,0 +1,25 @@
+[
+  {
+    "Allow": [
+      "/dl"
+    ],
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "GRADLE_TOKEN",
+      "FromFile": "",
+      "MatchHost": "repo.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://repo.acme.test"
+    },
+    "Ecosystems": {
+      "gradle": {
+        "path": "/gradle-maven"
+      }
+    },
+    "MatchHost": "repo.acme.test",
+    "UpstreamOrigin": "https://repo.acme.test"
+  }
+]

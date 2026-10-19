@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.gradle.path \"//\" must name a specific path, not the whole host"
+}
