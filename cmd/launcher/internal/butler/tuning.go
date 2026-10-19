@@ -60,25 +60,25 @@ func (p Policy) loadRecords() (records []dispatchrecord.Record, err error) {
 	return records, err
 }
 
-// storeSnapshot writes a tuning sweep's digest to the Dispatch Records store,
-// creating it if this is the first write. The Ledger carries only the ref
-// (ADR 0062): the digest itself is never committed or pushed.
-func (p Policy) storeSnapshot(snap dispatchrecord.TuningSnapshot) error {
+// storeSnapshot writes a records Chore sweep's digest to the Dispatch Records
+// store, creating it if this is the first write. The Ledger carries only the
+// ref (ADR 0062, ADR 0070): the digest itself is never committed or pushed.
+func (p Policy) storeSnapshot(snap dispatchrecord.Snapshot) error {
 	return p.withStore(func(s *dispatchrecord.Store) error {
-		if err := s.PutTuningSnapshot(snap); err != nil {
-			return fmt.Errorf("store tuning snapshot: %w", err)
+		if err := s.PutSnapshot(snap); err != nil {
+			return fmt.Errorf("store %s snapshot: %w", snap.Chore, err)
 		}
 		return nil
 	})
 }
 
-// loadSnapshot reads back the snapshot stored under recordID; ok is false when
-// the store, or the row, does not exist.
-func (p Policy) loadSnapshot(recordID string) (snap dispatchrecord.TuningSnapshot, ok bool, err error) {
+// loadSnapshot reads back the snapshot stored under the Chore and recordID; ok
+// is false when the store, or the row, does not exist.
+func (p Policy) loadSnapshot(chore, recordID string) (snap dispatchrecord.Snapshot, ok bool, err error) {
 	err = p.withExistingStore(func(s *dispatchrecord.Store) error {
 		var lerr error
-		if snap, ok, lerr = s.TuningSnapshot(recordID); lerr != nil {
-			return fmt.Errorf("load tuning snapshot: %w", lerr)
+		if snap, ok, lerr = s.Snapshot(chore, recordID); lerr != nil {
+			return fmt.Errorf("load %s snapshot: %w", chore, lerr)
 		}
 		return nil
 	})
@@ -88,12 +88,13 @@ func (p Policy) loadSnapshot(recordID string) (snap dispatchrecord.TuningSnapsho
 	return snap, ok, nil
 }
 
-// tuningSnapshot is a records-scoped sweep's digest. ref goes on the Done
-// commit and names the stored row; rendered is the text of that row, filled by
-// load at settle; digest is the Strategy whose hooks judge the findings;
-// policy and tree reach the store, the sample floor and the scanned HEAD's
-// tracked files.
+// tuningSnapshot is a records-scoped sweep's digest. chore and ref.Sweep key
+// the stored row; ref goes on the Done commit; rendered is the text of that
+// row, filled by load at settle; digest is the Strategy whose hooks judge the
+// findings; policy and tree reach the store, the sample floor and the scanned
+// HEAD's tracked files.
 type tuningSnapshot struct {
+	chore    string
 	ref      ledger.Snapshot
 	rendered string
 	digest   recordsdigest.Strategy
@@ -112,16 +113,16 @@ func (p Policy) digestLimits() recordsdigest.Limits {
 // A missing row, or one whose text no longer hashes to ref.SHA256, is an error:
 // the settle fails and the claim stands.
 func (t *tuningSnapshot) load() error {
-	snap, ok, err := t.policy.loadSnapshot(t.ref.Sweep)
+	snap, ok, err := t.policy.loadSnapshot(t.chore, t.ref.Sweep)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("tuning snapshot %s is missing from the dispatch records store", t.ref.Sweep)
+		return fmt.Errorf("%s snapshot %s is missing from the dispatch records store", t.chore, t.ref.Sweep)
 	}
 	sum := sha256.Sum256([]byte(snap.Rendered))
 	if got := hex.EncodeToString(sum[:]); snap.SHA256 != t.ref.SHA256 || got != t.ref.SHA256 {
-		return fmt.Errorf("tuning snapshot %s does not match its ledger ref %s", t.ref.Sweep, t.ref.SHA256)
+		return fmt.Errorf("%s snapshot %s does not match its ledger ref %s", t.chore, t.ref.Sweep, t.ref.SHA256)
 	}
 	t.rendered = snap.Rendered
 	return nil

@@ -131,7 +131,12 @@ func TestStoreMigratesV11DatabaseGainsPassAgents(t *testing.T) {
 	if n := ingest(t, old); n == 0 {
 		t.Fatal("first ingest read nothing")
 	}
-	for _, q := range []string{"DROP TABLE pass_agents", "PRAGMA user_version = 11"} {
+	for _, q := range []string{
+		"DROP TABLE pass_agents",
+		"DROP TABLE snapshots",
+		"CREATE TABLE tuning_snapshots (record_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, rendered TEXT NOT NULL, created_at INTEGER NOT NULL)",
+		"PRAGMA user_version = 11",
+	} {
 		if _, err := old.db.Exec(q); err != nil {
 			t.Fatal(err)
 		}

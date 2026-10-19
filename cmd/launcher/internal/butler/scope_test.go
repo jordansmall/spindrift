@@ -187,7 +187,7 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 	if step.tuning == nil || step.tuning.ref != want {
 		t.Fatalf("step.tuning = %+v, want ref %+v", step.tuning, want)
 	}
-	snap, ok, err := r.policy.loadSnapshot(d.RecordIDResult)
+	snap, ok, err := r.policy.loadSnapshot("tuning", d.RecordIDResult)
 	if err != nil || !ok {
 		t.Fatalf("snapshot not stored: ok=%v err=%v", ok, err)
 	}

@@ -244,6 +244,19 @@ var migrations = []string{
 	);
 	-- Existing rows were parsed before agents were tallied, so re-read them (mtime -1 never matches a real file).
 	UPDATE ingested_files SET mtime_ns = -1;`,
+	// v13: snapshots for every records Chore (ADR 0070, issue #5698), keyed by
+	// Chore and Record ID; tuning's rows carry over.
+	`CREATE TABLE snapshots (
+		chore      TEXT NOT NULL,
+		record_id  TEXT NOT NULL,
+		sha256     TEXT NOT NULL,
+		rendered   TEXT NOT NULL,
+		created_at INTEGER NOT NULL, -- unix ms, UTC
+		PRIMARY KEY (chore, record_id)
+	);
+	INSERT INTO snapshots (chore, record_id, sha256, rendered, created_at)
+		SELECT 'tuning', record_id, sha256, rendered, created_at FROM tuning_snapshots;
+	DROP TABLE tuning_snapshots;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
