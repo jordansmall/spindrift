@@ -255,7 +255,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `cmd/launcher/stats_by_test.go`, `cmd/launcher/stats_reverts_test.go`, and
   `cmd/launcher/stats_churn_test.go`
   to overwrite
-  `cmd/launcher/testdata/golden/stats*.{txt,jsonl}`, and the Driver
+  `cmd/launcher/testdata/golden/stats*.{txt,jsonl}`, the ecosystem doc test
+  `TestReferenceDocs_GeneratedSpans` (in
+  `cmd/launcher/internal/ecosystem`) to rewrite its two spans in
+  `docs/reference.md`, and the Driver
   Pass-log corpus test (each Driver's `TestCorpus`) to overwrite the goldens
   under `cmd/launcher/internal/driver/<driver>/testdata/corpus/` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a
