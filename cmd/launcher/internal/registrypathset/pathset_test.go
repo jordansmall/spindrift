@@ -1,13 +1,12 @@
 package registrypathset
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // registryvocab.PathSet.Admits owns the admission rule (issue #3398), so this
@@ -21,24 +20,13 @@ func (s HostPathSet) admits(requestPath string) bool {
 	return roots.Admits(requestPath)
 }
 
-func writeFixture(t *testing.T, dir, rel, body string) {
-	t.Helper()
-	full := filepath.Join(dir, rel)
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // Discover dedupes by host and drops the second registry. Derive must not: a
 // repo declaring an internal and a remote cargo registry on one host needs both
 // index subtrees, or the enforced path set refuses the crates the second
 // registry serves.
 func TestDerive_TwoCargoRegistriesOneHost(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".cargo/config.toml", `
+	testutil.WriteFixture(t, dir, ".cargo/config.toml", `
 [registries.internal]
 index = "sparse+https://artifacts.example.com/artifactory/api/cargo/internal/index"
 
@@ -70,8 +58,8 @@ index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index
 // Origin is the one kept.
 func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".npmrc", "registry=https://host.example.com/npm\n")
-	writeFixture(t, dir, ".yarnrc.yml", "npmRegistryServer: http://host.example.com:8080/yarn\n")
+	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://host.example.com/npm\n")
+	testutil.WriteFixture(t, dir, ".yarnrc.yml", "npmRegistryServer: http://host.example.com:8080/yarn\n")
 
 	got, err := Derive(dir)
 	if err != nil {
@@ -96,7 +84,7 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 // them.
 func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".npmrc", "registry=https://x.example.com/npm\n@scope:registry=https://X.example.com/npm\n")
+	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://x.example.com/npm\n@scope:registry=https://X.example.com/npm\n")
 
 	got, err := Derive(dir)
 	if err != nil {
@@ -117,7 +105,7 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 // keeps the brackets because that is the authority a client dials.
 func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".npmrc", "registry=http://[::1]/npm\n")
+	testutil.WriteFixture(t, dir, ".npmrc", "registry=http://[::1]/npm\n")
 
 	got, err := Derive(dir)
 	if err != nil {
@@ -149,7 +137,7 @@ func TestDerive_NoNpmConfigDerivesNoNpmPaths(t *testing.T) {
 
 	t.Run("cargo but no npm", func(t *testing.T) {
 		dir := t.TempDir()
-		writeFixture(t, dir, ".cargo/config.toml", `
+		testutil.WriteFixture(t, dir, ".cargo/config.toml", `
 [registries.mycorp]
 index = "sparse+https://cargo.example.com/index"
 `)
@@ -173,7 +161,7 @@ index = "sparse+https://cargo.example.com/index"
 // is a whole-host registry, so it derives the root subtree rather than nothing.
 func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".npmrc", "registry=https://registry.npmjs.org\n")
+	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://registry.npmjs.org\n")
 
 	got, err := Derive(dir)
 	if err != nil {
@@ -194,7 +182,7 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 // it stays a usable upstream origin.
 func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".npmrc", "registry=https://HOST.example.com:8443/repo/npm\n")
+	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://HOST.example.com:8443/repo/npm\n")
 
 	got, err := Derive(dir)
 	if err != nil {
@@ -219,7 +207,7 @@ func TestDerive_ArtifactoryFieldShape(t *testing.T) {
 	// The [source.*] stanzas send crates.io traffic to the remote index. The
 	// cargo row's ConfigParser reads only [registries.*], which is enough here
 	// because the remote registry the replacement points at is itself declared.
-	writeFixture(t, dir, ".cargo/config.toml", `
+	testutil.WriteFixture(t, dir, ".cargo/config.toml", `
 [registries.internal]
 index = "sparse+https://artifacts.example.com/artifactory/api/cargo/internal/index"
 
@@ -320,7 +308,7 @@ func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			writeFixture(t, dir, configPath, body)
+			testutil.WriteFixture(t, dir, configPath, body)
 
 			got, err := Derive(dir)
 			if err != nil {
@@ -350,15 +338,15 @@ func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
 // this.
 func TestDerive_DeterministicOverSnapshot(t *testing.T) {
 	dir := t.TempDir()
-	writeFixture(t, dir, ".cargo/config.toml", `
+	testutil.WriteFixture(t, dir, ".cargo/config.toml", `
 [registries.zeta]
 index = "sparse+https://artifacts.example.com/artifactory/api/cargo/zeta/index"
 
 [registries.alpha]
 index = "sparse+https://artifacts.example.com/artifactory/api/cargo/alpha/index"
 `)
-	writeFixture(t, dir, ".npmrc", "registry=https://npm.example.com/repo\n@myorg:registry=https://other.example.com/repo\n")
-	writeFixture(t, dir, ".yarnrc.yml", "npmRegistryServer: https://yarn.example.com/repo\n")
+	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://npm.example.com/repo\n@myorg:registry=https://other.example.com/repo\n")
+	testutil.WriteFixture(t, dir, ".yarnrc.yml", "npmRegistryServer: https://yarn.example.com/repo\n")
 
 	first, err := Derive(dir)
 	if err != nil {

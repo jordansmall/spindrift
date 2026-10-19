@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // isRowType reports whether expr is the bare identifier Row, the type a
@@ -174,7 +176,7 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 func TestScanForUntabledRows_FixtureDetectsViolation(t *testing.T) {
 	dir := t.TempDir()
 
-	writeFixture(t, dir, "rows.go", `package fixture
+	testutil.WriteFixture(t, dir, "rows.go", `package fixture
 
 type Row struct {
 	Name string
@@ -247,7 +249,7 @@ var Table = []Row{
 }
 `)
 
-	writeFixture(t, dir, "funcs.go", `package fixture
+	testutil.WriteFixture(t, dir, "funcs.go", `package fixture
 
 func newTaggedRow() Row {
 	return Row{Name: "tagged from func"}

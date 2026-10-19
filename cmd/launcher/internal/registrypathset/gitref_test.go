@@ -1,8 +1,6 @@
 package registrypathset
 
 import (
-	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -10,71 +8,11 @@ import (
 
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
-// mustRunGit repeats bootstrap_test.go's helper of the same name because the
-// two test files live in different packages.
-func mustRunGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s (in %s): %v: %s", strings.Join(args, " "), dir, err, out)
-	}
-}
-
-// mustBareRepoWithConfigs pushes a source checkout into a second, bare repo so
-// the fixture has no working tree at all, the way an Accumulation repo looks
-// (ADR 0033) and unlike a plain t.TempDir() Derive fixture. uncommittedFiles
-// lands in the source checkout's working tree but never in a commit, so a test
-// can pin that only committed content reaches the derived set (issue #3310 AC2).
-func mustBareRepoWithConfigs(t *testing.T, branch string, files, uncommittedFiles map[string]string) string {
-	t.Helper()
-	src := t.TempDir()
-	mustRunGit(t, src, "init", "-b", branch)
-	mustRunGit(t, src, "config", "user.email", "test@example.com")
-	mustRunGit(t, src, "config", "user.name", "Test")
-
-	for rel, body := range files {
-		full := filepath.Join(src, rel)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		mustRunGit(t, src, "add", rel)
-	}
-	if len(files) == 0 {
-		// A branch with no commit has no resolvable ^{tree}, so give it one
-		// harmless commit to keep "carries no config files" distinct from
-		// "carries no commits at all".
-		if err := os.WriteFile(filepath.Join(src, "README"), []byte("empty\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		mustRunGit(t, src, "add", "README")
-	}
-	mustRunGit(t, src, "commit", "-m", "seed")
-
-	for rel, body := range uncommittedFiles {
-		full := filepath.Join(src, rel)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	bare := filepath.Join(t.TempDir(), "accum.git")
-	mustRunGit(t, "", "init", "--bare", bare)
-	mustRunGit(t, src, "push", bare, "+refs/heads/"+branch+":refs/heads/"+branch)
-
-	return bare
-}
-
 func TestDeriveFromGitRef_CommittedNpmDerives(t *testing.T) {
-	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
 	}, nil)
 
@@ -95,7 +33,7 @@ func TestDeriveFromGitRef_CommittedNpmDerives(t *testing.T) {
 // The nested .cargo/config.toml pins that materialization creates parent
 // directories rather than only handling repo-root files.
 func TestDeriveFromGitRef_MultipleEcosystemsMaterializeAndDerive(t *testing.T) {
-	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://npm.example.com/repo/npm\n",
 		".cargo/config.toml": `
 [registries.mycorp]
@@ -127,10 +65,9 @@ index = "sparse+https://cargo.example.com/repo/cargo/index"
 // ref, the derived set would admit a registry the Accumulation repo never
 // recorded.
 func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
-	bare := mustBareRepoWithConfigs(t, "main",
-		map[string]string{".npmrc": "registry=https://committed.example.com/npm\n"},
-		map[string]string{".yarnrc.yml": "npmRegistryServer: https://uncommitted.example.com/yarn\n"},
-	)
+	bare, src := testutil.BareRepoWithConfigs(t, "main",
+		map[string]string{".npmrc": "registry=https://committed.example.com/npm\n"}, nil)
+	testutil.WriteFixture(t, src, ".yarnrc.yml", "npmRegistryServer: https://uncommitted.example.com/yarn\n")
 
 	got, err := DeriveFromGitRef(bare, "main")
 	if err != nil {
@@ -150,25 +87,23 @@ func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 // into the derived set for the other.
 func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 	src := t.TempDir()
-	mustRunGit(t, src, "init", "-b", "main")
-	mustRunGit(t, src, "config", "user.email", "test@example.com")
-	mustRunGit(t, src, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(src, "README"), []byte("main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	mustRunGit(t, src, "add", "README")
-	mustRunGit(t, src, "commit", "-m", "main seed")
+	testutil.GitRun(t, src, "init", "-b", "main")
+	testutil.GitRun(t, src, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, src, "config", "user.name", "Test")
+	testutil.WriteFixture(t, src, "README", "main\n")
+	testutil.GitRun(t, src, "add", "README")
+	testutil.GitRun(t, src, "commit", "-m", "main seed")
 
-	mustRunGit(t, src, "checkout", "-b", "other")
+	testutil.GitRun(t, src, "checkout", "-b", "other")
 	if err := os.WriteFile(filepath.Join(src, ".npmrc"), []byte("registry=https://other-branch.example.com/npm\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, src, "add", ".npmrc")
-	mustRunGit(t, src, "commit", "-m", "other branch config")
+	testutil.GitRun(t, src, "add", ".npmrc")
+	testutil.GitRun(t, src, "commit", "-m", "other branch config")
 
 	bare := filepath.Join(t.TempDir(), "accum.git")
-	mustRunGit(t, "", "init", "--bare", bare)
-	mustRunGit(t, src, "push", bare, "+refs/heads/main:refs/heads/main", "+refs/heads/other:refs/heads/other")
+	testutil.GitRun(t, "", "init", "--bare", bare)
+	testutil.GitRun(t, src, "push", bare, "+refs/heads/main:refs/heads/main", "+refs/heads/other:refs/heads/other")
 
 	got, err := DeriveFromGitRef(bare, "main")
 	if err != nil {
@@ -202,7 +137,7 @@ func TestDeriveFromGitRef_NotAGitRepoFails(t *testing.T) {
 // A missing ref is an error, unlike a ref that declares no config files. See
 // TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet for the other half.
 func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
-	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc": "registry=https://host.example.com/npm\n",
 	}, nil)
 
@@ -219,7 +154,7 @@ func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 // (registryroutesresolve.go) decides whether an empty set fails the route it
 // is resolving.
 func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
-	bare := mustBareRepoWithConfigs(t, "main", nil, nil)
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, nil)
 
 	got, err := DeriveFromGitRef(bare, "main")
 	if err != nil {
@@ -233,7 +168,7 @@ func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 // A row that is not in ecosystem.Table is walked end to end: materialized from
 // the ref, parsed, and derived, proving the rows parameter reaches both stages.
 func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
-	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		"fake.cfg": "x",
 	}, nil)
 	row := ecosystem.Row{
