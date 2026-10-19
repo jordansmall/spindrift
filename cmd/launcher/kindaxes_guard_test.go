@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // kindAxisForbidden pins one old kind-shaped comparison that the descriptor
@@ -36,13 +39,48 @@ var kindAxisForbiddenPatterns = []kindAxisForbidden{
 	{pattern: regexp.MustCompile(`dispatchkind\.Labels(Research|Configured|None)\s*[!=]=`), why: "compares the label family -- read Tracker instead"},
 }
 
-var findingLabelLiteral = regexp.MustCompile(`"agent-(review|research|butler)-finding"`)
+// findingLabelPattern is a capturing group alternating every non-empty
+// FindingLabel in the registry, so a new kind's label is guarded without
+// editing this file. Kinds that share a FindingLabel repeat an alternative,
+// which is harmless.
+var findingLabelPattern = func() string {
+	var alts []string
+	for _, d := range dispatchkind.All {
+		if d.FindingLabel != "" {
+			alts = append(alts, regexp.QuoteMeta(d.FindingLabel))
+		}
+	}
+	return "(" + strings.Join(alts, "|") + ")"
+}()
+
+var findingLabelLiteral = regexp.MustCompile(`"` + findingLabelPattern + `"`)
+
+const settleDir = "internal/settle/"
+
+// kindAxisViolations returns why line, read from path, fails the guard: one
+// reason per forbidden spelling it carries.
+func kindAxisViolations(path, line string) []string {
+	if strings.HasPrefix(strings.TrimSpace(line), "//") {
+		return nil // prose mentioning an axis's old name isn't a comparison
+	}
+	var whys []string
+	for _, fp := range kindAxisForbiddenPatterns {
+		if fp.matches(line) {
+			whys = append(whys, fp.why)
+		}
+	}
+	if strings.Contains(filepath.ToSlash(path), settleDir) && findingLabelLiteral.MatchString(line) {
+		whys = append(whys, "finding-label literal instead of the FindingLabel axis")
+	}
+	return whys
+}
 
 // TestKindAxesGuard walks the launcher module tree (prior art: the marker and
 // parity checks) and fails on any of the old kind == kind comparisons the
 // descriptor axes replaced, so a reintroduced comparison is caught here
 // instead of drifting back in unnoticed.
 func TestKindAxesGuard(t *testing.T) {
+	settleFiles := 0
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -61,25 +99,21 @@ func TestKindAxesGuard(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		underSettle := strings.Contains(filepath.ToSlash(path), "internal/settle/")
+		if strings.Contains(filepath.ToSlash(path), settleDir) {
+			settleFiles++
+		}
 		for i, line := range strings.Split(string(raw), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "//") {
-				continue // prose mentioning an axis's old name isn't a comparison
-			}
-			for _, fp := range kindAxisForbiddenPatterns {
-				if fp.matches(line) {
-					t.Errorf("%s:%d: %s\n\t%s", path, i+1, fp.why, trimmed)
-				}
-			}
-			if underSettle && findingLabelLiteral.MatchString(line) {
-				t.Errorf("%s:%d: finding-label literal instead of the FindingLabel axis\n\t%s", path, i+1, trimmed)
+			for _, why := range kindAxisViolations(path, line) {
+				t.Errorf("%s:%d: %s\n\t%s", path, i+1, why, strings.TrimSpace(line))
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk .: %v", err)
+	}
+	if settleFiles == 0 {
+		t.Fatalf("no .go files under %s: the finding-label guard is matching the wrong path", settleDir)
 	}
 }
 
@@ -121,5 +155,38 @@ func TestKindAxesGuardPatterns(t *testing.T) {
 		if hit(line) {
 			t.Errorf("guard flags legitimate use: %s", line)
 		}
+	}
+}
+
+// TestKindAxesGuardFindingLabels plants every registered kind's FindingLabel
+// as a literal and checks the guard flags it under settle, and only there.
+func TestKindAxesGuardFindingLabels(t *testing.T) {
+	const inSettle, outsideSettle = settleDir + "x.go", "internal/dispatch/x.go"
+	planted := 0
+	for _, d := range dispatchkind.All {
+		if d.FindingLabel == "" {
+			continue
+		}
+		planted++
+		t.Run(d.Name, func(t *testing.T) {
+			line := `labels = append(labels, ` + strconv.Quote(d.FindingLabel) + `)`
+			if got := kindAxisViolations(inSettle, line); len(got) != 1 {
+				t.Errorf("guard misses %s finding-label literal in %s: %s", d.Name, inSettle, line)
+			}
+			if got := kindAxisViolations(outsideSettle, line); len(got) != 0 {
+				t.Errorf("guard flags %s finding-label literal outside settle: %q", d.Name, got)
+			}
+			if got := kindAxisViolations(inSettle, "// "+line); len(got) != 0 {
+				t.Errorf("guard flags %s finding-label literal in a comment: %q", d.Name, got)
+			}
+		})
+	}
+	// With no label the alternation degenerates to `"()"`, which flags every
+	// empty string literal in settle.
+	if planted == 0 {
+		t.Fatal("no kind in dispatchkind.All has a FindingLabel: the settle guard has nothing to match")
+	}
+	if got := kindAxisViolations(inSettle, `labels = append(labels, d.FindingLabel)`); len(got) != 0 {
+		t.Errorf("guard flags legitimate use: %q", got)
 	}
 }
