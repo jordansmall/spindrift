@@ -37,6 +37,11 @@
 # (issue #4183), and reads an omitted write as "" where mkHarness.nix says
 # "GITHUB" (issue #2673).
 
+# displayName (required) is the backend's human-facing name, the value of the
+# prompt's ${FORGE_DISPLAY_NAME} substitution (issue #5647, ADR 0068): a
+# fragment shared by several backends names the active one through it instead
+# of forking a copy per backend. It is not title-cased by rule: local is "local".
+
 # goVar is an explicit field rather than a derived title-case transform,
 # because "github" must render as "GitHub" and no capitalize-first rule
 # produces that.

@@ -1169,6 +1169,7 @@ rec {
       optional = attr: go: default: { inherit attr go default; };
       rowFields = [
         (required "name" "Name")
+        (required "displayName" "DisplayName")
         (optional "validAsTracker" "ValidAsTracker" false)
         (optional "validAsCodeForge" "ValidAsCodeForge" false)
         (optional "tokenEnvVar" "TokenEnvVar" "")

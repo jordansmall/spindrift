@@ -4,6 +4,7 @@
 {
   name = "local";
   goVar = "Local";
+  displayName = "local";
   validAsTracker = true;
   validAsCodeForge = true;
   # ADR 0033: local has no writable remote to push to.

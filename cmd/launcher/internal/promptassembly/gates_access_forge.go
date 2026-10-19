@@ -16,13 +16,7 @@ func accessForgeGates(e Env) map[string]bool {
 	// never sets it. Re-derive it from e.CodeForge the way entrypoint.sh's
 	// "${CODE_FORGE:-github}" did; hardcoding the GH arm would tell the agent
 	// to drive `gh` against a Forgejo forge.
-	backend := e.ForgeBackend
-	if backend == "" {
-		backend = "GH"
-		if e.CodeForge == "forgejo" {
-			backend = "FORGEJO"
-		}
-	}
+	backend := forgeSignal(e)
 
 	// The read-write fork for the OPEN A PULL REQUEST create step (issue
 	// #5099). Read-only stays forge-agnostic, with no gate here at all.

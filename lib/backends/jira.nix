@@ -4,6 +4,7 @@
 {
   name = "jira";
   goVar = "Jira";
+  displayName = "Jira";
   validAsTracker = true;
   tokenEnvVar = "JIRA_TOKEN";
   doctorTokenHint = "JIRA_TOKEN";
