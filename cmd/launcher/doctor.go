@@ -68,11 +68,12 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 		labels = append(labels, doctor.ResearchLabelNamesFor(doctorResearchVerdicts(c))...)
 	}
 	if opts.butler {
-		labels = append(labels, dispatchkind.Butler.FindingLabel)
+		butlerKind := dispatchkind.MustBySettle(dispatchkind.SettleLedger)
+		labels = append(labels, butlerKind.FindingLabel)
 		// The patch rung never applies its label while the daily cap is 0 or
 		// while this tracker/forge pair cannot land patches at all.
 		if c.butlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.codeForge, rc.capabilities) != nil {
-			labels = append(labels, dispatchkind.Butler.PatchLabel)
+			labels = append(labels, butlerKind.PatchLabel)
 		}
 		// Read from the catalog, not chore.Load: Load errors on unrelated knob
 		// faults and would silently drop the requirement.
@@ -81,7 +82,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 	// A read-only work Box relays review findings for the host to file, so the
 	// label is part of what the work kind needs whichever flags are set.
 	if c.boxForgeAndIssueAccess == "read-only" && resolveAgentPresenceSignals(c.driver).filerEnabled {
-		labels = append(labels, dispatchkind.Work.FindingLabel)
+		labels = append(labels, dispatchkind.MustBySettle(dispatchkind.SettleMerge).FindingLabel)
 	}
 	return labels
 }
