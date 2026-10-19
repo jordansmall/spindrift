@@ -2,8 +2,10 @@ package registrydiscover
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -72,8 +74,8 @@ func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
 // a hand-checked TOML string would not.
 func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 	routes := []Route{{
-		MatchHost:        "crates.acme.example",
-		UpstreamBaseURL:  "https://crates.acme.example/api/v1",
+		MatchHost:        "registry.acme.example",
+		UpstreamBaseURL:  "https://registry.acme.example/api/v1",
 		AuthScheme:       "bearer",
 		CredentialSource: "netrc",
 		CredentialValue:  "/home/op/.netrc",
@@ -87,8 +89,8 @@ func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 		t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
 	}
 	got := parsed[0]
-	if got.MatchHost != "crates.acme.example" {
-		t.Errorf("MatchHost = %q, want crates.acme.example", got.MatchHost)
+	if got.MatchHost != "registry.acme.example" {
+		t.Errorf("MatchHost = %q, want registry.acme.example", got.MatchHost)
 	}
 	if got.AuthScheme != "bearer" {
 		t.Errorf("AuthScheme = %q, want bearer", got.AuthScheme)
@@ -112,11 +114,11 @@ func TestWriteFile_RefusesExistingFileWithoutForce(t *testing.T) {
 	}
 
 	routes := []Route{{
-		MatchHost:        "npm.example.com",
-		UpstreamBaseURL:  "https://npm.example.com",
+		MatchHost:        "registry.example.com",
+		UpstreamBaseURL:  "https://registry.example.com",
 		AuthScheme:       "bearer",
-		CredentialSource: "npmrc",
-		CredentialValue:  "/home/op/.npmrc",
+		CredentialSource: "netrc",
+		CredentialValue:  "/home/op/.netrc",
 	}}
 
 	err := WriteFile(path, routes, false)
@@ -136,86 +138,47 @@ func TestWriteFile_RefusesExistingFileWithoutForce(t *testing.T) {
 	}
 }
 
-func TestRender_NpmrcRouteRoundTrips(t *testing.T) {
-	routes := []Route{{
-		MatchHost:        "npm.example.com",
-		UpstreamBaseURL:  "https://npm.example.com",
-		AuthScheme:       "basic",
-		CredentialSource: "npmrc",
-		CredentialValue:  "/home/op/.npmrc",
-	}}
+// TestRender_StoreKindRouteRoundTrips round-trips a route through every
+// credential-store kind, so a kind the table gains is covered without a new
+// test. Each must survive Parse with its file path, file format and, where the
+// kind takes one, its companion value.
+func TestRender_StoreKindRouteRoundTrips(t *testing.T) {
+	for _, kind := range storeKinds() {
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			cfg := credresolver.Config{}
+			if kind.CompanionKey != "" {
+				*kind.CompanionField(&cfg) = "acme"
+			}
+			routes := []Route{{
+				MatchHost:        "registry.acme.example",
+				UpstreamBaseURL:  "https://registry.acme.example",
+				AuthScheme:       "basic",
+				CredentialSource: kind.SourceKey,
+				CredentialValue:  "/home/op/store",
+				RegistryName:     cfg.RegistryName,
+				PropertyKey:      cfg.PropertyKey,
+			}}
 
-	parsed, err := registryroutes.Parse(Render(routes))
-	if err != nil {
-		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
-	}
-	if len(parsed) != 1 {
-		t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
-	}
-	got := parsed[0]
-	if got.AuthScheme != "basic" {
-		t.Errorf("AuthScheme = %q, want basic", got.AuthScheme)
-	}
-	if got.Credential.FromFile != "/home/op/.npmrc" || got.Credential.FileFormat != "npmrc" {
-		t.Errorf("Credential = %+v, want FromFile=/home/op/.npmrc FileFormat=npmrc", got.Credential)
-	}
-}
-
-func TestRender_CargoCredentialsRouteRoundTrips(t *testing.T) {
-	routes := []Route{{
-		MatchHost:        "crates.acme.example",
-		UpstreamBaseURL:  "https://crates.acme.example/api/v1",
-		AuthScheme:       "bearer",
-		CredentialSource: "cargo-credentials",
-		CredentialValue:  "/home/op/.cargo/credentials.toml",
-		RegistryName:     "acme",
-	}}
-
-	parsed, err := registryroutes.Parse(Render(routes))
-	if err != nil {
-		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
-	}
-	if len(parsed) != 1 {
-		t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
-	}
-	got := parsed[0].Credential
-	if got.FromFile != "/home/op/.cargo/credentials.toml" {
-		t.Errorf("Credential.FromFile = %q, want /home/op/.cargo/credentials.toml", got.FromFile)
-	}
-	if got.FileFormat != "cargo-credentials" {
-		t.Errorf("Credential.FileFormat = %q, want cargo-credentials", got.FileFormat)
-	}
-	if got.RegistryName != "acme" {
-		t.Errorf("Credential.RegistryName = %q, want acme", got.RegistryName)
-	}
-}
-
-func TestRender_GradlePropertiesRouteRoundTrips(t *testing.T) {
-	routes := []Route{{
-		MatchHost:        "gradle.example.com",
-		UpstreamBaseURL:  "https://gradle.example.com",
-		AuthScheme:       "bearer",
-		CredentialSource: "gradle-properties",
-		CredentialValue:  "/home/op/gradle.properties",
-		PropertyKey:      "gradle.example.com",
-	}}
-
-	parsed, err := registryroutes.Parse(Render(routes))
-	if err != nil {
-		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
-	}
-	if len(parsed) != 1 {
-		t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
-	}
-	got := parsed[0].Credential
-	if got.FromFile != "/home/op/gradle.properties" {
-		t.Errorf("Credential.FromFile = %q, want /home/op/gradle.properties", got.FromFile)
-	}
-	if got.FileFormat != "gradle-properties" {
-		t.Errorf("Credential.FileFormat = %q, want gradle-properties", got.FileFormat)
-	}
-	if got.PropertyKey != "gradle.example.com" {
-		t.Errorf("Credential.PropertyKey = %q, want gradle.example.com", got.PropertyKey)
+			parsed, err := registryroutes.Parse(Render(routes))
+			if err != nil {
+				t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
+			}
+			if len(parsed) != 1 {
+				t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
+			}
+			got := parsed[0]
+			if got.AuthScheme != "basic" {
+				t.Errorf("AuthScheme = %q, want basic", got.AuthScheme)
+			}
+			if got.Credential.FromFile != "/home/op/store" || got.Credential.FileFormat != kind.FileFormat {
+				t.Errorf("Credential = %+v, want FromFile=/home/op/store FileFormat=%s", got.Credential, kind.FileFormat)
+			}
+			if kind.CompanionKey != "" {
+				if v := *kind.CompanionField(&got.Credential); v != "acme" {
+					t.Errorf("companion %s = %q, want acme", kind.CompanionKey, v)
+				}
+			}
+		})
 	}
 }
 
@@ -260,8 +223,8 @@ func TestRender_TwoRoutesParseInOrder(t *testing.T) {
 			MatchHost:        "second.example.com",
 			UpstreamBaseURL:  "https://second.example.com",
 			AuthScheme:       "basic",
-			CredentialSource: "npmrc",
-			CredentialValue:  "/home/op/.npmrc",
+			CredentialSource: "netrc",
+			CredentialValue:  "/home/op/.netrc",
 		},
 	}
 
@@ -318,11 +281,11 @@ func TestWriteFile_ForceOverwritesExistingFile(t *testing.T) {
 	}
 
 	routes := []Route{{
-		MatchHost:        "npm.example.com",
-		UpstreamBaseURL:  "https://npm.example.com",
+		MatchHost:        "registry.example.com",
+		UpstreamBaseURL:  "https://registry.example.com",
 		AuthScheme:       "bearer",
-		CredentialSource: "npmrc",
-		CredentialValue:  "/home/op/.npmrc",
+		CredentialSource: "netrc",
+		CredentialValue:  "/home/op/.netrc",
 	}}
 
 	if err := WriteFile(path, routes, true); err != nil {
@@ -346,11 +309,11 @@ func TestWriteFile_NewFilePermsAndParses(t *testing.T) {
 	path := filepath.Join(dir, "routes.toml")
 
 	routes := []Route{{
-		MatchHost:        "npm.example.com",
-		UpstreamBaseURL:  "https://npm.example.com",
+		MatchHost:        "registry.example.com",
+		UpstreamBaseURL:  "https://registry.example.com",
 		AuthScheme:       "bearer",
-		CredentialSource: "npmrc",
-		CredentialValue:  "/home/op/.npmrc",
+		CredentialSource: "netrc",
+		CredentialValue:  "/home/op/.netrc",
 	}}
 
 	if err := WriteFile(path, routes, false); err != nil {
@@ -382,38 +345,31 @@ func TestWriteFile_NewFilePermsAndParses(t *testing.T) {
 func TestRender_RouteCarriesNoCredentialValueField(t *testing.T) {
 	const neverProvidedSecret = "sk_live_should_never_appear_in_rendered_output"
 
-	routes := []Route{
-		{
-			MatchHost:        "crates.acme.example",
-			UpstreamBaseURL:  "https://crates.acme.example/api/v1",
+	routes := []Route{{
+		MatchHost:        "unmatched.example.com",
+		UpstreamBaseURL:  "https://unmatched.example.com",
+		AuthScheme:       "bearer",
+		CredentialSource: "env",
+		CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_UNMATCHED_EXAMPLE_COM",
+	}}
+	for i, kind := range storeKinds() {
+		routes = append(routes, Route{
+			MatchHost:        fmt.Sprintf("host%d.example.com", i),
+			UpstreamBaseURL:  fmt.Sprintf("https://host%d.example.com", i),
 			AuthScheme:       "bearer",
-			CredentialSource: "cargo-credentials",
-			CredentialValue:  "/home/op/.cargo/credentials.toml",
-			RegistryName:     "acme",
-		},
-		{
-			MatchHost:        "gradle.example.com",
-			UpstreamBaseURL:  "https://gradle.example.com",
-			AuthScheme:       "bearer",
-			CredentialSource: "gradle-properties",
-			CredentialValue:  "/home/op/gradle.properties",
-			PropertyKey:      "gradle.example.com",
-		},
-		{
-			MatchHost:        "unmatched.example.com",
-			UpstreamBaseURL:  "https://unmatched.example.com",
-			AuthScheme:       "bearer",
-			CredentialSource: "env",
-			CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_UNMATCHED_EXAMPLE_COM",
-		},
+			CredentialSource: kind.SourceKey,
+			CredentialValue:  "/home/op/" + kind.SourceKey,
+		})
 	}
 
 	rendered := string(Render(routes))
 	if strings.Contains(rendered, neverProvidedSecret) {
 		t.Fatalf("rendered output unexpectedly contains a secret-shaped string; Render output:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "/home/op/.cargo/credentials.toml") {
-		t.Error("rendered output should contain the store reference path, not a resolved secret")
+	for _, kind := range storeKinds() {
+		if !strings.Contains(rendered, "/home/op/"+kind.SourceKey) {
+			t.Errorf("rendered output should contain the %s store reference path, not a resolved secret", kind.SourceKey)
+		}
 	}
 }
 
@@ -423,8 +379,8 @@ func TestRender_RouteCarriesNoCredentialValueField(t *testing.T) {
 // derivation supplies the origin (ADR 0047, issue #3261).
 func TestRender_PlainHTTPSHostOmitsUpstreamOrigin(t *testing.T) {
 	routes := []Route{{
-		MatchHost:        "crates.acme.example",
-		UpstreamBaseURL:  "https://crates.acme.example/api/v1",
+		MatchHost:        "registry.acme.example",
+		UpstreamBaseURL:  "https://registry.acme.example/api/v1",
 		AuthScheme:       "bearer",
 		CredentialSource: "netrc",
 		CredentialValue:  "/home/op/.netrc",
@@ -433,7 +389,7 @@ func TestRender_PlainHTTPSHostOmitsUpstreamOrigin(t *testing.T) {
 	const want = `# Registry routes file (ADR 0045). Generated by spindrift registry discover.
 
 [[routes]]
-match-host = "crates.acme.example"
+match-host = "registry.acme.example"
 auth-scheme = "bearer"
 credential = { netrc = "/home/op/.netrc" }
 `
@@ -453,18 +409,18 @@ credential = { netrc = "/home/op/.netrc" }
 // a base path.
 func TestRender_ExplicitPortEmitsOriginWithoutPath(t *testing.T) {
 	routes := []Route{{
-		MatchHost:        "artifactory.example.com",
-		UpstreamBaseURL:  "https://artifactory.example.com:8443/artifactory/api/npm/npm-remote",
+		MatchHost:        "mirror.example.com",
+		UpstreamBaseURL:  "https://mirror.example.com:8443/mirror/api/repo-remote",
 		AuthScheme:       "bearer",
-		CredentialSource: "npmrc",
-		CredentialValue:  "/home/op/.npmrc",
+		CredentialSource: "netrc",
+		CredentialValue:  "/home/op/.netrc",
 	}}
 
 	rendered := string(Render(routes))
-	if !strings.Contains(rendered, `upstream-origin = "https://artifactory.example.com:8443"`+"\n") {
+	if !strings.Contains(rendered, `upstream-origin = "https://mirror.example.com:8443"`+"\n") {
 		t.Errorf("Render() =\n%s\nwant an upstream-origin line carrying the explicit port", rendered)
 	}
-	if strings.Contains(rendered, "/artifactory/api/npm/npm-remote") {
+	if strings.Contains(rendered, "/mirror/api/repo-remote") {
 		t.Errorf("Render() =\n%s\nwant the base URL's path dropped from the origin", rendered)
 	}
 
@@ -475,8 +431,8 @@ func TestRender_ExplicitPortEmitsOriginWithoutPath(t *testing.T) {
 	if len(parsed) != 1 {
 		t.Fatalf("parsed = %+v, want exactly 1 route", parsed)
 	}
-	if parsed[0].UpstreamOrigin != "https://artifactory.example.com:8443" {
-		t.Errorf("UpstreamOrigin = %q, want https://artifactory.example.com:8443", parsed[0].UpstreamOrigin)
+	if parsed[0].UpstreamOrigin != "https://mirror.example.com:8443" {
+		t.Errorf("UpstreamOrigin = %q, want https://mirror.example.com:8443", parsed[0].UpstreamOrigin)
 	}
 }
 
@@ -526,16 +482,15 @@ func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 			MatchHost:        "ported.example.com",
 			UpstreamBaseURL:  "https://ported.example.com:9443/repo",
 			AuthScheme:       "basic",
-			CredentialSource: "npmrc",
-			CredentialValue:  "/home/op/.npmrc",
+			CredentialSource: "env",
+			CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_PORTED_EXAMPLE_COM",
 		},
 		{
 			MatchHost:        "plaintext.example.com",
 			UpstreamBaseURL:  "http://plaintext.example.com/api/v1",
 			AuthScheme:       "bearer",
-			CredentialSource: "cargo-credentials",
-			CredentialValue:  "/home/op/.cargo/credentials.toml",
-			RegistryName:     "acme",
+			CredentialSource: "netrc",
+			CredentialValue:  "/home/op/.netrc",
 		},
 	}
 
@@ -555,39 +510,43 @@ func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 }
 
 // TestRender_BlockGrammarRoundTripsRenderParseRender pins the discovery
-// acceptance criterion (issue #3405), including that the output never carries
-// one of the three retired per-ecosystem keys registryroutes now refuses at
-// the launch gate. Discovery has never emitted one, but Render's output would
-// still parse if a future change did, so nothing else would catch that.
+// acceptance criterion (issue #3405), including that the output carries only
+// the keys of the block grammar, never one of the per-ecosystem keys
+// registryroutes now refuses at the launch gate. Discovery has never emitted
+// one, but Render's output would still parse if a future change did, so
+// nothing else would catch that.
 func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
-	routes := []Route{
-		{
-			MatchHost:        "crates.acme.example",
-			UpstreamBaseURL:  "http://crates.acme.example:8080/api/v1",
-			AuthScheme:       "bearer",
-			CredentialSource: "netrc",
-			CredentialValue:  "/home/op/.netrc",
-		},
-		{
-			MatchHost:        "cargo.acme.example",
-			AuthScheme:       "basic",
-			CredentialSource: "cargo-credentials",
-			CredentialValue:  "/home/op/.cargo/credentials.toml",
-			RegistryName:     "acme",
-		},
-		{
-			MatchHost:        "gradle.acme.example",
+	routes := []Route{{
+		MatchHost:        "registry.acme.example",
+		UpstreamBaseURL:  "http://registry.acme.example:8080/api/v1",
+		AuthScheme:       "bearer",
+		CredentialSource: "netrc",
+		CredentialValue:  "/home/op/.netrc",
+	}}
+	for i, kind := range storeKinds() {
+		route := Route{
+			MatchHost:        fmt.Sprintf("host%d.acme.example", i),
 			AuthScheme:       "header:X-Auth",
-			CredentialSource: "gradle-properties",
-			CredentialValue:  "/home/op/.gradle/gradle.properties",
-			PropertyKey:      "acmeRegistryToken",
-		},
+			CredentialSource: kind.SourceKey,
+			CredentialValue:  "/home/op/" + kind.SourceKey,
+		}
+		if kind.CompanionKey != "" {
+			cfg := credresolver.Config{}
+			*kind.CompanionField(&cfg) = "acme"
+			route.RegistryName, route.PropertyKey = cfg.RegistryName, cfg.PropertyKey
+		}
+		routes = append(routes, route)
 	}
 
 	first := Render(routes)
-	for _, retired := range []string{"go-path", "gradle-path", "cargo-registries"} {
-		if strings.Contains(string(first), retired) {
-			t.Errorf("Render output contains retired key %q:\n%s", retired, first)
+	allowedKeys := []string{"match-host", "upstream-origin", "auth-scheme", "credential"}
+	for _, line := range strings.Split(string(first), "\n") {
+		if line == "" || line == "[[routes]]" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, _, _ := strings.Cut(line, " = ")
+		if !slices.Contains(allowedKeys, key) {
+			t.Errorf("Render output carries key %q outside the block grammar %v:\n%s", key, allowedKeys, first)
 		}
 	}
 
@@ -610,7 +569,7 @@ func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
 }
 
 // routeFromParsedRoute is the inverse of Render, only as far as
-// TestRender_BlockGrammarRoundTripsRenderParseRender needs it to go.
+// TestRender_BlockGrammarRoundTripsRenderParseRender needs of it.
 func routeFromParsedRoute(pr registryroutes.Route) Route {
 	r := Route{
 		MatchHost:       pr.MatchHost,
@@ -627,4 +586,15 @@ func routeFromParsedRoute(pr registryroutes.Route) Route {
 	r.RegistryName = pr.Credential.RegistryName
 	r.PropertyKey = pr.Credential.PropertyKey
 	return r
+}
+
+// storeKinds returns the credential kinds that read an operator store file.
+func storeKinds() []credresolver.Kind {
+	var kinds []credresolver.Kind
+	for _, kind := range credresolver.Kinds() {
+		if kind.StoreConfig != nil {
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds
 }
