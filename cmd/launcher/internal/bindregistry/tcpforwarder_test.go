@@ -58,7 +58,7 @@ func TestNewTCPForwarder_RelaysAndAttachesSecret(t *testing.T) {
 	forwarder := newTestForwarder(t, upstream, wantSecret)
 	defer forwarder.Close()
 
-	resp, err := http.Get(forwarder.URL + "/crates/foo?bar=baz")
+	resp, err := http.Get(forwarder.URL + "/pkg/foo?bar=baz")
 	if err != nil {
 		t.Fatalf("GET through forwarder: %v", err)
 	}
@@ -71,8 +71,8 @@ func TestNewTCPForwarder_RelaysAndAttachesSecret(t *testing.T) {
 	if gotMethod != http.MethodGet {
 		t.Errorf("upstream saw method %q, want GET", gotMethod)
 	}
-	if gotPath != "/crates/foo" {
-		t.Errorf("upstream saw path %q, want /crates/foo", gotPath)
+	if gotPath != "/pkg/foo" {
+		t.Errorf("upstream saw path %q, want /pkg/foo", gotPath)
 	}
 	if gotQuery != "bar=baz" {
 		t.Errorf("upstream saw query %q, want bar=baz", gotQuery)
@@ -133,7 +133,7 @@ func TestNewTCPForwarder_PreservesInboundHost(t *testing.T) {
 	forwarder := newTestForwarder(t, upstream, wantSecret)
 	defer forwarder.Close()
 
-	req, err := http.NewRequest(http.MethodGet, forwarder.URL+"/crates/foo", nil)
+	req, err := http.NewRequest(http.MethodGet, forwarder.URL+"/pkg/foo", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}

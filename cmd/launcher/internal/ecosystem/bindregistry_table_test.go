@@ -110,3 +110,43 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
+
+// Order is asserted, not just membership: the verb's apply/revert loop
+// iterates InTreeBindings() in whatever order it returns, so npm/yarn/pnpm
+// must match ecosystem.Table's own order (issue #3180, rows from issue
+// #2933). cargo is absent by design (issue #3201), pinned by
+// TestInTreeBindings_ExcludesCargo below.
+func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
+	want := []struct {
+		name       string
+		configPath string
+	}{
+		{name: "npm", configPath: ".npmrc"},
+		{name: "yarn", configPath: ".yarnrc.yml"},
+		{name: "pnpm", configPath: "pnpm-workspace.yaml"},
+	}
+
+	got := bindregistry.InTreeBindings()
+	if len(got) != len(want) {
+		t.Fatalf("InTreeBindings() has %d rows, want exactly %d: %+v", len(got), len(want), got)
+	}
+	for i, tc := range want {
+		if got[i].Name != tc.name || got[i].InTreeConfigPath != tc.configPath {
+			t.Errorf("row %d = {Name: %q, InTreeConfigPath: %q}, want {Name: %q, InTreeConfigPath: %q}",
+				i, got[i].Name, got[i].InTreeConfigPath, tc.name, tc.configPath)
+		}
+	}
+}
+
+// Cargo's ecosystem.Table row keeps a non-empty InTreeConfigPath for
+// host-side discovery but carries a non-nil RepoAwareHomeConfig, so
+// InTreeBindings' filter must exclude it (issue #3201). A regression would
+// dual-write the in-tree rewrite and cargo's source-replacement home config,
+// which its 1:1 URL to source-name rule cannot tolerate.
+func TestInTreeBindings_ExcludesCargo(t *testing.T) {
+	for _, row := range bindregistry.InTreeBindings() {
+		if row.Name == "cargo" {
+			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", bindregistry.InTreeBindings())
+		}
+	}
+}
