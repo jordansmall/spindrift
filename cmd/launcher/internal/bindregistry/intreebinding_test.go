@@ -11,46 +11,30 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// Order is asserted, not just membership: the verb's apply/revert loop
-// iterates InTreeBindings() in whatever order it returns, so npm/yarn/pnpm
-// must match ecosystem.Table's own order (issue #3180, rows from issue
-// #2933). cargo is absent by design (issue #3201), pinned by
-// TestInTreeBindings_ExcludesCargo below.
-func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
-	want := []struct {
-		name       string
-		configPath string
-	}{
-		{name: "npm", configPath: ".npmrc"},
-		{name: "yarn", configPath: ".yarnrc.yml"},
-		{name: "pnpm", configPath: "pnpm-workspace.yaml"},
+// A row with a RepoAwareHomeConfig binds by re-rendering its home config, which
+// the in-tree rewrite does not compose with (issue #3201), and a row with no
+// InTreeConfigPath has nothing to rewrite; both are filtered out and the rest
+// keep the rows' own order. Which Table rows survive is pinned in the ecosystem
+// package's bindregistry_table_test.go.
+func TestInTreeBindingsOf_FiltersByRepoAwareHomeConfigAndConfigPath(t *testing.T) {
+	repoAware := ecosystem.Row{
+		Name:             "repo-aware",
+		InTreeConfigPath: ".repo-aware/registries",
+		RepoAwareHomeConfig: func(int, string, []registrymanifest.Route, string) (string, []ecosystem.EnvExport, []string) {
+			return "", nil, nil
+		},
 	}
+	noPath := ecosystem.Row{Name: "no-path"}
+	second := ecosystem.Row{Name: "second", InTreeConfigPath: ".second-registries"}
 
-	got := InTreeBindings()
-	if len(got) != len(want) {
-		t.Fatalf("InTreeBindings() has %d rows, want exactly %d: %+v", len(got), len(want), got)
-	}
-	for i, tc := range want {
-		if got[i].Name != tc.name || got[i].InTreeConfigPath != tc.configPath {
-			t.Errorf("row %d = {Name: %q, InTreeConfigPath: %q}, want {Name: %q, InTreeConfigPath: %q}",
-				i, got[i].Name, got[i].InTreeConfigPath, tc.name, tc.configPath)
-		}
-	}
-}
+	got := InTreeBindingsOf([]ecosystem.Row{synthetic.Row, repoAware, noPath, second})
 
-// Cargo's ecosystem.Table row keeps a non-empty InTreeConfigPath for
-// host-side discovery but carries a non-nil RepoAwareHomeConfig, so
-// InTreeBindings' filter must exclude it (issue #3201). A regression would
-// dual-write the in-tree rewrite and cargo's source-replacement home config,
-// which its 1:1 URL to source-name rule cannot tolerate.
-func TestInTreeBindings_ExcludesCargo(t *testing.T) {
-	for _, row := range InTreeBindings() {
-		if row.Name == "cargo" {
-			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", InTreeBindings())
-		}
+	if len(got) != 2 || got[0].Name != synthetic.Row.Name || got[1].Name != second.Name {
+		t.Errorf("InTreeBindingsOf = %+v, want [%s %s] in input order", got, synthetic.Row.Name, second.Name)
 	}
 }
 
@@ -159,14 +143,13 @@ func skipWorktreeSet(t *testing.T, dir, relPath string) bool {
 	return strings.HasPrefix(string(out), "S ")
 }
 
-var cargoBinding = ecosystem.Row{Name: "cargo", InTreeConfigPath: ".cargo/config.toml"}
-var npmBinding = ecosystem.Row{Name: "npm", InTreeConfigPath: ".npmrc"}
-var yarnBinding = ecosystem.Row{Name: "yarn", InTreeConfigPath: ".yarnrc.yml"}
-var pnpmBinding = ecosystem.Row{Name: "pnpm", InTreeConfigPath: "pnpm-workspace.yaml"}
+// synthetic.Row keeps its config in a subdirectory; rootBinding keeps its at
+// the repo root, a directory that exists even when the config does not.
+var rootBinding = ecosystem.Row{Name: "stub-root", InTreeConfigPath: ".stub-registries"}
 
-// ApplyInTree must walk the supplied rows, not ecosystem.Table: a row only the
-// caller knows about gets its in-tree config rewritten, which a call site
-// reaching for the Table-bound InTreeBindings() would never see.
+// ApplyInTree must walk the supplied rows, not the production row table: a row
+// only the caller knows about gets its in-tree config rewritten, which a call
+// site reaching for the Table-bound InTreeBindings() would never see.
 func TestApplyInTreeWalksSuppliedRows(t *testing.T) {
 	stub := ecosystem.Row{Name: "stub-ecosystem", InTreeConfigPath: ".stubrc"}
 	dir := newTestRepo(t)
@@ -196,10 +179,10 @@ func TestApplyInTreeWalksSuppliedRows(t *testing.T) {
 
 func TestApplyInTreeBindingRewritesTrackedFileBothSchemes(t *testing.T) {
 	dir := newTestRepo(t)
-	content := "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://upstream.example/index/\"\n\n[registries.proxy]\nindex = \"http://upstream.example/other/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	content := "primary = \"mirror+https://upstream.example/index/\"\nsecondary = \"http://upstream.example/other/\"\n"
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -207,20 +190,20 @@ func TestApplyInTreeBindingRewritesTrackedFileBothSchemes(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(got), "upstream.example") {
 		t.Errorf("rewritten content still mentions upstream.example: %s", got)
 	}
-	if !strings.Contains(string(got), "sparse+http://127.0.0.1:27182/index/") {
-		t.Errorf("rewritten content missing expected sparse https rewrite: %s", got)
+	if !strings.Contains(string(got), "mirror+http://127.0.0.1:27182/index/") {
+		t.Errorf("rewritten content missing expected prefixed https rewrite: %s", got)
 	}
 	if !strings.Contains(string(got), "http://127.0.0.1:27182/other/") {
 		t.Errorf("rewritten content missing expected http rewrite: %s", got)
 	}
-	if !skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if !skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit not set after apply")
 	}
 }
@@ -280,9 +263,9 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := newTestRepo(t)
-			writeConfig(t, dir, cargoBinding.InTreeConfigPath, tc.content, true)
+			writeConfig(t, dir, synthetic.Row.InTreeConfigPath, tc.content, true)
 
-			reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: tc.host, LocalURL: "http://127.0.0.1:27182"}})
+			reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: tc.host, LocalURL: "http://127.0.0.1:27182"}})
 			if err != nil {
 				t.Fatalf("ApplyInTreeBinding: %v", err)
 			}
@@ -290,74 +273,7 @@ func TestApplyInTreeBindingEscaping(t *testing.T) {
 				t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 			}
 
-			got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != tc.want {
-				t.Errorf("rewritten content = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-// Each case proves the generic engine ApplyInTreeBinding already uses for
-// cargo's TOML also rewrites npm's, yarn berry's, and pnpm's own syntax on
-// both schemes, with no ecosystem-specific code (issue #2933; these were
-// entrypoint.sh's phase_npm_intree_binding_apply and its yarn berry and
-// pnpm workspace siblings).
-func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
-	cases := []struct {
-		name    string
-		binding ecosystem.Row
-		content string
-		want    string
-	}{
-		{
-			// An INI-like scoped entry (`@scope:registry=`) and an
-			// unscoped entry (`registry=`), one on each scheme.
-			name:    "npm",
-			binding: npmBinding,
-			content: "@mycorp:registry=https://upstream.example/\nregistry=http://upstream.example/\n",
-			want:    "@mycorp:registry=http://127.0.0.1:27182/\nregistry=http://127.0.0.1:27182/\n",
-		},
-		{
-			// The top-level npmRegistryServer key and a per-scope
-			// npmScopes.<scope>.npmRegistryServer entry (issue #2856), one
-			// on each scheme. This is plain text substitution against real
-			// YAML syntax, not a YAML-aware parse.
-			name:    "yarn",
-			binding: yarnBinding,
-			content: "npmRegistryServer: \"https://upstream.example\"\nnpmScopes:\n  mycorp:\n    npmRegistryServer: \"http://upstream.example\"\n",
-			want:    "npmRegistryServer: \"http://127.0.0.1:27182\"\nnpmScopes:\n  mycorp:\n    npmRegistryServer: \"http://127.0.0.1:27182\"\n",
-		},
-		{
-			// The registries map keyed by URL, one entry per scheme, plus a
-			// URL embedding the scheme behind a prefix. That last entry
-			// exercises the same substring property cargo's
-			// "sparse+https://" URL proves, using a synthetic
-			// "mirror+https://" since pnpm has no sparse-index concept.
-			name:    "pnpm",
-			binding: pnpmBinding,
-			content: "packages:\n  - \"packages/*\"\nregistries:\n  \"https://upstream.example/\": {scopes: [\"@mycorp\"]}\n  \"http://upstream.example/other/\": {scopes: [\"@other\"]}\n  mirrorRegistry: \"mirror+https://upstream.example/mirror/\"\n",
-			want:    "packages:\n  - \"packages/*\"\nregistries:\n  \"http://127.0.0.1:27182/\": {scopes: [\"@mycorp\"]}\n  \"http://127.0.0.1:27182/other/\": {scopes: [\"@other\"]}\n  mirrorRegistry: \"mirror+http://127.0.0.1:27182/mirror/\"\n",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := newTestRepo(t)
-			writeConfig(t, dir, tc.binding.InTreeConfigPath, tc.content, true)
-
-			reason, err := ApplyInTreeBinding(dir, tc.binding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
-			if err != nil {
-				t.Fatalf("ApplyInTreeBinding: %v", err)
-			}
-			if reason != ApplyApplied {
-				t.Errorf("reason = %v, want %v", reason, ApplyApplied)
-			}
-
-			got, err := os.ReadFile(filepath.Join(dir, tc.binding.InTreeConfigPath))
+			got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -374,13 +290,13 @@ func TestApplyInTreeBindingRewritesNonCargoEcosystemShapes(t *testing.T) {
 func TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry-a = \"https://host-a.example/index/\"\nregistry-b = \"https://host-b.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "host-a.example", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "host-b.example", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -388,7 +304,7 @@ func TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,13 +319,13 @@ func TestApplyInTreeBindingRewritesEachRouteToItsOwnLocalURL(t *testing.T) {
 func TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry-b = \"https://host-b.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "host-a.example", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "host-b.example", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -417,7 +333,7 @@ func TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList(t *testing.T) 
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,13 +349,13 @@ func TestApplyInTreeBindingRewritesOnlyHostBWhenBothInRewriteList(t *testing.T) 
 func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://some-other-host.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "host-a.example", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "host-b.example", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -447,7 +363,7 @@ func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyNoopContent)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,13 +382,13 @@ func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "short = \"https://registry.example.com/index/\"\nlong = \"https://registry.example.com:8443/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "registry.example.com", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "registry.example.com:8443", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -480,7 +396,7 @@ func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,9 +413,9 @@ func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 func TestApplyInTreeBindingErrorsOnEmptyRewrites(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, nil)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, nil)
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (empty rewrites is an internal-consistency violation)")
 	}
@@ -522,7 +438,7 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 		{
 			name: "apply",
 			run: func(t *testing.T, dir string) bool {
-				reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+				reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 				if err != nil {
 					t.Fatalf("ApplyInTreeBinding: %v", err)
 				}
@@ -535,7 +451,7 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 		{
 			name: "revert",
 			run: func(t *testing.T, dir string) bool {
-				reverted, err := RevertInTreeBinding(dir, cargoBinding)
+				reverted, err := RevertInTreeBinding(dir, synthetic.Row)
 				if err != nil {
 					t.Fatalf("RevertInTreeBinding: %v", err)
 				}
@@ -547,13 +463,13 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := newTestRepo(t)
-			writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, false)
+			writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, false)
 
 			if acted := tc.run(t, dir); acted {
 				t.Errorf("%s: acted on untracked file, want no-op", tc.name)
 			}
 
-			got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+			got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -567,7 +483,7 @@ func TestInTreeBindingUntrackedFileTolerance(t *testing.T) {
 func TestApplyInTreeBindingNoopOnMissingFile(t *testing.T) {
 	dir := newTestRepo(t)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -579,9 +495,9 @@ func TestApplyInTreeBindingNoopOnMissingFile(t *testing.T) {
 func TestApplyInTreeBindingNoopWhenHostAbsent(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://some-other-host.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -589,14 +505,14 @@ func TestApplyInTreeBindingNoopWhenHostAbsent(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyNoopContent)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != content {
 		t.Errorf("content changed unexpectedly: got %q, want %q", got, content)
 	}
-	if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit set, want unset")
 	}
 }
@@ -604,9 +520,9 @@ func TestApplyInTreeBindingNoopWhenHostAbsent(t *testing.T) {
 func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reason1, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason1, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("first ApplyInTreeBinding: %v", err)
 	}
@@ -614,12 +530,12 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 		t.Fatalf("first call: reason = %v, want %v", reason1, ApplyApplied)
 	}
 
-	afterFirst, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	afterFirst, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	reason2, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason2, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("second ApplyInTreeBinding: %v", err)
 	}
@@ -630,14 +546,14 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 		t.Errorf("second call: reason = %v, want %v (idempotent no-op)", reason2, ApplySkipWorktreeSet)
 	}
 
-	afterSecond, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	afterSecond, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(afterFirst) != string(afterSecond) {
 		t.Errorf("content changed on second call: before %q, after %q", afterFirst, afterSecond)
 	}
-	if !skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if !skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit not set after second (no-op) call, want still set")
 	}
 }
@@ -645,17 +561,17 @@ func TestApplyInTreeBindingIdempotentOnSecondCall(t *testing.T) {
 func TestApplyInTreeBindingConvergesOnRewrittenContentWithBitClear(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
 	// Content already rewritten by some other means and dirty against the
 	// index, bit clear. Apply itself tags first, so this is the defensive
 	// convergence path.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
-	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -663,11 +579,11 @@ func TestApplyInTreeBindingConvergesOnRewrittenContentWithBitClear(t *testing.T)
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	if !skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if !skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit not set after converge, want set")
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -684,16 +600,16 @@ func TestApplyInTreeBindingConvergesOnRewrittenContentWithBitClear(t *testing.T)
 func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
 	// Set the bit directly, bypassing ApplyInTreeBinding, so content stays
 	// exactly as committed. The rewritten-content-with-bit-clear test above
 	// does the opposite: content rewritten, bit clear.
-	runGit(t, dir, "update-index", "--skip-worktree", "--", cargoBinding.InTreeConfigPath)
+	runGit(t, dir, "update-index", "--skip-worktree", "--", synthetic.Row.InTreeConfigPath)
 
 	rewrites := []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}
 
-	reason1, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason1, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("first ApplyInTreeBinding: %v", err)
 	}
@@ -701,7 +617,7 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 		t.Fatalf("first call: reason = %v, want %v", reason1, ApplySkipWorktreeSet)
 	}
 
-	got1, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got1, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +627,7 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 
 	// The non-convergence is permanent, not a one-shot miss on the first
 	// observation of the bit.
-	reason2, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason2, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("second ApplyInTreeBinding: %v", err)
 	}
@@ -719,7 +635,7 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 		t.Errorf("second call: reason = %v, want %v", reason2, ApplySkipWorktreeSet)
 	}
 
-	got2, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got2, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,17 +652,17 @@ func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T)
 func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
 	// Dirty the working tree with an edit that never mentions
 	// upstream.example: not a partial or crashed rewrite, just an unrelated
 	// change with the bit still clear.
 	unrelated := "registry = \"https://unrelated.example/index/\"\n"
-	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(unrelated), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath), []byte(unrelated), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -754,7 +670,7 @@ func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -762,7 +678,7 @@ func TestApplyInTreeBindingTagsUnrelatedDirtyConfig(t *testing.T) {
 		t.Errorf("content = %q, want unrelated edit left untouched %q", got, unrelated)
 	}
 
-	if !skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if !skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit not set, want set despite Apply never touching content")
 	}
 }
@@ -838,19 +754,19 @@ func newUnmergedTestRepo(t *testing.T, relPath string) string {
 // RevertInTreeBinding cannot clean up either (`git checkout --` refuses an
 // unmerged path). Apply must fail without ever touching content.
 func TestApplyInTreeBindingDoesNotRewriteContentWhenSkipWorktreeFails(t *testing.T) {
-	dir := newUnmergedTestRepo(t, cargoBinding.InTreeConfigPath)
+	dir := newUnmergedTestRepo(t, synthetic.Row.InTreeConfigPath)
 
-	before, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	before, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	_, err = ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (skip-worktree must fail on an unmerged path)")
 	}
 
-	after, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	after, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -871,9 +787,9 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
-	configFile := filepath.Join(dir, cargoBinding.InTreeConfigPath)
+	configFile := filepath.Join(dir, synthetic.Row.InTreeConfigPath)
 	configDir := filepath.Dir(configFile)
 	if err := os.Chmod(configDir, 0o555); err != nil {
 		t.Fatal(err)
@@ -882,7 +798,7 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 		_ = os.Chmod(configDir, 0o755)
 	})
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (temp-file write must fail against a read-only parent directory)")
 	}
@@ -890,7 +806,7 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 		t.Error("reason = ApplyApplied, want anything else")
 	}
 
-	if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit still set after write failure, want unset (compensating --no-skip-worktree should have run)")
 	}
 
@@ -909,9 +825,9 @@ func TestApplyInTreeBindingUnsetsBitWhenWriteFileFails(t *testing.T) {
 func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -919,7 +835,7 @@ func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 		t.Fatalf("ApplyInTreeBinding: reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	reverted, err := RevertInTreeBinding(dir, cargoBinding)
+	reverted, err := RevertInTreeBinding(dir, synthetic.Row)
 	if err != nil {
 		t.Fatalf("RevertInTreeBinding: %v", err)
 	}
@@ -927,14 +843,14 @@ func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 		t.Error("reverted = false, want true")
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != original {
 		t.Errorf("reverted content = %q, want %q", got, original)
 	}
-	if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit still set after revert")
 	}
 }
@@ -942,13 +858,13 @@ func TestRevertInTreeBindingRestoresAfterApply(t *testing.T) {
 func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
-	if _, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
+	if _, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 
-	reverted1, err := RevertInTreeBinding(dir, cargoBinding)
+	reverted1, err := RevertInTreeBinding(dir, synthetic.Row)
 	if err != nil {
 		t.Fatalf("first RevertInTreeBinding: %v", err)
 	}
@@ -956,12 +872,12 @@ func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 		t.Fatal("first call: reverted = false, want true")
 	}
 
-	afterFirst, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	afterFirst, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	reverted2, err := RevertInTreeBinding(dir, cargoBinding)
+	reverted2, err := RevertInTreeBinding(dir, synthetic.Row)
 	if err != nil {
 		t.Fatalf("second RevertInTreeBinding: %v", err)
 	}
@@ -969,14 +885,14 @@ func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 		t.Error("second call: reverted = true, want false (idempotent no-op)")
 	}
 
-	afterSecond, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	afterSecond, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(afterFirst) != string(afterSecond) {
 		t.Errorf("content changed on second revert: before %q, after %q", afterFirst, afterSecond)
 	}
-	if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit set after second revert, want unset")
 	}
 }
@@ -984,9 +900,9 @@ func TestRevertInTreeBindingSecondCallIsNoop(t *testing.T) {
 func TestRevertInTreeBindingNoopOnNeverApplied(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reverted, err := RevertInTreeBinding(dir, cargoBinding)
+	reverted, err := RevertInTreeBinding(dir, synthetic.Row)
 	if err != nil {
 		t.Fatalf("RevertInTreeBinding: %v", err)
 	}
@@ -994,7 +910,7 @@ func TestRevertInTreeBindingNoopOnNeverApplied(t *testing.T) {
 		t.Error("reverted = true, want false")
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1006,16 +922,16 @@ func TestRevertInTreeBindingNoopOnNeverApplied(t *testing.T) {
 func TestRevertInTreeBindingRestoresRewrittenContentWithBitClear(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
 
 	// Content already rewritten by some other means, bit clear. Apply itself
 	// tags first, so this is Revert's defensive path.
 	rewritten := "registry = \"http://127.0.0.1:27182/index/\"\n"
-	if err := os.WriteFile(filepath.Join(dir, cargoBinding.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath), []byte(rewritten), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	reverted, err := RevertInTreeBinding(dir, cargoBinding)
+	reverted, err := RevertInTreeBinding(dir, synthetic.Row)
 	if err != nil {
 		t.Fatalf("RevertInTreeBinding: %v", err)
 	}
@@ -1023,7 +939,7 @@ func TestRevertInTreeBindingRestoresRewrittenContentWithBitClear(t *testing.T) {
 		t.Error("reverted = false, want true")
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1041,23 +957,23 @@ func TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt(t *testing.T) {
 	dir := newTestRepo(t)
 
 	outsideDir := t.TempDir()
-	outsideFile := filepath.Join(outsideDir, "outside-config.toml")
+	outsideFile := filepath.Join(outsideDir, "outside-config")
 	sentinel := "registry = \"https://upstream.example/index/\"\n"
 	if err := os.WriteFile(outsideFile, []byte(sentinel), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	linkPath := filepath.Join(dir, cargoBinding.InTreeConfigPath)
+	linkPath := filepath.Join(dir, synthetic.Row.InTreeConfigPath)
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outsideFile, linkPath); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "add", cargoBinding.InTreeConfigPath)
+	runGit(t, dir, "add", synthetic.Row.InTreeConfigPath)
 	runGit(t, dir, "commit", "-m", "add symlinked config")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1100,26 +1016,26 @@ func TestApplyInTreeBindingReplacesSymlinkWithoutFollowingIt(t *testing.T) {
 func TestApplyInTreeBindingNoopsOnDanglingSymlink(t *testing.T) {
 	dir := newTestRepo(t)
 
-	linkPath := filepath.Join(dir, cargoBinding.InTreeConfigPath)
+	linkPath := filepath.Join(dir, synthetic.Row.InTreeConfigPath)
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// git tracks the symlink blob (mode 120000) itself, whether or not the
 	// target it points at exists on disk.
-	if err := os.Symlink(filepath.Join(dir, "does-not-exist.toml"), linkPath); err != nil {
+	if err := os.Symlink(filepath.Join(dir, "does-not-exist"), linkPath); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "add", cargoBinding.InTreeConfigPath)
+	runGit(t, dir, "add", synthetic.Row.InTreeConfigPath)
 	runGit(t, dir, "commit", "-m", "add dangling symlink config")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 	if reason != ApplyMissing {
 		t.Errorf("reason = %v, want %v", reason, ApplyMissing)
 	}
-	if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit set on a dangling-symlink no-op")
 	}
 }
@@ -1134,24 +1050,24 @@ func TestApplyInTreeBindingNoopsOnSymlinkToDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	linkPath := filepath.Join(dir, cargoBinding.InTreeConfigPath)
+	linkPath := filepath.Join(dir, synthetic.Row.InTreeConfigPath)
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(targetDir, linkPath); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "add", cargoBinding.InTreeConfigPath)
+	runGit(t, dir, "add", synthetic.Row.InTreeConfigPath)
 	runGit(t, dir, "commit", "-m", "add directory-symlink config")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 	if reason != ApplyNotRegular {
 		t.Errorf("reason = %v, want %v", reason, ApplyNotRegular)
 	}
-	if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+	if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 		t.Error("skip-worktree bit set on a symlink-to-directory no-op")
 	}
 }
@@ -1173,14 +1089,14 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 		t.Fatalf("Mkfifo: %v", err)
 	}
 
-	linkPath := filepath.Join(dir, cargoBinding.InTreeConfigPath)
+	linkPath := filepath.Join(dir, synthetic.Row.InTreeConfigPath)
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(fifoPath, linkPath); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, dir, "add", cargoBinding.InTreeConfigPath)
+	runGit(t, dir, "add", synthetic.Row.InTreeConfigPath)
 	runGit(t, dir, "commit", "-m", "add fifo-symlink config")
 
 	type result struct {
@@ -1189,7 +1105,7 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+		reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 		done <- result{reason: reason, err: err}
 	}()
 
@@ -1201,7 +1117,7 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 		if res.reason != ApplyNotRegular {
 			t.Errorf("reason = %v, want %v", res.reason, ApplyNotRegular)
 		}
-		if skipWorktreeSet(t, dir, cargoBinding.InTreeConfigPath) {
+		if skipWorktreeSet(t, dir, synthetic.Row.InTreeConfigPath) {
 			t.Error("skip-worktree bit set on a symlink-to-fifo no-op")
 		}
 	case <-time.After(5 * time.Second):
@@ -1216,9 +1132,9 @@ func TestApplyInTreeBindingNoopsOnSymlinkToFifo(t *testing.T) {
 func TestApplyInTreeBindingErrorsOnEmptyUpstreamHost(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "", LocalURL: "http://127.0.0.1:27182"}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (empty upstreamHost is an internal-consistency violation)")
 	}
@@ -1235,13 +1151,13 @@ func TestApplyInTreeBindingErrorsOnEmptyUpstreamHost(t *testing.T) {
 func TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (duplicate UpstreamHost is an internal-consistency violation)")
 	}
@@ -1255,9 +1171,9 @@ func TestApplyInTreeBindingErrorsOnDuplicateUpstreamHost(t *testing.T) {
 func TestApplyInTreeBindingErrorsOnEmptyLocalURL(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: ""}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: ""}})
 	if err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (empty LocalURL is an internal-consistency violation)")
 	}
@@ -1269,7 +1185,7 @@ func TestApplyInTreeBindingErrorsOnEmptyLocalURL(t *testing.T) {
 func TestRevertInTreeBindingNoopOnMissingFile(t *testing.T) {
 	dir := newTestRepo(t)
 
-	reverted, err := RevertInTreeBinding(dir, cargoBinding)
+	reverted, err := RevertInTreeBinding(dir, synthetic.Row)
 	if err != nil {
 		t.Fatalf("RevertInTreeBinding: %v", err)
 	}
@@ -1335,7 +1251,7 @@ func TestSweepOrphanedTempFilesNoopWhenNoneExist(t *testing.T) {
 func TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone(t *testing.T) {
 	dir := t.TempDir()
 	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
-	config := filepath.Join(dir, ".npmrc")
+	config := filepath.Join(dir, ".stub-registries")
 	unrelatedDotfile := filepath.Join(dir, ".intreebindingrc")
 
 	for _, p := range []string{config, unrelatedDotfile} {
@@ -1354,20 +1270,19 @@ func TestSweepOrphanedTempFilesLeavesUnrelatedFilesAndConfigAlone(t *testing.T) 
 	}
 }
 
-// cargoBinding is deliberate (issue #3201 excludes it from InTreeBindings,
-// but it is the only fixture row whose config lives in a subdirectory,
-// .cargo/): the sweep must target configPath's own directory, not always
-// repoDir. The sweep must also leave Apply's own temp file alone, created
+// synthetic.Row is deliberate: it is the only fixture row whose config
+// lives in a subdirectory, so the sweep must target configPath's own
+// directory, not always repoDir. The sweep must also leave Apply's own temp file alone, created
 // moments later in the same directory.
 func TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
-	configDir := filepath.Join(dir, filepath.Dir(cargoBinding.InTreeConfigPath))
+	configDir := filepath.Join(dir, filepath.Dir(synthetic.Row.InTreeConfigPath))
 	orphan := writeOrphan(t, configDir, ".intreebinding-crashed")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1377,7 +1292,7 @@ func TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory(t *testing.T) {
 
 	assertOrphanGone(t, orphan, "ApplyInTreeBinding")
 
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1390,15 +1305,15 @@ func TestApplyInTreeBindingSweepsOrphanInConfigSubdirectory(t *testing.T) {
 func TestRevertInTreeBindingRemovesOrphanTempFile(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, npmBinding.InTreeConfigPath, original, true)
+	writeConfig(t, dir, rootBinding.InTreeConfigPath, original, true)
 
-	if _, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
+	if _, err := ApplyInTreeBinding(dir, rootBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 
 	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
 
-	reverted, err := RevertInTreeBinding(dir, npmBinding)
+	reverted, err := RevertInTreeBinding(dir, rootBinding)
 	if err != nil {
 		t.Fatalf("RevertInTreeBinding: %v", err)
 	}
@@ -1412,14 +1327,14 @@ func TestRevertInTreeBindingRemovesOrphanTempFile(t *testing.T) {
 // This test and its untracked sibling below pin the sweep running before the
 // os.Stat/isTracked early returns: otherwise a config that goes missing or
 // untracked after a crash strands its orphan forever (issue #3027). It uses
-// npmBinding because that config path is the repo root itself (.npmrc),
-// which exists even when the config does not, unlike cargoBinding's .cargo/.
+// rootBinding because that config path is the repo root itself, which exists
+// even when the config does not, unlike synthetic.Row's subdirectory.
 func TestApplyInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 	dir := newTestRepo(t)
 
 	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
 
-	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, rootBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1432,12 +1347,12 @@ func TestApplyInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 
 func TestApplyInTreeBindingRemovesOrphanOnUntrackedConfig(t *testing.T) {
 	dir := newTestRepo(t)
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, "registry = \"https://upstream.example/index/\"\n", false)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, "registry = \"https://upstream.example/index/\"\n", false)
 
-	configDir := filepath.Join(dir, filepath.Dir(cargoBinding.InTreeConfigPath))
+	configDir := filepath.Join(dir, filepath.Dir(synthetic.Row.InTreeConfigPath))
 	orphan := writeOrphan(t, configDir, ".intreebinding-crashed")
 
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1449,13 +1364,13 @@ func TestApplyInTreeBindingRemovesOrphanOnUntrackedConfig(t *testing.T) {
 }
 
 // Mirrors the Apply-side pair above for Revert's own ENOENT early return,
-// with npmBinding for the same existing-directory reason.
+// with rootBinding for the same existing-directory reason.
 func TestRevertInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 	dir := newTestRepo(t)
 
 	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
 
-	reverted, err := RevertInTreeBinding(dir, npmBinding)
+	reverted, err := RevertInTreeBinding(dir, rootBinding)
 	if err != nil {
 		t.Fatalf("RevertInTreeBinding: %v", err)
 	}
@@ -1473,12 +1388,12 @@ func TestRevertInTreeBindingRemovesOrphanOnMissingConfig(t *testing.T) {
 // this is the one case pinning "sweep before skipWorktreeBitSet".
 func TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet(t *testing.T) {
 	dir := newTestRepo(t)
-	writeConfig(t, dir, npmBinding.InTreeConfigPath, "registry=https://upstream.example/index/\n", true)
-	runGit(t, dir, "update-index", "--skip-worktree", "--", npmBinding.InTreeConfigPath)
+	writeConfig(t, dir, rootBinding.InTreeConfigPath, "registry=https://upstream.example/index/\n", true)
+	runGit(t, dir, "update-index", "--skip-worktree", "--", rootBinding.InTreeConfigPath)
 
 	orphan := writeOrphan(t, dir, ".intreebinding-crashed")
 
-	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
+	reason, err := ApplyInTreeBinding(dir, rootBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1496,14 +1411,14 @@ func TestApplyInTreeBindingRemovesOrphanWhenSkipWorktreeAlreadySet(t *testing.T)
 // route-aware code here. This pins existing behavior, not new behavior.
 func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testing.T) {
 	dir := newTestRepo(t)
-	content := "registry=https://registry.example.com/artifactory/api/npm/npm-local/\n"
-	writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
+	content := "registry=https://registry.example.com/artifactory/api/pkg/pkg-local/\n"
+	writeConfig(t, dir, rootBinding.InTreeConfigPath, content, true)
 
 	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com"}
 	port := 27182
 	localURL := ecosystem.RouteLocalURL(route.Prefix, port)
 
-	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
+	reason, err := ApplyInTreeBinding(dir, rootBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1511,11 +1426,11 @@ func TestApplyInTreeBindingPreservesFullUpstreamPathForHostRootedRoute(t *testin
 		t.Fatalf("reason = %v, want %v", reason, ApplyApplied)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, rootBinding.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "registry=http://127.0.0.1:27182/r0/artifactory/api/npm/npm-local/\n"
+	want := "registry=http://127.0.0.1:27182/r0/artifactory/api/pkg/pkg-local/\n"
 	if string(got) != want {
 		t.Errorf("rewritten content = %q, want %q (full upstream path preserved, not just the bare route root)", got, want)
 	}
@@ -1532,7 +1447,7 @@ func TestApplyInTreeBindingMissingConfigUnderHostRootedRoute(t *testing.T) {
 	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "registry.example.com"}
 	localURL := ecosystem.RouteLocalURL(route.Prefix, 27182)
 
-	reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
+	reason, err := ApplyInTreeBinding(dir, rootBinding, []HostRewrite{{UpstreamHost: route.UpstreamHost, LocalURL: localURL}})
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
@@ -1556,8 +1471,8 @@ func TestApplyInTreeBindingMatchesHostCaseInsensitively(t *testing.T) {
 		{
 			name:    "config uppercase, route lowercase",
 			host:    "artifactory.example.test",
-			content: "registry=https://ARTIFACTORY.example.test/Api/Cargo/Index/\n",
-			want:    "registry=" + local + "/Api/Cargo/Index/\n",
+			content: "registry=https://ARTIFACTORY.example.test/Api/Pkg/Index/\n",
+			want:    "registry=" + local + "/Api/Pkg/Index/\n",
 		},
 		{
 			name:    "mixed lines, lowercase and capitalised",
@@ -1581,16 +1496,16 @@ func TestApplyInTreeBindingMatchesHostCaseInsensitively(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := newTestRepo(t)
-			writeConfig(t, dir, npmBinding.InTreeConfigPath, tc.content, true)
+			writeConfig(t, dir, rootBinding.InTreeConfigPath, tc.content, true)
 
-			reason, err := ApplyInTreeBinding(dir, npmBinding, []HostRewrite{{UpstreamHost: tc.host, LocalURL: local}})
+			reason, err := ApplyInTreeBinding(dir, rootBinding, []HostRewrite{{UpstreamHost: tc.host, LocalURL: local}})
 			if err != nil {
 				t.Fatalf("ApplyInTreeBinding: %v", err)
 			}
 			if reason != ApplyApplied {
 				t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 			}
-			got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+			got, err := os.ReadFile(filepath.Join(dir, rootBinding.InTreeConfigPath))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1606,13 +1521,13 @@ func TestApplyInTreeBindingMatchesHostCaseInsensitively(t *testing.T) {
 func TestApplyInTreeBindingErrorsOnCaseVariantDuplicateUpstreamHost(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "registry = \"https://artifactory.example.test/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "artifactory.example.test", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "ARTIFACTORY.example.test", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	if _, err := ApplyInTreeBinding(dir, cargoBinding, rewrites); err == nil {
+	if _, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites); err == nil {
 		t.Fatal("ApplyInTreeBinding: err = nil, want non-nil (case-variant duplicate UpstreamHost)")
 	}
 }
@@ -1622,20 +1537,20 @@ func TestApplyInTreeBindingErrorsOnCaseVariantDuplicateUpstreamHost(t *testing.T
 func TestApplyInTreeBindingOverlappingMixedCaseHostsRewriteLongestFirst(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "short = \"https://REGISTRY.example.com/Index/\"\nlong = \"https://registry.EXAMPLE.com:8443/Index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, content, true)
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, content, true)
 
 	rewrites := []HostRewrite{
 		{UpstreamHost: "registry.example.com", LocalURL: "http://127.0.0.1:27182/r0"},
 		{UpstreamHost: "REGISTRY.example.com:8443", LocalURL: "http://127.0.0.1:27182/r1"},
 	}
-	reason, err := ApplyInTreeBinding(dir, cargoBinding, rewrites)
+	reason, err := ApplyInTreeBinding(dir, synthetic.Row, rewrites)
 	if err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 	if reason != ApplyApplied {
 		t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1667,28 +1582,28 @@ func TestASCIILowerLowercasesASCIIOnly(t *testing.T) {
 func TestRevertInTreeBindingsNarratesAndContinuesPastFailure(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
-	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
-	if _, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
+	writeConfig(t, dir, synthetic.Row.InTreeConfigPath, original, true)
+	if _, err := ApplyInTreeBinding(dir, synthetic.Row, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
 	// A NUL in the path makes os.Stat fail with something other than not-exist.
-	broken := cargoBinding
+	broken := synthetic.Row
 	broken.InTreeConfigPath = "bad\x00path"
 
 	var out strings.Builder
-	failed := RevertInTreeBindings(dir, []ecosystem.Row{broken, cargoBinding}, "who", &out)
+	failed := RevertInTreeBindings(dir, []ecosystem.Row{broken, synthetic.Row}, "who", &out)
 	if !failed {
 		t.Error("failed = false, want true after a row error")
 	}
 	for _, want := range []string{
 		"who: revert in-tree bad\x00path:",
-		"==> in-tree " + cargoBinding.Name + " config " + cargoBinding.InTreeConfigPath + " restored and un-hidden from git\n",
+		"==> in-tree " + synthetic.Row.Name + " config " + synthetic.Row.InTreeConfigPath + " restored and un-hidden from git\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output %q lacks %q", out.String(), want)
 		}
 	}
-	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1697,7 +1612,7 @@ func TestRevertInTreeBindingsNarratesAndContinuesPastFailure(t *testing.T) {
 	}
 
 	out.Reset()
-	if RevertInTreeBindings(dir, []ecosystem.Row{cargoBinding}, "who", &out) || out.Len() != 0 {
+	if RevertInTreeBindings(dir, []ecosystem.Row{synthetic.Row}, "who", &out) || out.Len() != 0 {
 		t.Errorf("second revert: failed or wrote %q, want a silent no-op", out.String())
 	}
 }
@@ -1709,47 +1624,47 @@ func TestApplyInTreeBindingHostBoundary(t *testing.T) {
 	const local = "http://127.0.0.1:27182/r0"
 	rewrites := []HostRewrite{{UpstreamHost: "nexus.corp", LocalURL: local}}
 	for _, scheme := range []string{"https", "http", "HTTPS"} {
-		lookalikes := scheme + "://nexus.corp:8081/repository/npm/\n" +
-			scheme + "://Nexus.Corp.mirror.net/npm/\n"
+		lookalikes := scheme + "://nexus.corp:8081/repository/pkg/\n" +
+			scheme + "://Nexus.Corp.mirror.net/pkg/\n"
 
 		t.Run(scheme+" lookalikes only", func(t *testing.T) {
 			dir := newTestRepo(t)
-			writeConfig(t, dir, npmBinding.InTreeConfigPath, lookalikes, true)
-			reason, err := ApplyInTreeBinding(dir, npmBinding, rewrites)
+			writeConfig(t, dir, rootBinding.InTreeConfigPath, lookalikes, true)
+			reason, err := ApplyInTreeBinding(dir, rootBinding, rewrites)
 			if err != nil {
 				t.Fatalf("ApplyInTreeBinding: %v", err)
 			}
 			if reason != ApplyNoopContent {
 				t.Errorf("reason = %v, want %v", reason, ApplyNoopContent)
 			}
-			got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+			got, err := os.ReadFile(filepath.Join(dir, rootBinding.InTreeConfigPath))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if string(got) != lookalikes {
 				t.Errorf("content = %q, want unchanged %q", got, lookalikes)
 			}
-			if skipWorktreeSet(t, dir, npmBinding.InTreeConfigPath) {
+			if skipWorktreeSet(t, dir, rootBinding.InTreeConfigPath) {
 				t.Error("skip-worktree set on a config with nothing rewritten")
 			}
 		})
 
 		t.Run(scheme+" genuine alongside lookalikes", func(t *testing.T) {
 			dir := newTestRepo(t)
-			content := lookalikes + scheme + "://NEXUS.corp/repository/npm/\n"
-			writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
-			reason, err := ApplyInTreeBinding(dir, npmBinding, rewrites)
+			content := lookalikes + scheme + "://NEXUS.corp/repository/pkg/\n"
+			writeConfig(t, dir, rootBinding.InTreeConfigPath, content, true)
+			reason, err := ApplyInTreeBinding(dir, rootBinding, rewrites)
 			if err != nil {
 				t.Fatalf("ApplyInTreeBinding: %v", err)
 			}
 			if reason != ApplyApplied {
 				t.Errorf("reason = %v, want %v", reason, ApplyApplied)
 			}
-			got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+			got, err := os.ReadFile(filepath.Join(dir, rootBinding.InTreeConfigPath))
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := lookalikes + local + "/repository/npm/\n"
+			want := lookalikes + local + "/repository/pkg/\n"
 			if string(got) != want {
 				t.Errorf("content = %q, want %q", got, want)
 			}
@@ -1759,20 +1674,20 @@ func TestApplyInTreeBindingHostBoundary(t *testing.T) {
 
 // A look-alike must not shadow a genuine match later on the same line, and a
 // host at EOF with no trailing newline still ends at a boundary. YAML flow
-// syntax ('}', ']', ',') ends a host too, as in a .yarnrc.yml flow mapping.
+// syntax ('}', ']', ',') ends a host too, as in a YAML flow mapping.
 func TestApplyInTreeBindingHostBoundaryRescansAndEOF(t *testing.T) {
 	dir := newTestRepo(t)
-	content := "a=https://nexus.corp:8081/x https://nexus.corp/y\n{npmRegistryServer: https://nexus.corp}\n[https://nexus.corp, https://nexus.corp:8081]\nregistry=https://nexus.corp"
-	writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
+	content := "a=https://nexus.corp:8081/x https://nexus.corp/y\n{mirror: https://nexus.corp}\n[https://nexus.corp, https://nexus.corp:8081]\nregistry=https://nexus.corp"
+	writeConfig(t, dir, rootBinding.InTreeConfigPath, content, true)
 	rewrites := []HostRewrite{{UpstreamHost: "nexus.corp", LocalURL: "http://127.0.0.1:27182/r0"}}
-	if _, err := ApplyInTreeBinding(dir, npmBinding, rewrites); err != nil {
+	if _, err := ApplyInTreeBinding(dir, rootBinding, rewrites); err != nil {
 		t.Fatalf("ApplyInTreeBinding: %v", err)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, rootBinding.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "a=https://nexus.corp:8081/x http://127.0.0.1:27182/r0/y\n{npmRegistryServer: http://127.0.0.1:27182/r0}\n[http://127.0.0.1:27182/r0, https://nexus.corp:8081]\nregistry=http://127.0.0.1:27182/r0"
+	want := "a=https://nexus.corp:8081/x http://127.0.0.1:27182/r0/y\n{mirror: http://127.0.0.1:27182/r0}\n[http://127.0.0.1:27182/r0, https://nexus.corp:8081]\nregistry=http://127.0.0.1:27182/r0"
 	if string(got) != want {
 		t.Errorf("content = %q, want %q", got, want)
 	}
