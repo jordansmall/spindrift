@@ -7497,7 +7497,7 @@ unconfigured or fails, an image-only-stale verdict drains to exit 4 just
 as on OCI: `FLAKE_LAUNCHER_ATTR` is unset, the realize fails, the
 realized tip tag is not a `/nix/store/` path, or a nixInBox Consumer's
 nix-var snapshot generation fails. The last three each first print a
-`==> bwrap hot-swap: ... draining instead` line to stderr, which marks a
+`==> store-closure hot-swap: ... draining instead` line to stderr, which marks a
 failed swap of a fresh launcher. The unconfigured case prints no such
 line, and with `FLAKE_LAUNCHER_ATTR` unset the probe never checks the
 launcher dimension at all, so that exit 4 reports only a stale image.
