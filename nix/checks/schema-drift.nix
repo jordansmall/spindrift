@@ -574,8 +574,9 @@ checkedMerge {
         touch $out
       '';
 
-  # Regenerate with `nix run .#regen` when lib/dispatch-kinds/*.nix changes
-  # (issue #5668). Same gofmt normalization as driver-descriptors-gen.
+  # Regenerate with `nix run .#regen` when lib/dispatch-kinds/*.nix or
+  # lib/prompt-contract.nix's outcomeStatusSets changes (issues #5668, #5670).
+  # Same gofmt normalization as driver-descriptors-gen.
   dispatch-kinds-gen =
     let
       raw = pkgs.writeText "kinds_gen.go.raw" (
@@ -591,7 +592,7 @@ checkedMerge {
       ''
         gofmt "$raw" > generated.go
         diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/dispatchkind/kinds_gen.go is out of sync with lib/dispatch-kinds/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+          || { echo "cmd/launcher/internal/dispatchkind/kinds_gen.go is out of sync with lib/dispatch-kinds/*.nix or lib/prompt-contract.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
 

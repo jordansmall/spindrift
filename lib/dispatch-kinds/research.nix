@@ -1,4 +1,4 @@
-{
+rec {
   name = "research";
   verb = "research";
   keying = "ByIssue";
@@ -22,11 +22,6 @@
     when = "named";
     flag = "--research";
   };
-  statuses = [
-    "recommend"
-    "reject"
-    "unclear"
-    "blocked"
-  ];
+  statuses = (import ../prompt-contract.nix).outcomeStatusesFor name;
   goVar = "Research";
 }

@@ -6,7 +6,7 @@
 # only once dispatch and research have both reported no work (the
 # awake-window rule: gate starting, never stopping — a running butler child
 # is never preempted once picked).
-{
+rec {
   name = "butler";
   verb = "butler";
   keying = "ByChore";
@@ -36,5 +36,6 @@
     when = "drawn";
     flag = "--butler";
   };
+  statuses = (import ../prompt-contract.nix).outcomeStatusesFor name;
   goVar = "Butler";
 }

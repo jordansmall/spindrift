@@ -6,7 +6,7 @@
 # tracker issues, so the host counts the eligible ones itself
 # (DemandHostOutbox), leaving out bundles a running daemon child holds; the
 # count is an upper bound, so a child may still exit 2 (nothing eligible).
-{
+rec {
   name = "recover";
   verb = "recover";
   keying = "ByIssue";
@@ -23,5 +23,6 @@
   preflight = {
     when = "none";
   };
+  statuses = (import ../prompt-contract.nix).outcomeStatusesFor name;
   goVar = "Recover";
 }

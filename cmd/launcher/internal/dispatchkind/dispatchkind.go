@@ -188,7 +188,7 @@ type Descriptor struct {
 	Enablement     Enablement      // when the daemon draws this kind; see Enablement
 	Preflight      DoctorPreflight // how the daemon's startup preflight passes this kind's doctor flag; see DoctorPreflight
 	UnclaimedGate  bool            // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
-	Statuses       []string        // SPINDRIFT_OUTCOME status values the kind's Box can emit: hand-copied from lib/prompt-contract.nix outcomeStatusSets, kept in step by outcome/status_kind_parity_test.go (RESEARCH_VERDICTS can override research's at runtime, unseen here); empty for a kind with no outcomeStatusSets row (butler hand-writes its own, recover runs no Box)
+	Statuses       []string        // SPINDRIFT_OUTCOME status values the kind's Box can emit: read by the Nix row from lib/prompt-contract.nix outcomeStatusSets (RESEARCH_VERDICTS can override research's at runtime, unseen here); empty for a kind with no outcomeStatusSets row (butler hand-writes its own, recover runs no Box)
 
 	// PassRoles maps a pass_start op's Role to the attribution role its
 	// top-level messages take; a Role absent from it maps to "" (no role
