@@ -22,7 +22,18 @@ let
   # app-wiring guards cannot fork hand-copied variants (issue #3192).
   mkAppWiringCheck = import ../../lib/app-wiring-check.nix { inherit pkgs; };
 
-  protectedIdentifiers = unique (map (r: r.fragment) registry ++ map (r: r.var) registry);
+  # A deprecated var and its replacement are both live, but removed_vars.go
+  # must name them to warn; that table is pinned to
+  # lib/removed-fragment-vars.nix by equivalence.nix, so it is the one
+  # sanctioned mention.
+  deprecatedRows = pkgs.lib.filterAttrs (_: r: (r.severity or "removed") == "deprecated") (
+    import ../../lib/removed-fragment-vars.nix
+  );
+  deprecationVars =
+    builtins.attrNames deprecatedRows ++ map (r: r.replacement) (builtins.attrValues deprecatedRows);
+  protectedIdentifiers = pkgs.lib.subtractLists deprecationVars (
+    unique (map (r: r.fragment) registry ++ map (r: r.var) registry)
+  );
 
   identifierListFile = pkgs.writeText "promptassembly-registry-identifiers.txt" (
     concatMapStringsSep "\n" (x: x) protectedIdentifiers

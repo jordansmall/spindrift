@@ -19,6 +19,10 @@ type FragmentRow struct {
 	// Fragment is the basename under prompts/fragments/ rendered when Gate is on.
 	// On an axis row it is a basename under prompts/fragments/<backend>/ instead.
 	Fragment string `json:"fragment"`
+	// LegacyFragment is a root-level basename under prompts/fragments/ read
+	// only when Fragment's file is missing: a deprecation-window fallback for
+	// an override directory still on the old layout (issue #5646).
+	LegacyFragment string `json:"legacyFragment,omitempty"`
 	// Axis is "" for a plain row, or "tracker" / "forge" for a row whose
 	// fragment comes from the active backend's own folder: <backend> is the
 	// active ISSUE_TRACKER (tracker) or CODE_FORGE (forge) backend name. A

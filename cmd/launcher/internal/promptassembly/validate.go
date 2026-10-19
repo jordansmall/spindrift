@@ -87,11 +87,13 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 // It first reports a removed fragment variable's literal ${NAME} that Assemble
 // found in operator-authored prompt text (see removedFragmentVars). Assemble
 // defers that error to here so it is a *ValidateError; a caller that skips
-// Validate never sees it.
+// Validate never sees it. A deprecated fragment variable is a warning instead,
+// returned ahead of the marker matrix's.
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
 	if result.removedVarErr != nil {
 		return nil, result.removedVarErr
 	}
+	warnings = append(warnings, result.deprecatedVarWarnings...)
 	gates := Gates(e)
 	d := e.descriptor()
 	// SIGNAL_CARRIER_SOCKET picks the verb (SocketMarker) over the marker for

@@ -23,6 +23,11 @@ type Source struct {
 type segment struct {
 	src  Source
 	text string
+	// deprecatedRef, on a zero-byte marker segment, names the deprecated
+	// fragment variable the owner's raw text referenced. Substitution replaces
+	// the ${NAME} token, so the scan could not otherwise see an override
+	// still using a deprecated var that renders.
+	deprecatedRef string
 }
 
 // body is the attributed form of a rendered string. Its concatenated text()
@@ -40,21 +45,25 @@ func (b body) text() string {
 
 // trimTrailingNewlines mirrors RenderText's strings.TrimRight(..., "\n").
 // A tail segment trimmed to empty is dropped, so the result never carries an
-// attributed-but-empty segment a caller would have to special-case.
+// attributed-but-empty segment a caller would have to special-case. Zero-byte
+// deprecatedRef markers are skipped over and kept.
 func (b body) trimTrailingNewlines() body {
 	out := make(body, len(b))
 	copy(out, b)
-	for len(out) > 0 {
-		last := out[len(out)-1]
-		trimmed := strings.TrimRight(last.text, "\n")
-		if trimmed == last.text {
+	for i := len(out) - 1; i >= 0; i-- {
+		seg := out[i]
+		if seg.deprecatedRef != "" {
+			continue
+		}
+		trimmed := strings.TrimRight(seg.text, "\n")
+		if trimmed == seg.text {
 			break
 		}
 		if trimmed == "" {
-			out = out[:len(out)-1]
+			out = append(out[:i], out[i+1:]...)
 			continue
 		}
-		out[len(out)-1] = segment{src: last.src, text: trimmed}
+		out[i] = segment{src: seg.src, text: trimmed}
 		break
 	}
 	return out
@@ -80,7 +89,11 @@ func renderSegments(raw string, owner Source, vars map[string]body) body {
 		start, end := m[0], m[1]
 		appendLiteral(raw[pos:start])
 		tok := raw[start:end]
-		if v, ok := vars[tokenName(tok)]; ok {
+		name := tokenName(tok)
+		if v, ok := vars[name]; ok {
+			if isDeprecatedFragmentVar(name) {
+				out = append(out, segment{src: owner, deprecatedRef: name})
+			}
 			out = append(out, v...)
 		} else {
 			appendLiteral(tok)

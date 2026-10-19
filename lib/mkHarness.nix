@@ -636,12 +636,13 @@ let
             name = path;
             value = builtins.readFile (fragmentsDir + "/${path}");
           })
-          # An axis row's per-backend files may be absent from a Consumer
-          # fragmentsDir; a plain row's absence still aborts eval.
+          # An axis row's per-backend files and a deprecated row's files may
+          # be absent from an old-layout fragmentsDir (a test fixture); a
+          # plain row's absence still aborts eval.
           (
-            builtins.filter (path: (row.axis or "") == "" || builtins.pathExists (fragmentsDir + "/${path}")) (
-              fragmentPaths.pathsOf row
-            )
+            builtins.filter (
+              path: !(fragmentPaths.mayBeAbsent row) || builtins.pathExists (fragmentsDir + "/${path}")
+            ) (fragmentPaths.scanPathsOf fragmentsDir row)
           )
       ) readOnlyReachableFragmentRows
     );
@@ -670,11 +671,12 @@ let
 
   # A removed fragment variable still written as a literal ${NAME} in a
   # Consumer-overridable prompt arg, fragment file or chore file renders as that
-  # literal text (issue #4401). Scans the prompt args, each lib/fragments.nix
+  # literal text (issue #4401); a deprecated one is collected here too and only
+  # warns (deprecatedFragmentVarWarnings). Scans the prompt args, each lib/fragments.nix
   # row's fragment file present under fragmentsDir, and the top-level *.md
   # files under choresDir, so it fires regardless of which gates a build turns
   # on. Registry and rationale: lib/removed-fragment-vars.nix.
-  removedFragmentVarViolations =
+  removedFragmentVarHits =
     let
       promptArgs = {
         inherit
@@ -703,7 +705,7 @@ let
           })
           (
             builtins.filter (path: builtins.pathExists (fragmentsDir + "/${path}")) (
-              builtins.concatMap fragmentPaths.pathsOf fragments
+              builtins.concatMap (fragmentPaths.scanPathsOf fragmentsDir) fragments
             )
           )
       );
@@ -725,8 +727,34 @@ let
       map (name: {
         inherit source name;
         inherit (removedFragmentVars.${name}) issue;
+        severity = removedFragmentVars.${name}.severity or "removed";
+        replacement = removedFragmentVars.${name}.replacement or null;
       }) (builtins.filter (name: mentions name sources.${source}) (lib.attrNames removedFragmentVars))
     ) (lib.attrNames sources);
+
+  removedFragmentVarViolations = builtins.filter (v: v.severity == "removed") removedFragmentVarHits;
+
+  # A deprecated var only warns (through warnAll); the launcher repeats the
+  # warning at run time. One line per variable, like the launcher, however many
+  # sources name it. Exposed through `internals` so a check can assert on it
+  # without capturing stderr.
+  deprecatedFragmentVarWarnings =
+    let
+      hits = builtins.filter (v: v.severity == "deprecated") removedFragmentVarHits;
+    in
+    lib.optional (hits != [ ])
+      "mkHarness: a prompt arg, fragment file or chore file references a deprecated fragment variable, slated for removal (see MIGRATING.md):\n${
+        lib.concatMapStringsSep "\n" (
+          name:
+          let
+            named = builtins.filter (v: v.name == name) hits;
+            first = builtins.head named;
+          in
+          "  \${${name}} in ${
+              lib.concatMapStringsSep ", " (v: v.source) named
+            } (deprecated in issue #${toString first.issue}); use \${${first.replacement}} instead"
+        ) (lib.unique (map (v: v.name) hits))
+      }";
 
   removedFragmentVarCheckOk =
     if removedFragmentVarViolations == [ ] then
@@ -1771,7 +1799,9 @@ let
   warnAll =
     outputs:
     lib.foldl' (acc: msg: lib.warn msg acc) outputs (
-      lib.optional (legacyKnobsSet != [ ]) deprecationMsg ++ rosterWarnings
+      lib.optional (legacyKnobsSet != [ ]) deprecationMsg
+      ++ rosterWarnings
+      ++ deprecatedFragmentVarWarnings
     );
 
   # Forces buildTimeRejectVerdicts' evaluation (issue #2250): builtins.all
@@ -1961,7 +1991,7 @@ else
         researchPromptContentByName
         ;
 
-      inherit rosterWarnings;
+      inherit rosterWarnings deprecatedFragmentVarWarnings;
     };
 
     packages =
