@@ -2476,7 +2476,10 @@ rendered into the right per-runtime flag by the launcher:
   mislead a Consumer into thinking they get something `open` doesn't
   already give them. It stays rejected: a Consumer flake combining
   `NETWORK_MODE=no-host-loopback` with `runtime=bwrap` fails at `nix eval`,
-  not at dispatch time — use `open` instead.
+  and a runtime `NETWORK_MODE` override fails the launch gate, with one
+  message naming the modes the runner family supports — use `open` instead.
+  Each family's supported modes are the `networkModes` list on its row in
+  `lib/runners/`.
 - **`none`** — fully offline. Renders `--network=none` on OCI runtimes and
   bare `--unshare-net` on bwrap (no pasta helper — the one mode that skips
   it). This is **documented test-only**: a Driver cannot reach its own

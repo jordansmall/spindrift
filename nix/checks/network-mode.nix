@@ -10,7 +10,28 @@
   ...
 }:
 let
-  inherit (pkgs.lib) assertMsg;
+  inherit (pkgs.lib) assertMsg concatMap;
+  runners = import ../../lib/runners/index.nix { };
+  # Every (runtime, mode) pair, tagged with whether the runtime's runner row
+  # lists the mode in `networkModes`.
+  pairs = concatMap (
+    row:
+    concatMap (
+      runtime:
+      map (mode: {
+        inherit runtime mode;
+        listed = builtins.elem mode row.networkModes;
+      }) runners.networkModes
+    ) row.runtimes
+  ) runners.rows;
+  evaluates =
+    { runtime, mode, ... }:
+    (builtins.tryEval (builtins.seq (mkHarnessWithRuntime runtime { networkMode = mode; }) "reached"))
+    .success;
+  pairName = { runtime, mode, ... }: "${runtime}+${mode}";
+  rejectedPairs = builtins.filter (p: p.listed && !evaluates p) pairs;
+  acceptedPairs = builtins.filter (p: !p.listed && evaluates p) pairs;
+  bwrapRow = runners.forRuntime "bwrap";
   mkHarnessWith =
     defaults:
     (import ../../lib/mkHarness.nix {
@@ -19,8 +40,8 @@ let
       inherit defaults;
     }).spindrift.drvPath;
   # `runtime` is a baked mkHarness.nix function arg, not a schema default, and
-  # the check below that rejects no-host-loopback on bwrap is decided by it
-  # rather than by anything in `defaults`.
+  # the row-driven mode checks below are decided by it rather than by
+  # anything in `defaults`.
   mkHarnessWithRuntime =
     runtime: defaults:
     (import ../../lib/mkHarness.nix {
@@ -65,31 +86,6 @@ in
     ) "mkHarness.nix must throw when networkMode is set together with the raw podmanNetwork knob";
     pkgs.runCommand "network-mode-and-raw-podman-network-both-set-throws" { } "touch $out";
 
-  # Since issue #2666 a bwrap Box isolates its network namespace by default, so
-  # no-host-loopback would render byte-identical to "open". The choice stays
-  # rejected rather than let a Consumer believe it buys something extra.
-  network-mode-no-host-loopback-on-bwrap-throws =
-    let
-      broken = builtins.tryEval (
-        builtins.seq (mkHarnessWithRuntime "bwrap" { networkMode = "no-host-loopback"; }) "unreached"
-      );
-    in
-    assert assertMsg (
-      !broken.success
-    ) "mkHarness.nix must throw when networkMode = no-host-loopback is combined with runtime = bwrap";
-    pkgs.runCommand "network-mode-no-host-loopback-on-bwrap-throws" { } "touch $out";
-
-  # The bwrap-specific throw above must not over-fire onto the OCI runtimes.
-  network-mode-no-host-loopback-on-podman-does-not-throw =
-    let
-      ok = builtins.tryEval (
-        builtins.seq (mkHarnessWith { networkMode = "no-host-loopback"; }) "reached"
-      );
-    in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw when networkMode = no-host-loopback is combined with the default runtime (podman)";
-    pkgs.runCommand "network-mode-no-host-loopback-on-podman-does-not-throw" { } "touch $out";
-
   # A raw network knob alone, with network.mode never set, is the documented
   # escape hatch: the coherence assert must key off `defaults ? networkMode`,
   # not off the post-merge defaulted value.
@@ -131,4 +127,28 @@ in
       !broken.success
     ) "mkHarness.nix must throw when networkMode is set together with the raw bwrapUnshareNet knob";
     pkgs.runCommand "network-mode-and-raw-bwrap-unshare-net-both-set-throws" { } "touch $out";
+
+  # The assert reads each runner row's `networkModes` with no family-name
+  # branch, so every (runtime, mode) pair a row lists must evaluate...
+  network-mode-every-row-listed-mode-does-not-throw =
+    assert assertMsg (rejectedPairs == [ ])
+      "mkHarness.nix must accept every network mode its runner row lists, but threw on: ${builtins.concatStringsSep ", " (map pairName rejectedPairs)}";
+    pkgs.runCommand "network-mode-every-row-listed-mode-does-not-throw" { } "touch $out";
+
+  # ...and every enum mode a row does not list must throw.
+  network-mode-every-row-unlisted-mode-throws =
+    assert assertMsg (acceptedPairs == [ ])
+      "mkHarness.nix must reject every network mode its runner row omits, but accepted: ${builtins.concatStringsSep ", " (map pairName acceptedPairs)}";
+    pkgs.runCommand "network-mode-every-row-unlisted-mode-throws" { } "touch $out";
+
+  # The row-derived message the harness throws. tryEval drops messages, so the
+  # pure function is pinned instead. cmd/launcher/internal/runner/family_test.go
+  # pins the same literal for the Go launch gate (CheckNetworkMode); change both
+  # together.
+  network-mode-unsupported-message-matches-go-gate =
+    assert assertMsg (
+      runners.unsupportedNetworkModeMessage bwrapRow "no-host-loopback"
+      == "NETWORK_MODE=no-host-loopback is unsupported on runner family bwrap, which supports: open, none, host"
+    ) "unsupportedNetworkModeMessage must build the same text as the Go launch gate";
+    pkgs.runCommand "network-mode-unsupported-message-matches-go-gate" { } "touch $out";
 }

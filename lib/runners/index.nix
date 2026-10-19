@@ -4,7 +4,8 @@
 # by two rows, or a row with an unknown artifact, throws when `runtimes`,
 # `forRuntime`, or `rows` is forced, so a bad family never reaches the enum, the
 # harness, or the generated Go. So does a row listing a network mode outside the
-# NETWORK_MODE enum.
+# NETWORK_MODE enum. `unsupportedNetworkModeMessage` is the one wording for a
+# mode a row does not list.
 {
   rows ? import ./default.nix,
 }:
@@ -13,12 +14,7 @@ let
     "oci-image"
     "store-closure"
   ];
-  networkModes = [
-    "open"
-    "no-host-loopback"
-    "none"
-    "host"
-  ];
+  networkModes = (import ../env-schema.nix).networkMode.choices;
   runtimes = builtins.concatMap (r: r.runtimes) rows;
   duplicates = builtins.filter (
     rt: builtins.length (builtins.filter (x: x == rt) runtimes) > 1
@@ -45,6 +41,12 @@ let
       rows;
 in
 {
+  # cmd/launcher/internal/runner/family.go's CheckNetworkMode builds the same
+  # text for the launch gate, so change both together.
+  unsupportedNetworkModeMessage =
+    row: mode:
+    "NETWORK_MODE=${mode} is unsupported on runner family ${row.name}, which supports: ${builtins.concatStringsSep ", " row.networkModes}";
+  inherit networkModes;
   rows = checkedRows;
   runtimes = builtins.seq checkedRows runtimes;
   forRuntime =

@@ -485,17 +485,19 @@ let
 
   # NETWORK_MODE coherence (issue #2562): network.mode and the raw per-runtime
   # knobs say the same thing with no precedence rule between them, so a
-  # Consumer that sets both must pick one. no-host-loopback is rejected on
-  # bwrap because a bwrap Box already isolates its network namespace by
-  # default (issue #2666), so the choice would render identically to "open".
+  # Consumer that sets both must pick one. The mode must also be one the
+  # runtime's runner row (lib/runners) lists in `networkModes`; why a family
+  # omits a mode is documented on its row.
   networkModeCoherenceOk =
     if
       (defaults ? networkMode)
       && ((mergedDefaults.podmanNetwork or "" != "") || (mergedDefaults.bwrapUnshareNet or false))
     then
       throw "mkHarness: network.mode=${mergedDefaults.networkMode} is set together with a raw network knob (network.podman/network.bwrapUnshare) -- there is no precedence rule between them, so the Consumer must pick one"
-    else if mergedDefaults.networkMode or "open" == "no-host-loopback" && runnerKind == "bwrap" then
-      throw "mkHarness: network.mode=no-host-loopback is unsupported on runtime=bwrap -- it has no rendering distinct from the isolated-by-default network.mode=open; use network.mode=open instead, or runtime=podman/docker/rancher for the docker/nerdctl inert-but-correct render"
+    else if !(builtins.elem (mergedDefaults.networkMode or "open") runnerRow.networkModes) then
+      throw "mkHarness: ${
+        runners.unsupportedNetworkModeMessage runnerRow (mergedDefaults.networkMode or "open")
+      }"
     else
       true;
 
@@ -1517,7 +1519,8 @@ let
   # The runner row (lib/runners) that lists the runtime knob; runnerKind is the
   # adapter family the launcher knows, and the row's artifact picks the flake
   # package below.
-  runnerRow = (import ./runners/index.nix { }).forRuntime runtime;
+  runners = import ./runners/index.nix { };
+  runnerRow = runners.forRuntime runtime;
   runnerKind = runnerRow.name;
   boxArtifact = runnerRow.artifact;
 
