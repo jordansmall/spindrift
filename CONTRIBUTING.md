@@ -128,9 +128,9 @@ it under its own `caveman/SKILL.md` directory — the layout the
 Drivers discover. This is dogfood-only — the generic harness keeps its
 empty `skills` default.
 
-After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
-`templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
-`docs/flake-options.md`,
+After editing `lib/env-schema.nix` (or a registry row's `knobs`), regenerate
+the artifacts it drives — `templates/default/harness.env.example`,
+`cmd/launcher/flagtable_gen.go`, `docs/flake-options.md`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`,
 `cmd/launcher/internal/inputdoc/emptyissetting_gen.go`,
 `cmd/launcher/internal/inputdoc/schemadefaults_gen.go`,
@@ -156,7 +156,9 @@ The regenerator and the drift-guard checks share one renderer per artifact
 dev tooling, not part of the flake-option/env-schema consumer surface. The man
 page rebuilds fresh from the schema on every `nix flake check` (nothing to
 regenerate).
-`lib/env-schema.nix` is the only hand-edit a new knob requires;
+`lib/env-schema.nix` is the only hand-edit a new knob requires, unless a
+registry row owns it (today `lib/backends/<name>.nix`'s `knobs`, folded in by
+`lib/row-knobs.nix`, ADR 0068 decision 2), in which case edit it on its row;
 the launcher's Go wiring (when the binary reads the knob directly) is the only
 other hand-edit. A structural knob's doc/type/default metadata lives instead
 in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in
@@ -191,7 +193,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
 
 - **`lib/`** — the nix engine. `mkHarness.nix` (the function Consumers import),
   `flakeModule.nix` (the flake-parts option surface), `env-schema.nix` (the
-  **source of truth** for every operator-facing `SPINDRIFT_*` knob; the
+  **source of truth** for every operator-facing `SPINDRIFT_*` knob, folding in
+  those a registry row owns via `row-knobs.nix`; the
   `launcher-env-coverage` check fails if the launcher and the schema drift,
   and internal non-knob env names sit on that check's own allowlist),
   `backends/default.nix` (the backend descriptor registry — one row per

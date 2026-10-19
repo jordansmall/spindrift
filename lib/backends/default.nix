@@ -60,6 +60,12 @@
 # `gh auth setup-git`; github and git (its remote URL may be github.com), not
 # forgejo (token URL, ADR 0038) or local (filesystem mount, ADR 0033; issue #4452).
 
+# A row may also carry `knobs`: an attrset keyed by env-schema key, each value
+# an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so
+# the row owns its backend-specific knobs; the generated Descriptor ignores the
+# field, and an env name or key a row shares with another declaration fails
+# eval (ADR 0068).
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [
