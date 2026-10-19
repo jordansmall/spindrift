@@ -6,11 +6,49 @@ let
   preambles = import ../../lib/preambles.nix;
   inherit (pkgs.lib) assertMsg hasInfix;
 
+  bwrapRow = import ../../lib/runners/bwrap.nix;
+  ociRow = import ../../lib/runners/oci.nix;
+  allRows = (import ../../lib/runners/index.nix { }).rows;
+
+  # One check per runner row, so a new family is covered by adding its row
+  # file, never by editing this file: runArtifacts must layer the row's own
+  # keys under the shared trailer and identify the row.
+  runArtifactsRowChecks =
+    rows:
+    builtins.listToAttrs (
+      map (
+        row:
+        let
+          runtime = builtins.head row.runtimes;
+          out = preambles.runArtifacts (preambles.dummyRunArtifactArgs // { inherit row runtime; });
+          rowKeys = builtins.attrNames (row.runArtifacts preambles.dummyRunArtifactArgs);
+          missing = builtins.filter (k: !(out ? ${k})) rowKeys;
+          name = "preambles-run-artifacts-row-${row.name}";
+        in
+        {
+          inherit name;
+          value =
+            assert assertMsg (
+              out.RUNNER_KIND == row.name
+            ) "runArtifacts (${row.name}) must set RUNNER_KIND to the row name, got: ${builtins.toJSON out}";
+            assert assertMsg (out.BOX_ARTIFACT == row.artifact)
+              "runArtifacts (${row.name}) must set BOX_ARTIFACT to the row artifact, got: ${builtins.toJSON out}";
+            assert assertMsg (out.RUNTIME == runtime)
+              "runArtifacts (${row.name}) must set RUNTIME to the configured runtime, got: ${builtins.toJSON out}";
+            assert assertMsg (missing == [ ])
+              "runArtifacts (${row.name}) dropped the row's own keys ${builtins.toJSON missing}, got: ${builtins.toJSON out}";
+            pkgs.runCommand name { } "touch $out";
+        }
+      ) rows
+    );
+
+  stubRow = import ../fixtures/stub-runner-row.nix;
+
   # Shared by preambles-run-artifacts-bwrap and its -nix-config-omitted
   # sibling below, which differ only in whether nixConfigPath is set
   # (issue #2664).
   bwrapRunArtifactsBase = {
-    row = import ../../lib/runners/bwrap.nix;
+    row = bwrapRow;
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
@@ -31,7 +69,7 @@ let
     launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
     imageName = "spindrift";
     imageAttrName = "agent-closure";
-    runtime = "bwrap";
+    runtime = builtins.head bwrapRow.runtimes;
     imageDrv = "/nix/store/ddd-image.drv";
     nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
     systems = {
@@ -60,7 +98,7 @@ let
   # Shared by preambles-run-artifacts-oci and the OCI case of
   # preambles-run-artifacts-image-attr-name below.
   ociRunArtifactsBase = {
-    row = import ../../lib/runners/oci.nix;
+    row = ociRow;
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
@@ -82,7 +120,7 @@ let
     launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
     imageName = "spindrift";
     imageAttrName = "agent-image";
-    runtime = "podman";
+    runtime = builtins.head ociRow.runtimes;
     imageDrv = "/nix/store/ddd-image.drv";
     nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
     systems = {
@@ -114,7 +152,8 @@ let
     syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
   };
 in
-{
+runArtifactsRowChecks allRows
+// {
   preambles-defaults-shape =
     let
       out = preambles.renderDefaultsPreamble {
@@ -390,8 +429,8 @@ in
       );
     in
     assert assertMsg (
-      out.RUNTIME == "bwrap"
-    ) "runArtifacts (bwrap) must set RUNTIME=bwrap, got: ${builtins.toJSON out}";
+      out.RUNTIME == builtins.head bwrapRow.runtimes
+    ) "runArtifacts (bwrap) must set RUNTIME to the row runtime, got: ${builtins.toJSON out}";
     assert assertMsg (
       out.BOX_ARTIFACT == "store-closure"
     ) "runArtifacts (bwrap) must set BOX_ARTIFACT=store-closure, got: ${builtins.toJSON out}";
@@ -547,7 +586,7 @@ in
       out.IMAGE_TAG == "spindrift:deadbeef"
     ) "runArtifacts (oci) must set IMAGE_TAG, got: ${builtins.toJSON out}";
     assert assertMsg (
-      out.RUNTIME == "podman"
+      out.RUNTIME == builtins.head ociRow.runtimes
     ) "runArtifacts (oci) must set the configured RUNTIME, got: ${builtins.toJSON out}";
     assert assertMsg (
       out.BOX_ARTIFACT == "oci-image"
@@ -624,7 +663,7 @@ in
   preambles-run-artifacts-oci-driver-scoped-image-name =
     let
       out = preambles.runArtifacts {
-        row = import ../../lib/runners/oci.nix;
+        row = ociRow;
         driverEntry = {
           name = "opencode";
           skillsDirRelative = ".claude/skills";
@@ -646,7 +685,7 @@ in
         launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift-opencode";
         imageAttrName = "agent-image";
-        runtime = "podman";
+        runtime = builtins.head ociRow.runtimes;
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
         systems = {
@@ -701,21 +740,14 @@ in
     pkgs.runCommand "preambles-run-artifacts-oci-driver-scoped-image-name" { } "touch $out";
 
   # documentArtifactKeys must be derived from what runArtifacts emits across
-  # both runnerKind branches (issue #810), not a hand-maintained list that can
-  # drift. Pinning the exact list forces a conscious update here when
-  # runArtifacts gains or loses a key.
+  # every runner row (issue #810), not a hand-maintained list that can drift.
+  # Only the keys the shared trailer renders are pinned by hand, so a shared
+  # key gained or lost forces a conscious update here; each row's own keys
+  # (FLAKE_IMAGE_ATTR included) come from the row.
   preambles-document-artifact-keys =
     let
       out = preambles.documentArtifactKeys;
-      # lib/preambles.nix sorts the real keys, but this list does not sort
-      # itself. Insert new keys in alphabetical position or the assert below
-      # fails with a bare "got: [...]" dump that does not say why.
-      expected = [
-        "AGENT_ENV"
-        "AGENT_ENV_DRV"
-        "AGENT_FILES"
-        "AGENT_FILES_DRV"
-        "BAKED_PREFETCH"
+      sharedKeys = [
         "BOX_ARTIFACT"
         "BOX_ENV_VARS"
         "CHORE_CATALOG"
@@ -724,43 +756,65 @@ in
         "DRIVER_SKILLS_DIR"
         "DRIVER_VERSION"
         "FILER_ENABLED"
-        "FLAKE_IMAGE_ATTR"
         "FLAKE_LAUNCHER_ATTR"
         "FORGE_BACKEND"
         "FULLY_LOCAL"
         "GITHUB_OUTPUT"
-        "GROUP_FILE"
-        "GROUP_FILE_DRV"
         "HOST_MEDIATED_REMOTE"
         "IMAGE"
-        "IMAGE_ARCHIVE"
-        "IMAGE_DRV"
-        "IMAGE_TAG"
         "IN_BOX_UNREACHABLE_TRACKER"
         "LAUNCHER_CURRENCY_HASH"
-        "NIX_BUILDER_IMAGE"
-        "NIX_CONFIG_FILE"
-        "NIX_CONFIG_FILE_DRV"
-        "NIX_STORE_WRITABLE"
-        "NIX_VOLUME"
         "OUTBOX_RELAY_CAPABLE"
-        "PASSWD_FILE"
-        "PASSWD_FILE_DRV"
         "ROLE_MODELS"
         "RUNNER_KIND"
         "RUNTIME"
         "SCOUT_PROVISIONED"
-        "SYSCALL_FILTER"
-        "SYSCALL_FILTER_DRV"
         "TRACKER_AXIS_FILER"
         "TRACKER_AXIS_READ"
         "TRACKER_AXIS_WRITE"
         "WORKER_PROVISIONED"
       ];
+      rowKeys = builtins.concatMap (
+        row: builtins.attrNames (row.runArtifacts preambles.dummyRunArtifactArgs)
+      ) allRows;
+      expected = pkgs.lib.unique (builtins.sort builtins.lessThan (sharedKeys ++ rowKeys));
     in
     assert assertMsg (out == expected)
-      "documentArtifactKeys must be the sorted union of runArtifacts output keys (both runnerKinds) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
+      "documentArtifactKeys must be the sorted union of runArtifacts output keys (every runner row) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
+
+  # mkHarness hands runArtifacts the union of every row's inputs, so `...` must
+  # not swallow a misspelled name: an argument that is neither the shared
+  # trailer's nor any row's input fails eval.
+  preambles-run-artifacts-rejects-unknown-arg =
+    let
+      args = preambles.dummyRunArtifactArgs // {
+        row = ociRow;
+        runtime = "podman";
+      };
+      bad = builtins.tryEval (
+        builtins.deepSeq (preambles.runArtifacts (args // { imageNmae = "typo"; })) true
+      );
+    in
+    assert assertMsg (builtins.isAttrs (
+      preambles.runArtifacts args
+    )) "runArtifacts must accept every name in dummyRunArtifactArgs";
+    assert assertMsg (
+      !bad.success
+    ) "runArtifacts must throw on an argument no row or the trailer takes";
+    pkgs.runCommand "preambles-run-artifacts-rejects-unknown-arg" { } "touch $out";
+
+  # A stub row yields its per-row check with no test written for it; its
+  # run-document keys are schema-drift.nix's runners-stub-row-run-artifacts.
+  preambles-run-artifacts-stub-row-checks =
+    let
+      checks = runArtifactsRowChecks [ stubRow ];
+    in
+    assert assertMsg (checks ? preambles-run-artifacts-row-stub)
+      "runArtifactsRowChecks must yield preambles-run-artifacts-row-stub for a stub row, got: ${builtins.toJSON (builtins.attrNames checks)}";
+    builtins.seq checks.preambles-run-artifacts-row-stub.drvPath (
+      pkgs.runCommand "preambles-run-artifacts-stub-row-checks" { } "touch $out"
+    );
 
   # The {settings, artifacts} nesting is what the Go inputdoc.Document
   # struct (cmd/launcher/internal/inputdoc/inputdoc.go) parses (ADR 0020).
@@ -771,7 +825,7 @@ in
           BASE_BRANCH = "develop";
         };
         artifacts = {
-          RUNTIME = "podman";
+          RUNTIME = "sample-runtime";
         };
       };
       parsed = builtins.fromJSON out;
@@ -780,7 +834,7 @@ in
       parsed.settings.BASE_BRANCH == "develop"
     ) "renderInputDocumentJSON must nest settings under .settings, got: ${out}";
     assert assertMsg (
-      parsed.artifacts.RUNTIME == "podman"
+      parsed.artifacts.RUNTIME == "sample-runtime"
     ) "renderInputDocumentJSON must nest artifacts under .artifacts, got: ${out}";
     pkgs.runCommand "preambles-render-input-document-json" { } "touch $out";
 }
