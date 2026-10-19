@@ -25,6 +25,9 @@ func TestFragmentsReferenceOnlyRowsAbove(t *testing.T) {
 		files := []string{filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment)}
 		if row.Axis != "" {
 			files, err = filepath.Glob(filepath.Join(repopath.PromptsDir(), "fragments", "*", row.Fragment))
+			if row.Shared {
+				files = append(files, filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment))
+			}
 			if err != nil || len(files) == 0 {
 				t.Fatalf("axis row %s: no per-backend files found (err=%v)", row.Fragment, err)
 			}

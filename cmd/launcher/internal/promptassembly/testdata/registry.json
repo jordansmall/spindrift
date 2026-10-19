@@ -201,18 +201,27 @@
     "var": "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP"
   },
   {
+    "axis": "tracker",
+    "gate": "",
+    "fragment": "filer-dedup.md",
+    "var": "FILER_DEDUP_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_GITHUB",
-    "fragment": "filer-dedup-search.md",
+    "fragment": "github/filer-dedup.md",
+    "legacyFragment": "filer-dedup-search.md",
     "var": "FILER_DEDUP_SEARCH_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO",
-    "fragment": "filer-dedup-search-forgejo.md",
+    "fragment": "forgejo/filer-dedup.md",
+    "legacyFragment": "filer-dedup-search-forgejo.md",
     "var": "FILER_DEDUP_SEARCH_FORGEJO_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_LOCAL",
-    "fragment": "filer-dedup-search-local.md",
+    "fragment": "local/filer-dedup.md",
+    "legacyFragment": "filer-dedup-search-local.md",
     "var": "FILER_DEDUP_SEARCH_LOCAL_STEP"
   },
   {
@@ -314,14 +323,17 @@
   },
   {
     "axis": "tracker",
+    "shared": true,
     "gate": "",
     "fragment": "issue-read.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "ISSUE_READ_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_GITHUB",
-    "fragment": "github/issue-read.md",
+    "fragment": "issue-read.md",
     "legacyFragment": "issue-read-github.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "ISSUE_READ_GITHUB_STEP"
   },
   {
@@ -332,33 +344,59 @@
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO",
-    "fragment": "forgejo/issue-read.md",
+    "fragment": "issue-read.md",
     "legacyFragment": "issue-read-forgejo.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "ISSUE_READ_FORGEJO_STEP"
   },
   {
+    "axis": "tracker",
+    "shared": true,
+    "gate": "",
+    "fragment": "research-issue-read.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "RESEARCH_ISSUE_READ_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_GITHUB",
-    "fragment": "research-issue-read-github.md",
+    "fragment": "research-issue-read.md",
+    "legacyFragment": "research-issue-read-github.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "RESEARCH_ISSUE_READ_GITHUB_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_LOCAL",
-    "fragment": "research-issue-read-local.md",
+    "fragment": "local/research-issue-read.md",
+    "legacyFragment": "research-issue-read-local.md",
     "var": "RESEARCH_ISSUE_READ_LOCAL_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO",
-    "fragment": "research-issue-read-forgejo.md",
+    "fragment": "research-issue-read.md",
+    "legacyFragment": "research-issue-read-forgejo.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "RESEARCH_ISSUE_READ_FORGEJO_STEP"
   },
   {
+    "axis": "tracker",
+    "shared": true,
+    "gate": "ISSUE_TRACKER_REACHABLE",
+    "fragment": "scout-issue-read.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "SCOUT_ISSUE_READ_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_GITHUB",
-    "fragment": "scout-issue-read-github.md",
+    "fragment": "scout-issue-read.md",
+    "legacyFragment": "scout-issue-read-github.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "SCOUT_ISSUE_READ_GITHUB_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO",
-    "fragment": "scout-issue-read-forgejo.md",
+    "fragment": "scout-issue-read.md",
+    "legacyFragment": "scout-issue-read-forgejo.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "SCOUT_ISSUE_READ_FORGEJO_STEP"
   },
   {

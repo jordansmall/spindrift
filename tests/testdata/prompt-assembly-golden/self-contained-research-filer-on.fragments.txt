@@ -1,10 +1,10 @@
 caveman-default-research.md
-filer-dedup-search.md
 filer-file-relay.md
 filer-label-relay-research.md
+github/filer-dedup.md
 research-file-issues-relay.md
-research-issue-read-github.md
+research-issue-read.md
 research-outcome-landing-relayed.md
 research-verdict-github-readonly.md
-scout-issue-read-github.md
+scout-issue-read.md
 skill-preamble.md

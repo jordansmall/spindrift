@@ -817,3 +817,21 @@ func TestGatesResearchVerdictRelayedMatchesRegistry(t *testing.T) {
 		}
 	}
 }
+
+// TestGatesIssueTrackerReachable covers the backend-agnostic gate the scout's
+// issue-read slot rides: on for every tracker the Box can reach, off for one
+// (local) it cannot.
+func TestGatesIssueTrackerReachable(t *testing.T) {
+	for tracker, want := range map[string]bool{
+		"":        true,
+		"github":  true,
+		"forgejo": true,
+		"jira":    true,
+		"local":   false,
+	} {
+		got := Gates(Env{IssueTracker: tracker, TrackerAxisRead: "GITHUB"})["ISSUE_TRACKER_REACHABLE"]
+		if got != want {
+			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_REACHABLE] = %v, want %v", tracker, got, want)
+		}
+	}
+}

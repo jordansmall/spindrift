@@ -14,7 +14,7 @@ The issue's body and its last-10-comment snapshot are already in the
 # ISSUE TEXT section after the template body — read there, do not fetch
 it from the tracker. What follows here you still run yourself:
 
-${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_ISSUE_READ_FORGEJO_STEP}
+${RESEARCH_ISSUE_READ_STEP}
 # EXPLORE
 
 Explore the actual repo — grep, read the relevant files, check existing

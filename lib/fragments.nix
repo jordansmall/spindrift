@@ -349,19 +349,30 @@ let
     # not FILER_FILE_DIRECT_GH: a relay Filer still reads through the tracker.
     # jira has no read axis (lib/backends/jira.nix, no trackerAxisRead), so
     # it takes the GitHub arm like every other ISSUE_TRACKER_GITHUB fragment.
+    # One slot (issue #5647, ADR 0068): each backend's search commands differ
+    # in more than its name, so each folder carries its own file.
+    {
+      axis = "tracker";
+      fragment = "filer-dedup.md";
+      var = "FILER_DEDUP_STEP";
+    }
+    # Deprecation-window fills for override prompts still naming the old vars.
     {
       gate = "ISSUE_TRACKER_GITHUB";
-      fragment = "filer-dedup-search.md";
+      fragment = "github/filer-dedup.md";
+      legacyFragment = "filer-dedup-search.md";
       var = "FILER_DEDUP_SEARCH_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";
-      fragment = "filer-dedup-search-forgejo.md";
+      fragment = "forgejo/filer-dedup.md";
+      legacyFragment = "filer-dedup-search-forgejo.md";
       var = "FILER_DEDUP_SEARCH_FORGEJO_STEP";
     }
     {
       gate = "ISSUE_TRACKER_LOCAL";
-      fragment = "filer-dedup-search-local.md";
+      fragment = "local/filer-dedup.md";
+      legacyFragment = "filer-dedup-search-local.md";
       var = "FILER_DEDUP_SEARCH_LOCAL_STEP";
     }
     {
@@ -494,16 +505,20 @@ let
     # adds a blank line per fragment, so a mid-list `${VAR}` would split it.
     {
       axis = "tracker";
+      shared = true;
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "issue-read.md";
       var = "ISSUE_READ_STEP";
     }
     # Deprecation-window fill for override prompts that still name the
-    # per-backend vars (issue #5646); shipped prompts use ISSUE_READ_STEP.
-    # legacyFragment is the pre-move root file, read only when `fragment` is
-    # missing, so an override dir still on the old layout renders as before.
+    # per-backend vars (issues #5646, #5647); shipped prompts use the slot
+    # vars. legacyFragment is the pre-move root file, read only when
+    # `fragment` is missing, so an override dir still on the old layout
+    # renders as before.
     {
       gate = "ISSUE_TRACKER_GITHUB";
-      fragment = "github/issue-read.md";
+      fragment = "issue-read.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "issue-read-github.md";
       var = "ISSUE_READ_GITHUB_STEP";
     }
@@ -515,33 +530,62 @@ let
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";
-      fragment = "forgejo/issue-read.md";
+      fragment = "issue-read.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "issue-read-forgejo.md";
       var = "ISSUE_READ_FORGEJO_STEP";
     }
+    # The research issue-read step (issue #5647): one shared body naming the
+    # tracker; local's differs in more than its name and has its own file.
+    {
+      axis = "tracker";
+      shared = true;
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      fragment = "research-issue-read.md";
+      var = "RESEARCH_ISSUE_READ_STEP";
+    }
     {
       gate = "ISSUE_TRACKER_GITHUB";
-      fragment = "research-issue-read-github.md";
+      fragment = "research-issue-read.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      legacyFragment = "research-issue-read-github.md";
       var = "RESEARCH_ISSUE_READ_GITHUB_STEP";
     }
     {
       gate = "ISSUE_TRACKER_LOCAL";
-      fragment = "research-issue-read-local.md";
+      fragment = "local/research-issue-read.md";
+      legacyFragment = "research-issue-read-local.md";
       var = "RESEARCH_ISSUE_READ_LOCAL_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";
-      fragment = "research-issue-read-forgejo.md";
+      fragment = "research-issue-read.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      legacyFragment = "research-issue-read-forgejo.md";
       var = "RESEARCH_ISSUE_READ_FORGEJO_STEP";
+    }
+    # The scout's issue-read step (issue #5647): every tracker the Box can
+    # reach, so local (which has none in-Box) renders nothing.
+    {
+      axis = "tracker";
+      shared = true;
+      gate = "ISSUE_TRACKER_REACHABLE";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      fragment = "scout-issue-read.md";
+      var = "SCOUT_ISSUE_READ_STEP";
     }
     {
       gate = "ISSUE_TRACKER_GITHUB";
-      fragment = "scout-issue-read-github.md";
+      fragment = "scout-issue-read.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      legacyFragment = "scout-issue-read-github.md";
       var = "SCOUT_ISSUE_READ_GITHUB_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";
-      fragment = "scout-issue-read-forgejo.md";
+      fragment = "scout-issue-read.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      legacyFragment = "scout-issue-read-forgejo.md";
       var = "SCOUT_ISSUE_READ_FORGEJO_STEP";
     }
     # The local content-plane write step (issue #1692, ADR 0032): a local Box

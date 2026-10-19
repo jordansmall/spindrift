@@ -50,4 +50,44 @@
     severity = "deprecated";
     replacement = "ISSUE_READ_STEP";
   };
+  RESEARCH_ISSUE_READ_GITHUB_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_ISSUE_READ_STEP";
+  };
+  RESEARCH_ISSUE_READ_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_ISSUE_READ_STEP";
+  };
+  RESEARCH_ISSUE_READ_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_ISSUE_READ_STEP";
+  };
+  SCOUT_ISSUE_READ_GITHUB_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "SCOUT_ISSUE_READ_STEP";
+  };
+  SCOUT_ISSUE_READ_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "SCOUT_ISSUE_READ_STEP";
+  };
+  FILER_DEDUP_SEARCH_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DEDUP_STEP";
+  };
+  FILER_DEDUP_SEARCH_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DEDUP_STEP";
+  };
+  FILER_DEDUP_SEARCH_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DEDUP_STEP";
+  };
 }
