@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -20,7 +21,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 		issueTracker         string
 		launcherToken        string
 		boxToken             string // BOX_GH_TOKEN; empty means unset
-		result               tokenIntrospectionResult
+		result               backendkit.TokenIntrospection
 		introspectErr        error
 		expectIntrospectCall bool
 		wantErrSubstr        string
@@ -55,7 +56,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			access:               "read-only",
 			launcherToken:        "launcher-token",
 			boxToken:             "box-token",
-			result:               tokenIntrospectionResult{Introspectable: true, WriteCapable: false},
+			result:               backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false},
 			expectIntrospectCall: true,
 			wantVerified:         true,
 		},
@@ -64,7 +65,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			access:               "read-only",
 			launcherToken:        "launcher-token",
 			boxToken:             "box-token",
-			result:               tokenIntrospectionResult{Introspectable: true, WriteCapable: true},
+			result:               backendkit.TokenIntrospection{Introspectable: true, WriteCapable: true},
 			expectIntrospectCall: true,
 			wantErrSubstr:        "write",
 			wantErrIs:            errReadOnlyGateMisconfigured,
@@ -74,7 +75,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 			access:               "read-only",
 			launcherToken:        "launcher-token",
 			boxToken:             "box-token",
-			result:               tokenIntrospectionResult{Introspectable: false},
+			result:               backendkit.TokenIntrospection{Introspectable: false},
 			expectIntrospectCall: true,
 			wantWarning:          true,
 		},
@@ -106,7 +107,7 @@ func TestCheckReadOnlyTokenGate(t *testing.T) {
 
 			called := false
 			var gotToken, gotRepoSlug string
-			introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
+			introspect := func(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 				called = true
 				gotToken, gotRepoSlug = token, repoSlug
 				return tc.result, tc.introspectErr
@@ -152,8 +153,8 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedP
 	c.boxForgeAndIssueAccess = "read-only"
 	c.ghToken = "launcher-token"
 	t.Setenv("BOX_GH_TOKEN", "box-token")
-	introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
-		return tokenIntrospectionResult{Introspectable: false}, nil
+	introspect := func(token, repoSlug string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: false}, nil
 	}
 
 	var buf bytes.Buffer
@@ -194,8 +195,8 @@ func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferen
 		t.Fatal("tokenGateApplicable(c, backend.GitHub) = false, want true: custom-github shares GitHub's TokenEnvVar")
 	}
 
-	introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
-		return tokenIntrospectionResult{}, nil
+	introspect := func(token, repoSlug string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{}, nil
 	}
 	var buf bytes.Buffer
 	_, err := checkReadOnlyTokenGate(c, introspect, &buf)

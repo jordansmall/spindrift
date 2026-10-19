@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -6668,9 +6669,9 @@ func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T)
 	c.repoSlug = "owner/repo"
 	t.Setenv("BOX_GH_TOKEN", "")
 
-	introspect := func(token, repoSlug string) (tokenIntrospectionResult, error) {
+	introspect := func(token, repoSlug string) (backendkit.TokenIntrospection, error) {
 		t.Fatal("introspect should not be called when BOX_GH_TOKEN is unset")
-		return tokenIntrospectionResult{}, nil
+		return backendkit.TokenIntrospection{}, nil
 	}
 	var buf bytes.Buffer
 	_, err := checkReadOnlyTokenGate(c, introspect, &buf)
