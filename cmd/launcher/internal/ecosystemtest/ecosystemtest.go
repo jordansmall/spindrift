@@ -9,12 +9,18 @@
 //	repo/                         the Target-repo tree, with its committed registry config
 //	stores/<credresolver key>     optional operator credential store files (e.g. stores/netrc)
 //	routes.toml                   optional operator routes file; route resolution reads it
-//	                              instead of discovery's rendered output
+//	                              instead of discovery's rendered output; one the parser
+//	                              refuses is pinned in routes.golden.json, and the stages
+//	                              that consume the resolved routes (path-set, binding,
+//	                              rewrites) have no golden; classification still runs
+//	env.json                      optional JSON object of string to string: the prior
+//	                              environment the binding stage's renderers read (default empty)
 //	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 6)
 //	classification.golden.txt     stage 1: the lockfile classification, empty when no lockfile matches
 //	discovery.golden.toml         stage 2: the routes file discovery proposes
-//	routes.golden.json            stage 3: the resolved routes
-//	pathset.golden.json           stage 4: the derived enforced path-sets
+//	routes.golden.json            stage 3: the resolved routes, or {"refused": <error>}
+//	pathset.golden.json           stage 4: {"derived": the in-tree path-sets, "enforced":
+//	                              each route's enforced paths and tagged subtrees}
 //	binding.golden.json           stage 5: the env exports, home config and in-tree rewrite
 //	rewrites.golden.json          stage 6: the proxy's responses for the upstream bodies
 //
@@ -52,15 +58,21 @@ import (
 // registry to ask in a corpus.
 const probedAuthScheme = "bearer"
 
-// stage is one pipeline stage. takesPart is its single participation
-// predicate; replay produces the bytes its golden holds.
+// stage is one pipeline stage. It runs when takesPart holds and, for an
+// afterRoutes stage, the case's routes file was not refused; replay produces
+// the bytes its golden holds. afterRoutes marks a stage that consumes the
+// resolved routes.
 type stage struct {
-	name      string
-	golden    string
-	asJSON    bool
-	takesPart func(row ecosystem.Row) bool
-	replay    func(c *replay) ([]byte, error)
+	name        string
+	golden      string
+	asJSON      bool
+	afterRoutes bool
+	takesPart   func(row ecosystem.Row) bool
+	replay      func(c *replay) ([]byte, error)
 }
+
+// everyRow is the predicate of a stage no row can opt out of.
+func everyRow(ecosystem.Row) bool { return true }
 
 // stages is the pipeline in order; each stage is one entry here and nowhere else.
 var stages = []stage{
@@ -77,34 +89,39 @@ var stages = []stage{
 		replay:    (*replay).discovery,
 	},
 	{
+		// Every row: the generic `path` key needs no hook, and a route's declared
+		// path reaches the enforced path-set whatever the row.
 		name:      "route resolution",
 		golden:    "routes.golden.json",
 		asJSON:    true,
-		takesPart: func(row ecosystem.Row) bool { return row.ConfigParser != nil || row.RouteDeclaration != nil },
+		takesPart: everyRow,
 		replay:    (*replay).routes,
 	},
 	{
-		name:      "path-set derivation",
-		golden:    "pathset.golden.json",
-		asJSON:    true,
-		takesPart: func(row ecosystem.Row) bool { return row.ConfigParser != nil },
-		replay:    (*replay).pathSet,
+		name:        "path-set derivation",
+		golden:      "pathset.golden.json",
+		asJSON:      true,
+		afterRoutes: true,
+		takesPart:   everyRow,
+		replay:      (*replay).pathSet,
 	},
 	{
-		name:   "binding",
-		golden: "binding.golden.json",
-		asJSON: true,
+		name:        "binding",
+		golden:      "binding.golden.json",
+		asJSON:      true,
+		afterRoutes: true,
 		takesPart: func(row ecosystem.Row) bool {
 			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindingsOf([]ecosystem.Row{row})) > 0
 		},
 		replay: (*replay).binding,
 	},
 	{
-		name:      "proxy rewrites",
-		golden:    "rewrites.golden.json",
-		asJSON:    true,
-		takesPart: func(row ecosystem.Row) bool { return len(row.RewriteRows) > 0 },
-		replay:    (*replay).rewrites,
+		name:        "proxy rewrites",
+		golden:      "rewrites.golden.json",
+		asJSON:      true,
+		afterRoutes: true,
+		takesPart:   func(row ecosystem.Row) bool { return len(row.RewriteRows) > 0 },
+		replay:      (*replay).rewrites,
 	},
 }
 
@@ -143,13 +160,15 @@ func caseDirs(t testing.TB, corpusDir string) []string {
 
 // replayCase runs every stage over the case in dir and returns one error per
 // failing stage. A missing golden for a stage the row takes part in fails like
-// any other mismatch; update mode writes it instead.
+// any other mismatch; update mode writes it instead. A case whose operator
+// routes file is refused skips the stages that consume the resolved routes;
+// classification, which reads the repo alone, still runs.
 func replayCase(row ecosystem.Row, dir string, update bool) []error {
 	c := &replay{row: row, dir: dir}
 	var errs []error
 	for _, s := range stages {
 		path := filepath.Join(dir, s.golden)
-		if !s.takesPart(row) {
+		if !s.takesPart(row) || (s.afterRoutes && c.refused()) {
 			if err := golden.RemoveIfUpdate(path, update); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", s.name, err))
 			}
@@ -237,18 +256,40 @@ func (c *replay) discovery() ([]byte, error) {
 func (c *replay) parsedRoutes() ([]registryroutes.Route, error) {
 	return c.parsed.get(func() ([]registryroutes.Route, error) {
 		input, err := os.ReadFile(filepath.Join(c.dir, "routes.toml"))
+		operator := err == nil
 		if errors.Is(err, fs.ErrNotExist) {
 			input, err = c.discovery()
 		}
 		if err != nil {
 			return nil, err
 		}
-		return registryroutes.ParseRows(input, c.rows())
+		routes, err := registryroutes.ParseRows(input, c.rows())
+		if err != nil && operator {
+			return nil, &refusedError{err}
+		}
+		return routes, err
 	})
+}
+
+// refusedError is ParseRows rejecting an operator-written routes file, which a
+// case may pin as its outcome. Discovery's own output failing to parse is a
+// bug in the row, never a refusal, so it stays a plain error.
+type refusedError struct{ error }
+
+func (e *refusedError) Unwrap() error { return e.error }
+
+func (c *replay) refused() bool {
+	_, err := c.parsedRoutes()
+	var r *refusedError
+	return errors.As(err, &r)
 }
 
 func (c *replay) routes() ([]byte, error) {
 	routes, err := c.parsedRoutes()
+	var r *refusedError
+	if errors.As(err, &r) {
+		return json.Marshal(map[string]string{"refused": err.Error()})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -261,15 +302,43 @@ func (c *replay) pathSets() ([]registrypathset.HostPathSet, error) {
 	})
 }
 
+// pathSetOutput is the path-set stage's golden: the in-tree derivation, and the
+// enforced view the Forwarder checks requests against, which also carries each
+// route's declared path and allow entries.
+type pathSetOutput struct {
+	Derived  []registrypathset.HostPathSet `json:"derived"`
+	Enforced []enforcedOutput              `json:"enforced"`
+}
+
+type enforcedOutput struct {
+	MatchHost        string                  `json:"matchHost"`
+	Upstream         string                  `json:"upstream"`
+	EnforcedPaths    []string                `json:"enforcedPaths"`
+	EnforcedSubtrees []registryvocab.Subtree `json:"enforcedSubtrees"`
+}
+
 func (c *replay) pathSet() ([]byte, error) {
 	sets, err := c.pathSets()
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(sets)
+	routes, err := c.proxyRoutes()
+	if err != nil {
+		return nil, err
+	}
+	out := pathSetOutput{Derived: sets, Enforced: make([]enforcedOutput, len(routes))}
+	for i, r := range routes {
+		out.Enforced[i] = enforcedOutput{
+			MatchHost:        r.MatchHost,
+			Upstream:         r.Upstream,
+			EnforcedPaths:    r.EnforcedPaths,
+			EnforcedSubtrees: r.EnforcedSubtrees,
+		}
+	}
+	return json.Marshal(out)
 }
 
-// proxyRoutes is the proxy route table stages 5 and 6 run against. It mirrors
+// proxyRoutes is the proxy route table stages 4 to 6 run against. It mirrors
 // package main's resolveRegistryRoutesFromFile, applyHostPathSet and
 // registryproxy.AssignPrefixes, which the kit cannot import. Credentials stay
 // empty: no secret is resolved.

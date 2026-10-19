@@ -1,22 +1,52 @@
-[
-  {
-    "Host": "one.example.test",
-    "Origin": "https://one.example.test",
-    "Subtrees": [
-      {
-        "ecosystem": "synthetic",
-        "path": "/a"
-      }
-    ]
-  },
-  {
-    "Host": "two-mirror.example.test",
-    "Origin": "http://two-mirror.example.test:8080",
-    "Subtrees": [
-      {
-        "ecosystem": "synthetic",
-        "path": "/"
-      }
-    ]
-  }
-]
+{
+  "derived": [
+    {
+      "Host": "one.example.test",
+      "Origin": "https://one.example.test",
+      "Subtrees": [
+        {
+          "ecosystem": "synthetic",
+          "path": "/a"
+        }
+      ]
+    },
+    {
+      "Host": "two-mirror.example.test",
+      "Origin": "http://two-mirror.example.test:8080",
+      "Subtrees": [
+        {
+          "ecosystem": "synthetic",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/a"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "synthetic",
+          "path": "/a"
+        }
+      ],
+      "matchHost": "one.example.test",
+      "upstream": "https://one.example.test"
+    },
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "synthetic",
+          "path": "/"
+        }
+      ],
+      "matchHost": "two-mirror.example.test",
+      "upstream": "http://two-mirror.example.test:8080"
+    }
+  ]
+}
