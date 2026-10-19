@@ -1,0 +1,9 @@
+[[routes]]
+match-host = "repo.acme.test"
+upstream-origin = "https://repo.acme.test"
+auth-scheme = "bearer"
+credential = { env = "CARGO_TOKEN" }
+cargo-registries = ["a"]
+
+[routes.ecosystems.cargo]
+registries = ["b"]

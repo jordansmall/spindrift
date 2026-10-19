@@ -1,0 +1,27 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "CARGO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "repo.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://repo.acme.test"
+    },
+    "Ecosystems": {
+      "cargo": {
+        "registries": [
+          "example-remote",
+          "another_one",
+          "third-3"
+        ]
+      }
+    },
+    "MatchHost": "repo.acme.test",
+    "UpstreamOrigin": "https://repo.acme.test"
+  }
+]

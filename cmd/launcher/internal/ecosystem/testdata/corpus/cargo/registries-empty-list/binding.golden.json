@@ -1,0 +1,7 @@
+{
+  "homeConfig": {
+    "configPath": "config.toml",
+    "content": "[source.crates-io]\nreplace-with = \"spindrift-registry-proxy\"\n\n[source.spindrift-registry-proxy]\nregistry = \"sparse+http://127.0.0.1:27182/repo-acme-test/\"\n",
+    "homeEnvVar": "CARGO_HOME"
+  }
+}
