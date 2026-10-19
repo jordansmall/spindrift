@@ -400,59 +400,97 @@
     "var": "SCOUT_ISSUE_READ_FORGEJO_STEP"
   },
   {
+    "axis": "tracker",
+    "gate": "ISSUE_TRACKER_READWRITE",
+    "fragment": "research-verdict.md",
+    "var": "RESEARCH_VERDICT_STEP"
+  },
+  {
+    "axis": "tracker",
+    "shared": true,
+    "gate": "ISSUE_TRACKER_RELAYED_LOG",
+    "fragment": "research-verdict-relay.md",
+    "var": "RESEARCH_VERDICT_RELAY_STEP",
+    "signalChannel": "comment"
+  },
+  {
+    "axis": "tracker",
+    "shared": true,
+    "gate": "ISSUE_TRACKER_RELAYED_SOCKET",
+    "fragment": "research-verdict-relay-socket.md",
+    "var": "RESEARCH_VERDICT_RELAY_SOCKET_STEP",
+    "signalChannel": "comment"
+  },
+  {
     "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
-    "fragment": "research-verdict-github.md",
+    "fragment": "github/research-verdict.md",
+    "legacyFragment": "research-verdict-github.md",
     "var": "RESEARCH_VERDICT_GITHUB_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_GITHUB_READONLY_LOG",
-    "fragment": "research-verdict-github-readonly.md",
+    "fragment": "research-verdict-relay.md",
+    "legacyFragment": "research-verdict-github-readonly.md",
     "var": "RESEARCH_VERDICT_GITHUB_READONLY_STEP",
     "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_GITHUB_READONLY_SOCKET",
-    "fragment": "research-verdict-github-readonly-socket.md",
+    "fragment": "research-verdict-relay-socket.md",
+    "legacyFragment": "research-verdict-github-readonly-socket.md",
     "var": "RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP",
     "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_LOCAL_LOG",
-    "fragment": "research-verdict-local.md",
+    "fragment": "local/research-verdict-relay.md",
+    "legacyFragment": "research-verdict-local.md",
     "var": "RESEARCH_VERDICT_LOCAL_STEP",
     "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_LOCAL_SOCKET",
-    "fragment": "research-verdict-local-socket.md",
+    "fragment": "local/research-verdict-relay-socket.md",
+    "legacyFragment": "research-verdict-local-socket.md",
     "var": "RESEARCH_VERDICT_LOCAL_SOCKET_STEP",
     "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
-    "fragment": "research-verdict-forgejo.md",
+    "fragment": "forgejo/research-verdict.md",
+    "legacyFragment": "research-verdict-forgejo.md",
     "var": "RESEARCH_VERDICT_FORGEJO_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO_READONLY_LOG",
-    "fragment": "research-verdict-forgejo-readonly.md",
+    "fragment": "research-verdict-relay.md",
+    "legacyFragment": "research-verdict-forgejo-readonly.md",
     "var": "RESEARCH_VERDICT_FORGEJO_READONLY_STEP",
     "signalChannel": "comment"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO_READONLY_SOCKET",
-    "fragment": "research-verdict-forgejo-readonly-socket.md",
+    "fragment": "research-verdict-relay-socket.md",
+    "legacyFragment": "research-verdict-forgejo-readonly-socket.md",
     "var": "RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP",
     "signalChannel": "comment"
   },
   {
+    "axis": "tracker",
+    "gate": "ISSUE_TRACKER_READWRITE",
+    "fragment": "research-outcome-landing.md",
+    "var": "RESEARCH_OUTCOME_LANDING_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
-    "fragment": "research-outcome-landing-github.md",
+    "fragment": "github/research-outcome-landing.md",
+    "legacyFragment": "research-outcome-landing-github.md",
     "var": "RESEARCH_OUTCOME_LANDING_GITHUB_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
-    "fragment": "research-outcome-landing-forgejo.md",
+    "fragment": "forgejo/research-outcome-landing.md",
+    "legacyFragment": "research-outcome-landing-forgejo.md",
     "var": "RESEARCH_OUTCOME_LANDING_FORGEJO_STEP"
   },
   {
@@ -468,19 +506,18 @@
     "signalChannel": "comment"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
-    "fragment": "issue-blocked-comment-github.md",
-    "var": "ISSUE_BLOCKED_COMMENT_GITHUB_STEP"
+    "axis": "tracker",
+    "gate": "ISSUE_TRACKER_READWRITE",
+    "fragment": "issue-blocked-comment.md",
+    "var": "ISSUE_BLOCKED_COMMENT_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB_READONLY",
-    "fragment": "issue-blocked-comment-github-readonly.md",
-    "var": "ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP"
-  },
-  {
-    "gate": "ISSUE_TRACKER_LOCAL",
-    "fragment": "issue-blocked-comment-local.md",
-    "var": "ISSUE_BLOCKED_COMMENT_LOCAL_STEP"
+    "axis": "tracker",
+    "shared": true,
+    "gate": "ISSUE_TRACKER_RELAYED",
+    "fragment": "issue-blocked-comment-relay.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "ISSUE_BLOCKED_COMMENT_RELAY_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_UNWRITABLE_READWRITE",
@@ -488,13 +525,35 @@
     "var": "ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP"
   },
   {
+    "gate": "ISSUE_TRACKER_GITHUB_READWRITE",
+    "fragment": "github/issue-blocked-comment.md",
+    "legacyFragment": "issue-blocked-comment-github.md",
+    "var": "ISSUE_BLOCKED_COMMENT_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_READONLY",
+    "fragment": "issue-blocked-comment-relay.md",
+    "legacyFragment": "issue-blocked-comment-github-readonly.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "local/issue-blocked-comment-relay.md",
+    "legacyFragment": "issue-blocked-comment-local.md",
+    "var": "ISSUE_BLOCKED_COMMENT_LOCAL_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
-    "fragment": "issue-blocked-comment-forgejo.md",
+    "fragment": "forgejo/issue-blocked-comment.md",
+    "legacyFragment": "issue-blocked-comment-forgejo.md",
     "var": "ISSUE_BLOCKED_COMMENT_FORGEJO_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO_READONLY",
-    "fragment": "issue-blocked-comment-forgejo-readonly.md",
+    "fragment": "issue-blocked-comment-relay.md",
+    "legacyFragment": "issue-blocked-comment-forgejo-readonly.md",
+    "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP"
   },
   {

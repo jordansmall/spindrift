@@ -96,7 +96,7 @@ let
   # Broken fixture shared by both build-time-reject-research-verdict-comment-
   # relay-* checks below (issue #2250, parent #2244): the whole fragments
   # directory copied from the real templates tree, so every other fragment is
-  # still present, but with research-verdict-github-readonly.md swapped for a
+  # still present, but with research-verdict-relay.md swapped for a
   # copy missing the required SPINDRIFT_COMMENT marker.
   brokenResearchVerdictFragmentBody = ''
     On this run you do not comment on the issue yourself. Print the verdict as
@@ -115,7 +115,7 @@ let
         mkdir -p $out
         cp -r ${../../templates/default/prompts/fragments}/. $out/
         chmod -R u+w $out
-        cp "$brokenBodyPath" $out/research-verdict-github-readonly.md
+        cp "$brokenBodyPath" $out/research-verdict-relay.md
       '';
 
   # Broken fixture for the three forbidden-marker checks below (issue #2510,
@@ -1551,7 +1551,7 @@ in
   github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged =
     pkgs.runCommand "github-readwrite-comment-fragments-keep-gh-issue-comment-unchanged" { }
       ''
-        for f in issue-blocked-comment-github.md research-verdict-github.md; do
+        for f in github/issue-blocked-comment.md github/research-verdict.md; do
           grep -q 'gh issue comment' ${../../templates/default/prompts/fragments}/"$f"
         done
         touch $out
@@ -1565,15 +1565,15 @@ in
   github-readonly-comment-fragments-never-invoke-gh-issue-comment =
     pkgs.runCommand "github-readonly-comment-fragments-never-invoke-gh-issue-comment" { }
       ''
-        for f in issue-blocked-comment-github-readonly.md research-verdict-github-readonly.md; do
+        for f in issue-blocked-comment-relay.md research-verdict-relay.md; do
           n=$(grep -c 'gh issue comment' ${../../templates/default/prompts/fragments}/"$f" || true)
           [ "$n" -eq 0 ] || {
             echo "$f: expected no 'gh issue comment', found $n occurrence(s)" >&2
             exit 1
           }
         done
-        grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-github-readonly.md}
-        for f in research-verdict-github-readonly.md research-verdict-local.md; do
+        grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-relay.md}
+        for f in research-verdict-relay.md local/research-verdict-relay.md; do
           grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments}/"$f"
           ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments}/"$f" || {
             echo "$f invokes the SPINDRIFT_COMMENT_BEGIN grammar; read-only verdict fragments use the nonce-guarded SPINDRIFT_COMMENT line (issue #1917)" >&2
@@ -1589,7 +1589,7 @@ in
   forgejo-readwrite-comment-fragments-keep-fj-issue-comment =
     pkgs.runCommand "forgejo-readwrite-comment-fragments-keep-fj-issue-comment" { }
       ''
-        for f in issue-blocked-comment-forgejo.md research-verdict-forgejo.md; do
+        for f in forgejo/issue-blocked-comment.md forgejo/research-verdict.md; do
           grep -q 'fj issue comment' ${../../templates/default/prompts/fragments}/"$f"
         done
         touch $out
@@ -1602,17 +1602,17 @@ in
   forgejo-readonly-comment-fragments-never-invoke-fj-issue-comment =
     pkgs.runCommand "forgejo-readonly-comment-fragments-never-invoke-fj-issue-comment" { }
       ''
-        for f in issue-blocked-comment-forgejo-readonly.md research-verdict-forgejo-readonly.md; do
+        for f in issue-blocked-comment-relay.md research-verdict-relay.md; do
           n=$(grep -c 'fj issue comment' ${../../templates/default/prompts/fragments}/"$f" || true)
           [ "$n" -eq 0 ] || {
             echo "$f: expected no 'fj issue comment', found $n occurrence(s)" >&2
             exit 1
           }
         done
-        grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-forgejo-readonly.md}
-        grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md}
-        ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md} || {
-          echo "research-verdict-forgejo-readonly.md invokes the SPINDRIFT_COMMENT_BEGIN grammar (issue #1963)" >&2
+        grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-relay.md}
+        grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/research-verdict-relay.md}
+        ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-relay.md} || {
+          echo "research-verdict-relay.md invokes the SPINDRIFT_COMMENT_BEGIN grammar (issue #1963)" >&2
           exit 1
         }
         touch $out
@@ -1632,7 +1632,7 @@ in
   research-verdict-comment-line-fragments-state-carrier-and-payload-budget =
     let
       inherit (pkgs.lib)
-        concatMapStringsSep
+        concatStringsSep
         filter
         hasInfix
         hasPrefix
@@ -1641,22 +1641,25 @@ in
       # The fragments the Box posts itself, derived from the registry rather
       # than retyped: a verdict fragment relaying through a SPINDRIFT_COMMENT
       # line is one subject to the cap. The write-token variants
-      # (research-verdict-github.md, -forgejo.md) comment via the tracker CLI
-      # and carry no such line, so they drop out here by construction.
-      commentLineRows = filter (
-        r:
-        hasPrefix "RESEARCH_VERDICT_" r.var
-        && hasInfix "SPINDRIFT_COMMENT" (builtins.readFile (fragmentsDir + "/${r.fragment}"))
-      ) fragmentsRegistry;
+      # (github/research-verdict.md, forgejo/research-verdict.md) comment via
+      # the tracker CLI and carry no such line, so they drop out here by
+      # construction. A deprecated row names the same file as its slot.
+      commentLineFiles = pkgs.lib.unique (
+        filter (p: hasInfix "SPINDRIFT_COMMENT" (builtins.readFile (fragmentsDir + "/${p}"))) (
+          builtins.concatMap (r: (import ../../lib/fragment-paths.nix).pathsOf r) (
+            filter (r: hasPrefix "RESEARCH_VERDICT_" r.var) fragmentsRegistry
+          )
+        )
+      );
       checkedFragments =
-        if commentLineRows == [ ] then
+        if commentLineFiles == [ ] then
           throw "research-verdict budget check: no lib/fragments.nix row matched RESEARCH_VERDICT_* with a SPINDRIFT_COMMENT line -- the predicate has gone stale and would vacuously pass"
         else
-          commentLineRows;
+          commentLineFiles;
     in
     pkgs.runCommand "research-verdict-comment-line-fragments-state-carrier-and-payload-budget" { } ''
       ${normalizedGrep}
-      for f in ${concatMapStringsSep " " (r: r.fragment) checkedFragments}; do
+      for f in ${concatStringsSep " " checkedFragments}; do
         p=${fragmentsDir}/"$f"
         normalized_grep "$p" 'Bash tool result' || {
           echo "$f: missing the carrier phrase 'Bash tool result'" >&2
@@ -2047,7 +2050,7 @@ in
 
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
   # brokenResearchVerdictFragmentsDir swaps in a
-  # research-verdict-github-readonly.md missing the required
+  # research-verdict-relay.md missing the required
   # SPINDRIFT_COMMENT marker, shared by both checks below.
   build-time-reject-research-verdict-comment-relay-missing =
     let
@@ -2064,7 +2067,7 @@ in
       );
     in
     assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when boxForgeAndIssueAccess is statically read-only and research-verdict-github-readonly.md is missing the required SPINDRIFT_COMMENT marker";
+      "mkHarness.nix must throw when boxForgeAndIssueAccess is statically read-only and research-verdict-relay.md is missing the required SPINDRIFT_COMMENT marker";
     pkgs.runCommand "build-time-reject-research-verdict-comment-relay-missing" { } "touch $out";
 
   # The gate-not-triggered counterpart (AC3): the same broken fragments

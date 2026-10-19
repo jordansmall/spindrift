@@ -2,4 +2,4 @@ caveman-default-research.md
 check-hygiene-default.md
 research-issue-read.md
 research-outcome-landing-relayed.md
-research-verdict-github-readonly.md
+research-verdict-relay.md

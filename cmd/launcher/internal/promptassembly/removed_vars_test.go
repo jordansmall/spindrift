@@ -2,6 +2,7 @@ package promptassembly
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -408,6 +409,61 @@ func TestAssembleDeprecatedSlotVarsRenderAsBefore(t *testing.T) {
 					t.Errorf("override with the deprecated %s vars renders differently from %s", s.name, s.slot)
 				}
 			})
+		}
+	}
+}
+
+// The same guarantee for the verdict, landing and blocked-comment slots
+// (issue #5647), which fork on write access and signal carrier as well as on
+// the tracker: every combination must render as the per-backend vars did.
+func TestAssembleDeprecatedAccessSlotVarsRenderAsBefore(t *testing.T) {
+	slots := []struct {
+		name, kind, file, slot, old string
+	}{
+		{"verdict", "research", "research-prompt.md",
+			"${RESEARCH_VERDICT_STEP}${RESEARCH_VERDICT_RELAY_STEP}${RESEARCH_VERDICT_RELAY_SOCKET_STEP}",
+			"${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP}" +
+				"${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_LOCAL_SOCKET_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}" +
+				"${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP}"},
+		{"landing", "research", "research-prompt.md", "${RESEARCH_OUTCOME_LANDING_STEP}",
+			"${RESEARCH_OUTCOME_LANDING_GITHUB_STEP}${RESEARCH_OUTCOME_LANDING_FORGEJO_STEP}"},
+		{"blocked comment", "work", "issue-prompt.md",
+			"${ISSUE_BLOCKED_COMMENT_STEP}${ISSUE_BLOCKED_COMMENT_RELAY_STEP}",
+			"${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}" +
+				"${ISSUE_BLOCKED_COMMENT_FORGEJO_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP}"},
+	}
+	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"forgejo", "FORGEJO"}, {"local", "LOCAL"}, {"jira", "GITHUB"}}
+	for _, s := range slots {
+		for _, tr := range trackers {
+			for _, boxWrite := range []bool{true, false} {
+				for _, carrier := range []string{"log", "socket"} {
+					name := fmt.Sprintf("%s/%s/write=%v/%s", s.name, tr.tracker, boxWrite, carrier)
+					t.Run(name, func(t *testing.T) {
+						env := coveredEnv()
+						env.DispatchKind = s.kind
+						env.IssueTracker = tr.tracker
+						env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
+						if tr.tracker == "local" {
+							env.TrackerAxisWrite = ""
+						}
+						env.BoxWriteEnabled = boxWrite
+						env.SignalCarrier = carrier
+						res, err := Assemble(env, loadTestRegistry(t))
+						if err != nil {
+							t.Fatalf("Assemble: %v", err)
+						}
+						env.PromptsDir = stagePromptsCopy(t)
+						replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, s.old)
+						got, err := Assemble(env, loadTestRegistry(t))
+						if err != nil {
+							t.Fatalf("Assemble (override): %v", err)
+						}
+						if got.Prompt != res.Prompt {
+							t.Errorf("override with the deprecated %s vars renders differently from the slot", s.name)
+						}
+					})
+				}
+			}
 		}
 	}
 }

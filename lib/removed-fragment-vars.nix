@@ -90,4 +90,79 @@
     severity = "deprecated";
     replacement = "FILER_DEDUP_STEP";
   };
+  RESEARCH_VERDICT_GITHUB_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_STEP";
+  };
+  RESEARCH_VERDICT_GITHUB_READONLY_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_RELAY_STEP";
+  };
+  RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
+  };
+  RESEARCH_VERDICT_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_RELAY_STEP";
+  };
+  RESEARCH_VERDICT_LOCAL_SOCKET_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
+  };
+  RESEARCH_VERDICT_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_STEP";
+  };
+  RESEARCH_VERDICT_FORGEJO_READONLY_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_RELAY_STEP";
+  };
+  RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
+  };
+  RESEARCH_OUTCOME_LANDING_GITHUB_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_OUTCOME_LANDING_STEP";
+  };
+  RESEARCH_OUTCOME_LANDING_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "RESEARCH_OUTCOME_LANDING_STEP";
+  };
+  ISSUE_BLOCKED_COMMENT_GITHUB_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "ISSUE_BLOCKED_COMMENT_STEP";
+  };
+  ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
+  };
+  ISSUE_BLOCKED_COMMENT_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
+  };
+  ISSUE_BLOCKED_COMMENT_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "ISSUE_BLOCKED_COMMENT_STEP";
+  };
+  ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
+  };
 }

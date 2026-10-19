@@ -22,7 +22,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 119
+	const wantRows = 125
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}
@@ -94,8 +94,8 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 			withExtra++
 		}
 	}
-	if withExtra != 12 {
-		t.Errorf("rows with ExtraSubstVars = %d, want 12", withExtra)
+	if withExtra != 15 {
+		t.Errorf("rows with ExtraSubstVars = %d, want 15", withExtra)
 	}
 }
 

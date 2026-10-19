@@ -35,9 +35,8 @@ func TestMarkerFragmentParity(t *testing.T) {
 		file  string
 		token string
 	}{
-		{"research-verdict-local.md", "SPINDRIFT_COMMENT"},
-		{"research-verdict-github-readonly.md", "SPINDRIFT_COMMENT"},
-		{"research-verdict-forgejo-readonly.md", "SPINDRIFT_COMMENT"},
+		{"local/research-verdict-relay.md", "SPINDRIFT_COMMENT"},
+		{"research-verdict-relay.md", "SPINDRIFT_COMMENT"},
 		{"filer-file-relay.md", "SPINDRIFT_ISSUE_INTENT"},
 	}
 

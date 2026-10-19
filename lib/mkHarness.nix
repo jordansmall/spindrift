@@ -79,7 +79,7 @@
   # The directory the fragment registry's files live under, copied whole into
   # the image. Not Consumer-tunable; overridable here only so
   # nix/checks/prompts.nix (issue #2250) can point the
-  # research-verdict-*-readonly.md lookup at a broken fixture directory
+  # research-verdict-relay.md lookup at a broken fixture directory
   # without touching the real templates tree.
   fragmentsDir ? ../templates/default/prompts/fragments,
   # The dispatch kind rows (lib/dispatch-kinds), whose `prompts` axis lists
@@ -683,17 +683,17 @@ let
   forbiddenMarkersRegistryJson = builtins.toJSON promptContract.forbiddenMarkers;
 
   # Build-time reject arm (issue #2250): resolves both validateMarkers
-  # "reject" rows against this build's static knowledge. Only github and
-  # forgejo have a distinct "-readonly" fragment file (lib/fragments.nix), so
-  # for local/jira the suffix is null, the id is omitted from contentByRowId,
-  # and the row resolves to "advise". buildTimeRejectOk below forces the list.
-  researchReadonlyForgeSuffix =
-    if mergedDefaults.issueTracker == "github" then
-      "github"
-    else if mergedDefaults.issueTracker == "forgejo" then
-      "forgejo"
-    else
-      null;
+  # "reject" rows against this build's static knowledge. The relay fragment is
+  # one shared root file for github, forgejo and jira (which rides github's
+  # arm); local has its own file under local/, so only those three name a
+  # file to check. For the rest the id is omitted from
+  # contentByRowId and the row resolves to "advise". buildTimeRejectOk below
+  # forces the list.
+  researchRelayChecksFragment = builtins.elem mergedDefaults.issueTracker [
+    "github"
+    "forgejo"
+    "jira"
+  ];
   buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
     staticGates = {
       reviewPrompt = true;
@@ -702,10 +702,8 @@ let
     contentByRowId = {
       "reviewer-verdict" = reviewPrompt;
     }
-    // lib.optionalAttrs (researchReadonlyForgeSuffix != null) {
-      "verdict-comment-relay" = builtins.readFile (
-        fragmentsDir + "/research-verdict-${researchReadonlyForgeSuffix}-readonly.md"
-      );
+    // lib.optionalAttrs researchRelayChecksFragment {
+      "verdict-comment-relay" = builtins.readFile (fragmentsDir + "/research-verdict-relay.md");
     };
   };
 

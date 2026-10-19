@@ -11,11 +11,11 @@ file-issues-direct.md
 filer-file-direct-forgejo.md
 filer-label-direct-forgejo.md
 forgejo/filer-dedup.md
+forgejo/issue-blocked-comment.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-forgejo.md
 if-blocked-push-git.md
 if-blocked-triage-git.md
-issue-blocked-comment-forgejo.md
 issue-read.md
 land-git-push-git.md
 land-git-stop-read-write.md

@@ -9,12 +9,12 @@ if-blocked-outcome-landing-branch.md
 if-blocked-pr-none.md
 if-blocked-push-local.md
 if-blocked-triage-local.md
-issue-blocked-comment-local.md
 land-git-push-git.md
 land-git-stop-read-write.md
 land-pass-order-finish-no-filer.md
 land-pass-order-gate-default-no-filer.md
 land-pass-order-orchestrator.md
+local/issue-blocked-comment-relay.md
 local/issue-read.md
 open-pr-create-git.md
 open-pr-push-git.md

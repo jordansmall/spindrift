@@ -60,12 +60,18 @@ func trackerGates(e Env) map[string]bool {
 	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && (!e.BoxWriteEnabled || researchForceRelay)
 
+	// Backend-agnostic forms of the pairs above, for slot rows whose
+	// per-folder fragments replace the backend-named gates: READWRITE is the
+	// union of the two _READWRITE gates, RELAYED the union of every relayed
+	// path (read-only, local, Filer-forced).
+	g["ISSUE_TRACKER_READWRITE"] = itWrite != "" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
+	g["ISSUE_TRACKER_RELAYED"] = itWrite == "" || !e.BoxWriteEnabled || researchForceRelay
+
 	// Selects the research OUTCOME's landing=none variant (issue #5130): the
 	// union of the paths that render a relayed research-verdict fragment,
 	// scoped to ContractVerdict because the butler is AdviseOnly too but
 	// posts no verdict.
-	g["RESEARCH_VERDICT_RELAYED"] = verdictContract(e.descriptor()) &&
-		(g["ISSUE_TRACKER_GITHUB_READONLY"] || g["ISSUE_TRACKER_LOCAL"] || g["ISSUE_TRACKER_FORGEJO_READONLY"])
+	g["RESEARCH_VERDICT_RELAYED"] = verdictContract(e.descriptor()) && g["ISSUE_TRACKER_RELAYED"]
 
 	// On a work dispatch the relay activates on a read-only Box; a writable
 	// Box keeps the direct gh/fj path, forked further on itFiler.

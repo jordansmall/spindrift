@@ -595,61 +595,93 @@ let
 
     # github and forgejo split further on BOX_FORGE_AND_ISSUE_ACCESS
     # (issues #1917, #1963): a read-only Box holds no write token, so it gets
-    # the same host-mediated relay local always has. The read steps above keep
-    # the undifferentiated ISSUE_TRACKER_* gate on purpose, since a read-only
-    # token still permits `gh issue view` / `fj issue view`.
+    # the same host-mediated relay local always has. The read steps above are
+    # not split on access, since a read-only token still permits `gh issue
+    # view` / `fj issue view`; only the deprecation fills gate per backend.
     {
-      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
-      fragment = "research-verdict-github.md";
-      var = "RESEARCH_VERDICT_GITHUB_STEP";
+      axis = "tracker";
+      gate = "ISSUE_TRACKER_READWRITE";
+      fragment = "research-verdict.md";
+      var = "RESEARCH_VERDICT_STEP";
     }
     # The carrier (issue #3726) is orthogonal to the tracker backend: a
     # read-only/local research Box relays its verdict either as a stdout
-    # SPINDRIFT_COMMENT log line or over the Signal socket, so each of the
-    # three rows below forks in two on BOX_SIGNAL_CARRIER via the
-    # _LOG/_SOCKET gate pair gates.go computes. The registry only allows
-    # one gate per row, so the conjunction itself lives in gates.go, not
-    # here. The read-write rows above/below are untouched: a write-capable
-    # Box posts the comment with its own tracker client and never uses
-    # either carrier.
+    # SPINDRIFT_COMMENT log line or over the Signal socket, so the relay
+    # slot forks in two on BOX_SIGNAL_CARRIER via the _LOG/_SOCKET gate pair
+    # gates.go computes. The registry only allows one gate per row, so the
+    # conjunction itself lives in gates.go, not here. The read-write rows
+    # are untouched: a write-capable Box posts the comment with its own
+    # tracker client and never uses either carrier. github and forgejo share
+    # one relay body; local keeps its own.
+    {
+      axis = "tracker";
+      shared = true;
+      gate = "ISSUE_TRACKER_RELAYED_LOG";
+      fragment = "research-verdict-relay.md";
+      var = "RESEARCH_VERDICT_RELAY_STEP";
+      signalChannel = "comment";
+    }
+    {
+      axis = "tracker";
+      shared = true;
+      gate = "ISSUE_TRACKER_RELAYED_SOCKET";
+      fragment = "research-verdict-relay-socket.md";
+      var = "RESEARCH_VERDICT_RELAY_SOCKET_STEP";
+      signalChannel = "comment";
+    }
+    # Deprecation-window fill for override prompts that still name the
+    # per-backend vars (issue #5647); shipped prompts use the slot vars above.
+    {
+      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
+      fragment = "github/research-verdict.md";
+      legacyFragment = "research-verdict-github.md";
+      var = "RESEARCH_VERDICT_GITHUB_STEP";
+    }
     {
       gate = "ISSUE_TRACKER_GITHUB_READONLY_LOG";
-      fragment = "research-verdict-github-readonly.md";
+      fragment = "research-verdict-relay.md";
+      legacyFragment = "research-verdict-github-readonly.md";
       var = "RESEARCH_VERDICT_GITHUB_READONLY_STEP";
       signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_GITHUB_READONLY_SOCKET";
-      fragment = "research-verdict-github-readonly-socket.md";
+      fragment = "research-verdict-relay-socket.md";
+      legacyFragment = "research-verdict-github-readonly-socket.md";
       var = "RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP";
       signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_LOCAL_LOG";
-      fragment = "research-verdict-local.md";
+      fragment = "local/research-verdict-relay.md";
+      legacyFragment = "research-verdict-local.md";
       var = "RESEARCH_VERDICT_LOCAL_STEP";
       signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_LOCAL_SOCKET";
-      fragment = "research-verdict-local-socket.md";
+      fragment = "local/research-verdict-relay-socket.md";
+      legacyFragment = "research-verdict-local-socket.md";
       var = "RESEARCH_VERDICT_LOCAL_SOCKET_STEP";
       signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
-      fragment = "research-verdict-forgejo.md";
+      fragment = "forgejo/research-verdict.md";
+      legacyFragment = "research-verdict-forgejo.md";
       var = "RESEARCH_VERDICT_FORGEJO_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READONLY_LOG";
-      fragment = "research-verdict-forgejo-readonly.md";
+      fragment = "research-verdict-relay.md";
+      legacyFragment = "research-verdict-forgejo-readonly.md";
       var = "RESEARCH_VERDICT_FORGEJO_READONLY_STEP";
       signalChannel = "comment";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READONLY_SOCKET";
-      fragment = "research-verdict-forgejo-readonly-socket.md";
+      fragment = "research-verdict-relay-socket.md";
+      legacyFragment = "research-verdict-forgejo-readonly-socket.md";
       var = "RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP";
       signalChannel = "comment";
     }
@@ -657,13 +689,21 @@ let
     # write-capable Box posts the comment itself and sees a URL; every
     # relayed path (read-only, local, Filer-forced) reports landing=none.
     {
+      axis = "tracker";
+      gate = "ISSUE_TRACKER_READWRITE";
+      fragment = "research-outcome-landing.md";
+      var = "RESEARCH_OUTCOME_LANDING_STEP";
+    }
+    {
       gate = "ISSUE_TRACKER_GITHUB_READWRITE";
-      fragment = "research-outcome-landing-github.md";
+      fragment = "github/research-outcome-landing.md";
+      legacyFragment = "research-outcome-landing-github.md";
       var = "RESEARCH_OUTCOME_LANDING_GITHUB_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
-      fragment = "research-outcome-landing-forgejo.md";
+      fragment = "forgejo/research-outcome-landing.md";
+      legacyFragment = "research-outcome-landing-forgejo.md";
       var = "RESEARCH_OUTCOME_LANDING_FORGEJO_STEP";
     }
     # The relayed variant forks on carrier: only the socket acknowledges a
@@ -680,20 +720,21 @@ let
       var = "RESEARCH_OUTCOME_LANDING_RELAYED_SOCKET_STEP";
       signalChannel = "comment";
     }
+    # The work IF BLOCKED comment step: a write-capable Box comments itself;
+    # a relayed one (read-only, local) rides the outcome line's note= field.
     {
-      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
-      fragment = "issue-blocked-comment-github.md";
-      var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
+      axis = "tracker";
+      gate = "ISSUE_TRACKER_READWRITE";
+      fragment = "issue-blocked-comment.md";
+      var = "ISSUE_BLOCKED_COMMENT_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_GITHUB_READONLY";
-      fragment = "issue-blocked-comment-github-readonly.md";
-      var = "ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP";
-    }
-    {
-      gate = "ISSUE_TRACKER_LOCAL";
-      fragment = "issue-blocked-comment-local.md";
-      var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
+      axis = "tracker";
+      shared = true;
+      gate = "ISSUE_TRACKER_RELAYED";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      fragment = "issue-blocked-comment-relay.md";
+      var = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
     }
     # A tracker the Box reads but cannot write (jira, issue #5263): the same
     # host-posted note= relay as local, but only on a write-capable Box.
@@ -703,13 +744,35 @@ let
       var = "ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP";
     }
     {
+      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
+      fragment = "github/issue-blocked-comment.md";
+      legacyFragment = "issue-blocked-comment-github.md";
+      var = "ISSUE_BLOCKED_COMMENT_GITHUB_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_GITHUB_READONLY";
+      fragment = "issue-blocked-comment-relay.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      legacyFragment = "issue-blocked-comment-github-readonly.md";
+      var = "ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_LOCAL";
+      fragment = "local/issue-blocked-comment-relay.md";
+      legacyFragment = "issue-blocked-comment-local.md";
+      var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
+    }
+    {
       gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
-      fragment = "issue-blocked-comment-forgejo.md";
+      fragment = "forgejo/issue-blocked-comment.md";
+      legacyFragment = "issue-blocked-comment-forgejo.md";
       var = "ISSUE_BLOCKED_COMMENT_FORGEJO_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READONLY";
-      fragment = "issue-blocked-comment-forgejo-readonly.md";
+      fragment = "issue-blocked-comment-relay.md";
+      extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
+      legacyFragment = "issue-blocked-comment-forgejo-readonly.md";
       var = "ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP";
     }
     # The LAND THE CHANGE CODE_FORGE=git push step (issue #2510): the

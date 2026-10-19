@@ -1590,7 +1590,7 @@ func TestAssembleResearchPromptCavemanReadOnly(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
-		t.Errorf("Prompt missing research-verdict-github-readonly.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
+		t.Errorf("Prompt missing research-verdict-relay.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
 	}
 	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
 		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
@@ -1615,7 +1615,7 @@ func TestAssembleResearchSelfContainedPromptCavemanReadOnly(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
-		t.Errorf("Prompt missing research-verdict-github-readonly.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
+		t.Errorf("Prompt missing research-verdict-relay.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
 	}
 	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
 		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
@@ -1738,7 +1738,7 @@ func TestAssembleResearchSelfContainedPromptCheckHygiene(t *testing.T) {
 }
 
 // Issue #2708's third research-verdict relay cell. Unlike the github
-// split, research-verdict-local.md's SPINDRIFT_COMMENT line renders
+// split, local/research-verdict-relay.md's SPINDRIFT_COMMENT line renders
 // whatever BoxWriteEnabled says, since a local tracker has no in-box
 // client to post with. The fixture still clears BoxWriteEnabled, to mirror
 // TestAssembleResearchPromptCavemanReadOnly across both relay cells.
@@ -1756,7 +1756,7 @@ func TestAssembleResearchPromptCavemanLocalTracker(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
-		t.Errorf("Prompt missing research-verdict-local.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
+		t.Errorf("Prompt missing local/research-verdict-relay.md's substituted SPINDRIFT_COMMENT relay line: %q", result.Prompt)
 	}
 	if !strings.Contains(result.Prompt, markerGrammarSpindriftCommentExcerpt) {
 		t.Errorf("Prompt's marker-grammar exemption paragraph doesn't name SPINDRIFT_COMMENT: %q", result.Prompt)
@@ -1784,7 +1784,7 @@ func TestAssembleResearchPromptCarrierSelectsLogOrSocketFragment(t *testing.T) {
 		t.Fatalf("Assemble(log): %v", err)
 	}
 	if !strings.Contains(logResult.Prompt, "SPINDRIFT_COMMENT run-nonce-abc123") {
-		t.Errorf("SignalCarrier=log prompt missing research-verdict-github-readonly.md's SPINDRIFT_COMMENT relay line: %q", logResult.Prompt)
+		t.Errorf("SignalCarrier=log prompt missing research-verdict-relay.md's SPINDRIFT_COMMENT relay line: %q", logResult.Prompt)
 	}
 	if strings.Contains(logResult.Prompt, "driver-exec signal comment") {
 		t.Errorf("SignalCarrier=log prompt contains the socket fragment's driver-exec verb, want absent: %q", logResult.Prompt)
@@ -1797,7 +1797,7 @@ func TestAssembleResearchPromptCarrierSelectsLogOrSocketFragment(t *testing.T) {
 		t.Fatalf("Assemble(socket): %v", err)
 	}
 	if !strings.Contains(socketResult.Prompt, "driver-exec signal comment") {
-		t.Errorf("SignalCarrier=socket prompt missing research-verdict-github-readonly-socket.md's driver-exec verb: %q", socketResult.Prompt)
+		t.Errorf("SignalCarrier=socket prompt missing research-verdict-relay-socket.md's driver-exec verb: %q", socketResult.Prompt)
 	}
 	// caveman-default-research.md names SPINDRIFT_COMMENT unconditionally
 	// in its marker-grammar exemption paragraph (a later slice's concern),
@@ -2549,7 +2549,7 @@ func TestAssembleJiraRidesGithubArmsReadWrite(t *testing.T) {
 		t.Fatalf("Assemble(github): %v", err)
 	}
 
-	githubStep := strings.ReplaceAll(fragmentText(t, "issue-blocked-comment-github.md"), "${ISSUE_NUMBER}", githubEnv.IssueNumber)
+	githubStep := strings.ReplaceAll(fragmentText(t, "github/issue-blocked-comment.md"), "${ISSUE_NUMBER}", githubEnv.IssueNumber)
 	jiraStep := fragmentText(t, "issue-blocked-comment-unwritable.md")
 	if !strings.Contains(githubResult.Prompt, githubStep) {
 		t.Fatalf("github read-write prompt lacks its blocked-comment fragment %q", githubStep)
