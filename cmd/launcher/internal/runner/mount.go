@@ -24,7 +24,7 @@ const RegistryProxySocketTarget = "/registry-proxy.sock"
 // configurable. Mirrors RegistryProxySocketTarget above.
 const SignalSocketTarget = "/signal-socket.sock"
 
-// SocketMount names one launcher-owned unix socket buildMountSpecs mounts
+// SocketMount names one launcher-owned unix socket BuildMountSpecs mounts
 // into a Box (issue #3723): Source is the launcher-side host path, Target the
 // fixed in-Box path it always lands at. No ReadOnly or Message field: every
 // socket mount goes through candidateSocketMount, which always returns a
@@ -35,7 +35,7 @@ type SocketMount struct {
 }
 
 // MountSpec describes one host-to-box mount. Whether a mount applies is
-// decided once by buildMountSpecs, independent of runtime backend; each
+// decided once by BuildMountSpecs, independent of runtime backend; each
 // adapter only renders a MountSpec into its own flag syntax.
 type MountSpec struct {
 	Source   string // host path
@@ -47,7 +47,7 @@ type MountSpec struct {
 }
 
 // MountParams is the subset of Config and Driver-declared paths (ADR 0009)
-// that buildMountSpecs needs.
+// that BuildMountSpecs needs.
 type MountParams struct {
 	PromptDir             string
 	SkillsDir             string
@@ -91,7 +91,7 @@ func candidateSocketMount(source, target string) (MountSpec, bool) {
 	return MountSpec{Source: source, Target: target, ReadOnly: false}, true
 }
 
-func buildMountSpecs(p MountParams, box Box) []MountSpec {
+func BuildMountSpecs(p MountParams, box Box) []MountSpec {
 	var specs []MountSpec
 
 	if spec, ok := candidateMount(p.PromptDir, agentpaths.PromptsDir, true); ok {

@@ -16,10 +16,10 @@ import (
 // runs after a pull, and Dir is pwd so the build reads the updated tree.
 func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0, stdout: ""})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -30,7 +30,7 @@ func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	}
 
 	if gotName != "nix" {
-		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
 	}
 	got := readCall(t, dir, 0)
 	want := []string{"run", ".#", "--", "build"}
@@ -52,9 +52,9 @@ func TestRunNixBuild_ScriptedFailure_SurfacesStderr(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'boom: derivation failed' >&2\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -77,9 +77,9 @@ func TestRunNixBuild_CapturesOutput_NeverTouchesRealStdio(t *testing.T) {
 	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'building foo'\necho 'building foo stderr' >&2\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -145,9 +145,9 @@ func TestRunNixBuild_CapsOutputSize(t *testing.T) {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 

@@ -19,10 +19,10 @@ import (
 // Linux-only in syscall.SysProcAttr, hence the build tag.
 func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -43,10 +43,10 @@ func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
 // so this exercises the retry on a fresh Cmd plus the post-Start write; the
 // successful clone itself needs a real cgroupfs.
 func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 	var cmds []*exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		c := exec.Command("sleep", "5")
 		cmds = append(cmds, c)
 		return c
@@ -126,10 +126,10 @@ func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
 // cgroup fd.
 func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 	var cmds []*exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		c := exec.Command(script, args...)
 		cmds = append(cmds, c)
 		return c

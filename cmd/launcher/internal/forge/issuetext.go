@@ -9,7 +9,7 @@ import (
 )
 
 // maxIssueTextBytes bounds the string IssueText returns. The value reaches a
-// Box through the runner's environment (offArgvKeys, issue #3470), and execve
+// Box through the runner's environment (OffArgvKeys, issue #3470), and execve
 // bounds each environment string as it bounds each argument, so IssueText
 // truncates an unbounded comment thread. When t is also a LinkedIssueLister,
 // the subject text and the rendered link chain share this one budget.

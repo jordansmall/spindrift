@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Values of offArgvKeys must stay off bwrap's argv, where ps and /proc would
+// Values of OffArgvKeys must stay off bwrap's argv, where ps and /proc would
 // expose them.
 func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 	a := &bwrapAdapter{
@@ -31,7 +31,7 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 	for _, arg := range args {
 		for _, val := range offArgvValues {
 			if strings.Contains(arg, val) {
-				t.Errorf("offArgvKeys value %q found in bwrap argv: %v", val, args)
+				t.Errorf("OffArgvKeys value %q found in bwrap argv: %v", val, args)
 			}
 		}
 	}
@@ -39,7 +39,7 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 
 // Issue #3470: ISSUE_TEXT absent from box.Env, or present as an empty string,
 // must emit no "--setenv ISSUE_TEXT" pair. buildArgs emits --setenv for a key
-// only when !offArgvKeys[k], and ISSUE_TEXT is always in offArgvKeys, so this
+// only when !OffArgvKeys[k], and ISSUE_TEXT is always in OffArgvKeys, so this
 // holds for any value, unlike the OCI runner's bare "-e KEY" rendering.
 func TestBwrapArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	a := &bwrapAdapter{
@@ -840,7 +840,7 @@ func TestBwrapArgs_ClosureGenerationEmptyGenerationFallsBackToBaked(t *testing.T
 
 // Issue #2681 review finding: a Generation of ".." would resolve one level
 // above nixVarSnapshotRoot through a raw filepath.Join, so it is rejected the
-// same way closureGeneration rejects an unsafe imageTag-derived label and
+// same way ClosureGeneration rejects an unsafe imageTag-derived label and
 // falls back to the baked nixVarSnapshotDir.
 func TestBwrapArgs_ClosureGenerationUnsafeGenerationFallsBackToBaked(t *testing.T) {
 	a := &bwrapAdapter{

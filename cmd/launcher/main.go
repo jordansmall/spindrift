@@ -1248,8 +1248,8 @@ var errQueueEmpty = errors.New("queue empty")
 
 // snapshotGeneration creates the nix-var store-DB snapshot generation a bwrap
 // hot-swap is about to bind (ADR 0043, issue #2682); nothing else writes one
-// for a hot-swapped closure. It is a package-level test seam, like bwrap.go's
-// execCommand, rather than a threaded parameter, so runContinuousDispatch's
+// for a hot-swapped closure. It is a package-level test seam, like exec.go's
+// ExecCommand, rather than a threaded parameter, so runContinuousDispatch's
 // many nixInBox-indifferent test call sites need not pass it.
 var snapshotGeneration = runner.SnapshotGeneration
 

@@ -1,0 +1,400 @@
+package runner
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+)
+
+// statHostNixDB is the test seam for VacuumStoreDBInto's hostNixDBPath preflight,
+// so the missing-host-db assertion does not depend on the test machine having a
+// real /nix/var/nix/db/db.sqlite.
+var statHostNixDB = func() error {
+	_, err := os.Stat(hostNixDBPath)
+	return err
+}
+
+// LockRaceWindowHook runs between the os.OpenFile that opens a lock path and the
+// syscall.Flock that follows, so a test can deterministically swap the path's
+// inode inside the window LockedFDMatchesPath guards (issue #3005). No-op in
+// production.
+var LockRaceWindowHook = func() {}
+
+// vacuumTempRaceWindowHook runs in createLockedVacuumTemp's CreateTemp-to-Flock
+// window so a test can sweep the fresh temp. No-op in production.
+var vacuumTempRaceWindowHook = func() {}
+
+// NixVarSnapshotDir is the host-side directory standing in for /nix/var inside a
+// bwrap Box's overlay lower (ADR 0042): the build command writes a VACUUMed
+// snapshot of /nix/var/nix/db/db.sqlite to <dir>/nix/db/db.sqlite so the Box's
+// nix trusts host-present store paths. generation scopes it to one agent-closure
+// (issue #2680); empty means the flat pre-#2680 path.
+func NixVarSnapshotDir(pwd, generation string) string {
+	return filepath.Join(NixVarSnapshotRoot(pwd), generation)
+}
+
+// NixVarSnapshotRoot is the directory NixVarSnapshotDir nests generation subdirs
+// under, and the sweep root reclaimStaleSnapshots RemoveAlls entries of. Derive
+// it from pwd, never by filepath.Dir on an already-joined NixVarSnapshotDir:
+// with an empty generation the flat path IS the snapshot dir, so its parent is
+// .spindrift, home to unrelated siblings a sweep must never touch (issue #2680).
+func NixVarSnapshotRoot(pwd string) string {
+	return filepath.Join(pwd, ".spindrift", "nix-var-snapshot")
+}
+
+// ClosureGeneration derives NixVarSnapshotDir's generation subdir from a
+// bwrap-runtime Config.ImageTag. imageTag comes from an environment variable an
+// untrusted source can influence and becomes a path component
+// reclaimStaleSnapshots later os.RemoveAlls, hence SafePathComponent. A rejected
+// non-empty imageTag warns: it would otherwise silently disable stale reclaim.
+func ClosureGeneration(imageTag string) string {
+	gen := SafePathComponent(imageTag)
+	if imageTag != "" && gen == "" {
+		fmt.Printf("==> bwrap runner: warning: generation source %q is not a usable generation label; falling back to the legacy flat nix-var snapshot path (stale-generation reclaim disabled)\n", truncateGenerationLabel(imageTag))
+	}
+	return gen
+}
+
+// generationLabelWarnLimit bounds how much of a rejected generation source
+// ClosureGeneration's warning echoes. The value is untrusted text with no length
+// bound of its own, so printing it whole would let a hostile one emit an
+// arbitrarily long line into the launcher's log.
+const generationLabelWarnLimit = 256
+
+// truncateGenerationLabel cuts s on a rune boundary so the tail cannot become a
+// mangled half-rune that %q would escape as \xNN noise.
+func truncateGenerationLabel(s string) string {
+	if len(s) <= generationLabelWarnLimit {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= generationLabelWarnLimit {
+		return s
+	}
+	return string(r[:generationLabelWarnLimit]) + "..."
+}
+
+// NewAgentGeneration derives an AgentGeneration from closure, the just-realized
+// tip agent-closure linkFarm's own store output path (issue #2682), NOT the
+// agentFiles derivation. That linkFarm nests four children, so AgentFiles,
+// AgentEnv, NixConfigFile and PrefetchFile are closure's "files", "env",
+// "nix-config" and "prefetch" children (lib/mkHarness.nix, issue #2954).
+func NewAgentGeneration(closure string) AgentGeneration {
+	return AgentGeneration{
+		AgentFiles:    filepath.Join(closure, "files"),
+		AgentEnv:      filepath.Join(closure, "env"),
+		NixConfigFile: filepath.Join(closure, "nix-config"),
+		PrefetchFile:  filepath.Join(closure, "prefetch"),
+		Generation:    SafePathComponent(closure),
+	}
+}
+
+// SafePathComponent returns s unless it is unsafe as a single path component
+// (empty, ".", "..", or a bare separator), in which case it returns "" so the
+// caller falls back to a known-safe default. Shared by ClosureGeneration and
+// snapshotDirFor (issue #2681) so both rejection paths stay in lockstep.
+func SafePathComponent(s string) string {
+	if s == "" {
+		return ""
+	}
+	base := filepath.Base(s)
+	if base == "." || base == ".." || base == string(filepath.Separator) {
+		return ""
+	}
+	return base
+}
+
+// SnapshotLockPath spells the "<generation dir>.lock" convention: a sibling of
+// the generation dir, never a file inside it, since buildArgs --overlay-src
+// binds that dir into the sandbox and a lock file inside it would risk being
+// swept up by the mount.
+func SnapshotLockPath(dir string) string {
+	return dir + ".lock"
+}
+
+// LockSnapshotShared opens (creating if needed) and takes a blocking shared
+// advisory flock on dir's SnapshotLockPath. The path's inode is not stable: a
+// concurrent sweepOrphanedLock can remove it between this open and the Flock,
+// leaving a lock on an inode nothing resolves to, so verify identity afterwards
+// (LockedFDMatchesPath) and retry against a fresh fd, bounded (issues #2680, #3005).
+func LockSnapshotShared(dir string) (*os.File, error) {
+	const maxAttempts = 100
+	path := SnapshotLockPath(dir)
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		lf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			return nil, err
+		}
+		LockRaceWindowHook()
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+			lf.Close()
+			return nil, err
+		}
+		if LockedFDMatchesPath(lf, path) {
+			return lf, nil
+		}
+		// lf's lock protects an inode nothing resolves to anymore. Drop it and
+		// retry against whatever is at the path now.
+		UnlockSnapshot(lf)
+	}
+	return nil, fmt.Errorf("lockSnapshotShared: %s kept changing identity after locking across %d attempts", path, maxAttempts)
+}
+
+// LockedFDMatchesPath reports whether lf, an fd a caller just flocked, still
+// identifies whatever currently sits at path. A successful flock proves the fd
+// is locked, not that it still names path: a concurrent remove/recreate can win
+// the window between the caller's open and its flock (issues #2680, #3005). Any
+// stat failure counts as a mismatch.
+func LockedFDMatchesPath(lf *os.File, path string) bool {
+	fdStat, err := lf.Stat()
+	if err != nil {
+		return false
+	}
+	pathStat, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(fdStat, pathStat)
+}
+
+// UnlockSnapshot releases lf's flock and closes it; a nil lf is a no-op so
+// callers can defer this unconditionally.
+func UnlockSnapshot(lf *os.File) {
+	if lf == nil {
+		return
+	}
+	_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	lf.Close()
+}
+
+// SnapshotGeneration writes the nix-var snapshot for a closure hot-swapped
+// mid-run (ADR 0043, issue #2682), before binding it: Run's stat guard fails a
+// Box naming a generation with no directory. It skips the vacuum when db.sqlite
+// already exists, since a live Box may be reading it, and never reclaims: an
+// idle Dispatch holds no flock on a generation it will launch against again.
+func SnapshotGeneration(pwd, closurePath string) error {
+	generation := ClosureGeneration(closurePath)
+	dir := NixVarSnapshotDir(pwd, generation)
+	root := NixVarSnapshotRoot(pwd)
+
+	dest := filepath.Join(dir, "nix", "db", StoreDBName)
+	// Sweep before the existence check: a temp leaked by a killed launcher would
+	// otherwise stay forever once a concurrent launcher has installed dest.
+	sweepStaleVacuumTemps(filepath.Dir(dest))
+	if _, err := os.Stat(dest); err == nil {
+		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
+		return nil
+	}
+
+	fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) for hot-swapped generation %s\n", generation)
+
+	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
+		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
+	}
+	lf, lockErr := LockSnapshotShared(dir)
+	if lockErr != nil {
+		fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(dir), lockErr)
+	}
+	err := VacuumStoreDBInto(dir, InstallIfAbsent)
+	UnlockSnapshot(lf)
+	return err
+}
+
+// hostNixDBPath is the host's real, live nix store database, never a path inside
+// a sandbox: snapshotStoreDB runs during `launcher build`, on the operator's own
+// machine. It is the one Go call site that reaches into live host store metadata.
+const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
+
+// SnapshotInstall is how VacuumStoreDBInto lands the finished temp on db.sqlite.
+type SnapshotInstall int
+
+const (
+	// InstallReplace renames over an existing db.sqlite: the build path, which
+	// owns the generation.
+	InstallReplace SnapshotInstall = iota
+	// InstallIfAbsent links only if db.sqlite is absent, never disturbing one a
+	// running Box may be reading (SnapshotGeneration, ADR 0043).
+	InstallIfAbsent
+)
+
+// VacuumStoreDBInto does the VACUUM INTO and install work against an explicit
+// dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it rather
+// than reaching it only through a bwrapBuildAdapter's baked field (issue
+// #2682). Writes dir/nix/db/db.sqlite, the layout every NixVarSnapshotDir
+// caller expects. mode picks how the finished temp lands on db.sqlite.
+func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
+	if err := statHostNixDB(); err != nil {
+		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
+	}
+
+	dest := filepath.Join(dir, "nix", "db", StoreDBName)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
+	}
+
+	// Vacuum into a temp sibling and install over dest only on success, so dest
+	// only ever names a complete snapshot: SnapshotGeneration's existence check
+	// and IsReady trust it, and a failed vacuum (disk full, host db locked) must
+	// neither leave a partial dest nor destroy a previous one (#2664, #4817).
+	// The name must be unique: concurrent launchers hold only a shared lock.
+	// createLockedVacuumTemp and sweepStaleVacuumTemps cover ownership and the
+	// reclaim of temps a killed launcher leaks.
+	sweepStaleVacuumTemps(filepath.Dir(dest))
+	tmpFile, err := createLockedVacuumTemp(filepath.Dir(dest))
+	if err != nil {
+		return err
+	}
+	defer tmpFile.Close()
+	tmp := tmpFile.Name()
+	// "VACUUM INTO" accepts the empty file CreateTemp leaves and keeps its mode,
+	// so without this chmod CreateTemp's 0600 would carry into the snapshot.
+	if err := tmpFile.Chmod(0o644); err != nil {
+		removeVacuumTemp(tmp)
+		return fmt.Errorf("prepare temp nix store db snapshot %s: %w", tmp, err)
+	}
+
+	// "VACUUM INTO" uses sqlite's online-backup mechanism, so it handles a
+	// concurrent nix-daemon write (WAL not yet checkpointed) that a plain file
+	// copy could snapshot mid-write, and it compacts into the destination in the
+	// same step. tmp is escaped for a single-quoted SQL literal; sqlite3's
+	// dot-commands are whitespace-tokenized, but a SQL statement on argv is not.
+	escapedTmp := strings.ReplaceAll(tmp, "'", "''")
+	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedTmp)
+	vacuumInto := ExecCommand("sqlite3", hostNixDBPath, stmt)
+	vacuumInto.Stdout = os.Stdout
+	vacuumInto.Stderr = os.Stderr
+	if err := vacuumInto.Run(); err != nil {
+		removeVacuumTemp(tmp)
+		return fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
+	}
+
+	if mode == InstallReplace {
+		if err := os.Rename(tmp, dest); err != nil {
+			removeVacuumTemp(tmp)
+			return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
+		}
+		return nil
+	}
+
+	// Link, never rename: a concurrent launcher may have installed dest and
+	// started a Box on it, and a swap must not replace a file a running Box is
+	// reading (ADR 0043).
+	err = os.Link(tmp, dest)
+	removeVacuumTemp(tmp)
+	if errors.Is(err, fs.ErrExist) {
+		fmt.Printf("==> bwrap runner: nix-var snapshot %s was installed concurrently; keeping it\n", dest)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
+	}
+	return nil
+}
+
+// maxVacuumTempAttempts bounds createLockedVacuumTemp's retries against a
+// concurrent sweep.
+const maxVacuumTempAttempts = 3
+
+// createLockedVacuumTemp creates a vacuum temp in dir and returns it holding
+// the exclusive flock that marks it owned. A concurrent sweep can lock and
+// unlink the fresh temp between CreateTemp and Flock, leaving this fd locked on
+// an orphaned inode; LockedFDMatchesPath catches that and retries with a new
+// temp. Once the locked fd matches the path, no sweep can remove it. A stat
+// failure other than a sweep also reads as a mismatch, so the retry may leave
+// that temp behind; it is unlocked once f closes, and the next
+// sweepStaleVacuumTemps reclaims it.
+func createLockedVacuumTemp(dir string) (*os.File, error) {
+	for range maxVacuumTempAttempts {
+		f, err := os.CreateTemp(dir, vacuumTempPrefix+"*")
+		if err != nil {
+			return nil, fmt.Errorf("create temp nix store db snapshot: %w", err)
+		}
+		tmp := f.Name()
+		vacuumTempRaceWindowHook()
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			f.Close()
+			removeVacuumTemp(tmp)
+			return nil, fmt.Errorf("lock temp nix store db snapshot %s: %w", tmp, err)
+		}
+		if LockedFDMatchesPath(f, tmp) {
+			return f, nil
+		}
+		f.Close()
+	}
+	return nil, fmt.Errorf("create temp nix store db snapshot in %s: swept by a concurrent launcher across %d attempts", dir, maxVacuumTempAttempts)
+}
+
+// StoreDBName is the snapshot file name under <dir>/nix/db; vacuumTempPrefix
+// derives from it.
+const StoreDBName = "db.sqlite"
+
+// vacuumTempPrefix names the temp siblings VacuumStoreDBInto writes before
+// installing them over db.sqlite.
+const vacuumTempPrefix = StoreDBName + ".tmp-"
+
+// removeVacuumTemp deletes a vacuum temp and its sqlite3 journal, warning on
+// any failure but a file already gone: a leaked temp is ~100MB until the next
+// sweep, and a journal outliving its temp is never swept (see isVacuumTempName).
+func removeVacuumTemp(path string) {
+	for _, p := range []string{path, path + "-journal"} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Printf("==> bwrap runner: warning: could not remove temp nix store db snapshot %s: %v\n", p, err)
+		}
+	}
+}
+
+// sweepStaleVacuumTemps removes vacuum temps in dir that no live launcher owns.
+// Ownership is the exclusive flock VacuumStoreDBInto holds on its temp, so a
+// non-blocking exclusive Flock that succeeds means the owner is gone or has not
+// locked yet (it re-checks the path after locking and retries if swept), and
+// EWOULDBLOCK leaves a concurrent launcher's temp alone. Only names CreateTemp
+// can produce (digits after the prefix) count: sqlite3's side files, such as
+// <tmp>-journal, share the prefix but hold no flock, so a live vacuum's journal
+// would otherwise look stale. A stale temp's journal, leaked when sqlite3 died
+// with its launcher, goes with it. Best-effort: errors warn and never fail the
+// vacuum.
+func sweepStaleVacuumTemps(dir string) {
+	matches, err := filepath.Glob(filepath.Join(dir, vacuumTempPrefix+"*"))
+	if err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not list stale temp nix store db snapshots in %s: %v\n", dir, err)
+		return
+	}
+	for _, path := range matches {
+		if !isVacuumTempName(filepath.Base(path)) {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				fmt.Printf("==> bwrap runner: warning: could not open temp nix store db snapshot %s: %v\n", path, err)
+			}
+			continue
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			removeVacuumTemp(path)
+		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+			fmt.Printf("==> bwrap runner: warning: could not probe temp nix store db snapshot %s: %v\n", path, err)
+		}
+		f.Close()
+	}
+}
+
+// isVacuumTempName reports whether name has the shape os.CreateTemp gives a
+// vacuum temp: vacuumTempPrefix followed only by decimal digits. It says
+// nothing about ownership, which is the flock.
+func isVacuumTempName(name string) bool {
+	suffix, ok := strings.CutPrefix(name, vacuumTempPrefix)
+	if !ok || suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}

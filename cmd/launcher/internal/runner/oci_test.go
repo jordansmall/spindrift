@@ -591,7 +591,7 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
-// The adapter, not just buildMountSpecs, surfaces the operator-facing mount
+// The adapter, not just BuildMountSpecs, surfaces the operator-facing mount
 // message on stdout.
 func TestBuildRunArgs_SkillsDirPrintsMountMessage(t *testing.T) {
 	dir := t.TempDir()
@@ -687,7 +687,7 @@ func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
 }
 
 // TestBuildRunArgs_OffArgvKeyRendersBareFlag: a box.Env key listed in
-// offArgvKeys (shared with the bwrap adapter) renders as a bare `-e KEY`,
+// OffArgvKeys (shared with the bwrap adapter) renders as a bare `-e KEY`,
 // never `-e KEY=VALUE`, so the value never lands in argv, which ps/proc
 // exposes to any local user for the container's whole lifetime (issue #3111
 // finding A).
@@ -725,7 +725,7 @@ func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 	}
 }
 
-// SIGNAL_SOCKET_SECRET (issue #3725) is an offArgvKeys entry, so it must
+// SIGNAL_SOCKET_SECRET (issue #3725) is an OffArgvKeys entry, so it must
 // render as a bare `-e SIGNAL_SOCKET_SECRET` under OCI, mirroring
 // REGISTRY_PROXY_TCP_SECRET's treatment above.
 func TestBuildRunArgs_SignalSocketSecretRendersBareFlag(t *testing.T) {
@@ -748,7 +748,7 @@ func TestBuildRunArgs_SignalSocketSecretRendersBareFlag(t *testing.T) {
 	}
 }
 
-// TestOciRunEnv: ociRunEnv appends only the offArgvKeys-listed keys present in
+// TestOciRunEnv: ociRunEnv appends only the OffArgvKeys-listed keys present in
 // boxEnv, as KEY=VALUE, on top of the full os.Environ(), so the docker/podman
 // CLI process carries the value in its own environment (for a bare `-e KEY`
 // argv entry to forward) without it ever reaching the exec.Command args slice.
@@ -758,18 +758,18 @@ func TestOciRunEnv(t *testing.T) {
 		"GH_TOKEN":                  "gh-s3cr3t",
 		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
 		"ISSUE_TEXT":                "issue-text-value",
-		"ISSUE_NUMBER":              "1", // not in offArgvKeys, must not be appended
+		"ISSUE_NUMBER":              "1", // not in OffArgvKeys, must not be appended
 	}
 	got := ociRunEnv(boxEnv)
 
-	// Spelled out rather than derived from offArgvKeys: deriving it would
+	// Spelled out rather than derived from OffArgvKeys: deriving it would
 	// shrink the expectation and the actual together if a key were ever
 	// dropped from the set, leaving the length assert green. The membership
 	// guard below fails loudly in that case instead.
 	offArgv := []string{"FORGEJO_TOKEN", "GH_TOKEN", "ISSUE_TEXT", "REGISTRY_PROXY_TCP_SECRET"}
 	for _, k := range offArgv {
-		if !offArgvKeys[k] {
-			t.Fatalf("ociRunEnv fixture: %s is no longer an offArgvKeys member; update this test alongside the set", k)
+		if !OffArgvKeys[k] {
+			t.Fatalf("ociRunEnv fixture: %s is no longer an OffArgvKeys member; update this test alongside the set", k)
 		}
 	}
 
@@ -1818,7 +1818,7 @@ func TestRegistryProxyTransport_BothNoVerdict_NeverCached(t *testing.T) {
 // A wedged probe container (never exits) must return a Go error naming the
 // timeout rather than hanging dispatch (issue #3111 finding 1).
 // registryProxyProbeTimeout is overridden to a short duration, following the
-// execCommand-seam override idiom used elsewhere here. A socket-probe timeout
+// ExecCommand-seam override idiom used elsewhere here. A socket-probe timeout
 // is a no-verdict outcome, so the control probe wedges too: callCount is 2.
 func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
@@ -2841,7 +2841,7 @@ func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 	}
 }
 
-// The host `nix build` step in EnsureReady goes through the execCommand seam,
+// The host `nix build` step in EnsureReady goes through the ExecCommand seam,
 // and a genuine (non-builder-missing) scripted failure returns an error without
 // falling back to the container build.
 func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
@@ -2849,10 +2849,10 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	cliScript, _ := newFakeCLI(t, fakeCall{exit: 1}) // image inspect: absent
 
 	nixScript, nixDir := newFakeCLI(t, fakeCall{exit: 1, stdout: "genuine derivation error"})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(nixScript, args...)
 	}
@@ -2866,7 +2866,7 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	err := a.EnsureReady()
 
 	if gotName != "nix" {
-		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
 	}
 	if err == nil {
 		t.Error("expected error from scripted nix build failure, got nil")
@@ -2876,14 +2876,14 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	}
 }
 
-// stubHostNix routes the host `nix build` through the execCommand seam to a
+// stubHostNix routes the host `nix build` through the ExecCommand seam to a
 // fake that replays the given call.
 func stubHostNix(t *testing.T, call fakeCall) {
 	t.Helper()
 	nixScript, _ := newFakeCLI(t, call)
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(nixScript, args...)
 	}
 }

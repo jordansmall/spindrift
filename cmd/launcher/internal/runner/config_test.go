@@ -115,8 +115,8 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		unshareNet:         cfg.BwrapUnshareNet,
 		networkMode:        cfg.NetworkMode,
 		nixConfigFile:      cfg.NixConfigFile,
-		nixVarSnapshotDir:  nixVarSnapshotDir("/pwd", closureGeneration(cfg.ImageTag)),
-		nixVarSnapshotRoot: nixVarSnapshotRoot("/pwd"),
+		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
 	}
 	// Compare with reflect.DeepEqual over pointers, not !=: the mu/running
 	// fields Kill uses (issue #649) are not comparable, and dereferencing
@@ -146,9 +146,9 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 		passwdFileDrv:      cfg.PasswdFileDrv,
 		groupFileDrv:       cfg.GroupFileDrv,
 		nixConfigFileDrv:   cfg.NixConfigFileDrv,
-		nixVarSnapshotDir:  nixVarSnapshotDir("/pwd", closureGeneration(cfg.ImageTag)),
-		nixVarSnapshotRoot: nixVarSnapshotRoot("/pwd"),
-		nixVarGeneration:   closureGeneration(cfg.ImageTag),
+		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
+		nixVarGeneration:   ClosureGeneration(cfg.ImageTag),
 	}
 	if *a != want {
 		t.Errorf("NewBwrapBuild(cfg) fields = %+v, want %+v", *a, want)

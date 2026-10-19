@@ -217,11 +217,11 @@ func (e *RunError) Unwrap() error {
 	return e.Err
 }
 
-// asRunError translates an error that unwraps to *exec.ExitError into a
+// AsRunError translates an error that unwraps to *exec.ExitError into a
 // *RunError carrying the box process's exit code. Podman/docker and bwrap both
 // surface the 128+N killed-by-signal convention as an ordinary exit code, so
 // nothing here reads a raw syscall.WaitStatus. Other errors pass through.
-func asRunError(err error) error {
+func AsRunError(err error) error {
 	if err == nil {
 		return nil
 	}

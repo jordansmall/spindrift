@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,10 +18,6 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// execCommand is the test seam for hardcoded-binary orchestration (nix, bwrap)
-// that has no configurable CLI field to intercept.
-var execCommand = exec.Command
-
 // statResolvConf is the test seam for buildArgs' "does the host have
 // /etc/resolv.conf to bind" check, so the resolv.conf-bind assertions do not
 // depend on the test machine having that file (some nix build sandboxes do not).
@@ -30,24 +25,6 @@ var statResolvConf = func() error {
 	_, err := os.Stat("/etc/resolv.conf")
 	return err
 }
-
-// statHostNixDB is the test seam for snapshotStoreDB's hostNixDBPath preflight,
-// so the missing-host-db assertion does not depend on the test machine having a
-// real /nix/var/nix/db/db.sqlite.
-var statHostNixDB = func() error {
-	_, err := os.Stat(hostNixDBPath)
-	return err
-}
-
-// lockRaceWindowHook runs between the os.OpenFile that opens a lock path and the
-// syscall.Flock that follows, so a test can deterministically swap the path's
-// inode inside the window lockedFDMatchesPath guards (issue #3005). No-op in
-// production.
-var lockRaceWindowHook = func() {}
-
-// vacuumTempRaceWindowHook runs in createLockedVacuumTemp's CreateTemp-to-Flock
-// window so a test can sweep the fresh temp. No-op in production.
-var vacuumTempRaceWindowHook = func() {}
 
 // readSelfCgroup returns the launcher's own cgroup v2 path from
 // /proc/self/cgroup's unified-hierarchy line ("0::<path>"). Tests swap this seam
@@ -81,42 +58,6 @@ var writeCgroupLimit = os.WriteFile
 // is added, and bwrap cannot create a mountpoint inside a read-only bind.
 const homeAgentStagingDir = "/home-agent-staged"
 
-// offArgvKeys names the box.Env keys whose values must never appear on a runner
-// process's argv: ps and /proc/<pid>/cmdline expose argv to any local user for
-// the Box's whole lifetime, while the process's own environment is readable only
-// by its owner. The test is "must never appear on argv", not "is a credential":
-// ISSUE_TEXT is a private issue body, sensitive without being a secret.
-//
-// The Driver credential half comes from credentialenv_gen.go (regenerated from
-// the Driver credential rules); nonDriverOffArgvKeys holds only the rest. It is
-// a runner-local generated slice because runner does not import internal/driver.
-var offArgvKeys = withDriverCredentialEnv(nonDriverOffArgvKeys)
-
-var nonDriverOffArgvKeys = map[string]bool{
-	"GH_TOKEN": true,
-	// Registry-proxy TCP fallback secret, a bearer-token-shaped credential
-	// (issue #3111).
-	"REGISTRY_PROXY_TCP_SECRET": true,
-	// Signal socket's TCP fallback secret, a bearer-token-shaped credential
-	// (issue #3725).
-	"SIGNAL_SOCKET_SECRET": true,
-	"FORGEJO_TOKEN":        true,
-	// The subject issue's injected body and comments (issue #3445). ADR 0032
-	// keeps local issues private, and a private-repo GitHub body is sensitive.
-	"ISSUE_TEXT": true,
-}
-
-func withDriverCredentialEnv(nonDriver map[string]bool) map[string]bool {
-	keys := make(map[string]bool, len(nonDriver)+len(driverCredentialEnv))
-	for k := range nonDriver {
-		keys[k] = true
-	}
-	for _, k := range driverCredentialEnv {
-		keys[k] = true
-	}
-	return keys
-}
-
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
 // EnsureReady delegates to IsReady rather than realizing anything itself, since
 // the build command realizes the store closures.
@@ -142,7 +83,7 @@ type bwrapAdapter struct {
 	// nixConfigFile, so true here alone does nothing when nixInBox is off.
 	nixStoreWritable bool
 	// mountParams passes this run's host-mount facts from Config to
-	// buildMountSpecs unmodified. DriverSessionCacheDir is ADR 0009; the
+	// BuildMountSpecs unmodified. DriverSessionCacheDir is ADR 0009; the
 	// CODE_FORGE=local mount specs are issue #1697.
 	mountParams MountParams
 	unshareNet  bool        // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
@@ -185,151 +126,8 @@ type bwrapAdapter struct {
 	// launch. Guarded by mu; lazily allocated; never pruned, so it grows by one
 	// entry per distinct unreadable generation. Keyed on PrefetchFile, not
 	// Generation: Generation can be "" for an unsafe closure path
-	// (safePathComponent) and would collapse distinct generations.
+	// (SafePathComponent) and would collapse distinct generations.
 	prefetchFallbackLogged map[string]struct{}
-}
-
-// nixVarSnapshotDir is the host-side directory standing in for /nix/var inside a
-// bwrap Box's overlay lower (ADR 0042): the build command writes a VACUUMed
-// snapshot of /nix/var/nix/db/db.sqlite to <dir>/nix/db/db.sqlite so the Box's
-// nix trusts host-present store paths. generation scopes it to one agent-closure
-// (issue #2680); empty means the flat pre-#2680 path.
-func nixVarSnapshotDir(pwd, generation string) string {
-	return filepath.Join(nixVarSnapshotRoot(pwd), generation)
-}
-
-// nixVarSnapshotRoot is the directory nixVarSnapshotDir nests generation subdirs
-// under, and the sweep root reclaimStaleSnapshots RemoveAlls entries of. Derive
-// it from pwd, never by filepath.Dir on an already-joined nixVarSnapshotDir:
-// with an empty generation the flat path IS the snapshot dir, so its parent is
-// .spindrift, home to unrelated siblings a sweep must never touch (issue #2680).
-func nixVarSnapshotRoot(pwd string) string {
-	return filepath.Join(pwd, ".spindrift", "nix-var-snapshot")
-}
-
-// closureGeneration derives nixVarSnapshotDir's generation subdir from a
-// bwrap-runtime Config.ImageTag. imageTag comes from an environment variable an
-// untrusted source can influence and becomes a path component
-// reclaimStaleSnapshots later os.RemoveAlls, hence safePathComponent. A rejected
-// non-empty imageTag warns: it would otherwise silently disable stale reclaim.
-func closureGeneration(imageTag string) string {
-	gen := safePathComponent(imageTag)
-	if imageTag != "" && gen == "" {
-		fmt.Printf("==> bwrap runner: warning: generation source %q is not a usable generation label; falling back to the legacy flat nix-var snapshot path (stale-generation reclaim disabled)\n", truncateGenerationLabel(imageTag))
-	}
-	return gen
-}
-
-// generationLabelWarnLimit bounds how much of a rejected generation source
-// closureGeneration's warning echoes. The value is untrusted text with no length
-// bound of its own, so printing it whole would let a hostile one emit an
-// arbitrarily long line into the launcher's log.
-const generationLabelWarnLimit = 256
-
-// truncateGenerationLabel cuts s on a rune boundary so the tail cannot become a
-// mangled half-rune that %q would escape as \xNN noise.
-func truncateGenerationLabel(s string) string {
-	if len(s) <= generationLabelWarnLimit {
-		return s
-	}
-	r := []rune(s)
-	if len(r) <= generationLabelWarnLimit {
-		return s
-	}
-	return string(r[:generationLabelWarnLimit]) + "..."
-}
-
-// NewAgentGeneration derives an AgentGeneration from closure, the just-realized
-// tip agent-closure linkFarm's own store output path (issue #2682), NOT the
-// agentFiles derivation. That linkFarm nests four children, so AgentFiles,
-// AgentEnv, NixConfigFile and PrefetchFile are closure's "files", "env",
-// "nix-config" and "prefetch" children (lib/mkHarness.nix, issue #2954).
-func NewAgentGeneration(closure string) AgentGeneration {
-	return AgentGeneration{
-		AgentFiles:    filepath.Join(closure, "files"),
-		AgentEnv:      filepath.Join(closure, "env"),
-		NixConfigFile: filepath.Join(closure, "nix-config"),
-		PrefetchFile:  filepath.Join(closure, "prefetch"),
-		Generation:    safePathComponent(closure),
-	}
-}
-
-// safePathComponent returns s unless it is unsafe as a single path component
-// (empty, ".", "..", or a bare separator), in which case it returns "" so the
-// caller falls back to a known-safe default. Shared by closureGeneration and
-// snapshotDirFor (issue #2681) so both rejection paths stay in lockstep.
-func safePathComponent(s string) string {
-	if s == "" {
-		return ""
-	}
-	base := filepath.Base(s)
-	if base == "." || base == ".." || base == string(filepath.Separator) {
-		return ""
-	}
-	return base
-}
-
-// snapshotLockPath spells the "<generation dir>.lock" convention: a sibling of
-// the generation dir, never a file inside it, since buildArgs --overlay-src
-// binds that dir into the sandbox and a lock file inside it would risk being
-// swept up by the mount.
-func snapshotLockPath(dir string) string {
-	return dir + ".lock"
-}
-
-// lockSnapshotShared opens (creating if needed) and takes a blocking shared
-// advisory flock on dir's snapshotLockPath. The path's inode is not stable: a
-// concurrent sweepOrphanedLock can remove it between this open and the Flock,
-// leaving a lock on an inode nothing resolves to, so verify identity afterwards
-// (lockedFDMatchesPath) and retry against a fresh fd, bounded (issues #2680, #3005).
-func lockSnapshotShared(dir string) (*os.File, error) {
-	const maxAttempts = 100
-	path := snapshotLockPath(dir)
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		lf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
-		if err != nil {
-			return nil, err
-		}
-		lockRaceWindowHook()
-		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
-			lf.Close()
-			return nil, err
-		}
-		if lockedFDMatchesPath(lf, path) {
-			return lf, nil
-		}
-		// lf's lock protects an inode nothing resolves to anymore. Drop it and
-		// retry against whatever is at the path now.
-		unlockSnapshot(lf)
-	}
-	return nil, fmt.Errorf("lockSnapshotShared: %s kept changing identity after locking across %d attempts", path, maxAttempts)
-}
-
-// lockedFDMatchesPath reports whether lf, an fd a caller just flocked, still
-// identifies whatever currently sits at path. A successful flock proves the fd
-// is locked, not that it still names path: a concurrent remove/recreate can win
-// the window between the caller's open and its flock (issues #2680, #3005). Any
-// stat failure counts as a mismatch.
-func lockedFDMatchesPath(lf *os.File, path string) bool {
-	fdStat, err := lf.Stat()
-	if err != nil {
-		return false
-	}
-	pathStat, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return os.SameFile(fdStat, pathStat)
-}
-
-// unlockSnapshot releases lf's flock and closes it; a nil lf is a no-op so
-// callers can defer this unconditionally.
-func unlockSnapshot(lf *os.File) {
-	if lf == nil {
-		return
-	}
-	_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
-	lf.Close()
 }
 
 // NewBwrap constructs a bwrap adapter for the run command from cfg and pwd (the
@@ -345,8 +143,8 @@ func NewBwrap(cfg Config, pwd string) Runner {
 		groupFile:          cfg.GroupFile,
 		bakedPrefetch:      cfg.BakedPrefetch,
 		nixConfigFile:      cfg.NixConfigFile,
-		nixVarSnapshotDir:  nixVarSnapshotDir(pwd, closureGeneration(cfg.ImageTag)),
-		nixVarSnapshotRoot: nixVarSnapshotRoot(pwd),
+		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, ClosureGeneration(cfg.ImageTag)),
+		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixStoreWritable:   cfg.NixStoreWritable,
 		mountParams:        cfg.MountParams,
 		unshareNet:         cfg.BwrapUnshareNet,
@@ -375,7 +173,7 @@ func (a *bwrapAdapter) IsReady() error {
 	// MkdirAlls <nixVarSnapshotDir>/nix/db before it writes db.sqlite, so a
 	// dir-only check would report ready on a dir left behind by a failed
 	// snapshot (issue #2664).
-	dbPath := filepath.Join(a.nixVarSnapshotDir, "nix", "db", storeDBName)
+	dbPath := filepath.Join(a.nixVarSnapshotDir, "nix", "db", StoreDBName)
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -390,9 +188,9 @@ func (a *bwrapAdapter) IsReady() error {
 }
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
-// the OCI adapter (buildMountSpecs); only the rendering below differs.
+// the OCI adapter (BuildMountSpecs); only the rendering below differs.
 func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
-	return buildMountSpecs(a.mountParams, box)
+	return BuildMountSpecs(a.mountParams, box)
 }
 
 // RegistryProxyTransport always reports a unix Endpoint for bwrap: an
@@ -494,7 +292,7 @@ func (a *bwrapAdapter) prefetchFor(box Box) string {
 // a.nixVarSnapshotRoot directly, since nixVarSnapshotDir would re-append it.
 func (a *bwrapAdapter) snapshotDirFor(box Box) string {
 	if box.ClosureGeneration != nil {
-		if gen := safePathComponent(box.ClosureGeneration.Generation); gen != "" {
+		if gen := SafePathComponent(box.ClosureGeneration.Generation); gen != "" {
 			return filepath.Join(a.nixVarSnapshotRoot, gen)
 		}
 	}
@@ -503,7 +301,7 @@ func (a *bwrapAdapter) snapshotDirFor(box Box) string {
 
 // buildArgs constructs the bwrap command-line arguments for box. Secret env vars
 // stay off argv and reach the sandbox via the inherited process environment (no
-// --clearenv); see offArgvKeys. etcDir is only still needed for the synthesised
+// --clearenv); see OffArgvKeys. etcDir is only still needed for the synthesised
 // /etc/resolv.conf on the pasta path, since passwd/group are baked store paths
 // (issue #2663). Pasta is never part of this return value; see execTarget.
 func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
@@ -552,7 +350,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// read-only above (issue #2843). The box program (cmd/launcher/box) copies
 	// it in at startup.
 	args = append(args, "--ro-bind", agentFiles+"/home/agent", homeAgentStagingDir)
-	// buildMountSpecs computes the mount decisions (gates, existence guards,
+	// BuildMountSpecs computes the mount decisions (gates, existence guards,
 	// operator messages) once and shares them with the OCI adapter; bwrap only
 	// renders each spec into bind syntax. The driver-cache spec (issue #427)
 	// and the /outbox spec (ADR 0033, issue #1697; set whenever dispatch hands
@@ -572,9 +370,9 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		}
 		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
-	// --clearenv is deliberately absent: the offArgvKeys subset of box.Env
+	// --clearenv is deliberately absent: the OffArgvKeys subset of box.Env
 	// reaches the sandbox through resolvedRunEnv, which Run sets as cmd.Env and
-	// bwrap inherits. See offArgvKeys for why those keys stay off argv.
+	// bwrap inherits. See OffArgvKeys for why those keys stay off argv.
 	agentEnv := a.agentEnvFor(box)
 	args = append(args,
 		"--setenv", "HOME", "/home/agent",
@@ -584,7 +382,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--setenv", "PREFETCH", a.prefetchFor(box),
 	)
 	for k, v := range box.Env {
-		if !offArgvKeys[k] {
+		if !OffArgvKeys[k] {
 			args = append(args, "--setenv", k, v)
 		}
 	}
@@ -679,12 +477,12 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 
 // resolvedRunEnv returns the process environment the bwrap child inherits. It is
 // an allowlist, not a denylist: os.Environ() is never read here, so nothing
-// outside boxEnv reaches the sandbox this way, and only the offArgvKeys subset
+// outside boxEnv reaches the sandbox this way, and only the OffArgvKeys subset
 // needs it (buildArgs delivers every other key on argv). TERM/LANG/TZ/TMPDIR and
 // the proxy vars are excluded on the OCI runner's precedent: it forwards none.
 func resolvedRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(offArgvKeys))
-	for k := range offArgvKeys {
+	keys := make([]string, 0, len(OffArgvKeys))
+	for k := range OffArgvKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -695,44 +493,6 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 		}
 	}
 	return out
-}
-
-// MemoryLimitToBytes converts a podman/docker-style unit-suffixed memory limit
-// ("5g", "512m", "1024k"; bare digits are already bytes) to a raw byte count.
-// cgroup v2's memory.max accepts only a plain integer or the literal "max",
-// unlike podman's --memory -- so it is the output side that must be bytes;
-// "max" is not an input shape this parses. The doctor-side podman-machine
-// sizing check needs the same conversion, so this is the one parse both
-// share. It errors on a non-positive value or one whose byte count overflows
-// int64, so "0" is an error, not "no limit".
-func MemoryLimitToBytes(limit string) (int64, error) {
-	if limit == "" {
-		return 0, fmt.Errorf("empty memory limit")
-	}
-	mult := int64(1)
-	numPart := limit
-	switch limit[len(limit)-1] {
-	case 'g', 'G':
-		mult = 1024 * 1024 * 1024
-		numPart = limit[:len(limit)-1]
-	case 'm', 'M':
-		mult = 1024 * 1024
-		numPart = limit[:len(limit)-1]
-	case 'k', 'K':
-		mult = 1024
-		numPart = limit[:len(limit)-1]
-	}
-	n, err := strconv.ParseInt(numPart, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid memory limit %q: %w", limit, err)
-	}
-	if n <= 0 {
-		return 0, fmt.Errorf("invalid memory limit %q: must be positive (set MEMORY_LIMIT to empty to disable the limit)", limit)
-	}
-	if n > math.MaxInt64/mult {
-		return 0, fmt.Errorf("invalid memory limit %q: overflows int64 bytes", limit)
-	}
-	return n * mult, nil
 }
 
 // cgroupDirForName computes the per-Box cgroup v2 directory provisionCgroup
@@ -746,22 +506,6 @@ func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(parent, "spindrift-"+name), nil
-}
-
-// CgroupControllers returns the cgroup v2 controllers the given limits need:
-// "memory" iff memoryLimit is set, "pids" iff pidsLimit is set.
-// resolveCgroupAnchor rejects an ancestor missing one of these without
-// over-rejecting one missing a controller nothing configured here needs.
-// Exported so `spindrift doctor` resolves the same set and cannot drift (#3273).
-func CgroupControllers(memoryLimit, pidsLimit string) []string {
-	var want []string
-	if memoryLimit != "" {
-		want = append(want, "memory")
-	}
-	if pidsLimit != "" {
-		want = append(want, "pids")
-	}
-	return want
 }
 
 func (a *bwrapAdapter) cgroupControllers() []string {
@@ -1027,7 +771,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// A func, not a value: exec.Cmd.Start is one-shot, and the CLONE_INTO_CGROUP
 	// attempt below may need a fresh Cmd for its fallback.
 	newCmd := func() *exec.Cmd {
-		cmd := execCommand(program, execArgs...)
+		cmd := ExecCommand(program, execArgs...)
 		// Pdeathsig kills this direct child (bwrap or pasta) the moment the launcher
 		// dies, so a crashed launcher never leaves an orphaned Box. Separate from
 		// bwrap's own --die-with-parent, which only protects bwrap against ITS
@@ -1039,7 +783,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 			// pasta execs "bwrap" by bare name via execvp, using its own process
 			// environment's PATH rather than Go's LookPath, which resolved only the
 			// top-level program. Without this the env carries no PATH at all and the
-			// child exec fails with ENOENT. PATH is not an offArgvKeys value, so
+			// child exec fails with ENOENT. PATH is not an OffArgvKeys value, so
 			// forwarding it does not widen resolvedRunEnv's no-ambient-leak guarantee.
 			cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
 		}
@@ -1061,11 +805,11 @@ func (a *bwrapAdapter) Run(box Box) error {
 		// The same call buildArgs' --overlay-src bind uses, so the lock and stat
 		// guard the exact directory this launch mounts.
 		snapshotDir := a.snapshotDirFor(box)
-		lf, err := lockSnapshotShared(snapshotDir)
+		lf, err := LockSnapshotShared(snapshotDir)
 		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", snapshotLockPath(snapshotDir), err, box.Name)
+			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", SnapshotLockPath(snapshotDir), err, box.Name)
 		} else if _, statErr := os.Stat(snapshotDir); statErr != nil {
-			unlockSnapshot(lf)
+			UnlockSnapshot(lf)
 			if cgroupDir != "" {
 				_ = os.Remove(cgroupDir)
 			}
@@ -1105,7 +849,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 		if cgroupDir != "" {
 			_ = os.Remove(cgroupDir)
 		}
-		unlockSnapshot(nixVarSnapshotLock)
+		UnlockSnapshot(nixVarSnapshotLock)
 		return err
 	}
 	if cgroupDir != "" {
@@ -1125,7 +869,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// earlier would let reclaimStaleSnapshots believe this generation is free
 	// while the sandboxed process is still reading it. Flock releases on process
 	// exit, so a crashed launcher needs no separate recovery path.
-	defer unlockSnapshot(nixVarSnapshotLock)
+	defer UnlockSnapshot(nixVarSnapshotLock)
 	if cgroupDir != "" {
 		// Deferred so cleanup runs after cmd.Wait() returns: the cgroup dir can
 		// only be rmdir'd once no live process remains inside it (ADR 0042).
@@ -1135,7 +879,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 			}
 		}()
 	}
-	return asRunError(cmd.Wait())
+	return AsRunError(cmd.Wait())
 }
 
 // untrackRunning drops name's tracked process once Run's Wait returns.
@@ -1289,7 +1033,7 @@ type bwrapBuildAdapter struct {
 // pwd (the launcher's own working directory). EnsureReady realizes the agent
 // store closures and, when nixInBox is on, snapshots the host nix store DB.
 func NewBwrapBuild(cfg Config, pwd string) Runner {
-	generation := closureGeneration(cfg.ImageTag)
+	generation := ClosureGeneration(cfg.ImageTag)
 	return &bwrapBuildAdapter{
 		agentFilesDrv:      cfg.AgentFilesDrv,
 		agentEnvDrv:        cfg.AgentEnvDrv,
@@ -1297,8 +1041,8 @@ func NewBwrapBuild(cfg Config, pwd string) Runner {
 		groupFileDrv:       cfg.GroupFileDrv,
 		nixConfigFileDrv:   cfg.NixConfigFileDrv,
 		syscallFilterDrv:   cfg.SyscallFilterDrv,
-		nixVarSnapshotDir:  nixVarSnapshotDir(pwd, generation),
-		nixVarSnapshotRoot: nixVarSnapshotRoot(pwd),
+		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, generation),
+		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixVarGeneration:   generation,
 	}
 }
@@ -1341,7 +1085,7 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	}
 
 	if a.nixConfigFileDrv != "" {
-		// MkdirAll first: lockSnapshotShared opens dir+".lock", a sibling of dir,
+		// MkdirAll first: LockSnapshotShared opens dir+".lock", a sibling of dir,
 		// so its parent must exist for O_CREATE, and on a fresh checkout the
 		// root does not exist yet. A failure here degrades like a lock failure.
 		if mkErr := os.MkdirAll(a.nixVarSnapshotRoot, 0o755); mkErr != nil {
@@ -1352,12 +1096,12 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		// its point of view this dir is one more stale generation and its
 		// exclusive probe would RemoveAll it mid-VACUUM (issue #2680). Failing to
 		// lock degrades only that protection; it must never fail the build.
-		lf, lockErr := lockSnapshotShared(a.nixVarSnapshotDir)
+		lf, lockErr := LockSnapshotShared(a.nixVarSnapshotDir)
 		if lockErr != nil {
-			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", snapshotLockPath(a.nixVarSnapshotDir), lockErr)
+			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(a.nixVarSnapshotDir), lockErr)
 		}
 		err := a.snapshotStoreDB()
-		unlockSnapshot(lf)
+		UnlockSnapshot(lf)
 		if err != nil {
 			return err
 		}
@@ -1377,44 +1121,6 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 	return nil
 }
 
-// SnapshotGeneration writes the nix-var snapshot for a closure hot-swapped
-// mid-run (ADR 0043, issue #2682), before binding it: Run's stat guard fails a
-// Box naming a generation with no directory. It skips the vacuum when db.sqlite
-// already exists, since a live Box may be reading it, and never reclaims: an
-// idle Dispatch holds no flock on a generation it will launch against again.
-func SnapshotGeneration(pwd, closurePath string) error {
-	generation := closureGeneration(closurePath)
-	dir := nixVarSnapshotDir(pwd, generation)
-	root := nixVarSnapshotRoot(pwd)
-
-	dest := filepath.Join(dir, "nix", "db", storeDBName)
-	// Sweep before the existence check: a temp leaked by a killed launcher would
-	// otherwise stay forever once a concurrent launcher has installed dest.
-	sweepStaleVacuumTemps(filepath.Dir(dest))
-	if _, err := os.Stat(dest); err == nil {
-		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
-		return nil
-	}
-
-	fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) for hot-swapped generation %s\n", generation)
-
-	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
-		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
-	}
-	lf, lockErr := lockSnapshotShared(dir)
-	if lockErr != nil {
-		fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", snapshotLockPath(dir), lockErr)
-	}
-	err := vacuumStoreDBInto(dir, installIfAbsent)
-	unlockSnapshot(lf)
-	return err
-}
-
-// hostNixDBPath is the host's real, live nix store database, never a path inside
-// a sandbox: snapshotStoreDB runs during `launcher build`, on the operator's own
-// machine. It is the one Go call site that reaches into live host store metadata.
-const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
-
 // snapshotStoreDB copies the host's live nix store database into
 // a.nixVarSnapshotDir, compacting it in the same step (ADR 0042: ~302MB raw vs
 // ~104MB compacted, and an overlay copy-up rewrites a file whole, so the
@@ -1423,197 +1129,7 @@ const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 // invoking uid and no explicit chown is needed.
 func (a *bwrapBuildAdapter) snapshotStoreDB() error {
 	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
-	return vacuumStoreDBInto(a.nixVarSnapshotDir, installReplace)
-}
-
-// snapshotInstall is how vacuumStoreDBInto lands the finished temp on db.sqlite.
-type snapshotInstall int
-
-const (
-	// installReplace renames over an existing db.sqlite: the build path, which
-	// owns the generation.
-	installReplace snapshotInstall = iota
-	// installIfAbsent links only if db.sqlite is absent, never disturbing one a
-	// running Box may be reading (SnapshotGeneration, ADR 0043).
-	installIfAbsent
-)
-
-// vacuumStoreDBInto does the VACUUM INTO and install work against an explicit
-// dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it rather
-// than reaching it only through a bwrapBuildAdapter's baked field (issue
-// #2682). Writes dir/nix/db/db.sqlite, the layout every nixVarSnapshotDir
-// caller expects. mode picks how the finished temp lands on db.sqlite.
-func vacuumStoreDBInto(dir string, mode snapshotInstall) error {
-	if err := statHostNixDB(); err != nil {
-		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
-	}
-
-	dest := filepath.Join(dir, "nix", "db", storeDBName)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
-	}
-
-	// Vacuum into a temp sibling and install over dest only on success, so dest
-	// only ever names a complete snapshot: SnapshotGeneration's existence check
-	// and IsReady trust it, and a failed vacuum (disk full, host db locked) must
-	// neither leave a partial dest nor destroy a previous one (#2664, #4817).
-	// The name must be unique: concurrent launchers hold only a shared lock.
-	// createLockedVacuumTemp and sweepStaleVacuumTemps cover ownership and the
-	// reclaim of temps a killed launcher leaks.
-	sweepStaleVacuumTemps(filepath.Dir(dest))
-	tmpFile, err := createLockedVacuumTemp(filepath.Dir(dest))
-	if err != nil {
-		return err
-	}
-	defer tmpFile.Close()
-	tmp := tmpFile.Name()
-	// "VACUUM INTO" accepts the empty file CreateTemp leaves and keeps its mode,
-	// so without this chmod CreateTemp's 0600 would carry into the snapshot.
-	if err := tmpFile.Chmod(0o644); err != nil {
-		removeVacuumTemp(tmp)
-		return fmt.Errorf("prepare temp nix store db snapshot %s: %w", tmp, err)
-	}
-
-	// "VACUUM INTO" uses sqlite's online-backup mechanism, so it handles a
-	// concurrent nix-daemon write (WAL not yet checkpointed) that a plain file
-	// copy could snapshot mid-write, and it compacts into the destination in the
-	// same step. tmp is escaped for a single-quoted SQL literal; sqlite3's
-	// dot-commands are whitespace-tokenized, but a SQL statement on argv is not.
-	escapedTmp := strings.ReplaceAll(tmp, "'", "''")
-	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedTmp)
-	vacuumInto := execCommand("sqlite3", hostNixDBPath, stmt)
-	vacuumInto.Stdout = os.Stdout
-	vacuumInto.Stderr = os.Stderr
-	if err := vacuumInto.Run(); err != nil {
-		removeVacuumTemp(tmp)
-		return fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
-	}
-
-	if mode == installReplace {
-		if err := os.Rename(tmp, dest); err != nil {
-			removeVacuumTemp(tmp)
-			return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
-		}
-		return nil
-	}
-
-	// Link, never rename: a concurrent launcher may have installed dest and
-	// started a Box on it, and a swap must not replace a file a running Box is
-	// reading (ADR 0043).
-	err = os.Link(tmp, dest)
-	removeVacuumTemp(tmp)
-	if errors.Is(err, fs.ErrExist) {
-		fmt.Printf("==> bwrap runner: nix-var snapshot %s was installed concurrently; keeping it\n", dest)
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
-	}
-	return nil
-}
-
-// maxVacuumTempAttempts bounds createLockedVacuumTemp's retries against a
-// concurrent sweep.
-const maxVacuumTempAttempts = 3
-
-// createLockedVacuumTemp creates a vacuum temp in dir and returns it holding
-// the exclusive flock that marks it owned. A concurrent sweep can lock and
-// unlink the fresh temp between CreateTemp and Flock, leaving this fd locked on
-// an orphaned inode; lockedFDMatchesPath catches that and retries with a new
-// temp. Once the locked fd matches the path, no sweep can remove it. A stat
-// failure other than a sweep also reads as a mismatch, so the retry may leave
-// that temp behind; it is unlocked once f closes, and the next
-// sweepStaleVacuumTemps reclaims it.
-func createLockedVacuumTemp(dir string) (*os.File, error) {
-	for range maxVacuumTempAttempts {
-		f, err := os.CreateTemp(dir, vacuumTempPrefix+"*")
-		if err != nil {
-			return nil, fmt.Errorf("create temp nix store db snapshot: %w", err)
-		}
-		tmp := f.Name()
-		vacuumTempRaceWindowHook()
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-			f.Close()
-			removeVacuumTemp(tmp)
-			return nil, fmt.Errorf("lock temp nix store db snapshot %s: %w", tmp, err)
-		}
-		if lockedFDMatchesPath(f, tmp) {
-			return f, nil
-		}
-		f.Close()
-	}
-	return nil, fmt.Errorf("create temp nix store db snapshot in %s: swept by a concurrent launcher across %d attempts", dir, maxVacuumTempAttempts)
-}
-
-// storeDBName is the snapshot file name under <dir>/nix/db; vacuumTempPrefix
-// derives from it.
-const storeDBName = "db.sqlite"
-
-// vacuumTempPrefix names the temp siblings vacuumStoreDBInto writes before
-// installing them over db.sqlite.
-const vacuumTempPrefix = storeDBName + ".tmp-"
-
-// removeVacuumTemp deletes a vacuum temp and its sqlite3 journal, warning on
-// any failure but a file already gone: a leaked temp is ~100MB until the next
-// sweep, and a journal outliving its temp is never swept (see isVacuumTempName).
-func removeVacuumTemp(path string) {
-	for _, p := range []string{path, path + "-journal"} {
-		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			fmt.Printf("==> bwrap runner: warning: could not remove temp nix store db snapshot %s: %v\n", p, err)
-		}
-	}
-}
-
-// sweepStaleVacuumTemps removes vacuum temps in dir that no live launcher owns.
-// Ownership is the exclusive flock vacuumStoreDBInto holds on its temp, so a
-// non-blocking exclusive Flock that succeeds means the owner is gone or has not
-// locked yet (it re-checks the path after locking and retries if swept), and
-// EWOULDBLOCK leaves a concurrent launcher's temp alone. Only names CreateTemp
-// can produce (digits after the prefix) count: sqlite3's side files, such as
-// <tmp>-journal, share the prefix but hold no flock, so a live vacuum's journal
-// would otherwise look stale. A stale temp's journal, leaked when sqlite3 died
-// with its launcher, goes with it. Best-effort: errors warn and never fail the
-// vacuum.
-func sweepStaleVacuumTemps(dir string) {
-	matches, err := filepath.Glob(filepath.Join(dir, vacuumTempPrefix+"*"))
-	if err != nil {
-		fmt.Printf("==> bwrap runner: warning: could not list stale temp nix store db snapshots in %s: %v\n", dir, err)
-		return
-	}
-	for _, path := range matches {
-		if !isVacuumTempName(filepath.Base(path)) {
-			continue
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			if !errors.Is(err, fs.ErrNotExist) {
-				fmt.Printf("==> bwrap runner: warning: could not open temp nix store db snapshot %s: %v\n", path, err)
-			}
-			continue
-		}
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
-			removeVacuumTemp(path)
-		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
-			fmt.Printf("==> bwrap runner: warning: could not probe temp nix store db snapshot %s: %v\n", path, err)
-		}
-		f.Close()
-	}
-}
-
-// isVacuumTempName reports whether name has the shape os.CreateTemp gives a
-// vacuum temp: vacuumTempPrefix followed only by decimal digits. It says
-// nothing about ownership, which is the flock.
-func isVacuumTempName(name string) bool {
-	suffix, ok := strings.CutPrefix(name, vacuumTempPrefix)
-	if !ok || suffix == "" {
-		return false
-	}
-	for _, r := range suffix {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
+	return VacuumStoreDBInto(a.nixVarSnapshotDir, InstallReplace)
 }
 
 // reclaimStaleSnapshots removes generation directories under root that are
@@ -1649,26 +1165,26 @@ func reclaimStaleSnapshots(root, keepGeneration string) error {
 			continue
 		}
 		genDir := filepath.Join(root, name)
-		lockPath := snapshotLockPath(genDir)
+		lockPath := SnapshotLockPath(genDir)
 		lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 		if err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not open nix-var snapshot lock %s (%v); leaving stale generation %s in place\n", lockPath, err, name)
 			continue
 		}
-		lockRaceWindowHook()
+		LockRaceWindowHook()
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 			// A live Box holds the shared lock, so leave this generation alone.
 			lf.Close()
 			continue
 		}
-		// See lockedFDMatchesPath's doc: only remove if lf still identifies
+		// See LockedFDMatchesPath's doc: only remove if lf still identifies
 		// whatever currently sits at lockPath.
-		if lockedFDMatchesPath(lf, lockPath) {
+		if LockedFDMatchesPath(lf, lockPath) {
 			if err := os.RemoveAll(genDir); err != nil {
 				fmt.Printf("==> bwrap runner: warning: could not remove stale nix-var snapshot %s: %v\n", genDir, err)
 			}
 		}
-		unlockSnapshot(lf)
+		UnlockSnapshot(lf)
 	}
 	return nil
 }
@@ -1691,25 +1207,25 @@ func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations 
 	if err != nil {
 		return
 	}
-	lockRaceWindowHook()
+	LockRaceWindowHook()
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		// Still referenced (Run may be mid-race, about to discover its
 		// generation dir is gone); leave it for a later reclaim pass.
 		lf.Close()
 		return
 	}
-	// See lockedFDMatchesPath's doc: only remove if lf still identifies
+	// See LockedFDMatchesPath's doc: only remove if lf still identifies
 	// whatever currently sits at lockPath.
-	if lockedFDMatchesPath(lf, lockPath) {
+	if LockedFDMatchesPath(lf, lockPath) {
 		_ = os.Remove(lockPath)
 	}
-	unlockSnapshot(lf)
+	UnlockSnapshot(lf)
 }
 
 // realize runs `nix build <drv>^* --no-link` for a single closure, wrapping
 // any failure with label so the caller can tell which closure failed.
 func (a *bwrapBuildAdapter) realize(label, drv string) error {
-	cmd := execCommand("nix", "build", drv+"^*", "--no-link")
+	cmd := ExecCommand("nix", "build", drv+"^*", "--no-link")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
