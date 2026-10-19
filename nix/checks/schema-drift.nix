@@ -695,6 +695,48 @@ checkedMerge {
         touch $out
       '';
 
+  # Each row that declares knobs owns a generated typed reader; a row without
+  # knobs must have none (ADR 0068 decision 3, issue #5636). Regen writes and
+  # deletes these, so a row edit without `nix run .#regen` fails here.
+  row-knob-readers-gen =
+    let
+      inherit (pkgs.lib) escapeShellArg;
+      readers = import ../../lib/row-knob-readers.nix;
+      repo = ../..;
+      regenHint = "regenerate with `nix run .#regen`";
+      presentScript =
+        target:
+        let
+          raw = pkgs.writeText "knobs_gen.go.raw" (renderers.renderRowKnobsGo target);
+          committed = "${repo + "/${target.path}"}";
+          say = msg: "echo ${escapeShellArg msg} >&2";
+        in
+        if builtins.pathExists (repo + "/${target.path}") then
+          ''
+            gofmt ${raw} > generated.go
+            diff generated.go ${escapeShellArg committed} \
+              || { ${say "${target.path} is out of sync with ${target.source} — ${regenHint}"}; failed=1; }
+          ''
+        else
+          ''
+            ${say "${target.path} is missing, but ${target.source} declares knobs — ${regenHint}"}
+            failed=1
+          '';
+      absentScript =
+        path:
+        pkgs.lib.optionalString (builtins.pathExists (repo + "/${path}")) ''
+          echo ${escapeShellArg "${path} exists, but its row declares no knobs — ${regenHint}"} >&2
+          failed=1
+        '';
+    in
+    pkgs.runCommand "row-knob-readers-gen" { nativeBuildInputs = [ pkgs.go ]; } ''
+      failed=0
+      ${builtins.concatStringsSep "\n" (map presentScript readers.generated)}
+      ${builtins.concatStringsSep "\n" (map absentScript readers.absent)}
+      [ "$failed" = 0 ] || exit 1
+      touch $out
+    '';
+
   # checkRow must reject an explicit "" on each forbidden string field, yet
   # still accept one on trackerAxisWrite (issue #3487). It iterates the
   # renderer's own list, so it proves the guard fires for every listed field
