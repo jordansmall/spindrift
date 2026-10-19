@@ -51,7 +51,7 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -127,7 +127,7 @@ func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -227,7 +227,7 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -284,7 +284,7 @@ func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testin
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -343,7 +343,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -419,7 +419,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -480,7 +480,7 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -530,7 +530,7 @@ func TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain(t *testing.T) {
 	c := baseConfig()
 	c.continuousDispatch = true
 	c.maxParallel = 1
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"

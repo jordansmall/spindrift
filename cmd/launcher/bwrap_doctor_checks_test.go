@@ -8,13 +8,12 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 )
 
 func TestBwrapCapabilityChecks_ReturnsThreeRowsInOrder(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	checks := bwrapCapabilityChecks(c)
 	want := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 	if len(checks) != len(want) {
@@ -31,7 +30,7 @@ func TestBwrapCapabilityChecks_ReturnsThreeRowsInOrder(t *testing.T) {
 // leaves an operator with only the bare error text.
 func TestBwrapCapabilityChecks_RemedyNonEmpty(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	checks := bwrapCapabilityChecks(c)
 	for _, ch := range checks {
 		if ch.Remedy == "" {
@@ -44,7 +43,7 @@ func TestBwrapCapabilityChecks_RemedyNonEmpty(t *testing.T) {
 // Required exactly when nixStoreWritable && nixConfigFile != "".
 func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = true
 	c.nixConfigFile = "/nix/store/example/nix.conf"
 	got := checkByName(t, bwrapCapabilityChecks(c), "bwrap-overlay-support")
@@ -53,7 +52,7 @@ func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 	}
 
 	c = minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = false
 	c.nixConfigFile = ""
 	got = checkByName(t, bwrapCapabilityChecks(c), "bwrap-overlay-support")
@@ -64,7 +63,7 @@ func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 	// This case pins the "&&" half of the gate against a mutant that drops
 	// the nixConfigFile conjunct (issue #2671 round-4 review finding).
 	c = minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = true
 	c.nixConfigFile = ""
 	got = checkByName(t, bwrapCapabilityChecks(c), "bwrap-overlay-support")
@@ -77,7 +76,7 @@ func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 // Required unless networkMode is "host" or "none".
 func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.networkMode = "open"
 	got := checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
 	if got.Tier != doctor.Required {
@@ -86,7 +85,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 
 	for _, mode := range []runner.NetworkMode{runner.NetworkModeHost, runner.NetworkModeNone} {
 		c = minimalValidConfig()
-		c.runnerKind = freshness.KindBwrap
+		c.runnerKind = runner.KindBwrap
 		c.networkMode = string(mode)
 		got = checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
 		if got.Tier != doctor.Advisory {
@@ -100,7 +99,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 func TestBwrapCapabilityChecks_CgroupDelegationAlwaysAdvisory(t *testing.T) {
 	configs := []config{minimalValidConfig()}
 	for _, c := range configs {
-		c.runnerKind = freshness.KindBwrap
+		c.runnerKind = runner.KindBwrap
 		got := checkByName(t, bwrapCapabilityChecks(c), "bwrap-cgroup-delegation")
 		if got.Tier != doctor.Advisory {
 			t.Errorf("Tier = %v, want Advisory", got.Tier)
@@ -117,7 +116,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing(t *test
 	validateCgroupDelegationFn = func([]string) error { return errors.New("cgroup v2 subtree not delegated") }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
 	doctor.NewReporter(&buf, true).Results(results)
@@ -139,7 +138,7 @@ func TestBwrapCapabilityChecks_OverlayRendersAdvisoryNotMissing(t *testing.T) {
 	validateOverlayFn = func() error { return errors.New("overlay mount failed") }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = false
 	c.nixConfigFile = ""
 
@@ -163,7 +162,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *test
 	validatePastaFn = func() error { return errors.New("pasta not on PATH") }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.networkMode = string(runner.NetworkModeHost)
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
@@ -187,7 +186,7 @@ func TestBwrapCapabilityChecks_OverlayRendersMissingWhenRequired(t *testing.T) {
 	validateOverlayFn = func() error { return errors.New("overlay mount failed") }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = true
 	c.nixConfigFile = "/nix/store/example/nix.conf"
 
@@ -210,7 +209,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired(t *tes
 	validatePastaFn = func() error { return errors.New("pasta not on PATH") }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.networkMode = "open"
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
@@ -229,7 +228,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersMissingWhenRequired(t *tes
 // nonsensical, so the hint appears only while the row is Required.
 func TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = false
 	c.nixConfigFile = ""
 	advisory := checkByName(t, bwrapCapabilityChecks(c), "bwrap-overlay-support")
@@ -238,7 +237,7 @@ func TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory(t *testin
 	}
 
 	c = minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.nixStoreWritable = true
 	c.nixConfigFile = "/nix/store/example/nix.conf"
 	required := checkByName(t, bwrapCapabilityChecks(c), "bwrap-overlay-support")
@@ -251,7 +250,7 @@ func TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory(t *testin
 // nonsensical, so the hint appears only while the row is Required.
 func TestBwrapCapabilityChecks_NetworkIsolationRemedyOmitsHostHintWhenAdvisory(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.networkMode = string(runner.NetworkModeHost)
 	advisory := checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
 	if strings.Contains(advisory.Remedy, "set NETWORK_MODE=host") {
@@ -259,7 +258,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRemedyOmitsHostHintWhenAdvisory(t
 	}
 
 	c = minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.networkMode = "open"
 	required := checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
 	if !strings.Contains(required.Remedy, "set NETWORK_MODE=host") {
@@ -275,7 +274,7 @@ func TestBwrapCapabilityChecks_OverlayRendersOkWhenPassing(t *testing.T) {
 	validateOverlayFn = func() error { return nil }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
@@ -293,7 +292,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersOkWhenPassing(t *testing.T
 	validatePastaFn = func() error { return nil }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
@@ -311,7 +310,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationRendersOkWhenPassing(t *testing.T
 	validateCgroupDelegationFn = func([]string) error { return nil }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
@@ -336,7 +335,7 @@ func TestBwrapCapabilityChecks_CgroupDelegationPassesConfiguredControllers(t *te
 	}
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.pidsLimit = "256"
 	c.memoryLimit = ""
 
@@ -365,7 +364,7 @@ func TestBwrapCapabilityChecks_ProbeWiring(t *testing.T) {
 	validateCgroupDelegationFn = func([]string) error { return cgroupErr }
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 
 	overlay := checkByName(t, bwrapCapabilityChecks(c), "bwrap-overlay-support")
 	if _, err := overlay.Probe(); !errors.Is(err, overlayErr) {

@@ -8,7 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // checkByName looks a row up by name rather than by position, so reordering
@@ -376,7 +376,7 @@ func TestDoctorCheckSets_BwrapRowsGatedOnRunnerKind(t *testing.T) {
 	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	_, report := doctorCheckSets(c)
 	for _, name := range bwrapRowNames {
 		checkByName(t, report, name)
@@ -403,7 +403,7 @@ func TestDoctorExtraChecks_NeverIncludesBwrapCapabilityRows(t *testing.T) {
 	bwrapRowNames := []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	extra := doctorExtraChecks(c)
 	for _, ch := range extra {
 		for _, name := range bwrapRowNames {

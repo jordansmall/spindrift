@@ -817,7 +817,7 @@ func runnerConfig(c config) runner.Config {
 // solely on c.runnerKind (issue #2538), never c.runtime, which also carries
 // operator-facing runtime names that aren't "oci" literally.
 func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
-	if c.runnerKind == freshness.KindBwrap {
+	if c.runnerKind == runner.KindBwrap {
 		return bwrap.New(rc, pwd)
 	}
 	return oci.New(rc, pwd)
@@ -827,7 +827,7 @@ func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 // bwrap arm selects bwrap.NewBuild, which realizes store closures rather than
 // running an agent.
 func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
-	if c.runnerKind == freshness.KindBwrap {
+	if c.runnerKind == runner.KindBwrap {
 		return bwrap.NewBuild(rc, pwd)
 	}
 	return oci.New(rc, pwd)
@@ -1193,7 +1193,7 @@ func checkNetworkModeRuntimeGate(c config) error {
 	// Keys on runnerKind, never runtime: RUNNER_KIND=bwrap/RUNTIME=podman is a
 	// supported pairing, and keying on runtime would miss that pairing and let
 	// no-host-loopback reach the bwrap adapter (issue #2538).
-	if c.runnerNetworkMode() == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
+	if c.runnerNetworkMode() == runner.NetworkModeNoHostLoopback && c.runnerKind == runner.KindBwrap {
 		return newLaunchGateConfigError("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
 	}
 	// Only the detectable subset: Go sees the resolved value alone, so an
@@ -1218,7 +1218,7 @@ func checkNetworkModeRuntimeGate(c config) error {
 // beside BWRAP_UNSHARE_NET would invoke pasta, but checkNetworkModeRuntimeGate
 // refuses that pairing.
 func checkBwrapPastaGate(c config) error {
-	if c.runnerKind != freshness.KindBwrap {
+	if c.runnerKind != runner.KindBwrap {
 		return nil
 	}
 	if mode := c.runnerNetworkMode(); mode == runner.NetworkModeHost || mode == runner.NetworkModeNone {
@@ -1233,7 +1233,7 @@ func checkBwrapPastaGate(c config) error {
 // namespace from mounting overlayfs. The three no-op arms mirror bwrap.go's
 // own AND-gate, where the overlay flags never render at all.
 func checkBwrapOverlayGate(c config) error {
-	if c.runnerKind != freshness.KindBwrap {
+	if c.runnerKind != runner.KindBwrap {
 		return nil
 	}
 	if !c.nixStoreWritable {
@@ -1924,7 +1924,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// LauncherFresh keeps a both-moved verdict out (the launcher wins
 		// then), KindBwrap keeps OCI out, and flakeLauncherAttr keeps an
 		// unconfigured launcher out, since Probe hard-codes its freshness.
-		if c.runnerKind == freshness.KindBwrap && res.Applicable && !res.ImageFresh && res.LauncherFresh && c.flakeLauncherAttr != "" {
+		if c.runnerKind == runner.KindBwrap && res.Applicable && !res.ImageFresh && res.LauncherFresh && c.flakeLauncherAttr != "" {
 			// drain is the shared fallback exit for every failure branch below.
 			drain := func() (bool, bool, string) {
 				staleResult = res

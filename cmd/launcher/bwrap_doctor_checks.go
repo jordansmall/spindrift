@@ -2,7 +2,6 @@ package main
 
 import (
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/bwrap"
 )
@@ -22,7 +21,7 @@ var (
 // Advisory. doctorCheckSets puts these rows in the report half only, never in
 // the classify half that can exit 2.
 func bwrapCapabilityChecks(c config) []doctor.Check {
-	if c.runnerKind != freshness.KindBwrap {
+	if c.runnerKind != runner.KindBwrap {
 		return nil
 	}
 

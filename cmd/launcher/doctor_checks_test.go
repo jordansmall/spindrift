@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // replaceCheckByName must copy rather than mutate in place: doctorExtraChecks
@@ -88,7 +88,7 @@ func TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRow
 	withDriftMatchingRemote(t)       // Issue #3144: the drift row needs a positively identified Target checkout.
 
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"

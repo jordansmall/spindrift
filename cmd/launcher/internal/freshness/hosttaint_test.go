@@ -3,6 +3,8 @@ package freshness
 import (
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // A stale verdict at the same rev the prior launcher process exited stale on
@@ -53,12 +55,12 @@ func TestHostTaintDiagnostic_ContainsRequiredSubstrings(t *testing.T) {
 	}
 }
 
-// Under KindBwrap the host is always Linux, since lib/mkHarness.nix gates the
-// agent-closure package on isLinux && runtime == "bwrap", so darwin can never
-// be the cause. The bwrap imageTag slot also holds a bare nix store path, not
-// a repo:tag string.
+// Under runner.KindBwrap the host is always Linux, since lib/mkHarness.nix
+// gates the agent-closure package on isLinux && runnerRow.artifact ==
+// "store-closure", so darwin can never be the cause. The bwrap imageTag slot
+// also holds a bare nix store path, not a repo:tag string.
 func TestHostTaintDiagnostic_Bwrap_DoesNotBlameDarwin(t *testing.T) {
-	got := HostTaintDiagnostic(KindBwrap, "main", "deadbeef", ".#packages.x86_64-linux.agent-closure", "/nix/store/aaa-agent-closure", "/nix/store/bbb-agent-closure")
+	got := HostTaintDiagnostic(runner.KindBwrap, "main", "deadbeef", ".#packages.x86_64-linux.agent-closure", "/nix/store/aaa-agent-closure", "/nix/store/bbb-agent-closure")
 
 	if strings.Contains(strings.ToLower(got), "darwin") {
 		t.Errorf("HostTaintDiagnostic(bwrap, ...) blames darwin, which is impossible under bwrap (host is always Linux); got:\n%s", got)

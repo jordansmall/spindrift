@@ -27,10 +27,10 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
-	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -4467,7 +4467,7 @@ func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
 // doctorExtraChecks(c), so a bwrap-runner config shows
 // bwrapCapabilityChecks' three rows; swapping the call site back would
 // drop them silently (issue #2671 review). runnerKind must be
-// freshness.KindBwrap for those rows to exist, and
+// runner.KindBwrap for those rows to exist, and
 // validateCgroupDelegationFn is made to fail so its row renders predictably.
 func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	f := forge.NewFake()
@@ -4477,7 +4477,7 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	c := minimalValidConfig()
 	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 
 	origCgroup := validateCgroupDelegationFn
 	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
