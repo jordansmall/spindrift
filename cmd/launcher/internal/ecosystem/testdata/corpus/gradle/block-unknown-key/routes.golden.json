@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.gradle.registries is not a key gradle's route declaration accepts"
+}

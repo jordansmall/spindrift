@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.cargo.registries names \"example-remote\" more than once"
+}

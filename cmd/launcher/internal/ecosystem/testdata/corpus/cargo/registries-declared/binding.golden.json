@@ -1,0 +1,12 @@
+{
+  "homeConfig": {
+    "configPath": "config.toml",
+    "content": "[source.crates-io]\nreplace-with = \"spindrift-registry-proxy\"\n\n[source.spindrift-registry-proxy]\nregistry = \"sparse+http://127.0.0.1:27182/repo-acme-test/\"\n",
+    "homeEnvVar": "CARGO_HOME"
+  },
+  "warnings": [
+    "==> WARNING: cargo registry \"example-remote\" is declared on route prefix \"repo-acme-test\" (upstream host \"repo.acme.test\") but the repo's .cargo/config.toml has no [registries.example-remote] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml",
+    "==> WARNING: cargo registry \"another_one\" is declared on route prefix \"repo-acme-test\" (upstream host \"repo.acme.test\") but the repo's .cargo/config.toml has no [registries.another_one] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml",
+    "==> WARNING: cargo registry \"third-3\" is declared on route prefix \"repo-acme-test\" (upstream host \"repo.acme.test\") but the repo's .cargo/config.toml has no [registries.third-3] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml"
+  ]
+}
