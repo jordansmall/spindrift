@@ -84,8 +84,9 @@ dependency this ADR rules out.
 
 Credential sources therefore stay one table in `credresolver`. Each
 Ecosystem row declares, by source key, which stores it reads, and the
-launcher wires that into `credresolver` as constructor input, the way it
-already wires rewrite rows into the proxy. That removes
+launcher's `registry discover` command builds that map once with
+`ecosystem.CredentialStores()` and hands it to `registrydiscover.Discover`,
+the way it already wires rewrite rows into the proxy. That removes
 `f.Ecosystem == "cargo"`, the one name literal the containment scan could
 not reach.
 
