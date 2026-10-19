@@ -105,14 +105,14 @@ func TestRegistry_SelfContainedSkipsTheInTreeSteps(t *testing.T) {
 
 func TestRegistry_ExportsReachTheEnvironmentBindingsFirst(t *testing.T) {
 	f, g := registryFixture(t)
-	g.bindExports = []ecosystem.EnvExport{{Name: "GOPROXY", Value: "http://127.0.0.1:1"}, {Name: "GOSUMDB", Value: "off"}}
-	g.applyExports = []ecosystem.EnvExport{{Name: "CARGO_X", Value: "placeholder"}}
+	g.bindExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_REGISTRY", Value: "http://127.0.0.1:1"}, {Name: "SYNTHETIC_VERIFY", Value: "off"}}
+	g.applyExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_TOKEN", Value: "placeholder"}}
 	f.run()
-	want := []string{"gate", "bind", "setenv GOPROXY", "setenv GOSUMDB", "apply", "setenv CARGO_X", "nix", "driver", "revert"}
+	want := []string{"gate", "bind", "setenv SYNTHETIC_REGISTRY", "setenv SYNTHETIC_VERIFY", "apply", "setenv SYNTHETIC_TOKEN", "nix", "driver", "revert"}
 	if !reflect.DeepEqual(g.events, want) {
 		t.Fatalf("events = %v, want %v", g.events, want)
 	}
-	if g.env["GOPROXY"] != "http://127.0.0.1:1" || g.env["CARGO_X"] != "placeholder" {
+	if g.env["SYNTHETIC_REGISTRY"] != "http://127.0.0.1:1" || g.env["SYNTHETIC_TOKEN"] != "placeholder" {
 		t.Errorf("env = %v", g.env)
 	}
 }
@@ -120,18 +120,18 @@ func TestRegistry_ExportsReachTheEnvironmentBindingsFirst(t *testing.T) {
 func TestRegistry_FailedBindWarnsAppliesNothingAndCarriesOn(t *testing.T) {
 	f, g := registryFixture(t)
 	g.bindFail = true
-	g.bindExports = []ecosystem.EnvExport{{Name: "GOPROXY", Value: "x"}}
-	g.applyExports = []ecosystem.EnvExport{{Name: "CARGO_X", Value: "y"}}
+	g.bindExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_REGISTRY", Value: "x"}}
+	g.applyExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_TOKEN", Value: "y"}}
 	if rc := f.run(); rc != 0 {
 		t.Fatalf("rc = %d, want the run to carry on", rc)
 	}
 	if countLine(f.lines(), bindWarning) != 1 {
 		t.Errorf("stdout = %q, want %q once", f.lines(), bindWarning)
 	}
-	if _, ok := g.env["GOPROXY"]; ok {
+	if _, ok := g.env["SYNTHETIC_REGISTRY"]; ok {
 		t.Errorf("failed bind exported %v", g.env)
 	}
-	if g.env["CARGO_X"] != "y" {
+	if g.env["SYNTHETIC_TOKEN"] != "y" {
 		t.Errorf("the in-tree step's export was lost: %v", g.env)
 	}
 }
@@ -139,18 +139,18 @@ func TestRegistry_FailedBindWarnsAppliesNothingAndCarriesOn(t *testing.T) {
 func TestRegistry_FailedApplyWarnsRevertsAndCarriesOn(t *testing.T) {
 	f, g := registryFixture(t)
 	g.applyFail = true
-	g.bindExports = []ecosystem.EnvExport{{Name: "GOPROXY", Value: "x"}}
-	g.applyExports = []ecosystem.EnvExport{{Name: "CARGO_X", Value: "y"}}
+	g.bindExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_REGISTRY", Value: "x"}}
+	g.applyExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_TOKEN", Value: "y"}}
 	if rc := f.run(); rc != 0 {
 		t.Fatalf("rc = %d, want the run to carry on", rc)
 	}
 	if countLine(f.lines(), applyWarning) != 1 {
 		t.Errorf("stdout = %q, want %q once", f.lines(), applyWarning)
 	}
-	if _, ok := g.env["CARGO_X"]; ok || g.env["GOPROXY"] != "x" {
+	if _, ok := g.env["SYNTHETIC_TOKEN"]; ok || g.env["SYNTHETIC_REGISTRY"] != "x" {
 		t.Errorf("env = %v, want only the bindings' exports", g.env)
 	}
-	want := []string{"gate", "bind", "setenv GOPROXY", "apply", "revert", "nix", "driver", "revert"}
+	want := []string{"gate", "bind", "setenv SYNTHETIC_REGISTRY", "apply", "revert", "nix", "driver", "revert"}
 	if !reflect.DeepEqual(g.events, want) {
 		t.Fatalf("events = %v, want %v", g.events, want)
 	}
@@ -213,11 +213,11 @@ func TestRealRegistryDepsSetenvIsTheProcessEnvironment(t *testing.T) {
 func TestRegistry_FailedSetenvWarnsNamingTheVariableAndCarriesOn(t *testing.T) {
 	f, g := registryFixture(t)
 	g.setenvErr = errors.New("boom")
-	g.bindExports = []ecosystem.EnvExport{{Name: "GOPROXY", Value: "x"}, {Name: "GOSUMDB", Value: "off"}}
+	g.bindExports = []ecosystem.EnvExport{{Name: "SYNTHETIC_REGISTRY", Value: "x"}, {Name: "SYNTHETIC_VERIFY", Value: "off"}}
 	if rc := f.run(); rc != 0 {
 		t.Fatalf("rc = %d, want the run to carry on", rc)
 	}
-	for _, name := range []string{"GOPROXY", "GOSUMDB"} {
+	for _, name := range []string{"SYNTHETIC_REGISTRY", "SYNTHETIC_VERIFY"} {
 		want := "==> WARNING: registry proxy binding " + name + " could not be exported: boom"
 		if countLine(f.lines(), want) != 1 {
 			t.Errorf("stdout = %q, want %q once", f.lines(), want)
