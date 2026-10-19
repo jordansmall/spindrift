@@ -86,8 +86,8 @@ func isProvenanceTerm(k string) bool {
 	return ok && slices.ContainsFunc(catalogRows(), func(r chore.Row) bool { return r.Name == name })
 }
 
-// tuningChore names the tuning Chore for its own expiry and digest features,
-// not the merge hold, which reads the catalog row instead.
+// tuningChore names the tuning Chore for its own not-planned expiry, not the
+// merge hold, which reads the catalog row instead.
 const tuningChore = "tuning"
 
 // dedupPunctRun matches a run of site-key separators plus any touching space,
@@ -130,6 +130,26 @@ func normalizeDedupTerm(s string) (string, bool) {
 		return "", false
 	}
 	return k, true
+}
+
+// DedupFiles extracts the file path from each "path/to/file.go:Symbol" dedup
+// term (the path before the first ':'), deduping while keeping first-seen
+// order. A term with no ':' is taken whole. A term the dedup key set would
+// drop, or whose path names no site (e.g. "-:Foo"), contributes no file, so
+// junk terms never satisfy decide's file-count floor (issue #4036). The path
+// stays raw: the normalized key folds case and separators.
+func DedupFiles(dedupTerms []string) []string {
+	seen := make(map[string]bool, len(dedupTerms))
+	var files []string
+	for _, term := range dedupTerms {
+		path, _, hasSymbol := strings.Cut(term, ":")
+		if seen[path] || !UsableDedupTerm(term) || (hasSymbol && !UsableDedupTerm(path)) {
+			continue
+		}
+		seen[path] = true
+		files = append(files, path)
+	}
+	return files
 }
 
 // UsableDedupTerm reports whether splitDedupTerms would keep s as a key, so
@@ -463,34 +483,32 @@ type DedupPolicy struct {
 	NotPlannedBefore time.Time
 }
 
-// TuningFinding is a tuning finding issue as the backlog holds it, with the
-// metric its pattern key names.
-type TuningFinding struct {
+// PriorFinding is a finding issue of one Chore as the backlog holds it.
+type PriorFinding struct {
 	Issue forge.Issue
 	// Open reports the issue was listed open; false means closed.
 	Open bool
-	// Metric is the last part of the marker's class:file:metric pattern term,
-	// empty when the marker carries none.
-	Metric string
+	// Terms are the dedup marker's terms that are not provenance terms, in
+	// marker order; the Chore reads its own pattern key out of them.
+	Terms []string
 }
 
-// TuningFindings lists the tuning findings in the backlog, open and closed,
-// recognised by the tuning term in their dedup marker so trackers with no
+// PriorFindings lists chore's findings in the backlog, open and closed,
+// recognised by the chore term in their dedup marker so trackers with no
 // label registry list them too. A list failure is non-fatal for the lookup it
 // hit: the findings the other lookup returned are still returned, beside the
 // first error.
-func TuningFindings(it forge.IssueTracker) ([]TuningFinding, error) {
-	var out []TuningFinding
+func PriorFindings(it forge.IssueTracker, chore string) ([]PriorFinding, error) {
+	var out []PriorFinding
 	collect := func(issues []forge.Issue, open bool) {
 		for _, iss := range issues {
-			if !isFindingIssue(iss.Labels) || !carriesChoreMarker(iss.Body, tuningChore) {
+			if !isFindingIssue(iss.Labels) || !carriesChoreMarker(iss.Body, chore) {
 				continue
 			}
-			f := TuningFinding{Issue: iss, Open: open}
+			f := PriorFinding{Issue: iss, Open: open}
 			for _, k := range parseDedupMarker(iss.Body) {
 				if !isProvenanceTerm(k) {
-					f.Metric = k[strings.LastIndex(k, ":")+1:]
-					break
+					f.Terms = append(f.Terms, k)
 				}
 			}
 			out = append(out, f)

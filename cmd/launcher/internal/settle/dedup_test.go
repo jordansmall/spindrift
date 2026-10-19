@@ -1048,3 +1048,100 @@ func TestNonCatalogChoreTermIsADedupKey(t *testing.T) {
 		t.Errorf("matchDedup(%q) = %+v, want full overlap", foo, ov)
 	}
 }
+
+func priorMarker(chore string, terms ...string) string {
+	return "<!-- spindrift-dedup: " + strings.Join(append([]string{choreTerm(chore)}, terms...), ", ") + " -->"
+}
+
+// PriorFindings keeps only the named Chore's finding issues, open and closed,
+// carrying their non-provenance marker terms in order.
+func TestPriorFindings_FiltersByChoreAndKeepsTerms(t *testing.T) {
+	label := dispatchkind.Butler.FindingLabel
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueOpen: {
+				{Number: "1", Labels: []string{label}, Body: priorMarker("tuning", "model:x:usd")},
+				{Number: "2", Labels: []string{label}, Body: priorMarker("security", "site")},
+				{Number: "3", Labels: []string{"bug"}, Body: priorMarker("tuning", "model:y:usd")},
+			},
+			forge.IssueClosed: {
+				{Number: "4", Labels: []string{label}, Body: priorMarker("tuning")},
+			},
+		},
+	}
+
+	got, err := PriorFindings(stub, "tuning")
+	if err != nil {
+		t.Fatalf("PriorFindings: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("PriorFindings = %+v, want issues 1 and 4", got)
+	}
+	if got[0].Issue.Number != "1" || !got[0].Open || !slices.Equal(got[0].Terms, []string{"model:x:usd"}) {
+		t.Errorf("first = %+v", got[0])
+	}
+	if got[1].Issue.Number != "4" || got[1].Open || len(got[1].Terms) != 0 {
+		t.Errorf("second = %+v", got[1])
+	}
+}
+
+func TestPriorFindings_ListFailureKeepsOtherLookup(t *testing.T) {
+	label := dispatchkind.Butler.FindingLabel
+	stub := &labeledBacklogListerStub{
+		IssueTrackerFake: forge.NewFake().IssueTrackerFake,
+		issues: map[forge.IssueState][]forge.Issue{
+			forge.IssueOpen: {{Number: "1", Labels: []string{label}, Body: priorMarker("tuning", "a:b:c")}},
+		},
+		errs: map[forge.IssueState]error{forge.IssueClosed: errors.New("boom")},
+	}
+
+	got, err := PriorFindings(stub, "tuning")
+	if err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("err = %v, want a closed-lookup error", err)
+	}
+	if len(got) != 1 || got[0].Issue.Number != "1" {
+		t.Errorf("got = %+v, want the open finding", got)
+	}
+}
+
+func TestPriorFindings_FallsBackToOpenIssues(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{dispatchkind.Butler.FindingLabel}, Body: priorMarker("tuning", "a:b:c")})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{dispatchkind.Butler.FindingLabel}, Body: priorMarker("security", "a:b:c")})
+
+	got, err := PriorFindings(fc, "tuning")
+	if err != nil {
+		t.Fatalf("PriorFindings: %v", err)
+	}
+	if len(got) != 1 || got[0].Issue.Number != "1" || !got[0].Open || !slices.Equal(got[0].Terms, []string{"a:b:c"}) {
+		t.Errorf("got = %+v", got)
+	}
+}
+
+// TestDedupFiles_JunkTermsCountAsNoFile pins that junk dedup terms count as
+// no file (issue #4036).
+func TestDedupFiles_JunkTermsCountAsNoFile(t *testing.T) {
+	cases := []struct {
+		name  string
+		terms []string
+		want  []string
+	}{
+		{"bare dash", []string{"-"}, nil},
+		{"bare bangs", []string{"!!"}, nil},
+		{"dash path dash symbol", []string{"-:-"}, nil},
+		{"dash path named symbol", []string{"-:Foo"}, nil},
+		{"junk mixed with a real term", []string{"a.go:F", "-", "!!"}, []string{"a.go"}},
+		{"term rejected for comma", []string{"a.go:F, misc"}, nil},
+		{"two symbols in the same file dedupe to one path", []string{"b/c.go:X", "b/c.go:Y"}, []string{"b/c.go"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DedupFiles(tc.terms)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("DedupFiles(%v) = %v, want %v", tc.terms, got, tc.want)
+			}
+		})
+	}
+}
