@@ -170,9 +170,9 @@ func ResponseRewriteRows() []registryvocab.RewriteRow {
 // CredentialStores returns each row's CredentialStores keyed by row Name, so
 // registrydiscover never has to know which row reads which store. The slices
 // are copies; callers may write through them.
-func CredentialStores() map[string][]string {
-	stores := make(map[string][]string, len(Table))
-	for _, row := range Table {
+func CredentialStores(rows []Row) map[string][]string {
+	stores := make(map[string][]string, len(rows))
+	for _, row := range rows {
 		stores[row.Name] = append([]string(nil), row.CredentialStores...)
 	}
 	return stores

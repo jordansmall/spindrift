@@ -9,7 +9,7 @@ import (
 )
 
 func TestCredentialStoresPinsTodaysQueries(t *testing.T) {
-	got := CredentialStores()
+	got := CredentialStores(Table)
 	if len(got) != len(Table) {
 		t.Fatalf("CredentialStores has %d rows, Table has %d", len(got), len(Table))
 	}
@@ -41,8 +41,8 @@ func TestCredentialStoresAreStoreKinds(t *testing.T) {
 }
 
 func TestCredentialStoresReturnsCopies(t *testing.T) {
-	CredentialStores()[nameCargo][0] = "mutated"
-	if CredentialStores()[nameCargo][0] == "mutated" {
+	CredentialStores(Table)[nameCargo][0] = "mutated"
+	if CredentialStores(Table)[nameCargo][0] == "mutated" {
 		t.Fatal("mutating the returned slice reached Table")
 	}
 }

@@ -7,9 +7,9 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// StoreLookup is the production Lookup for Discover: it reports whether store
-// holds a credential for d. It discards the resolved value and never returns
-// or logs the credential.
+// StoreLookup is the production Lookup for DiscoverRows: it reports whether
+// store holds a credential for d. It discards the resolved value and never
+// returns or logs the credential.
 func StoreLookup(store Store, d ecosystem.Declaration) (found bool, err error) {
 	cfg, err := storeLookupConfig(store, d)
 	if err != nil {

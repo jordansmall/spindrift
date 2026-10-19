@@ -58,7 +58,7 @@ type UnmatchedHost struct {
 	StoresSearched []string
 }
 
-// Report summarizes a Discover run: which declared hosts matched a store,
+// Report summarizes a DiscoverRows run: which declared hosts matched a store,
 // which did not, and which config files declare no usable registry (carried
 // through from Extract's Note, including its Skipped distinction).
 type Report struct {
@@ -67,16 +67,12 @@ type Report struct {
 	NoRegistry []ecosystem.Note
 }
 
-// Discover extracts registry declarations from repoDir and proposes a route
-// per unique host, searching stores in order for a matching credential.
-// storesByEcosystem maps an ecosystem row name to the source keys of the stores
-// that row reads (ecosystem.CredentialStores); a store outside a declaration's
-// row is named in StoresSearched but never queried.
-func Discover(repoDir string, stores []Store, storesByEcosystem map[string][]string, lookup Lookup, probe Probe) ([]Route, Report, error) {
-	return DiscoverRows(repoDir, ecosystem.Table, stores, storesByEcosystem, lookup, probe)
-}
-
-// DiscoverRows is Discover over the given rows rather than ecosystem.Table.
+// DiscoverRows extracts registry declarations from repoDir over the given rows
+// and proposes a route per unique host, searching stores in order for a
+// matching credential. storesByEcosystem maps an ecosystem row name to the
+// source keys of the stores that row reads (ecosystem.CredentialStores); a
+// store outside a declaration's row is named in StoresSearched but never
+// queried.
 func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, storesByEcosystem map[string][]string, lookup Lookup, probe Probe) ([]Route, Report, error) {
 	declared, notes, err := ExtractRows(repoDir, rows)
 	if err != nil {
@@ -108,7 +104,7 @@ func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, storesBy
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
 			// Each kind's own StoreConfig already names every companion it
-			// contributes, so Discover assigns both unconditionally rather
+			// contributes, so DiscoverRows assigns both unconditionally rather
 			// than branching per store name.
 			if kind, ok := credresolver.KindBySourceKey(matchedStore.Name); ok && kind.StoreConfig != nil {
 				cfg := kind.StoreConfig(matchedStore.Path, declarationFacts(d))
