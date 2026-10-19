@@ -1,7 +1,6 @@
 package registrydiscover
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // This test pins storeLookupConfig to the credresolver kind table rather than a
@@ -43,21 +43,27 @@ func TestStoreLookupConfig_MatchesKindStoreConfig(t *testing.T) {
 	}
 }
 
-func TestStoreLookup_NetrcMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "netrc")
-	content := "machine registry.example.com\nlogin alice\npassword s3kr3t\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test netrc file: %v", err)
-	}
+// lookupNetrc runs StoreLookup for registry.example.com against a netrc store
+// holding content. netrc stands in for every store kind here: the lookup glue
+// is kind-agnostic, and each format's own parsing is pinned in credresolver's
+// tests and, end to end per row, in the ecosystem corpus's stores/ cases.
+func lookupNetrc(t *testing.T, content string) bool {
+	t.Helper()
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, "netrc", content)
 
-	store := Store{Name: "netrc", Path: path}
+	store := Store{Name: "netrc", Path: filepath.Join(dir, "netrc")}
 	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
 
 	found, err := StoreLookup(store, d)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !found {
+	return found
+}
+
+func TestStoreLookup_NetrcMatch(t *testing.T) {
+	if !lookupNetrc(t, "machine registry.example.com\nlogin alice\npassword s3kr3t\n") {
 		t.Error("found = false, want true")
 	}
 }
@@ -65,138 +71,7 @@ func TestStoreLookup_NetrcMatch(t *testing.T) {
 // A miss answers found=false with a nil error. It is an ordinary "this store
 // doesn't have it", not a discovery-halting error.
 func TestStoreLookup_NetrcNoMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "netrc")
-	content := "machine other.example.com\nlogin alice\npassword s3kr3t\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test netrc file: %v", err)
-	}
-
-	store := Store{Name: "netrc", Path: path}
-	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Error("found = true, want false")
-	}
-}
-
-func TestStoreLookup_NpmrcMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "npmrc")
-	content := "//npm.example.com/:_authToken=s3kr3t\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test npmrc file: %v", err)
-	}
-
-	store := Store{Name: "npmrc", Path: path}
-	d := ecosystem.Declaration{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Error("found = false, want true")
-	}
-}
-
-func TestStoreLookup_NpmrcNoMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "npmrc")
-	content := "//other.example.com/:_authToken=s3kr3t\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test npmrc file: %v", err)
-	}
-
-	store := Store{Name: "npmrc", Path: path}
-	d := ecosystem.Declaration{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Error("found = true, want false")
-	}
-}
-
-// Cargo keys its credentials on the declaration's registry name, not its host.
-func TestStoreLookup_CargoCredentialsMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "credentials.toml")
-	content := "[registries.mycorp]\ntoken = \"s3kr3t\"\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test credentials.toml file: %v", err)
-	}
-
-	store := Store{Name: "cargo-credentials", Path: path}
-	d := ecosystem.Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Error("found = false, want true")
-	}
-}
-
-func TestStoreLookup_CargoCredentialsNoMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "credentials.toml")
-	content := "[registries.other]\ntoken = \"s3kr3t\"\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test credentials.toml file: %v", err)
-	}
-
-	store := Store{Name: "cargo-credentials", Path: path}
-	d := ecosystem.Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
-		t.Error("found = true, want false")
-	}
-}
-
-// The declaration's host is deliberately mixed case and carries a port: by
-// discover's convention the gradle property key is the host with the port
-// stripped and lowercased, so a simplified fixture would stop testing that.
-func TestStoreLookup_GradlePropertiesMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "gradle.properties")
-	content := "maven.example.com=s3kr3t\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test gradle.properties file: %v", err)
-	}
-
-	store := Store{Name: "gradle-properties", Path: path}
-	d := ecosystem.Declaration{Host: "Maven.Example.com:443", UpstreamBaseURL: "https://maven.example.com:443/repo"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
-		t.Error("found = false, want true")
-	}
-}
-
-func TestStoreLookup_GradlePropertiesNoMatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "gradle.properties")
-	content := "other.example.com=s3kr3t\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test gradle.properties file: %v", err)
-	}
-
-	store := Store{Name: "gradle-properties", Path: path}
-	d := ecosystem.Declaration{Host: "maven.example.com", UpstreamBaseURL: "https://maven.example.com/repo"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if found {
+	if lookupNetrc(t, "machine other.example.com\nlogin alice\npassword s3kr3t\n") {
 		t.Error("found = true, want false")
 	}
 }
@@ -205,17 +80,23 @@ func TestStoreLookup_GradlePropertiesNoMatch(t *testing.T) {
 // a missing file must not abort the search of the remaining stores. See
 // firstMatch.
 func TestStoreLookup_MissingStoreFileIsNotFoundNilError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "does-not-exist")
-
-	store := Store{Name: "netrc", Path: path}
-	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	d := ecosystem.Declaration{
+		Host:            "registry.example.com",
+		UpstreamBaseURL: "https://registry.example.com/index",
+		RegistryName:    "mycorp",
 	}
-	if found {
-		t.Error("found = true, want false")
+	for _, kind := range storeKinds() {
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			store := Store{Name: kind.SourceKey, Path: filepath.Join(t.TempDir(), "does-not-exist")}
+
+			found, err := StoreLookup(store, d)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if found {
+				t.Error("found = true, want false")
+			}
+		})
 	}
 }
 
@@ -237,20 +118,7 @@ func TestStoreLookup_UnknownStoreNameIsError(t *testing.T) {
 // caller. This test pins that shape against a future signature change.
 func TestStoreLookup_NeverReturnsCredentialValue(t *testing.T) {
 	const sentinel = "DO-NOT-LEAK-s3kr3t"
-	path := filepath.Join(t.TempDir(), "netrc")
-	content := "machine registry.example.com\nlogin alice\npassword " + sentinel + "\n"
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("writing test netrc file: %v", err)
-	}
-
-	store := Store{Name: "netrc", Path: path}
-	d := ecosystem.Declaration{Host: "registry.example.com", UpstreamBaseURL: "https://registry.example.com/index"}
-
-	found, err := StoreLookup(store, d)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !found {
+	if !lookupNetrc(t, "machine registry.example.com\nlogin alice\npassword "+sentinel+"\n") {
 		t.Error("found = false, want true")
 	}
 }
