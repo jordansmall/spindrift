@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/boxclone"
 )
 
@@ -38,12 +39,19 @@ func (r *boxRun) cloneConfig() boxclone.Config {
 		GHCredentialHelper: r.forgeDescriptor().InBoxGHCredentialHelper,
 		HostMediatedRemote: r.env.HostMediatedRemote,
 		RepoSlug:           g("REPO_SLUG"),
-		RemoteURL:          g("CODE_FORGE_REMOTE_URL"),
-		ForgejoBaseURL:     g("FORGEJO_BASE_URL"),
-		ForgejoToken:       g("FORGEJO_TOKEN"),
+		Lookup:             envLookup(g),
 		RepoMountDir:       r.in.RepoMountDir,
 		WorkDir:            r.in.WorkDir,
 		GitUserName:        g("GIT_USER_NAME"),
 		GitUserEmail:       g("GIT_USER_EMAIL"),
+	}
+}
+
+// envLookup serves a backend's knobs from the Box env; a blank value is unset,
+// as a bare Getenv read has always treated it.
+func envLookup(getenv func(string) string) backendkit.Lookup {
+	return func(k string) (string, bool) {
+		v := getenv(k)
+		return v, v != ""
 	}
 }

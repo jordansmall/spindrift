@@ -162,8 +162,8 @@ func seamCloneRoute(t *testing.T, workDir, home string, env map[string]string) {
 		env["CODE_FORGE_REMOTE_URL"] = "https://git.example/o/r.git"
 	}
 	url, err := boxclone.CloneURL(boxclone.Config{
-		CodeForge: env["CODE_FORGE"], RepoSlug: env["REPO_SLUG"], RemoteURL: env["CODE_FORGE_REMOTE_URL"],
-		ForgejoBaseURL: env["FORGEJO_BASE_URL"], ForgejoToken: env["FORGEJO_TOKEN"],
+		CodeForge: env["CODE_FORGE"], RepoSlug: env["REPO_SLUG"],
+		Lookup: func(k string) (string, bool) { v := env[k]; return v, v != "" },
 	})
 	if err != nil {
 		return // box rejects the config itself

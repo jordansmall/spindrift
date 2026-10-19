@@ -1285,7 +1285,7 @@ var daemonKnobEnvVars = []string{
 	"BUTLER_CHORES", "BUTLER_EVERY", "BUTLER_CHORE_CLASSES",
 	"DAEMON_SELF_APP", "SPINDRIFT_DAEMON_PROGRAM", "DAEMON_PROBE_INTERVAL",
 	"ISSUE_TRACKER", "LABEL", "IN_PROGRESS_LABEL",
-	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL",
+	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG",
 	"GH_TOKEN_REFRESH_FILE",
 	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
 }
@@ -1294,8 +1294,8 @@ var daemonKnobEnvVars = []string{
 // test, so an ambient export in the host/CI environment cannot shadow the
 // input document values these tests set up. The backend knobs are read through
 // the Strategies' Lookup, not literally, so they are discovered by running
-// every tracker Strategy against a recording Lookup (the generated ReadKnobs
-// reads every row knob whatever the values).
+// every tracker and web-URL facet against a recording Lookup (the generated
+// ReadKnobs reads every row knob whatever the values).
 func clearKnobEnvT(t *testing.T) {
 	t.Helper()
 	keys := slices.Clone(daemonKnobEnvVars)
@@ -1309,6 +1309,9 @@ func clearKnobEnvT(t *testing.T) {
 		}
 		if s.NewIssueTracker != nil {
 			_, _ = s.NewIssueTracker(backendkit.Shared{}, record)
+		}
+		if s.WebURL != nil {
+			_ = s.WebURL(backendkit.Shared{RepoSlug: "o/r"}, record)
 		}
 		if s.TokenEnvVar != "" {
 			keys = append(keys, s.TokenEnvVar+"_CMD")

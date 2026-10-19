@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/boxclone"
 )
 
@@ -23,6 +24,7 @@ func git(t *testing.T, dir string, args ...string) string {
 
 type fixture struct {
 	origin, work, globalCfg, ghLog string
+	knobs                          map[string]string
 	cfg                            boxclone.Config
 }
 
@@ -33,6 +35,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
 	f := &fixture{
+		knobs:     map[string]string{},
 		origin:    filepath.Join(root, "origin.git"),
 		work:      filepath.Join(root, "work"),
 		globalCfg: filepath.Join(root, "gitconfig"),
@@ -70,7 +73,16 @@ func newFixture(t *testing.T) *fixture {
 		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "o/r", WorkDir: f.work,
 		GitUserName: "Box Agent", GitUserEmail: "box@example.com",
 	}
+	f.cfg.Lookup = mapLookup(f.knobs)
 	return f
+}
+
+// mapLookup serves m live, so a test can set knobs after building the fixture.
+func mapLookup(m map[string]string) backendkit.Lookup {
+	return func(k string) (string, bool) {
+		v, ok := m[k]
+		return v, ok
+	}
 }
 
 // redirect makes git rewrite urlPrefix to the local origin, so a clone only
@@ -117,12 +129,12 @@ func TestCloneGitForgeClonesFromRemoteURL(t *testing.T) {
 	f := newFixture(t)
 	f.redirect(t, "https://git.example.test/o/r.git")
 	f.cfg.CodeForge = "git"
-	f.cfg.RemoteURL = "https://git.example.test/o/r.git"
+	f.knobs["CODE_FORGE_REMOTE_URL"] = "https://git.example.test/o/r.git"
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.originURL(t); got != f.cfg.RemoteURL {
-		t.Errorf("origin url = %q, want %q", got, f.cfg.RemoteURL)
+	if got := f.originURL(t); got != f.knobs["CODE_FORGE_REMOTE_URL"] {
+		t.Errorf("origin url = %q, want %q", got, f.knobs["CODE_FORGE_REMOTE_URL"])
 	}
 }
 
@@ -138,7 +150,7 @@ func TestCloneGitForgeRequiresRemoteURL(t *testing.T) {
 func TestCloneGithubIgnoresStrayRemoteURL(t *testing.T) {
 	f := newFixture(t)
 	f.redirect(t, "https://github.com/o/r.git")
-	f.cfg.RemoteURL = "https://stray.example.test/x.git"
+	f.knobs["CODE_FORGE_REMOTE_URL"] = "https://stray.example.test/x.git"
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,36 +159,21 @@ func TestCloneGithubIgnoresStrayRemoteURL(t *testing.T) {
 	}
 }
 
-func TestCloneForgejoEmbedsTokenAndSkipsGh(t *testing.T) {
+func TestCloneForgejoClonesStrategyURLAndSkipsGh(t *testing.T) {
 	f := newFixture(t)
-	f.redirect(t, "https://tok123@forge.example.test/o/r.git")
+	f.redirect(t, "https://tok123@forgejo.invalid/o/r.git")
 	f.cfg.CodeForge = "forgejo"
 	f.cfg.GHCredentialHelper = false
-	f.cfg.ForgejoToken = "tok123"
-	f.cfg.ForgejoBaseURL = "https://forge.example.test/"
+	f.knobs["FORGEJO_TOKEN"] = "tok123"
 	var out bytes.Buffer
 	if err := boxclone.Clone(f.cfg, &out, &out); err != nil {
 		t.Fatalf("Clone: %v\n%s", err, out.String())
 	}
-	if got := f.originURL(t); got != "https://tok123@forge.example.test/o/r.git" {
+	if got := f.originURL(t); got != "https://tok123@forgejo.invalid/o/r.git" {
 		t.Errorf("origin url = %q", got)
 	}
 	if got := f.ghCalls(t); got != "" {
 		t.Errorf("gh was invoked: %q", got)
-	}
-}
-
-func TestCloneForgejoDefaultsToCodeberg(t *testing.T) {
-	f := newFixture(t)
-	f.redirect(t, "https://tok123@codeberg.org/o/r.git")
-	f.cfg.CodeForge = "forgejo"
-	f.cfg.GHCredentialHelper = false
-	f.cfg.ForgejoToken = "tok123"
-	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.originURL(t); got != "https://tok123@codeberg.org/o/r.git" {
-		t.Errorf("origin url = %q", got)
 	}
 }
 
@@ -225,11 +222,11 @@ func TestCloneSetsIdentityRepoLocallyAndLeavesGlobalConfigAlone(t *testing.T) {
 				f.redirect(t, "https://github.com/o/r.git")
 			case "git":
 				f.cfg.GHCredentialHelper = true
-				f.cfg.RemoteURL = "https://git.example.test/o/r.git"
-				f.redirect(t, f.cfg.RemoteURL)
+				f.knobs["CODE_FORGE_REMOTE_URL"] = "https://git.example.test/o/r.git"
+				f.redirect(t, f.knobs["CODE_FORGE_REMOTE_URL"])
 			case "forgejo":
-				f.cfg.ForgejoToken = "tok"
-				f.redirect(t, "https://tok@codeberg.org/o/r.git")
+				f.knobs["FORGEJO_TOKEN"] = "tok"
+				f.redirect(t, "https://tok@forgejo.invalid/o/r.git")
 			}
 			before, err := os.ReadFile(f.globalCfg)
 			if err != nil {
@@ -257,15 +254,15 @@ func TestCloneSetsIdentityRepoLocallyAndLeavesGlobalConfigAlone(t *testing.T) {
 
 func TestCloneBannerRedactsTokenBearingURL(t *testing.T) {
 	f := newFixture(t)
-	f.redirect(t, "https://sekrit@codeberg.org/o/r.git")
+	f.redirect(t, "https://sekrit@forgejo.invalid/o/r.git")
 	f.cfg.CodeForge = "forgejo"
 	f.cfg.GHCredentialHelper = false
-	f.cfg.ForgejoToken = "sekrit"
+	f.knobs["FORGEJO_TOKEN"] = "sekrit"
 	var out, errOut bytes.Buffer
 	if err := boxclone.Clone(f.cfg, &out, &errOut); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "==> cloning https://codeberg.org/o/r.git") {
+	if !strings.Contains(out.String(), "==> cloning https://forgejo.invalid/o/r.git") {
 		t.Errorf("banner missing: %q", out.String())
 	}
 	if strings.Contains(out.String()+errOut.String(), "sekrit") {
@@ -276,7 +273,7 @@ func TestCloneBannerRedactsTokenBearingURL(t *testing.T) {
 func TestCloneGitFailureGoesToStderrNotStdout(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.CodeForge = "git"
-	f.cfg.RemoteURL = filepath.Join(t.TempDir(), "missing.git")
+	f.knobs["CODE_FORGE_REMOTE_URL"] = filepath.Join(t.TempDir(), "missing.git")
 	var out, errOut bytes.Buffer
 	if err := boxclone.Clone(f.cfg, &out, &errOut); err == nil {
 		t.Fatal("Clone of a missing repo succeeded")
@@ -292,23 +289,42 @@ func TestCloneGitFailureGoesToStderrNotStdout(t *testing.T) {
 	}
 }
 
-func TestCloneURL(t *testing.T) {
+// CloneURL hands the selected Strategy the slug, the mount dir and the
+// config's Lookup, and returns its answer or error untouched.
+func TestCloneURLDelegatesToTheStrategy(t *testing.T) {
+	knobs := map[string]string{"FORGEJO_TOKEN": "t"}
 	for _, tc := range []struct {
-		name string
 		cfg  boxclone.Config
 		want string
 	}{
-		{"github", boxclone.Config{CodeForge: "github", RepoSlug: "o/r"}, "https://github.com/o/r.git"},
-		{"empty forge is github", boxclone.Config{RepoSlug: "o/r"}, "https://github.com/o/r.git"},
-		{"git", boxclone.Config{CodeForge: "git", RemoteURL: "ssh://h/x.git"}, "ssh://h/x.git"},
-		{"forgejo default base", boxclone.Config{CodeForge: "forgejo", RepoSlug: "o/r", ForgejoToken: "t"}, "https://t@codeberg.org/o/r.git"},
-		{"forgejo trims slash", boxclone.Config{CodeForge: "forgejo", RepoSlug: "o/r", ForgejoToken: "t", ForgejoBaseURL: "http://f.test:3000/"}, "http://t@f.test:3000/o/r.git"},
-		{"local", boxclone.Config{CodeForge: "local", RepoMountDir: "/mnt/repo"}, "/mnt/repo"},
+		{boxclone.Config{CodeForge: "github", RepoSlug: "o/r"}, "https://github.com/o/r.git"},
+		{boxclone.Config{CodeForge: "forgejo", RepoSlug: "o/r"}, "https://t@forgejo.invalid/o/r.git"},
+		{boxclone.Config{CodeForge: "local", RepoMountDir: "/mnt/repo"}, "/mnt/repo"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.cfg.CodeForge, func(t *testing.T) {
+			tc.cfg.Lookup = mapLookup(knobs)
 			got, err := boxclone.CloneURL(tc.cfg)
 			if err != nil || got != tc.want {
 				t.Errorf("CloneURL = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+	_, err := boxclone.CloneURL(boxclone.Config{CodeForge: "git", Lookup: mapLookup(nil)})
+	if err == nil || !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL is required") {
+		t.Errorf("err = %v, want the Strategy's own error", err)
+	}
+}
+
+// A CODE_FORGE the Box cannot clone from must never fall back to a github URL.
+func TestCloneURLFailsClosed(t *testing.T) {
+	for _, forge := range []string{"", "gitlab", "jira"} {
+		t.Run("forge="+forge, func(t *testing.T) {
+			got, err := boxclone.CloneURL(boxclone.Config{CodeForge: forge, RepoSlug: "o/r"})
+			if err == nil || !strings.Contains(err.Error(), "CODE_FORGE") {
+				t.Errorf("err = %v, want one naming CODE_FORGE", err)
+			}
+			if strings.Contains(got, "github.com") {
+				t.Errorf("CloneURL = %q, must not be a github URL", got)
 			}
 		})
 	}
