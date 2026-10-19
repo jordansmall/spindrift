@@ -1,8 +1,6 @@
 # Queue-mode `spindrift recover` (issue #4656): it relays a finished work
 # Box's stranded outbox bundle through the work merge gate and runs no Box of
-# its own, so its Box-facing fields mirror work's, spelled as literals
-# because nix/checks/dispatch-labels.nix extracts every FindingLabel literal
-# from the generated kinds_gen.go.
+# its own, so its Box-facing fields mirror work's.
 # PriorityFirst lands stranded work before a new Box starts, so each rebases
 # onto as little new main as possible. Its work is outbox bundles, not
 # tracker issues, so the host counts the eligible ones itself
