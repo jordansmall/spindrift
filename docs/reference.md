@@ -3771,11 +3771,12 @@ the Issue Tracker (where issues live) and the Code Forge (where code and CI
 live) are independent axes. `ISSUE_TRACKER` selects the tracker and
 `CODE_FORGE` the forge, so pairings like Jira issues with GitHub PRs work.
 
-The [Quickstart wizard](../README.md#quick-start) provisions `github`, or
-`forgejo` when the repo's remote is on codeberg.org. For any other
-non-GitHub host, it asks which one to use. `local` and `jira` are
-experimental, and you select them by editing `issues.tracker` in the
-generated `flake.nix`.
+The [Quickstart wizard](../README.md#quick-start) provisions a backend whose
+row declares a `quickstart` block: `github`, or `forgejo` when the repo's
+remote is on a host that row lists (codeberg.org). For any other
+host, it asks which of those backends to use. `local` and `jira` have no
+such block and are experimental, so you select them by editing
+`issues.tracker` in the generated `flake.nix`.
 
 - **`github`** (default) — the label lifecycle described above.
 - **`local`** — a private, file-based tracker; see [Local issue
