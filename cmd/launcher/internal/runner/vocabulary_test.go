@@ -87,7 +87,8 @@ func TestPrecedence_CoversValidValues(t *testing.T) {
 // iteration order.
 func TestRuntimeAliases_NoAmbiguousReverseMapping(t *testing.T) {
 	seen := map[string]string{}
-	for runtime, bin := range runtimeAliases {
+	for runtime, a := range runtimeAliases {
+		bin := a.binary
 		if other, ok := seen[bin]; ok {
 			t.Errorf("both %q and %q alias to binary %q — AliasFor(%q) would be ambiguous", runtime, other, bin, bin)
 		}

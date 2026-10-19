@@ -9,20 +9,29 @@ import (
 // invokes, for the runtimes whose knob value differs from their binary name.
 // BinaryFor and AliasFor both resolve from this one map so the pairing cannot
 // drift in one direction (issue #2561).
-var runtimeAliases = map[string]string{"rancher": "nerdctl"}
+var runtimeAliases = map[string]runtimeAlias{
+	"rancher": {binary: "nerdctl", missingHint: "is Rancher Desktop running in containerd mode?"},
+}
+
+// runtimeAlias is one alias row: the binary it invokes and, optionally, the
+// hint ValidateRuntimeWithLookup appends when that binary is not on PATH.
+type runtimeAlias struct {
+	binary      string
+	missingHint string
+}
 
 // BinaryFor maps a Config.Runtime value to the CLI binary it invokes.
 func BinaryFor(runtime string) string {
-	if bin, ok := runtimeAliases[runtime]; ok {
-		return bin
+	if a, ok := runtimeAliases[runtime]; ok {
+		return a.binary
 	}
 	return runtime
 }
 
 // AliasFor maps a probed binary name back to its operator-facing runtime value.
 func AliasFor(binary string) string {
-	for runtime, bin := range runtimeAliases {
-		if bin == binary {
+	for runtime, a := range runtimeAliases {
+		if a.binary == binary {
 			return runtime
 		}
 	}
