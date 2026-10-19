@@ -1,22 +1,31 @@
 package ecosystem
 
-import "strings"
+import (
+	"strings"
 
-// nameYarn is yarnRow's Name. npmFamilyVars (npm.go) compares against this
-// const rather than yarnRow.Name to avoid a package initialization cycle.
-const nameYarn = "yarn"
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
-// yarnRow is the yarn ecosystem's Table entry. It carries a BindingEnvVar
-// despite a nil EnvExports because npmRow's EnvExports (NpmFamilyBindings)
-// renders all three npm-family vars, yarn's included, in one call.
+// nameYarn and yarnBindingEnvVar are consts because yarnRow's EnvExports cannot
+// read yarnRow.Name or yarnRow.BindingEnvVar without a package initialization
+// cycle. Sharing the const keeps BindingEnvVar and the exported var one name.
+const (
+	nameYarn          = "yarn"
+	yarnBindingEnvVar = "YARN_NPM_REGISTRY_SERVER"
+)
+
+// yarnRow is the yarn ecosystem's Table entry.
 var yarnRow = Row{
 	Name:             nameYarn,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"yarn.lock"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".yarnrc.yml",
-	BindingEnvVar:    "YARN_NPM_REGISTRY_SERVER",
-	ConfigParser:     parseYarnRegistryConfig,
+	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		return npmFamilyBinding(port, prefix, routes, yarnBindingEnvVar, nameYarn)
+	},
+	BindingEnvVar: yarnBindingEnvVar,
+	ConfigParser:  parseYarnRegistryConfig,
 }
 
 // parseYarnRegistryConfig ignores .yarnrc.yml indentation and nesting, taking

@@ -646,7 +646,7 @@ func TestRunBindRegistryWithDeps_ExportOrderFollowsTable(t *testing.T) {
 	}
 	gotNames := exportNamesInFileOrder(t, string(got))
 	wantNames := []string{
-		"npm_config_registry", "pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER",
+		"npm_config_registry", "YARN_NPM_REGISTRY_SERVER", "pnpm_config_registry",
 		"GOPROXY", "GOTOOLCHAIN", "GONOPROXY", "GOSUMDB",
 	}
 	if len(gotNames) != len(wantNames) {
@@ -3225,7 +3225,7 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 
 // boundRoute is the manifest route the bindings-mode tests share: one route
 // declaring a path per ecosystem, the shape that renders every binding var (see
-// ecosystem.NpmFamilyBindings and ecosystem.ComputeGoBindings). An ecosystem the
+// the npm-family rows' EnvExports and ecosystem.ComputeGoBindings). An ecosystem the
 // route declares nothing for binds nothing.
 func boundRoute(prefix string) registrymanifest.Route {
 	return registrymanifest.Route{

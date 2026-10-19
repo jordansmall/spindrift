@@ -24,29 +24,6 @@ func rowByName(t *testing.T, name string) Row {
 	return Row{}
 }
 
-// The npm row must delegate to NpmFamilyBindings rather than reimplement it.
-func TestNpmRowEnvExports(t *testing.T) {
-	row := rowByName(t, "npm")
-	if row.EnvExports == nil {
-		t.Fatal("npm row has nil EnvExports")
-	}
-
-	gotExports, gotWarnings := row.EnvExports(27182, "r0", stubGetenv(nil), allDeclaredRoutes())
-
-	want, _ := NpmFamilyBindings(27182, "r0", allDeclaredRoutes())
-	if len(gotExports) != len(want) {
-		t.Fatalf("got %d exports, want %d: %v", len(gotExports), len(want), gotExports)
-	}
-	for i, w := range want {
-		if gotExports[i] != w {
-			t.Errorf("export %d = %+v, want %+v", i, gotExports[i], w)
-		}
-	}
-	if gotWarnings != nil {
-		t.Errorf("got warnings %v, want nil", gotWarnings)
-	}
-}
-
 // The go row must pass its getenv parameter into ComputeGoBindings rather
 // than discard the snapshot it is handed.
 func TestGoRowEnvExports(t *testing.T) {
@@ -95,8 +72,8 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	want := map[string]bool{
 		"cargo":  false,
 		"npm":    true,
-		"yarn":   false,
-		"pnpm":   false,
+		"yarn":   true,
+		"pnpm":   true,
 		"go":     true,
 		"gradle": false,
 	}
@@ -113,9 +90,7 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 }
 
 // npm, pnpm, yarn and go bind the Forwarder through an env var; cargo and
-// gradle bind through a file and leave the field empty. pnpm and yarn carry
-// a value despite rendering no EnvExports of their own, because npm's
-// NpmFamilyBindings renders all three family vars in one call.
+// gradle bind through a file and leave the field empty.
 func TestTable_BindingEnvVarPresence(t *testing.T) {
 	want := map[string]string{
 		"cargo":  "",
@@ -136,10 +111,10 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 	}
 }
 
-// No single row's own EnvExports output can be diffed against its
-// BindingEnvVar: pnpm and yarn render none, and go's renderer emits its vars
-// conditionally. So this checks each BindingEnvVar against the whole export
-// file, walking EnvExportRows() the way bindings mode does.
+// A single row's own EnvExports output cannot always be diffed against its
+// BindingEnvVar: go's renderer emits its vars conditionally. So this checks
+// each BindingEnvVar against the whole export file, walking EnvExportRows()
+// the way bindings mode does.
 func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	renderedNames := map[string]bool{}
 	for _, row := range EnvExportRows() {
