@@ -1,13 +1,20 @@
 package butler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/ledger/ledgertest"
 )
 
 func TestTreeSourceDue(t *testing.T) {
@@ -72,5 +79,136 @@ func TestTreeSourceStageSurfacesTrackedFilesError(t *testing.T) {
 	src := &treeSource{tree: fakeTree{filesErr: boom}, head: "head1"}
 	if err := src.Stage(); !errors.Is(err, boom) {
 		t.Errorf("err = %v, want %v", err, boom)
+	}
+}
+
+// newTestRecordsSource is a recordsSource over a store at root seeded with n
+// settled Records, built the way the tuning sweep tests build their Runner,
+// returned with that Runner and the Record IDs in order.
+func newTestRecordsSource(t *testing.T, root string, n, minRecords int) (recordsSource, *Runner, []string) {
+	t.Helper()
+	ids := seedRecords(t, root, 1, n, tuningNow.Add(-48*time.Hour))
+	it := forge.NewFake().AsIssueFiler()
+	r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, it, nil, tuningPolicy(root, minRecords), func() time.Time { return tuningNow })
+	src, err := newRecordsSource(r, "tuning", "head1", tuningNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return src, r, ids
+}
+
+func TestRecordsSourceDue(t *testing.T) {
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
+	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 3)
+
+	fresh := ledger.Tip{}
+	if got := src.Due(fresh, nil, tuningNow, chore.Room{}, cfg); got != chore.Due {
+		t.Errorf("5 new settled Records, min 3: got %v, want Due", got)
+	}
+
+	pastThree := ledger.Tip{State: ledger.State{Cursor: ids[2], Phase: ledger.Done}}
+	if got := src.Due(pastThree, nil, tuningNow, chore.Room{}, cfg); got != chore.TooFewRecords {
+		t.Errorf("2 Records past the cursor, min 3: got %v, want TooFewRecords", got)
+	}
+
+	pastAll := ledger.Tip{State: ledger.State{Cursor: ids[4], Phase: ledger.Done}}
+	if got := src.Due(pastAll, nil, tuningNow, chore.Room{}, cfg); got != chore.TooFewRecords {
+		t.Errorf("no Records past the cursor: got %v, want TooFewRecords", got)
+	}
+}
+
+func TestRecordsSourceNextDue(t *testing.T) {
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
+	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 3)
+
+	if at, onTipMove := src.NextDue(ledger.Tip{}, nil, tuningNow, chore.Room{}, cfg); !at.Equal(tuningNow) || onTipMove {
+		t.Errorf("Due: got (%v, %v), want (now, false)", at, onTipMove)
+	}
+
+	pastAll := ledger.Tip{State: ledger.State{Cursor: ids[4], Phase: ledger.Done}}
+	want := tuningNow.Add(chore.RecordsRecheck)
+	if at, onTipMove := src.NextDue(pastAll, nil, tuningNow, chore.Room{}, cfg); !at.Equal(want) || onTipMove {
+		t.Errorf("TooFewRecords: got (%v, %v), want (%v, false)", at, onTipMove, want)
+	}
+}
+
+func TestRecordsSourcePrepare(t *testing.T) {
+	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 1)
+
+	got, err := src.Prepare(ledger.Tip{State: ledger.State{Phase: ledger.Claimed}})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if want := (chore.Scope{Head: "head1", NextCursor: ids[4]}); !reflect.DeepEqual(got.scope, want) {
+		t.Errorf("scope = %+v, want %+v", got.scope, want)
+	}
+	if want := "Window: after (start) through " + ids[4] + " — 5 settled Records"; !strings.Contains(got.input, want) {
+		t.Errorf("input lacks %q:\n%s", want, got.input)
+	}
+	if !got.claimTime.Equal(tuningNow) {
+		t.Errorf("claimTime = %v, want %v", got.claimTime, tuningNow)
+	}
+	if got.arm == nil {
+		t.Error("records source must hand a settle hook")
+	}
+}
+
+func TestRecordsSourcePrepareStartsPastCursor(t *testing.T) {
+	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 1)
+
+	got, err := src.Prepare(ledger.Tip{State: ledger.State{Cursor: ids[2], Phase: ledger.Claimed}})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if got.scope.NextCursor != ids[4] {
+		t.Errorf("NextCursor = %q, want %q", got.scope.NextCursor, ids[4])
+	}
+	if want := "Window: after " + ids[2] + " through " + ids[4] + " — 2 settled Records"; !strings.Contains(got.input, want) {
+		t.Errorf("input lacks %q:\n%s", want, got.input)
+	}
+}
+
+func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
+	src, r, _ := newTestRecordsSource(t, t.TempDir(), 5, 1)
+	p, err := src.Prepare(ledger.Tip{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := dispatch.NewFake()
+	d.RecordIDResult = dispatchrecord.RecordID("tuning", "tuning", tuningNow)
+	step := &settleRun{}
+	if err := p.arm(d, step); err != nil {
+		t.Fatalf("arm: %v", err)
+	}
+
+	sum := sha256.Sum256([]byte(p.input))
+	want := ledger.Snapshot{Sweep: d.RecordIDResult, SHA256: hex.EncodeToString(sum[:])}
+	if step.tuning == nil || step.tuning.ref != want {
+		t.Fatalf("step.tuning = %+v, want ref %+v", step.tuning, want)
+	}
+	snap, ok, err := r.policy.loadSnapshot(d.RecordIDResult)
+	if err != nil || !ok {
+		t.Fatalf("snapshot not stored: ok=%v err=%v", ok, err)
+	}
+	if snap.Rendered != p.input || snap.SHA256 != want.SHA256 || !snap.CreatedAt.Equal(tuningNow) {
+		t.Errorf("stored snapshot = %+v, want the digest %q created at %v", snap, p.input, tuningNow)
+	}
+}
+
+func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
+	src, _, _ := newTestRecordsSource(t, t.TempDir(), 5, 1)
+	p, err := src.Prepare(ledger.Tip{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	step := &settleRun{}
+	err = p.arm(dispatch.NewFake(), step)
+	if err == nil || !strings.HasPrefix(err.Error(), "butler: tuning: dispatch has no record ID") {
+		t.Fatalf("err = %v, want the no-record-ID error", err)
+	}
+	if step.tuning != nil {
+		t.Error("a failed arm must leave the settle step unarmed")
 	}
 }
