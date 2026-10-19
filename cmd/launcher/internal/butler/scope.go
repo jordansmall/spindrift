@@ -169,13 +169,13 @@ func (s recordsSource) armSnapshot(d dispatch.Dispatcher, step *settleRun, diges
 	// findings nothing can validate. The claim stands until stale takeover.
 	id := d.RecordID()
 	if id == "" {
-		return fmt.Errorf("butler: %s: dispatch has no record ID to key the tuning snapshot", s.chore)
+		return fmt.Errorf("butler: %s: dispatch has no record ID to key the snapshot", s.chore)
 	}
 	sum := sha256.Sum256([]byte(digest))
 	ref := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
-	if err := s.policy.storeSnapshot(dispatchrecord.TuningSnapshot{RecordID: id, SHA256: ref.SHA256, Rendered: digest, CreatedAt: s.claimedAt}); err != nil {
+	if err := s.policy.storeSnapshot(dispatchrecord.Snapshot{Chore: s.chore, RecordID: id, SHA256: ref.SHA256, Rendered: digest, CreatedAt: s.claimedAt}); err != nil {
 		return fmt.Errorf("butler: %s: %w", s.chore, err)
 	}
-	step.tuning = &tuningSnapshot{ref: ref, digest: s.digest, policy: s.policy, tree: s.tree}
+	step.tuning = &tuningSnapshot{chore: s.chore, ref: ref, digest: s.digest, policy: s.policy, tree: s.tree}
 	return nil
 }

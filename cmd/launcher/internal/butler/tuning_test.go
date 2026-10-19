@@ -293,7 +293,7 @@ func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
 			return
 		}
 		defer s.Close()
-		_, storedAtLaunch, _ = s.TuningSnapshot(id)
+		_, storedAtLaunch, _ = s.Snapshot("tuning", id)
 	}
 
 	out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
@@ -315,9 +315,9 @@ func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	snap, ok, err := store.TuningSnapshot(id)
+	snap, ok, err := store.Snapshot("tuning", id)
 	if err != nil || !ok {
-		t.Fatalf("TuningSnapshot(%q) = ok %v, err %v", id, ok, err)
+		t.Fatalf("Snapshot(%q) = ok %v, err %v", id, ok, err)
 	}
 	if snap.Rendered != tr.input[0] || snap.SHA256 != want.SHA256 || !snap.CreatedAt.Equal(tuningNow) {
 		t.Errorf("snapshot = %+v, want the Box's input, sha %s, created %v", snap, want.SHA256, tuningNow)
@@ -1280,14 +1280,14 @@ func TestSweep_Tuning_StoredSnapshotGoneOrAlteredLeavesClaim(t *testing.T) {
 		// wantStoreAbsent asserts settle did not recreate a deleted store.
 		wantStoreAbsent bool
 	}{
-		{"removed", sqlMutation(`DELETE FROM tuning_snapshots`), "is missing from the dispatch records store", false},
+		{"removed", sqlMutation(`DELETE FROM snapshots`), "is missing from the dispatch records store", false},
 		{"store-deleted", func(t *testing.T, root string) {
 			if err := os.Remove(hostpaths.DispatchRecordsDB(root)); err != nil {
 				t.Error(err)
 			}
 		}, "is missing from the dispatch records store", true},
-		{"rendered", sqlMutation(`UPDATE tuning_snapshots SET rendered = rendered || 'x'`), "does not match its ledger ref", false},
-		{"sha256", sqlMutation(`UPDATE tuning_snapshots SET sha256 = 'deadbeef'`), "does not match its ledger ref", false},
+		{"rendered", sqlMutation(`UPDATE snapshots SET rendered = rendered || 'x'`), "does not match its ledger ref", false},
+		{"sha256", sqlMutation(`UPDATE snapshots SET sha256 = 'deadbeef'`), "does not match its ledger ref", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
