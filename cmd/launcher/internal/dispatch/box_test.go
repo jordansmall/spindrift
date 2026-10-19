@@ -1374,8 +1374,8 @@ func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testi
 			Upstream: "https://host.example.com",
 			Prefix:   "host-example-com",
 			EnforcedSubtrees: []registryvocab.Subtree{
-				{Ecosystem: "npm", Path: "/npm"},
-				{Ecosystem: "yarn", Path: "/yarn"},
+				{Ecosystem: "synthetic", Path: "/synthetic"},
+				{Ecosystem: "twin", Path: "/twin"},
 			},
 		},
 	}
@@ -1386,8 +1386,8 @@ func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testi
 		t.Fatalf("registryManifestRoutes returned %d routes, want 1", len(got))
 	}
 	want := []registryvocab.Subtree{
-		{Ecosystem: "npm", Path: "/npm"},
-		{Ecosystem: "yarn", Path: "/yarn"},
+		{Ecosystem: "synthetic", Path: "/synthetic"},
+		{Ecosystem: "twin", Path: "/twin"},
 	}
 	if !reflect.DeepEqual(got[0].EnforcedPaths, want) {
 		t.Errorf("got[0].EnforcedPaths = %+v, want %+v", got[0].EnforcedPaths, want)
