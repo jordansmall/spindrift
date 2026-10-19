@@ -53,6 +53,7 @@ func TestNpmRow_RewriteRows_PackumentMatches(t *testing.T) {
 		{name: "scoped tarball path does not match", path: "/@scope/pkg/-/pkg-1.0.0.tgz", base: "/", matches: false},
 		{name: "near-miss base prefix", path: "/r0foo/pkg", base: "/r0", matches: false},
 		{name: "trailing slash does not match", path: "/pkg/", base: "/", matches: false},
+		{name: "two-segment non-scoped path does not match", path: "/pkg/download", base: "/", matches: false},
 		{name: "bare @ segment does not match", path: "/@", base: "/", matches: false},
 		{name: "no package name at all", path: "/", base: "/", matches: false},
 		{name: "tarball directory marker does not match", path: "/-", base: "/", matches: false},

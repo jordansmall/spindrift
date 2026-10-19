@@ -509,3 +509,122 @@ func (b *lockedBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+// fakeStreamRow is a streaming row for the invented "widget" ecosystem that
+// serves manifest.json under the route's base and hands the body to rewrite.
+func fakeStreamRow(rewrite func(dst io.Writer, src io.Reader, rc registryvocab.RewriteContext, onEdit func(registryvocab.RewriteEdit)) error) registryvocab.RewriteRow {
+	return registryvocab.RewriteRow{
+		Name:      "widget stream",
+		Ecosystem: "widget",
+		Method:    http.MethodGet,
+		Matches: func(routeRelativePath, base string) bool {
+			return routeRelativePath == registryvocab.JoinBase(base, "/manifest.json")
+		},
+		RewriteStream: rewrite,
+	}
+}
+
+func fakeStreamRoute(upstream string) Route {
+	return Route{
+		MatchHost:        "widget.example.com",
+		EnforcedPaths:    []string{"/index"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/index"}},
+		Upstream:         upstream,
+		Credential:       "sekret-stream-token",
+	}
+}
+
+// A streamed rewrite well past the buffered path's cap is rewritten whole,
+// drops the upstream Content-Length (the length changed and the response goes
+// chunked), learns only from the applied edit, and logs the declined one as a
+// skip without learning from it (issues #3401, #5003).
+func TestStreamRewrite_LargeBodyRewrittenWithLearningAndNoContentLength(t *testing.T) {
+	const primary = "https://widget.example.com/primary/pkg.tar.gz"
+	const foreign = "https://cdn.example.com/mirror/pkg.tar.gz"
+	pad := strings.Repeat("x", 4<<20)
+	in := `{"pad":"` + pad + `","primary":"` + primary + `","secondary":"` + foreign + `"}`
+
+	row := fakeStreamRow(func(dst io.Writer, src io.Reader, rc registryvocab.RewriteContext, onEdit func(registryvocab.RewriteEdit)) error {
+		b, err := io.ReadAll(src)
+		if err != nil {
+			return err
+		}
+		to := "http://" + rc.Forwarder.Host + "/" + rc.Prefix + "/primary/pkg.tar.gz"
+		onEdit(registryvocab.RewriteEdit{From: primary, To: to, LearnedPath: "/primary"})
+		onEdit(registryvocab.RewriteEdit{From: foreign})
+		_, err = io.WriteString(dst, strings.Replace(string(b), primary, to, 1))
+		return err
+	})
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index/manifest.json" {
+			w.Header().Set("Content-Type", "application/json")
+		}
+		_, _ = w.Write([]byte(in))
+	})
+	p, routes := newProxy(t, []registryvocab.RewriteRow{row}, []Route{fakeStreamRoute(upstream.URL)})
+	prefix := routes[0].Prefix
+	logBuf := captureLog(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
+	req.Host = "forwarder.example:9999"
+	rr := serve(p, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	want := strings.Replace(in, primary, "http://forwarder.example:9999/"+prefix+"/primary/pkg.tar.gz", 1)
+	if got := rr.Body.String(); got != want {
+		t.Errorf("body differs from the expected rewrite (len %d vs %d)", len(got), len(want))
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Errorf("Content-Length = %q, want absent (streamed rewrite goes chunked)", got)
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, foreign) || strings.Contains(logged, "rewrote "+foreign) {
+		t.Errorf("declined edit not logged as a skip: %.300q", logged)
+	}
+	if strings.Contains(logged, "sekret-stream-token") {
+		t.Errorf("log output contained the credential: %.300q", logged)
+	}
+
+	if rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+"/primary/pkg.tar.gz", nil)); rr.Code != http.StatusOK {
+		t.Errorf("applied edit's path: status = %d, want %d (learned path must be admitted)", rr.Code, http.StatusOK)
+	}
+	if rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+"/mirror/pkg.tar.gz", nil)); rr.Code != http.StatusForbidden {
+		t.Errorf("declined edit's path: status = %d, want %d (nothing learned from a declined edit)", rr.Code, http.StatusForbidden)
+	}
+}
+
+// A rewriter that abandons the stream partway has relayed the rest verbatim:
+// the client gets the upstream's bytes unchanged and the abandonment is logged
+// once, naming the row and path.
+func TestStreamRewrite_AbandonedStreamRelaysUnchangedAndLogsOnce(t *testing.T) {
+	in := `{"readme":"` + strings.Repeat("r", 2<<20) + `"}`
+	row := fakeStreamRow(func(dst io.Writer, src io.Reader, _ registryvocab.RewriteContext, _ func(registryvocab.RewriteEdit)) error {
+		if _, err := io.Copy(dst, src); err != nil {
+			return err
+		}
+		return registryvocab.ErrRewriteAbandoned
+	})
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(in))
+	})
+	p, routes := newProxy(t, []registryvocab.RewriteRow{row}, []Route{fakeStreamRoute(upstream.URL)})
+	prefix := routes[0].Prefix
+	logBuf := captureLog(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index/manifest.json", nil)
+	req.Host = "forwarder.example:9999"
+	rr := serve(p, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if rr.Body.String() != in {
+		t.Errorf("body (len %d) differs from upstream's (len %d), want byte-identical", rr.Body.Len(), len(in))
+	}
+	want := "registryproxy: widget stream: stopped rewriting /" + prefix + "/index/manifest.json partway"
+	if n := strings.Count(logBuf.String(), want); n != 1 {
+		t.Errorf("log has %d %q lines, want exactly 1: %.400q", n, want, logBuf.String())
+	}
+}
