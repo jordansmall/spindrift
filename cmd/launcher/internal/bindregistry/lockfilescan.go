@@ -18,11 +18,12 @@ type LockfileHit struct {
 	MatchedURL string
 }
 
-// ScanLockfilesForForwarder reports every git-tracked lockfile under repoDir
+// ScanLockfilesForForwarderRows reports every git-tracked lockfile under repoDir
 // whose content contains the literal "127.0.0.1:<port>". It matches lockfiles
 // by basename across every tracked path rather than checking only the repo
-// root, since lockfiles nest in workspace members and nested Go modules.
-func ScanLockfilesForForwarder(repoDir string, port int) ([]LockfileHit, error) {
+// root, since lockfiles nest in workspace members and nested Go modules. Hits
+// come out in rows order, then path order within a row.
+func ScanLockfilesForForwarderRows(repoDir string, port int, rows []ecosystem.Row) ([]LockfileHit, error) {
 	needle := fmt.Sprintf("127.0.0.1:%d", port)
 
 	paths, err := trackedPaths(repoDir)
@@ -31,7 +32,7 @@ func ScanLockfilesForForwarder(repoDir string, port int) ([]LockfileHit, error) 
 	}
 
 	var hits []LockfileHit
-	for _, row := range ecosystem.Table {
+	for _, row := range rows {
 		names := make(map[string]bool, len(row.LockfileNames))
 		for _, name := range row.LockfileNames {
 			names[name] = true
