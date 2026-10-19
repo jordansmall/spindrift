@@ -1,0 +1,52 @@
+{
+  "derived": [
+    {
+      "Host": "other.acme.test",
+      "Origin": "https://other.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/idx"
+        }
+      ]
+    },
+    {
+      "Host": "crates.acme.test",
+      "Origin": "https://crates.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/"
+        }
+      ],
+      "matchHost": "crates.acme.test",
+      "upstream": "https://crates.acme.test"
+    },
+    {
+      "enforcedPaths": [
+        "/idx"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/idx"
+        }
+      ],
+      "matchHost": "other.acme.test",
+      "upstream": "https://other.acme.test"
+    }
+  ]
+}

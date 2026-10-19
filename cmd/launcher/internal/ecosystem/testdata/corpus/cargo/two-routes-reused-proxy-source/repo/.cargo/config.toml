@@ -1,0 +1,5 @@
+[registries.private]
+index = "sparse+https://crates.acme.test/"
+
+[registries.other-private]
+index = "sparse+https://other.acme.test/idx/"
