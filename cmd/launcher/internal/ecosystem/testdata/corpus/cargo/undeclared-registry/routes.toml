@@ -1,0 +1,8 @@
+[[routes]]
+match-host = "crates.acme.test"
+upstream-origin = "https://crates.acme.test"
+auth-scheme = "bearer"
+credential = { env = "CARGO_TOKEN" }
+
+[routes.ecosystems.cargo]
+registries = ["declared"]

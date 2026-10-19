@@ -1,0 +1,25 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "CARGO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "crates.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://crates.acme.test"
+    },
+    "Ecosystems": {
+      "cargo": {
+        "registries": [
+          "declared"
+        ]
+      }
+    },
+    "MatchHost": "crates.acme.test",
+    "UpstreamOrigin": "https://crates.acme.test"
+  }
+]

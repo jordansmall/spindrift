@@ -1,0 +1,2 @@
+[registries.undeclared]
+index = "sparse+https://crates.acme.test/undeclared/index/"
