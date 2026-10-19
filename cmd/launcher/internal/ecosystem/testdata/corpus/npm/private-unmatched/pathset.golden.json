@@ -1,0 +1,12 @@
+[
+  {
+    "Host": "registry.acme.test",
+    "Origin": "https://registry.acme.test",
+    "Subtrees": [
+      {
+        "ecosystem": "npm",
+        "path": "/"
+      }
+    ]
+  }
+]
