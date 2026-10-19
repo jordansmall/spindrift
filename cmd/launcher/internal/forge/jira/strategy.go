@@ -22,15 +22,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			return nil, err
 		}
-		mapping := k.JiraStatusMapping
-		// The status mapping covers the work lifecycle only; research states
-		// ride the label fallback (ADR 0022, issue #4919). Mirrors
-		// trackerbuild.JiraStatusMappingFor until trackerbuild is deleted (ADR 0068).
-		// TestKindAxesGuard requires a switch on a descriptor tag, not ==.
-		switch s.Tracker {
-		case dispatchkind.TrackerResearch:
-			mapping = ""
-		}
+		mapping := statusMappingFor(s.Tracker, k.JiraStatusMapping)
 		statusMapping, err := ParseStatusMapping(mapping)
 		if err != nil {
 			// Callers validate the mapping first, so fall back to unmapped
@@ -47,4 +39,16 @@ var Strategy = backendkit.Strategy{
 			VerdictLabels: s.VerdictLabels,
 		}), nil
 	},
+}
+
+// statusMappingFor is the JIRA_STATUS_MAPPING the tracker instance t is built
+// with. The mapping covers the work lifecycle only; research states always ride
+// the label fallback (ADR 0022, issue #4919), so the research tracker gets none.
+func statusMappingFor(t dispatchkind.Tracker, mapping string) string {
+	// TestKindAxesGuard requires a switch on a descriptor tag, not ==.
+	switch t {
+	case dispatchkind.TrackerResearch:
+		return ""
+	}
+	return mapping
 }

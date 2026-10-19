@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -82,5 +83,15 @@ func TestNewJiraClient_NilHTTPClientIsTimed(t *testing.T) {
 	jc := NewJiraClient(JiraConfig{BaseURL: "http://example.test"}).(*jiraClient)
 	if timeout := jc.rest.HTTPClientForTest().Timeout; timeout != defaultJiraHTTPTimeout {
 		t.Fatalf("rest client Timeout = %v, want defaultJiraHTTPTimeout (%v), never the untimed http.DefaultClient", timeout, defaultJiraHTTPTimeout)
+	}
+}
+
+func TestStatusMappingFor(t *testing.T) {
+	const mapping = `{"dispatchable":"To Do"}`
+	if got := statusMappingFor(dispatchkind.TrackerWork, mapping); got != mapping {
+		t.Errorf("work = %q, want the mapping", got)
+	}
+	if got := statusMappingFor(dispatchkind.TrackerResearch, mapping); got != "" {
+		t.Errorf("research = %q, want empty", got)
 	}
 }
