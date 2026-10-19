@@ -1,0 +1,23 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "GO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "repo.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://repo.acme.test"
+    },
+    "Ecosystems": {
+      "go": {
+        "path": "/go"
+      }
+    },
+    "MatchHost": "repo.acme.test",
+    "UpstreamOrigin": "https://repo.acme.test"
+  }
+]

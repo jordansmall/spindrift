@@ -1,0 +1,19 @@
+{
+  "envExports": [
+    {
+      "Name": "GOPROXY",
+      "Value": "http://127.0.0.1:27182/repo-acme-test/go"
+    },
+    {
+      "Name": "GOTOOLCHAIN",
+      "Value": "local"
+    },
+    {
+      "Name": "GONOPROXY",
+      "Value": "none"
+    }
+  ],
+  "warnings": [
+    "==> WARNING: overriding pre-existing GONOPROXY/GOPRIVATE with GONOPROXY=none — every module path, private or not, now routes through the Forwarder"
+  ]
+}

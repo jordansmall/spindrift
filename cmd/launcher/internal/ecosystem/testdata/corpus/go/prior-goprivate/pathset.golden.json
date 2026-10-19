@@ -1,0 +1,18 @@
+{
+  "derived": null,
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/go"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "go",
+          "path": "/go"
+        }
+      ],
+      "matchHost": "repo.acme.test",
+      "upstream": "https://repo.acme.test"
+    }
+  ]
+}
