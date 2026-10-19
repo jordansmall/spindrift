@@ -293,7 +293,7 @@ func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
 			return
 		}
 		defer s.Close()
-		_, storedAtLaunch, _ = s.Snapshot("tuning", id)
+		_, storedAtLaunch, _ = s.Snapshot(tuning.Strategy.Name, id)
 	}
 
 	out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
