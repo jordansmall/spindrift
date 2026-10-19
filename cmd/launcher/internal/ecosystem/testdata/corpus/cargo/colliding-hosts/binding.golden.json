@@ -1,0 +1,10 @@
+{
+  "homeConfig": {
+    "configPath": "config.toml",
+    "content": "[source.crates-io]\nreplace-with = \"spindrift-registry-proxy\"\n\n[source.spindrift-registry-proxy]\nregistry = \"sparse+http://127.0.0.1:27182/one-acme-test/\"\n",
+    "homeEnvVar": "CARGO_HOME"
+  },
+  "warnings": [
+    "registry proxy manifest routes one-acme-test, two-acme-test share upstream host Crates.Acme.Test — host-based in-tree rewriting cannot tell them apart, their in-tree registry rewrite is skipped, those ecosystems fall back to the public registry"
+  ]
+}

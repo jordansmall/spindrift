@@ -1,0 +1,11 @@
+[[routes]]
+match-host = "one.acme.test"
+upstream-origin = "https://Crates.Acme.Test"
+auth-scheme = "bearer"
+credential = { env = "CARGO_TOKEN" }
+
+[[routes]]
+match-host = "two.acme.test"
+upstream-origin = "https://crates.acme.test"
+auth-scheme = "bearer"
+credential = { env = "CARGO_TOKEN" }

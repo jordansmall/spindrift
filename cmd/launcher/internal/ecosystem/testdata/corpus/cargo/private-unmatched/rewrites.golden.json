@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\"dl\": \"https://static.elsewhere.test/crates\", \"api\": \"https://crates.acme.test\"}\n",
+    "request": "GET /crates-acme-test/index/config.json",
+    "status": 200
+  }
+]
