@@ -1,0 +1,22 @@
+[
+  {
+    "Host": "registry.npmjs.org",
+    "Origin": "https://registry.npmjs.org",
+    "Subtrees": [
+      {
+        "ecosystem": "pnpm",
+        "path": "/"
+      }
+    ]
+  },
+  {
+    "Host": "npm.acme.test",
+    "Origin": "https://npm.acme.test",
+    "Subtrees": [
+      {
+        "ecosystem": "pnpm",
+        "path": "/"
+      }
+    ]
+  }
+]

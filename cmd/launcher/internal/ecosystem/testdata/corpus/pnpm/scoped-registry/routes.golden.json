@@ -1,0 +1,36 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SPINDRIFT_REGISTRY_CREDENTIAL_REGISTRY_NPMJS_ORG",
+      "FromFile": "",
+      "MatchHost": "registry.npmjs.org",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://registry.npmjs.org"
+    },
+    "Ecosystems": null,
+    "MatchHost": "registry.npmjs.org",
+    "UpstreamOrigin": ""
+  },
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "npmrc",
+      "FromEnv": "",
+      "FromFile": "stores/npmrc",
+      "MatchHost": "npm.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://npm.acme.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "npm.acme.test",
+    "UpstreamOrigin": ""
+  }
+]

@@ -1,0 +1,22 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      widget:
+        specifier: ^1.0.0
+        version: 1.0.0
+
+packages:
+
+  widget@1.0.0:
+    resolution: {integrity: sha512-Y29ycHVzLXRlc3QtZmFrZS1pbnRlZ3JpdHktbm90LXJlYWw=}
+
+snapshots:
+
+  widget@1.0.0: {}

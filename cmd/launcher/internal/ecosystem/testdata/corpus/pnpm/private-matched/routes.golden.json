@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "npmrc",
+      "FromEnv": "",
+      "FromFile": "stores/npmrc",
+      "MatchHost": "registry.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://registry.acme.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "registry.acme.test",
+    "UpstreamOrigin": ""
+  }
+]
