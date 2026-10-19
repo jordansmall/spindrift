@@ -6,50 +6,76 @@ import (
 	"io"
 	"os"
 
-	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/forge/github"
 )
 
 // errReadOnlyGateMisconfigured marks a read-only token gate misconfiguration
-// (BOX_GH_TOKEN/BOX_FORGEJO_TOKEN unset, identical to the Launcher's own
+// (a row's Box token unset, identical to the Launcher's own
 // token, or write-capable). It stays distinct from bootstrap.go's
 // errConfigInvalid so bootstrapExitCode does not award exit 6 to
 // dispatch/recover/preview; doctorExitCodeFor classifies it as exit 2 (#2942).
 var errReadOnlyGateMisconfigured = errors.New("read-only token gate misconfigured")
 
+// readOnlyTrustNotice closes every non-verified warning; doctor goldens pin its
+// bytes.
+const readOnlyTrustNotice = "read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it."
+
 // checkReadOnlyTokenGate enforces BOX_FORGE_AND_ISSUE_ACCESS=read-only's
-// startup token gate (issue #1950): the Box must hold a credential distinct
-// from the Launcher's GH_TOKEN, or read-only is a fiction. read-write never
-// reads BOX_GH_TOKEN. The access-mode guard is this check's own; whether the
-// active backends use GH_TOKEN at all is gateRegistry's Applicable decision.
-// verified is true only when introspection confirmed the token has no write
-// scopes, and is always false when err is non-nil.
-func checkReadOnlyTokenGate(c config, introspect func(token, repoSlug string) (backendkit.TokenIntrospection, error), w io.Writer) (verified bool, err error) {
+// startup token gate (issue #1950) for one backend row: the Box must hold a
+// credential distinct from the Launcher's own, or read-only is a fiction.
+// read-write never reads the Box token. The access-mode guard is this check's
+// own; whether the active backends use the row's token at all is
+// gateRegistry's Applicable decision.
+//
+// A row without an IntrospectToken hook warns and returns (false, nil) rather
+// than failing (ADR 0068 decision 6), so a new backend gets this gate by
+// default. verified is true only when introspection confirmed the token has no
+// write scopes, and is always false when err is non-nil.
+func checkReadOnlyTokenGate(c config, row backendRow, w io.Writer) (verified bool, err error) {
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
-	boxToken := os.Getenv("BOX_GH_TOKEN")
+	boxEnv, hostEnv := row.BoxTokenEnvVar, row.TokenEnvVar
+	boxToken := os.Getenv(boxEnv)
 	if boxToken == "" {
-		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to be set to a credential distinct from GH_TOKEN — the Box must never receive the Launcher's own write-capable token", errReadOnlyGateMisconfigured)
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to be set to a credential distinct from %s — the Box must never receive the Launcher's own write-capable token", errReadOnlyGateMisconfigured, boxEnv, hostEnv)
 	}
-	if boxToken == c.ghToken {
-		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to differ from GH_TOKEN — it is byte-for-byte identical to the Launcher's own token, which defeats read-only", errReadOnlyGateMisconfigured)
+	if boxToken == hostToken(c, hostEnv) {
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to differ from %s — it is byte-for-byte identical to the Launcher's own token, which defeats read-only", errReadOnlyGateMisconfigured, boxEnv, hostEnv)
 	}
-	result, err := introspect(boxToken, c.repoSlug)
+	if row.introspectToken == nil {
+		fmt.Fprintf(w, "WARNING: the %s backend cannot introspect a token's scopes (no IntrospectToken hook), so %s's write capability could not be determined. "+readOnlyTrustNotice+"\n", row.DisplayName, boxEnv)
+		return false, nil
+	}
+	result, err := row.introspectToken(boxToken, c.repoSlug)
 	if err != nil {
-		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting BOX_GH_TOKEN failed: %w", doctor.ErrConnectivity, err)
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting %s failed: %w", doctor.ErrConnectivity, boxEnv, err)
 	}
 	if !result.Introspectable {
-		fmt.Fprintln(w, "WARNING: BOX_GH_TOKEN's write capability could not be determined (e.g. a fine-grained PAT, whose granted permissions GitHub exposes no endpoint to introspect). read-only trusts that it was provisioned with read-only scope; verify this yourself before relying on it.")
+		reason := ""
+		if result.Reason != "" {
+			reason = " (" + result.Reason + ")"
+		}
+		fmt.Fprintf(w, "WARNING: %s's write capability could not be determined%s. "+readOnlyTrustNotice+"\n", boxEnv, reason)
 		return false, nil
 	}
 	if result.WriteCapable {
-		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires BOX_GH_TOKEN to carry no write scopes; the provided token is write-capable", errReadOnlyGateMisconfigured)
+		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to carry no write scopes; the provided token is write-capable", errReadOnlyGateMisconfigured, boxEnv)
 	}
 	return true, nil
 }
 
-// ghTokenIntrospector is the production Box-token introspector, swapped by
-// tests.
-var ghTokenIntrospector = github.Strategy.IntrospectToken
+// hostToken returns the Launcher's own value of the token env var a row names.
+// GH_TOKEN is a core config field rather than a backend knob, so knobLookup
+// does not serve it. Any other unserved name falls back to the environment,
+// which is empty when the host token came from a _FILE/_CMD form; the
+// identical-token check then compares against "" and cannot fire.
+func hostToken(c config, env string) string {
+	if v, ok := c.knobLookup(env); ok {
+		return v
+	}
+	if env == "GH_TOKEN" {
+		return c.ghToken
+	}
+	return os.Getenv(env)
+}

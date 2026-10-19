@@ -192,18 +192,16 @@ func TestWalkGateRegistry_CollectAllFalseSingleErrorTextUnchanged(t *testing.T) 
 // applicable: with both token gates skipped, the appended probe lands in the
 // same visible position either way and cannot fail against the pre-fix tail.
 func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
+	swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
+	})
+
 	originalRegistry := gateRegistry
 	gateRegistry = append(append([]launchGate{}, originalRegistry...), launchGate{
 		Name:  "zz-probe",
 		Check: func(config, io.Writer) error { return nil },
 	})
 	defer func() { gateRegistry = originalRegistry }()
-
-	originalIntrospector := ghTokenIntrospector
-	ghTokenIntrospector = func(string, string) (backendkit.TokenIntrospection, error) {
-		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
-	}
-	defer func() { ghTokenIntrospector = originalIntrospector }()
 
 	t.Setenv("REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
@@ -372,11 +370,9 @@ func TestGateRegistry_GitHubTokenGateInapplicableOnPureForgejo(t *testing.T) {
 }
 
 func TestGateRegistry_ForgejoTokenGateInapplicableOnPureGitHub(t *testing.T) {
-	originalIntrospector := ghTokenIntrospector
-	ghTokenIntrospector = func(string, string) (backendkit.TokenIntrospection, error) {
+	swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
 		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
-	}
-	defer func() { ghTokenIntrospector = originalIntrospector }()
+	})
 
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
@@ -467,15 +463,16 @@ func gateNames(gates []launchGate) []string {
 	return names
 }
 
-// A row carrying a readOnlyTokenGate yields one network gate named for it, and
-// a row without one yields none, so no launch gate names a backend by hand.
-func TestReadOnlyTokenGates_OneGatePerRowWithClosure(t *testing.T) {
+// A row with a BoxTokenEnvVar yields one network gate named for it, and a row
+// without one yields none, so no launch gate names a backend by hand. The
+// gate's Check runs the row's own hook.
+func TestReadOnlyTokenGates_OneGatePerRowWithBoxToken(t *testing.T) {
 	var calls int
 	fake := backendRow{
-		Descriptor: backend.Descriptor{Name: "fake", ValidAsCodeForge: true, TokenEnvVar: "FAKE_TOKEN"},
-		readOnlyTokenGate: func(config, io.Writer) error {
+		Descriptor: backend.Descriptor{Name: "fake", DisplayName: "Fake", ValidAsCodeForge: true, TokenEnvVar: "FAKE_TOKEN", BoxTokenEnvVar: "BOX_FAKE_TOKEN"},
+		introspectToken: func(string, string) (backendkit.TokenIntrospection, error) {
 			calls++
-			return nil
+			return backendkit.TokenIntrospection{Introspectable: true}, nil
 		},
 	}
 	plain := backendRow{Descriptor: backend.Descriptor{Name: "plain", ValidAsCodeForge: true, TokenEnvVar: "PLAIN_TOKEN"}}
@@ -492,18 +489,20 @@ func TestReadOnlyTokenGates_OneGatePerRowWithClosure(t *testing.T) {
 	if !g.Network {
 		t.Error("Network = false, want true")
 	}
-	if err := g.Check(config{}, io.Discard); err != nil || calls != 1 {
-		t.Errorf("Check() err = %v, calls = %d, want the row's closure invoked once", err, calls)
+
+	t.Setenv("BOX_FAKE_TOKEN", "box-token")
+	c := minimalValidConfig()
+	c.boxForgeAndIssueAccess = "read-only"
+	if err := g.Check(c, io.Discard); err != nil || calls != 1 {
+		t.Errorf("Check() err = %v, calls = %d, want the row's hook invoked once", err, calls)
 	}
 
 	original := backendRows
 	backendRows = append(append([]backendRow{}, original...), fake, plain)
 	defer func() { backendRows = original }()
 
-	c := minimalValidConfig()
 	c.codeForge = "fake"
 	c.issueTracker = "local"
-	c.boxForgeAndIssueAccess = "read-only"
 	if !g.Applicable(c) {
 		t.Error("Applicable under read-only with the fake forge = false, want true")
 	}
@@ -513,10 +512,114 @@ func TestReadOnlyTokenGates_OneGatePerRowWithClosure(t *testing.T) {
 	}
 }
 
+// A tracker and a forge on different backends activate two token gates; on one
+// backend they share a single gate.
+func TestGateRegistry_TokenGatesApplicablePerDistinctActiveBackend(t *testing.T) {
+	cases := []struct {
+		tracker, forge string
+		want           []string
+	}{
+		{"github", "forgejo", []string{"read-only-token-github", "read-only-token-forgejo"}},
+		{"github", "github", []string{"read-only-token-github"}},
+		{"forgejo", "forgejo", []string{"read-only-token-forgejo"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tracker+"+"+tc.forge, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.boxForgeAndIssueAccess = "read-only"
+			c.issueTracker = tc.tracker
+			c.codeForge = tc.forge
+			_, network := splitGateRegistryByNetwork(gateRegistry)
+			var got []string
+			for _, g := range network {
+				if g.Applicable == nil || g.Applicable(c) {
+					got = append(got, g.Name)
+				}
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("applicable token gates = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A full walkGateRegistry pass runs the read-only token check once per
+// distinct active backend: two when tracker and forge differ, one when shared.
+func TestGateRegistry_FullWalkChecksEachActiveBackendOnce(t *testing.T) {
+	cases := []struct {
+		tracker, forge string
+		wantGitHub     int
+		wantForgejo    int
+	}{
+		{"github", "forgejo", 1, 1},
+		{"github", "github", 1, 0},
+		{"forgejo", "forgejo", 0, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tracker+"+"+tc.forge, func(t *testing.T) {
+			var gotGitHub, gotForgejo int
+			swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
+				gotGitHub++
+				return backendkit.TokenIntrospection{Introspectable: true}, nil
+			})
+			swapIntrospector(t, "forgejo", func(string, string) (backendkit.TokenIntrospection, error) {
+				gotForgejo++
+				return backendkit.TokenIntrospection{Introspectable: true}, nil
+			})
+
+			c := minimalValidConfig()
+			c.boxForgeAndIssueAccess = "read-only"
+			c.issueTracker = tc.tracker
+			c.codeForge = tc.forge
+			c.ghToken = "launcher-gh-tok"
+			c.forgejoToken = "launcher-fj-tok"
+			t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
+			t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
+
+			var buf bytes.Buffer
+			if err := walkGateRegistry(gateRegistry, c, &buf, doctor.NewReporter(&buf, true), true); err != nil {
+				t.Fatalf("walkGateRegistry() error = %v, output %q", err, buf.String())
+			}
+			if gotGitHub != tc.wantGitHub || gotForgejo != tc.wantForgejo {
+				t.Errorf("token checks (github, forgejo) = (%d, %d), want (%d, %d)", gotGitHub, gotForgejo, tc.wantGitHub, tc.wantForgejo)
+			}
+		})
+	}
+}
+
 func TestGateRegistry_TokenGatesComeFromBackendRowsInRowOrder(t *testing.T) {
 	_, network := splitGateRegistryByNetwork(gateRegistry)
 	want := []string{"read-only-token-github", "read-only-token-forgejo"}
 	if got := gateNames(network); !reflect.DeepEqual(got, want) {
 		t.Errorf("network gates = %v, want %v", got, want)
+	}
+}
+
+// A row with a BoxTokenEnvVar but no distinct TokenEnvVar would make its gate
+// match every backend whose TokenEnvVar is also empty (git, local).
+func TestBackendRows_BoxTokenPairsWithDistinctHostToken(t *testing.T) {
+	for _, r := range backendRows {
+		if r.BoxTokenEnvVar == "" {
+			continue
+		}
+		if r.TokenEnvVar == "" {
+			t.Errorf("row %q has BoxTokenEnvVar %q but an empty TokenEnvVar", r.Name, r.BoxTokenEnvVar)
+		}
+		if r.TokenEnvVar == r.BoxTokenEnvVar {
+			t.Errorf("row %q has TokenEnvVar equal to BoxTokenEnvVar %q", r.Name, r.BoxTokenEnvVar)
+		}
+	}
+}
+
+func TestGateRegistry_HasReadOnlyTokenGatePerBoxTokenRow(t *testing.T) {
+	names := map[string]bool{}
+	for _, g := range gateRegistry {
+		names[g.Name] = true
+	}
+	for _, r := range backendRows {
+		got := names[readOnlyTokenGatePrefix+r.Name]
+		if want := r.BoxTokenEnvVar != ""; got != want {
+			t.Errorf("gateRegistry has %q gate = %v, want %v (BoxTokenEnvVar %q)", readOnlyTokenGatePrefix+r.Name, got, want, r.BoxTokenEnvVar)
+		}
 	}
 }

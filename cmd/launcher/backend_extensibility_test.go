@@ -97,9 +97,15 @@ func TestBackendRegistry_NewBackendNeedsOnlyRowAndNoOtherChanges(t *testing.T) {
 		t.Errorf("doctorSlugHint = %q, want %q", hintRow.DoctorSlugHint, "GITLAB_BASE_URL")
 	}
 
-	// Do not re-add a read-only-token-gate assertion here: this row carries no
-	// readOnlyTokenGate closure, so it yields no gate. A row that sets one gets
-	// read-only-token-<Name> from readOnlyTokenGates (launchgates_test.go).
+	found := false
+	for _, g := range readOnlyTokenGates(backendRows) {
+		if g.Name == "read-only-token-gitlab" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("readOnlyTokenGates(backendRows) has no read-only-token-gitlab gate for the fake row")
+	}
 }
 
 // TestValidateIssueTracker_InvalidMessageListsRuntimeRegisteredBackend pins issue

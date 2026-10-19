@@ -26,7 +26,7 @@ import (
 //     "ok: runtime ... found on PATH" one.
 //   - c.boxForgeAndIssueAccess stays "read-write" (minimalValidConfig's
 //     default), so runDoctor prints the fixed token-gate no-op line
-//     (cmd/launcher/doctor.go:108) and skips both read-only-token gates, which
+//     (cmd/launcher/doctor.go:108) and skips every read-only-token gate, which
 //     would otherwise make a live network call.
 //   - f.Labels carries every triage and advisory-tier label name
 //     (doctor.AdvisoryLabelNames) the doctor.Run label check enumerates, so
@@ -73,11 +73,9 @@ func TestRunDoctor_ReadOnlyGitHub_Golden(t *testing.T) {
 	c.ghToken = "launcher-gh-tok"
 	t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
 
-	original := ghTokenIntrospector
-	ghTokenIntrospector = func(string, string) (backendkit.TokenIntrospection, error) {
+	swapIntrospector(t, "github", func(string, string) (backendkit.TokenIntrospection, error) {
 		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
-	}
-	t.Cleanup(func() { ghTokenIntrospector = original })
+	})
 
 	assertDoctorGolden(t, f, c, "testdata/golden/doctor-readonly-github-report.txt")
 }
@@ -130,11 +128,11 @@ func TestRunDoctor_HealthyReport_Quiet_PrintsNothing(t *testing.T) {
 // TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning
 // pins a defect found on issue #3777: a passing
 // read-only-token-forgejo gate writes its "WARNING: …" line straight to
-// checkW (readonly_forgejo_token_gate.go:30), which bypasses the Reporter
-// entirely, so a healthy read-only Forgejo deployment printed a line under
-// quiet and violated AC1 ("a healthy doctor writes nothing to stdout").
-// Forgejo needs no introspection stub (unlike the GitHub gate), so it is the
-// cheaper of the two fixtures for pinning this.
+// checkW via checkReadOnlyTokenGate (readonly_token_gate.go), which bypasses
+// the Reporter entirely, so a healthy read-only Forgejo deployment printed a
+// line under quiet and violated AC1 ("a healthy doctor writes nothing to
+// stdout"). Forgejo needs no introspection stub because its row has no
+// IntrospectToken hook, so it is the cheaper fixture for pinning this.
 func TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning(t *testing.T) {
 	f, c := healthyGoldenFixture()
 	c.boxForgeAndIssueAccess = "read-only"
@@ -161,7 +159,7 @@ func TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning(t 
 		if got != 0 {
 			t.Errorf("doctorReport() exit = %d, want 0", got)
 		}
-		if !strings.Contains(stdout.String(), "WARNING: Forgejo exposes no endpoint") {
+		if !strings.Contains(stdout.String(), "WARNING: the Forgejo backend cannot introspect a token's scopes (no IntrospectToken hook)") {
 			t.Errorf("doctorReport() verbose stdout = %q, want it to contain the token gate WARNING line", stdout.String())
 		}
 	})
