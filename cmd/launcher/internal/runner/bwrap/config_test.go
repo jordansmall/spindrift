@@ -3,30 +3,34 @@ package bwrap
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Issue #445 replaced a long positional-argument list with a single Config
 // struct, so every bwrap-relevant Config field must reach the adapter.
 func TestNewBwrap_UsesConfigFields(t *testing.T) {
 	cfg := runner.Config{
-		AgentFiles:      "/agent-files",
-		AgentEnv:        "/agent-env",
-		PasswdFile:      "/nix/store/abc-passwd/passwd",
-		GroupFile:       "/nix/store/def-group/group",
-		BakedPrefetch:   "prefetch-snippet",
-		BwrapUnshareNet: true,
-		NetworkMode:     "none",
-		NixConfigFile:   "/nix/store/fake-hash-nix-conf/nix.conf",
+		AgentFiles:    "/agent-files",
+		AgentEnv:      "/agent-env",
+		PasswdFile:    "/nix/store/abc-passwd/passwd",
+		GroupFile:     "/nix/store/def-group/group",
+		BakedPrefetch: "prefetch-snippet",
+		NetworkMode:   "none",
+		NixConfigFile: "/nix/store/fake-hash-nix-conf/nix.conf",
 		MountParams: runner.MountParams{
 			PromptDir:             "/prompts",
 			SkillsDir:             "/skills",
 			DriverSessionCacheDir: "/home/agent/.claude/projects",
 		},
 	}
-	r := New(cfg, "/pwd")
+	r, err := New(cfg, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "true"}), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a, ok := r.(*bwrapAdapter)
 	if !ok {
 		t.Fatalf("New did not return *bwrapAdapter")
@@ -38,7 +42,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		groupFile:          cfg.GroupFile,
 		bakedPrefetch:      cfg.BakedPrefetch,
 		mountParams:        cfg.MountParams,
-		network:            cfg.BwrapNetwork(),
+		network:            cfg.BwrapNetwork(true),
 		nixConfigFile:      cfg.NixConfigFile,
 		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
 		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
@@ -60,7 +64,10 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 		GroupFileDrv:     "/group.drv",
 		NixConfigFileDrv: "/nix-config.drv",
 	}
-	r := NewBuild(cfg, "/pwd")
+	r, err := NewBuild(cfg, runnertest.Lookup(nil), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
 		t.Fatalf("NewBuild did not return *bwrapBuildAdapter")
@@ -85,7 +92,10 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 // after its basename, replacing the flat path every closure collided on.
 func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
-	r := New(cfg, "/pwd")
+	r, err := New(cfg, runnertest.Lookup(nil), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a, ok := r.(*bwrapAdapter)
 	if !ok {
 		t.Fatalf("New did not return *bwrapAdapter")
@@ -100,7 +110,10 @@ func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 // resolve to the same generation-scoped path for a given ImageTag.
 func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
-	r := NewBuild(cfg, "/pwd")
+	r, err := NewBuild(cfg, runnertest.Lookup(nil), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
 		t.Fatalf("NewBuild did not return *bwrapBuildAdapter")
@@ -116,7 +129,11 @@ func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T
 func TestNewBwrap_IsolatesUnderMismatchedRuntime(t *testing.T) {
 	for _, rt := range []string{"podman", "docker", "rancher", ""} {
 		cfg := runner.Config{Runtime: rt, NetworkMode: runner.NetworkModeOpen}
-		a, ok := New(cfg, "/pwd").(*bwrapAdapter)
+		r, err := New(cfg, runnertest.Lookup(nil), "/pwd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, ok := r.(*bwrapAdapter)
 		if !ok {
 			t.Fatalf("New did not return *bwrapAdapter")
 		}
@@ -129,5 +146,35 @@ func TestNewBwrap_IsolatesUnderMismatchedRuntime(t *testing.T) {
 // testNet resolves mode through the shared plan, so a test states the
 // NETWORK_MODE knob rather than hand-picking the Isolate/Pasta booleans.
 func testNet(mode runner.NetworkMode) runner.BwrapNetwork {
-	return runner.Config{NetworkMode: mode}.BwrapNetwork()
+	return runner.Config{NetworkMode: mode}.BwrapNetwork(false)
+}
+
+// BWRAP_UNSHARE_NET is a row knob: read through the Lookup New is handed, it
+// can force isolation on even under NETWORK_MODE=host.
+func TestNewBwrap_ReadsUnshareNetFromLookup(t *testing.T) {
+	cfg := runner.Config{NetworkMode: runner.NetworkModeHost}
+	r, err := New(cfg, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "true"}), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.(*bwrapAdapter).network; !got.Isolate {
+		t.Errorf("network = %+v, want Isolate", got)
+	}
+	r, err = New(cfg, runnertest.Lookup(nil), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.(*bwrapAdapter).network; got.Isolate {
+		t.Errorf("network = %+v, want shared host network with the knob unset", got)
+	}
+}
+
+// Guards only a direct-lookup caller: the launcher knobLookup normalizes
+// BWRAP_UNSHARE_NET through strconv.FormatBool, so the launcher path never
+// reaches this error (see TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter).
+func TestNewBwrap_MalformedUnshareNetIsAnError(t *testing.T) {
+	_, err := New(runner.Config{}, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "maybe"}), "/pwd")
+	if err == nil || !strings.Contains(err.Error(), "BWRAP_UNSHARE_NET") {
+		t.Errorf("New error = %v, want one naming BWRAP_UNSHARE_NET", err)
+	}
 }

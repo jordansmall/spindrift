@@ -16,15 +16,17 @@ var (
 // enforced at launch when Required; bwrap-cgroup-delegation has no launch gate
 // (ADR 0042) and is always Advisory. A launch-gate Probe returns the raw
 // Validate* error, which the launch path surfaces verbatim.
-func Prerequisites(cfg runner.Config) []runner.Prerequisite {
+func Prerequisites(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite {
 	// The overlay flags only render under this AND-gate in bwrap.go, so the
 	// check is enforced exactly when they would.
 	overlayRequired := cfg.NixStoreWritable && cfg.NixConfigFile != ""
 
-	// The plan's Pasta decision (runner.Config.BwrapNetwork) is the same one
-	// the adapter renders, so the check never fires for a Box that will not
-	// invoke pasta.
-	networkAdvisory := !cfg.BwrapNetwork().Pasta
+	// The Pasta decision comes from network, the same helper New renders from,
+	// so the check never fires for a Box that will not invoke pasta. A malformed
+	// knob, which New would also refuse, fails the network row rather than
+	// guess at the decision.
+	net, knobErr := network(cfg, l)
+	networkAdvisory := knobErr == nil && !net.Pasta
 
 	overlayRemedy := "ensure the host kernel allows an unprivileged user namespace to mount overlayfs (e.g. the unprivileged_userns_clone sysctl on some distros)"
 	if overlayRequired {
@@ -63,6 +65,9 @@ func Prerequisites(cfg runner.Config) []runner.Prerequisite {
 			Required: !networkAdvisory,
 			Remedy:   networkRemedy,
 			Probe: func() (any, error) {
+				if knobErr != nil {
+					return nil, knobErr
+				}
 				return nil, validatePastaFn()
 			},
 		},
@@ -78,4 +83,15 @@ func Prerequisites(cfg runner.Config) []runner.Prerequisite {
 			},
 		},
 	}
+}
+
+// network resolves the plan's Box network from cfg and the family knobs read
+// through l. New and Prerequisites share it so the doctor check inspects the
+// decision the adapter renders.
+func network(cfg runner.Config, l runner.KnobLookup) (runner.BwrapNetwork, error) {
+	k, err := ReadKnobs(Lookup(l))
+	if err != nil {
+		return runner.BwrapNetwork{}, err
+	}
+	return cfg.BwrapNetwork(k.BwrapUnshareNet), nil
 }

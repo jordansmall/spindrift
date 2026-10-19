@@ -68,7 +68,7 @@ func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 		nixConfigFile:      bakedNixConfigFile,
 		nixVarSnapshotRoot: snapshotRoot,
 		nixVarSnapshotDir:  filepath.Join(snapshotRoot, bakedGeneration),
-		network:            runner.Config{NetworkMode: l.Network}.BwrapNetwork(),
+		network:            runner.Config{NetworkMode: l.Network}.BwrapNetwork(false),
 		mountParams:        runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
 	}
 	if err := a.Run(l.Box); err != nil {

@@ -421,7 +421,7 @@ func TestBuildRunArgs_NetworkArgRendersNetworkFlag(t *testing.T) {
 
 // A raw PODMAN_NETWORK value resolved by the plan renders verbatim.
 func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
-	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.Config{Runtime: "podman", PodmanNetwork: "pasta"}.OCINetwork()}
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.Config{Runtime: "podman"}.OCINetwork("pasta")}
 	args := a.buildRunArgs(runner.Box{Name: "agent-issue-1", Env: map[string]string{}})
 	for i, arg := range args {
 		if arg == "--network" {

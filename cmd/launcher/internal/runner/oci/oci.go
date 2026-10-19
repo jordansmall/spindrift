@@ -41,7 +41,7 @@ type ociAdapter struct {
 	// unmodified. DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local
 	// mount specs are issue #1697.
 	mountParams runner.MountParams
-	network     runner.OCINetwork // from runner.Config.OCINetwork
+	network     runner.OCINetwork // from runner.Config.OCINetwork + PODMAN_NETWORK
 	pidsLimit   string            // --pids-limit value; empty disables the flag
 	memoryLimit string            // --memory value; empty disables the flag
 }
@@ -50,10 +50,15 @@ type ociAdapter struct {
 // command constructs the same adapter as its run command.
 var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Prerequisites: Prerequisites}
 
-// New constructs an OCI adapter from cfg. pwd is the working directory the
+// New constructs an OCI adapter from cfg and the family knobs read through l;
+// the error is a malformed family knob. pwd is the working directory the
 // container-fallback build mounts as /workspace, a per-invocation dependency
 // passed separately from cfg.
-func New(cfg runner.Config, pwd string) runner.Runner {
+func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+	k, err := ReadKnobs(Lookup(l))
+	if err != nil {
+		return nil, err
+	}
 	return &ociAdapter{
 		cli:             runner.BinaryFor(cfg.Runtime),
 		image:           cfg.Image,
@@ -65,10 +70,10 @@ func New(cfg runner.Config, pwd string) runner.Runner {
 		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             pwd,
 		mountParams:     cfg.MountParams,
-		network:         cfg.OCINetwork(),
+		network:         cfg.OCINetwork(k.PodmanNetwork),
 		pidsLimit:       cfg.PidsLimit,
 		memoryLimit:     cfg.MemoryLimit,
-	}
+	}, nil
 }
 
 // imagePresent inspects rather than asking `image exists`, which docker has

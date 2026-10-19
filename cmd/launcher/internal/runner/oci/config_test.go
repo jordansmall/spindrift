@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Issue #445 replaced a long positional-argument list with a single Config
@@ -18,7 +19,6 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		NixBuilderImage: "builder@sha256:abc",
 		NixVolume:       "vol",
 		FlakeImageAttr:  ".#image",
-		PodmanNetwork:   "none",
 		NetworkMode:     "no-host-loopback",
 		PidsLimit:       "256",
 		MemoryLimit:     "2g",
@@ -28,7 +28,10 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 			DriverSessionCacheDir: "/home/agent/.claude/projects",
 		},
 	}
-	r := New(cfg, "/pwd")
+	r, err := New(cfg, runnertest.Lookup(map[string]string{"PODMAN_NETWORK": "none"}), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a, ok := r.(*ociAdapter)
 	if !ok {
 		t.Fatalf("New did not return *ociAdapter")
@@ -59,7 +62,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             "/pwd",
 		mountParams:     cfg.MountParams,
-		network:         cfg.OCINetwork(),
+		network:         cfg.OCINetwork("none"),
 		pidsLimit:       cfg.PidsLimit,
 		memoryLimit:     cfg.MemoryLimit,
 	}
@@ -71,12 +74,35 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 // Issue #1274: "rancher" is the first runtime value that differs from the
 // binary it invokes, "nerdctl".
 func TestNewOCI_RancherAliasesToNerdctl(t *testing.T) {
-	r := New(runner.Config{Runtime: "rancher"}, "/pwd")
+	r, err := New(runner.Config{Runtime: "rancher"}, runnertest.Lookup(nil), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a, ok := r.(*ociAdapter)
 	if !ok {
 		t.Fatalf("New did not return *ociAdapter")
 	}
 	if a.cli != "nerdctl" {
 		t.Errorf("cli = %q, want %q", a.cli, "nerdctl")
+	}
+}
+
+// PODMAN_NETWORK is a row knob: it reaches the adapter through the Lookup New
+// is handed, not through runner.Config.
+func TestNewOCI_ReadsPodmanNetworkFromLookup(t *testing.T) {
+	cfg := runner.Config{Runtime: "podman", NetworkMode: runner.NetworkModeOpen}
+	r, err := New(cfg, runnertest.Lookup(map[string]string{"PODMAN_NETWORK": "slirp4netns"}), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.(*ociAdapter).network.Arg; got != "slirp4netns" {
+		t.Errorf("network.Arg = %q, want slirp4netns", got)
+	}
+	r, err = New(cfg, runnertest.Lookup(nil), "/pwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.(*ociAdapter).network.Arg; got != "" {
+		t.Errorf("network.Arg = %q, want empty with the knob unset", got)
 	}
 }

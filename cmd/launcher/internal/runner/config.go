@@ -40,30 +40,30 @@ type Config struct {
 	NixVolume       string
 	FlakeImageAttr  string
 
-	// PodmanNetwork is the raw --network escape hatch; NetworkMode is the
-	// NETWORK_MODE knob. nix eval-rejects setting both (lib/mkHarness.nix
-	// networkModeCoherenceOk), but Config.OCINetwork still picks a deterministic
-	// winner (raw) since Go cannot observe that invariant.
-	PodmanNetwork string
-	NetworkMode   NetworkMode
-	PidsLimit     string
-	MemoryLimit   string
+	// NetworkMode is the NETWORK_MODE knob. The raw PODMAN_NETWORK and
+	// BWRAP_UNSHARE_NET escape hatches are family row knobs the adapters read,
+	// not Config fields. nix eval rejects setting NETWORK_MODE together with
+	// either raw knob (lib/mkHarness.nix networkModeCoherenceOk), but
+	// Config.OCINetwork still picks a deterministic winner (raw) since Go
+	// cannot observe that invariant.
+	NetworkMode NetworkMode
+	PidsLimit   string
+	MemoryLimit string
 
 	// MaxParallel is MAX_PARALLEL; only the podman-machine prerequisite reads
 	// it, to size the podman machine.
 	MaxParallel int
 
 	// bwrap agent closure paths (bwrap only).
-	AgentFiles      string
-	AgentEnv        string
-	PasswdFile      string
-	GroupFile       string
-	AgentFilesDrv   string // .drv path; realized by `launcher build`
-	AgentEnvDrv     string // .drv path; realized by `launcher build`
-	PasswdFileDrv   string // .drv path; realized by `launcher build`
-	GroupFileDrv    string // .drv path; realized by `launcher build`
-	BakedPrefetch   string
-	BwrapUnshareNet bool
+	AgentFiles    string
+	AgentEnv      string
+	PasswdFile    string
+	GroupFile     string
+	AgentFilesDrv string // .drv path; realized by `launcher build`
+	AgentEnvDrv   string // .drv path; realized by `launcher build`
+	PasswdFileDrv string // .drv path; realized by `launcher build`
+	GroupFileDrv  string // .drv path; realized by `launcher build`
+	BakedPrefetch string
 	// NixConfigFile is the baked store path for /etc/nix/nix.conf (ADR 0042);
 	// empty when the Consumer's nixInBox knob is off.
 	NixConfigFile string

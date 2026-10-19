@@ -4,6 +4,7 @@
 // (InstallImageBuildPipe, WantImageBuildStates), the issue-text-reaches-the-
 // prompt end-to-end assertion (AssertIssueTextReachesPrompt), and the shared
 // mount-table fixture and adapter-file marker check (MountFixture,
-// AssertNoMountDecisionMarkers). It never imports runner, so the runner
+// AssertNoMountDecisionMarkers), and the knob lookup (Lookup) that stands in for
+// the launcher's. It never imports runner, so the runner
 // package's own internal tests can import it.
 package runnertest

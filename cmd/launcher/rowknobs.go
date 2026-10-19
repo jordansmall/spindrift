@@ -20,11 +20,16 @@ var rowKnobs = map[string]func(c config) string{
 	"BUTLER_TUNING_MIN_SAMPLE":         func(c config) string { return strconv.Itoa(c.butlerTuningMinSample) },
 	"BUTLER_TUNING_DIGEST_BYTES":       func(c config) string { return strconv.Itoa(c.butlerTuningDigestBytes) },
 	"BUTLER_TUNING_COOLDOWN":           func(c config) string { return c.butlerTuningCooldown },
+	"PODMAN_NETWORK":                   func(c config) string { return c.podmanNetwork },
+	"BWRAP_UNSHARE_NET":                func(c config) string { return strconv.FormatBool(c.bwrapUnshareNet) },
 }
 
 // knobLookup serves the row knobs from c's already-resolved fields,
 // so a Strategy's ReadKnobs sees what the launcher resolved, not the process
-// environment.
+// environment. It must serve these already-parsed values (bools via
+// FormatBool), never raw env: the schema treats any non-empty BWRAP_UNSHARE_NET
+// as true, but the generated ReadKnobs uses ParseBool, so a raw
+// BWRAP_UNSHARE_NET=0 would silently stop forcing isolation.
 func (c config) knobLookup(env string) (string, bool) {
 	if field, ok := rowKnobs[env]; ok {
 		return field(c), true

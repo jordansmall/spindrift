@@ -499,7 +499,7 @@ func TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		network:       runner.Config{BwrapUnshareNet: true}.BwrapNetwork(),
+		network:       runner.Config{}.BwrapNetwork(true),
 	}
 	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
@@ -573,7 +573,7 @@ func TestExecTarget_UnshareNetKnobWrapsWithPasta(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		network:       runner.Config{BwrapUnshareNet: true}.BwrapNetwork(),
+		network:       runner.Config{}.BwrapNetwork(true),
 	}
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 }

@@ -133,12 +133,17 @@ type bwrapAdapter struct {
 // Strategy is the bwrap family's entry in the runner registry.
 var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild, Prerequisites: Prerequisites}
 
-// New constructs a bwrap adapter for the run command from cfg and pwd (the
+// New constructs a bwrap adapter for the run command from cfg, the family
+// knobs read through l (the error is a malformed family knob), and pwd (the
 // launcher's own working directory); call NewBuild for the build command.
 // By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
 // adapter isolates the sandbox into its own network namespace, with egress
 // restored via a hardened pasta helper (ADR 0042), matching rootless podman.
-func New(cfg runner.Config, pwd string) runner.Runner {
+func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+	net, err := network(cfg, l)
+	if err != nil {
+		return nil, err
+	}
 	return &bwrapAdapter{
 		agentFiles:         cfg.AgentFiles,
 		agentEnv:           cfg.AgentEnv,
@@ -150,11 +155,11 @@ func New(cfg runner.Config, pwd string) runner.Runner {
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixStoreWritable:   cfg.NixStoreWritable,
 		mountParams:        cfg.MountParams,
-		network:            cfg.BwrapNetwork(),
+		network:            net,
 		pidsLimit:          cfg.PidsLimit,
 		memoryLimit:        cfg.MemoryLimit,
 		syscallFilterPath:  cfg.SyscallFilterPath,
-	}
+	}, nil
 }
 
 // EnsureReady builds nothing for bwrap run: `launcher build` realizes the store
@@ -1053,7 +1058,9 @@ type bwrapBuildAdapter struct {
 // NewBuild constructs a bwrap adapter for the build command from cfg and
 // pwd (the launcher's own working directory). EnsureReady realizes the agent
 // store closures and, when nixInBox is on, snapshots the host nix store DB.
-func NewBuild(cfg runner.Config, pwd string) runner.Runner {
+// The knob lookup is unused and the error always nil; both exist only for the
+// shared runner.Strategy signature.
+func NewBuild(cfg runner.Config, _ runner.KnobLookup, pwd string) (runner.Runner, error) {
 	generation := ClosureGeneration(cfg.ImageTag)
 	return &bwrapBuildAdapter{
 		agentFilesDrv:      cfg.AgentFilesDrv,
@@ -1065,7 +1072,7 @@ func NewBuild(cfg runner.Config, pwd string) runner.Runner {
 		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, generation),
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixVarGeneration:   generation,
-	}
+	}, nil
 }
 
 // closureSpec pairs a human-readable label with the .drv path EnsureReady

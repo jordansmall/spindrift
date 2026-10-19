@@ -6,16 +6,23 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 func prereqByName(t *testing.T, cfg runner.Config, name string) runner.Prerequisite {
 	t.Helper()
-	for _, p := range Prerequisites(cfg) {
+	return prereqWithKnobs(t, cfg, nil, name)
+}
+
+func prereqWithKnobs(t *testing.T, cfg runner.Config, knobs map[string]string, name string) runner.Prerequisite {
+	t.Helper()
+	for _, p := range Prerequisites(cfg, runnertest.Lookup(knobs)) {
 		if p.Name == name {
 			return p
 		}
@@ -44,7 +51,7 @@ func stubValidators(t *testing.T, overlay, pasta func() error, cgroup func([]str
 // rendered report.
 func render(cfg runner.Config) string {
 	var checks []doctor.Check
-	for _, p := range Prerequisites(cfg) {
+	for _, p := range Prerequisites(cfg, runnertest.Lookup(nil)) {
 		checks = append(checks, doctor.PrerequisiteCheck(p))
 	}
 	var buf bytes.Buffer
@@ -53,13 +60,13 @@ func render(cfg runner.Config) string {
 }
 
 func TestStrategyDeclaresPrerequisites(t *testing.T) {
-	if got := Strategy.PrerequisitesFor(runner.Config{}); len(got) != 4 {
+	if got := Strategy.PrerequisitesFor(runner.Config{}, runnertest.Lookup(nil)); len(got) != 4 {
 		t.Errorf("Strategy.PrerequisitesFor returned %d rows, want 4", len(got))
 	}
 }
 
 func TestPrerequisites_ReturnsRowsInOrder(t *testing.T) {
-	got := Prerequisites(runner.Config{})
+	got := Prerequisites(runner.Config{}, runnertest.Lookup(nil))
 	want := []string{"runtime", "bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 	if len(got) != len(want) {
 		t.Fatalf("returned %d rows, want %d", len(got), len(want))
@@ -74,7 +81,7 @@ func TestPrerequisites_ReturnsRowsInOrder(t *testing.T) {
 // Reporter.Results prints Remedy alongside a failure, so a row with no Remedy
 // leaves an operator with only the bare error text.
 func TestPrerequisites_RemedyNonEmpty(t *testing.T) {
-	for _, p := range Prerequisites(runner.Config{}) {
+	for _, p := range Prerequisites(runner.Config{}, runnertest.Lookup(nil)) {
 		if p.Remedy == "" {
 			t.Errorf("prerequisite %q has empty Remedy", p.Name)
 		}
@@ -119,10 +126,25 @@ func TestPrerequisites_NetworkIsolationRequired(t *testing.T) {
 		{runner.NetworkModeNone, false, false},
 		{runner.NetworkModeHost, true, true},
 	} {
-		got := prereqByName(t, runner.Config{NetworkMode: tc.mode, BwrapUnshareNet: tc.unshare}, "bwrap-network-isolation")
+		knobs := map[string]string{"BWRAP_UNSHARE_NET": strconv.FormatBool(tc.unshare)}
+		got := prereqWithKnobs(t, runner.Config{NetworkMode: tc.mode}, knobs, "bwrap-network-isolation")
 		if got.Required != tc.want {
-			t.Errorf("NetworkMode=%q BwrapUnshareNet=%v: Required = %v, want %v", tc.mode, tc.unshare, got.Required, tc.want)
+			t.Errorf("NetworkMode=%q BWRAP_UNSHARE_NET=%v: Required = %v, want %v", tc.mode, tc.unshare, got.Required, tc.want)
 		}
+	}
+}
+
+// A malformed BWRAP_UNSHARE_NET leaves the pasta decision unknown, so the
+// network row is Required and its Probe surfaces the knob error, not a pasta one.
+func TestPrerequisites_NetworkIsolationMalformedKnob(t *testing.T) {
+	stubValidators(t, nil, func() error { return errors.New("pasta failed") }, nil)
+	cfg := runner.Config{NetworkMode: runner.NetworkModeHost}
+	got := prereqWithKnobs(t, cfg, map[string]string{"BWRAP_UNSHARE_NET": "maybe"}, "bwrap-network-isolation")
+	if !got.Required {
+		t.Error("Required = false, want true for a malformed knob")
+	}
+	if _, err := got.Probe(); err == nil || !strings.Contains(err.Error(), "BWRAP_UNSHARE_NET") {
+		t.Errorf("Probe() = %v, want an error naming BWRAP_UNSHARE_NET", err)
 	}
 }
 
@@ -284,7 +306,7 @@ func TestPrerequisites_LaunchStages(t *testing.T) {
 		"bwrap-network-isolation": runner.LaunchGate,
 		"bwrap-cgroup-delegation": runner.DoctorOnly,
 	}
-	for _, p := range Prerequisites(runner.Config{}) {
+	for _, p := range Prerequisites(runner.Config{}, runnertest.Lookup(nil)) {
 		if p.Launch != want[p.Name] {
 			t.Errorf("%s Launch = %v, want %v", p.Name, p.Launch, want[p.Name])
 		}
@@ -298,11 +320,11 @@ func TestPrerequisites_LaunchChecksPastaBeforeOverlay(t *testing.T) {
 	errOverlay, errPasta := errors.New("overlay failed"), errors.New("pasta failed")
 	stubValidators(t, func() error { return errOverlay }, func() error { return errPasta }, nil)
 	cfg := runner.Config{NixStoreWritable: true, NixConfigFile: "/nix/store/example/nix.conf"}
-	if !cfg.BwrapNetwork().Pasta {
+	if !cfg.BwrapNetwork(false).Pasta {
 		t.Fatal("zero NetworkMode no longer runs pasta; pick a mode that does")
 	}
 	var got error
-	for _, p := range runner.LaunchGates(Prerequisites(cfg), runner.LaunchGate) {
+	for _, p := range runner.LaunchGates(Prerequisites(cfg, runnertest.Lookup(nil)), runner.LaunchGate) {
 		if _, err := p.Probe(); err != nil {
 			got = err
 			break

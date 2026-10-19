@@ -7,6 +7,7 @@ import (
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // stubPodmanMachineMemory swaps the query seam for the duration of the test.
@@ -29,7 +30,7 @@ func podmanCfg(memoryLimit string, maxParallel int) runner.Config {
 
 func machinePrereq(t *testing.T, cfg runner.Config) runner.Prerequisite {
 	t.Helper()
-	for _, p := range Prerequisites(cfg) {
+	for _, p := range Prerequisites(cfg, runnertest.Lookup(nil)) {
 		if p.Name == podmanMachineMemoryCheckName {
 			return p
 		}
@@ -250,7 +251,7 @@ func TestPrerequisites_SuccessMsgFormatsFromArgument(t *testing.T) {
 }
 
 func TestPrerequisites_DeclaresRuntimeFirst(t *testing.T) {
-	got := Prerequisites(podmanCfg("5g", 1))
+	got := Prerequisites(podmanCfg("5g", 1), runnertest.Lookup(nil))
 	if len(got) != 2 {
 		t.Fatalf("returned %d rows, want 2", len(got))
 	}

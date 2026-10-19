@@ -785,13 +785,12 @@ func TestRunnerConfig_DriverMountTargets(t *testing.T) {
 	}
 }
 
-// PIDS_LIMIT, MEMORY_LIMIT, PODMAN_NETWORK and SPINDRIFT_SKILLS_DIR overrides
-// reach runner.Config, so the adapters render the operator's values rather
-// than the schema defaults.
-func TestRunnerConfig_LimitsNetworkSkillsOverrides(t *testing.T) {
+// PIDS_LIMIT, MEMORY_LIMIT and SPINDRIFT_SKILLS_DIR overrides reach
+// runner.Config, so the adapters render the operator's values rather than the
+// schema defaults.
+func TestRunnerConfig_LimitsSkillsOverrides(t *testing.T) {
 	t.Setenv("PIDS_LIMIT", "256")
 	t.Setenv("MEMORY_LIMIT", "2g")
-	t.Setenv("PODMAN_NETWORK", "pasta")
 	t.Setenv("SPINDRIFT_SKILLS_DIR", "/host/skills")
 
 	rc := runnerConfig(loadConfig())
@@ -801,9 +800,6 @@ func TestRunnerConfig_LimitsNetworkSkillsOverrides(t *testing.T) {
 	}
 	if rc.MemoryLimit != "2g" {
 		t.Errorf("MemoryLimit = %q, want 2g", rc.MemoryLimit)
-	}
-	if rc.PodmanNetwork != "pasta" {
-		t.Errorf("PodmanNetwork = %q, want pasta", rc.PodmanNetwork)
 	}
 	if rc.MountParams.SkillsDir != "/host/skills" {
 		t.Errorf("MountParams.SkillsDir = %q, want /host/skills", rc.MountParams.SkillsDir)
@@ -4490,8 +4486,8 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	t.Cleanup(func() { lookupRunnerStrategy = orig })
 	lookupRunnerStrategy = func(string) (runner.Strategy, error) {
 		s := real
-		s.Prerequisites = func(cfg runner.Config) []runner.Prerequisite {
-			ps := real.PrerequisitesFor(cfg)
+		s.Prerequisites = func(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite {
+			ps := real.PrerequisitesFor(cfg, l)
 			for i := range ps {
 				fail := ps[i].Name == "bwrap-cgroup-delegation"
 				ps[i].Probe = func() (any, error) {
