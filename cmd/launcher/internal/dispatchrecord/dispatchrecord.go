@@ -470,12 +470,12 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	case announced != "":
 		kind = announced
 	case firstRole != "":
-		kind = dispatchkind.Work.Name
+		kind = dispatchkind.Default.Name
 	case status == outcome.StatusBlocked:
 		// Pre-orchestrator single-pass run: no pass_start names a role. Of the
 		// compiled-default statuses only the shared blocked is still unsettled
 		// here; any other status falls through to KindUnknown.
-		kind = dispatchkind.Work.Name
+		kind = dispatchkind.Default.Name
 	}
 
 	return Record{

@@ -23,7 +23,8 @@ type queueSettler struct {
 	// nil, and Marked's nil-receiver guard then reports nothing terminated.
 	terminated *terminate.Registry
 	// kind scopes the queue marks to this stack's own rows: a work and a
-	// research row can share a number (issue #4230). Nil means KindWork.
+	// research row can share a number (issue #4230). Nil means
+	// dispatchkind.Default.
 	kind Kind
 }
 
@@ -57,4 +58,4 @@ func (qs queueSettler) Fail(num string, gen uint64, result dispatch.Result) {
 	}
 }
 
-func (qs queueSettler) rowKind() Kind { return orWork(qs.kind) }
+func (qs queueSettler) rowKind() Kind { return orDefault(qs.kind) }

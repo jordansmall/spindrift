@@ -185,7 +185,7 @@ func heldIssues(issues, selected []Issue) []Issue {
 func printSelectiveRerunHint(cfg Config, held []Issue) {
 	verb := cfg.Verb
 	if verb == "" {
-		verb = dispatchkind.Work.Verb
+		verb = dispatchkind.Default.Verb
 	}
 	nums := make([]string, len(held))
 	for i, iss := range held {

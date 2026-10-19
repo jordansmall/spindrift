@@ -167,7 +167,7 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
 	if r.kind == "" {
-		r.kind = dispatchkind.Work.Name
+		r.kind = dispatchkind.Default.Name
 	}
 	desc, ok := dispatchkind.ByName(r.kind)
 	if !ok {

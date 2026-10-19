@@ -36,7 +36,7 @@ func (k Kind) choreKeyed() bool {
 // existing dispatch-only callers need not pass a kind at all.
 func ParseKind(s string) (Kind, error) {
 	if s == "" {
-		return KindOf(dispatchkind.Work), nil
+		return KindOf(dispatchkind.Default), nil
 	}
 	if d, ok := dispatchkind.ByVerb(s); ok {
 		return KindOf(d), nil
