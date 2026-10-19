@@ -73,7 +73,12 @@ type Report struct {
 // that row reads (ecosystem.CredentialStores); a store outside a declaration's
 // row is named in StoresSearched but never queried.
 func Discover(repoDir string, stores []Store, storesByEcosystem map[string][]string, lookup Lookup, probe Probe) ([]Route, Report, error) {
-	declared, notes, err := Extract(repoDir)
+	return DiscoverRows(repoDir, ecosystem.Table, stores, storesByEcosystem, lookup, probe)
+}
+
+// DiscoverRows is Discover over the given rows rather than ecosystem.Table.
+func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, storesByEcosystem map[string][]string, lookup Lookup, probe Probe) ([]Route, Report, error) {
+	declared, notes, err := ExtractRows(repoDir, rows)
 	if err != nil {
 		return nil, Report{}, err
 	}
