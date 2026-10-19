@@ -501,12 +501,16 @@ let
     else
       true;
 
-  # Whether either backend knob selects forgejo (issue #1963): drives
-  # lib/image.nix's fj (forgejo-cli) bake, so a github-backend Consumer's
-  # image never carries an unused CLI.
-  forgejoBackend =
-    (mergedDefaults.issueTracker or "github") == "forgejo"
-    || (mergedDefaults.codeForge or "github") == "forgejo";
+  # The backend-specific CLI packages (nixpkgs attribute names) the selected
+  # tracker and forge rows declare (issue #1963), which lib/image.nix bakes so
+  # an image never carries a CLI its backends do not use. An unregistered
+  # backend name contributes none.
+  backendCLIPackages = lib.unique (
+    lib.concatMap (row: lib.optional (row ? cliPackage) row.cliPackage) [
+      issueTrackerRow
+      codeForgeRow
+    ]
+  );
 
   defaultsKeyError = import ./defaults-key-error.nix {
     inherit lib;
@@ -1179,11 +1183,6 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/signalclient)
         forgeTopLevelFiles
-        # Branch recovery's open-PR query goes through the github adapter, the
-        # one place gh calls may live (issue #4301).
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/forge/github)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/forge/gitplumbing)
@@ -1345,7 +1344,7 @@ let
     inherit
       nixInBox
       nixStoreWritable
-      forgejoBackend
+      backendCLIPackages
       prefetch
       imageName
       ;

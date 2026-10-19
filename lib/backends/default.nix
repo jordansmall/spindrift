@@ -77,6 +77,13 @@
 # knobs in the row's `knobs`. An omitted block
 # means hand-edit only: quickstart never offers the backend.
 
+# cliPackage is the nixpkgs attribute name of a CLI only this backend needs
+# inside the Box (forgejo: forgejo-cli, issue #1963). lib/mkHarness.nix unions
+# it across the selected tracker and forge rows and lib/image.nix bakes the
+# result; omit it for a backend that needs none. gh is not declared here: it
+# is Harness plumbing, baked unconditionally. Like `knobs`, the generated
+# Descriptor ignores it.
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [

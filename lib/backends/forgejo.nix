@@ -25,6 +25,7 @@
       "forge"
     ];
   };
+  cliPackage = "forgejo-cli";
 
   knobs = {
     forgejoBaseURL = {
