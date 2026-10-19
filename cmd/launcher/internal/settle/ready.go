@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/report"
@@ -103,15 +103,15 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.it.Comment(num, mergeGuardComment(matched))
 				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardHit), ""
 			}
-			held, tuningErr := s.tuningHold(num)
-			if tuningErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  check=tuning  !! %v\n", num, pr, tuningErr)
-				s.commentTuningPR(num, pr, tuningCheckErrorComment(tuningErr))
+			heldRow, held, holdErr := s.mergeByHandHold(num)
+			if holdErr != nil {
+				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  check=tuning  !! %v\n", num, pr, holdErr)
+				s.commentHoldPR(num, pr, holdCheckErrorComment(mergeByHandRows(), holdErr))
 				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardCheckError), ""
 			}
 			if held {
 				fmt.Printf("    #%s  landing=%s  status=tuning-provenance\n", num, pr)
-				s.commentTuningPR(num, pr, tuningHoldComment())
+				s.commentHoldPR(num, pr, holdComment(heldRow))
 				return s.completeLanding(num, gen, landingManual, ReasonTuningProvenance), ""
 			}
 			mergeReason, err := s.applyMergeMode(num, gen, pr, d)
@@ -508,29 +508,60 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 	return matchedGuardPaths(s.cfg.MergeGuardPaths, files), nil
 }
 
-// commentTuningPR posts a tuning-hold comment on the PR, where a reviewer of
+// catalogRows is the Chore catalog settle consults for merge-by-hand and
+// marker facts; a var so tests can swap in synthetic rows.
+var catalogRows = chore.Rows
+
+// commentHoldPR posts a merge-hold comment on the PR, where a reviewer of
 // the held PR will look. A failed post is logged only: the hold stands anyway.
-func (s *Settle) commentTuningPR(num, pr, body string) {
+func (s *Settle) commentHoldPR(num, pr, body string) {
 	if err := s.pr.CommentPR(pr, body); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: post tuning-hold PR comment: %v\n", num, err)
+		fmt.Fprintf(os.Stderr, "    ?? #%s: post merge-hold PR comment: %v\n", num, err)
 	}
 }
 
-// tuningHold reports whether num's issue is a tuning finding, whose PR the
-// host never merges. A tracker with a label registry is judged by the
-// agent-tuning-finding label alone, so removing it is the override; one
-// without may never have applied the label, so the body's chore=tuning marker
+// wearsFindingLabel reports whether labels include row's finding label.
+func wearsFindingLabel(row chore.Row, labels []string) bool {
+	return row.FindingLabel != "" && containsLabel(labels, row.FindingLabel)
+}
+
+// mergeByHandRows is the catalog rows whose findings the host never merges.
+func mergeByHandRows() []chore.Row {
+	var rows []chore.Row
+	for _, r := range catalogRows() {
+		if r.MergeByHand {
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}
+
+// mergeByHandHold reports whether num's issue is a finding of a MergeByHand
+// Chore, whose PR the host never merges, and which row held it. With no such
+// row the issue is not read at all. A tracker with a label registry is judged
+// by the row's finding label alone, so removing it is the override; one
+// without may never have applied the label, so the body's chore=<name> marker
 // counts there too. An unreadable issue is an error: the caller holds as a
 // precaution.
-func (s *Settle) tuningHold(num string) (bool, error) {
+func (s *Settle) mergeByHandHold(num string) (chore.Row, bool, error) {
+	rows := mergeByHandRows()
+	if len(rows) == 0 {
+		return chore.Row{}, false, nil
+	}
 	iss, err := s.it.Issue(num)
 	if err != nil {
-		return false, err
+		return chore.Row{}, false, err
 	}
-	if containsLabel(iss.Labels, doctor.TuningFindingLabel) {
-		return true, nil
+	registry := s.cfg.Capabilities.TrackerDescriptor.LabelRegistry
+	for _, r := range rows {
+		if wearsFindingLabel(r, iss.Labels) {
+			return r, true, nil
+		}
+		if !registry && carriesChoreMarker(iss.Body, r.Name) {
+			return r, true, nil
+		}
 	}
-	return !s.cfg.Capabilities.TrackerDescriptor.LabelRegistry && carriesTuningMarker(iss.Body), nil
+	return chore.Row{}, false, nil
 }
 
 // applyMergeMode performs the mode-specific action once a landing is ready to

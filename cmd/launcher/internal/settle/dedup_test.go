@@ -808,12 +808,12 @@ func TestFindingLabelsListsEachLabelOnce(t *testing.T) {
 }
 
 func TestNormalizeDedupKey_TuningChoreTermIsStable(t *testing.T) {
-	if got := normalizeDedupKey(tuningChoreTerm); got != tuningChoreTerm {
-		t.Fatalf("normalizeDedupKey(%q) = %q, want it unchanged", tuningChoreTerm, got)
+	if got := normalizeDedupKey(tuningTerm); got != tuningTerm {
+		t.Fatalf("normalizeDedupKey(%q) = %q, want it unchanged", tuningTerm, got)
 	}
 }
 
-func TestCarriesTuningMarker(t *testing.T) {
+func TestCarriesChoreMarker(t *testing.T) {
 	quoted := dedupMarkerPrefix + "chore=tuning, quoted" + dedupMarkerSuffix
 	for _, tc := range []struct {
 		name string
@@ -831,17 +831,17 @@ func TestCarriesTuningMarker(t *testing.T) {
 		{"empty body", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := carriesTuningMarker(tc.body); got != tc.want {
-				t.Errorf("carriesTuningMarker = %v, want %v", got, tc.want)
+			if got := carriesChoreMarker(tc.body, "tuning"); got != tc.want {
+				t.Errorf("carriesChoreMarker = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
 func TestDedupMarker_RoundTripsTuningChoreTerm(t *testing.T) {
-	marker := buildDedupMarker([]string{"Site:Key", tuningChoreTerm})
+	marker := buildDedupMarker([]string{"Site:Key", tuningTerm})
 	got := parseDedupMarker(marker)
-	want := []string{"site:key", tuningChoreTerm}
+	want := []string{"site:key", tuningTerm}
 	if !slices.Equal(got, want) {
 		t.Fatalf("parseDedupMarker = %v, want %v", got, want)
 	}
@@ -853,23 +853,23 @@ func TestTuningChoreTermIsNotADedupKey(t *testing.T) {
 	label := dispatchkind.Work.FindingLabel
 	index := make(map[string]string)
 	indexFindingIssues(index, []forge.Issue{
-		{Number: "7", Labels: []string{label}, Body: buildDedupMarker([]string{"site a", tuningChoreTerm})},
+		{Number: "7", Labels: []string{label}, Body: buildDedupMarker([]string{"site a", tuningTerm})},
 	}, time.Time{})
-	if _, ok := index[tuningChoreTerm]; ok {
-		t.Errorf("index = %v, want %q not indexed", index, tuningChoreTerm)
+	if _, ok := index[tuningTerm]; ok {
+		t.Errorf("index = %v, want %q not indexed", index, tuningTerm)
 	}
 
-	ov := matchDedup(index, map[string]bool{"site b": true, tuningChoreTerm: true})
+	ov := matchDedup(index, map[string]bool{"site b": true, tuningTerm: true})
 	if ov.full || len(ov.covered) != 0 || len(ov.refs) != 0 {
 		t.Errorf("matchDedup(distinct tuning finding) = %+v, want no overlap", ov)
 	}
 
-	ov = matchDedup(index, map[string]bool{"site a": true, tuningChoreTerm: true})
+	ov = matchDedup(index, map[string]bool{"site a": true, tuningTerm: true})
 	if !ov.full || len(ov.covered) != 1 || len(ov.refs) != 1 || ov.refs[0] != "#7" {
 		t.Errorf("matchDedup(real keys covered + term) = %+v, want full against #7", ov)
 	}
 
-	ov = matchDedup(map[string]string{tuningChoreTerm: "#7"}, map[string]bool{tuningChoreTerm: true})
+	ov = matchDedup(map[string]string{tuningTerm: "#7"}, map[string]bool{tuningTerm: true})
 	if ov.full || len(ov.covered) != 0 {
 		t.Errorf("matchDedup(term-only intent) = %+v, want not full", ov)
 	}
@@ -881,7 +881,7 @@ func TestTuningChoreTermIsNotADedupKey(t *testing.T) {
 func TestIndexFindingIssues_NotPlannedExpiry(t *testing.T) {
 	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	label := dispatchkind.Butler.FindingLabel
-	tuning := buildDedupMarker([]string{"k", tuningChoreTerm})
+	tuning := buildDedupMarker([]string{"k", tuningTerm})
 	code := buildDedupMarker([]string{"k"})
 	cases := []struct {
 		name    string
@@ -916,7 +916,7 @@ func TestIndexFindingIssues_NotPlannedExpiry(t *testing.T) {
 func TestIndexFindingIssues_NotPlannedExpiryFromJiraAdapter(t *testing.T) {
 	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	label := dispatchkind.Butler.FindingLabel
-	body, _ := json.Marshal(buildDedupMarker([]string{"k", tuningChoreTerm}))
+	body, _ := json.Marshal(buildDedupMarker([]string{"k", tuningTerm}))
 	cases := []struct {
 		name       string
 		resolution string
@@ -955,7 +955,7 @@ func TestIndexFindingIssues_NotPlannedExpiryFromJiraAdapter(t *testing.T) {
 func TestIndexFindingIssues_NotPlannedExpiryFromLocalAdapter(t *testing.T) {
 	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	label := dispatchkind.Butler.FindingLabel
-	marker := buildDedupMarker([]string{"k", tuningChoreTerm})
+	marker := buildDedupMarker([]string{"k", tuningTerm})
 	cases := []struct {
 		name    string
 		reason  string
@@ -985,5 +985,66 @@ func TestIndexFindingIssues_NotPlannedExpiryFromLocalAdapter(t *testing.T) {
 				t.Errorf("key covered = %v, want %v", ok, c.covered)
 			}
 		})
+	}
+}
+
+// tuningTerm pins the wire form of the tuning Chore's marker term.
+const tuningTerm = "chore=tuning"
+
+func TestChoreTerm(t *testing.T) {
+	if got := choreTerm("tuning"); got != tuningTerm {
+		t.Errorf("choreTerm(tuning) = %q, want %q", got, tuningTerm)
+	}
+	if got := normalizeDedupKey(choreTerm("synthetic")); got != "chore=synthetic" {
+		t.Errorf("normalizeDedupKey(choreTerm(synthetic)) = %q, want it unchanged", got)
+	}
+}
+
+func TestCarriesChoreMarker_NamesTheChore(t *testing.T) {
+	body := "body\n\n" + buildDedupMarker([]string{"k", "chore=synthetic"})
+	if !carriesChoreMarker(body, "synthetic") {
+		t.Error("carriesChoreMarker(synthetic) = false, want true")
+	}
+	if carriesChoreMarker(body, "tuning") {
+		t.Error("carriesChoreMarker(tuning) = true for a synthetic marker, want false")
+	}
+}
+
+// Every Chore's provenance term is skipped, not just tuning's, so a new
+// Chore's findings never dedup against each other on the shared term.
+func TestChoreTermsAreNotDedupKeys(t *testing.T) {
+	withCatalogRows(t, syntheticHold)
+	const term = "chore=synthetic"
+	if !isProvenanceTerm(term) || isProvenanceTerm("site a") {
+		t.Fatalf("isProvenanceTerm: %q = %v, \"site a\" = %v", term, isProvenanceTerm(term), isProvenanceTerm("site a"))
+	}
+	index := make(map[string]string)
+	indexFindingIssues(index, []forge.Issue{
+		{Number: "7", Labels: []string{dispatchkind.Work.FindingLabel}, Body: buildDedupMarker([]string{"site a", term})},
+	}, time.Time{})
+	if _, ok := index[term]; ok {
+		t.Errorf("index = %v, want %q not indexed", index, term)
+	}
+}
+
+// Only a catalog Chore's term is provenance: a Box-supplied "chore=foo" naming
+// no row stays an ordinary dedup term, indexed and matched.
+func TestNonCatalogChoreTermIsADedupKey(t *testing.T) {
+	const foo = "chore=foo"
+	if isProvenanceTerm(foo) || !isProvenanceTerm(tuningTerm) {
+		t.Fatalf("isProvenanceTerm: %q = %v, %q = %v", foo, isProvenanceTerm(foo), tuningTerm, isProvenanceTerm(tuningTerm))
+	}
+	index := make(map[string]string)
+	indexFindingIssues(index, []forge.Issue{
+		{Number: "7", Labels: []string{dispatchkind.Work.FindingLabel}, Body: buildDedupMarker([]string{"site a", foo, tuningTerm})},
+	}, time.Time{})
+	if index[foo] != "#7" {
+		t.Errorf("index = %v, want %q indexed to #7", index, foo)
+	}
+	if _, ok := index[tuningTerm]; ok {
+		t.Errorf("index = %v, want %q not indexed", index, tuningTerm)
+	}
+	if ov := matchDedup(index, map[string]bool{foo: true}); !ov.full {
+		t.Errorf("matchDedup(%q) = %+v, want full overlap", foo, ov)
 	}
 }
