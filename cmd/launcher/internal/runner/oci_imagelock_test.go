@@ -6,13 +6,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // The warm path (image already present) must never touch the lock at all —
 // issue #3632's "single-child path unchanged in cost" criterion.
 func TestEnsureReady_ImagePresent_NoLockFileCreated(t *testing.T) {
 	dir := redirectImageLockDir(t)
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
 
 	if err := a.EnsureReady(); err != nil {
@@ -44,7 +46,7 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 	// acquire — must see absent, or it would never attempt the lock at all.
 	// call 1+: the re-probe under the lock, taken only after the holder
 	// releases — scripted present, standing in for "the winner finished".
-	cliScript, cliDir := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 0})
+	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 0})
 
 	origExec := ExecCommand
 	nixInvoked := false
@@ -63,7 +65,7 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 	done := make(chan result, 1)
 	var res result
 
-	stdout := captureStdoutDuring(t, func() {
+	stdout := runnertest.CaptureStdoutDuring(t, func() {
 		go func() {
 			done <- result{err: a.EnsureReady()}
 		}()
@@ -91,7 +93,7 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 	if nixInvoked {
 		t.Error("nix build invoked; the loser must not repeat the winner's realize")
 	}
-	if got := callCount(t, cliDir); got != 2 {
+	if got := runnertest.CallCount(t, cliDir); got != 2 {
 		t.Errorf("fake CLI callCount = %d, want 2 (two inspects, no run/load/tag)", got)
 	}
 	if !strings.Contains(stdout, "is being realized elsewhere — waiting") {
@@ -106,14 +108,14 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 // the lock changes nothing about the single-child, image-absent case.
 func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, cliDir := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent (outside the lock)
-		fakeCall{exit: 1}, // image inspect: still absent (re-probe under the lock)
-		fakeCall{},        // load
-		fakeCall{},        // tag
+	cliScript, cliDir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // image inspect: absent (outside the lock)
+		runnertest.Call{Exit: 1}, // image inspect: still absent (re-probe under the lock)
+		runnertest.Call{},        // load
+		runnertest.Call{},        // tag
 	)
 
-	nixScript, _ := newFakeCLI(t, fakeCall{exit: 0})
+	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	var gotName string
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -136,7 +138,7 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 	if gotName != "nix" {
 		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
 	}
-	if got := callCount(t, cliDir); got != 4 {
+	if got := runnertest.CallCount(t, cliDir); got != 4 {
 		t.Errorf("fake CLI callCount = %d, want 4 (two inspects, load, tag)", got)
 	}
 }
@@ -157,14 +159,14 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 	imageLockDir = func() string { return missing }
 	t.Cleanup(func() { imageLockDir = orig })
 
-	cliScript, cliDir := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent (outside the lock)
-		fakeCall{exit: 1}, // image inspect: still absent (re-probe, despite the failed acquire)
-		fakeCall{},        // load
-		fakeCall{},        // tag
+	cliScript, cliDir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // image inspect: absent (outside the lock)
+		runnertest.Call{Exit: 1}, // image inspect: still absent (re-probe, despite the failed acquire)
+		runnertest.Call{},        // load
+		runnertest.Call{},        // tag
 	)
 
-	nixScript, _ := newFakeCLI(t, fakeCall{exit: 0})
+	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(nixScript, args...)
@@ -180,7 +182,7 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 	}
 
 	var ensureErr error
-	stderr := captureStderrDuring(t, func() { ensureErr = a.EnsureReady() })
+	stderr := runnertest.CaptureStderrDuring(t, func() { ensureErr = a.EnsureReady() })
 
 	if ensureErr != nil {
 		t.Fatalf("EnsureReady: unexpected error: %v", ensureErr)
@@ -188,7 +190,7 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 	if !strings.Contains(stderr, "could not lock image") || !strings.Contains(stderr, "continuing unlocked") {
 		t.Errorf("stderr missing the acquire-failure degrade warning; got: %q", stderr)
 	}
-	if got := callCount(t, cliDir); got != 4 {
+	if got := runnertest.CallCount(t, cliDir); got != 4 {
 		t.Errorf("fake CLI callCount = %d, want 4 (two inspects, load, tag) — the build must still proceed unlocked", got)
 	}
 }

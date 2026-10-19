@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/agentpaths"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Both sides of the Target comparison read agentpaths.PromptsDir, so a rename
@@ -360,7 +360,7 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()
 	cacheDir := t.TempDir()
-	proxySocket := newTestSocket(t, "registry-proxy.sock")
+	proxySocket := runnertest.NewTestSocket(t, "registry-proxy.sock")
 
 	mp := MountParams{
 		PromptDir:             promptDir,
@@ -502,30 +502,9 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
 	}
 }
 
-// newTestSocket deliberately avoids t.TempDir(): that helper's directory embeds
-// the full test name, and under a nix build sandbox the build root is already
-// long, so the two together can exceed AF_UNIX's ~108-byte sun_path limit
-// (net.Listen then fails with "bind: invalid argument"). A short os.MkdirTemp
-// prefix keeps the path under the limit whatever the test name.
-func newTestSocket(t *testing.T, name string) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "sock-")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	path := filepath.Join(dir, name)
-	l, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("net.Listen(unix, %s): %v", path, err)
-	}
-	t.Cleanup(func() { l.Close() })
-	return path
-}
-
 // candidateMount rejects a unix socket; candidateSocketMount accepts one.
 func TestCandidateSocketMount_RealSocket(t *testing.T) {
-	sock := newTestSocket(t, "registry-proxy.sock")
+	sock := runnertest.NewTestSocket(t, "registry-proxy.sock")
 
 	spec, ok := candidateSocketMount(sock, "/registry-proxy.sock")
 	if !ok {
@@ -570,7 +549,7 @@ func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
 
 // ADR 0044 fixes the in-box target at /registry-proxy.sock.
 func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
-	sock := newTestSocket(t, "registry-proxy.sock")
+	sock := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	specs := BuildMountSpecs(MountParams{}, Box{Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}})
 
 	var found *MountSpec
@@ -603,8 +582,8 @@ func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
 // issue #3723: BuildMountSpecs mounts every entry of Box.Sockets, in order,
 // each at its own fixed target — not just a single hardcoded socket.
 func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
-	sockA := newTestSocket(t, "registry-proxy.sock")
-	sockB := newTestSocket(t, "signal.sock")
+	sockA := runnertest.NewTestSocket(t, "registry-proxy.sock")
+	sockB := runnertest.NewTestSocket(t, "signal.sock")
 	box := Box{Sockets: []SocketMount{
 		{Source: sockA, Target: RegistryProxySocketTarget},
 		{Source: sockB, Target: SignalSocketTarget},
@@ -631,7 +610,7 @@ func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
 // A non-existent or non-socket source is dropped, but a good entry
 // elsewhere in the list still mounts (issue #3723).
 func TestBuildMountSpecs_MultipleSockets_SkipsBadEntryKeepsGoodOne(t *testing.T) {
-	sockA := newTestSocket(t, "registry-proxy.sock")
+	sockA := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	box := Box{Sockets: []SocketMount{
 		{Source: filepath.Join(t.TempDir(), "does-not-exist.sock"), Target: SignalSocketTarget},
 		{Source: sockA, Target: RegistryProxySocketTarget},

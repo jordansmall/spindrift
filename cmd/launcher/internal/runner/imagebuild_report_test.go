@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // installImageBuildPipe installs a reporter on a fresh pipe and returns a
@@ -71,7 +72,7 @@ func wantStates(t *testing.T, got []string, want ...report.ImageBuildState) {
 func TestOCIEnsureReady_WarmReportsNothing(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := installImageBuildPipe(t)
-	cli, _ := newFakeCLI(t, fakeCall{exit: 0}) // image inspect: present
+	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}) // image inspect: present
 	a := &ociAdapter{cli: cli, image: "spindrift:abc123"}
 
 	if err := a.EnsureReady(); err != nil {
@@ -83,7 +84,7 @@ func TestOCIEnsureReady_WarmReportsNothing(t *testing.T) {
 func TestOCIEnsureReady_SiblingRealisedReportsNothing(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := installImageBuildPipe(t)
-	cli, _ := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 0}) // absent, then present under the lock
+	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 0}) // absent, then present under the lock
 	a := &ociAdapter{cli: cli, image: "spindrift:abc123"}
 
 	if err := a.EnsureReady(); err != nil {
@@ -95,8 +96,8 @@ func TestOCIEnsureReady_SiblingRealisedReportsNothing(t *testing.T) {
 func TestOCIEnsureReady_ColdBuildReportsStartedBeforeNixThenFinished(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := installImageBuildPipe(t)
-	cli, _ := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{}, fakeCall{})
-	nixScript, _ := newFakeCLI(t, fakeCall{exit: 0})
+	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 1}, runnertest.Call{}, runnertest.Call{})
+	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var beforeNix []string
@@ -122,8 +123,8 @@ func TestOCIEnsureReady_ColdBuildReportsStartedBeforeNixThenFinished(t *testing.
 func TestOCIEnsureReady_ColdBuildFailureStillReportsFinished(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := installImageBuildPipe(t)
-	cli, _ := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1})
-	stubHostNix(t, fakeCall{exit: 1, stdout: "genuine derivation error"})
+	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 1})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
 	a := &ociAdapter{cli: cli, image: "spindrift:abc123", imageDrv: "/nix/store/fake.drv"}
 
 	if err := a.EnsureReady(); err == nil {
@@ -134,7 +135,7 @@ func TestOCIEnsureReady_ColdBuildFailureStillReportsFinished(t *testing.T) {
 
 func TestBwrapBuildEnsureReady_ReportsStartedThenFinished(t *testing.T) {
 	drain := installImageBuildPipe(t)
-	stubHostNix(t, fakeCall{exit: 0})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 0})
 	a := &bwrapBuildAdapter{agentFilesDrv: "/fake/files.drv"}
 
 	if err := a.EnsureReady(); err != nil {
@@ -145,7 +146,7 @@ func TestBwrapBuildEnsureReady_ReportsStartedThenFinished(t *testing.T) {
 
 func TestBwrapBuildEnsureReady_RealizeFailureStillReportsFinished(t *testing.T) {
 	drain := installImageBuildPipe(t)
-	stubHostNix(t, fakeCall{exit: 1})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1})
 	a := &bwrapBuildAdapter{agentFilesDrv: "/fake/files.drv"}
 
 	if err := a.EnsureReady(); err == nil {
@@ -156,7 +157,7 @@ func TestBwrapBuildEnsureReady_RealizeFailureStillReportsFinished(t *testing.T) 
 
 func TestImageBuild_NoReporterInstalledIsHarmless(t *testing.T) {
 	redirectImageLockDir(t)
-	cli, _ := newFakeCLI(t, fakeCall{exit: 0})
+	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	a := &ociAdapter{cli: cli, image: "spindrift:abc123"}
 	if err := a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady: %v", err)

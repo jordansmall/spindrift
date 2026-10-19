@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // The Console's in-session rebuild action (issue #652) needs a fresh nix
@@ -15,7 +17,7 @@ import (
 // IMAGE_TAG are fixed at process start. The argv matches what an operator
 // runs after a pull, and Dir is pwd so the build reads the updated tree.
 func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0, stdout: ""})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0, Stdout: ""})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -32,7 +34,7 @@ func TestRunNixBuild_InvokesNixRunBuildInPwd(t *testing.T) {
 	if gotName != "nix" {
 		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
 	}
-	got := readCall(t, dir, 0)
+	got := runnertest.ReadCall(t, dir, 0)
 	want := []string{"run", ".#", "--", "build"}
 	if len(got) != len(want) {
 		t.Fatalf("argv = %v, want %v", got, want)
