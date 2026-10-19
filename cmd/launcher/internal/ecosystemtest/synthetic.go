@@ -20,6 +20,8 @@ import (
 // index.json response. Real rows migrate onto this kit later (issue #5600).
 var Synthetic = ecosystem.Row{
 	Name:             "synthetic",
+	LockfileNames:    []string{"synthetic.lock"},
+	Classification:   "synthetic",
 	InTreeConfigPath: ".synthetic/registries",
 	ConfigParser:     parseSynthetic,
 	RouteDeclaration: validateSyntheticRouteDeclaration,

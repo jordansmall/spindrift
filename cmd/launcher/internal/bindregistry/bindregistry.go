@@ -14,7 +14,13 @@ import (
 // the table changes the result: its order encodes the cargo, npm-family, go,
 // gradle precedence that agent/entrypoint.sh's old if/elif chain had (#2930).
 func Classify(workDir string) string {
-	for _, row := range ecosystem.Table {
+	return ClassifyRows(workDir, ecosystem.Table)
+}
+
+// ClassifyRows is Classify over the given rows in order, so a row's corpus can
+// prove its classification without ecosystem.Table.
+func ClassifyRows(workDir string, rows []ecosystem.Row) string {
+	for _, row := range rows {
 		for _, name := range row.LockfileNames {
 			info, err := os.Stat(filepath.Join(workDir, name))
 			if err != nil {

@@ -156,3 +156,22 @@ func TestClassify_IgnoresDirectory(t *testing.T) {
 		t.Errorf("Classify(%q) = %q, want empty (directory must not classify)", dir, got)
 	}
 }
+
+// ClassifyRows reads only the rows it is handed, so a row proves its own
+// lockfile classification without ecosystem.Table.
+func TestClassifyRows_UsesOnlyTheGivenRows(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"Cargo.lock", "own.lock"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	own := ecosystem.Row{Name: "own", LockfileNames: []string{"own.lock"}, Classification: "own"}
+
+	if got := ClassifyRows(dir, []ecosystem.Row{own}); got != "own" {
+		t.Errorf("ClassifyRows = %q, want %q", got, "own")
+	}
+	if got := ClassifyRows(dir, nil); got != "" {
+		t.Errorf("ClassifyRows with no rows = %q, want empty", got)
+	}
+}

@@ -10,12 +10,13 @@
 //	stores/<credresolver key>     optional operator credential store files (e.g. stores/netrc)
 //	routes.toml                   optional operator routes file; route resolution reads it
 //	                              instead of discovery's rendered output
-//	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 5)
-//	discovery.golden.toml         stage 1: the routes file discovery proposes
-//	routes.golden.json            stage 2: the resolved routes
-//	pathset.golden.json           stage 3: the derived enforced path-sets
-//	binding.golden.json           stage 4: the env exports, home config and in-tree rewrite
-//	rewrites.golden.json          stage 5: the proxy's responses for the upstream bodies
+//	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 6)
+//	classification.golden.txt     stage 1: the lockfile classification, empty when no lockfile matches
+//	discovery.golden.toml         stage 2: the routes file discovery proposes
+//	routes.golden.json            stage 3: the resolved routes
+//	pathset.golden.json           stage 4: the derived enforced path-sets
+//	binding.golden.json           stage 5: the env exports, home config and in-tree rewrite
+//	rewrites.golden.json          stage 6: the proxy's responses for the upstream bodies
 //
 // A stage the row does not take part in has no golden and is skipped; a stale
 // golden for one fails. Importing this package from non-test code pulls in
@@ -63,6 +64,12 @@ type stage struct {
 
 // stages is the pipeline in order; each stage is one entry here and nowhere else.
 var stages = []stage{
+	{
+		name:      "lockfile classification",
+		golden:    "classification.golden.txt",
+		takesPart: func(row ecosystem.Row) bool { return len(row.LockfileNames) > 0 },
+		replay:    (*replay).classification,
+	},
 	{
 		name:      "discovery",
 		golden:    "discovery.golden.toml",
@@ -194,6 +201,10 @@ func (c *replay) rows() []ecosystem.Row { return []ecosystem.Row{c.row} }
 
 func (c *replay) repo() string { return filepath.Join(c.dir, "repo") }
 
+func (c *replay) classification() ([]byte, error) {
+	return []byte(bindregistry.ClassifyRows(c.repo(), c.rows()) + "\n"), nil
+}
+
 // discovery hands DiscoverRows a repo-relative display path for each store, so
 // the golden carries no absolute temp path, and maps it back to the real file
 // for the lookup.
@@ -258,7 +269,7 @@ func (c *replay) pathSet() ([]byte, error) {
 	return json.Marshal(sets)
 }
 
-// proxyRoutes is the proxy route table stages 4 and 5 run against. It mirrors
+// proxyRoutes is the proxy route table stages 5 and 6 run against. It mirrors
 // package main's resolveRegistryRoutesFromFile, applyHostPathSet and
 // registryproxy.AssignPrefixes, which the kit cannot import. Credentials stay
 // empty: no secret is resolved.
