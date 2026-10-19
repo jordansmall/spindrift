@@ -16,7 +16,7 @@ it from the tracker.
 Read first (run these yourself) — skip anything CI FAILURE above already answered:
 
 - `git log -n 10 --oneline` — the prior run's commits already on this branch.
-${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}# FIX
+${FIX_CI_READ_STEP}# FIX
 
 ${SKILL_PREAMBLE}A comment earns its place only by carrying something the code cannot state
 itself: the non-obvious why, a constraint, or a gotcha. Never write a

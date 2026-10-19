@@ -876,3 +876,48 @@ func TestGatesBackendAgnosticReadWriteAndRelayed(t *testing.T) {
 		}
 	}
 }
+
+// TestGatesFilerDirectFollowsFilerFolder pins the filer-axis slot rows, gated
+// on FILER_FILE_DIRECT_ANY, to the deprecated per-backend gates: GH is on
+// exactly when a direct Filer's folder is github, FORGEJO when it is forgejo,
+// for every tracker, with and without explicit axis fields.
+func TestGatesFilerDirectFollowsFilerFolder(t *testing.T) {
+	axes := []struct{ read, write, filer string }{{"", "", ""}, {"GITHUB", "GITHUB", "GH"}, {"FORGEJO", "FORGEJO", "FORGEJO"}, {"LOCAL", "", "GH"}}
+	for _, tracker := range []string{"github", "forgejo", "local", "jira"} {
+		for _, ax := range axes {
+			for _, boxWrite := range []bool{true, false} {
+				for _, kd := range dispatchkind.All {
+					for _, filer := range []bool{true, false} {
+						env := Env{IssueTracker: tracker, TrackerAxisRead: ax.read, TrackerAxisWrite: ax.write, TrackerAxisFiler: ax.filer,
+							BoxWriteEnabled: boxWrite, DispatchKind: kd.Name, FilerEnabled: filer}
+						g := Gates(env)
+						folder, err := FragmentRow{Axis: "filer"}.axisFolder(env)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if want := g["FILER_FILE_DIRECT_ANY"] && folder == "github"; g["FILER_FILE_DIRECT_GH"] != want {
+							t.Errorf("Gates(%+v)[FILER_FILE_DIRECT_GH] = %v, want %v", env, g["FILER_FILE_DIRECT_GH"], want)
+						}
+						if want := g["FILER_FILE_DIRECT_ANY"] && folder == "forgejo"; g["FILER_FILE_DIRECT_FORGEJO"] != want {
+							t.Errorf("Gates(%+v)[FILER_FILE_DIRECT_FORGEJO] = %v, want %v", env, g["FILER_FILE_DIRECT_FORGEJO"], want)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestGatesPRBodyIssueRefKeysOnKnob pins the PR-body ticket-reference gates to
+// LOCAL_ISSUE_REFERENCE alone, never a tracker name: the folder decides which
+// tracker has a file for them, and exactly one of the pair is on.
+func TestGatesPRBodyIssueRefKeysOnKnob(t *testing.T) {
+	for _, tracker := range []string{"github", "forgejo", "local", "jira"} {
+		for _, ref := range []bool{true, false} {
+			g := Gates(Env{IssueTracker: tracker, LocalIssueReference: ref})
+			if g["PR_BODY_ISSUE_REF"] != ref || g["PR_BODY_NO_ISSUE_REF"] == ref {
+				t.Errorf("tracker %s ref=%v: PR_BODY_ISSUE_REF=%v PR_BODY_NO_ISSUE_REF=%v", tracker, ref, g["PR_BODY_ISSUE_REF"], g["PR_BODY_NO_ISSUE_REF"])
+			}
+		}
+	}
+}

@@ -17,7 +17,7 @@ issue number alone — research never opens a PR; a butler delegation (ADR
 
 Steps:
 
-${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}${FILER_LABEL_RELAY_BUTLER_STEP}${FILER_LABEL_RELAY_BUTLER_RECORDS_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+${FILER_DIRECT_LABEL_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}${FILER_LABEL_RELAY_BUTLER_STEP}${FILER_LABEL_RELAY_BUTLER_RECORDS_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
    - Dedup the batch against itself first: two findings sharing a site key,
      or naming the same symbol, are one finding — file it once. The host
      catches only exact keys and overlapping line ranges, so one defect
@@ -38,7 +38,7 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      differently, so only the site is stable across them — never key on
      wording. One key per finding; add a second only when a finding
      genuinely spans two sites.
-${FILER_DEDUP_STEP}${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
+${FILER_DEDUP_STEP}${FILER_DIRECT_FILE_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".

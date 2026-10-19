@@ -202,12 +202,12 @@ let
   # findingLabel/patchLabel directly.
   harnessSurfaces = {
     "lib/dispatch-kinds" = kindRowSurface dispatchKinds;
-    "templates/default/prompts/fragments/filer-label-direct.md" = {
-      src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct.md;
+    "templates/default/prompts/fragments/github/filer-direct-label.md" = {
+      src = builtins.readFile ../../templates/default/prompts/fragments/github/filer-direct-label.md;
       extract = extractLabelCreateTokens;
     };
-    "templates/default/prompts/fragments/filer-label-direct-forgejo.md" = {
-      src = builtins.readFile ../../templates/default/prompts/fragments/filer-label-direct-forgejo.md;
+    "templates/default/prompts/fragments/forgejo/filer-direct-label.md" = {
+      src = builtins.readFile ../../templates/default/prompts/fragments/forgejo/filer-direct-label.md;
       extract = extractNameFieldTokens;
     };
     "cmd/launcher/internal/doctor/doctor.go" = {
@@ -625,10 +625,10 @@ mapAttrs (
               label create \
                      agent-unregistered-label''
           ]
-          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md".src;
+          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "templates/default/prompts/fragments/filer-label-direct.md" =
-          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md"
+        "templates/default/prompts/fragments/github/filer-direct-label.md" =
+          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md"
           // {
             src = doctoredFilerLabelDirectSrc;
           };
@@ -639,7 +639,7 @@ mapAttrs (
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-continuation-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct.md with the label-create bareword line-continued and renamed to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-continuation-regression: expected assertHarnessWritesInRegistry to reject a synthetic github/filer-direct-label.md with the label-create bareword line-continued and renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-continuation-regression" { } "touch $out";
 
   # Proves the emptyOffenders half fires when extractLabelCreateTokens'
@@ -652,10 +652,10 @@ mapAttrs (
         replaceStrings
           [ "label create agent-review-finding" ]
           [ ''label create "agent-unregistered-label"'' ]
-          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md".src;
+          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "templates/default/prompts/fragments/filer-label-direct.md" =
-          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md"
+        "templates/default/prompts/fragments/github/filer-direct-label.md" =
+          harnessSurfaces."templates/default/prompts/fragments/github/filer-direct-label.md"
           // {
             src = doctoredFilerLabelDirectSrc;
           };
@@ -666,7 +666,7 @@ mapAttrs (
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-quoted-bareword-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct.md with the label-create bareword double-quoted and renamed to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-quoted-bareword-regression: expected assertHarnessWritesInRegistry to reject a synthetic github/filer-direct-label.md with the label-create bareword double-quoted and renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-quoted-bareword-regression" { } "touch $out";
 
   # Proves the emptyOffenders half fires when extractNameFieldTokens' no-space
@@ -677,10 +677,10 @@ mapAttrs (
     let
       doctoredForgejoSrc =
         replaceStrings [ ''"name":"agent-review-finding"'' ] [ ''"name": "agent-unregistered-label"'' ]
-          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct-forgejo.md".src;
+          harnessSurfaces."templates/default/prompts/fragments/forgejo/filer-direct-label.md".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "templates/default/prompts/fragments/filer-label-direct-forgejo.md" =
-          harnessSurfaces."templates/default/prompts/fragments/filer-label-direct-forgejo.md"
+        "templates/default/prompts/fragments/forgejo/filer-direct-label.md" =
+          harnessSurfaces."templates/default/prompts/fragments/forgejo/filer-direct-label.md"
           // {
             src = doctoredForgejoSrc;
           };
@@ -691,7 +691,7 @@ mapAttrs (
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-json-spacing-regression: expected assertHarnessWritesInRegistry to reject a synthetic filer-label-direct-forgejo.md with a space after the \"name\" key's colon and the value renamed to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-json-spacing-regression: expected assertHarnessWritesInRegistry to reject a synthetic forgejo/filer-direct-label.md with a space after the \"name\" key's colon and the value renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-json-spacing-regression" { } "touch $out";
 
   # Proves assertHarnessWritesInRegistry catches doctor.go's hand-written

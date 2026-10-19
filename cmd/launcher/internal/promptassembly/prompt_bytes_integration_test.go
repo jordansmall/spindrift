@@ -385,12 +385,12 @@ func TestPromptBytes_CodeForgeGitBranchesToPushOnlyOutcome(t *testing.T) {
 
 // issue #1614: the draft bit is the readiness signal the entrypoint backstop
 // and launcher trust, so the PR must never open non-draft. issue #1919: the
-// `gh pr create` invocation lives in open-pr-create-git.md, so the section
-// itself carries only the OPEN_PR_CREATE_READ_WRITE_STEP reference.
+// `gh pr create` invocation lives in github/open-pr-create.md, so the section
+// itself carries only the OPEN_PR_CREATE_DIRECT_STEP reference.
 func TestPromptBytes_OpenPullRequestOpensAsDraft(t *testing.T) {
 	section := pbSection(t, pbPrompt(t, "issue-prompt.md"), `^# OPEN A PULL REQUEST$`, `^# OUTCOME$`)
-	pbMatch(t, section, `OPEN_PR_CREATE_READ_WRITE_STEP`)
-	pbMatch(t, pbPrompt(t, filepath.Join("fragments", "open-pr-create-git.md")), `gh pr create --draft`)
+	pbMatch(t, section, `OPEN_PR_CREATE_DIRECT_STEP`)
+	pbMatch(t, pbPrompt(t, filepath.Join("fragments", "github/open-pr-create.md")), `gh pr create --draft`)
 }
 
 // issue #1653: the launcher, not the Driver, owns the draft to ready flip

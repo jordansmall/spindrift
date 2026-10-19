@@ -1456,7 +1456,7 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 					}
 
 					if strings.Contains(result.Prompt, "gh issue create --title") {
-						t.Errorf("Prompt contains filer-file-direct.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
+						t.Errorf("Prompt contains github/filer-direct-file.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
 					}
 				})
 			}
@@ -2438,10 +2438,10 @@ func TestAssembleLocalTrackerWithLocalIssueReference(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "Local-issue: 2349") {
-		t.Errorf("Prompt missing PR_BODY_LOCAL_REF fragment text (pr-body-local-ref.md):\n%s", result.Prompt)
+		t.Errorf("Prompt missing PR_BODY_LOCAL_REF fragment text (local/pr-body-issue-ref.md):\n%s", result.Prompt)
 	}
 	if strings.Contains(result.Prompt, "Body must NOT reference the local ticket by slug or number") {
-		t.Errorf("Prompt contains PR_BODY_LOCAL_NOREF fragment text (pr-body-local-noref.md), want local-ref only")
+		t.Errorf("Prompt contains PR_BODY_LOCAL_NOREF fragment text (local/pr-body-no-issue-ref.md), want local-ref only")
 	}
 }
 
@@ -2457,10 +2457,10 @@ func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "Body must NOT reference the local ticket by slug or number") {
-		t.Errorf("Prompt missing PR_BODY_LOCAL_NOREF fragment text (pr-body-local-noref.md):\n%s", result.Prompt)
+		t.Errorf("Prompt missing PR_BODY_LOCAL_NOREF fragment text (local/pr-body-no-issue-ref.md):\n%s", result.Prompt)
 	}
 	if strings.Contains(result.Prompt, "Local-issue:") {
-		t.Errorf("Prompt contains PR_BODY_LOCAL_REF fragment text (pr-body-local-ref.md), want local-noref only")
+		t.Errorf("Prompt contains PR_BODY_LOCAL_REF fragment text (local/pr-body-issue-ref.md), want local-noref only")
 	}
 }
 

@@ -421,7 +421,7 @@ in
       out = promptContract.buildTimeResearchDirectFileViolations {
         directFileFragmentRows = [
           {
-            fragment = "filer-file-direct.md";
+            fragment = "github/filer-direct-file.md";
             var = "SOME_VAR";
           }
         ];
@@ -442,7 +442,7 @@ in
       out = promptContract.buildTimeResearchDirectFileViolations {
         directFileFragmentRows = [
           {
-            fragment = "filer-file-direct.md";
+            fragment = "github/filer-direct-file.md";
             var = "SOME_VAR";
           }
         ];
@@ -478,7 +478,7 @@ in
       out = promptContract.buildTimeResearchDirectFileViolations {
         directFileFragmentRows = [
           {
-            fragment = "filer-file-direct.md";
+            fragment = "github/filer-direct-file.md";
             var = "FILER_FILE_DIRECT_STEP";
           }
         ];
@@ -490,7 +490,7 @@ in
     in
     assert assertMsg (builtins.length out == 1)
       "buildTimeResearchDirectFileViolations must report exactly one violation for this fixture, got: ${toString (builtins.length out)}";
-    assert assertMsg (violation.fragment == "filer-file-direct.md")
+    assert assertMsg (violation.fragment == "github/filer-direct-file.md")
       "buildTimeResearchDirectFileViolations violation record must name the offending row's fragment, got: ${violation.fragment}";
     assert assertMsg (violation.var == "FILER_FILE_DIRECT_STEP")
       "buildTimeResearchDirectFileViolations violation record must name the offending row's var, got: ${violation.var}";
