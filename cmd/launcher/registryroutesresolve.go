@@ -18,15 +18,17 @@ import (
 // issue #3145 retired the scalar REGISTRY_PROXY_* knobs. AssignPrefixes runs
 // here, not in the file parser, so every production table carries a Prefix
 // (issue #3142) while the parser stays testable on its own.
-func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
+// rows is the ecosystem table to resolve over: production passes
+// ecosystem.Table, tests a synthetic row.
+func buildRegistryProxyRoutes(c config, rows []ecosystem.Row) ([]registryproxy.Route, error) {
 	if c.registryProxyRoutesFile == "" {
 		return nil, nil
 	}
-	routes, err := resolveRegistryRoutesFromFile(c.registryProxyRoutesFile)
+	routes, err := resolveRegistryRoutesFromFile(c.registryProxyRoutesFile, rows)
 	if err != nil {
 		return nil, err
 	}
-	routes, err = resolveHostRootedUpstreams(c, routes)
+	routes, err = resolveHostRootedUpstreams(c, routes, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +40,7 @@ func buildRegistryProxyRoutes(c config) ([]registryproxy.Route, error) {
 // route declaring its own upstream-origin: that origin replaces the derived
 // origin, never the derived subtrees, so what a route enforces never depends
 // on whether a checkout was reachable. Every failure fails the launch closed.
-func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]registryproxy.Route, error) {
+func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []ecosystem.Row) ([]registryproxy.Route, error) {
 	if len(routes) == 0 {
 		return routes, nil
 	}
@@ -47,7 +49,7 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 		hosts[i] = r.MatchHost
 	}
 
-	sets, err := deriveHostRootedPathSets(c, hosts)
+	sets, err := deriveHostRootedPathSets(c, hosts, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +60,7 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 
 	resolved := make([]registryproxy.Route, len(routes))
 	for i, r := range routes {
-		route, err := applyHostPathSet(r, byHost)
+		route, err := applyHostPathSet(r, byHost, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -72,10 +74,10 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route) ([]regis
 // backend would miss. Such a forge derives from the Accumulation repo's
 // baseBranch ref (issue #3310), the one snapshot no in-Box agent can widen, and
 // skips checkoutIsTargetRepo, whose contract is remote-based identity.
-func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypathset.HostPathSet, error) {
+func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosystem.Row) ([]registrypathset.HostPathSet, error) {
 	row, _ := backendByName(c.codeForge)
 	if row.HostMediatedRemote {
-		sets, err := registrypathset.DeriveFromGitRef(c.codeForgeAccumulationRepoDir, c.baseBranch)
+		sets, err := registrypathset.DeriveFromGitRefRows(c.codeForgeAccumulationRepoDir, c.baseBranch, rows)
 		if err != nil {
 			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.baseBranch, c.codeForgeAccumulationRepoDir, err)
 		}
@@ -87,7 +89,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 		return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need a Target-repo checkout to derive their enforced path-set, and none is available here; run inside a checkout of the Target repo", strings.Join(hostRootedHosts, ", "))
 	}
 
-	sets, err := registrypathset.Derive(repoDir)
+	sets, err := registrypathset.DeriveRows(repoDir, rows)
 	if err != nil {
 		return nil, fmt.Errorf("registry proxy: deriving enforced path-set from %q: %w", repoDir, err)
 	}
@@ -99,11 +101,11 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string) ([]registrypat
 // host-rooted Upstream carrying a path. A route naming a host absent from sets
 // and declaring no upstream-origin of its own is an error, never a route left
 // unenforced; one declaring an origin enforces only what it declares itself.
-func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet) (registryproxy.Route, error) {
+func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset.HostPathSet, rows []ecosystem.Row) (registryproxy.Route, error) {
 	hp, ok := sets[registryvocab.HostKey(route.MatchHost)]
 	if !ok && route.UpstreamOrigin == "" {
-		if label := declaredPathAloneLabel(route); label != "" {
-			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; %s alone cannot establish a host-rooted route's upstream origin -- declare a discoverable npm/yarn/pnpm/cargo registry on this host in the Target repo's committed config, or set the route's upstream-origin", route.MatchHost, label)
+		if label := declaredPathAloneLabel(route, rows); label != "" {
+			return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; %s alone cannot establish a host-rooted route's upstream origin -- declare a discoverable %s registry on this host in the Target repo's committed config, or set the route's upstream-origin", route.MatchHost, label, discoverableNames(rows))
 		}
 		return registryproxy.Route{}, fmt.Errorf("registry proxy: route %q is host-rooted but the Target repo declares no registry on that host; declare a discoverable registry on this host in the Target repo's committed config, or set the route's upstream-origin", route.MatchHost)
 	}
@@ -134,7 +136,7 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 	// its own tagged entry even when it duplicates a derived or allow path,
 	// because the Forwarder keys a rewrite row's bases off that tag (see
 	// routeState.basesByEcosystem in registryproxy), not off EnforcedPaths.
-	for _, d := range declaredPaths(route) {
+	for _, d := range declaredPaths(route, rows) {
 		subtrees = append(subtrees, registryvocab.Subtree{Ecosystem: d.ecosystem, Path: d.path})
 		if !derived[d.path] {
 			derived[d.path] = true
@@ -153,12 +155,12 @@ type declaredPath struct {
 	path      string
 }
 
-// declaredPaths walks ecosystem.Table in Table's own order (issue #3403), not
+// declaredPaths walks rows in their own order (issue #3403), not
 // route.Ecosystems' map, because Go map iteration is random and both callers
 // need this enumeration deterministic.
-func declaredPaths(route registryproxy.Route) []declaredPath {
+func declaredPaths(route registryproxy.Route, rows []ecosystem.Row) []declaredPath {
 	var set []declaredPath
-	for _, row := range ecosystem.Table {
+	for _, row := range rows {
 		if path := route.Ecosystems.Path(row.Name); path != "" {
 			set = append(set, declaredPath{ecosystem: row.Name, path: path})
 		}
@@ -168,12 +170,26 @@ func declaredPaths(route registryproxy.Route) []declaredPath {
 
 // declaredPathAloneLabel names route's declared paths by their
 // [routes.ecosystems.<name>] spelling, for applyHostPathSet's error message.
-func declaredPathAloneLabel(route registryproxy.Route) string {
+func declaredPathAloneLabel(route registryproxy.Route, rows []ecosystem.Row) string {
 	var labels []string
-	for _, d := range declaredPaths(route) {
+	for _, d := range declaredPaths(route, rows) {
 		labels = append(labels, registryvocab.RouteDeclarationKeyLabel(d.ecosystem, registryvocab.RouteDeclarationPathKey))
 	}
 	return strings.Join(labels, " and ")
+}
+
+// discoverableNames joins, in rows' order, the names of the rows whose in-tree
+// config registrydiscover.ExtractRows can read: the same filter, so the error
+// advice never names an ecosystem whose declaration would go undiscovered.
+func discoverableNames(rows []ecosystem.Row) string {
+	var names []string
+	for _, row := range rows {
+		if row.InTreeConfigPath == "" || row.ConfigParser == nil {
+			continue
+		}
+		names = append(names, row.Name)
+	}
+	return strings.Join(names, "/")
 }
 
 // resolveRegistryRoutesFromFile parses routesFile (ADR 0045) and resolves each
@@ -193,12 +209,12 @@ func declaredPathAloneLabel(route registryproxy.Route) string {
 // order the routes appear in. One consequence: when both an env-sourced and
 // a non-env route would fail to resolve, the env route's failure always
 // surfaces first, because pass 1 runs to completion before pass 2 starts.
-func resolveRegistryRoutesFromFile(routesFile string) ([]registryproxy.Route, error) {
+func resolveRegistryRoutesFromFile(routesFile string, rows []ecosystem.Row) ([]registryproxy.Route, error) {
 	data, err := os.ReadFile(routesFile)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", routesFile, err)
 	}
-	parsed, err := registryroutes.Parse(data)
+	parsed, err := registryroutes.ParseRows(data, rows)
 	if err != nil {
 		return nil, err
 	}

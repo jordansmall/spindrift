@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
@@ -102,7 +103,7 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	// before newGatedContext's validate peek re-reads the same vars (issue
 	// #2944). validate(seedConfig) above still fails a bad credential ahead of
 	// the git push and network gates, since peek and resolve share logic (#3139).
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errConfigInvalid, err)
 	}

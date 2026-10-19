@@ -24,7 +24,7 @@ import (
 func TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError(t *testing.T) {
 	missing := t.TempDir() + "/does-not-exist.toml"
 
-	routes, err := resolveRegistryRoutesFromFile(missing)
+	routes, err := resolveRegistryRoutesFromFile(missing, ecosystem.Table)
 	if err == nil {
 		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: the file doesn't exist")
 	}
@@ -45,7 +45,7 @@ func TestResolveRegistryRoutesFromFile_MissingFile_WrapsReadError(t *testing.T) 
 func TestResolveRegistryRoutesFromFile_InvalidTOML_PropagatesParseError(t *testing.T) {
 	invalid := writeRoutesFile(t, `not valid toml [[[`)
 
-	routes, err := resolveRegistryRoutesFromFile(invalid)
+	routes, err := resolveRegistryRoutesFromFile(invalid, ecosystem.Table)
 	if err == nil {
 		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: the file is not valid TOML")
 	}
@@ -68,7 +68,7 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_RESOLVE_CRED_DOES_NOT_EXIST" }
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err == nil {
 		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: the route's env credential is unresolvable")
 	}
@@ -89,7 +89,7 @@ upstream-origin = "https://registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -125,7 +125,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_CARGO_REGISTRIES_CRED" }
 registries = ["example-remote", "another_one"]
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -162,7 +162,7 @@ registries = ["example-remote"]
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -185,7 +185,7 @@ registries = ["example-remote"]
 func TestBuildRegistryProxyRoutes_NoRoutesFile_ReturnsNil(t *testing.T) {
 	c := config{}
 
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -203,7 +203,7 @@ func TestResolveRegistryRoutesFromFile_HostRooted_LeavesUpstreamEmpty(t *testing
 match-host = "host.example.com"
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -229,7 +229,7 @@ match-host = "host.example.com"
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 
 	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no Target-repo checkout is available")
 	}
@@ -255,7 +255,7 @@ match-host = "host.example.com"
 	t.Cleanup(func() { registryRouteDriftRepoDirFn = orig })
 
 	c := config{schemaConfig: schemaConfig{registryProxyRoutesFile: path}}
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the resolved checkout is not the Target repo")
 	}
@@ -287,7 +287,7 @@ match-host = "host.example.com"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the repo declares no registry on host.example.com")
 	}
@@ -316,7 +316,7 @@ match-host = "host.example.com"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -357,7 +357,7 @@ match-host = "host.example.com"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	if _, err := buildRegistryProxyRoutes(c); err != nil {
+	if _, err := buildRegistryProxyRoutes(c, ecosystem.Table); err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil: a GH_HOST-matching origin must derive routes", err)
 	}
 }
@@ -386,7 +386,7 @@ allow = ["/dl"]
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -436,7 +436,7 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -501,7 +501,7 @@ match-host = "host.example.com"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -532,7 +532,7 @@ func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -544,7 +544,7 @@ func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "unknown.example.com"}
 
-	_, err := applyHostPathSet(route, map[string]registrypathset.HostPathSet{})
+	_, err := applyHostPathSet(route, map[string]registrypathset.HostPathSet{}, ecosystem.Table)
 	if err == nil {
 		t.Fatal("applyHostPathSet() = nil error, want an error: no HostPathSet for this host")
 	}
@@ -571,7 +571,7 @@ func TestApplyHostPathSet_AllowAppendsAfterDerivedPaths(t *testing.T) {
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -593,7 +593,7 @@ func TestApplyHostPathSet_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T)
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -618,7 +618,7 @@ func TestApplyHostPathSet_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosyst
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -647,7 +647,7 @@ func TestApplyHostPathSet_EnforcedSubtreesTwoCargoSubtreesInDerivationOrder(t *t
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -674,7 +674,7 @@ func TestApplyHostPathSet_EcosystemsBlockDeclaredPathForRowWithNoDedicatedField(
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -705,7 +705,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithAllowStillTagsSubtree(t *testin
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -731,7 +731,7 @@ func TestApplyHostPathSet_GradlePathCollidingWithDerivedSubtreeStillTagsSubtree(
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -770,7 +770,7 @@ path = "/gradle-maven"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -814,7 +814,7 @@ path = "/gradle-maven"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no other ecosystem's config is discoverable on this host")
 	}
@@ -839,7 +839,7 @@ match-host = "host.example.com"
 path = "/gradle-maven"
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -865,7 +865,7 @@ func TestApplyHostPathSet_GoPathCollidingWithAllowStillTagsSubtree(t *testing.T)
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -891,7 +891,7 @@ func TestApplyHostPathSet_GoPathCollidingWithDerivedSubtreeStillTagsSubtree(t *t
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -918,7 +918,7 @@ func TestApplyHostPathSet_WithoutGoPathTagsNoGoSubtree(t *testing.T) {
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -943,7 +943,7 @@ func TestApplyHostPathSet_GradlePathAndGoPathCoexistBothTagged(t *testing.T) {
 		},
 	}
 
-	got, err := applyHostPathSet(route, sets)
+	got, err := applyHostPathSet(route, sets, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
 	}
@@ -987,7 +987,7 @@ path = "/go-modules"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -1041,7 +1041,7 @@ registries = ["internal", "crates-remote"]
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -1098,7 +1098,7 @@ path = "/go-modules"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: no other ecosystem's config is discoverable on this host")
 	}
@@ -1122,7 +1122,7 @@ match-host = "host.example.com"
 path = "/go-modules"
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -1145,7 +1145,7 @@ match-host = "host.example.com"
 go-path = "/go-modules"
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err == nil {
 		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: go-path is retired")
 	}
@@ -1195,7 +1195,7 @@ match-host = "gradle.example.com"
 credential = { gradle-properties = "`+propsPath+`", key = "registryToken" }
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -1278,7 +1278,7 @@ match-host = "env.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED" }
 `, execEchoOrAbsentArgv("SPINDRIFT_TEST_ROUTES_ORDER_ENV_CRED")))
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 	}
@@ -1324,7 +1324,7 @@ credential = { env = "SSH_AUTH_SOCK" }
 			t.Setenv("SSH_AUTH_SOCK", "permute-secret")
 			path := writeRoutesFile(t, doc)
 
-			routes, err := resolveRegistryRoutesFromFile(path)
+			routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 			if err != nil {
 				t.Fatalf("resolveRegistryRoutesFromFile() error = %v, want nil", err)
 			}
@@ -1356,7 +1356,7 @@ match-host = "env.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_BOTH_FAIL_ENV_DOES_NOT_EXIST" }
 `)
 
-	routes, err := resolveRegistryRoutesFromFile(path)
+	routes, err := resolveRegistryRoutesFromFile(path, ecosystem.Table)
 	if err == nil {
 		t.Fatal("resolveRegistryRoutesFromFile() = nil error, want an error: both routes fail to resolve")
 	}
@@ -1423,7 +1423,7 @@ match-host = "host.example.com"
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.registryProxyRoutesFile = path
 
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -1463,7 +1463,7 @@ match-host = "host.example.com"
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.registryProxyRoutesFile = path
 
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the Accumulation repo's main branch never received the .npmrc commit")
 	}
@@ -1483,7 +1483,7 @@ match-host = "host.example.com"
 	c := minimalValidLocalConfigForRoutes(filepath.Join(t.TempDir(), "does-not-exist.git"))
 	c.registryProxyRoutesFile = path
 
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the Accumulation repo does not exist")
 	}
@@ -1505,7 +1505,7 @@ match-host = "host.example.com"
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.registryProxyRoutesFile = path
 
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: the Accumulation repo declares no registry on host.example.com")
 	}
@@ -1539,7 +1539,7 @@ upstream-origin = "https://host.example.com:8443"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -1584,7 +1584,7 @@ upstream-origin = "http://host.example.com:8081"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil: upstream-origin alone establishes the route", err)
 	}
@@ -1625,7 +1625,7 @@ path = "/gradle-maven"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	routes, err := buildRegistryProxyRoutes(c)
+	routes, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err != nil {
 		t.Fatalf("buildRegistryProxyRoutes() error = %v, want nil", err)
 	}
@@ -1662,7 +1662,7 @@ match-host = "host.example.com"
 
 	c := minimalValidConfig()
 	c.registryProxyRoutesFile = path
-	_, err := buildRegistryProxyRoutes(c)
+	_, err := buildRegistryProxyRoutes(c, ecosystem.Table)
 	if err == nil {
 		t.Fatal("buildRegistryProxyRoutes() = nil error, want an error: nothing establishes this route's upstream origin")
 	}
