@@ -12,7 +12,7 @@ import (
 // passes that name separately.
 func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 	var ghToken string
-	if harnessEnvTokenEnvVar(a.tracker.issueTracker) == "GH_TOKEN" {
+	if harnessEnvTokenEnvVar(a.choice.name) == "GH_TOKEN" {
 		ghToken = a.token
 	}
 	return launcherchecks.Config{
@@ -30,7 +30,7 @@ func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 
 		Runtime: a.runtime,
 
-		IssueTracker: a.tracker.issueTracker,
+		IssueTracker: a.choice.name,
 		CodeForge:    codeForge,
 
 		// Models, ResearchDispatch, and SelfContained stay zero because the
@@ -57,10 +57,10 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 			// collects, so its row checks axis membership only.
 			if name == backend.Forgejo.Name {
 				b.ValidateTracker = func() error {
-					return forgejo.ValidateForgejoEnv("ISSUE_TRACKER", a.tracker.forgejoBaseURL, a.token)
+					return forgejo.ValidateForgejoEnv("ISSUE_TRACKER", a.choice.knobs["FORGEJO_BASE_URL"], a.token)
 				}
 				b.ValidateCodeForge = func() error {
-					return forgejo.ValidateForgejoEnv("CODE_FORGE", a.tracker.forgejoBaseURL, a.token)
+					return forgejo.ValidateForgejoEnv("CODE_FORGE", a.choice.knobs["FORGEJO_BASE_URL"], a.token)
 				}
 			}
 			return b, true

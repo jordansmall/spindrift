@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 )
 
@@ -24,7 +25,7 @@ func acquireToken(_ backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPr
 // guides the operator toward a fine-grained single-repo PAT. The `gh auth
 // token` fallback warns, because that token is typically repo-wide.
 func acquireGHToken(p backendkit.TokenPrompt) (string, error) {
-	tokenEnvVar := p.TokenEnvVar
+	tokenEnvVar := backend.GitHub.TokenEnvVar
 	if token := p.Getenv(tokenEnvVar); token != "" {
 		return token, nil
 	}

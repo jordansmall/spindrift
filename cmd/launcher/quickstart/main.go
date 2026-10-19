@@ -80,42 +80,6 @@ func (hostEnvironment) GitConfig(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// GitRemoteRepoSlug guesses "owner/repo" from the "origin" remote, returning ""
-// when there is no remote or it is not a github.com URL.
-func (hostEnvironment) GitRemoteRepoSlug() string {
-	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
-	if err != nil {
-		return ""
-	}
-	return parseGitHubRepoSlug(strings.TrimSpace(string(out)))
-}
-
-// parseGitHubRepoSlug extracts "owner/repo" from a github.com remote URL in
-// scp-like ssh, ssh://, or https form, returning "" for anything else.
-func parseGitHubRepoSlug(remoteURL string) string {
-	s := strings.TrimSuffix(remoteURL, ".git")
-	const marker = "github.com"
-	i := strings.Index(s, marker)
-	if i < 0 {
-		return ""
-	}
-	// Only "@" (scp-like or ssh://) or "/" (https://) may precede the match.
-	// Anything else is a different host, such as "notgithub.com" or the SSH
-	// alias "github.com-work".
-	if i > 0 && s[i-1] != '@' && s[i-1] != '/' {
-		return ""
-	}
-	rest := s[i+len(marker):]
-	if rest == "" || (rest[0] != ':' && rest[0] != '/') {
-		return ""
-	}
-	rest = strings.TrimSuffix(rest[1:], "/")
-	if rest == "" || strings.Count(rest, "/") != 1 {
-		return ""
-	}
-	return rest
-}
-
 // GitRemoteURL returns the raw "origin" remote URL, or "" if there is none.
 func (hostEnvironment) GitRemoteURL() string {
 	out, err := exec.Command("git", "remote", "get-url", "origin").Output()

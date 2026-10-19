@@ -17,7 +17,7 @@ func validAnswers() answers {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "github"},
+		choice:       backendChoice{name: "github"},
 		token:        "ghp_faketoken",
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
@@ -34,7 +34,7 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 		GHToken:      a.token,
 		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
 		Runtime:      a.runtime,
-		IssueTracker: a.tracker.issueTracker,
+		IssueTracker: a.choice.name,
 		CodeForge:    "github",
 	}
 	if !reflect.DeepEqual(c, want) {
@@ -159,7 +159,7 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	} {
 		t.Run(tc.issueTracker+"/"+tc.codeForge, func(t *testing.T) {
 			a := validAnswers()
-			a.tracker.issueTracker = tc.issueTracker
+			a.choice.name = tc.issueTracker
 
 			c := quickstartCheckConfig(a, tc.codeForge)
 			want := ""
@@ -222,7 +222,7 @@ func TestQuickstartCheckDeps_NonForgejoValidatorsStayNil(t *testing.T) {
 // test can blank one at a time.
 func forgejoAnswers() answers {
 	a := validAnswers()
-	a.tracker = trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"}
+	a.choice = backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}}
 	a.token = "forgejo-faketoken"
 	return a
 }
@@ -248,7 +248,7 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 		mutate  func(a *answers)
 		wantErr string
 	}{
-		{name: "missing base URL", mutate: func(a *answers) { a.tracker.forgejoBaseURL = "" }, wantErr: "FORGEJO_BASE_URL"},
+		{name: "missing base URL", mutate: func(a *answers) { a.choice.knobs["FORGEJO_BASE_URL"] = "" }, wantErr: "FORGEJO_BASE_URL"},
 		{name: "missing token", mutate: func(a *answers) { a.token = "" }, wantErr: "FORGEJO_TOKEN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

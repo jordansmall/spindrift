@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge/github"
 )
@@ -18,8 +19,8 @@ func acquire(t *testing.T, p backendkit.TokenPrompt) (string, error) {
 func TestAcquireToken_AmbientTokenSkipsPromptAndPrintsAuditNote(t *testing.T) {
 	var out bytes.Buffer
 	token, err := acquire(t, backendkit.TokenPrompt{
-		Out:         &out,
-		TokenEnvVar: "GH_TOKEN", Getenv: func(k string) string { return map[string]string{"GH_TOKEN": "github_pat_x"}[k] },
+		Out:          &out,
+		Getenv:       func(k string) string { return map[string]string{"GH_TOKEN": "github_pat_x"}[k] },
 		PromptMasked: func(string) string { t.Fatal("must not prompt"); return "" },
 	})
 	if err != nil || token != "github_pat_x" {
@@ -33,8 +34,8 @@ func TestAcquireToken_AmbientTokenSkipsPromptAndPrintsAuditNote(t *testing.T) {
 func TestAcquireToken_PastedToken(t *testing.T) {
 	var out bytes.Buffer
 	token, err := acquire(t, backendkit.TokenPrompt{
-		Out:         &out,
-		TokenEnvVar: "GH_TOKEN", Getenv: func(string) string { return "" },
+		Out:          &out,
+		Getenv:       func(string) string { return "" },
 		PromptMasked: func(string) string { return "github_pat_pasted" },
 	})
 	if err != nil || token != "github_pat_pasted" {
@@ -62,8 +63,8 @@ func TestAcquireToken_BlankFallsBackToAmbientGhToken(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
 			token, err := acquire(t, backendkit.TokenPrompt{
-				Out:         &out,
-				TokenEnvVar: "GH_TOKEN", Getenv: func(string) string { return "" },
+				Out:          &out,
+				Getenv:       func(string) string { return "" },
 				PromptMasked: func(string) string { return "" },
 				AmbientToken: func() (string, error) { return c.token, c.err },
 				// A gho_ token is audited; keep the scopes narrow.
@@ -103,8 +104,8 @@ func TestAcquireToken_ClassicTokenAudit(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var out bytes.Buffer
 			_, err := acquire(t, backendkit.TokenPrompt{
-				Out:         &out,
-				TokenEnvVar: "GH_TOKEN", Getenv: func(k string) string { return map[string]string{"GH_TOKEN": "ghp_x"}[k] },
+				Out:          &out,
+				Getenv:       func(k string) string { return map[string]string{"GH_TOKEN": "ghp_x"}[k] },
 				Prompt:       func(string) string { return c.answer },
 				TokenScopes:  func(string) ([]string, error) { return c.scopes, c.scopesErr },
 				PromptMasked: func(string) string { t.Fatal("must not prompt"); return "" },
@@ -124,9 +125,9 @@ func TestAcquireToken_ClassicTokenAudit(t *testing.T) {
 
 func TestAcquireToken_OtherPrefixIsNotAudited(t *testing.T) {
 	token, err := acquire(t, backendkit.TokenPrompt{
-		Out:         new(bytes.Buffer),
-		TokenEnvVar: "GH_TOKEN",
-		Getenv:      func(k string) string { return map[string]string{"GH_TOKEN": "ghs_x"}[k] },
+		Out: new(bytes.Buffer),
+
+		Getenv: func(k string) string { return map[string]string{"GH_TOKEN": "ghs_x"}[k] },
 	})
 	if err != nil || token != "ghs_x" {
 		t.Fatalf("got %q, %v", token, err)
@@ -136,5 +137,23 @@ func TestAcquireToken_OtherPrefixIsNotAudited(t *testing.T) {
 func TestStrategyHasNoKnobsFromRemote(t *testing.T) {
 	if github.Strategy.KnobsFromRemote != nil {
 		t.Error("github implies no knobs from a remote")
+	}
+}
+
+// The ambient lookup follows the Descriptor's TokenEnvVar, not a GH_TOKEN
+// literal.
+func TestAcquireToken_AmbientLookupFollowsDescriptorTokenEnvVar(t *testing.T) {
+	orig := backend.GitHub.TokenEnvVar
+	backend.GitHub.TokenEnvVar = "CUSTOM_GH_TOKEN"
+	t.Cleanup(func() { backend.GitHub.TokenEnvVar = orig })
+
+	token, err := acquire(t, backendkit.TokenPrompt{
+		Out: new(bytes.Buffer),
+		Getenv: func(k string) string {
+			return map[string]string{"GH_TOKEN": "ghp_wrong", "CUSTOM_GH_TOKEN": "ghs_right"}[k]
+		},
+	})
+	if err != nil || token != "ghs_right" {
+		t.Fatalf("got %q, %v", token, err)
 	}
 }
