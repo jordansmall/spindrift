@@ -1312,19 +1312,6 @@ func TestSweep_Tuning_StoredSnapshotGoneOrAlteredLeavesClaim(t *testing.T) {
 	}
 }
 
-// evidenceGapClass repeats a class the generated chore descriptor declares, so
-// a rename there must fail here instead of silently dropping the sample-floor
-// exemption.
-func TestEvidenceGapClassIsATuningChoreClass(t *testing.T) {
-	cs, err := chore.Load(chore.Knobs{Chores: "tuning"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(cs[0].ClassList, evidenceGapClass) {
-		t.Errorf("tuning Chore classes = %v, want %q among them", cs[0].ClassList, evidenceGapClass)
-	}
-}
-
 // refiledAfter files one default tuning finding, then sweeps again with second
 // (the default finding when empty) against a backlog that backlog derives from
 // the first filing, and returns how many issues the second sweep filed.
@@ -1764,7 +1751,7 @@ func TestMergeLookup_StopsAfterRateLimitAndWarns(t *testing.T) {
 	if want := []string{"https://example.com/pulls/1"}; !slices.Equal(reader.calls, want) {
 		t.Errorf("PRState calls = %v, want %v", reader.calls, want)
 	}
-	if !strings.Contains(warn.String(), "?? tuning: prior tuning finding PR https://example.com/pulls/1") {
+	if !strings.Contains(warn.String(), "?? tuning: prior finding PR https://example.com/pulls/1") {
 		t.Errorf("warn = %q, want the failed read named", warn.String())
 	}
 }

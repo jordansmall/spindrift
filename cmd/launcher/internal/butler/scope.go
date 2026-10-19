@@ -12,8 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/tuning"
 )
 
 // scopeSource is a Chore's Scope source (ADR 0070 decision 1): the one place
@@ -97,7 +97,8 @@ type recordsSource struct {
 	it     forge.IssueTracker
 	warn   io.Writer
 	// merged is built once per source: its rate-limit state is per digest.
-	merged tuning.MergeLookup
+	merged recordsdigest.MergeLookup
+	digest recordsdigest.Strategy
 	chore  string
 	head   string
 	// records is read once per candidate, so the digest renders the very
@@ -107,12 +108,16 @@ type recordsSource struct {
 }
 
 func newRecordsSource(r *Runner, choreName, head string, claimedAt time.Time) (recordsSource, error) {
+	digest, ok := recordsdigest.ByName(choreName)
+	if !ok {
+		return recordsSource{}, recordsdigest.NotRegistered(choreName)
+	}
 	records, err := r.policy.loadRecords()
 	if err != nil {
 		return recordsSource{}, err
 	}
 	return recordsSource{
-		policy: r.policy, tree: r.tree, it: r.it, warn: r.warn, merged: r.mergeLookup(choreName),
+		policy: r.policy, tree: r.tree, it: r.it, warn: r.warn, merged: r.mergeLookup(choreName), digest: digest,
 		chore: choreName, head: head, records: records, claimedAt: claimedAt,
 	}, nil
 }
@@ -133,24 +138,29 @@ func (s recordsSource) NextDue(tip ledger.Tip, recent []ledger.Entry, now time.T
 func (s recordsSource) Stage() error { return nil }
 
 func (s recordsSource) Prepare(claim ledger.Tip) (prepared, error) {
-	findings, err := settle.PriorFindings(s.it, s.chore)
-	if err != nil {
-		fmt.Fprintf(s.warn, "    ?? %s: prior tuning findings: %v\n", s.chore, err)
+	var prior []any
+	if s.digest.ParsePrior != nil {
+		findings, err := settle.PriorFindings(s.it, s.chore)
+		if err != nil {
+			fmt.Fprintf(s.warn, "    ?? %s: prior findings: %v\n", s.chore, err)
+		}
+		prior = make([]any, 0, len(findings))
+		for _, f := range findings {
+			prior = append(prior, s.digest.ParsePrior(f))
+		}
 	}
-	prior := make([]tuning.Prior, 0, len(findings))
-	for _, f := range findings {
-		p := tuning.Strategy.ParsePrior(f).(tuning.Prior)
-		prior = append(prior, p)
-	}
-	dg := tuning.Render(s.records, claim.State.Cursor, s.claimedAt,
-		tuning.Limits{MinSample: s.policy.TuningMinSample, MaxBytes: s.policy.TuningDigestBytes}, prior, s.merged)
+	out := s.digest.Render(recordsdigest.Input{
+		Records: s.records, Cursor: claim.State.Cursor, Now: s.claimedAt,
+		Limits: s.policy.digestLimits(),
+		Prior:  prior, Merged: s.merged,
+	})
 	return prepared{
-		scope: chore.Scope{Head: s.head, NextCursor: dg.Latest},
-		input: dg.Text,
+		scope: chore.Scope{Head: s.head, NextCursor: out.Latest},
+		input: out.Text,
 		// The sweep's Record ID keys the stored digest, so it is pinned to the
 		// claim instant to be known before the Box runs.
 		claimTime: s.claimedAt,
-		arm:       func(d dispatch.Dispatcher, step *settleRun) error { return s.armSnapshot(d, step, dg.Text) },
+		arm:       func(d dispatch.Dispatcher, step *settleRun) error { return s.armSnapshot(d, step, out.Text) },
 	}, nil
 }
 
@@ -166,6 +176,6 @@ func (s recordsSource) armSnapshot(d dispatch.Dispatcher, step *settleRun, diges
 	if err := s.policy.storeSnapshot(dispatchrecord.TuningSnapshot{RecordID: id, SHA256: ref.SHA256, Rendered: digest, CreatedAt: s.claimedAt}); err != nil {
 		return fmt.Errorf("butler: %s: %w", s.chore, err)
 	}
-	step.tuning = &tuningSnapshot{ref: ref, policy: s.policy, tree: s.tree}
+	step.tuning = &tuningSnapshot{ref: ref, digest: s.digest, policy: s.policy, tree: s.tree}
 	return nil
 }

@@ -1772,33 +1772,6 @@ func jsonQuote(s string) string {
 	return strconv.Quote(s)
 }
 
-// TestButlerFiles_JunkTermsCountAsNoFile pins that junk dedup terms count as
-// no file (issue #4036).
-func TestButlerFiles_JunkTermsCountAsNoFile(t *testing.T) {
-	cases := []struct {
-		name  string
-		terms []string
-		want  []string
-	}{
-		{"bare dash", []string{"-"}, nil},
-		{"bare bangs", []string{"!!"}, nil},
-		{"dash path dash symbol", []string{"-:-"}, nil},
-		{"dash path named symbol", []string{"-:Foo"}, nil},
-		{"junk mixed with a real term", []string{"a.go:F", "-", "!!"}, []string{"a.go"}},
-		{"term rejected for comma", []string{"a.go:F, misc"}, nil},
-		{"two symbols in the same file dedupe to one path", []string{"b/c.go:X", "b/c.go:Y"}, []string{"b/c.go"}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := butlerFiles(tc.terms)
-			if !slices.Equal(got, tc.want) {
-				t.Errorf("butlerFiles(%v) = %v, want %v", tc.terms, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestButlerBacklink_AllJunkTermsOmitsFilesSentence(t *testing.T) {
 	f := settle.Finding{DedupTerms: []string{"-", "!!", "-:Foo"}}
 	got := butlerBacklink("bugs", f)

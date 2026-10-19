@@ -18,9 +18,9 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/tuning"
 )
 
 // Policy is a Runner's resolved butler knobs (ADR 0056).
@@ -177,14 +177,14 @@ func (r *Runner) WithPatchForge(f PatchForge, gate PatchGate) *Runner {
 	return r
 }
 
-// MergeReader reads whether a PR has merged, so the tuning digest can show a
+// MergeReader reads whether a PR has merged, so a Records digest can show a
 // finding's PR as merged after a human merged it (settle holds that PR, so no
 // Record says so).
 type MergeReader interface {
 	PRState(url string) (forge.PRState, error)
 }
 
-// WithMergeReader opts r into reading PR merges for the tuning digest's Prior
+// WithMergeReader opts r into reading PR merges for a Records digest's Prior
 // findings. A nil m leaves them to the Records alone; a nil commits leaves the
 // merge commit unnamed. Returns r so a caller can chain it onto New.
 func (r *Runner) WithMergeReader(m MergeReader, commits forge.MergeCommitReader) *Runner {
@@ -192,11 +192,11 @@ func (r *Runner) WithMergeReader(m MergeReader, commits forge.MergeCommitReader)
 	return r
 }
 
-// mergeLookup is r.mergeRead as the digest's tuning.MergeLookup, nil without a
+// mergeLookup is r.mergeRead as the digest's recordsdigest.MergeLookup, nil without a
 // reader. A failed read counts as not merged and is warned about; a rate limit
 // also ends the lookups for the rest of the digest. A URL the forge client
 // could read as a flag is never queried.
-func (r *Runner) mergeLookup(choreName string) tuning.MergeLookup {
+func (r *Runner) mergeLookup(choreName string) recordsdigest.MergeLookup {
 	if r.mergeRead == nil {
 		return nil
 	}
@@ -208,7 +208,7 @@ func (r *Runner) mergeLookup(choreName string) tuning.MergeLookup {
 		state, err := r.mergeRead.PRState(url)
 		if err != nil {
 			limited = errors.Is(err, forge.ErrRateLimit)
-			fmt.Fprintf(r.warn, "    ?? %s: prior tuning finding PR %s: %v\n", choreName, url, err)
+			fmt.Fprintf(r.warn, "    ?? %s: prior finding PR %s: %v\n", choreName, url, err)
 			return "", false
 		}
 		if state != forge.PRMerged {
