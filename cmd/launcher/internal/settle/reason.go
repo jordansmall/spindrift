@@ -10,7 +10,7 @@ const (
 	ReasonAutoMergeEnqueued    = "auto-merge-enqueued"
 	ReasonMergeGuardHit        = "merge-guard-hit"
 	ReasonMergeGuardCheckError = "merge-guard-check-error"
-	ReasonTuningProvenance     = "tuning-provenance" // the closing issue is a finding of a merge-by-hand Chore (tuning); the merge is held for a human
+	ReasonMergeByHand          = "tuning-provenance" // a merge-by-hand Chore's finding, held for a human; Records persist the old spelling
 	ReasonMergeBlocked         = "merge-blocked"     // the merge, or auto-merge enqueue, failed after green; the PR stays open
 	ReasonAlreadyResolved      = "already-resolved"
 	ReasonVerdict              = "verdict" // research: the verdict itself rides in the note
@@ -48,7 +48,7 @@ const (
 func ReasonLeavesPROpen(reason string) bool {
 	switch reason {
 	case ReasonManual, ReasonAutoMergeEnqueued, ReasonMergeGuardHit,
-		ReasonMergeGuardCheckError, ReasonTuningProvenance, ReasonMergeBlocked:
+		ReasonMergeGuardCheckError, ReasonMergeByHand, ReasonMergeBlocked:
 		return true
 	}
 	return false

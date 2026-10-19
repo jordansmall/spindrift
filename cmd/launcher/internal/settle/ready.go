@@ -110,9 +110,9 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardCheckError), ""
 			}
 			if held {
-				fmt.Printf("    #%s  landing=%s  status=tuning-provenance\n", num, pr)
+				fmt.Printf("    #%s  landing=%s  status=%s\n", num, pr, ReasonMergeByHand)
 				s.commentHoldPR(num, pr, holdComment(heldRow))
-				return s.completeLanding(num, gen, landingManual, ReasonTuningProvenance), ""
+				return s.completeLanding(num, gen, landingManual, ReasonMergeByHand), ""
 			}
 			mergeReason, err := s.applyMergeMode(num, gen, pr, d)
 			if err != nil {

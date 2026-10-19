@@ -1577,7 +1577,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanShowsDelta(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
 	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 	closed := []forge.Issue{
 		tuningFinding("100", "avg-usd", "role:implement:avg-usd"),
@@ -1608,7 +1608,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanThenReopened(t *testing.T) 
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
 	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 	iss := tuningFinding("100", "avg-usd", "role:implement:avg-usd")
 	iss.Reopened = true
@@ -1631,7 +1631,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedWithoutCommit(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
 	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 	iss := tuningFinding("100", "usd-per-record")
 	iss.State = forge.IssueClosed
@@ -1661,7 +1661,7 @@ func TestSweep_Tuning_PriorFindingHeldPRNotMergedShowsNoDelta(t *testing.T) {
 			root := t.TempDir()
 			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 			seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-				hostop.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+				hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
 			seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 			iss := tuningFinding("100", "usd-per-record")
 			iss.State = forge.IssueClosed
