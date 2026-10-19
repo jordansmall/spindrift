@@ -22,6 +22,11 @@ type Descriptor struct {
 	// the backend carries no bearer token (git, local).
 	TokenEnvVar string
 
+	// BoxTokenEnvVar is the ADR 0016 Box-side override of TokenEnvVar: the
+	// operator's value under this name reaches the Box as TokenEnvVar. Empty
+	// when the backend has no override.
+	BoxTokenEnvVar string
+
 	// DoctorTokenHint/DoctorSlugHint name the env vars doctor points an
 	// operator at when this backend is the active ISSUE_TRACKER. Empty means
 	// the github-shaped default.

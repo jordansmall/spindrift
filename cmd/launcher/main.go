@@ -938,10 +938,10 @@ func gitIdentityResolver(c config, next func(num, name string) string) func(num,
 func boxTokenResolver(next func(num, name string) string) func(num, name string) string {
 	return func(num, name string) string {
 		for _, row := range backendRows {
-			if row.TokenEnvVar == "" || row.boxTokenEnvVar == "" || name != row.TokenEnvVar {
+			if row.TokenEnvVar == "" || row.BoxTokenEnvVar == "" || name != row.TokenEnvVar {
 				continue
 			}
-			if v := os.Getenv(row.boxTokenEnvVar); v != "" {
+			if v := os.Getenv(row.BoxTokenEnvVar); v != "" {
 				return v
 			}
 			break

@@ -1188,6 +1188,7 @@ rec {
         (optional "validAsTracker" "ValidAsTracker" false)
         (optional "validAsCodeForge" "ValidAsCodeForge" false)
         (optional "tokenEnvVar" "TokenEnvVar" "")
+        (optional "boxTokenEnvVar" "BoxTokenEnvVar" "")
         (optional "doctorTokenHint" "DoctorTokenHint" "")
         (optional "doctorSlugHint" "DoctorSlugHint" "")
         (optional "hostMediatedRemote" "HostMediatedRemote" false)

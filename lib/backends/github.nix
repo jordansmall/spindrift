@@ -7,6 +7,7 @@
   validAsTracker = true;
   validAsCodeForge = true;
   tokenEnvVar = "GH_TOKEN";
+  boxTokenEnvVar = "BOX_GH_TOKEN";
   outboxRelayCapable = true;
   inBoxGHCredentialHelper = true;
   relayCapable = true;

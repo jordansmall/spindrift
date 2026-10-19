@@ -1332,20 +1332,23 @@ checkedMerge {
         subtractLists
         ;
       # lib.hasInfix wraps builtins.match with a leading and trailing `.*`, and
-      # that std::regex backtracking recurses per haystack character. These
-      # three files exceed 100KB, enough to blow the evaluator's C stack
-      # (issue #2533: flake check segfaulted, exit 139). splitString's regex
-      # has no `.*` wrapper, so it does not recurse per byte.
+      # that std::regex backtracking recurses per haystack character. The
+      # concatenated forwarded source exceeds 100KB, enough to blow the
+      # evaluator's C stack (issue #2533: flake check segfaulted, exit 139).
+      # splitString's regex has no `.*` wrapper, so it does not recurse per byte.
       containsLiteral = needle: haystack: builtins.length (splitString needle haystack) > 1;
       launcherDir = ../../cmd/launcher;
       # schemaconfig_gen.go is listed before loadConfig embeds schemaConfig, so
       # the later slice wiring it in does not fail this check for knobs whose
       # env-var literal lives only in the generated file (issue #2364).
+      # registry_gen.go carries each backend row's BoxTokenEnvVar, which the
+      # launcher reads through the row rather than a literal (issue #5642).
       forwardGoSrc = concatStringsSep "\n" (
         map (name: builtins.readFile (launcherDir + "/${name}")) [
           "main.go"
           "backend.go"
           "schemaconfig_gen.go"
+          "internal/backend/registry_gen.go"
         ]
       );
       # Nix-computed plumbing read via getenvArtifact/docArtifact, not
@@ -1439,7 +1442,7 @@ checkedMerge {
       deadNonKnobs = subtractLists goEnvNames nonKnobEnvNames;
     in
     assert pkgs.lib.assertMsg (missingFromGo == [ ])
-      "schema knobs absent from main.go/backend.go/schemaconfig_gen.go: ${concatStringsSep ", " missingFromGo}";
+      "schema knobs absent from main.go/backend.go/schemaconfig_gen.go/registry_gen.go: ${concatStringsSep ", " missingFromGo}";
     assert pkgs.lib.assertMsg (extraInGo == [ ])
       "cmd/launcher reads env vars absent from schema/documentArtifactKeys/Box env/nonKnobEnvNames: ${concatStringsSep ", " extraInGo}";
     assert pkgs.lib.assertMsg (

@@ -4035,7 +4035,7 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *tes
 }
 
 // boxTokenResolver's registry walk (issue #2267) lets a token name with no
-// registered boxTokenEnvVar fall straight through unchanged: jira's row
+// registered BoxTokenEnvVar fall straight through unchanged: jira's row
 // carries a tokenEnvVar but no Box-side override knob, since jira is
 // tracker-only.
 func TestDispatchConfig_ResolveEnv_JiraTokenFallsThroughUntouched(t *testing.T) {
