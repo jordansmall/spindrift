@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,11 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
+	"spindrift.dev/launcher/internal/forge/git"
+	"spindrift.dev/launcher/internal/forge/jira"
+	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // Slice 1 of issue #2267 is purely additive: nothing calls backendRows yet, so
@@ -370,5 +376,91 @@ func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
 				t.Errorf("JQL %q has a status clause = %v, want %v", fake.jqls[0], got, tc.wantStatusJQL)
 			}
 		})
+	}
+}
+
+// An input document that sets a knob to "" reaches the Strategy as a blank
+// (the document value wins over the schema default), and ReadKnobs would
+// re-default it: a blank FORGEJO_BASE_URL must still fail closed rather
+// than send a self-hosted FORGEJO_TOKEN to codeberg.
+func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	t.Setenv("FORGEJO_BASE_URL", "")
+	t.Setenv("LOCAL_ISSUES_DIR", "")
+	loadedDoc = &inputdoc.Document{Settings: map[string]string{
+		"FORGEJO_BASE_URL": "",
+		"LOCAL_ISSUES_DIR": "",
+	}}
+	c := minimalValidConfig()
+	c.schemaConfig = loadSchemaConfig()
+	c.forgejoToken = "tok"
+	if c.forgejoBaseURL != "" || c.localIssuesDir != "" {
+		t.Fatalf("document blanks not resolved: %q %q", c.forgejoBaseURL, c.localIssuesDir)
+	}
+
+	fj, ok := backendByName("forgejo")
+	if !ok {
+		t.Fatal("forgejo row missing")
+	}
+	for axis, fn := range map[string]func(config) error{
+		"ISSUE_TRACKER": fj.validateTracker,
+		"CODE_FORGE":    fj.validateCodeForge,
+	} {
+		want := "set FORGEJO_BASE_URL (Forgejo instance base URL) when " + axis + "=forgejo"
+		if err := fn(c); err == nil || err.Error() != want {
+			t.Errorf("forgejo %s: err = %v, want %q", axis, err, want)
+		}
+	}
+
+	// LOCAL_ISSUES_DIR is deliberately unguarded: a blank re-defaults to
+	// .spindrift/issues (the pre-Strategy launcher built an inert tracker on ""; issue #5638).
+	local, ok := backendByName("local")
+	if !ok {
+		t.Fatal("local row missing")
+	}
+	if local.validateTracker != nil {
+		t.Error("local validateTracker non-nil; a blank LOCAL_ISSUES_DIR must not fail closed")
+	}
+	t.Chdir(t.TempDir())
+	c.issueTracker = "local"
+	probe, ok := local.newIssueTracker(c).(interface{ Probe() (string, error) })
+	if !ok {
+		t.Fatal("local tracker has no Probe")
+	}
+	dir, err := probe.Probe()
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if want := filepath.Join(".spindrift", "issues"); !strings.HasSuffix(dir, string(filepath.Separator)+want) {
+		t.Errorf("blank LOCAL_ISSUES_DIR resolved to %q, want it to end in %q", dir, want)
+	}
+}
+
+// Every backendKnobs key must be an env some backend package's generated
+// ReadKnobs looks up, and ReadKnobs over the config's lookup must succeed:
+// the latter pins mustBuild's claim that its error is unreachable.
+func TestBackendKnobsAreRowKnobs(t *testing.T) {
+	c := minimalValidConfig()
+	seen := map[string]bool{}
+	rec := func(env string) (string, bool) {
+		seen[env] = true
+		return c.knobLookup(env)
+	}
+	if _, err := forgejo.ReadKnobs(rec); err != nil {
+		t.Errorf("forgejo.ReadKnobs: %v", err)
+	}
+	if _, err := jira.ReadKnobs(rec); err != nil {
+		t.Errorf("jira.ReadKnobs: %v", err)
+	}
+	if _, err := local.ReadKnobs(rec); err != nil {
+		t.Errorf("local.ReadKnobs: %v", err)
+	}
+	if _, err := git.ReadKnobs(rec); err != nil {
+		t.Errorf("git.ReadKnobs: %v", err)
+	}
+	for key := range backendKnobs {
+		if !seen[key] {
+			t.Errorf("backendKnobs key %q is not declared by any backend row", key)
+		}
 	}
 }
