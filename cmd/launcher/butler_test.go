@@ -989,3 +989,18 @@ func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
 		t.Errorf("tuning knobs = %d/%d/%d, want 7/3/1000", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample, cfg.butlerTuningDigestBytes)
 	}
 }
+
+// A records-scoped Chore with no registered Records digest fails startup,
+// naming the Chore; the stock tuning Chore passes because main.go imports the
+// host bundle that registers its digest.
+func TestButlerPreflight_RecordsDigest(t *testing.T) {
+	err := checkRecordsDigests([]chore.Row{{Name: "bugs"}, {Name: "tuning", Records: true}, {Name: "nodigest", Records: true}})
+	if err == nil || !strings.Contains(err.Error(), `chore "nodigest" is records-scoped`) {
+		t.Fatalf("checkRecordsDigests err = %v, want it to name chore nodigest", err)
+	}
+
+	cfg := config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "tuning"}}
+	if _, err := butlerPreflight(cfg, "tuning", true, choreCatalog{}); err != nil {
+		t.Fatalf("butlerPreflight with the stock tuning Chore: %v", err)
+	}
+}

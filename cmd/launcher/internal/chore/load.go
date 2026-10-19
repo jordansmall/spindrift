@@ -190,6 +190,7 @@ type Row struct {
 	Name         string
 	FindingLabel string // "" for a Chore with none
 	MergeByHand  bool   // the host never merges a PR closing one of its findings
+	Records      bool   // scopeSource = "records": it sweeps the Dispatch Records store
 }
 
 // Rows lists the built-in catalog in builtinChores order.
@@ -200,6 +201,7 @@ func Rows() []Row {
 			Name:         name,
 			FindingLabel: FindingLabel(name),
 			MergeByHand:  slices.Contains(builtinMergeByHand, name),
+			Records:      slices.Contains(builtinRecordsScoped, name),
 		}
 	}
 	return rows

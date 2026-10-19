@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -149,6 +150,9 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog ch
 	if err != nil {
 		return nil, fmt.Errorf("butler: %w", err)
 	}
+	if err := checkRecordsDigests(chore.Rows()); err != nil {
+		return nil, err
+	}
 	if choreName != "" {
 		if !slices.ContainsFunc(chores, func(c chore.Chore) bool { return c.Name == choreName }) {
 			return nil, fmt.Errorf("butler: chore %q is not enabled (BUTLER_CHORES=%q)", choreName, cfg.butlerChores)
@@ -192,6 +196,22 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog ch
 		return nil, err
 	}
 	return chores, nil
+}
+
+// checkRecordsDigests fails when a records-scoped catalog row, enabled or not,
+// has no registered Records digest: records Chores are built in, so a missing
+// Digest is a build wiring gap (ADR 0070 decision 5), caught at startup rather
+// than as a failed sweep.
+func checkRecordsDigests(rows []chore.Row) error {
+	for _, r := range rows {
+		if !r.Records {
+			continue
+		}
+		if _, ok := recordsdigest.ByName(r.Name); !ok {
+			return recordsdigest.NotRegistered(r.Name)
+		}
+	}
+	return nil
 }
 
 // butlerBudgets builds a chore.Budgets from cfg's BUTLER_MAX_* knobs, the
