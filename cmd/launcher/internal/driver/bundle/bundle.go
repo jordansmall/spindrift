@@ -1,8 +1,10 @@
 // Package bundle registers every bundled Driver's Strategy with the driver
 // registry and every bundled backend's Strategy with the backendkit registry
-// (ADR 0068 decision 1). Only binaries import it (ADR 0066 decision 8); the
+// (ADR 0068 decision 1), and every runner family's Strategy with the runner
+// registry (runners.go). Only binaries import it (ADR 0066 decision 8); the
 // registries and the libraries that read them import no Driver or concrete
-// backend adapter.
+// backend adapter. The in-box filesets (lib/mkHarness.nix driverTreeFiles)
+// drop runners.go, so the Box build of this package registers no runners.
 package bundle
 
 import (
