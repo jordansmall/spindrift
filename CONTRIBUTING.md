@@ -201,7 +201,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `dispatch-kinds/default.nix` (the Dispatch kind descriptor rows — one row
   per kind, each in its own `dispatch-kinds/<name>.nix` file, rendered into
   `cmd/launcher/internal/dispatchkind/kinds_gen.go` by `renderers.nix`'s
-  `renderDispatchKindsGo`, drift-guarded by the `dispatch-kinds-gen` check),
+  `renderDispatchKindsGo`, drift-guarded by the `dispatch-kinds-gen` check;
+  `mkHarness` and `image.nix` bake each row's `prompts` files),
   `backends/default.nix` (the backend descriptor registry — one row per
   ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
   file; `env-schema.nix`'s tracker/forge choices derive from it),
