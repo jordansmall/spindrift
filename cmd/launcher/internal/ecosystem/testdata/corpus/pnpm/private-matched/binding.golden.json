@@ -1,0 +1,7 @@
+{
+  "inTree": {
+    "configPath": "pnpm-workspace.yaml",
+    "content": "registry: http://127.0.0.1:27182/registry-acme-test/\n",
+    "outcome": "applied"
+  }
+}

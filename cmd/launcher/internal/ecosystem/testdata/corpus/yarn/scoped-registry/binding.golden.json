@@ -1,0 +1,7 @@
+{
+  "inTree": {
+    "configPath": ".yarnrc.yml",
+    "content": "npmRegistryServer: \"http://127.0.0.1:27182/registry-npmjs-org\"\n\nnpmScopes:\n  acme:\n    npmRegistryServer: \"http://127.0.0.1:27182/npm-acme-test\"\n",
+    "outcome": "applied"
+  }
+}
