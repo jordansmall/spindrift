@@ -237,11 +237,11 @@ func TestLauncherChecks_GhToken_ByPairing(t *testing.T) {
 			c := minimalValidConfig()
 			c.issueTracker = tc.issueTracker
 			c.codeForge = tc.codeForge
-			c.forgejoBaseURL = "https://codeberg.org"
-			c.forgejoToken = "tok"
-			c.jiraBaseURL = "https://example.atlassian.net"
-			c.jiraProjectKey = "PROJ"
-			c.jiraToken = "tok"
+			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+			c.setRowKnob("FORGEJO_TOKEN", "tok")
+			c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
+			c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
+			c.setRowKnob("JIRA_TOKEN", "tok")
 			c.ghToken = ""
 			ch := checkByName(t, launcherChecks(c), "gh-token")
 			_, err := ch.Probe()
@@ -335,14 +335,14 @@ func TestLauncherChecks_IssueTracker_FailsAndPasses(t *testing.T) {
 
 	c = minimalValidConfig()
 	c.issueTracker = "jira"
-	c.jiraBaseURL = "https://example.atlassian.net"
+	c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
 	ch = checkByName(t, launcherChecks(c), "issue-tracker-config")
 	if _, err := ch.Probe(); err == nil {
 		t.Fatal("issue-tracker Probe() must fail when jira cross-knob fields are incomplete")
 	}
 
-	c.jiraProjectKey = "PROJ"
-	c.jiraToken = "tok"
+	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
+	c.setRowKnob("JIRA_TOKEN", "tok")
 	ch = checkByName(t, launcherChecks(c), "issue-tracker-config")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("issue-tracker Probe() unexpected error for fully configured jira: %v", err)
@@ -443,13 +443,13 @@ func TestLauncherChecks_CodeForge_FailsAndPasses(t *testing.T) {
 
 	c = minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
 	if _, err := ch.Probe(); err == nil {
 		t.Fatal("code-forge Probe() must fail when forgejo cross-knob fields are incomplete")
 	}
 
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	ch = checkByName(t, launcherChecks(c), "code-forge-config")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("code-forge Probe() unexpected error for fully configured forgejo: %v", err)

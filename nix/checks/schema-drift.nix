@@ -1907,28 +1907,6 @@ checkedMerge {
         touch $out
       '';
 
-  # Regenerate with `nix run .#regen` when a registry row's knobs change. The
-  # raw renderer output is intentionally unaligned: gofmt owns the map-literal
-  # column alignment.
-  launcher-row-knob-table =
-    let
-      raw = pkgs.writeText "rowknobs_gen.go.raw" (
-        renderers.renderRowKnobTableGo (import ../../lib/row-knob-registries.nix)
-      );
-    in
-    pkgs.runCommand "launcher-row-knob-table"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/rowknobs_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/rowknobs_gen.go is out of sync with lib/row-knob-registries.nix — regenerate it" >&2; exit 1; }
-        touch $out
-      '';
-
   # Regenerate with `nix run .#regen` when a box-env row changes. The raw
   # renderer output is intentionally unaligned: gofmt owns the struct
   # literal's column alignment (issue #2979).

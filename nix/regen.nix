@@ -25,7 +25,6 @@ let
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
   schemaConfigFile = renderers.renderSchemaConfigGo schema;
-  rowKnobTableFile = renderers.renderRowKnobTableGo (import ../lib/row-knob-registries.nix);
   flakeOptionsDoc =
     renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
       extraOptionPaths;
@@ -174,8 +173,6 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/flagtable_gen.go" flagTable}
     ${writeGenerated "cmd/launcher/schemaconfig_gen.go" schemaConfigFile}
     gofmt -w "$root/cmd/launcher/schemaconfig_gen.go"
-    ${writeGenerated "cmd/launcher/rowknobs_gen.go" rowKnobTableFile}
-    gofmt -w "$root/cmd/launcher/rowknobs_gen.go"
     ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
     ${writeGenerated "cmd/launcher/internal/driver/descriptor_gen.go" driverDescriptorsFile}
     gofmt -w "$root/cmd/launcher/internal/driver/descriptor_gen.go"

@@ -1210,7 +1210,7 @@ func mustLocalAccumulationRepo(t *testing.T, relPath, registryConfig string) str
 func minimalValidLocalConfigForRoutes(accumRepo string) config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = accumRepo
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", accumRepo)
 	c.baseBranch = "main"
 	return c
 }

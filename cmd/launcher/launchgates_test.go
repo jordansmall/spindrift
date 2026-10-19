@@ -352,7 +352,7 @@ func TestGateRegistry_GitHubTokenGateInapplicableOnPureForgejo(t *testing.T) {
 	c.boxForgeAndIssueAccess = "read-only"
 	c.codeForge = "forgejo"
 	c.issueTracker = "forgejo"
-	c.forgejoToken = "launcher-forgejo-token"
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-forgejo-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
 
 	var buf bytes.Buffer
@@ -572,7 +572,7 @@ func TestGateRegistry_FullWalkChecksEachActiveBackendOnce(t *testing.T) {
 			c.issueTracker = tc.tracker
 			c.codeForge = tc.forge
 			c.ghToken = "launcher-gh-tok"
-			c.forgejoToken = "launcher-fj-tok"
+			c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 			t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
 			t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 

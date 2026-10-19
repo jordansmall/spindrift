@@ -329,7 +329,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		c.codeForge = "github" // ledger-capable (backendByName's newLedger != nil)
 		c.butlerChores = "bugs"
 		c.butlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
-		c.butlerTuningCooldown = schemaDefault("BUTLER_TUNING_COOLDOWN")
+		c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
 		return c
 	}
 
@@ -421,7 +421,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		{
 			name: "malformed BUTLER_TUNING_COOLDOWN",
 			mutate: func(t *testing.T, c *config) {
-				c.butlerTuningCooldown = "-1h"
+				c.setRowKnob("BUTLER_TUNING_COOLDOWN", "-1h")
 			},
 			wantErr: "BUTLER_TUNING_COOLDOWN",
 		},
@@ -629,7 +629,7 @@ func TestDoctorReport_ReadOnlyCapabilityGate_GitCodeForge_ExitsTwoAndNamesBundle
 	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://example.com/repo.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
 	c.boxForgeAndIssueAccess = "read-only"
 
 	var stdout, stderr bytes.Buffer
@@ -740,7 +740,9 @@ func TestDoctorReport_NoLabelRegistryTracker_SkipsLabelCheck(t *testing.T) {
 			c := minimalValidConfig()
 			c.issueTracker = tracker
 			if tracker == "jira" {
-				c.jiraBaseURL, c.jiraProjectKey, c.jiraToken = "https://example.atlassian.net", "PROJ", "tok"
+				c.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
+				c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
+				c.setRowKnob("JIRA_TOKEN", "tok")
 			}
 			c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
 				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"

@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -338,14 +337,16 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 	t.Helper()
 	return &launchContext{
 		config: config{schemaConfig: schemaConfig{
-			codeForge:                    "local",
-			codeForgeAccumulationRepoDir: repo,
-			butlerChores:                 butlerChores,
-			butlerEvery:                  schemaDefault("BUTLER_EVERY"),
-			butlerClaimTimeout:           schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-			butlerTuningCooldown:         schemaDefault("BUTLER_TUNING_COOLDOWN"),
-			daemonAwakeWindow:            schemaDefault("DAEMON_AWAKE_WINDOW"),
-			baseBranch:                   schemaDefault("BASE_BRANCH"),
+			codeForge: "local",
+			rowKnobs: map[string]string{
+				"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
+				"BUTLER_TUNING_COOLDOWN":           schemaDefault("BUTLER_TUNING_COOLDOWN"),
+			},
+			butlerChores:       butlerChores,
+			butlerEvery:        schemaDefault("BUTLER_EVERY"),
+			butlerClaimTimeout: schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			daemonAwakeWindow:  schemaDefault("DAEMON_AWAKE_WINDOW"),
+			baseBranch:         schemaDefault("BASE_BRANCH"),
 		}},
 		factory: testFactory(t, t.TempDir(), runner.NewFake()),
 		cleanup: func() {},
@@ -413,7 +414,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 		},
 		{
 			name:       "BUTLER_TUNING_COOLDOWN",
-			set:        func(cfg *config) { cfg.butlerTuningCooldown = "-1h" },
+			set:        func(cfg *config) { cfg.setRowKnob("BUTLER_TUNING_COOLDOWN", "-1h") },
 			wantSubstr: "BUTLER_TUNING_COOLDOWN",
 		},
 		{
@@ -905,17 +906,19 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 
 	lc := &launchContext{
 		config: config{schemaConfig: schemaConfig{
-			codeForge:                    "local",
-			codeForgeAccumulationRepoDir: repo,
-			butlerChores:                 "bugs",
-			butlerChoreClasses:           "bugs=error-handling",
-			butlerEvery:                  schemaDefault("BUTLER_EVERY"),
-			butlerClaimTimeout:           schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-			butlerTuningCooldown:         schemaDefault("BUTLER_TUNING_COOLDOWN"),
-			daemonAwakeWindow:            schemaDefault("DAEMON_AWAKE_WINDOW"),
-			baseBranch:                   schemaDefault("BASE_BRANCH"),
-			butlerMaxPromotionsPerDay:    1,
-			butlerPromotionMaxFiles:      3,
+			codeForge: "local",
+			rowKnobs: map[string]string{
+				"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
+				"BUTLER_TUNING_COOLDOWN":           schemaDefault("BUTLER_TUNING_COOLDOWN"),
+			},
+			butlerChores:              "bugs",
+			butlerChoreClasses:        "bugs=error-handling",
+			butlerEvery:               schemaDefault("BUTLER_EVERY"),
+			butlerClaimTimeout:        schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			daemonAwakeWindow:         schemaDefault("DAEMON_AWAKE_WINDOW"),
+			baseBranch:                schemaDefault("BASE_BRANCH"),
+			butlerMaxPromotionsPerDay: 1,
+			butlerPromotionMaxFiles:   3,
 		}, workLabel: "agent-go"},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
@@ -943,16 +946,22 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 }
 
 func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
-	cfg := loadSchemaConfig()
-	if cfg.butlerTuningMinRecords != 20 || cfg.butlerTuningMinSample != 15 || cfg.butlerTuningDigestBytes != 49152 {
-		t.Errorf("tuning defaults = %d/%d/%d, want 20/15/49152", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample, cfg.butlerTuningDigestBytes)
+	tuningKnobs := func(cfg schemaConfig) string {
+		return cfg.rowKnobs["BUTLER_TUNING_MIN_RECORDS"] + "/" + cfg.rowKnobs["BUTLER_TUNING_MIN_SAMPLE"] + "/" + cfg.rowKnobs["BUTLER_TUNING_DIGEST_BYTES"]
+	}
+	if got := tuningKnobs(loadSchemaConfig()); got != "20/15/49152" {
+		t.Errorf("tuning defaults = %s, want 20/15/49152", got)
 	}
 	t.Setenv("BUTLER_TUNING_MIN_RECORDS", "7")
 	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "3")
 	t.Setenv("BUTLER_TUNING_DIGEST_BYTES", "1000")
-	cfg = loadSchemaConfig()
-	if cfg.butlerTuningMinRecords != 7 || cfg.butlerTuningMinSample != 3 || cfg.butlerTuningDigestBytes != 1000 {
-		t.Errorf("tuning knobs = %d/%d/%d, want 7/3/1000", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample, cfg.butlerTuningDigestBytes)
+	if got := tuningKnobs(loadSchemaConfig()); got != "7/3/1000" {
+		t.Errorf("tuning knobs = %s, want 7/3/1000", got)
+	}
+	// A malformed int falls back to its default, as the field loader did.
+	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "lots")
+	if got := loadSchemaConfig().rowKnobs["BUTLER_TUNING_MIN_SAMPLE"]; got != "15" {
+		t.Errorf("malformed BUTLER_TUNING_MIN_SAMPLE = %q, want the default 15", got)
 	}
 }
 
@@ -975,7 +984,10 @@ func TestButlerPreflight_RecordsDigest(t *testing.T) {
 // value set on the config reaches the Digest's own reader unchanged.
 func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 	c := minimalValidConfig()
-	c.butlerTuningMinSample, c.butlerTuningDigestBytes, c.butlerTuningCooldown = 3, 1000, "36h"
+	c.schemaConfig = loadSchemaConfig()
+	c.setRowKnob("BUTLER_TUNING_MIN_SAMPLE", "3")
+	c.setRowKnob("BUTLER_TUNING_DIGEST_BYTES", "1000")
+	c.setRowKnob("BUTLER_TUNING_COOLDOWN", "36h")
 	got, err := tuning.Strategy.Knobs(c.knobLookup)
 	if err != nil {
 		t.Fatal(err)
@@ -984,7 +996,7 @@ func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 	if got != want {
 		t.Errorf("Knobs = %+v, want %+v", got, want)
 	}
-	if v, ok := c.knobLookup(chore.MinRecordsKnob("tuning")); !ok || v != strconv.Itoa(c.butlerTuningMinRecords) {
+	if v, ok := c.knobLookup(chore.MinRecordsKnob("tuning")); !ok || v != c.rowKnobs["BUTLER_TUNING_MIN_RECORDS"] {
 		t.Errorf("min-records knob = %q, %v, want the config's", v, ok)
 	}
 }

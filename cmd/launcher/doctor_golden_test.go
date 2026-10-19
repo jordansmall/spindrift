@@ -85,8 +85,8 @@ func TestRunDoctor_ReadOnlyForgejo_Golden(t *testing.T) {
 	c.boxForgeAndIssueAccess = "read-only"
 	c.codeForge = "forgejo"
 	c.issueTracker = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "launcher-fj-tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 
 	assertDoctorGolden(t, f, c, "testdata/golden/doctor-readonly-forgejo-report.txt")
@@ -138,8 +138,8 @@ func TestDoctorReport_ReadOnlyForgejo_Healthy_QuietSuppressesTokenGateWarning(t 
 	c.boxForgeAndIssueAccess = "read-only"
 	c.codeForge = "forgejo"
 	c.issueTracker = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "launcher-fj-tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 
 	t.Run("quiet", func(t *testing.T) {

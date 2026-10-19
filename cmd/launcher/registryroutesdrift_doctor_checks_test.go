@@ -610,7 +610,7 @@ func TestCheckoutIsTargetRepo_Github_FollowsGHHost(t *testing.T) {
 func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://git.example.com/team/proj.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/team/proj.git")
 
 	for _, remoteURL := range []string{
 		"https://git.example.com/team/proj.git",
@@ -628,7 +628,7 @@ func TestCheckoutIsTargetRepo_GitMatch(t *testing.T) {
 func TestCheckoutIsTargetRepo_GitMismatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://git.example.com/team/proj.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/team/proj.git")
 	dir := newGitCheckoutWithRemote(t, "https://git.example.com/team/other.git")
 	if checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = true, want false for a mismatched codeForge=git remote", dir)
@@ -641,7 +641,7 @@ func TestCheckoutIsTargetRepo_GitMismatch(t *testing.T) {
 func TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "ssh://git@host/owner/repo.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "ssh://git@host/owner/repo.git")
 	dir := newGitCheckoutWithRemote(t, "git@host:owner/repo.git")
 	if !checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = false, want true for equivalent scp-like/ssh:// remote forms", dir)
@@ -654,7 +654,7 @@ func TestCheckoutIsTargetRepo_GitMatch_DifferentRemoteForms(t *testing.T) {
 func TestCheckoutIsTargetRepo_GitLocalPathMismatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "/srv/git/target.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "/srv/git/target.git")
 	dir := newGitCheckoutWithRemote(t, "/srv/git/consumer.git")
 	if checkoutIsTargetRepo(dir, c) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = true, want false for two different local-path remotes that both parse to (\"\", \"\")", dir)
@@ -664,7 +664,7 @@ func TestCheckoutIsTargetRepo_GitLocalPathMismatch(t *testing.T) {
 func TestCheckoutIsTargetRepo_ForgejoMatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.repoSlug = "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@codeberg.org:owner/repo.git")
 	if !checkoutIsTargetRepo(dir, c) {
@@ -676,7 +676,7 @@ func TestCheckoutIsTargetRepo_ForgejoMatch(t *testing.T) {
 func TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.repoSlug = "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@CODEBERG.ORG:Owner/Repo.git")
 	if !checkoutIsTargetRepo(dir, c) {
@@ -688,7 +688,7 @@ func TestCheckoutIsTargetRepo_ForgejoMatch_CaseInsensitive(t *testing.T) {
 func TestCheckoutIsTargetRepo_ForgejoHostMismatch(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
 	c.repoSlug = "owner/repo"
 	dir := newGitCheckoutWithRemote(t, "git@git.example.com:owner/repo.git")
 	if checkoutIsTargetRepo(dir, c) {

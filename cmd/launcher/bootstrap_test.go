@@ -456,7 +456,7 @@ func TestSeedAccumulationRepoIfHostMediated_Local_SeedsFromPwd(t *testing.T) {
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = repoPath
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.baseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
@@ -498,7 +498,7 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing
 	c := baseConfig()
 	c.codeForge = "local"
 	c.dispatchKind = dispatchkind.Research
-	c.codeForgeAccumulationRepoDir = repoPath
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.baseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
@@ -523,7 +523,7 @@ func TestSeedAccumulationRepoIfHostMediated_ResearchSelfContained_NoOp(t *testin
 	c.codeForge = "local"
 	c.dispatchKind = dispatchkind.Research
 	c.selfContained = true
-	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "accum.git")
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
 	c.baseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, "/nonexistent/pwd")
@@ -545,7 +545,7 @@ func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilRel
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = repoPath
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.baseBranch = "main"
 
 	firstLock, err := seedAccumulationRepoIfHostMediated(c, checkout)
@@ -592,7 +592,7 @@ func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 	c := baseConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = repoPath
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
 	c.baseBranch = "main"
 
 	lock, err := seedAccumulationRepoIfHostMediated(c, checkout)
@@ -985,7 +985,7 @@ body
 
 	c := baseConfig()
 	c.issueTracker = "local"
-	c.localIssuesDir = issuesDir
+	c.setRowKnob("LOCAL_ISSUES_DIR", issuesDir)
 	dir := tempLogDir(t)
 	lc := &launchContext{
 		config:    c,

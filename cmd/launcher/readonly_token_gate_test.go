@@ -282,7 +282,7 @@ func TestCheckReadOnlyTokenGate_Forgejo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := minimalValidConfig()
 			c.boxForgeAndIssueAccess = tc.access
-			c.forgejoToken = tc.launcherToken
+			c.setRowKnob("FORGEJO_TOKEN", tc.launcherToken)
 			t.Setenv("BOX_FORGEJO_TOKEN", tc.boxToken)
 
 			row, _ := backendByName("forgejo")
