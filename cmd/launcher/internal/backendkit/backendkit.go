@@ -10,6 +10,7 @@ package backendkit
 import (
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -85,6 +86,10 @@ type Strategy struct {
 	WebURL      func(Shared, Lookup) string
 	RemoteMatch func(Shared, Lookup, string) bool
 
+	// ConfigureCLI sets up the backend's CLI inside the Box; nil means the
+	// backend has none to set up.
+	ConfigureCLI func(BoxCLI) error
+
 	// Quickstart hooks (ADR 0068 decision 8). KnobsFromRemote returns the
 	// backend's own knob values (env name -> value) implied by a git remote
 	// URL, or nil when the remote implies none. AcquireToken is the
@@ -113,6 +118,14 @@ type TokenPrompt struct {
 	Probe func(token string) error
 	// RerunCmd is the command the error hints tell the operator to rerun.
 	RerunCmd string
+}
+
+// BoxCLI is the Box's process seams a ConfigureCLI setup runs through.
+type BoxCLI struct {
+	Getenv   func(string) string
+	LookPath func(string) (string, error)
+	Run      func(*exec.Cmd) error
+	Stderr   io.Writer
 }
 
 // AutoMergeForges names, in slice order, every Strategy that offers an

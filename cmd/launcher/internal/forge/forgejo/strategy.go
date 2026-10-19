@@ -98,6 +98,7 @@ var Strategy = backendkit.Strategy{
 		host, slug := gitremote.ParseHostSlug(remote)
 		return strings.EqualFold(host, u.Host) && strings.EqualFold(slug, s.RepoSlug)
 	},
+	ConfigureCLI: configureCLI,
 	KnobsFromRemote: func(remote string) map[string]string {
 		host, _ := gitremote.ParseHostSlug(remote)
 		if host == "" {

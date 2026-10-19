@@ -199,6 +199,7 @@ func TestReadonlyGuards_FjOnPath_GetsItsShimInTheSameDir(t *testing.T) {
 func TestReadonlyGuards_RunsAfterForgejoCLIBeforeRecoveryAndBindings(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.OutboxRelayCapable = true
+	g.env.CodeForge = "forgejo"
 	g.knobs["FORGEJO_TOKEN"] = "s3cret"
 	g.d.LookPath = func(name string) (string, error) {
 		if name == "fj" {

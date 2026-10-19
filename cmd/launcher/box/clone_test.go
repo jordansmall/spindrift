@@ -28,7 +28,7 @@ func TestCloneRunsWithTheEnvsConfigAndGithubDefault(t *testing.T) {
 	got.Lookup = nil
 	want := boxclone.Config{
 		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "owner/repo", RepoMountDir: "/repo",
-		WorkDir: f.in.WorkDir, GitUserName: defaultGitUserName, GitUserEmail: "agent@example.com",
+		WorkDir: f.in.WorkDir, GitUserName: fixtureGitUserName, GitUserEmail: "agent@example.com",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("clone config = %+v, want %+v", got, want)

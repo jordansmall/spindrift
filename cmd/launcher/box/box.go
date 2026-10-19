@@ -97,9 +97,9 @@ type deps struct {
 	// PublishBranch is branchrecovery.Publish, the one decision for how a
 	// rebased branch lands.
 	PublishBranch func(cfg branchrecovery.Config, w io.Writer) error
-	// RunCmd runs the prefetch hook and the Forgejo CLI credential setup.
+	// RunCmd runs the prefetch hook and the backend CLI setups.
 	RunCmd func(*exec.Cmd) error
-	// LookPath resolves a binary on PATH, for the Forgejo CLI gate.
+	// LookPath resolves a binary on PATH, for the backend CLI setups.
 	LookPath func(string) (string, error)
 	// Git runs git in dir, for the read-only guards' decoy repo.
 	Git func(dir string, args ...string) error
@@ -190,12 +190,12 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 		return 0, err
 	}
 
-	// The Forgejo CLI credential and the guards come right after the clone,
-	// ahead of recovery, so no recovery step (its gh pr list, its outbox
+	// Each selected backend's CLI setup and the guards come right after the
+	// clone, ahead of recovery, so no recovery step (its gh pr list, its outbox
 	// bundle) runs unguarded (issue #4446). The PATH the guards prepend
 	// must reach the prefetch hook, the orchestrator and the Driver.
-	if err := r.configureForgejoCLI(); err != nil {
-		return 0, phaseErr("forgejo-cli", err)
+	if err := r.configureBackendCLIs(); err != nil {
+		return 0, phaseErr("backend-cli", err)
 	}
 	if err := r.installReadonlyGuards(); err != nil {
 		return 0, phaseErr("readonly-guards", err)
