@@ -1,20 +1,15 @@
 {
-  "lastSwept": "e59aded328bd4e03470a9ca27501eb9c2aa65551",
-  "cursor": "cmd/launcher/internal/driver/opencode/testdata/corpus/real-normal/heartbeat.golden.json",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-19T15:19:18.889509672-04:00"
-  },
+  "lastSwept": "79b6f20d6364272ff33e572170152c703480d0f1",
+  "cursor": "cmd/launcher/internal/driver/opencode/testdata/corpus/review-block-fixture/pass.jsonl",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 38,
+    "output_tokens": 5197,
+    "cache_read_input_tokens": 838141,
+    "cache_creation_input_tokens": 52093,
+    "total_cost_usd": 0.6884642,
+    "duration_ms": 55207,
+    "duration_api_ms": 53354,
+    "num_turns": 21
   }
 }
