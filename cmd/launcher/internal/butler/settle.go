@@ -16,7 +16,6 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/tuning"
 )
 
 // conventionalSubjectRE matches a Conventional Commits subject line
@@ -66,9 +65,9 @@ type settleRun struct {
 	// for how patch.forge's presence gates it.
 	patch patchRung
 
-	// tuning is the stored digest of a records-scoped sweep; nil for a code
+	// records is the stored digest of a records-scoped sweep; nil for a code
 	// Chore.
-	tuning *tuningSnapshot
+	records *recordsSnapshot
 }
 
 // patchRung is what the patch rung needs (ADR 0057, issue #4074/#4076): tree
@@ -133,8 +132,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 
 	var drops []ledger.Drop
-	if s.tuning != nil {
-		err := s.tuning.load()
+	if s.records != nil {
+		err := s.records.load()
 		if err == nil {
 			result.IssueIntents, drops, err = s.validateFindings(num, result.IssueIntents)
 		}
@@ -156,8 +155,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// The cutoff must stay now-cooldown: a zero NotPlannedBefore never
 	// expires, but a zero cooldown would expire every not-planned close.
 	var dedup settle.DedupPolicy
-	if s.tuning != nil {
-		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.tuning.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.tuning.knobs.Cooldown)}
+	if s.records != nil {
+		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.records.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.records.knobs.Cooldown)}
 	}
 	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
@@ -271,15 +270,15 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				promoted = append(promoted, url)
 			}}
 		}
-		if s.tuning == nil {
+		if s.records == nil || s.records.digest.Evidence == nil {
 			return decorate
 		}
-		rows := tuning.Rows(s.tuning.rendered)
+		rendered, evidence := s.records.rendered, s.records.digest.Evidence
 		// Appended last, after any promotion note, so the visible body ends
 		// with the host-rendered rows rather than the model's transcription.
 		return func(f settle.Finding) settle.Decoration {
 			dec := decorate(f)
-			if ev := tuning.Evidence(rows, f.Cites); ev != "" {
+			if ev := evidence(rendered, f.Cites); ev != "" {
 				dec.Backlink += "\n\n" + strings.TrimRight(ev, "\n")
 			}
 			return dec
@@ -320,8 +319,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		Dropped:   dropped,
 		Drops:     drops,
 	}
-	if s.tuning != nil {
-		state.Snapshot = &s.tuning.ref
+	if s.records != nil {
+		state.Snapshot = &s.records.ref
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
@@ -562,7 +561,7 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 		if tracked != nil {
 			return tracked, nil
 		}
-		files, err := s.tuning.tree.TrackedFiles(s.scope.Head)
+		files, err := s.records.tree.TrackedFiles(s.scope.Head)
 		if err != nil {
 			return nil, fmt.Errorf("list tracked files at %s: %w", s.scope.Head, err)
 		}
@@ -572,7 +571,7 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 		}
 		return tracked, nil
 	}
-	anchors := s.tuning.digest.Anchors(s.tuning.rendered)
+	anchors := s.records.digest.Anchors(s.records.rendered)
 	var kept []string
 	var drops []ledger.Drop
 	for _, r := range raw {
@@ -582,9 +581,9 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 			continue
 		}
 		reason := citeDrop(in.Cites, anchors)
-		if reason == "" && s.tuning.digest.Validate != nil {
+		if reason == "" && s.records.digest.Validate != nil {
 			var err error
-			reason, err = s.tuning.digest.Validate(in, s.tuning.rendered, s.tuning.knobs.Limits, trackedFiles)
+			reason, err = s.records.digest.Validate(in, s.records.rendered, s.records.knobs.Limits, trackedFiles)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -24,6 +24,7 @@ const (
 	noPriorChore   = "noprior"
 	noPriorAnchor  = "row:a"
 	withPriorChore = "withprior"
+	evidenceChore  = "withevidence"
 )
 
 // The butler's tests exercise the tuning records path, which the production
@@ -48,6 +49,16 @@ func init() {
 		},
 		Anchors:    func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
 		ParsePrior: func(f settle.PriorFinding) any { return f.Issue.Number },
+	})
+	recordsdigest.Register(recordsdigest.Strategy{
+		Name: evidenceChore,
+		Render: func(in recordsdigest.Input) recordsdigest.Output {
+			return recordsdigest.Output{Text: "digest", Latest: "latest"}
+		},
+		Anchors: func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
+		Evidence: func(digest string, cites []string) string {
+			return "host-evidence[" + digest + "|" + strings.Join(cites, ",") + "]\n"
+		},
 	})
 }
 
@@ -304,5 +315,54 @@ func TestRecordsChoreNotPlannedCooldownExpiresItsOwnFindings(t *testing.T) {
 				t.Errorf("second Sweep filed %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+// sweepOneCitedFinding settles one finding citing noPriorAnchor under the named
+// synthetic records Chore and returns the body that was filed.
+func sweepOneCitedFinding(t *testing.T, name string) string {
+	t.Helper()
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
+	p := tuningPolicy(root, 1)
+	p.Chores = []chore.Chore{{Name: name, Every: time.Hour, Records: true, FindingLabel: chore.FindingLabel(name)}}
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/77"
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		d := readyDispatcher()
+		d.RunResult = dispatch.Succeeded(dispatch.Result{
+			Resolved:          outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "butler-" + name, Status: outcome.StatusReady, Note: "swept"}},
+			IssueIntentsFound: true,
+			IssueIntents:      []string{tuningIntent(t, "cited", "prompt-gap", []string{noPriorAnchor}, "c.go:Foo")},
+		})
+		d.RecordIDResult = dispatchrecord.RecordID(name, c.Name, c.ClaimTime)
+		return d
+	}
+	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), newBox, p, func() time.Time { return tuningNow })
+	out, err := r.Sweep([]string{name})
+	if err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("filed %d findings, want 1", len(fc.PostIssueCalls))
+	}
+	return fc.PostIssueCalls[0].Body
+}
+
+// A Digest's Evidence hook, not the butler, writes the block appended to a
+// filed finding, from the stored digest and the finding's cites.
+func TestRecordsChoreEvidenceHookOutputEndsFiledBody(t *testing.T) {
+	body := sweepOneCitedFinding(t, evidenceChore)
+	want := "host-evidence[digest|" + noPriorAnchor + "]"
+	if !strings.Contains(body, "\n\n"+want+"\n") {
+		t.Errorf("body = %q, want it to contain %q after the backlink", body, want)
+	}
+}
+
+func TestRecordsChoreWithNilEvidenceAppendsNothing(t *testing.T) {
+	body := sweepOneCitedFinding(t, noPriorChore)
+	if strings.Contains(body, "host-evidence") || strings.Contains(body, "## Evidence") {
+		t.Errorf("body = %q, want no evidence block", body)
 	}
 }

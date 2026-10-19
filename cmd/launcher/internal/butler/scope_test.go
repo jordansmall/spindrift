@@ -188,8 +188,8 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 
 	sum := sha256.Sum256([]byte(p.input))
 	want := ledger.Snapshot{Sweep: d.RecordIDResult, SHA256: hex.EncodeToString(sum[:])}
-	if step.tuning == nil || step.tuning.ref != want {
-		t.Fatalf("step.tuning = %+v, want ref %+v", step.tuning, want)
+	if step.records == nil || step.records.ref != want {
+		t.Fatalf("step.records = %+v, want ref %+v", step.records, want)
 	}
 	snap, ok, err := r.policy.loadSnapshot(tuning.Strategy.Name, d.RecordIDResult)
 	if err != nil || !ok {
@@ -216,7 +216,7 @@ func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
 	if n := countSnapshots(t, root); n != 0 {
 		t.Errorf("a failed arm must store nothing: snapshots rows = %d", n)
 	}
-	if step.tuning != nil {
+	if step.records != nil {
 		t.Error("a failed arm must leave the settle step unarmed")
 	}
 }
@@ -237,8 +237,8 @@ func TestRecordsSourceSnapshotsKeyedByChore(t *testing.T) {
 		}
 	}
 	for name, step := range steps {
-		if err := step.tuning.load(); err != nil || step.tuning.rendered != name+" digest" {
-			t.Errorf("%s load: rendered %q, err %v; want %q", name, step.tuning.rendered, err, name+" digest")
+		if err := step.records.load(); err != nil || step.records.rendered != name+" digest" {
+			t.Errorf("%s load: rendered %q, err %v; want %q", name, step.records.rendered, err, name+" digest")
 		}
 	}
 }
@@ -287,7 +287,7 @@ func countSnapshots(t *testing.T, root string) int {
 
 // A claim made before the upgrade left its digest in tuning_snapshots; the
 // settle after the upgrade must still load it, under the Chore's name.
-func TestTuningSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
+func TestRecordsSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 	root := t.TempDir()
 	s, err := dispatchrecord.Open(root)
 	if err != nil {
@@ -312,7 +312,7 @@ func TestTuningSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 		}
 	}
 
-	snap := &tuningSnapshot{chore: tuning.Strategy.Name, ref: ref, policy: tuningPolicy(root, 1)}
+	snap := &recordsSnapshot{chore: tuning.Strategy.Name, ref: ref, policy: tuningPolicy(root, 1)}
 	if err := snap.load(); err != nil || snap.rendered != digest {
 		t.Fatalf("load: rendered %q, err %v; want %q", snap.rendered, err, digest)
 	}
