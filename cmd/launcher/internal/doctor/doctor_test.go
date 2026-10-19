@@ -1379,3 +1379,34 @@ func TestRun_NoLabelRegistry_SkipsLabelSection(t *testing.T) {
 		})
 	}
 }
+
+func TestRun_RuntimeLine_UsesRuntimeProbe(t *testing.T) {
+	run := func(c Config) string {
+		f := forge.NewFake()
+		f.ProbeRepo = "owner/repo"
+		f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+		var buf bytes.Buffer
+		if err := Run(f, f, c, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil); err != nil {
+			t.Fatalf("Run: %v (the runtime line is advisory)", err)
+		}
+		return buf.String()
+	}
+
+	c := defaultDoctorConfig()
+	c.Runtime = "podman"
+	c.RuntimeProbe = func() (any, error) { return nil, errors.New("probe says no") }
+	if out := run(c); !strings.Contains(out, `runtime "podman" not ready: probe says no — does not fail this check`) {
+		t.Errorf("missing the RuntimeProbe failure line, got:\n%s", out)
+	}
+
+	c.RuntimeProbe = func() (any, error) { return nil, nil }
+	if out := run(c); !strings.Contains(out, `runtime "podman" found on PATH`) {
+		t.Errorf("missing the RuntimeProbe success line, got:\n%s", out)
+	}
+
+	c.RuntimeProbe = nil
+	c.Runtime = "not-a-real-runtime-binary"
+	if out := run(c); !strings.Contains(out, `runtime "not-a-real-runtime-binary" not ready:`) {
+		t.Errorf("a nil RuntimeProbe must default to the runtime prerequisite's, got:\n%s", out)
+	}
+}

@@ -31,8 +31,6 @@ type Config struct {
 	// from named config fields, so a new rule variable needs an entry there.
 	Credentials map[string]string
 
-	Runtime string
-
 	IssueTracker string
 	CodeForge    string
 
@@ -160,7 +158,6 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 				return nil, errors.Join(errs...)
 			},
 		},
-		doctor.RuntimeCheck(c.Runtime),
 	}
 }
 
@@ -226,20 +223,6 @@ func CrossKnobChecks(c Config, d Deps) []doctor.Check {
 // them relative to its own validateChoice calls: required-knob rows first.
 func All(c Config, d Deps) []doctor.Check {
 	return append(RequiredKnobChecks(c, d), CrossKnobChecks(c, d)...)
-}
-
-// WithoutRuntime returns checks with the "runtime" row removed, as a new slice
-// that never aliases checks' backing array. doctor.Run reports runtime
-// validity on its own advisory line, so the two must never both report.
-func WithoutRuntime(checks []doctor.Check) []doctor.Check {
-	out := make([]doctor.Check, 0, len(checks))
-	for _, ch := range checks {
-		if ch.Name == doctor.RuntimeCheckName {
-			continue
-		}
-		out = append(out, ch)
-	}
-	return out
 }
 
 // JoinOxford joins words into an Oxford-comma "a, b, or c" list; two words

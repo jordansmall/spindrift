@@ -708,8 +708,8 @@ body
 }
 
 // A PATH that still resolves "git" (bootstrap's seeding shells out to it) and
-// a stub "bwrap" (validate(c)'s doctor.RuntimeCheck LookPath probe runs even
-// earlier), but excludes pasta, so checkBwrapPastaGate's LookPath("pasta")
+// a stub "bwrap" (validate(c)'s runtime prerequisite LookPath probe runs even
+// earlier), but excludes pasta, so the bwrap pasta launch gate's LookPath("pasta")
 // fails whether or not the real test runner has pasta installed.
 func pathWithoutPasta(t *testing.T) string {
 	t.Helper()
@@ -725,8 +725,8 @@ func pathWithoutPasta(t *testing.T) string {
 	return bwrapStubDir + string(os.PathListSeparator) + filepath.Dir(git)
 }
 
-// The wiring test for issue #2666: bwrap_pasta_gate_test.go covers
-// checkBwrapPastaGate directly, but every other RUNNER_KIND=bwrap bootstrap
+// The wiring test for issue #2666: internal/runner/bwrap/prerequisites_test.go covers
+// the pasta gate directly, but every other RUNNER_KIND=bwrap bootstrap
 // test stubs pasta onto PATH, so a bootstrap() that stopped calling the gate
 // would leave them all green. Here pasta is absent, and bootstrap() itself
 // must return an error naming pasta and PATH.
@@ -768,7 +768,7 @@ body
 
 	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil {
-		t.Fatal("bootstrap() with RUNNER_KIND=bwrap, default NETWORK_MODE, and pasta absent from PATH = nil error, want checkBwrapPastaGate to block the launch")
+		t.Fatal("bootstrap() with RUNNER_KIND=bwrap, default NETWORK_MODE, and pasta absent from PATH = nil error, want the pasta launch gate to block the launch")
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on a pasta-gate error = %+v, want nil launch context", lc)

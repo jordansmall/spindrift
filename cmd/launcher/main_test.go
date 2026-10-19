@@ -4465,11 +4465,12 @@ func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
 }
 
 // runDoctor passes doctorCheckSets(c)'s report half, not
-// doctorExtraChecks(c), so a bwrap-runner config shows
-// bwrapCapabilityChecks' three rows; swapping the call site back would
-// drop them silently (issue #2671 review). runnerKind must be
-// runner.KindBwrap for those rows to exist, and
-// validateCgroupDelegationFn is made to fail so its row renders predictably.
+// doctorExtraChecks(c), so a bwrap-runner config shows the bwrap family's
+// three prerequisite rows; swapping the call site back would drop them
+// silently (issue #2671 review). The bwrap Strategy is wrapped with its probes
+// swapped through lookupRunnerStrategy so the test never spawns a real bwrap
+// or does a real PATH lookup; the cgroup probe fails so its row renders
+// predictably.
 func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
@@ -4480,20 +4481,29 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
 	c.runnerKind = runner.KindBwrap
 
-	origCgroup := validateCgroupDelegationFn
-	t.Cleanup(func() { validateCgroupDelegationFn = origCgroup })
-	validateCgroupDelegationFn = func([]string) error { return errors.New("distinguishable cgroup delegation sentinel") }
-
-	// Stand-ins so this test never spawns a real bwrap subprocess or does a
-	// real PATH lookup; their return values do not matter to the assertion,
-	// which targets bwrap-cgroup-delegation only.
-	origOverlay := validateOverlayFn
-	t.Cleanup(func() { validateOverlayFn = origOverlay })
-	validateOverlayFn = func() error { return nil }
-
-	origPasta := validatePastaFn
-	t.Cleanup(func() { validatePastaFn = origPasta })
-	validatePastaFn = func() error { return nil }
+	real, err := runner.Lookup(runner.KindBwrap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := lookupRunnerStrategy
+	t.Cleanup(func() { lookupRunnerStrategy = orig })
+	lookupRunnerStrategy = func(string) (runner.Strategy, error) {
+		s := real
+		s.Prerequisites = func(cfg runner.Config) []runner.Prerequisite {
+			ps := real.PrerequisitesFor(cfg)
+			for i := range ps {
+				fail := ps[i].Name == "bwrap-cgroup-delegation"
+				ps[i].Probe = func() (any, error) {
+					if fail {
+						return nil, errors.New("distinguishable cgroup delegation sentinel")
+					}
+					return nil, nil
+				}
+			}
+			return ps
+		}
+		return s, nil
+	}
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
@@ -4502,7 +4512,7 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	}
 	out := buf.String()
 	if !strings.Contains(out, "advisory: bwrap-cgroup-delegation") {
-		t.Errorf("want runDoctor's output to report bwrapCapabilityChecks(c)'s bwrap-cgroup-delegation row (proves it wired doctorCheckSets(c)'s report half, not doctorExtraChecks(c)), got:\n%s", out)
+		t.Errorf("want runDoctor's output to report the bwrap family's bwrap-cgroup-delegation row (proves it wired doctorCheckSets(c)'s report half, not doctorExtraChecks(c)), got:\n%s", out)
 	}
 }
 

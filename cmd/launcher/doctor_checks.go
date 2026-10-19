@@ -10,14 +10,12 @@ import (
 // memoizeCheckProbes shares one *sync.Once per row, so a credential Peeks at
 // most once across the one set this call builds -- run-wide that holds only
 // at readContext.validation(), the single call site building one set and
-// running both halves over it. classify omits the bwrap, drift, and
-// transport rows (both the registry-proxy and signal-socket transport rows),
-// which must never make validateConfig exit 2 (issue #2671, ADR 0045, issue
-// #3114, issue #3728); the per-route rows stay, so a bad credential still
-// exits 2. podman-machine-memory joins classify too (issue #3544) -- it is
-// the one extraCheck row whose Required tier must actually fail the run: the
-// daemon's startup preflight reads doctor's exit code, and an undersized
-// VM's OOM-killer fires before any container's --memory cap ever bites.
+// running both halves over it. classify omits the drift and transport rows
+// (both the registry-proxy and signal-socket transport rows) and the runner's
+// launch-gate prerequisites, which must never make validateConfig exit 2
+// (issue #2671, ADR 0045, issue #3114, issue #3728); the per-route rows stay,
+// so a bad credential still exits 2. The runner's doctor-only prerequisites
+// join classify (issue #3544; see prerequisiteChecks).
 func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	extra := doctorExtraChecks(c)
 	var perRoute, drift []doctor.Check
@@ -34,23 +32,19 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	}
 	extra = memoizeCheckProbes(extra)
 	perRoute = memoizeCheckProbes(perRoute)
-	podmanMemory := memoizeCheckProbes(podmanMachineMemoryCheck(c))
+	// Both halves share these memoized rows, so a probe such as `podman
+	// machine inspect` runs once per doctorCheckSets(c) call.
+	prereqClassify, prereqReport := prerequisiteChecks(c)
 
-	classify = make([]doctor.Check, 0, len(extra)+len(podmanMemory)+len(perRoute))
+	classify = make([]doctor.Check, 0, len(extra)+len(prereqClassify)+len(perRoute))
 	classify = append(classify, extra...)
-	// podmanMemory is the same memoized slice value appended to report below,
-	// so an undersized machine's Required failure reaches validateConfigChecks
-	// (hence exit 2) while the probe still shells out to `podman machine
-	// inspect` only once per doctorCheckSets(c) call.
-	classify = append(classify, podmanMemory...)
+	classify = append(classify, prereqClassify...)
 	classify = append(classify, perRoute...)
 
-	bwrap := bwrapCapabilityChecks(c)
 	signalSocket := signalSocketTransportChecks(c)
-	report = make([]doctor.Check, 0, len(extra)+len(bwrap)+len(podmanMemory)+len(perRoute)+len(drift)+len(signalSocket)+1)
+	report = make([]doctor.Check, 0, len(extra)+len(prereqReport)+len(perRoute)+len(drift)+len(signalSocket)+1)
 	report = append(report, extra...)
-	report = append(report, bwrap...)
-	report = append(report, podmanMemory...)
+	report = append(report, prereqReport...)
 	report = append(report, perRoute...)
 	report = append(report, drift...)
 	report = append(report, registryProxyTransportCheck(c))

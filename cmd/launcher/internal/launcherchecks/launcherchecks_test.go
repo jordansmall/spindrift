@@ -36,8 +36,6 @@ func minimalValidConfig() Config {
 		Driver:      "claude",
 		Credentials: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-token"},
 
-		Runtime: "bwrap",
-
 		IssueTracker: "github",
 		CodeForge:    "github",
 	}
@@ -62,9 +60,9 @@ func minimalDeps() Deps {
 	}
 }
 
-func TestRequiredKnobChecks_ReturnsSixRowsInOrder(t *testing.T) {
+func TestRequiredKnobChecks_ReturnsFiveRowsInOrder_NoRuntimeRow(t *testing.T) {
 	checks := RequiredKnobChecks(minimalValidConfig(), minimalDeps())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime"}
+	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials"}
 	if len(checks) != len(want) {
 		t.Fatalf("RequiredKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -410,15 +408,6 @@ func TestRequiredKnobChecks_DriverCredentials_UnknownDriverFails(t *testing.T) {
 	}
 }
 
-func TestRequiredKnobChecks_Runtime(t *testing.T) {
-	c := minimalValidConfig()
-	c.Runtime = "not-a-real-runtime"
-	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "runtime")
-	if _, err := ch.Probe(); err == nil {
-		t.Fatal("runtime Probe() must fail for an unrecognised runtime")
-	}
-}
-
 func TestCrossKnobChecks_ReturnsRowsBeforeExtra(t *testing.T) {
 	extra := doctor.Check{Name: "registry-proxy-routes", Tier: doctor.Required, Remedy: "r"}
 	d := minimalDeps()
@@ -492,44 +481,13 @@ func TestCrossKnobChecks_NilValidatorPasses(t *testing.T) {
 	}
 }
 
-func TestWithoutRuntime_DropsOnlyRuntimeRow(t *testing.T) {
-	checks := All(minimalValidConfig(), minimalDeps())
-	out := WithoutRuntime(checks)
-	if len(out) != len(checks)-1 {
-		t.Fatalf("WithoutRuntime returned %d rows, want %d", len(out), len(checks)-1)
-	}
-	for _, ch := range out {
-		if ch.Name == doctor.RuntimeCheckName {
-			t.Fatalf("WithoutRuntime left the %q row in place", doctor.RuntimeCheckName)
-		}
-	}
-}
-
-func TestWithoutRuntime_DoesNotAliasInput(t *testing.T) {
-	checks := All(minimalValidConfig(), minimalDeps())
-	before := len(checks)
-	_ = WithoutRuntime(checks)
-	if len(checks) != before {
-		t.Fatalf("WithoutRuntime mutated its input slice: len changed from %d to %d", before, len(checks))
-	}
-	found := false
-	for _, ch := range checks {
-		if ch.Name == doctor.RuntimeCheckName {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("WithoutRuntime mutated its input slice: runtime row missing from original")
-	}
-}
-
-func TestAll_ReturnsNineRowsInOrder(t *testing.T) {
+func TestAll_ReturnsEightRowsInOrder(t *testing.T) {
 	extra := doctor.Check{Name: "registry-proxy-routes", Tier: doctor.Required, Remedy: "r"}
 	d := minimalDeps()
 	d.ExtraCrossKnob = []doctor.Check{extra}
 	checks := All(minimalValidConfig(), d)
 	want := []string{
-		"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime",
+		"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials",
 		"issue-tracker-config", "code-forge-config", "registry-proxy-routes",
 	}
 	if len(checks) != len(want) {

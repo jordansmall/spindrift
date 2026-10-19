@@ -83,7 +83,7 @@ func TestMemoizeCheckProbes_ProbeInvokedOnceAcrossTwoRuns(t *testing.T) {
 // invalid", keeps the Required per-route rows but drops the bwrap and drift
 // rows: those are environment and staleness concerns, not configuration
 // faults (issue #2671 round-1 review finding, extended to the drift row).
-func TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows(t *testing.T) {
+func TestDoctorCheckSets_ClassifyExcludesBwrapGatesAndDriftRowsButIncludesPerRouteRows(t *testing.T) {
 	withDriftRepoDir(t, t.TempDir()) // No declared hosts, so the drift row still exists and reports no drift.
 	withDriftMatchingRemote(t)       // Issue #3144: the drift row needs a positively identified Target checkout.
 
@@ -97,12 +97,17 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 
 	classify, report := doctorCheckSets(c)
 
-	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation", "registry-route-drift", "registry-proxy-transport"} {
+	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "registry-route-drift", "registry-proxy-transport"} {
 		for _, ch := range classify {
 			if ch.Name == name {
 				t.Errorf("classify contains %q, want it excluded (environment/staleness concern, not a configuration fault)", name)
 			}
 		}
+	}
+	// The doctor-only cgroup row joins classify (prerequisiteChecks) but is
+	// Advisory, so it can never make validateConfig exit 2.
+	if got := checkByName(t, classify, "bwrap-cgroup-delegation"); got.Tier != doctor.Advisory {
+		t.Errorf("classify bwrap-cgroup-delegation Tier = %v, want Advisory", got.Tier)
 	}
 	checkByName(t, classify, "registry-route-credential[registry.example.com]")
 	checkByName(t, classify, "registry-route-origin[registry.example.com]")
@@ -111,10 +116,10 @@ credential = { env = "SPINDRIFT_TEST_DOCTOR_CHECK_SETS_SPLIT" }
 		checkByName(t, report, name)
 	}
 
-	// doctorCheckSets' true row order is extra, bwrap, podman-machine-memory,
+	// doctorCheckSets' true row order is extra, runner prerequisites,
 	// per-route, drift, transport. Presence alone would not pin it. This
-	// config's runnerKind is bwrap, so podmanMachineMemoryCheck returns nil
-	// and that row never appears here, leaving only bwrap < per-route <
+	// config's runnerKind is bwrap, so no podman-machine-memory row exists
+	// and that row never appears here, leaving only the bwrap rows < per-route <
 	// drift < transport to pin.
 	indexOf := func(name string) int {
 		for i, ch := range report {

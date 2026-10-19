@@ -110,7 +110,7 @@ func TestDoctorReport_ConfigInvalid_NamesEveryBrokenKnob(t *testing.T) {
 }
 
 // Pins the regression a prior review round caught: gating cmdDoctor on the
-// full validate(c), which includes doctor.RuntimeCheck as Required, turned an
+// full validate(c), which includes the runtime prerequisite as Required, turned an
 // advisory-only "runtime not ready" finding into an exit-2 failure. A config
 // whose only problem is an unresolvable RUNTIME value must still exit 0.
 func TestDoctorReport_RuntimeNotReady_StaysAdvisory(t *testing.T) {

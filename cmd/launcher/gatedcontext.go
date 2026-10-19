@@ -15,10 +15,11 @@ type gatedContext struct {
 	readContext
 }
 
-// newGatedContext splices the bwrap gates between gateRegistry's non-Network
-// and Network halves rather than appending them after, so preview and real
-// dispatch stop at the same first failure and the token gates' live network
-// calls never run ahead of a bwrap failure.
+// newGatedContext splices the runner's launch prerequisites between
+// gateRegistry's non-Network and Network halves rather than appending them
+// after, so preview and real dispatch stop at the same first failure and the
+// token gates' live network calls never run ahead of a runner-prerequisite
+// failure.
 func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gatedContext, error) {
 	rc := newReadContext(kind, selfContained)
 	if err := validate(rc.config); err != nil {
@@ -31,10 +32,7 @@ func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained b
 	if err := walkGateRegistry(nonNetwork, rc.config, w, discardRep, false); err != nil {
 		return gatedContext{}, err
 	}
-	if err := checkBwrapPastaGate(rc.config); err != nil {
-		return gatedContext{}, err
-	}
-	if err := checkBwrapOverlayGate(rc.config); err != nil {
+	if err := checkRunnerLaunchPrerequisites(runnerPrerequisites(rc.config)); err != nil {
 		return gatedContext{}, err
 	}
 	if err := walkGateRegistry(network, rc.config, w, discardRep, false); err != nil {

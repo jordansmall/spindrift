@@ -10,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/launcherchecks"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 func validAnswers() answers {
@@ -34,7 +35,6 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 		GitUserEmail: a.gitUserEmail,
 		GHToken:      a.token,
 		Credentials:  map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"},
-		Runtime:      a.runtime,
 		IssueTracker: a.choice.name,
 		CodeForge:    "github",
 	}
@@ -93,14 +93,14 @@ func TestQuickstartCheckDeps_TrackerAndCodeForgeNames(t *testing.T) {
 }
 
 // doctor.Config.Runtime already reports the runtime, so handing doctor.Run
-// an unstripped row set double-reports it. This test fails if a call site
-// edit drops WithoutRuntime.
-func TestQuickstartLauncherRows_RuntimeRowStripped(t *testing.T) {
+// a set with a runtime row double-reports it. This test fails if
+// launcherchecks reintroduces one.
+func TestQuickstartLauncherRows_NoRuntimeRow(t *testing.T) {
 	a := validAnswers()
-	rows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, "github"), quickstartCheckDeps(a)))
+	rows := launcherchecks.All(quickstartCheckConfig(a, "github"), quickstartCheckDeps(a))
 	for _, ch := range rows {
-		if ch.Name == doctor.RuntimeCheckName {
-			t.Fatalf("launcherchecks row set contains the %q row, want it stripped", doctor.RuntimeCheckName)
+		if ch.Name == runner.RuntimePrerequisiteName {
+			t.Fatalf("launcherchecks row set contains the %q row, want none (doctor.Config.Runtime reports it)", runner.RuntimePrerequisiteName)
 		}
 	}
 }
