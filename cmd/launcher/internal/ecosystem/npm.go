@@ -22,9 +22,8 @@ var npmRow = Row{
 	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
 		return NpmFamilyBindings(port, prefix, routes)
 	},
-	EnvExportOrder: envExportOrderNpmFamily,
-	BindingEnvVar:  "npm_config_registry",
-	ConfigParser:   parseNpmRegistryConfig,
+	BindingEnvVar: "npm_config_registry",
+	ConfigParser:  parseNpmRegistryConfig,
 	RewriteRows: []registryvocab.RewriteRow{{
 		Name:          "npm packument",
 		Ecosystem:     nameNpm,

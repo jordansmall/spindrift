@@ -6,8 +6,6 @@
 package ecosystem
 
 import (
-	"sort"
-
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -77,12 +75,6 @@ type Row struct {
 
 	EnvExports EnvExportRenderer
 
-	// EnvExportOrder pins where the row's exports land in the rendered export
-	// file, whose line order predates Table and must stay byte-identical to the
-	// hand-written calls the table walk replaced (issue #3181). Zero is fine for
-	// a new row: nothing reads the file positionally.
-	EnvExportOrder int
-
 	HomeConfig *HomeConfig
 
 	// RepoAwareHomeConfig is nil for every row but cargo's (issue #3201). Such
@@ -122,17 +114,8 @@ type Row struct {
 	CredentialStores []string
 }
 
-// The rendered export file's line order. Consecutive by construction: a row
-// that wants to land between two of these renumbers the block rather than
-// guessing at spare values.
-const (
-	envExportOrderGo = iota + 1
-	envExportOrderNpmFamily
-)
-
-// EnvExportRows returns the rows carrying an EnvExports renderer, in ascending
-// EnvExportOrder (ties keep Table order), so the rendered file's line order
-// stays independent of the classification precedence Table's order encodes.
+// EnvExportRows returns the rows carrying an EnvExports renderer, in Table
+// order, which is the rendered export file's line order.
 // The slice is fresh, but its Row copies share their LockfileNames backing
 // array with Table, which callers must not write through.
 func EnvExportRows() []Row {
@@ -150,15 +133,12 @@ func EnvExportRowsOf(in []Row) []Row {
 		}
 		rows = append(rows, row)
 	}
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].EnvExportOrder < rows[j].EnvExportOrder })
 	return rows
 }
 
 // HomeConfigRows returns the rows carrying a non-nil HomeConfig, in Table
-// order: the two home-config writes have no legacy file order to match, so
-// they need no order field of their own. The slice is fresh, but its Row
-// copies share their LockfileNames backing array with Table, which callers
-// must not write through.
+// order. The slice is fresh, but its Row copies share their LockfileNames
+// backing array with Table, which callers must not write through.
 func HomeConfigRows() []Row {
 	return HomeConfigRowsOf(Table)
 }
@@ -199,9 +179,10 @@ func CredentialStores() map[string][]string {
 }
 
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
-// order. That order is load-bearing: it encodes the first-hit lockfile
-// precedence entrypoint.sh's old if/elif chain had (issue #2930), so do not
-// reorder rows without checking every caller that stops at the first match.
+// order. That order is load-bearing twice over: it encodes the first-hit
+// lockfile precedence entrypoint.sh's old if/elif chain had (issue #2930), and
+// it sets the env-export file's line order (EnvExportRows), so do not reorder
+// rows without checking every caller that stops at the first match.
 // Treat it as read-only; a consumer handing rows further out copies them.
 var Table = []Row{
 	cargoRow,
