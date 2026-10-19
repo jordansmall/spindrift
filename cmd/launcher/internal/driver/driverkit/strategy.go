@@ -12,9 +12,9 @@ const (
 	LastMessage
 )
 
-// Strategy is the host-side half of one Driver, declared as data. The shared
-// implementation in package driver turns it into a Driver, so a CLI's behaviour
-// is its grammar and these values, never its own adapter code.
+// Strategy is the host-side half of one Driver, declared as data. New turns
+// it into a Driver, so a CLI's behaviour is its grammar and these values,
+// never its own adapter code.
 type Strategy struct {
 	// Name is the Driver identifier, which must match a key in the nix
 	// lib/drivers/ registry.

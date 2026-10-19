@@ -1443,10 +1443,10 @@ this section together.
 
 A Driver's host-side half is one `driverkit.Strategy` literal, registered with
 a single `driver.Register` call in the bundle package
-(`cmd/launcher/internal/driver/bundle`); one shared implementation in
-`cmd/launcher/internal/driver` satisfies the `Driver` interface from it, so
-an author writes a literal and never calls a reader. The registry package
-imports no Driver: only the binaries (launcher, box, driver-exec,
+(`cmd/launcher/internal/driver/bundle`); `driverkit.New` turns it into the
+one shared implementation, `driverkit.Driver`, which satisfies
+`driver.Driver`, so an author writes a literal and never calls a reader. The
+registry package imports no Driver: only the binaries (launcher, box, driver-exec,
 orchestrator, quickstart and daemon) import the bundle. A library test that
 needs a Driver either calls `seamtest.RegisterDriver`, which registers seamtest's
 canonical-event `Strategy` under the `claude` name unless the bundle is
