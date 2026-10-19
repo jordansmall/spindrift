@@ -20,8 +20,8 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// A hermetic $HOME with every row's home-directory env var left unset (issue
-// #3201): a run reaching a home-config write would otherwise land in the real
+// A hermetic $HOME with the synthetic and stub rows' home-directory env vars
+// left unset (issue #3201): a run reaching a home-config write would otherwise land in the real
 // ambient one. Tests that t.Setenv their own HOME or home-directory var scope
 // back to this default at teardown.
 func TestMain(m *testing.M) {
@@ -30,10 +30,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("HOME", home)
-	for _, row := range ecosystem.HomeConfigRows() {
-		os.Unsetenv(row.HomeConfig.HomeEnvVar)
+	for _, v := range []string{
+		synthetic.Row.HomeConfig.HomeEnvVar,
+		"STUB_ECOSYSTEM_HOME", "STUB_HOME_ECOSYSTEM_HOME", "STUB_REPO_AWARE_HOME", "STUB_HOME_HOME",
+	} {
+		os.Unsetenv(v)
 	}
-	os.Unsetenv(synthetic.Row.HomeConfig.HomeEnvVar)
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
@@ -237,7 +239,7 @@ func TestRunBindRegistry_MissingFlagsErrors(t *testing.T) {
 // Issue #3141 replaced entrypoint.sh's `[ -S "$REGISTRY_PROXY_SOCKET_PATH" ] ||
 // return 0` short-circuit: the launcher sets the manifest only when the registry
 // proxy is genuinely enabled, so its absence is the "feature off" signal.
-func TestRunBindRegistryWithDeps_ManifestAbsentIsNoOp(t *testing.T) {
+func TestBindRegistry_ManifestAbsentIsNoOp(t *testing.T) {
 	clearManifestEnv(t)
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
@@ -272,7 +274,7 @@ func TestRunBindRegistryWithDeps_ManifestAbsentIsNoOp(t *testing.T) {
 // A manifest present but broken is distinct from ErrAbsent's empty-string case,
 // so issue #3141's "manifest present but unusable" branch warns rather than
 // silently no-opping, and never reaches probe/spawn.
-func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *testing.T) {
+func TestBindRegistry_ManifestMalformedJSONWarnsAndSkipsBindings(t *testing.T) {
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
@@ -309,7 +311,7 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 // Issue #2931's blocking finding: this early-return branch had zero coverage,
 // since every other test here injects lookPathFound. The lookPath check only
 // gates the spawn path, so it must run after probe, not before.
-func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T) {
+func TestBindRegistry_SocatMissingWarnsAndSkipsBindings(t *testing.T) {
 	socketPath := mountSocketManifest(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -346,7 +348,7 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 // The double-spawn-prevention path at the CLI-integration level: with probe
 // reporting "already listening", spawn is never called and the ready path still
 // writes bindings-env-output and the home config.
-func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
+func TestBindRegistry_AlreadyListeningWritesBindings(t *testing.T) {
 	mountSocketManifest(t, registrymanifest.Route{Prefix: "r0"})
 	home := syntheticHome(t)
 
@@ -392,7 +394,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 // Issue #3181: bindings mode must collect exports by walking the rows, not by
 // naming individual ecosystems' renderers. A stub row's export reaching the
 // written file proves the walk; a by-name call site would never see it.
-func TestRunBindRegistryWithRows_ExportsComeFromRowsWalk(t *testing.T) {
+func TestBindRegistry_ExportsComeFromRowsWalk(t *testing.T) {
 	syntheticHome(t)
 	rc, stdout, bindingsOut := bindReady(t, rowsWith(exportStubRow("stub-ecosystem", "STUB_ECOSYSTEM_URL")), registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
@@ -412,7 +414,7 @@ func TestRunBindRegistryWithRows_ExportsComeFromRowsWalk(t *testing.T) {
 // Issue #3182, the same row-generic contract for home-level config writes: a
 // stub row's rendered file reaching disk proves the walk, where a call site
 // naming one ecosystem directly would never write it.
-func TestRunBindRegistryWithRows_HomeConfigsComeFromRowsWalk(t *testing.T) {
+func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
 	t.Setenv("STUB_ECOSYSTEM_HOME", stubHome)
 	syntheticHome(t)
@@ -446,7 +448,7 @@ func TestRunBindRegistryWithRows_HomeConfigsComeFromRowsWalk(t *testing.T) {
 // Issue #3185, for the success summary's per-ecosystem "bound to it via ..."
 // fragments. Two stub rows, one with a BindingEnvVar and one with only a
 // HomeConfig, prove both halves of the precedence a row-generic walk applies.
-func TestRunBindRegistryWithRows_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
+func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
 	t.Setenv("STUB_HOME_ECOSYSTEM_HOME", stubHome)
 	syntheticHome(t)
@@ -487,7 +489,7 @@ func TestRunBindRegistryWithRows_SuccessSummaryFragmentsComeFromRowsWalk(t *test
 // Issue #3185, for the gate-unusable fallback warning: the ecosystem list must
 // come from walking the rows, not a hand-maintained literal a new row could
 // silently be left out of.
-func TestRunBindRegistryWithRows_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
+func TestBindRegistry_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
 	rows := rowsWith(ecosystem.Row{Name: "stub-ecosystem"})
 
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
@@ -517,7 +519,7 @@ func TestRunBindRegistryWithRows_UnusableGateFallbackNamesComeFromRowsWalk(t *te
 }
 
 // Mirrors the above for the sibling no-route-prefix fallback warning.
-func TestRunBindRegistryWithRows_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *testing.T) {
+func TestBindRegistry_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *testing.T) {
 	rows := rowsWith(ecosystem.Row{Name: "stub-ecosystem"})
 
 	rc, stdout, _ := bindReady(t, rows) // no routes at all
@@ -531,7 +533,7 @@ func TestRunBindRegistryWithRows_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *t
 
 // exportNamesInFileOrder parses a rendered bindings env file into its export
 // names in line order, the property
-// TestRunBindRegistryWithRows_ExportOrderFollowsRows pins and a
+// TestBindRegistry_ExportOrderFollowsRows pins and a
 // strings.Contains assertion cannot see.
 func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	t.Helper()
@@ -552,7 +554,7 @@ func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 // The rendered file's line order is the rows' order, each row's exports staying
 // contiguous; the stub names sort opposite to their position so a sorted file
 // fails here.
-func TestRunBindRegistryWithRows_ExportOrderFollowsRows(t *testing.T) {
+func TestBindRegistry_ExportOrderFollowsRows(t *testing.T) {
 	syntheticHome(t)
 	rows := []ecosystem.Row{
 		exportStubRow("stub-z", "STUB_Z_FIRST", "STUB_Z_SECOND"),
@@ -585,7 +587,7 @@ func TestRunBindRegistryWithRows_ExportOrderFollowsRows(t *testing.T) {
 // everything to gate.manifest.Routes[0], preserving the pre-prefix routes[0]
 // fallback semantics. The distinctive non-"r0" prefix proves real propagation
 // from the manifest rather than a coincidental match on a hardcoded default.
-func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) {
+func TestBindRegistry_BindsToFirstRoutePrefixNotSecond(t *testing.T) {
 	home := syntheticHome(t)
 
 	rc, stdout, bindingsOut := bindReady(t, rowsWith(),
@@ -621,7 +623,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 // to the bare, now-404ing "http://127.0.0.1:<port>/" URL. This is a defensive
 // path: the launcher always mints at least one route whenever it sets
 // REGISTRY_PROXY_MANIFEST at all.
-func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
+func TestBindRegistry_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 	rc, stdout, bindingsOut := bindReady(t, rowsWith()) // no routes at all
 	if rc != 0 {
 		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
@@ -635,10 +637,10 @@ func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 	}
 }
 
-// Mirrors TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings for the
+// Mirrors TestBindRegistry_NoRoutesWarnsAndSkipsBindings for the
 // other defensive shape named in the same guard: a route present but its own
 // Prefix field left empty.
-func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testing.T) {
+func TestBindRegistry_EmptyRoutePrefixWarnsAndSkipsBindings(t *testing.T) {
 	rc, stdout, bindingsOut := bindReady(t, rowsWith(), registrymanifest.Route{UpstreamHost: "upstream.example"})
 	if rc != 0 {
 		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
@@ -655,7 +657,7 @@ func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testin
 // Issue #2931's blocking finding: the port silently dropped the success log
 // line agent/entrypoint.sh printed, leaving the success path printing nothing
 // to stdout.
-func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T) {
+func TestBindRegistry_AlreadyListeningPrintsSuccessLines(t *testing.T) {
 	home := syntheticHome(t)
 	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
 	envStub.BindingEnvVar = "STUB_ENV_REGISTRY"
@@ -674,7 +676,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 // The summary half of issues #3259 and #3260: a BindingEnvVar row whose var the
 // route leaves unexported must not appear in the summary, which would otherwise
 // claim a binding that does not exist.
-func TestRunBindRegistryWithDeps_SummaryOmitsUnexportedBindingVars(t *testing.T) {
+func TestBindRegistry_SummaryOmitsUnexportedBindingVars(t *testing.T) {
 	home := syntheticHome(t)
 	unexported := ecosystem.Row{
 		Name:          "stub-unexported",
@@ -699,7 +701,7 @@ func TestRunBindRegistryWithDeps_SummaryOmitsUnexportedBindingVars(t *testing.T)
 // both-unset guard around it: every other home-config test here either pins the
 // row's home var or empties both, so none runs the one branch every real
 // deployment takes.
-func TestRunBindRegistryWithDeps_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T) {
+func TestBindRegistry_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T) {
 	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -721,7 +723,7 @@ func TestRunBindRegistryWithDeps_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t
 // The home config write shares the env export write's all-or-nothing readiness
 // gate: a Forwarder that never becomes ready must leave the row's home
 // directory untouched, not just bindings-env-output.
-func TestRunBindRegistryWithDeps_TimeoutSkipsHomeConfig(t *testing.T) {
+func TestBindRegistry_TimeoutSkipsHomeConfig(t *testing.T) {
 	mountSocketManifest(t)
 	home := syntheticHome(t)
 
@@ -752,7 +754,7 @@ func TestRunBindRegistryWithDeps_TimeoutSkipsHomeConfig(t *testing.T) {
 // have died on the unset $HOME expansion. It must also not print a line
 // claiming a binding or a live Forwarder when that later write failed (issue
 // #2931).
-func TestRunBindRegistryWithDeps_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
+func TestBindRegistry_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
 	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
 
@@ -775,7 +777,7 @@ func TestRunBindRegistryWithDeps_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
 
 // Issue #2931 finding: a row's EnvExports warnings used to print before the
 // fallible writes, so stdout could claim an override that was never applied.
-func TestRunBindRegistryWithDeps_HomeResolveFailureOmitsRowWarnings(t *testing.T) {
+func TestBindRegistry_HomeResolveFailureOmitsRowWarnings(t *testing.T) {
 	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
 	warnStub := exportStubRow("stub-warn-ecosystem", "STUB_WARN_REGISTRY")
@@ -798,7 +800,7 @@ func TestRunBindRegistryWithDeps_HomeResolveFailureOmitsRowWarnings(t *testing.T
 // timeout/pollInterval keeps this test's wall-clock cost well under a second
 // instead of eating the real 5s; production callers still use the real
 // bindregistry.ForwarderReadyTimeout/PollInterval constants unchanged.
-func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
+func TestBindRegistry_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 	socketPath := mountSocketManifest(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -831,7 +833,7 @@ func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 // EnsureForwarderReady's other failure mode, spawn returning an error rather
 // than a readiness timeout, also warns naming both the endpoint and the error
 // (issue #3141's "manifest present but unusable" branch).
-func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testing.T) {
+func TestBindRegistry_ForwarderSpawnErrorWarnsNamingEndpoint(t *testing.T) {
 	socketPath := mountSocketManifest(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -861,7 +863,7 @@ func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testi
 // readiness probe, so an already-ready Forwarder still failed bindings mode
 // entirely if socat had since left PATH. lookPath is wired to t.Fatal here to
 // prove it is never reached.
-func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
+func TestBindRegistry_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 	mountSocketManifest(t, registrymanifest.Route{Prefix: "r0"})
 	syntheticHome(t)
 
@@ -903,7 +905,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 // socket-shaped spawn, and write the same bindings and home config the
 // socket-mode success test asserts, proving the downstream computation really is
 // transport-blind.
-func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
+func TestBindRegistry_TCPTransportWritesBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
 	home := syntheticHome(t)
@@ -974,7 +976,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 // A TCP endpoint with REGISTRY_PROXY_TCP_SECRET unset warns and no-ops (exit 0)
 // rather than hard-failing the whole verb: the launcher always mints the secret
 // together with the TCP endpoint, so a missing one is a real misconfiguration.
-func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(t *testing.T) {
+func TestBindRegistry_TCPTransportMissingSecretWarnsAndSkipsBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "")
 	setTCPManifestEnv(t, "registry.example", "9443")
 
@@ -1009,7 +1011,7 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 
 // The TCP branch never reaches lookPath at all, unlike the unix branch, which
 // gates it on the spawn path.
-func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
+func TestBindRegistry_TCPTransportNeverChecksSocat(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
 	syntheticHome(t)
@@ -1055,7 +1057,7 @@ func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 // ParseEndpoint only checks that host and port are non-empty, not that port
 // parses as a number, so a non-numeric port must warn rather than panic on the
 // strconv.Atoi this internal-consistency guard exists for.
-func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
+func TestBindRegistry_TCPManifestNonNumericPortWarns(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "https")
 
@@ -1089,24 +1091,9 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 // invocation, so it is no longer folded in here. The repo-aware row is a stub:
 // the synthetic row has no repo-aware home config, and a row carrying one is
 // excluded from the in-tree rewrite.
-func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *testing.T) {
-	const registriesContent = "main = https://upstream.example/\n"
+func TestBindRegistry_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, synthetic.Row.InTreeConfigPath, registriesContent)
-
-	repoAware := ecosystem.Row{
-		Name:             "stub-repo-aware",
-		InTreeConfigPath: ".stub-repo-aware/registries",
-		HomeConfig: &ecosystem.HomeConfig{
-			HomeEnvVar:          "STUB_REPO_AWARE_HOME",
-			HomeRelativeDefault: ".stub-repo-aware",
-			ConfigPath:          "config",
-			Render:              func(int, string, []registrymanifest.Route) string { return "" },
-		},
-		RepoAwareHomeConfig: func(int, string, []registrymanifest.Route, string) (string, []ecosystem.EnvExport, []string) {
-			return "", nil, nil
-		},
-	}
+	writeTrackedIntreeFile(t, dir, synthetic.Row.InTreeConfigPath, intreeRegistriesContent)
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -1117,7 +1104,7 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 	rc := runBindRegistryWithRows([]string{
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
-	}, rowsWith(repoAware), &stdout,
+	}, rowsWith(intreeRepoAwareRow), &stdout,
 		func(int) bool { return false }, // never ready
 		func(string, int) (int, error) { spawnCalls++; return 0, nil },
 		lookPathFound,
@@ -1137,7 +1124,7 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != registriesContent {
+	if string(got) != intreeRegistriesContent {
 		t.Errorf("in-tree config changed, want byte-for-byte unchanged when the Forwarder never becomes ready")
 	}
 }
@@ -1178,9 +1165,7 @@ var intreeRepoAwareRow = ecosystem.Row{
 		ConfigPath:          "config",
 		Render:              func(int, string, []registrymanifest.Route) string { return "" },
 	},
-	RepoAwareHomeConfig: func(int, string, []registrymanifest.Route, string) (string, []ecosystem.EnvExport, []string) {
-		return "", nil, nil
-	},
+	RepoAwareHomeConfig: renderRepoAware,
 }
 
 // writeTrackedIntreeFile commits relPath so
@@ -1451,7 +1436,7 @@ func TestBindRegistry_IntreeApplyEmptyUpstreamHostWarns(t *testing.T) {
 }
 
 // Review finding on issue #2932, mirroring
-// TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings for the
+// TestBindRegistry_SocatMissingWarnsAndSkipsBindings for the
 // intree-apply path: apply must print a socat-specific warning naming the
 // endpoint rather than falling through to EnsureForwarderReady's generic "failed
 // to start" warning.
@@ -1491,7 +1476,7 @@ func TestBindRegistry_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *testing.T) 
 	}
 }
 
-// Mirrors TestRunBindRegistryWithDeps_TCPTransportWritesBindings for intree-apply
+// Mirrors TestBindRegistry_TCPTransportWritesBindings for intree-apply
 // mode (issue #3111 slice 8, manifest-driven since #3141): apply must spawn via
 // spawnHTTPForwarder, never the injected socket-shaped spawn.
 func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
@@ -1543,7 +1528,7 @@ func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 }
 
 // Mirrors
-// TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings for
+// TestBindRegistry_TCPTransportMissingSecretWarnsAndSkipsBindings for
 // intree-apply mode.
 func TestBindRegistry_IntreeApplyTCPTransportMissingSecretWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
@@ -1859,422 +1844,275 @@ func TestBindRegistry_IntreeApplyNoopContentWarns(t *testing.T) {
 	}
 }
 
-// intreeNpmStyleConfigContent is the real-row-shaped fixture the repo-aware
-// tests below still use.
-const intreeNpmStyleConfigContent = "registry=https://upstream.example/\n"
-
-// The "private" registry's index host matches intreeUpstreamRoute's UpstreamHost,
-// which is what every bindregistry.ApplyInTree's repo-aware half test below needs.
-const intreeCargoNamedRegistryRepoConfig = "[registries.private]\n" +
-	"index = \"sparse+https://upstream.example/private/index/\"\n"
-
-// Issue #3201 replaced the in-tree cargo rewrite entirely. This is the end-to-end
-// proof the verb wiring reaches ecosystem.CargoRepoAwareConfig at all: the
-// rendered $CARGO_HOME/config.toml must match that renderer's own output for the
-// same inputs.
-func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementConfig(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoNamedRegistryRepoConfig)
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+// renderRepoAware is intreeRepoAwareRow's renderer: it echoes what the verb
+// hands a repo-aware renderer into the home config, exports one placeholder
+// per route and warns once, both only when the repo's own config is non-empty.
+func renderRepoAware(port int, prefix string, routes []registrymanifest.Route, repoConfig string) (string, []ecosystem.EnvExport, []string) {
+	var b strings.Builder
+	b.WriteString("port=" + strconv.Itoa(port) + " prefix=" + prefix + " repo=" + strconv.Quote(repoConfig) + "\n")
+	var exports []ecosystem.EnvExport
+	for _, r := range routes {
+		b.WriteString("route=" + r.Prefix + " path=" + r.Ecosystems.Path("stub-repo-aware") + "\n")
+		if repoConfig != "" {
+			exports = append(exports, ecosystem.EnvExport{Name: "STUB_REPO_AWARE_" + strings.ToUpper(r.Prefix) + "_TOKEN", Value: "placeholder"})
+		}
 	}
-
-	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
-	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
+	var warnings []string
+	if repoConfig != "" {
+		warnings = []string{"==> WARNING: stub-repo-aware read its repo config for prefix " + prefix}
 	}
-	want, _, _ := ecosystem.CargoRepoAwareConfig(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{intreeUpstreamRoute}, intreeCargoNamedRegistryRepoConfig)
-	if string(got) != want {
-		t.Errorf("cargo config.toml = %q, want %q", got, want)
-	}
-
-	// Cargo no longer participates in the in-tree rewrite at all (issue #3201), so
-	// the tracked repo file stays untouched.
-	repoConfig, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(repoConfig) != intreeCargoNamedRegistryRepoConfig {
-		t.Errorf(".cargo/config.toml = %q, want byte-for-byte unchanged", repoConfig)
-	}
+	return b.String(), exports, warnings
 }
 
-// The other half of the same apply: the placeholder token export the rewritten
-// config.toml's [registries.spindrift-registry-proxy] needs bound, keyed to the
-// reused proxy source name since route "r0" coincides with the manifest's own
-// routes[0].Prefix.
-func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutput(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoNamedRegistryRepoConfig)
+// repoAwareSetup is a fresh repo (with repoConfig tracked at the repo-aware
+// row's in-tree path unless empty), a ready manifest naming routes, and a home
+// directory for the row, returning the repo, the home and an env output path.
+func repoAwareSetup(t *testing.T, repoConfig string, routes ...registrymanifest.Route) (dir, home, envOut string) {
+	t.Helper()
+	dir = newIntreeTestRepo(t)
+	if repoConfig != "" {
+		writeTrackedIntreeFile(t, dir, intreeRepoAwareRow.InTreeConfigPath, repoConfig)
+	}
+	mountSocketManifest(t, routes...)
+	home = t.TempDir()
+	t.Setenv(intreeRepoAwareRow.HomeConfig.HomeEnvVar, home)
+	envOut = filepath.Join(t.TempDir(), "intree-bindings.env")
+	return dir, home, envOut
+}
 
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+// applyRepoAware runs in-tree apply over the repo-aware row alone against a
+// Forwarder already reporting ready.
+func applyRepoAware(dir, envOut string) (rc int, stdout string) {
+	var out bytes.Buffer
+	rc = runBindRegistryWithRows([]string{
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
 		"-intree-bindings-env-output", envOut,
-	}, &stdout,
+	}, []ecosystem.Row{intreeRepoAwareRow}, &out,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
+	return rc, out.String()
+}
+
+func readFileOrFail(t *testing.T, path string) string {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(got)
+}
+
+// The end-to-end proof the verb wiring reaches a row's RepoAwareHomeConfig at
+// all: the rendered home config must match that renderer's own output for the
+// same inputs.
+func TestBindRegistry_IntreeApplyWritesRepoAwareHomeConfig(t *testing.T) {
+	dir, home, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute)
+
+	rc, stdout := applyRepoAware(dir, envOut)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry apply exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	got, err := os.ReadFile(envOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
+	got := readFileOrFail(t, filepath.Join(home, intreeRepoAwareRow.HomeConfig.ConfigPath))
+	want, _, _ := renderRepoAware(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{intreeUpstreamRoute}, intreeRegistriesContent)
+	if got != want {
+		t.Errorf("home config = %q, want %q", got, want)
 	}
-	want := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_PRIVATE_TOKEN='` + ecosystem.CargoPlaceholderToken + "'\n"
-	if string(got) != want {
+
+	// A repo-aware row binds through its home config, so the tracked repo file
+	// stays untouched.
+	if repoConfig := readIntreeFile(t, dir, intreeRepoAwareRow.InTreeConfigPath); repoConfig != intreeRegistriesContent {
+		t.Errorf("%s = %q, want byte-for-byte unchanged", intreeRepoAwareRow.InTreeConfigPath, repoConfig)
+	}
+}
+
+// The other half of the same apply: the row's exports reach the env output.
+func TestBindRegistry_IntreeApplyWritesRepoAwareEnvOutput(t *testing.T) {
+	dir, _, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute)
+
+	rc, stdout := applyRepoAware(dir, envOut)
+	if rc != 0 {
+		t.Fatalf("bind-registry apply exit = %d, want 0 (stdout=%q)", rc, stdout)
+	}
+
+	want := "export STUB_REPO_AWARE_R0_TOKEN='placeholder'\n"
+	if got := readFileOrFail(t, envOut); got != want {
 		t.Errorf("intree bindings env output = %q, want %q", got, want)
 	}
 }
 
-// The common case (issue #3201): a repo with no .cargo/config.toml declares no
-// named registry, so the read-error-is-not-an-error path treats it as empty
-// content and the render falls back to CargoConfigTOML's crates-io-only base.
-func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutputAndBaseConfig(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	// No .cargo/config.toml at all; npm's is enough to give the repo a tracked
-	// in-tree file and prove the run otherwise succeeds.
-	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
+// The common case: a repo with no tracked config for the row still gets its home
+// config rendered from empty content, and exports nothing.
+func TestBindRegistry_IntreeApplyNoRepoConfigWritesEmptyEnvOutputAndBaseConfig(t *testing.T) {
+	dir, home, envOut := repoAwareSetup(t, "", intreeUpstreamRoute)
 
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", envOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout := applyRepoAware(dir, envOut)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry apply exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
-	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
+	got := readFileOrFail(t, filepath.Join(home, intreeRepoAwareRow.HomeConfig.ConfigPath))
+	want, _, _ := renderRepoAware(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{intreeUpstreamRoute}, "")
+	if got != want {
+		t.Errorf("home config = %q, want the empty-content render %q", got, want)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0", nil); string(got) != want {
-		t.Errorf("cargo config.toml = %q, want the crates-io-only base render %q", got, want)
-	}
-
-	envGot, err := os.ReadFile(envOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
-	if string(envGot) != "" {
-		t.Errorf("intree bindings env output = %q, want empty (no repo-declared registries)", envGot)
+	if envGot := readFileOrFail(t, envOut); envGot != "" {
+		t.Errorf("intree bindings env output = %q, want empty (no repo config)", envGot)
 	}
 }
 
-// Issue #3201's URL-to-source-name 1:1 constraint end-to-end: the "r0" route's
-// registry shares the [source.spindrift-registry-proxy] stanza CargoConfigTOML
-// already wrote and must not double it up, while the "r1" route's registry still
-// gets its own distinct proxy source and placeholder export.
-func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySource(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	repoConfig := intreeCargoNamedRegistryRepoConfig +
-		"\n[registries.other-private]\n" +
-		"index = \"sparse+https://other.example/idx/\"\n"
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
+// Every route in the manifest reaches the renderer, and each route's exports
+// reach the env output.
+func TestBindRegistry_IntreeApplyPassesEveryRouteToRepoAwareRenderer(t *testing.T) {
+	route1 := registrymanifest.Route{Prefix: "r1", UpstreamHost: "other.example"}
+	dir, home, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute, route1)
 
-	route0 := intreeUpstreamRoute
-	route1 := registrymanifest.Route{Prefix: "r1", UpstreamHost: "other.example", Ecosystems: ecosystem.CargoRouteBlock("other-private")}
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, route0, route1)
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", envOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout := applyRepoAware(dir, envOut)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry apply exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
-	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
-	}
-	want, _, _ := ecosystem.CargoRepoAwareConfig(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{route0, route1}, repoConfig)
-	if string(got) != want {
-		t.Errorf("cargo config.toml = %q, want %q", got, want)
-	}
-	if n := strings.Count(string(got), "[source.spindrift-registry-proxy]"); n != 1 {
-		t.Errorf("cargo config.toml has %d [source.spindrift-registry-proxy] stanzas, want exactly 1 (the reused base one, not re-emitted for route r0's own registry)", n)
+	got := readFileOrFail(t, filepath.Join(home, intreeRepoAwareRow.HomeConfig.ConfigPath))
+	want, _, _ := renderRepoAware(bindregistry.ForwarderPort, "r0", []registrymanifest.Route{intreeUpstreamRoute, route1}, intreeRegistriesContent)
+	if got != want {
+		t.Errorf("home config = %q, want %q", got, want)
 	}
 
-	envGot, err := os.ReadFile(envOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
+	envGot := readFileOrFail(t, envOut)
 	for _, wantExport := range []string{
-		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_PRIVATE_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
-		`export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_OTHER_PRIVATE_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`,
+		"export STUB_REPO_AWARE_R0_TOKEN='placeholder'",
+		"export STUB_REPO_AWARE_R1_TOKEN='placeholder'",
 	} {
-		if !strings.Contains(string(envGot), wantExport) {
+		if !strings.Contains(envGot, wantExport) {
 			t.Errorf("intree bindings env output = %q, want it to contain %q", envGot, wantExport)
 		}
 	}
 }
 
-// Issue #3201's warning parity at the verb boundary: the row value only returns
-// warning strings, so without an end-to-end assertion the print loop in
-// bindregistry.ApplyInTree's repo-aware half could be deleted and nothing would fail.
-func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStdout(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	repoConfig := "[registries.undeclared]\n" +
-		"index = \"sparse+https://upstream.example/undeclared/index/\"\n"
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
+// The row value only returns warning strings, so without an end-to-end
+// assertion the print loop in bindregistry.ApplyInTree's repo-aware half could be
+// deleted and nothing would fail.
+func TestBindRegistry_IntreeApplyPrintsRepoAwareWarningsToStdout(t *testing.T) {
+	dir, _, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute)
 
-	route := registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example", Ecosystems: ecosystem.CargoRouteBlock("declared")}
-
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, route)
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout := applyRepoAware(dir, envOut)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry apply exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	want := `==> WARNING: cargo registry "undeclared" matches route prefix "r0"'s upstream host but is not declared in that route's cargo-registries`
-	if !strings.Contains(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	want := "==> WARNING: stub-repo-aware read its repo config for prefix r0"
+	if !strings.Contains(stdout, want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout, want)
 	}
 }
 
-// The one manifest route issue #3404's acceptance criterion asks for: go, gradle
-// and cargo each in their own [routes.ecosystems.<name>] block, the grammar of
-// spec #3403's example, plus a "pypi" block no renderer in this Box knows. Every
-// assertion below is an exact expected string, so that unknown block must change
-// neither the exit code nor a rendered byte.
-func threeEcosystemRoute() registrymanifest.Route {
+// multiBlockRoute is one route carrying a declaration block for each row below,
+// plus a block no row in the run knows. Every assertion that uses it is an
+// exact expected string, so the unknown block must change neither the exit code
+// nor a rendered byte.
+func multiBlockRoute() registrymanifest.Route {
 	return registrymanifest.Route{
 		Prefix:       "r0",
 		UpstreamHost: "upstream.example",
 		Ecosystems: registryvocab.RouteEcosystems{
-			"go":     registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/api/go/go-remote"},
-			"gradle": registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/maven-remote"},
-			"cargo":  registryvocab.RouteDeclaration{ecosystem.CargoRouteRegistriesKey: registryvocab.StringsValue([]string{"internal"})},
-			"pypi":   registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/pypi-remote"},
+			"synthetic":       registryvocab.RouteDeclaration{"mirror-path": "/artifactory/synthetic-remote"},
+			"stub-env":        registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/env-remote"},
+			"stub-home":       registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/home-remote"},
+			"stub-repo-aware": registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/repo-aware-remote"},
+			"stub-unknown":    registryvocab.RouteDeclaration{registryvocab.RouteDeclarationPathKey: "/artifactory/unknown-remote"},
 		},
 	}
 }
 
-// The pre-clone half of issue #3404: each renderer reads its own block and binds
-// to its own declared path. A shared source would give both the same path, or one
-// of them none.
-func TestRunBindRegistryWithDeps_OneRouteBindsGoAndGradleFromTheirOwnBlocks(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, threeEcosystemRoute())
+// pathEnvRow exports a var valued at the route's local URL plus the path its own
+// block declares.
+var pathEnvRow = ecosystem.Row{
+	Name: "stub-env",
+	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+		return []ecosystem.EnvExport{{Name: "STUB_ENV_REGISTRY", Value: ecosystem.RouteLocalURL(prefix, port) + routes[0].Ecosystems.Path("stub-env")}}, nil
+	},
+}
 
-	t.Setenv("CARGO_HOME", t.TempDir())
-	gradleUserHome := t.TempDir()
-	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
+// pathHomeRow renders a home config naming the path its own block declares.
+var pathHomeRow = ecosystem.Row{
+	Name: "stub-home",
+	HomeConfig: &ecosystem.HomeConfig{
+		HomeEnvVar:          "STUB_HOME_HOME",
+		HomeRelativeDefault: ".stub-home",
+		ConfigPath:          "stub.conf",
+		Render: func(port int, prefix string, routes []registrymanifest.Route) string {
+			return "url = " + ecosystem.RouteLocalURL(prefix, port) + routes[0].Ecosystems.Path("stub-home") + "/\n"
+		},
+	},
+}
 
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
+// The pre-clone half: each renderer reads its own block and binds to its own
+// declared path. A shared source would give both the same path, or one of them
+// none.
+func TestBindRegistry_OneRouteBindsEachRowFromItsOwnBlock(t *testing.T) {
+	syntheticHome(t)
+	stubHome := t.TempDir()
+	t.Setenv(pathHomeRow.HomeConfig.HomeEnvVar, stubHome)
 
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, bindingsOut := bindReady(t, rowsWith(pathEnvRow, pathHomeRow), multiBlockRoute())
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	port := strconv.Itoa(bindregistry.ForwarderPort)
-
-	gotEnv, err := os.ReadFile(bindingsOut)
-	if err != nil {
-		t.Fatalf("read bindings env output: %v", err)
-	}
-	wantExport := `export GOPROXY='http://127.0.0.1:` + port + `/r0/artifactory/api/go/go-remote'`
-	if !strings.Contains(string(gotEnv), wantExport) {
-		t.Errorf("bindings env output = %q, want it to contain %q", gotEnv, wantExport)
+	gotEnv := readFileOrFail(t, bindingsOut)
+	wantEnv := syntheticExport("r0") + "\n" +
+		"export STUB_ENV_REGISTRY='" + ecosystem.RouteLocalURL("r0", bindregistry.ForwarderPort) + "/artifactory/env-remote'\n"
+	if gotEnv != wantEnv {
+		t.Errorf("bindings env output = %q, want %q", gotEnv, wantEnv)
 	}
 
-	gotScript, err := os.ReadFile(filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle"))
-	if err != nil {
-		t.Fatalf("read gradle init script: %v", err)
-	}
-	wantURL := `def spindriftMavenUrl = "http://127.0.0.1:` + port + `/r0/artifactory/maven-remote/"`
-	if !strings.Contains(string(gotScript), wantURL) {
-		t.Errorf("gradle init script = %q, want it to contain %q", gotScript, wantURL)
-	}
-	if strings.Contains(string(gotScript), "installs no repository redirection") {
-		t.Errorf("gradle init script = %q, want the real redirect script, not the inert fallback", gotScript)
+	gotHome := readFileOrFail(t, filepath.Join(stubHome, pathHomeRow.HomeConfig.ConfigPath))
+	wantHome := "url = " + ecosystem.RouteLocalURL("r0", bindregistry.ForwarderPort) + "/artifactory/home-remote/\n"
+	if gotHome != wantHome {
+		t.Errorf("stub home config = %q, want %q", gotHome, wantHome)
 	}
 }
 
-// The repo-aware half of issue #3404 over the same route: apply mode is the only
-// one that reads the repo's .cargo/config.toml, so a bindings-mode invocation
-// cannot reach the cargo renderer's registries filter at all.
-func TestRunBindRegistryWithDeps_IntreeApplyBindsCargoFromSameThreeBlockRoute(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	repoConfig := "[registries.internal]\n" +
-		"index = \"sparse+https://upstream.example/internal/index/\"\n"
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", repoConfig)
+// The repo-aware half over the same route: the renderer reads its own block
+// among the others.
+func TestBindRegistry_IntreeApplyRepoAwareRowReadsItsOwnBlock(t *testing.T) {
+	dir, home, envOut := repoAwareSetup(t, intreeRegistriesContent, multiBlockRoute())
 
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, threeEcosystemRoute())
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", envOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout := applyRepoAware(dir, envOut)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry apply exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	got, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
-	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
-	}
-	wantStanza := "[source.spindrift-upstream-internal]\n" +
-		"registry = \"sparse+https://upstream.example/internal/index/\"\n" +
-		"replace-with = \"spindrift-registry-proxy-r0-internal\"\n"
-	if !strings.Contains(string(got), wantStanza) {
-		t.Errorf("cargo config.toml = %q, want it to contain %q", got, wantStanza)
-	}
-
-	envGot, err := os.ReadFile(envOut)
-	if err != nil {
-		t.Fatalf("read intree bindings env output: %v", err)
-	}
-	wantExport := `export CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_INTERNAL_TOKEN='` + ecosystem.CargoPlaceholderToken + `'`
-	if !strings.Contains(string(envGot), wantExport) {
-		t.Errorf("intree bindings env output = %q, want it to contain %q", envGot, wantExport)
-	}
-
-	// The declared name and the repo's own registry match, so either warning firing
-	// would mean the filter came from somewhere other than this route's cargo block.
-	if strings.Contains(stdout.String(), "==> WARNING: cargo registry") {
-		t.Errorf("stdout = %q, want no cargo registry warning", stdout.String())
+	got := readFileOrFail(t, filepath.Join(home, intreeRepoAwareRow.HomeConfig.ConfigPath))
+	want := "port=" + forwarderPortStr + " prefix=r0 repo=" + strconv.Quote(intreeRegistriesContent) + "\n" +
+		"route=r0 path=/artifactory/repo-aware-remote\n"
+	if got != want {
+		t.Errorf("home config = %q, want %q", got, want)
 	}
 }
 
-// The repo-aware phase's non-ENOENT read-error branch (issue #3201): a missing
-// config means "this repo declares no named registry", while an unreadable one
-// means the plan was derived from nothing and the run must fail. The unreadable
-// file is a directory, since os.ReadFile then returns EISDIR without depending on
-// the test running as a non-root user, which a Box does not guarantee.
-func TestRunBindRegistryWithDeps_IntreeApplyUnreadableRepoConfigFails(t *testing.T) {
-	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".npmrc", intreeNpmStyleConfigContent)
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo", "config.toml"), 0o755); err != nil {
+// A non-ENOENT read error: a missing config means "this repo declares nothing
+// for the row", while an unreadable one means the plan was derived from nothing
+// and the run must fail. The unreadable file is a directory, since os.ReadFile
+// then returns EISDIR without depending on the test running as a non-root user,
+// which a Box does not guarantee.
+func TestBindRegistry_IntreeApplyUnreadableRepoConfigFails(t *testing.T) {
+	dir, _, envOut := repoAwareSetup(t, "", intreeUpstreamRoute)
+	if err := os.MkdirAll(filepath.Join(dir, intreeRepoAwareRow.InTreeConfigPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	socketPath := shortUnixSocketPath(t)
-	listenOnFakeSocket(t, socketPath)
-	setUnixManifestEnv(t, socketPath, intreeUpstreamRoute)
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-intree-action", "apply",
-		"-intree-work-dir", dir,
-		"-intree-bindings-env-output", envOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout := applyRepoAware(dir, envOut)
 	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want non-zero when a repo config is unreadable (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry apply exit = %d, want non-zero when a repo config is unreadable (stdout=%q)", rc, stdout)
 	}
 
-	if want := "driver-exec bind-registry: read cargo repo config:"; !strings.Contains(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
+	if want := "driver-exec bind-registry: read stub-repo-aware repo config:"; !strings.Contains(stdout, want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout, want)
 	}
 
 	if _, err := os.Stat(envOut); !os.IsNotExist(err) {
@@ -2283,12 +2121,12 @@ func TestRunBindRegistryWithDeps_IntreeApplyUnreadableRepoConfigFails(t *testing
 }
 
 // -intree-bindings-env-output must be paired with -intree-action=apply, mirroring
-// the other flag-pair validation errors in runBindRegistryWithDeps.
-func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
+// the other flag-pair validation errors in runBindRegistryWithRows.
+func TestBindRegistry_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-intree-bindings-env-output", envOut,
 	}, &stdout,
 		func(int) bool { t.Fatal("probe should not be called on a validation error"); return false },
@@ -2300,7 +2138,7 @@ func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
+		t.Fatalf("runSyntheticBind exit = 0, want non-zero (stdout=%q)", stdout.String())
 	}
 	want := "driver-exec bind-registry: -intree-bindings-env-output requires -intree-action=apply\n"
 	if stdout.String() != want {
@@ -2313,9 +2151,9 @@ func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing
 // re-render the same rows from the base template in the same invocation,
 // silently clobbering what apply just wrote. No caller combines the two flags
 // today; this guards against one starting to.
-func TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected(t *testing.T) {
+func TestBindRegistry_IntreeApplyWithBindingsEnvOutputRejected(t *testing.T) {
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-intree-work-dir", t.TempDir(),
 		"-intree-action", "apply",
 		"-bindings-env-output", filepath.Join(t.TempDir(), "bindings.env"),
@@ -2329,7 +2167,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected(t *tes
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
+		t.Fatalf("runSyntheticBind exit = 0, want non-zero (stdout=%q)", stdout.String())
 	}
 	want := "driver-exec bind-registry: -intree-action=apply and -bindings-env-output cannot be combined in one invocation — bindings mode would re-render the repo-aware rows' home configs from the base template and undo the apply\n"
 	if stdout.String() != want {
@@ -2339,7 +2177,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected(t *tes
 
 // Mirrors TestRunBindRegistry_MissingFlagsErrors' style for the
 // -intree-work-dir/-intree-action pair and the -intree-action value check.
-func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
+func TestBindRegistry_IntreeFlagValidation(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
@@ -2353,14 +2191,14 @@ func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var stdout bytes.Buffer
-			rc := runBindRegistryWithDeps(c.args, &stdout,
+			rc := runSyntheticBind(c.args, &stdout,
 				func(int) bool { return true },
 				func(string, int) (int, error) { return 0, nil },
 				lookPathFound,
 				bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 			)
 			if rc == 0 {
-				t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero for %v (stdout=%q)", c.args, stdout.String())
+				t.Fatalf("runSyntheticBind exit = 0, want non-zero for %v (stdout=%q)", c.args, stdout.String())
 			}
 		})
 	}
@@ -2369,13 +2207,14 @@ func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 // Issue #3199: this scan reads the manifest only to decide on or off. It never
 // resolves the shared Forwarder-readiness gate and must never itself spawn a
 // Forwarder, unlike bindings and intree-apply mode.
-func TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit(t *testing.T) {
+func TestBindRegistry_LockfileScanWarnsOnHit(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, "Cargo.lock", "source = \"registry+http://127.0.0.1:"+forwarderPortStr+"/\"\n")
+	lockfile := synthetic.Row.LockfileNames[0]
+	writeTrackedIntreeFile(t, dir, lockfile, "source = \"http://127.0.0.1:"+forwarderPortStr+"/\"\n")
 	setUnixManifestEnv(t, shortUnixSocketPath(t))
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-lockfile-scan-work-dir", dir,
 	}, &stdout,
 		func(int) bool {
@@ -2390,9 +2229,9 @@ func TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("runSyntheticBind exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> WARNING: cargo lockfile Cargo.lock still names the registry proxy Forwarder URL 127.0.0.1:" + forwarderPortStr + " — this will ship in the PR (issue #3199)\n"
+	want := "==> WARNING: " + synthetic.Row.Classification + " lockfile " + lockfile + " still names the registry proxy Forwarder URL 127.0.0.1:" + forwarderPortStr + " — this will ship in the PR (issue #3199)\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -2400,16 +2239,21 @@ func TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit(t *testing.T) {
 
 // -lockfile-scan-work-dir alone satisfies the "at least one mode" guard without
 // requiring any other flag.
-func TestRunBindRegistryWithDeps_LockfileScanFlagAloneSatisfiesModeGuard(t *testing.T) {
+func TestBindRegistry_LockfileScanFlagAloneSatisfiesModeGuard(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	clearManifestEnv(t)
 
 	var stdout bytes.Buffer
-	rc := runBindRegistry([]string{
+	rc := runSyntheticBind([]string{
 		"-lockfile-scan-work-dir", dir,
-	}, &stdout)
+	}, &stdout,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
+	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("runSyntheticBind exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 }
 
@@ -2417,7 +2261,7 @@ func TestRunBindRegistryWithDeps_LockfileScanFlagAloneSatisfiesModeGuard(t *test
 // carrying shell metacharacters must round-trip through a real `source`
 // unexpanded, byte-for-byte. The input flagged against issue #3259 is a
 // host-rooted route's derived path, sourced from a repo's own committed,
-// therefore untrusted, .npmrc.
+// therefore untrusted, registry config.
 func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 	path, err := exec.LookPath("bash")
 	if err != nil {
@@ -2436,7 +2280,7 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rendered := renderEnvExports([]ecosystem.EnvExport{
-				{Name: "npm_config_registry", Value: tc.value},
+				{Name: "STUB_REGISTRY", Value: tc.value},
 			})
 
 			dir := t.TempDir()
@@ -2445,13 +2289,13 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			cmd := exec.Command(path, "-c", `source "$1"; printf '%s' "$npm_config_registry"`, "--", envFile)
+			cmd := exec.Command(path, "-c", `source "$1"; printf '%s' "$STUB_REGISTRY"`, "--", envFile)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("sourcing rendered exports failed: %v (output=%q)", err, out)
 			}
 			if got := string(out); got != tc.value {
-				t.Errorf("sourced npm_config_registry = %q, want unexpanded %q (rendered=%q)", got, tc.value, rendered)
+				t.Errorf("sourced STUB_REGISTRY = %q, want unexpanded %q (rendered=%q)", got, tc.value, rendered)
 			}
 		})
 	}
