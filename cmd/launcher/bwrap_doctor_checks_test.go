@@ -72,8 +72,8 @@ func TestBwrapCapabilityChecks_OverlayTier(t *testing.T) {
 	}
 }
 
-// The tier rule mirrors checkBwrapPastaGate's own condition in main.go:
-// Required unless networkMode is "host" or "none".
+// The tier reads the plan's Pasta decision, as checkBwrapPastaGate does:
+// Required unless the Box never runs pasta.
 func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = runner.KindBwrap
@@ -91,6 +91,15 @@ func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 		if got.Tier != doctor.Advisory {
 			t.Errorf("Tier = %v, want Advisory when networkMode=%s", got.Tier, mode)
 		}
+	}
+
+	c = minimalValidConfig()
+	c.runnerKind = runner.KindBwrap
+	c.networkMode = string(runner.NetworkModeHost)
+	c.bwrapUnshareNet = true
+	got = checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
+	if got.Tier != doctor.Required {
+		t.Errorf("Tier = %v, want Required when networkMode=host with bwrapUnshareNet", got.Tier)
 	}
 }
 

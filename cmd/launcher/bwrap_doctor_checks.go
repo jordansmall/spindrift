@@ -31,8 +31,7 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 		overlayTier = doctor.Required
 	}
 
-	mode := c.runnerNetworkMode()
-	networkAdvisory := mode == runner.NetworkModeHost || mode == runner.NetworkModeNone
+	networkAdvisory := !runnerConfig(c).BwrapNetwork().Pasta
 	networkTier := doctor.Required
 	if networkAdvisory {
 		networkTier = doctor.Advisory

@@ -38,8 +38,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		groupFile:          cfg.GroupFile,
 		bakedPrefetch:      cfg.BakedPrefetch,
 		mountParams:        cfg.MountParams,
-		unshareNet:         cfg.BwrapUnshareNet,
-		networkMode:        cfg.NetworkMode,
+		network:            cfg.BwrapNetwork(),
 		nixConfigFile:      cfg.NixConfigFile,
 		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
 		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
@@ -110,4 +109,25 @@ func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T
 	if a.nixVarSnapshotDir != want {
 		t.Errorf("NewBuild(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
 	}
+}
+
+// RUNNER_KIND=bwrap with RUNTIME=podman is a supported pairing (issue #2538);
+// the adapter must still isolate, whatever the runtime name says.
+func TestNewBwrap_IsolatesUnderMismatchedRuntime(t *testing.T) {
+	for _, rt := range []string{"podman", "docker", "rancher", ""} {
+		cfg := runner.Config{Runtime: rt, NetworkMode: runner.NetworkModeOpen}
+		a, ok := New(cfg, "/pwd").(*bwrapAdapter)
+		if !ok {
+			t.Fatalf("New did not return *bwrapAdapter")
+		}
+		if !a.network.Isolate || !a.network.Pasta {
+			t.Errorf("Runtime %q: network = %+v, want Isolate and Pasta", rt, a.network)
+		}
+	}
+}
+
+// testNet resolves mode through the shared plan, so a test states the
+// NETWORK_MODE knob rather than hand-picking the Isolate/Pasta booleans.
+func testNet(mode runner.NetworkMode) runner.BwrapNetwork {
+	return runner.Config{NetworkMode: mode}.BwrapNetwork()
 }

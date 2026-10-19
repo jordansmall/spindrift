@@ -30,7 +30,7 @@ func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
 		return gotCmd
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
 	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
 	if err := os.WriteFile(filter, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, syscallFilterPath: filter}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), syscallFilterPath: filter}
 	done := make(chan error, 1)
 	go func() { done <- a.Run(runner.Box{Name: "clone-box", Env: map[string]string{"FOO": "bar"}}) }()
 
@@ -144,7 +144,7 @@ func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
 	t.Cleanup(func() { cgroupFSRoot = origRoot })
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
 	runnertest.CaptureStdoutDuring(t, func() {
 		if err := a.Run(runner.Box{Name: "plain-box", Env: map[string]string{}}); err != nil {
 			t.Errorf("Run: %v", err)

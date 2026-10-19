@@ -33,7 +33,7 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
 	err := a.Run(runner.Box{Env: map[string]string{}})
 
 	if gotName != "bwrap" {
@@ -78,7 +78,7 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
 	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 // "prlimit" substring.
 func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 	t.Run("bare bwrap", func(t *testing.T) {
-		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "512"}
+		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "512"}
 		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}})
 
 		if program != "bwrap" {
@@ -114,7 +114,7 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 	})
 
 	t.Run("pasta", func(t *testing.T) {
-		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
+		a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
 		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}})
 
 		if program != "pasta" {
@@ -155,7 +155,7 @@ func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
 	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 		return gotCmd
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
 	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -999,6 +999,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	}
 
 	a := &bwrapAdapter{
+		network:            testNet(""),
 		agentFiles:         "/fake/agent",
 		agentEnv:           "/fake/env",
 		bakedPrefetch:      "echo ok",
@@ -1692,7 +1693,7 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 	// subtree.
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(runner.Box{Name: "test-box", Env: map[string]string{}})
@@ -1732,7 +1733,7 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "256", memoryLimit: "5g"}
 	if err := a.Run(runner.Box{Name: "test-box", Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1768,7 +1769,7 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "256", memoryLimit: "5g"}
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(runner.Box{Name: "anchored-box", Env: map[string]string{}})
@@ -1837,7 +1838,7 @@ func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "256"}
 	if err := a.Run(runner.Box{Name: "fallback-box", Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -2825,7 +2826,7 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
 		bakedPrefetch:     "echo ok",
-		networkMode:       runner.NetworkModeHost,
+		network:           testNet(runner.NetworkModeHost),
 		syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
 	}
 	var runErr error
@@ -2872,7 +2873,7 @@ func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
 		bakedPrefetch:     "echo ok",
-		networkMode:       runner.NetworkModeHost,
+		network:           testNet(runner.NetworkModeHost),
 		syscallFilterPath: filterPath,
 	}
 	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
@@ -3516,7 +3517,7 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 // override the adapter's startup-baked a.agentEnv in the rendered --setenv
 // args.
 func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
 	box := runner.Box{
 		Env:               map[string]string{},
 		ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", Generation: "swapped"},
@@ -3595,7 +3596,7 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: runner.NetworkModeHost}
+			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", network: testNet(runner.NetworkModeHost)}
 			box := runner.Box{Env: map[string]string{}, ClosureGeneration: tc.setup(t)}
 
 			args := a.buildArgs("", box)
@@ -3613,7 +3614,7 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 // Not parallel: runnertest.CaptureStderrDuring swaps the global os.Stderr.
 func TestBuildArgs_PrefetchFallbackLoggedOncePerFile(t *testing.T) {
 	const diagnostic = "unreadable, falling back"
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", network: testNet(runner.NetworkModeHost)}
 	launch := func(prefetchFile string) string {
 		box := runner.Box{Env: map[string]string{}, ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}}
 		var got string
@@ -3682,7 +3683,7 @@ func newReclaimFixture(t *testing.T, procs string) *reclaimFixture {
 	if err := os.WriteFile(filepath.Join(f.dir, "cgroup.procs"), []byte(procs), 0o644); err != nil {
 		t.Fatalf("seed cgroup.procs: %v", err)
 	}
-	f.adapter = &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	f.adapter = &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "256", memoryLimit: "5g"}
 	return f
 }
 
@@ -3794,7 +3795,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	var dir string
 	probed, reclaimed, existedAfter := false, true, false
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "256", memoryLimit: "5g"}
 	root := stubCgroupSeams(t,
 		func() (string, error) { return "", nil },
 		func(name string, args ...string) *exec.Cmd {

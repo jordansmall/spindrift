@@ -71,6 +71,21 @@ func TestBwrapPastaGate_NetworkModeHostIsNoOp(t *testing.T) {
 	}
 }
 
+// BWRAP_UNSHARE_NET=true isolates even a host-mode Box, and an isolated Box
+// that is not offline runs pasta, so the gate probes here.
+// checkNetworkModeRuntimeGate refuses this pairing earlier anyway.
+func TestBwrapPastaGate_NetworkModeHostWithUnshareNetProbes(t *testing.T) {
+	withFakePasta(t, false)
+	c := minimalValidConfig()
+	c.runnerKind = "bwrap"
+	c.networkMode = string(runner.NetworkModeHost)
+	c.bwrapUnshareNet = true
+
+	if err := checkBwrapPastaGate(c); err == nil {
+		t.Error("checkBwrapPastaGate() with networkMode=host and bwrapUnshareNet = nil, want an error when pasta is absent from PATH")
+	}
+}
+
 // The fully-offline mode is a bare --unshare-net with no pasta helper, so it
 // never reaches ValidatePasta either.
 func TestBwrapPastaGate_NetworkModeNoneIsNoOp(t *testing.T) {
