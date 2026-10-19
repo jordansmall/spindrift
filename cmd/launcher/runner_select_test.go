@@ -28,9 +28,9 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 
 	for _, sel := range selectors {
 		t.Run(sel.name, func(t *testing.T) {
-			bwrapWant := bwrap.NewBwrap(rc, pwd)
+			bwrapWant := bwrap.New(rc, pwd)
 			if sel.name == "buildRunnerForKind" {
-				bwrapWant = bwrap.NewBwrapBuild(rc, pwd)
+				bwrapWant = bwrap.NewBuild(rc, pwd)
 			}
 			cases := []struct {
 				name       string
@@ -38,8 +38,8 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 				want       runner.Runner
 			}{
 				{name: "bwrap", runnerKind: "bwrap", want: bwrapWant},
-				{name: "oci", runnerKind: "oci", want: oci.NewOCI(rc, pwd)},
-				{name: "empty defaults to oci", runnerKind: "", want: oci.NewOCI(rc, pwd)},
+				{name: "oci", runnerKind: "oci", want: oci.New(rc, pwd)},
+				{name: "empty defaults to oci", runnerKind: "", want: oci.New(rc, pwd)},
 			}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {

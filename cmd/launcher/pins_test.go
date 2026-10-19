@@ -218,7 +218,7 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 }
 
 // Issue #445 deleted newRunner and newBuildRunner, the positional-unpacking
-// wrappers around runner.NewOCI, NewBwrap and NewBwrapBuild. Call sites now
+// wrappers around oci.New, bwrap.New and bwrap.NewBuild. Call sites now
 // build a runner.Config via runnerConfig(c) and select the adapter directly.
 func TestRunnerUnpackingWrappersRemoved(t *testing.T) {
 	data, err := os.ReadFile("main.go")

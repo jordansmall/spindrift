@@ -46,10 +46,10 @@ type ociAdapter struct {
 	memoryLimit   string             // --memory value; empty disables the flag
 }
 
-// NewOCI constructs an OCI adapter from cfg. pwd is the working directory the
+// New constructs an OCI adapter from cfg. pwd is the working directory the
 // container-fallback build mounts as /workspace, a per-invocation dependency
 // passed separately from cfg.
-func NewOCI(cfg runner.Config, pwd string) runner.Runner {
+func New(cfg runner.Config, pwd string) runner.Runner {
 	return &ociAdapter{
 		cli:             runner.BinaryFor(cfg.Runtime),
 		image:           cfg.Image,

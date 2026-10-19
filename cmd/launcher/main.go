@@ -817,19 +817,19 @@ func runnerConfig(c config) runner.Config {
 // operator-facing runtime names that aren't "oci" literally.
 func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
-		return bwrap.NewBwrap(rc, pwd)
+		return bwrap.New(rc, pwd)
 	}
-	return oci.NewOCI(rc, pwd)
+	return oci.New(rc, pwd)
 }
 
 // buildRunnerForKind is runnerForKind's `launcher build` counterpart: the
-// bwrap arm selects NewBwrapBuild, which realizes store closures rather than
+// bwrap arm selects bwrap.NewBuild, which realizes store closures rather than
 // running an agent.
 func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
-		return bwrap.NewBwrapBuild(rc, pwd)
+		return bwrap.NewBuild(rc, pwd)
 	}
-	return oci.NewOCI(rc, pwd)
+	return oci.New(rc, pwd)
 }
 
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
