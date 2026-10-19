@@ -1,8 +1,9 @@
-// Package contract is the executable lifecycle contract for runner.Runner
-// (issue #5680): one shared suite the OCI adapter, the bwrap adapter and
-// runner.Fake each run from their own package, so semantic drift between them
-// fails CI. It is a sibling of runnertest because it imports runner, which
-// runnertest must not (runner's own tests import runnertest).
+// Package contract holds the executable runner.Runner contracts (ADR 0069
+// decision 5): the lifecycle suite (issue #5680) the OCI adapter, the bwrap
+// adapter and runner.Fake each run from their own package, and the rendering
+// table (issue #5681) each adapter runs with its own argv decoder, so drift
+// between them fails CI. It is a sibling of runnertest because it imports
+// runner, which runnertest must not (runner's own tests import runnertest).
 package contract
 
 import (
