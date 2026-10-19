@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 )
@@ -13,6 +14,74 @@ type Strategy struct {
 	New func(cfg Config, pwd string) Runner
 	// NewBuild constructs the Runner for the build command.
 	NewBuild func(cfg Config, pwd string) Runner
+	// Prerequisites declares the family's host checks in report order. Tiers and
+	// remedies depend on cfg, so it is a function of Config; nil means none.
+	Prerequisites func(cfg Config) []Prerequisite
+}
+
+// Launch says where the launch path enforces a Required prerequisite. Doctor
+// reports every prerequisite whatever its Launch.
+type Launch int
+
+const (
+	// DoctorOnly prerequisites are checked by doctor alone.
+	DoctorOnly Launch = iota
+	// LaunchWithConfig prerequisites run with the launcher's config checks,
+	// ahead of every launch gate.
+	LaunchWithConfig
+	// LaunchGate prerequisites run among the launch gates, ahead of the
+	// network-bound ones.
+	LaunchGate
+)
+
+// Prerequisite is one Runner prerequisite (CONTEXT.md; ADR 0069 decision 4): a
+// named host check a family declares on its Strategy. Runner core cannot hold a
+// doctor.Check (doctor imports runner), so doctor adapts this type.
+type Prerequisite struct {
+	Name string
+	// Launch says where the launch path enforces this check when Required.
+	Launch Launch
+	// LaunchOrder orders a stage's checks at launch, ascending, ties in
+	// declaration order. Launch stops at the first failure, so this decides
+	// which error a host failing several checks sees, independent of doctor's
+	// declaration-order report.
+	LaunchOrder int
+	// Required is the check's tier for this Config; false is Advisory.
+	Required bool
+	Remedy   string
+	// Probe returns a non-nil error on failure. The launch path returns that
+	// error verbatim, so a launch-enforced Probe must not wrap it.
+	Probe func() (any, error)
+	// SuccessMsg optionally overrides doctor's "ok: <Name>" line.
+	SuccessMsg func(output any) string
+}
+
+// LaunchGates returns the Required prerequisites of ps whose Launch is stage,
+// stably sorted by LaunchOrder. ps is not mutated.
+func LaunchGates(ps []Prerequisite, stage Launch) []Prerequisite {
+	var out []Prerequisite
+	for _, p := range ps {
+		if p.Launch == stage && p.Required {
+			out = append(out, p)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].LaunchOrder < out[j].LaunchOrder })
+	return out
+}
+
+// ErrDegraded marks a Prerequisite Probe error as indeterminate: the probe
+// could not determine the condition it checks, as distinct from affirmatively
+// detecting it. Doctor treats a Required failure wrapping it as non-blocking
+// and still prints it, with its Remedy, as an advisory line.
+var ErrDegraded = errors.New("check degraded: probe could not determine result")
+
+// PrerequisitesFor returns the family's prerequisites for cfg, or nil when it
+// declares none.
+func (s Strategy) PrerequisitesFor(cfg Config) []Prerequisite {
+	if s.Prerequisites == nil {
+		return nil
+	}
+	return s.Prerequisites(cfg)
 }
 
 var strategies = map[string]Strategy{}

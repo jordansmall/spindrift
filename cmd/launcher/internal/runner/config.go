@@ -49,6 +49,10 @@ type Config struct {
 	PidsLimit     string
 	MemoryLimit   string
 
+	// MaxParallel is MAX_PARALLEL; only the podman-machine prerequisite reads
+	// it, to size the podman machine.
+	MaxParallel int
+
 	// bwrap agent closure paths (bwrap only).
 	AgentFiles      string
 	AgentEnv        string
