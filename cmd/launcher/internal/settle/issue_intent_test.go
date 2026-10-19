@@ -2279,7 +2279,7 @@ func TestFileIssueIntentsDetailed_Dedup_QuotedMarkerNeverIndexed(t *testing.T) {
 
 	backlog := forge.NewFake()
 	backlog.SetIssue(forge.Issue{Number: "7", Labels: []string{dispatchkind.Work.FindingLabel}, Body: filedBody})
-	index := backlogDedupIndex(backlog, "100", time.Time{})
+	index := backlogDedupIndex(backlog, "100", "", time.Time{})
 
 	if len(index) != 0 {
 		t.Errorf("index = %v, want empty (the quoted marker must not become this issue's key set)", index)

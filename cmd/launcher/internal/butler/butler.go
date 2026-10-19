@@ -73,9 +73,9 @@ type Policy struct {
 	// digest: over it, Evidence is trimmed first, Outliers second, and Prior
 	// findings third, never the aggregate tables.
 	TuningDigestBytes int
-	// TuningCooldown is BUTLER_TUNING_COOLDOWN, how long a tuning finding closed
-	// as not planned keeps suppressing a refile of the same pattern; 0 never
-	// suppresses on a not-planned close.
+	// TuningCooldown is BUTLER_TUNING_COOLDOWN, how long a records Chore's
+	// finding closed as not planned keeps suppressing that Chore's refile of
+	// the same pattern; 0 never suppresses on a not-planned close.
 	TuningCooldown time.Duration
 }
 

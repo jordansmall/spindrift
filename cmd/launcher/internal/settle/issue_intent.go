@@ -229,7 +229,7 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		if len(keys) == 0 {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: no usable dedup term for %q: filing without dedup\n", num, in.Title)
 		} else if dedupIndex == nil {
-			dedupIndex = backlogDedupIndex(it, num, dedup.NotPlannedBefore)
+			dedupIndex = backlogDedupIndex(it, num, dedup.Chore, dedup.NotPlannedBefore)
 		}
 		applyRunLineOverlap(dedupIndex, runKeys, keys)
 		ov := matchDedup(dedupIndex, keys)
