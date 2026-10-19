@@ -46,6 +46,10 @@ type ociAdapter struct {
 	memoryLimit   string             // --memory value; empty disables the flag
 }
 
+// Strategy is the oci family's entry in the runner registry; its build
+// command constructs the same adapter as its run command.
+var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New}
+
 // New constructs an OCI adapter from cfg. pwd is the working directory the
 // container-fallback build mounts as /workspace, a per-invocation dependency
 // passed separately from cfg.

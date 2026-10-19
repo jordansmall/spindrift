@@ -221,7 +221,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
 - **`cmd/launcher/`** — the Go host-side launcher (its own module). Public
   behavior lives at the top level; `internal/` holds the seams — `forge`,
-  `outcome`, `runner`, `driver` (the Driver interface and registry; each
+  `outcome`, `runner` (the Runner interface and the runner family Strategy
+  registry; each family's constructors live in a sibling subpackage, e.g.
+  `runner/oci`, registered by the Bundle, `driver/bundle`),
+  `driver` (the Driver interface and registry; each
   Driver's own behavior lives in a sibling subpackage, e.g. `driver/claude`),
   `dispatchkind` (the Dispatch kind descriptors; `kinds_gen.go` is generated
   from `lib/dispatch-kinds/default.nix`),
