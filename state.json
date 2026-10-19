@@ -1,15 +1,20 @@
 {
   "lastSwept": "8eb585545ade2b54093d761d879b52d69cb5b11c",
   "cursor": "cmd/launcher/internal/driver/pi/testhelpers_test.go",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-19T13:12:01.282562991-04:00"
+  },
   "usage": {
-    "input_tokens": 32,
-    "output_tokens": 5584,
-    "cache_read_input_tokens": 601673,
-    "cache_creation_input_tokens": 45180,
-    "total_cost_usd": 0.5935826000000001,
-    "duration_ms": 62004,
-    "duration_api_ms": 60273,
-    "num_turns": 17
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
