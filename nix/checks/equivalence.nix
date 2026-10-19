@@ -782,10 +782,20 @@ in
         ;
       registry = import ../../lib/removed-fragment-vars.nix;
       goSource = builtins.readFile ../../cmd/launcher/internal/promptassembly/removed_vars.go;
-      goRows = map (m: "${builtins.elemAt m 0}:${builtins.elemAt m 1}") (
-        builtins.filter builtins.isList (builtins.split "[{]\"([A-Z_]+)\", ([0-9]+)[}]" goSource)
-      );
-      registryRows = map (n: "${n}:${toString registry.${n}.issue}") (attrNames registry);
+      goRows =
+        map
+          (m: "${builtins.elemAt m 0}:${builtins.elemAt m 1}:${builtins.elemAt m 2}:${builtins.elemAt m 3}")
+          (
+            builtins.filter builtins.isList (
+              builtins.split "[{]\"([A-Z_]+)\", ([0-9]+), \"([a-z]+)\", \"([A-Z_]*)\"[}]" goSource
+            )
+          );
+      registryRows = map (
+        n:
+        "${n}:${toString registry.${n}.issue}:${registry.${n}.severity or "removed"}:${
+          registry.${n}.replacement or ""
+        }"
+      ) (attrNames registry);
       fragmentRows = import ../../lib/fragments.nix;
       liveVars =
         map (row: row.var) (builtins.filter (row: row ? var) fragmentRows)
@@ -803,11 +813,25 @@ in
       templateText = concatStringsSep "\n" (map builtins.readFile templateFiles);
       perVar =
         name:
-        assert assertMsg (!(builtins.elem name liveVars))
-          "${name} is a live var in lib/fragments.nix, so it is not removed: drop its lib/removed-fragment-vars.nix row";
+        let
+          severity = registry.${name}.severity or "removed";
+          replacement = registry.${name}.replacement or null;
+        in
+        assert assertMsg (severity == "removed" || severity == "deprecated")
+          "${name} has severity ${severity}; lib/removed-fragment-vars.nix allows only removed or deprecated";
+        assert assertMsg (severity == "deprecated" -> builtins.elem name liveVars)
+          "${name} is deprecated, so it must still be a live var in lib/fragments.nix (else mark it removed)";
+        assert assertMsg (severity == "removed" -> !(builtins.elem name liveVars))
+          "${name} is a live var in lib/fragments.nix, so it is not removed: drop its lib/removed-fragment-vars.nix row or mark it deprecated";
+        assert assertMsg (
+          severity == "deprecated" -> (replacement != null && builtins.elem replacement liveVars)
+        ) "${name} is deprecated, so lib/removed-fragment-vars.nix must name a live replacement var";
+        assert assertMsg (
+          severity == "removed" -> replacement == null
+        ) "${name} is removed, so it must not name a replacement";
         # Not lib.hasInfix: see mentions in lib/mkHarness.nix.
         assert assertMsg (builtins.length (builtins.split "\\$[{]${name}[}]" templateText) == 1)
-          "templates/default/prompts still references \${${name}}; a removed fragment variable must not appear in shipped text";
+          "templates/default/prompts still references \${${name}}; a removed or deprecated fragment variable must not appear in shipped text";
         true;
     in
     assert assertMsg (registry != { }) "lib/removed-fragment-vars.nix must not be empty";
@@ -2073,6 +2097,7 @@ in
         "readOnlyReachableFragmentRows"
         "researchPromptContentByName"
         "rosterWarnings"
+        "deprecatedFragmentVarWarnings"
       ];
       actual = builtins.attrNames harness.internals;
     in

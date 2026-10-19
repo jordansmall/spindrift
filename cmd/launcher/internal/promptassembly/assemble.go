@@ -45,6 +45,10 @@ type Result struct {
 	// Deferred rather than returned so it surfaces as a *ValidateError via
 	// WriteAssembly (printed bare as operator prose); skipping Validate drops it.
 	removedVarErr error
+
+	// deprecatedVarWarnings holds one message per deprecated fragment variable
+	// an operator-authored segment still references; Validate returns them.
+	deprecatedVarWarnings []string
 }
 
 // ArgvShape describes how the CLI wrapper assembles the Driver's argv: which
@@ -431,8 +435,20 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		// An ungated row (empty Gate) renders unconditionally, so the
 		// orchestrator fragments need no switch gate.
 		if row.Gate == "" || gates[row.Gate] {
-			path := filepath.Join(e.PromptsDir, "fragments", fragName)
-			rendered, err := renderFileSegments(path, fragSource, vars)
+			var rendered body
+			// The legacy file is read only when the primary one is absent;
+			// fragName and fragSource then name the file actually read.
+			for _, name := range []string{fragName, row.LegacyFragment} {
+				if name == "" {
+					break
+				}
+				fragName = name
+				fragSource = Source{Kind: SourceFragment, Name: name}
+				rendered, err = renderFileSegments(filepath.Join(e.PromptsDir, "fragments", name), fragSource, vars)
+				if !errors.Is(err, os.ErrNotExist) {
+					break
+				}
+			}
 			if err != nil {
 				// A missing fragment file resolves to an empty string rather
 				// than aborting, reproducing the bash original: its command
@@ -660,6 +676,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 
 	result.Fragments = slices.Sorted(maps.Keys(frags))
 	result.removedVarErr = removed.err
+	result.deprecatedVarWarnings = removed.warnings
 
 	// Dispatch-time overrides (issue #3171) bind last, over both extraction
 	// paths above: dispatch env beats a baked roster entry beats the

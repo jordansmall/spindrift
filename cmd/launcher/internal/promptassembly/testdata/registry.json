@@ -321,16 +321,19 @@
   {
     "gate": "ISSUE_TRACKER_GITHUB",
     "fragment": "github/issue-read.md",
+    "legacyFragment": "issue-read-github.md",
     "var": "ISSUE_READ_GITHUB_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_LOCAL",
     "fragment": "local/issue-read.md",
+    "legacyFragment": "issue-read-local.md",
     "var": "ISSUE_READ_LOCAL_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO",
     "fragment": "forgejo/issue-read.md",
+    "legacyFragment": "issue-read-forgejo.md",
     "var": "ISSUE_READ_FORGEJO_STEP"
   },
   {

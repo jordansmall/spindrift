@@ -2011,6 +2011,40 @@ in
     ) "mkHarness.nix must throw when a chore file references the removed \${CODE_REVIEW_STEP}";
     pkgs.runCommand "build-time-reject-removed-fragment-var" { } "touch $out";
 
+  # The deprecated counterpart (issue #5646): a prompt override still naming a
+  # per-backend issue-read var must keep evaluating and warn, naming the
+  # replacement. The warning is read back from internals, so no stderr capture.
+  build-time-warn-deprecated-fragment-var =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      defaultPrompt = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
+      harness =
+        args:
+        import ../../lib/mkHarness.nix (
+          {
+            inherit nixpkgs system;
+            packages = p: [ p.hello ];
+          }
+          // args
+        );
+      withDeprecated = harness {
+        prompt = defaultPrompt + "\n\${ISSUE_READ_GITHUB_STEP}\n";
+      };
+      warnings = withDeprecated.internals.deprecatedFragmentVarWarnings;
+      warning = builtins.head warnings;
+    in
+    assert assertMsg (builtins.tryEval withDeprecated.spindrift).success
+      "an override prompt using the deprecated \${ISSUE_READ_GITHUB_STEP} must still evaluate";
+    assert assertMsg (builtins.length warnings == 1) "exactly one deprecation warning is expected";
+    assert assertMsg (
+      hasInfix "\${ISSUE_READ_GITHUB_STEP} in prompt arg prompt" warning
+      && hasInfix "use \${ISSUE_READ_STEP}" warning
+    ) "the warning must name the old var and the replacement \${ISSUE_READ_STEP}: ${warning}";
+    assert assertMsg (
+      (harness { }).internals.deprecatedFragmentVarWarnings == [ ]
+    ) "the default build must raise no deprecation warning";
+    pkgs.runCommand "build-time-warn-deprecated-fragment-var" { } "touch $out";
+
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
   # brokenResearchVerdictFragmentsDir swaps in a
   # research-verdict-github-readonly.md missing the required

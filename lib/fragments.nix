@@ -490,19 +490,24 @@ let
     }
     # Deprecation-window fill for override prompts that still name the
     # per-backend vars (issue #5646); shipped prompts use ISSUE_READ_STEP.
+    # legacyFragment is the pre-move root file, read only when `fragment` is
+    # missing, so an override dir still on the old layout renders as before.
     {
       gate = "ISSUE_TRACKER_GITHUB";
       fragment = "github/issue-read.md";
+      legacyFragment = "issue-read-github.md";
       var = "ISSUE_READ_GITHUB_STEP";
     }
     {
       gate = "ISSUE_TRACKER_LOCAL";
       fragment = "local/issue-read.md";
+      legacyFragment = "issue-read-local.md";
       var = "ISSUE_READ_LOCAL_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";
       fragment = "forgejo/issue-read.md";
+      legacyFragment = "issue-read-forgejo.md";
       var = "ISSUE_READ_FORGEJO_STEP";
     }
     {
