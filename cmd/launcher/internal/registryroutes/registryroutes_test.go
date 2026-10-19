@@ -10,7 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
-	"spindrift.dev/launcher/internal/ecosystemtest"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registryroutes"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -19,7 +19,7 @@ import (
 // pinned here without naming a real ecosystem, whose own declarations are
 // pinned by the ecosystem corpora.
 func parse(data []byte) ([]registryroutes.Route, error) {
-	return registryroutes.ParseRows(data, []ecosystem.Row{ecosystemtest.Synthetic})
+	return registryroutes.ParseRows(data, []ecosystem.Row{synthetic.Row})
 }
 
 // Pins the minimal valid routes file of ADR 0045 and its mapping onto
