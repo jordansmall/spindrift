@@ -3735,12 +3735,35 @@ func TestBwrapRun_ReclaimsEmptyLeftoverCgroupDir(t *testing.T) {
 	}
 }
 
+// assertReclaimRefused asserts that reclaimLeftoverCgroupDir, called as the
+// sole provisioning Run for the fixture's name, leaves the dir alone with procs
+// intact. Run's own already-running check pre-empts these cases, so the guard is
+// exercised directly: it is the backstop when that check and the Mkdir race a
+// launcher in another process.
+func (f *reclaimFixture) assertReclaimRefused(t *testing.T, procs string) {
+	t.Helper()
+	_, release := f.adapter.beginProvisioning("leftover-box")
+	defer release()
+	if f.adapter.reclaimLeftoverCgroupDir("leftover-box", f.dir) {
+		t.Error("reclaimLeftoverCgroupDir removed a dir that must not be reused")
+	}
+	got, err := os.ReadFile(filepath.Join(f.dir, "cgroup.procs"))
+	if err != nil {
+		t.Fatalf("leftover dir was removed or altered: %v", err)
+	}
+	if string(got) != procs {
+		t.Errorf("cgroup.procs = %q, want unchanged %q", got, procs)
+	}
+}
+
 // A leftover dir that still holds a live PID belongs to someone else's Box and
-// must be neither removed nor reused.
+// must be neither removed nor reused; Run refuses it outright.
 func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirWithLivePID(t *testing.T) {
 	f := newReclaimFixture(t, "4242\n")
-	out := f.run(t)
-	f.assertNotReclaimed(t, out, "4242\n")
+	if err := f.adapter.Run(runner.Box{Name: "leftover-box"}); !errors.Is(err, runner.ErrAlreadyRunning) {
+		t.Errorf("Run = %v, want ErrAlreadyRunning", err)
+	}
+	f.assertReclaimRefused(t, "4242\n")
 }
 
 // An in-process sibling Run mid-launch for the same name owns the dir even
@@ -3758,8 +3781,10 @@ func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirWhileSiblingProvisioning(t *tes
 func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirOfTrackedSibling(t *testing.T) {
 	f := newReclaimFixture(t, "")
 	f.adapter.running = map[string]*os.Process{"leftover-box": {}}
-	out := f.run(t)
-	f.assertNotReclaimed(t, out, "")
+	if err := f.adapter.Run(runner.Box{Name: "leftover-box"}); !errors.Is(err, runner.ErrAlreadyRunning) {
+		t.Errorf("Run = %v, want ErrAlreadyRunning", err)
+	}
+	f.assertReclaimRefused(t, "")
 }
 
 // Inside a live Run's launch window the dir exists with an empty cgroup.procs

@@ -728,8 +728,14 @@ func (a *bwrapAdapter) provisionCgroup(box runner.Box) (dir string) {
 	return dir
 }
 
-// Run launches a single issue into a bubblewrap sandbox.
+// Run launches a single issue into a bubblewrap sandbox. It returns
+// runner.ErrAlreadyRunning, before touching anything, when a Box of that name is
+// already live: tracked in this adapter (a sibling Run) or resident in a
+// spindrift-<name> cgroup (another launcher's).
 func (a *bwrapAdapter) Run(box runner.Box) error {
+	if a.alreadyRunning(box.Name) {
+		return runner.ErrAlreadyRunning
+	}
 	// Only the synthesised /etc/resolv.conf lives here; passwd/group are baked
 	// store paths (issue #2663).
 	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
@@ -897,6 +903,20 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 		}()
 	}
 	return runner.AsRunError(cmd.Wait())
+}
+
+// alreadyRunning reports whether a Box named name is live. A sibling Run still
+// provisioning (not yet in running) is not covered: only a launched Box counts,
+// so two concurrent Runs of one name that both pass this check can both launch.
+func (a *bwrapAdapter) alreadyRunning(name string) bool {
+	return a.tracked(name) || a.IsRunning(name)
+}
+
+// tracked reports whether Run has handed name's process off to running.
+func (a *bwrapAdapter) tracked(name string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.running[name] != nil
 }
 
 // untrackRunning drops name's tracked process once Run's Wait returns.
