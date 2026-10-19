@@ -183,7 +183,7 @@ func crossKnobCheck(s crossKnobSpec, d Deps) doctor.Check {
 		Probe: func() (any, error) {
 			row, ok := d.Backend(s.value)
 			if !ok || !s.validAs(row) {
-				return nil, fmt.Errorf("%s=%q is not valid; must be %s", s.knobName, s.value, JoinOxford(s.validNames()))
+				return nil, NotValidError(s.knobName, s.value, s.validNames())
 			}
 			if fn := s.validate(row); fn != nil {
 				return nil, fn()
@@ -223,6 +223,13 @@ func CrossKnobChecks(c Config, d Deps) []doctor.Check {
 // them relative to its own validateChoice calls: required-knob rows first.
 func All(c Config, d Deps) []doctor.Check {
 	return append(RequiredKnobChecks(c, d), CrossKnobChecks(c, d)...)
+}
+
+// NotValidError is the "is not valid; must be" failure for a knob whose value
+// names no backend of its axis, shared by doctor and launch-time validation so
+// the two wordings cannot drift.
+func NotValidError(knob, value string, valid []string) error {
+	return fmt.Errorf("%s=%q is not valid; must be %s", knob, value, JoinOxford(valid))
 }
 
 // JoinOxford joins words into an Oxford-comma "a, b, or c" list; two words

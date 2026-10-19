@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
@@ -23,7 +24,15 @@ import (
 // from the caller's flag parse.
 func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
-	rc := newReadContext(nil, false)
+	rc, err := newReadContext(nil, false)
+	var unregistered *unregisteredBackendError
+	if errors.As(err, &unregistered) {
+		return doctorUnbuildableReport(rc, unregistered, stderr, opts)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	opts.interactive = isStdinTTY()
 	return doctorReport(rc, stdout, stderr, os.Stdin, opts)
 }
@@ -60,7 +69,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 	// local and jira have no label registry to list or create from, so doctor.Run
 	// skips the label section there (NoLabelRegistry, issue #5460); adding none
 	// keeps this answer honest for any caller that reads it directly.
-	if row, _ := backendByName(c.issueTracker); !row.LabelRegistry {
+	if row, _ := backendkit.ByName(c.issueTracker); !row.LabelRegistry {
 		return nil
 	}
 	var labels []string
@@ -97,15 +106,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 // butler's own config checks into configErr (issue #3920).
 func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opts doctorOptions) int {
 	v := rc.validation()
-	configErr := v.configErr
-	if opts.butler {
-		// "" means no --chore: validate every BUTLER_CHORES entry, and an
-		// empty BUTLER_CHORES fails (ErrNoChores) -- same as gateKinds
-		// refusing an explicit butler selector with no chores.
-		if _, err := resolveButlerSettings(rc.config, ""); err != nil {
-			configErr = errors.Join(configErr, err)
-		}
-	}
+	configErr := doctorConfigErr(rc, v, opts)
 	if configErr != nil {
 		fmt.Fprintf(stderr, "%s\n", configErr)
 	}
@@ -115,6 +116,36 @@ func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opt
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
 	return doctorExitCodeFor(configErr, runErr)
+}
+
+// doctorConfigErr is v.configErr plus the butler's own config checks when
+// opts.butler is set.
+func doctorConfigErr(rc readContext, v readValidation, opts doctorOptions) error {
+	configErr := v.configErr
+	if opts.butler {
+		// "" means no --chore: validate every BUTLER_CHORES entry, and an
+		// empty BUTLER_CHORES fails (ErrNoChores) -- same as gateKinds
+		// refusing an explicit butler selector with no chores.
+		if _, err := resolveButlerSettings(rc.config, ""); err != nil {
+			configErr = errors.Join(configErr, err)
+		}
+	}
+	return configErr
+}
+
+// doctorUnbuildableReport is doctorReport for a config naming an unregistered
+// backend, where no adapter can be built: it reports the full config findings
+// and skips runDoctor's adapter probes. rc carries only the config. The bad
+// name is itself a config finding, so the exit is 2, not the unclassified 1
+// (issue #2569); unregistered stands in when validation finds nothing, so an
+// unbuildable config never prints a nil error or exits 0.
+func doctorUnbuildableReport(rc readContext, unregistered error, stderr io.Writer, opts doctorOptions) int {
+	configErr := doctorConfigErr(rc, rc.validation(), opts)
+	if configErr == nil {
+		configErr = unregistered
+	}
+	fmt.Fprintf(stderr, "%s\n", configErr)
+	return doctorExitCodeFor(configErr, nil)
 }
 
 // doctorExitCodeFor maps cmdDoctor's two failure sources to the doctor
@@ -151,7 +182,7 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // bypassing the Reporter (issue #3777). The two params stay distinct since
 // only one of them is the report stream.
 func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
-	row, _ := backendByName(c.issueTracker)
+	row, _ := backendkit.ByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:     c.issueTracker,
 		NoLabelRegistry:  !row.LabelRegistry,

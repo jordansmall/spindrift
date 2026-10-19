@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -32,8 +33,8 @@ type launchGate struct {
 // a desc with a non-empty TokenEnvVar; a token-less desc (backend.Local,
 // backend.Git) would match every lookup miss, since both sides are empty.
 func tokenGateApplicable(c config, desc backend.Descriptor) bool {
-	forgeRow, _ := backendByName(c.codeForge)
-	trackerRow, _ := backendByName(c.issueTracker)
+	forgeRow, _ := backendkit.ByName(c.codeForge)
+	trackerRow, _ := backendkit.ByName(c.issueTracker)
 	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
 }
 
@@ -46,7 +47,7 @@ const readOnlyTokenGatePrefix = "read-only-token-"
 // read-only access when c's codeForge or issueTracker shares the row's token
 // (tokenGateApplicable), so a renamed row on the same token still triggers it,
 // and a tracker and forge on one backend share a single gate.
-func readOnlyTokenGates(rows []backendRow) []launchGate {
+func readOnlyTokenGates(rows []backendkit.Strategy) []launchGate {
 	var gates []launchGate
 	for _, r := range rows {
 		if r.BoxTokenEnvVar == "" {
@@ -73,8 +74,8 @@ func readOnlyTokenGates(rows []backendRow) []launchGate {
 // by checkRunnerLaunchPrerequisites and reported by doctor through
 // prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
 // read-only token gates follow, one per backend row with a Box token. It is
-// built once at package init from backendRows, so a test that swaps
-// backendRows must rebuild it (see swapIntrospector).
+// built once at package init from the registered Strategies, so a test that swaps
+// the registry must rebuild it (see swapIntrospector).
 var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
@@ -85,7 +86,7 @@ var gateRegistry = append([]launchGate{
 	{Name: "signal-carrier-network-mode", Check: func(c config, _ io.Writer) error {
 		return checkSignalCarrierNetworkModeGate(c)
 	}},
-}, readOnlyTokenGates(backendRows)...)
+}, readOnlyTokenGates(backendkit.Strategies())...)
 
 // splitGateRegistryByNetwork partitions registry into its non-network and
 // network gates, preserving registry order within each. The split reads each

@@ -12,16 +12,17 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
-// Slice 1 of issue #2267 is purely additive: nothing calls backendRows yet, so
-// this pins it against main.go's hardcoded per-axis switch for all 5 backends.
-func TestBackendRowsShape(t *testing.T) {
-	if len(backendRows) != 5 {
-		t.Fatalf("len(backendRows) = %d, want 5", len(backendRows))
+// TestRegisteredStrategiesShape pins the registered Strategies against main.go's
+// hardcoded per-axis switch for all 5 backends.
+func TestRegisteredStrategiesShape(t *testing.T) {
+	if len(backendkit.Strategies()) != 5 {
+		t.Fatalf("len(backendkit.Strategies()) = %d, want 5", len(backendkit.Strategies()))
 	}
 
 	cases := []struct {
@@ -106,9 +107,9 @@ func TestBackendRowsShape(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			row, ok := backendByName(tc.name)
+			row, ok := backendkit.ByName(tc.name)
 			if !ok {
-				t.Fatalf("backendByName(%q) ok=false, want true", tc.name)
+				t.Fatalf("backendkit.ByName(%q) ok=false, want true", tc.name)
 			}
 			if row.Name != tc.name {
 				t.Errorf("name = %q, want %q", row.Name, tc.name)
@@ -141,40 +142,40 @@ func TestBackendRowsShape(t *testing.T) {
 				t.Errorf("inBoxUnreachableTracker = %v, want %v", row.InBoxUnreachableTracker, tc.inBoxUnreachableTracker)
 			}
 
-			if (row.validateTracker != nil) != tc.hasValidateTracker {
-				t.Errorf("validateTracker present = %v, want %v", row.validateTracker != nil, tc.hasValidateTracker)
+			if (row.ValidateTracker != nil) != tc.hasValidateTracker {
+				t.Errorf("validateTracker present = %v, want %v", row.ValidateTracker != nil, tc.hasValidateTracker)
 			}
-			if (row.validateCodeForge != nil) != tc.hasValidateCodeForge {
-				t.Errorf("validateCodeForge present = %v, want %v", row.validateCodeForge != nil, tc.hasValidateCodeForge)
+			if (row.ValidateCodeForge != nil) != tc.hasValidateCodeForge {
+				t.Errorf("validateCodeForge present = %v, want %v", row.ValidateCodeForge != nil, tc.hasValidateCodeForge)
 			}
-			if (row.newIssueTracker != nil) != tc.hasNewIssueTracker {
-				t.Errorf("newIssueTracker present = %v, want %v", row.newIssueTracker != nil, tc.hasNewIssueTracker)
+			if (row.NewIssueTracker != nil) != tc.hasNewIssueTracker {
+				t.Errorf("newIssueTracker present = %v, want %v", row.NewIssueTracker != nil, tc.hasNewIssueTracker)
 			}
-			if (row.newCodeForge != nil) != tc.hasNewCodeForge {
-				t.Errorf("newCodeForge present = %v, want %v", row.newCodeForge != nil, tc.hasNewCodeForge)
+			if (row.NewCodeForge != nil) != tc.hasNewCodeForge {
+				t.Errorf("newCodeForge present = %v, want %v", row.NewCodeForge != nil, tc.hasNewCodeForge)
 			}
-			if (row.newReadOnlyCodeForge != nil) != tc.hasNewReadOnlyCodeForge {
-				t.Errorf("newReadOnlyCodeForge present = %v, want %v", row.newReadOnlyCodeForge != nil, tc.hasNewReadOnlyCodeForge)
+			if (row.NewReadOnlyCodeForge != nil) != tc.hasNewReadOnlyCodeForge {
+				t.Errorf("newReadOnlyCodeForge present = %v, want %v", row.NewReadOnlyCodeForge != nil, tc.hasNewReadOnlyCodeForge)
 			}
 		})
 	}
 }
 
 func TestBackendByNameUnknown(t *testing.T) {
-	if _, ok := backendByName("nonexistent"); ok {
-		t.Fatalf("backendByName(%q) ok=true, want false", "nonexistent")
+	if _, ok := backendkit.ByName("nonexistent"); ok {
+		t.Fatalf("backendkit.ByName(%q) ok=true, want false", "nonexistent")
 	}
 }
 
 // A malformed JIRA_STATUS_MAPPING must fall back to an empty map and still
 // yield a non-nil tracker, matching main.go's newIssueTracker "jira" case.
 func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
-	row, ok := backendByName("jira")
+	row, ok := backendkit.ByName("jira")
 	if !ok {
-		t.Fatal("backendByName(\"jira\") ok=false")
+		t.Fatal("backendkit.ByName(\"jira\") ok=false")
 	}
-	if row.newIssueTracker == nil {
-		t.Fatal("jira row.newIssueTracker is nil")
+	if row.NewIssueTracker == nil {
+		t.Fatal("jira row.NewIssueTracker is nil")
 	}
 	c := config{schemaConfig: schemaConfig{
 		rowKnobs: map[string]string{
@@ -189,31 +190,32 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 			t.Fatalf("newIssueTracker panicked: %v", r)
 		}
 	}()
-	tracker := row.newIssueTracker(c)
+	tracker := mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup))
 	if tracker == nil {
 		t.Fatal("newIssueTracker returned nil tracker")
 	}
 }
 
-// backendRows and internal/backend's ByName are two registry-fallback paths over
-// the same generated descriptors, so a row reaching one but not the other splits
-// them silently rather than failing a build (issue #3062). Descriptor holds only
-// strings and bools, so comparing whole values also catches a row that carries a
-// stale copy instead of embedding the generated package variable.
-func TestBackendRowsCoverRegistry(t *testing.T) {
+// The backendkit registry and internal/backend's ByName are two paths over the
+// same generated descriptors, so a Strategy reaching one but not the other
+// splits them silently rather than failing a build (issue #3062). Descriptor
+// holds only strings and bools, so comparing whole values also catches a
+// Strategy that carries a stale copy instead of embedding the generated
+// package variable.
+func TestStrategiesCoverRegistry(t *testing.T) {
 	for _, d := range backend.Registry {
-		row, ok := backendByName(d.Name)
+		s, ok := backendkit.ByName(d.Name)
 		if !ok {
-			t.Errorf("backendByName(%q) ok=false, want true (backend.Registry descriptor missing from backendRows)", d.Name)
+			t.Errorf("backendkit.ByName(%q) ok=false, want true (backend.Registry descriptor has no registered Strategy)", d.Name)
 			continue
 		}
-		if row.Descriptor != d {
-			t.Errorf("backendByName(%q).Descriptor = %+v, want %+v", d.Name, row.Descriptor, d)
+		if s.Descriptor != d {
+			t.Errorf("backendkit.ByName(%q).Descriptor = %+v, want %+v", d.Name, s.Descriptor, d)
 		}
 	}
-	for _, row := range backendRows {
-		if _, ok := backend.ByName(row.Name); !ok {
-			t.Errorf("backend.ByName(%q) ok=false, want true (backendRows row missing from backend.Registry)", row.Name)
+	for _, s := range backendkit.Strategies() {
+		if _, ok := backend.ByName(s.Name); !ok {
+			t.Errorf("backend.ByName(%q) ok=false, want true (registered Strategy missing from backend.Registry)", s.Name)
 		}
 	}
 }
@@ -233,9 +235,9 @@ func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	row, ok := backendByName("jira")
+	row, ok := backendkit.ByName("jira")
 	if !ok {
-		t.Fatal("backendByName(\"jira\") ok=false")
+		t.Fatal("backendkit.ByName(\"jira\") ok=false")
 	}
 	for _, include := range []bool{false, true} {
 		c := config{schemaConfig: schemaConfig{
@@ -246,7 +248,7 @@ func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
 				"JIRA_INCLUDE_COMMENTS": strconv.FormatBool(include),
 			},
 		}}
-		text, err := forge.IssueText(row.newIssueTracker(c), "PROJ-7", io.Discard)
+		text, err := forge.IssueText(mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup)), "PROJ-7", io.Discard)
 		if err != nil {
 			t.Fatalf("include=%v: IssueText: %v", include, err)
 		}
@@ -317,9 +319,9 @@ func (f *fakeJiraWorkflow) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // (issue #4919). The work tracker keeps the native path.
 func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
 	const mapping = `{"dispatchable":"To Do","inProgress":"In Progress"}`
-	row, ok := backendByName("jira")
+	row, ok := backendkit.ByName("jira")
 	if !ok {
-		t.Fatal(`backendByName("jira") ok=false`)
+		t.Fatal(`backendkit.ByName("jira") ok=false`)
 	}
 
 	cases := []struct {
@@ -352,7 +354,7 @@ func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
 				completeLabel:   "agent-complete",
 				failedLabel:     "agent-failed",
 			}}, tc.kind)
-			tracker := row.newIssueTracker(c)
+			tracker := mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup))
 
 			if err := tracker.TransitionState("PROJ-1", forge.Dispatchable, forge.InProgress); err != nil {
 				t.Fatalf("TransitionState: %v", err)
@@ -404,32 +406,32 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 		t.Fatalf("document blanks not resolved: %q %q", fjBase, localDir)
 	}
 
-	fj, ok := backendByName("forgejo")
+	fj, ok := backendkit.ByName("forgejo")
 	if !ok {
 		t.Fatal("forgejo row missing")
 	}
-	for axis, fn := range map[string]func(config) error{
-		"ISSUE_TRACKER": fj.validateTracker,
-		"CODE_FORGE":    fj.validateCodeForge,
+	for axis, fn := range map[string]func(backendkit.Shared, backendkit.Lookup) error{
+		"ISSUE_TRACKER": fj.ValidateTracker,
+		"CODE_FORGE":    fj.ValidateCodeForge,
 	} {
 		want := "set FORGEJO_BASE_URL (Forgejo instance base URL) when " + axis + "=forgejo"
-		if err := fn(c); err == nil || err.Error() != want {
+		if err := fn(backendShared(c), c.knobLookup); err == nil || err.Error() != want {
 			t.Errorf("forgejo %s: err = %v, want %q", axis, err, want)
 		}
 	}
 
 	// LOCAL_ISSUES_DIR is deliberately unguarded: a blank re-defaults to
 	// .spindrift/issues (the pre-Strategy launcher built an inert tracker on ""; issue #5638).
-	local, ok := backendByName("local")
+	local, ok := backendkit.ByName("local")
 	if !ok {
 		t.Fatal("local row missing")
 	}
-	if local.validateTracker != nil {
+	if local.ValidateTracker != nil {
 		t.Error("local validateTracker non-nil; a blank LOCAL_ISSUES_DIR must not fail closed")
 	}
 	t.Chdir(t.TempDir())
 	c.issueTracker = "local"
-	probe, ok := local.newIssueTracker(c).(interface{ Probe() (string, error) })
+	probe, ok := mustBuild(local.NewIssueTracker(backendShared(c), c.knobLookup)).(interface{ Probe() (string, error) })
 	if !ok {
 		t.Fatal("local tracker has no Probe")
 	}
@@ -439,5 +441,55 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 	}
 	if want := filepath.Join(".spindrift", "issues"); !strings.HasSuffix(dir, string(filepath.Separator)+want) {
 		t.Errorf("blank LOCAL_ISSUES_DIR resolved to %q, want it to end in %q", dir, want)
+	}
+}
+
+// An unregistered ISSUE_TRACKER or CODE_FORGE fails validation, and the
+// constructors never substitute github for it.
+func TestUnregisteredBackendNameFailsWithoutGithubFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		tracker, cf  string
+		wantContains string
+	}{
+		{"tracker", "nope", "local", `ISSUE_TRACKER="nope" is not valid`},
+		{"code forge", "local", "nope", `CODE_FORGE="nope" is not valid`},
+		{"tracker-only backend as code forge", "local", "jira", `CODE_FORGE="jira" is not valid`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.issueTracker, c.codeForge = tc.tracker, tc.cf
+
+			if err := validate(c); err == nil || !strings.Contains(err.Error(), tc.wantContains) {
+				t.Errorf("validate() = %v, want error containing %q", err, tc.wantContains)
+			}
+			if err := checkBackendsRegistered(c); err == nil || !strings.Contains(err.Error(), tc.wantContains) {
+				t.Errorf("checkBackendsRegistered() = %v, want error containing %q", err, tc.wantContains)
+			}
+		})
+	}
+
+	c := minimalValidConfig()
+	c.issueTracker = "nope"
+	assertPanics := func(name string, f func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("%s with an unregistered name returned, want a panic rather than a github fallback", name)
+			}
+		}()
+		f()
+	}
+	assertPanics("newIssueTracker", func() { newIssueTracker(c) })
+	c.codeForge = "nope"
+	assertPanics("newCodeForge", func() { newCodeForge(c, forge.SanitizedParent{}, forge.NewFake()) })
+}
+
+func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {
+	setFullyLocalEnv(t)
+	t.Setenv("CODE_FORGE", "nope")
+
+	if _, err := newReadContext(dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), `CODE_FORGE="nope" is not valid`) {
+		t.Errorf("newReadContext err = %v, want the unregistered CODE_FORGE rejected", err)
 	}
 }

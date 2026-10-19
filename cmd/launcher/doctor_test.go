@@ -326,7 +326,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		c := minimalValidConfig()
 		c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
 			"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-		c.codeForge = "github" // ledger-capable (backendByName's newLedger != nil)
+		c.codeForge = "github" // ledger-capable (the Strategy's NewLedger != nil)
 		c.butlerChores = "bugs"
 		c.butlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
 		c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
@@ -808,6 +808,56 @@ func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
 			_ = runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, nil)
 			if !strings.Contains(buf.String(), tc.want) {
 				t.Errorf("runDoctor() output = %q, want it to contain %q", buf.String(), tc.want)
+			}
+		})
+	}
+}
+
+// The unregistered error is itself the config finding when validation turns up
+// nothing, so an unbuildable config never prints a nil error or exits 0.
+func TestDoctorUnbuildableReport_UnregisteredErrorStandsInForCleanValidation(t *testing.T) {
+	setFullyLocalEnv(t)
+	rc, err := newReadContext(nil, false)
+	if err != nil {
+		t.Fatalf("newReadContext: %v", err)
+	}
+	unregistered := &unregisteredBackendError{msg: `ISSUE_TRACKER="bogus" is not valid`}
+
+	var stderr bytes.Buffer
+	got := doctorUnbuildableReport(rc, unregistered, &stderr, doctorOptions{})
+
+	if got != 2 {
+		t.Errorf("doctorUnbuildableReport = %d, want 2; stderr: %q", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), unregistered.msg) || strings.Contains(stderr.String(), "%!s") {
+		t.Errorf("stderr = %q, want the unregistered message and no nil formatting", stderr.String())
+	}
+}
+
+// An unregistered ISSUE_TRACKER or CODE_FORGE cannot build adapters, but doctor
+// still reports it as a config finding (exit 2, issue #2569) alongside every
+// other broken knob rather than as the bare unclassified exit 1.
+func TestCmdDoctor_UnregisteredBackend_ExitsTwoWithFullConfigReport(t *testing.T) {
+	for _, tc := range []struct{ env, value string }{
+		{"ISSUE_TRACKER", "bogus"},
+		{"CODE_FORGE", "gitlab"},
+	} {
+		t.Run(tc.env, func(t *testing.T) {
+			setFullyLocalEnv(t)
+			t.Setenv(tc.env, tc.value)
+			t.Setenv("MERGE_MODE", "bogus")
+
+			var stdout, stderr bytes.Buffer
+			got := cmdDoctor(doctorOptions{}, &stdout, &stderr)
+
+			if got != 2 {
+				t.Errorf("cmdDoctor = %d, want 2; stderr: %q", got, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.env) {
+				t.Errorf("stderr should name %s, got %q", tc.env, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "MERGE_MODE") {
+				t.Errorf("stderr should also carry the other config findings, got %q", stderr.String())
 			}
 		})
 	}

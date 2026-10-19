@@ -276,7 +276,7 @@ func TestRun_PopulatesBoxOutboxDir_ButlerReadWrite(t *testing.T) {
 	}
 }
 
-// Forgejo's backendRow carries OutboxRelayCapable: true (issue #2927), so it
+// Forgejo's Strategy carries OutboxRelayCapable: true (issue #2927), so it
 // gets github's outbox-relay treatment (issue #1918). The descriptor comes
 // from the real backend.Forgejo registry row rather than a hand-built
 // stand-in, so this proves the actual row provisions an outbox and not just
@@ -313,7 +313,7 @@ func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 }
 
 // The outbox dir is gated on the backend's capability, not just the access
-// mode. No backendRow valid under read-only (github, local, forgejo) leaves
+// mode. No backend valid under read-only (github, local, forgejo) leaves
 // both OutboxRelayCapable and HostMediatedRemote false today, so the
 // descriptor here is a hypothetical backend shape, not a pin on any real
 // backend's behavior.

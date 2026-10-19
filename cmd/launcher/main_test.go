@@ -2790,7 +2790,8 @@ func TestValidateCodeForge_RejectsUnknown(t *testing.T) {
 // registry-driven rewrite of the CODE_FORGE switch (issue #2267) cannot
 // silently drift it. The "must be ..." list renders from
 // validCodeForgeNames() (issue #2520 slice 4), so its word order tracks
-// backendRows. want also pins the remedy line the row carries (issue #2886).
+// the registered Strategies. want also pins the remedy line the row carries
+// (issue #2886).
 func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "gitlab"
@@ -4382,7 +4383,10 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 	setFullyLocalEnv(t)
 
-	rc := newReadContext(dispatchkind.Work, false)
+	rc, err := newReadContext(dispatchkind.Work, false)
+	if err != nil {
+		t.Fatalf("newReadContext: %v", err)
+	}
 	if rc.capabilities.LandingRecorder == nil {
 		t.Fatal("rc.capabilities.LandingRecorder = nil, want non-nil for a local IssueTracker (precondition)")
 	}

@@ -21,7 +21,10 @@ type gatedContext struct {
 // token gates' live network calls never run ahead of a runner-prerequisite
 // failure.
 func newGatedContext(w io.Writer, kind *dispatchkind.Descriptor, selfContained bool) (gatedContext, error) {
-	rc := newReadContext(kind, selfContained)
+	rc, err := newReadContext(kind, selfContained)
+	if err != nil {
+		return gatedContext{}, err
+	}
 	if err := validate(rc.config); err != nil {
 		return gatedContext{}, err
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
@@ -620,18 +621,18 @@ func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 		return !rule.Satisfied(os.Getenv)
 	}
 	codeForge, issueTracker := getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER")
-	forgeRow, _ := backendByName(codeForge)
-	trackerRow, _ := backendByName(issueTracker)
+	forgeRow, _ := backendkit.ByName(codeForge)
+	trackerRow, _ := backendkit.ByName(issueTracker)
 	switch env {
 	case "GH_TOKEN":
 		sig := resolveCapabilitySignals(codeForge, issueTracker)
 		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
-	case "JIRA_TOKEN", "FORGEJO_TOKEN":
-		return forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env
 	default:
-		// BOX_GH_TOKEN (ADR 0016) is opt-in with no requiredness signal of
-		// its own, so the template never sources it.
-		return false
+		// Any other backend's own token is required exactly when a selected
+		// backend names it as its TokenEnvVar. BOX_GH_TOKEN (ADR 0016) is opt-in and
+		// no row names it as a TokenEnvVar (github has it only as its boxTokenEnvVar),
+		// so the template never sources it.
+		return env != "" && (forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env)
 	}
 }
 

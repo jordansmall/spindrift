@@ -172,10 +172,9 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningDoesNotClaimFineGrainedP
 // Applicable yet enforced nothing and accepted a missing BOX_GH_TOKEN. The
 // fake "custom-github" row shares backend.GitHub's TokenEnvVar and feeds only
 // the tokenGateApplicable assertion (the registry's Applicable); the check
-// itself no longer reads backendRows and must still enforce.
+// itself no longer reads the registry and must still enforce.
 func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
-	original := backendRows
-	backendRows = append(append([]backendRow{}, original...), backendRow{
+	withExtraStrategies(t, backendkit.Strategy{
 		Descriptor: backend.Descriptor{
 			Name:             "custom-github",
 			ValidAsTracker:   true,
@@ -183,7 +182,6 @@ func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferen
 			TokenEnvVar:      backend.GitHub.TokenEnvVar,
 		},
 	})
-	defer func() { backendRows = original }()
 
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
@@ -212,54 +210,57 @@ func TestCheckReadOnlyTokenGate_AppliesWhenBackendSharesTokenEnvVarUnderDifferen
 	}
 }
 
-// withIntrospector returns a copy of rows with name's IntrospectToken hook
+// withIntrospector returns a copy of ss with name's IntrospectToken hook
 // replaced by f; nil models a backend with no hook.
-func withIntrospector(rows []backendRow, name string, f backendkit.TokenIntrospector) []backendRow {
-	out := append([]backendRow{}, rows...)
+func withIntrospector(ss []backendkit.Strategy, name string, f backendkit.TokenIntrospector) []backendkit.Strategy {
+	out := append([]backendkit.Strategy{}, ss...)
 	for i := range out {
 		if out[i].Name == name {
-			out[i].introspectToken = f
+			out[i].IntrospectToken = f
 		}
 	}
 	return out
 }
 
-// rowWithIntrospector returns the registry row for name with its
+// rowWithIntrospector returns the registered Strategy for name with its
 // IntrospectToken hook replaced by f.
-func rowWithIntrospector(t *testing.T, name string, f backendkit.TokenIntrospector) backendRow {
+func rowWithIntrospector(t *testing.T, name string, f backendkit.TokenIntrospector) backendkit.Strategy {
 	t.Helper()
-	for _, r := range withIntrospector(backendRows, name, f) {
-		if r.Name == name {
-			return r
+	for _, s := range withIntrospector(backendkit.Strategies(), name, f) {
+		if s.Name == name {
+			return s
 		}
 	}
 	t.Fatalf("no backend row %q", name)
-	return backendRow{}
+	return backendkit.Strategy{}
 }
 
-// swapIntrospector installs f as name's hook in backendRows for the test and
-// rebuilds gateRegistry's read-only token gates from the patched rows, since
-// each gate captures its row when built. Cleanup rebuilds the token gates from
-// the restored rows rather than restoring a captured registry, so it is safe
-// whether or not the caller swaps gateRegistry itself, in either order.
+// swapIntrospector installs f as name's hook in the registry for the test and
+// rebuilds gateRegistry's read-only token gates from the patched Strategies,
+// since each gate captures its Strategy when built. Cleanup rebuilds the token
+// gates from the restored registry rather than restoring a captured gateRegistry,
+// so it is safe whether or not the caller swaps gateRegistry itself, in either
+// order.
 func swapIntrospector(t *testing.T, name string, f backendkit.TokenIntrospector) {
 	t.Helper()
-	original := backendRows
-	rebuildTokenGates := func(rows []backendRow) {
-		kept := make([]launchGate, 0, len(gateRegistry))
-		for _, g := range gateRegistry {
-			if !strings.HasPrefix(g.Name, readOnlyTokenGatePrefix) {
-				kept = append(kept, g)
-			}
-		}
-		gateRegistry = append(kept, readOnlyTokenGates(rows)...)
-	}
-	backendRows = withIntrospector(original, name, f)
-	rebuildTokenGates(backendRows)
+	restore := backendkit.ReplaceRegistryForTest(withIntrospector(backendkit.Strategies(), name, f))
+	rebuildTokenGates()
 	t.Cleanup(func() {
-		backendRows = original
-		rebuildTokenGates(original)
+		restore()
+		rebuildTokenGates()
 	})
+}
+
+// rebuildTokenGates rebuilds gateRegistry's read-only token gates from the
+// registry as it stands.
+func rebuildTokenGates() {
+	kept := make([]launchGate, 0, len(gateRegistry))
+	for _, g := range gateRegistry {
+		if !strings.HasPrefix(g.Name, readOnlyTokenGatePrefix) {
+			kept = append(kept, g)
+		}
+	}
+	gateRegistry = append(kept, readOnlyTokenGates(backendkit.Strategies())...)
 }
 
 // Forgejo's Strategy has no IntrospectToken, so a distinct Box token is
@@ -285,7 +286,7 @@ func TestCheckReadOnlyTokenGate_Forgejo(t *testing.T) {
 			c.setRowKnob("FORGEJO_TOKEN", tc.launcherToken)
 			t.Setenv("BOX_FORGEJO_TOKEN", tc.boxToken)
 
-			row, _ := backendByName("forgejo")
+			row, _ := backendkit.ByName("forgejo")
 			var buf bytes.Buffer
 			verified, err := checkReadOnlyTokenGate(c, row, &buf)
 
@@ -314,7 +315,7 @@ func TestCheckReadOnlyTokenGate_Forgejo(t *testing.T) {
 // A new backend with a Box token and no IntrospectToken hook gets a warning
 // naming the missing hook, never a failure (ADR 0068 decision 6).
 func TestCheckReadOnlyTokenGate_StubBackendWithoutHookWarns(t *testing.T) {
-	stub := backendRow{Descriptor: backend.Descriptor{
+	stub := backendkit.Strategy{Descriptor: backend.Descriptor{
 		Name:           "stub",
 		DisplayName:    "Stub",
 		TokenEnvVar:    "STUB_TOKEN",
@@ -343,7 +344,7 @@ func TestCheckReadOnlyTokenGate_StubBackendWithoutHookWarns(t *testing.T) {
 // environment; without that the identical-token check would compare against ""
 // and never fire.
 func TestCheckReadOnlyTokenGate_StubBackendIdenticalTokenFails(t *testing.T) {
-	stub := backendRow{Descriptor: backend.Descriptor{
+	stub := backendkit.Strategy{Descriptor: backend.Descriptor{
 		Name:           "stub",
 		DisplayName:    "Stub",
 		TokenEnvVar:    "STUB_TOKEN",
@@ -394,11 +395,11 @@ func TestCheckReadOnlyTokenGate_NonIntrospectableWarningUsesHookReason(t *testin
 // hook and the gate: it uses the real row, so deleting the hook from
 // internal/forge/github/strategy.go fails here and nowhere else.
 func TestCheckReadOnlyTokenGate_ProductionGitHubHookWarnsOnFineGrainedPAT(t *testing.T) {
-	row, ok := backendByName("github")
+	row, ok := backendkit.ByName("github")
 	if !ok {
-		t.Fatal("backendByName(\"github\") ok = false, want true")
+		t.Fatal("backendkit.ByName(\"github\") ok = false, want true")
 	}
-	if row.introspectToken == nil {
+	if row.IntrospectToken == nil {
 		t.Fatal("github row introspectToken = nil, want the Strategy's IntrospectToken hook")
 	}
 	c := minimalValidConfig()

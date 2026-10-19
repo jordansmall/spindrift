@@ -37,8 +37,8 @@ func TestLauncherCheckDeps_BackendBindsValidatorToConfig(t *testing.T) {
 	}
 }
 
-// TestLauncherCheckDeps_BackendNilValidatorsStayNil proves a backendRow with
-// nil validateTracker/validateCodeForge (github has no code-forge validator,
+// TestLauncherCheckDeps_BackendNilValidatorsStayNil proves a Strategy with
+// nil ValidateTracker/ValidateCodeForge (github has no code-forge validator,
 // local no tracker validator) adapts to a Backend with a nil func. A non-nil
 // no-op wrapper would turn crossKnobCheck's "no extra validation" arm into a
 // no-op that always succeeds, breaking any test that asserts a row has no

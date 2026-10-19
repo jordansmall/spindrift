@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registryroutes"
@@ -46,8 +47,8 @@ func checkoutIsTargetRepo(root string, c config) bool {
 	if remote == "" {
 		return false
 	}
-	row, ok := backendByName(c.codeForge)
-	return ok && row.remoteMatch != nil && row.remoteMatch(c, remote)
+	row, ok := backendkit.ByName(c.codeForge)
+	return ok && row.RemoteMatch != nil && row.RemoteMatch(backendShared(c), c.knobLookup, remote)
 }
 
 // gitCheckoutRoot walks up from dir to the directory holding a ".git" entry,
@@ -68,12 +69,12 @@ func gitCheckoutRoot(dir string) string {
 }
 
 // registryRouteDriftCheckForRoutes keys the row's source on
-// backendByName(c.codeForge).HostMediatedRemote, not a codeForge == "local"
+// backendkit.ByName(c.codeForge).HostMediatedRemote, not a codeForge == "local"
 // compare a future host-mediated backend would break. A host-mediated forge
 // reads the bare Accumulation repo at c.baseBranch, the same snapshot the
 // launch itself derives host-rooted routes from.
 func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) []doctor.Check {
-	row, _ := backendByName(c.codeForge)
+	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
 		return registryRouteDriftCheckForRef(c.accumulationRepoDir(), c.baseBranch, routes)
 	}

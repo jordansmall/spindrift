@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
@@ -118,8 +119,8 @@ type choreCatalog struct {
 // in promptassembly.choreSection, leaving the claim standing for the full
 // claim timeout (issue #3905).
 func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog choreCatalog) ([]chore.Chore, error) {
-	row, ok := backendByName(cfg.codeForge)
-	if !ok || row.newLedger == nil {
+	row, ok := backendkit.ByName(cfg.codeForge)
+	if !ok || row.NewLedger == nil {
 		return nil, fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
 	}
 	if choreName != "" && !promptassembly.ValidChoreName(choreName) {
@@ -323,9 +324,9 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "butler: hostname: %v\n", err)
 		return 1
 	}
-	// butlerPreflight already checked row.newLedger != nil for this CODE_FORGE.
-	row, _ := backendByName(lc.config.codeForge)
-	backend, tree, ledgerCleanup, err := row.newLedger(lc.config)
+	// butlerPreflight already checked row.NewLedger != nil for this CODE_FORGE.
+	row, _ := backendkit.ByName(lc.config.codeForge)
+	backend, tree, ledgerCleanup, err := ledgerFor(lc.config, row)
 	if err != nil {
 		fmt.Fprintf(stderr, "butler: %v\n", err)
 		return 1

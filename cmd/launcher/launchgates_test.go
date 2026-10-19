@@ -400,8 +400,7 @@ func TestGateRegistry_ForgejoTokenGateInapplicableOnPureGitHub(t *testing.T) {
 // shared TokenEnvVar makes the gate apply, and Check then really runs and
 // rejects the missing BOX_GH_TOKEN instead of the gate never running at all.
 func TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnderDifferentName(t *testing.T) {
-	original := backendRows
-	backendRows = append(append([]backendRow{}, original...), backendRow{
+	withExtraStrategies(t, backendkit.Strategy{
 		Descriptor: backend.Descriptor{
 			Name:             "custom-github",
 			ValidAsTracker:   true,
@@ -409,7 +408,6 @@ func TestGateRegistry_TokenGateAppliesAndChecksWhenBackendSharesTokenEnvVarUnder
 			TokenEnvVar:      backend.GitHub.TokenEnvVar,
 		},
 	})
-	defer func() { backendRows = original }()
 
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
@@ -468,15 +466,15 @@ func gateNames(gates []launchGate) []string {
 // gate's Check runs the row's own hook.
 func TestReadOnlyTokenGates_OneGatePerRowWithBoxToken(t *testing.T) {
 	var calls int
-	fake := backendRow{
+	fake := backendkit.Strategy{
 		Descriptor: backend.Descriptor{Name: "fake", DisplayName: "Fake", ValidAsCodeForge: true, TokenEnvVar: "FAKE_TOKEN", BoxTokenEnvVar: "BOX_FAKE_TOKEN"},
-		introspectToken: func(string, string) (backendkit.TokenIntrospection, error) {
+		IntrospectToken: func(string, string) (backendkit.TokenIntrospection, error) {
 			calls++
 			return backendkit.TokenIntrospection{Introspectable: true}, nil
 		},
 	}
-	plain := backendRow{Descriptor: backend.Descriptor{Name: "plain", ValidAsCodeForge: true, TokenEnvVar: "PLAIN_TOKEN"}}
-	rows := []backendRow{plain, fake}
+	plain := backendkit.Strategy{Descriptor: backend.Descriptor{Name: "plain", ValidAsCodeForge: true, TokenEnvVar: "PLAIN_TOKEN"}}
+	rows := []backendkit.Strategy{plain, fake}
 
 	gates := readOnlyTokenGates(rows)
 	if len(gates) != 1 {
@@ -497,9 +495,7 @@ func TestReadOnlyTokenGates_OneGatePerRowWithBoxToken(t *testing.T) {
 		t.Errorf("Check() err = %v, calls = %d, want the row's hook invoked once", err, calls)
 	}
 
-	original := backendRows
-	backendRows = append(append([]backendRow{}, original...), fake, plain)
-	defer func() { backendRows = original }()
+	withExtraStrategies(t, fake, plain)
 
 	c.codeForge = "fake"
 	c.issueTracker = "local"
@@ -587,7 +583,7 @@ func TestGateRegistry_FullWalkChecksEachActiveBackendOnce(t *testing.T) {
 	}
 }
 
-func TestGateRegistry_TokenGatesComeFromBackendRowsInRowOrder(t *testing.T) {
+func TestGateRegistry_TokenGatesComeFromStrategiesInRegistrationOrder(t *testing.T) {
 	_, network := splitGateRegistryByNetwork(gateRegistry)
 	want := []string{"read-only-token-github", "read-only-token-forgejo"}
 	if got := gateNames(network); !reflect.DeepEqual(got, want) {
@@ -597,8 +593,8 @@ func TestGateRegistry_TokenGatesComeFromBackendRowsInRowOrder(t *testing.T) {
 
 // A row with a BoxTokenEnvVar but no distinct TokenEnvVar would make its gate
 // match every backend whose TokenEnvVar is also empty (git, local).
-func TestBackendRows_BoxTokenPairsWithDistinctHostToken(t *testing.T) {
-	for _, r := range backendRows {
+func TestStrategies_BoxTokenPairsWithDistinctHostToken(t *testing.T) {
+	for _, r := range backendkit.Strategies() {
 		if r.BoxTokenEnvVar == "" {
 			continue
 		}
@@ -616,7 +612,7 @@ func TestGateRegistry_HasReadOnlyTokenGatePerBoxTokenRow(t *testing.T) {
 	for _, g := range gateRegistry {
 		names[g.Name] = true
 	}
-	for _, r := range backendRows {
+	for _, r := range backendkit.Strategies() {
 		got := names[readOnlyTokenGatePrefix+r.Name]
 		if want := r.BoxTokenEnvVar != ""; got != want {
 			t.Errorf("gateRegistry has %q gate = %v, want %v (BoxTokenEnvVar %q)", readOnlyTokenGatePrefix+r.Name, got, want, r.BoxTokenEnvVar)

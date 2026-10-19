@@ -212,3 +212,13 @@ func RequireRepoSlug(s Shared, trackerName string) error {
 	}
 	return nil
 }
+
+// ReplaceRegistryForTest swaps the registry for ss and returns a func that
+// restores the original. It exists so a test in another package can register a
+// fake backend or hide a real one; production code registers only through
+// Register.
+func ReplaceRegistryForTest(ss []Strategy) (restore func()) {
+	original := registry
+	registry = append([]Strategy(nil), ss...)
+	return func() { registry = original }
+}

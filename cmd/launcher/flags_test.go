@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
@@ -1380,13 +1381,6 @@ func TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira(t *testing.T)
 	}
 }
 
-func withExtraBackendRow(t *testing.T, row backendRow) {
-	t.Helper()
-	original := backendRows
-	backendRows = append(append([]backendRow{}, original...), row)
-	t.Cleanup(func() { backendRows = original })
-}
-
 // A backend registered under another name that shares a stock TokenEnvVar,
 // on either the tracker or the code forge axis, must still mark that secret
 // required, or applySecretCmdFallback skips the vault fetch and validate()
@@ -1395,14 +1389,14 @@ func withExtraBackendRow(t *testing.T, row backendRow) {
 func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T) {
 	tests := []struct {
 		name      string
-		extraRow  *backendRow
+		extraRow  *backendkit.Strategy
 		env       map[string]string
 		secretEnv string
 		want      string
 	}{
 		{
 			name: "tracker shares JIRA_TOKEN under a different name",
-			extraRow: &backendRow{Descriptor: backend.Descriptor{
+			extraRow: &backendkit.Strategy{Descriptor: backend.Descriptor{
 				Name:           "my-jira-clone",
 				ValidAsTracker: true,
 				TokenEnvVar:    backend.Jira.TokenEnvVar,
@@ -1413,7 +1407,7 @@ func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T)
 		},
 		{
 			name: "tracker shares FORGEJO_TOKEN under a different name",
-			extraRow: &backendRow{Descriptor: backend.Descriptor{
+			extraRow: &backendkit.Strategy{Descriptor: backend.Descriptor{
 				Name:           "my-forgejo-clone",
 				ValidAsTracker: true,
 				TokenEnvVar:    backend.Forgejo.TokenEnvVar,
@@ -1439,7 +1433,7 @@ func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.extraRow != nil {
-				withExtraBackendRow(t, *tc.extraRow)
+				withExtraStrategies(t, *tc.extraRow)
 			}
 			orig := secretCmdRunner
 			t.Cleanup(func() { secretCmdRunner = orig })
@@ -1553,6 +1547,36 @@ func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
 				t.Errorf("secretRequiredThisRun(GH_TOKEN) with %s/%s = %v, want %v", tc.forge, tc.tracker, got, tc.want)
 			}
 		})
+	}
+}
+
+// A backend's own token is required exactly when a selected backend names it
+// as its TokenEnvVar, however novel the name: the default arm reads the rows,
+// not a list of known tokens.
+func TestSecretRequiredThisRun_NovelRowTokenFollowsSelection(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	row := fakeGitlabRow()
+	row.TokenEnvVar = "NOVEL_FORGE_TOKEN"
+	withExtraStrategies(t, row)
+
+	for _, tc := range []struct {
+		name, forge, tracker string
+		want                 bool
+	}{
+		{"selected as forge", "gitlab", "github", true},
+		{"selected as tracker", "github", "gitlab", true},
+		{"not selected", "github", "github", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CODE_FORGE", tc.forge)
+			t.Setenv("ISSUE_TRACKER", tc.tracker)
+			if got := secretRequiredThisRun("NOVEL_FORGE_TOKEN", nil); got != tc.want {
+				t.Errorf("secretRequiredThisRun(NOVEL_FORGE_TOKEN) with %s/%s = %v, want %v", tc.forge, tc.tracker, got, tc.want)
+			}
+		})
+	}
+	if secretRequiredThisRun("", nil) {
+		t.Error("secretRequiredThisRun(\"\") = true, want false")
 	}
 }
 

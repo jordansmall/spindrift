@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -31,7 +32,7 @@ const readOnlyTrustNotice = "read-only trusts that it was provisioned with read-
 // than failing (ADR 0068 decision 6), so a new backend gets this gate by
 // default. verified is true only when introspection confirmed the token has no
 // write scopes, and is always false when err is non-nil.
-func checkReadOnlyTokenGate(c config, row backendRow, w io.Writer) (verified bool, err error) {
+func checkReadOnlyTokenGate(c config, row backendkit.Strategy, w io.Writer) (verified bool, err error) {
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return false, nil
 	}
@@ -43,11 +44,11 @@ func checkReadOnlyTokenGate(c config, row backendRow, w io.Writer) (verified boo
 	if boxToken == hostToken(c, hostEnv) {
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to differ from %s — it is byte-for-byte identical to the Launcher's own token, which defeats read-only", errReadOnlyGateMisconfigured, boxEnv, hostEnv)
 	}
-	if row.introspectToken == nil {
+	if row.IntrospectToken == nil {
 		fmt.Fprintf(w, "WARNING: the %s backend cannot introspect a token's scopes (no IntrospectToken hook), so %s's write capability could not be determined. "+readOnlyTrustNotice+"\n", row.DisplayName, boxEnv)
 		return false, nil
 	}
-	result, err := row.introspectToken(boxToken, c.repoSlug)
+	result, err := row.IntrospectToken(boxToken, c.repoSlug)
 	if err != nil {
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only: introspecting %s failed: %w", doctor.ErrConnectivity, boxEnv, err)
 	}
