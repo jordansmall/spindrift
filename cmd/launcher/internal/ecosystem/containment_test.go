@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 type ecosystemLiteral struct {
@@ -79,16 +81,6 @@ func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 	return findings
 }
 
-func writeFixture(t *testing.T, dir, name, contents string) {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%s): %v", dir, err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", name, err)
-	}
-}
-
 // lineOf reports the 1-based line of the first line of src containing needle.
 // Fixture sources are generated, so deriving the expected line keeps the
 // assertions from drifting when the templates change.
@@ -130,9 +122,9 @@ func classify(name string) bool {
 	return false
 }
 `, violatingName)
-	writeFixture(t, dir, "violating.go", violatingSrc)
+	testutil.WriteFixture(t, dir, "violating.go", violatingSrc)
 
-	writeFixture(t, dir, "compliant.go", fmt.Sprintf(`package fixture
+	testutil.WriteFixture(t, dir, "compliant.go", fmt.Sprintf(`package fixture
 
 // configFile names the %s config file this package writes; it is not
 // itself a routing decision on the %s ecosystem name.
@@ -141,7 +133,7 @@ func configFile() string {
 }
 `, containedName, containedName, containedName+" config.json"))
 
-	writeFixture(t, dir, "fixture_test.go", fmt.Sprintf(`package fixture
+	testutil.WriteFixture(t, dir, "fixture_test.go", fmt.Sprintf(`package fixture
 
 import "testing"
 
@@ -156,9 +148,9 @@ func TestBareLiteralOutOfScope(t *testing.T) {
 
 var routed = %q
 `, subpkgName)
-	writeFixture(t, subDir, "nested.go", nestedSrc)
+	testutil.WriteFixture(t, subDir, "nested.go", nestedSrc)
 
-	writeFixture(t, filepath.Join(dir, "testdata"), "broken.go", "this is not go source {{")
+	testutil.WriteFixture(t, filepath.Join(dir, "testdata"), "broken.go", "this is not go source {{")
 
 	findings := scanForEcosystemLiterals(t, dir)
 	want := ecosystemLiteral{File: filepath.Join(dir, "violating.go"), Line: lineOf(t, violatingSrc, violatingName), Value: violatingName}
@@ -297,13 +289,13 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, pla
 	root = t.TempDir()
 	moduleName = "example.com/fixturemodule"
 
-	writeFixture(t, root, "go.mod", fmt.Sprintf("module %s\n\ngo 1.24\n", moduleName))
-	writeFixture(t, root, "mainpkg.go", fmt.Sprintf("package mainpkg\n\nvar routed = %q\n", plantedRoot))
-	writeFixture(t, filepath.Join(root, "internal", "ecosystem"), "ecosystem.go", "package ecosystem\n")
-	writeFixture(t, filepath.Join(root, "internal", "newreader"), "newreader.go", fmt.Sprintf(
+	testutil.WriteFixture(t, root, "go.mod", fmt.Sprintf("module %s\n\ngo 1.24\n", moduleName))
+	testutil.WriteFixture(t, root, "mainpkg.go", fmt.Sprintf("package mainpkg\n\nvar routed = %q\n", plantedRoot))
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "ecosystem"), "ecosystem.go", "package ecosystem\n")
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "newreader"), "newreader.go", fmt.Sprintf(
 		"package newreader\n\nimport _ %q\n\nvar routed = %q\n", moduleName+"/internal/ecosystem", plantedReader))
-	writeFixture(t, filepath.Join(root, "internal", "sibling"), "sibling.go", "package sibling\n\nvar notRouted = \"unrelated\"\n")
-	writeFixture(t, filepath.Join(root, "internal", "credresolver"), "credresolver.go", fmt.Sprintf(
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "sibling"), "sibling.go", "package sibling\n\nvar notRouted = \"unrelated\"\n")
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "credresolver"), "credresolver.go", fmt.Sprintf(
 		"package credresolver\n\nvar routed = %q\n", plantedCred))
 
 	return root, moduleName
