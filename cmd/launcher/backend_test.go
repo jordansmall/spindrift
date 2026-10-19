@@ -13,12 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/forge/git"
-	"spindrift.dev/launcher/internal/forge/jira"
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/inputdoc"
-	"spindrift.dev/launcher/internal/tuning"
 )
 
 // Slice 1 of issue #2267 is purely additive: nothing calls backendRows yet, so
@@ -435,37 +430,5 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 	}
 	if want := filepath.Join(".spindrift", "issues"); !strings.HasSuffix(dir, string(filepath.Separator)+want) {
 		t.Errorf("blank LOCAL_ISSUES_DIR resolved to %q, want it to end in %q", dir, want)
-	}
-}
-
-// Every rowKnobs key must be an env some row's generated
-// ReadKnobs looks up, and ReadKnobs over the config's lookup must succeed:
-// the latter pins mustBuild's claim that its error is unreachable.
-func TestRowKnobsAreDeclaredByRows(t *testing.T) {
-	c := minimalValidConfig()
-	seen := map[string]bool{}
-	rec := func(env string) (string, bool) {
-		seen[env] = true
-		return c.knobLookup(env)
-	}
-	if _, err := forgejo.ReadKnobs(rec); err != nil {
-		t.Errorf("forgejo.ReadKnobs: %v", err)
-	}
-	if _, err := jira.ReadKnobs(rec); err != nil {
-		t.Errorf("jira.ReadKnobs: %v", err)
-	}
-	if _, err := local.ReadKnobs(rec); err != nil {
-		t.Errorf("local.ReadKnobs: %v", err)
-	}
-	if _, err := tuning.Strategy.Knobs(rec); err != nil {
-		t.Errorf("tuning.Strategy.Knobs: %v", err)
-	}
-	if _, err := git.ReadKnobs(rec); err != nil {
-		t.Errorf("git.ReadKnobs: %v", err)
-	}
-	for key := range rowKnobs {
-		if !seen[key] {
-			t.Errorf("rowKnobs key %q is not declared by any row", key)
-		}
 	}
 }

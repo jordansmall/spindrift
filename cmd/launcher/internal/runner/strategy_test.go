@@ -63,18 +63,22 @@ func TestLookupReturnsRegisteredConstructors(t *testing.T) {
 	built := ""
 	Register(Strategy{
 		Name:     "fake",
-		New:      func(Config, string) Runner { built = "run"; return nil },
-		NewBuild: func(Config, string) Runner { built = "build"; return nil },
+		New:      func(Config, KnobLookup, string) (Runner, error) { built = "run"; return nil, nil },
+		NewBuild: func(Config, KnobLookup, string) (Runner, error) { built = "build"; return nil, nil },
 	})
 	s, err := Lookup("fake")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.New(Config{}, "")
+	if _, err := s.New(Config{}, nil, ""); err != nil {
+		t.Fatal(err)
+	}
 	if built != "run" {
 		t.Errorf("New dispatched to %q", built)
 	}
-	s.NewBuild(Config{}, "")
+	if _, err := s.NewBuild(Config{}, nil, ""); err != nil {
+		t.Fatal(err)
+	}
 	if built != "build" {
 		t.Errorf("NewBuild dispatched to %q", built)
 	}
@@ -91,16 +95,16 @@ func TestNamesSorted(t *testing.T) {
 }
 
 func TestPrerequisitesForNilFuncIsNil(t *testing.T) {
-	if got := (Strategy{Name: "fake"}).PrerequisitesFor(Config{}); got != nil {
+	if got := (Strategy{Name: "fake"}).PrerequisitesFor(Config{}, nil); got != nil {
 		t.Errorf("PrerequisitesFor with nil func = %v, want nil", got)
 	}
 }
 
 func TestPrerequisitesForPassesConfig(t *testing.T) {
-	s := Strategy{Name: "fake", Prerequisites: func(cfg Config) []Prerequisite {
+	s := Strategy{Name: "fake", Prerequisites: func(cfg Config, _ KnobLookup) []Prerequisite {
 		return []Prerequisite{{Name: cfg.Runtime, Required: cfg.MaxParallel > 1}}
 	}}
-	got := s.PrerequisitesFor(Config{Runtime: "x", MaxParallel: 2})
+	got := s.PrerequisitesFor(Config{Runtime: "x", MaxParallel: 2}, nil)
 	if len(got) != 1 || got[0].Name != "x" || !got[0].Required {
 		t.Errorf("PrerequisitesFor = %+v, want one Required row named x", got)
 	}

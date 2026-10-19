@@ -10,12 +10,14 @@ type OCINetwork struct {
 }
 
 // OCINetwork resolves c's network knobs for an OCI runtime (issue #2562, #2666).
-func (c Config) OCINetwork() OCINetwork {
+// podmanNetwork is the raw PODMAN_NETWORK escape hatch, a row knob the oci
+// family reads itself rather than carrying on Config.
+func (c Config) OCINetwork(podmanNetwork string) OCINetwork {
 	n := OCINetwork{Mode: c.NetworkMode}
 	// Raw wins: mkHarness and main.go's checkNetworkModeRuntimeGate already
 	// reject pairing it with a non-open mode.
-	if c.PodmanNetwork != "" {
-		n.Arg = c.PodmanNetwork
+	if podmanNetwork != "" {
+		n.Arg = podmanNetwork
 		return n
 	}
 	switch c.NetworkMode {
@@ -45,11 +47,12 @@ type BwrapNetwork struct {
 // BwrapNetwork resolves c's network knobs for the bwrap runner (issue #2562,
 // #2666). It reads no Runtime: RUNNER_KIND, not RUNTIME, picks the adapter
 // (issue #2538), so RUNNER_KIND=bwrap/RUNTIME=podman must still isolate.
-func (c Config) BwrapNetwork() BwrapNetwork {
+// unshareNet is the raw BWRAP_UNSHARE_NET row knob the bwrap family reads.
+func (c Config) BwrapNetwork(unshareNet bool) BwrapNetwork {
 	var n BwrapNetwork
 	// Every mode except "host" isolates, including the zero value. The raw
-	// BwrapUnshareNet can only force isolation on; kept for defense in depth.
-	n.Isolate = c.BwrapUnshareNet || c.NetworkMode != NetworkModeHost
+	// unshareNet can only force isolation on; kept for defense in depth.
+	n.Isolate = unshareNet || c.NetworkMode != NetworkModeHost
 	// "none" is fully offline: bare --unshare-net, no pasta helper.
 	n.Pasta = n.Isolate && c.NetworkMode != NetworkModeNone
 	return n

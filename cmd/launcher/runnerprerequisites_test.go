@@ -33,7 +33,7 @@ func installStubStrategy(t *testing.T, gateErr, doctorOnlyErr error) *stubPrereq
 	counts := &stubPrereqs{}
 	stub := runner.Strategy{
 		Name: stubFamily,
-		Prerequisites: func(runner.Config) []runner.Prerequisite {
+		Prerequisites: func(runner.Config, runner.KnobLookup) []runner.Prerequisite {
 			return []runner.Prerequisite{
 				{Name: "stub-config", Launch: runner.LaunchWithConfig, Required: true, Remedy: "fix the config row", Probe: func() (any, error) {
 					counts.configCalls++

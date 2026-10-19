@@ -6,17 +6,25 @@ import (
 	"sort"
 )
 
+// KnobLookup resolves one knob's env name to its already-resolved value (after
+// any _CMD resolution) and whether it is set; os.LookupEnv has this shape. A
+// family hands it to its generated ReadKnobs, so its own knobs never widen
+// Config (ADR 0068 decision 3).
+type KnobLookup func(env string) (value string, ok bool)
+
 // Strategy is one runner family's entry in the registry (ADR 0069 decision 2;
 // CONTEXT.md "Runner Strategy"). Name is the family's RUNNER_KIND string.
 type Strategy struct {
 	Name string
-	// New constructs the Runner for the run command.
-	New func(cfg Config, pwd string) Runner
+	// New constructs the Runner for the run command; a malformed family knob
+	// read through l is an error.
+	New func(cfg Config, l KnobLookup, pwd string) (Runner, error)
 	// NewBuild constructs the Runner for the build command.
-	NewBuild func(cfg Config, pwd string) Runner
+	NewBuild func(cfg Config, l KnobLookup, pwd string) (Runner, error)
 	// Prerequisites declares the family's host checks in report order. Tiers and
-	// remedies depend on cfg, so it is a function of Config; nil means none.
-	Prerequisites func(cfg Config) []Prerequisite
+	// remedies depend on cfg and the family's knobs, read through l; nil means
+	// none.
+	Prerequisites func(cfg Config, l KnobLookup) []Prerequisite
 }
 
 // Launch says where the launch path enforces a Required prerequisite. Doctor
@@ -75,13 +83,13 @@ func LaunchGates(ps []Prerequisite, stage Launch) []Prerequisite {
 // and still prints it, with its Remedy, as an advisory line.
 var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
-// PrerequisitesFor returns the family's prerequisites for cfg, or nil when it
+// PrerequisitesFor returns the family's prerequisites for cfg and l, or nil when it
 // declares none.
-func (s Strategy) PrerequisitesFor(cfg Config) []Prerequisite {
+func (s Strategy) PrerequisitesFor(cfg Config, l KnobLookup) []Prerequisite {
 	if s.Prerequisites == nil {
 		return nil
 	}
-	return s.Prerequisites(cfg)
+	return s.Prerequisites(cfg, l)
 }
 
 var strategies = map[string]Strategy{}

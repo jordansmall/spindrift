@@ -795,7 +795,7 @@ func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
 
 // runnerConfig builds the runner.Config a runner adapter needs. Shared by the
 // `run` and `build` entry points; build never calls Run, so leaving
-// PromptDir/SkillsDir/PodmanNetwork populated is harmless there.
+// PromptDir/SkillsDir populated is harmless there.
 func runnerConfig(c config) runner.Config {
 	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
 	return runner.Config{
@@ -807,7 +807,6 @@ func runnerConfig(c config) runner.Config {
 		NixBuilderImage:   c.nixBuilderImage,
 		NixVolume:         c.nixVolume,
 		FlakeImageAttr:    c.flakeImageAttr,
-		PodmanNetwork:     c.podmanNetwork,
 		NetworkMode:       c.runnerNetworkMode(),
 		PidsLimit:         c.pidsLimit,
 		MemoryLimit:       c.memoryLimit,
@@ -825,7 +824,6 @@ func runnerConfig(c config) runner.Config {
 		NixStoreWritable:  c.nixStoreWritable,
 		SyscallFilterPath: c.syscallFilterPath,
 		SyscallFilterDrv:  c.syscallFilterDrv,
-		BwrapUnshareNet:   c.bwrapUnshareNet,
 		MaxParallel:       c.maxParallel,
 		MountParams: runner.MountParams{
 			PromptDir:             c.spindriftPromptDir,
@@ -846,7 +844,7 @@ func runnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, error
 	if err != nil {
 		return nil, err
 	}
-	return s.New(rc, pwd), nil
+	return s.New(rc, c.knobLookup, pwd)
 }
 
 // buildRunnerForKind is runnerForKind's `launcher build` counterpart, using
@@ -856,7 +854,7 @@ func buildRunnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, 
 	if err != nil {
 		return nil, err
 	}
-	return s.NewBuild(rc, pwd), nil
+	return s.NewBuild(rc, c.knobLookup, pwd)
 }
 
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).

@@ -71,7 +71,7 @@ func podmanMachineMemoryRemedy(memoryLimit string, maxParallel int) string {
 // an in-box `nix build`; #712 took down the whole VM). The row is declared for
 // every runtime of the family; docker and rancher use no podman machine, so
 // their Probe reports not applicable.
-func Prerequisites(cfg runner.Config) []runner.Prerequisite {
+func Prerequisites(cfg runner.Config, _ runner.KnobLookup) []runner.Prerequisite {
 	return []runner.Prerequisite{runner.RuntimePrerequisite(cfg.Runtime), {
 		Name:     podmanMachineMemoryCheckName,
 		Launch:   runner.DoctorOnly,
