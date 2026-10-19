@@ -1,12 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -17,6 +20,21 @@ import (
 // from dispatchkind.ByName(...).AdviseOnly -- never the kind name itself.
 // Prior art: ../kindaxes_guard_test.go.
 
+// kindNamePattern is a capturing group alternating every registered kind, so
+// a kind added to dispatchkind.All is guarded without a hand-edit here.
+var kindNamePattern = func() string {
+	names := make([]string, len(dispatchkind.All))
+	for i, k := range dispatchkind.All {
+		names[i] = regexp.QuoteMeta(k.Name)
+	}
+	return "(" + strings.Join(names, "|") + ")"
+}()
+
+// choreKeyLiteral matches a bare chore-key prefix literal. The prefix belongs
+// to the Chore Key, not to any kind descriptor, so it is read from
+// dispatchkey.ChorePrefix rather than dispatchkind.All.
+var choreKeyLiteral = regexp.MustCompile(regexp.QuoteMeta(`"` + dispatchkey.ChorePrefix))
+
 // shellKindBranch mirrors the grep -E patterns of the retired
 // entrypoint kind-axes bats guard. `--dispatch-kind "${DISPATCH_KIND:-work}"`
 // (handing the name to driver-exec for its own descriptor lookup) and the
@@ -25,19 +43,19 @@ import (
 var shellKindBranch = []*regexp.Regexp{
 	regexp.MustCompile(`\$\{?DISPATCH_KIND[^}]*\}?"?[[:space:]]+[!=]?=`),
 	regexp.MustCompile(`case[[:space:]]+"?\$\{?DISPATCH_KIND`),
-	regexp.MustCompile(`[!=]?=[[:space:]]*"?(butler|research|work)"?([^A-Za-z0-9_.-]|$)`),
-	// The "butler-" key derivation is dispatch.buildBoxEnv's job
-	// (DISPATCH_KEY), not the Box's.
-	regexp.MustCompile(`"butler-`),
+	regexp.MustCompile(`[!=]?=[[:space:]]*"?` + kindNamePattern + `"?([^A-Za-z0-9_.-]|$)`),
+	// The chore-key derivation (dispatchkey.ChorePrefix) is
+	// dispatch.buildBoxEnv's job (DISPATCH_KEY), not the Box's.
+	choreKeyLiteral,
 }
 
 // goKindBranch is the Go-side equivalent. `r.kind == ""` (the empty default)
 // is not a kind-name comparison and does not match.
 var goKindBranch = []*regexp.Regexp{
-	regexp.MustCompile(`(DispatchKind|\bkind|\.Name)\s*[!=]=\s*"(work|research|butler)"`),
-	regexp.MustCompile(`"(work|research|butler)"\s*[!=]=\s*[\w.]*(DispatchKind|kind|\.Name)\b`),
+	regexp.MustCompile(`(DispatchKind|\bkind|\.Name)\s*[!=]=\s*"` + kindNamePattern + `"`),
+	regexp.MustCompile(`"` + kindNamePattern + `"\s*[!=]=\s*[\w.]*(DispatchKind|kind|\.Name)\b`),
 	regexp.MustCompile(`switch\s+([\w.]*\.)?(DispatchKind|kind)\s*\{`),
-	regexp.MustCompile(`"butler-`),
+	choreKeyLiteral,
 }
 
 // kindBranchViolations returns the non-comment lines of src that match any
@@ -95,50 +113,65 @@ func TestBoxHasNoKindBranch(t *testing.T) {
 }
 
 func TestKindBranchCheckerCatchesReintroducedViolations(t *testing.T) {
-	cases := []struct {
+	type tc struct {
 		name, prefix, src, want string
 		patterns                []*regexp.Regexp
-	}{
+	}
+	cases := []tc{
 		{"shell DISPATCH_KIND comparison", "#", `#!/usr/bin/env bash
-# a plain comment mentioning butler is fine
-if [ "${DISPATCH_KIND:-}" = "butler" ]; then
+if [ "${DISPATCH_KIND:-}" = "$other" ]; then
   echo sweeping
 fi
-`, `DISPATCH_KIND:-}" = "butler"`, shellKindBranch},
+`, `DISPATCH_KIND:-}" = "$other"`, shellKindBranch},
 		{"shell case-on-kind dispatch", "#", `#!/usr/bin/env bash
 case "$DISPATCH_KIND" in
-  research) echo researching ;;
+  "$other") echo matched ;;
   *) echo implementing ;;
 esac
 `, `case "$DISPATCH_KIND"`, shellKindBranch},
-		{"shell bare butler- key literal", "#", `#!/usr/bin/env bash
-export BRANCH="butler-${CHORE_NAME}"
-`, `"butler-`, shellKindBranch},
-		{"go kind-name comparison", "//", `package main
+		{"shell bare chore-key literal", "#", fmt.Sprintf(`#!/usr/bin/env bash
+export BRANCH="%s${CHORE_NAME}"
+`, dispatchkey.ChorePrefix), `"` + dispatchkey.ChorePrefix, shellKindBranch},
+	}
+	// Every registered kind must trip each name-comparison pattern, so a kind
+	// added to dispatchkind.All is guarded without touching this file.
+	for _, k := range dispatchkind.All {
+		n := k.Name
+		cases = append(cases,
+			// Comparing a plain variable keeps the DISPATCH_KIND-expansion
+			// pattern out of it: only the kind-name alternation can match.
+			tc{"shell comparison with " + n, "#", fmt.Sprintf(`#!/usr/bin/env bash
+# a plain comment mentioning %[1]s is fine
+if [ "$k" = "%[1]s" ]; then
+  echo sweeping
+fi
+`, n), fmt.Sprintf(`"$k" = "%s"`, n), shellKindBranch},
+			tc{"go kind-name comparison with " + n, "//", fmt.Sprintf(`package main
 
-// if r.kind == "work" in a comment is fine
+// if r.kind == "%[1]s" in a comment is fine
 func f(r runner) bool {
-	if r.kind == "research" {
+	if r.kind == "%[1]s" {
 		return true
 	}
 	return false
 }
-`, `r.kind == "research"`, goKindBranch},
-		{"go bare local kind comparison", "//", `package main
+`, n), fmt.Sprintf(`r.kind == "%s"`, n), goKindBranch},
+			tc{"go bare local kind comparison with " + n, "//", fmt.Sprintf(`package main
 
 func f(kind string) bool {
-	if kind == "butler" {
+	if kind == "%s" {
 		return true
 	}
 	return false
 }
-`, `kind == "butler"`, goKindBranch},
-		{"go reversed bare local kind comparison", "//", `package main
+`, n), fmt.Sprintf(`kind == "%s"`, n), goKindBranch},
+			tc{"go reversed bare local kind comparison with " + n, "//", fmt.Sprintf(`package main
 
 func f(kind string) bool {
-	return "work" != kind
+	return "%s" != kind
 }
-`, `"work" != kind`, goKindBranch},
+`, n), fmt.Sprintf(`"%s" != kind`, n), goKindBranch},
+		)
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -151,9 +184,9 @@ func f(kind string) bool {
 }
 
 func TestKindBranchCheckerAllowsLegitimateSpellings(t *testing.T) {
-	shell := `exec driver-exec --dispatch-kind "${DISPATCH_KIND:-work}"
-echo "DISPATCH_KIND=${DISPATCH_KIND:-work}"
-`
+	shell := fmt.Sprintf(`exec driver-exec --dispatch-kind "${DISPATCH_KIND:-%[1]s}"
+echo "DISPATCH_KIND=${DISPATCH_KIND:-%[1]s}"
+`, dispatchkind.Work.Name)
 	if got := kindBranchViolations(shell, "#", shellKindBranch); len(got) != 0 {
 		t.Errorf("shell false positives: %q", got)
 	}
