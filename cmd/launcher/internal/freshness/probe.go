@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // Evaluator hermetically evaluates a flake attribute's output path at a git rev.
@@ -109,19 +111,13 @@ func trimFlakeAttrPrefix(attr string) string {
 	return strings.TrimPrefix(attr, ".#")
 }
 
-// KindBwrap is the RUNNER_KIND value selecting the bwrap runner. bwrap has no
-// "repo:tag" registry concept, so Probe compares the evaluated outPath directly
-// against the loaded imageTag, itself a bare store path. Any other runnerKind,
-// including an OCI runtime name, is treated as an OCI kind.
-const KindBwrap = "bwrap"
-
 // ProbeSpec is the set of params Probe needs to answer a freshness check.
 type ProbeSpec struct {
-	// RunnerKind is the RUNNER_KIND document artifact (#2538 AC1): KindBwrap
+	// RunnerKind is the RUNNER_KIND document artifact (#2538 AC1): runner.KindBwrap
 	// selects the bwrap comparison path, any other value an OCI kind.
 	RunnerKind, Pwd, BaseBranch string
 	// ImageTag is the loaded image's tag, an OCI "repo:tag" string or, for
-	// KindBwrap, a bare nix store path.
+	// runner.KindBwrap, a bare nix store path.
 	FlakeImageAttr, ImageTag string
 	// FlakeLauncherAttr and LoadedLauncherHash drive the optional
 	// host-launcher freshness dimension (#1364); a non-empty FlakeLauncherAttr
@@ -181,7 +177,10 @@ func Probe(spec ProbeSpec, eval Evaluator) Result {
 
 	var tipTag string
 	var imageFresh bool
-	if spec.RunnerKind == KindBwrap {
+	// bwrap has no "repo:tag" registry concept, so compare the evaluated outPath
+	// directly against the loaded imageTag, itself a bare store path. Any other
+	// runnerKind, including an OCI runtime name, is treated as an OCI kind.
+	if spec.RunnerKind == runner.KindBwrap {
 		tipTag = outPath
 		imageFresh = outPath == spec.ImageTag
 	} else {
@@ -248,7 +247,7 @@ func Probe(spec ProbeSpec, eval Evaluator) Result {
 // for bwrap (#2667), where that slot holds a raw nix store path.
 func freshnessMessage(runnerKind, baseBranch, rev string, launcherConfigured, imageFresh, launcherFresh bool, tipTag, imageTag, tipLauncherHash, loadedLauncherHash string) string {
 	loaded := "image"
-	if runnerKind == KindBwrap {
+	if runnerKind == runner.KindBwrap {
 		loaded = "closure"
 	}
 

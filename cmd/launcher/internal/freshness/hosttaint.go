@@ -5,7 +5,11 @@
 // content-hash tag or store path, so Probe's "rebuild needed" never converges.
 package freshness
 
-import "fmt"
+import (
+	"fmt"
+
+	"spindrift.dev/launcher/internal/runner"
+)
 
 // NonConverging reports whether staleRev repeats the rev the prior launcher
 // process already exited stale on, meaning a rebuild against the same base tip
@@ -16,12 +20,12 @@ func NonConverging(staleRev, priorStaleRev string) bool {
 }
 
 // HostTaintDiagnostic returns a one-shot operator diagnostic for a freshness
-// divergence that persisted across a rebuild to the base tip. Under KindBwrap,
+// divergence that persisted across a rebuild to the base tip. Under runner.KindBwrap,
 // tipTag and imageTag are bare nix store paths and darwin can never be the
 // culprit, since lib/mkHarness.nix gates agent-closure on isLinux. Any other
 // runnerKind is OCI, where the tags are "repo:tag" strings.
 func HostTaintDiagnostic(runnerKind, baseBranch, rev, flakeImageAttr, tipTag, imageTag string) string {
-	if runnerKind == KindBwrap {
+	if runnerKind == runner.KindBwrap {
 		return fmt.Sprintf(
 			"freshness divergence did not converge after rebuilding to %s tip %s: "+
 				"the evaluated closure identity %s still does not match the loaded closure identity %s.\n"+

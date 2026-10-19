@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/oci"
 )
@@ -72,7 +71,7 @@ func podmanMachineMemoryRemedy(memoryLimit string, maxParallel int) string {
 // an in-box `nix build`; #712 took down the whole VM). A bwrap harness runs
 // no podman machine at all, so the row never appears there.
 func podmanMachineMemoryCheck(c config) []doctor.Check {
-	if c.runnerKind == freshness.KindBwrap {
+	if c.runnerKind == runner.KindBwrap {
 		return nil
 	}
 

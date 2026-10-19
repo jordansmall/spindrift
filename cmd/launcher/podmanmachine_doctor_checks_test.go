@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // stubPodmanMachineMemory swaps the query seam for the duration of the test,
@@ -27,7 +27,7 @@ func stubPodmanMachineMemory(t *testing.T, mib int, found bool) *bool {
 
 func TestPodmanMachineMemoryCheck_BwrapReturnsNoRow(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.runtime = "podman"
 	if got := podmanMachineMemoryCheck(c); got != nil {
 		t.Errorf("podmanMachineMemoryCheck() = %v, want nil under bwrap", got)
@@ -467,7 +467,7 @@ func TestDoctorCheckSets_PodmanMachineProbeMemoizedAcrossClassifyAndReport(t *te
 // absent from both halves now that it also sits in classify.
 func TestDoctorCheckSets_BwrapRunnerGetsNoPodmanMachineRowInEitherSet(t *testing.T) {
 	c := minimalValidConfig()
-	c.runnerKind = freshness.KindBwrap
+	c.runnerKind = runner.KindBwrap
 	c.runtime = "podman"
 
 	classify, report := doctorCheckSets(c)
