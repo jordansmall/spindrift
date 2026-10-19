@@ -104,6 +104,7 @@ func Register(s Strategy) {
 }
 
 // defaultKind is the runner family an empty RUNNER_KIND selects.
+// runner-family-guard: unset RUNNER_KIND means OCI; Lookup still resolves it.
 const defaultKind = KindOCI
 
 // orDefault resolves an empty runner kind to defaultKind.
