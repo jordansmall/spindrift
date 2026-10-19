@@ -2,8 +2,11 @@ package runner
 
 import (
 	"os"
+	"slices"
+	"sort"
 	"sync"
 
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -11,6 +14,10 @@ import (
 // concurrent use.
 type Fake struct {
 	mu sync.Mutex
+
+	// live maps the name of each Box mid-RunFunc to the channel Kill closes to
+	// end that Run.
+	live map[string]chan struct{}
 
 	EnsureReadyCalls int
 
@@ -44,6 +51,8 @@ type Fake struct {
 	// calls without deadlocking.
 	RunFunc func(Box) error
 
+	// IsRunningRet, when true, makes IsRunning report true for every name and
+	// every Run return ErrAlreadyRunning.
 	IsRunningRet bool
 
 	IsRunningCalls []string
@@ -88,12 +97,20 @@ func (f *Fake) IsReady() error {
 	return f.IsReadyErr
 }
 
-// Run records the box and returns the scripted error for this call index, or
-// calls RunFunc when it is set.
+// Run records the box, then returns ErrAlreadyRunning, writing no output, if
+// box.Name is running (see IsRunning); else it writes WriteToOutput and returns
+// the scripted error for this call index, or calls RunFunc when it is set. A
+// Kill of box.Name while RunFunc runs ends the Run with an ExitSIGKILL
+// RunError, as a SIGKILLed box does. The refusal is not atomic with the
+// RunFunc Run becoming live, so concurrent same-name Runs can both proceed.
 func (f *Fake) Run(box Box) error {
 	f.mu.Lock()
 	i := len(f.RunCalls)
 	f.RunCalls = append(f.RunCalls, box)
+	if f.runningLocked(box.Name) {
+		f.mu.Unlock()
+		return ErrAlreadyRunning
+	}
 	if len(f.WriteToOutput) > 0 && box.Output != nil {
 		box.Output.Write(f.WriteToOutput) //nolint:errcheck
 	}
@@ -114,17 +131,61 @@ func (f *Fake) Run(box Box) error {
 	f.mu.Unlock()
 
 	if fn != nil {
-		return fn(box)
+		return f.runFunc(fn, box)
 	}
 	return err
 }
 
-// Kill records the name and returns KillErr.
+// runFunc runs fn as the live Box box.Name until it returns or Kill ends it.
+// A nameless Box is not tracked, so unnamed concurrent Runs never collide.
+func (f *Fake) runFunc(fn func(Box) error, box Box) error {
+	if box.Name == "" {
+		return fn(box)
+	}
+	killed := make(chan struct{})
+	f.mu.Lock()
+	if f.live == nil {
+		f.live = map[string]chan struct{}{}
+	}
+	f.live[box.Name] = killed
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		if f.live[box.Name] == killed {
+			delete(f.live, box.Name)
+		}
+		f.mu.Unlock()
+	}()
+
+	// done closes even if fn exits its goroutine (t.FailNow), so Run cannot hang.
+	var fnErr error
+	done := make(chan struct{})
+	panicguard.Go(func() {
+		defer close(done)
+		fnErr = fn(box)
+	})
+	select {
+	case <-done:
+		return fnErr
+	case <-killed:
+		return &RunError{ExitCode: ExitSIGKILL, Msg: "fake box killed (SIGKILL)"}
+	}
+}
+
+// Kill records the name and returns KillErr. With KillErr nil it also ends a
+// live RunFunc Run of that name; a failed Kill leaves the Box running.
 func (f *Fake) Kill(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.KillCalls = append(f.KillCalls, name)
-	return f.KillErr
+	if f.KillErr != nil {
+		return f.KillErr
+	}
+	if ch, ok := f.live[name]; ok {
+		close(ch)
+		delete(f.live, name)
+	}
+	return nil
 }
 
 // RemoveHostTree records the path and removes it for real, so tests that rely
@@ -136,22 +197,43 @@ func (f *Fake) RemoveHostTree(path string) error {
 	return os.RemoveAll(path)
 }
 
-// IsRunning records the name and returns IsRunningRet.
+// IsRunning records the name and reports whether it is running: IsRunningRet
+// is set, the name is in RunningNames, or a RunFunc Run of it is live.
 func (f *Fake) IsRunning(name string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.IsRunningCalls = append(f.IsRunningCalls, name)
-	return f.IsRunningRet
+	return f.runningLocked(name)
 }
 
-// ListRunning returns RunningNames, or ListRunningErr when set.
+func (f *Fake) runningLocked(name string) bool {
+	if f.IsRunningRet || slices.Contains(f.RunningNames, name) {
+		return true
+	}
+	_, live := f.live[name]
+	return live
+}
+
+// ListRunning returns RunningNames plus the names of live RunFunc Runs, or
+// ListRunningErr when set.
 func (f *Fake) ListRunning() ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.ListRunningErr != nil {
 		return nil, f.ListRunningErr
 	}
-	return f.RunningNames, nil
+	if len(f.live) == 0 {
+		return f.RunningNames, nil
+	}
+	names := slices.Clone(f.RunningNames)
+	var liveNames []string
+	for n := range f.live {
+		if !slices.Contains(names, n) {
+			liveNames = append(liveNames, n)
+		}
+	}
+	sort.Strings(liveNames)
+	return append(names, liveNames...), nil
 }
 
 // RegistryProxyTransport records the call and returns the scripted endpoint,
