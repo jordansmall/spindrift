@@ -17,10 +17,29 @@ func TestReadContext_ReconcileLivenessProbe_LocalTracker_ReturnsNonNil(t *testin
 	c.issueTracker = "local"
 	rc := readContext{config: c, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
-	lp := rc.reconcileLivenessProbe(t.TempDir())
+	lp, err := rc.reconcileLivenessProbe(t.TempDir())
+	if err != nil {
+		t.Fatalf("reconcileLivenessProbe: %v", err)
+	}
 
 	if lp == nil {
 		t.Error("reconcileLivenessProbe(pwd) = nil, want a non-nil LivenessProbe for ISSUE_TRACKER=local")
+	}
+}
+
+func TestReadContext_ReconcileLivenessProbe_UnknownRunnerKind_ReturnsError(t *testing.T) {
+	c := baseConfig()
+	c.issueTracker = "local"
+	c.runnerKind = "nope"
+	rc := readContext{config: c, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
+
+	_, err := rc.reconcileLivenessProbe(t.TempDir())
+
+	if err == nil {
+		t.Fatal("reconcileLivenessProbe: nil error, want one for an unknown RUNNER_KIND")
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Errorf("error %q does not name the unknown kind %q", err, "nope")
 	}
 }
 
@@ -31,7 +50,10 @@ func TestReadContext_ReconcileLivenessProbe_GithubTracker_ReturnsNil(t *testing.
 	c.issueTracker = "github"
 	rc := readContext{config: c}
 
-	lp := rc.reconcileLivenessProbe(t.TempDir())
+	lp, err := rc.reconcileLivenessProbe(t.TempDir())
+	if err != nil {
+		t.Fatalf("reconcileLivenessProbe: %v", err)
+	}
 
 	if lp != nil {
 		t.Errorf("reconcileLivenessProbe(pwd) = %v, want nil for ISSUE_TRACKER=github", lp)
@@ -99,7 +121,10 @@ func TestReadContext_ConstructibleAgainstForgeFake(t *testing.T) {
 	fake := forge.NewFake()
 	rc := readContext{config: c, issueTracker: fake, codeForge: fake, capabilities: forge.Capabilities{TrackerDescriptor: backend.Local}}
 
-	lp := rc.reconcileLivenessProbe(t.TempDir())
+	lp, err := rc.reconcileLivenessProbe(t.TempDir())
+	if err != nil {
+		t.Fatalf("reconcileLivenessProbe: %v", err)
+	}
 
 	if lp == nil {
 		t.Error("reconcileLivenessProbe(pwd) = nil, want a non-nil LivenessProbe for ISSUE_TRACKER=local")

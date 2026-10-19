@@ -24,7 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers, backends, and runner families
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
@@ -41,7 +41,6 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/bwrap"
-	"spindrift.dev/launcher/internal/runner/oci"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/stopsignal"
@@ -384,7 +383,7 @@ func loadConfig() config {
 	// No runtime-name fallback: the nix pipeline always renders RUNNER_KIND
 	// alongside RUNTIME (issue #2538). A direct binary invocation with no
 	// --input document that also omits RUNNER_KIND gets "", which
-	// runnerForKind/buildRunnerForKind treat as "oci".
+	// runner.Lookup resolves to the OCI family.
 	runnerKind := getenvArtifact("RUNNER_KIND", "")
 	// loadConfig runs from several call sites, so mainRun prints the warning
 	// once instead.
@@ -813,24 +812,26 @@ func runnerConfig(c config) runner.Config {
 	}
 }
 
-// runnerForKind selects the run-time runner adapter (bwrap or OCI). Keyed
-// solely on c.runnerKind (issue #2538), never c.runtime, which also carries
-// operator-facing runtime names that aren't "oci" literally.
-func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
-	if c.runnerKind == runner.KindBwrap {
-		return bwrap.New(rc, pwd)
+// runnerForKind builds the run-time runner for c.runnerKind through the runner
+// registry; an unregistered kind is an error. Keyed solely on c.runnerKind
+// (issue #2538), never c.runtime, which also carries operator-facing runtime
+// names that aren't a runner family literally.
+func runnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, error) {
+	s, err := runner.Lookup(c.runnerKind)
+	if err != nil {
+		return nil, err
 	}
-	return oci.New(rc, pwd)
+	return s.New(rc, pwd), nil
 }
 
-// buildRunnerForKind is runnerForKind's `launcher build` counterpart: the
-// bwrap arm selects bwrap.NewBuild, which realizes store closures rather than
-// running an agent.
-func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
-	if c.runnerKind == runner.KindBwrap {
-		return bwrap.NewBuild(rc, pwd)
+// buildRunnerForKind is runnerForKind's `launcher build` counterpart, using
+// the family's NewBuild constructor.
+func buildRunnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, error) {
+	s, err := runner.Lookup(c.runnerKind)
+	if err != nil {
+		return nil, err
 	}
-	return oci.New(rc, pwd)
+	return s.NewBuild(rc, pwd), nil
 }
 
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
@@ -1108,7 +1109,10 @@ func build() error {
 		return err
 	}
 	rc := runnerConfig(c)
-	r := buildRunnerForKind(c, rc, pwd)
+	r, err := buildRunnerForKind(c, rc, pwd)
+	if err != nil {
+		return err
+	}
 	return r.EnsureReady()
 }
 

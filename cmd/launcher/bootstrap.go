@@ -121,7 +121,10 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	}
 
 	rc := runnerConfig(c)
-	r := runnerForKind(c, rc, pwd)
+	r, err := runnerForKind(c, rc, pwd)
+	if err != nil {
+		return nil, err
+	}
 	if ensureReady {
 		if err := r.EnsureReady(); err != nil {
 			return nil, err

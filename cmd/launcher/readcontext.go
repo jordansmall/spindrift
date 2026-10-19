@@ -52,13 +52,16 @@ func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) readConte
 // in-box-unreachable tracker (issue #2941 AC2). The runner it wraps matters
 // only for the probe's container check, which reconcile reaches for such a
 // tracker alone, so any other tracker skips building a runner entirely.
-func (rc readContext) reconcileLivenessProbe(pwd string) reconcile.LivenessProbe {
+func (rc readContext) reconcileLivenessProbe(pwd string) (reconcile.LivenessProbe, error) {
 	if !rc.capabilities.TrackerDescriptor.InBoxUnreachableTracker {
-		return nil
+		return nil, nil
 	}
 	runnerCfg := runnerConfig(rc.config)
-	r := runnerForKind(rc.config, runnerCfg, pwd)
-	return reconcile.NewFSProbe(pwd, r)
+	r, err := runnerForKind(rc.config, runnerCfg, pwd)
+	if err != nil {
+		return nil, err
+	}
+	return reconcile.NewFSProbe(pwd, r), nil
 }
 
 // readValidation pairs the full-report verdict on rc.config with the report

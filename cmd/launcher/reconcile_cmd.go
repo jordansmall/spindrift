@@ -132,7 +132,11 @@ func cmdReconcile(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	lp := rc.reconcileLivenessProbe(pwd)
+	lp, err := rc.reconcileLivenessProbe(pwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, rc.capabilities, pwd, stdout); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
