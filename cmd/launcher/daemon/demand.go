@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net/http"
 	"os"
 	"slices"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -19,13 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/recoverrecord"
-	"spindrift.dev/launcher/internal/trackerbuild"
 )
-
-// jiraProbeTimeout bounds each Jira Demand probe: the adapter otherwise falls
-// back to the untimed http.DefaultClient, and a server that accepts the
-// connection but never answers would stall the kind's probe for good.
-const jiraProbeTimeout = 30 * time.Second
 
 // demandSources maps each kind the daemon schedules from host-side demand
 // (ADR 0059: a tracker probe or the outbox count) to the counter that answers
@@ -89,31 +83,25 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSour
 
 // buildTrackerSources is the DemandTrackerProbe half of buildDemandSources.
 func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descriptor) (demandSources, missingSources) {
-	// Every knob is read whatever the tracker, so one Settings feeds whichever
-	// adapter ISSUE_TRACKER names. The branch prefix is left blank: it only names
-	// agent branches, which counting never touches.
-	statusMapping := childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING"))
-	s := trackerbuild.Settings{
-		RepoSlug:          childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG")),
-		LocalIssuesDir:    childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR")),
-		ForgejoBaseURL:    childKnob(doc, "FORGEJO_BASE_URL", os.Getenv("FORGEJO_BASE_URL")),
-		ForgejoToken:      childKnob(doc, "FORGEJO_TOKEN", os.Getenv("FORGEJO_TOKEN")),
-		JiraBaseURL:       childKnob(doc, "JIRA_BASE_URL", os.Getenv("JIRA_BASE_URL")),
-		JiraProjectKey:    childKnob(doc, "JIRA_PROJECT_KEY", os.Getenv("JIRA_PROJECT_KEY")),
-		JiraEmail:         childKnob(doc, "JIRA_EMAIL", os.Getenv("JIRA_EMAIL")),
-		JiraToken:         childKnob(doc, "JIRA_TOKEN", os.Getenv("JIRA_TOKEN")),
-		JiraStatusMapping: statusMapping,
-		JiraHTTPClient:    &http.Client{Timeout: jiraProbeTimeout},
-	}
 	name := issueTrackerName(doc)
-	tr, ok := trackerbuild.ByName(name)
+	strat, ok := backendkit.ByName(name)
 	if !ok {
-		return nil, allMissing(probed, fmt.Sprintf("unknown ISSUE_TRACKER %q", name))
+		return nil, allMissing(probed, fmt.Sprintf("unknown ISSUE_TRACKER %q (valid: %s)", name, strings.Join(trackerNames(), ", ")))
 	}
-	// Validate sees the raw mapping, so a malformed one is rejected even when
-	// only the research kind (which ignores it) is probed.
-	if err := tr.Validate(s); err != nil {
-		return nil, allMissing(probed, err.Error()+tokenFormHint(doc, name, s))
+	if strat.NewIssueTracker == nil {
+		return nil, allMissing(probed, fmt.Sprintf("%q is not a valid ISSUE_TRACKER (valid: %s)", name, strings.Join(trackerNames(), ", ")))
+	}
+	lookup := childLookup(doc)
+	// The branch prefix is left blank: it only names agent branches, which
+	// counting never touches.
+	shared := backendkit.Shared{RepoSlug: childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))}
+	// Validation runs without a Tracker, so it sees the raw mapping and a
+	// malformed one is rejected even when only the research kind (which ignores
+	// it) is probed.
+	if strat.ValidateTracker != nil {
+		if err := strat.ValidateTracker(shared, lookup); err != nil {
+			return nil, allMissing(probed, err.Error()+tokenFormHint(strat, lookup, err))
+		}
 	}
 	configured := forge.DispatchLabels{
 		Dispatchable: childKnob(doc, "LABEL", os.Getenv("LABEL")),
@@ -130,11 +118,16 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 			missing[daemon.KindOf(d)] = "set LABEL (the dispatchable label is blank)"
 			continue
 		}
-		s.Labels = labels
-		s.JiraStatusMapping = trackerbuild.JiraStatusMappingFor(d.Tracker, statusMapping)
+		shared.Labels = labels
+		shared.Tracker = d.Tracker
+		tracker, err := strat.NewIssueTracker(shared, lookup)
+		if err != nil {
+			missing[daemon.KindOf(d)] = err.Error()
+			continue
+		}
 		// Only the tracker's capabilities matter: no code forge is in play, and the
 		// descriptors feed fields counting never reads.
-		counter := forge.ResolveCapabilities(nil, tr.New(s), backend.Descriptor{}, backend.Descriptor{}).DemandCounter
+		counter := forge.ResolveCapabilities(nil, tracker, backend.Descriptor{}, backend.Descriptor{}).DemandCounter
 		if counter == nil {
 			missing[daemon.KindOf(d)] = fmt.Sprintf("ISSUE_TRACKER=%s has no Demand adapter", name)
 			continue
@@ -142,6 +135,38 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 		sources[daemon.KindOf(d)] = counter
 	}
 	return sources, missing
+}
+
+// trackerNames lists the registered backends that build an Issue Tracker, in
+// registry order.
+func trackerNames() []string {
+	var names []string
+	for _, s := range backendkit.Strategies() {
+		if s.NewIssueTracker != nil {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+// childEnvValue is the daemon's backendkit.Lookup body: key resolved as a
+// child does, the document first and then the daemon's ambient env. The
+// Strategy names its own knobs, so the key is not a literal here;
+// clearKnobEnvT records the keys the registered Strategies read.
+func childEnvValue(doc *inputdoc.Document, key string) (string, bool) {
+	return childValue(doc, key, os.Getenv(key))
+}
+
+// knobLookup has backendkit.Lookup's underlying type, so it passes wherever a
+// Lookup is wanted. The daemon spells it out because the knob guard reads any
+// ".Lookup" selector, even in a type position, as an untraceable knob read.
+type knobLookup = func(env string) (string, bool)
+
+// childLookup is the Lookup a backend Strategy resolves its knobs through.
+// A knob unset in both places reports absent, so the backend's generated
+// ReadKnobs applies its own row default.
+func childLookup(doc *inputdoc.Document) knobLookup {
+	return func(key string) (string, bool) { return childEnvValue(doc, key) }
 }
 
 // outboxDemandInterval paces the outbox scan: a local directory read, so as
@@ -222,16 +247,19 @@ func allMissing(probed []*dispatchkind.Descriptor, reason string) missingSources
 
 // tokenFormHint explains a blank plain token when the tracker's _CMD form is
 // set: the operator believes the token is supplied, but the daemon never runs
-// the command. It names the knobs only, never the command.
-func tokenFormHint(doc *inputdoc.Document, tracker string, s trackerbuild.Settings) string {
-	var plain, cmd string
-	switch {
-	case tracker == "forgejo" && s.ForgejoToken == "":
-		plain, cmd = "FORGEJO_TOKEN", childKnob(doc, "FORGEJO_TOKEN_CMD", os.Getenv("FORGEJO_TOKEN_CMD"))
-	case tracker == "jira" && s.JiraToken == "":
-		plain, cmd = "JIRA_TOKEN", childKnob(doc, "JIRA_TOKEN_CMD", os.Getenv("JIRA_TOKEN_CMD"))
+// the command. It names the knobs only, never the command. It applies only
+// when err is the blank-token failure, which every backend words as "set
+// <plain token knob> when ..."; any other validation error (a missing
+// REPO_SLUG, say) is not explained by the _CMD form.
+func tokenFormHint(strat backendkit.Strategy, lookup knobLookup, err error) string {
+	plain := strat.TokenEnvVar
+	if plain == "" || !strings.Contains(err.Error(), plain) {
+		return ""
 	}
-	if cmd == "" {
+	if v, _ := lookup(plain); v != "" {
+		return ""
+	}
+	if cmd, _ := lookup(plain + "_CMD"); cmd == "" {
 		return ""
 	}
 	return fmt.Sprintf("; the daemon reads %s only, not %s_CMD", plain, plain)
