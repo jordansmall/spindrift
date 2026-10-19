@@ -702,6 +702,29 @@ checkedMerge {
       "runners-unique-runtime (ADR 0069): a runtime no row lists must make `forRuntime` throw, but it returned a row";
     pkgs.runCommand "runners-unique-runtime" { } "touch $out";
 
+  # A family row carries its own run-document keys (ADR 0069 decision 7), so a
+  # stub row with a made-up key must reach both the rendered artifacts and the
+  # derived schema key list without any preamble naming its family.
+  runners-stub-row-run-artifacts =
+    let
+      inherit (pkgs.lib) assertMsg;
+      preambles = import ../../lib/preambles.nix;
+      stub = import ../fixtures/stub-runner-row.nix;
+      rows = (import ../../lib/runners/index.nix { rows = [ stub ]; }).rows;
+      out = preambles.runArtifacts (preambles.dummyRunArtifactArgs // { row = builtins.head rows; });
+      keys = preambles.documentArtifactKeysFor rows;
+    in
+    assert assertMsg
+      (out.STUB_ONLY_KEY == "x" && out.RUNNER_KIND == "stub" && out.BOX_ARTIFACT == "oci-image")
+      "runners-stub-row-run-artifacts (ADR 0069): a stub row's runArtifacts must render with RUNNER_KIND/BOX_ARTIFACT from the row, got: ${builtins.toJSON out}";
+    assert assertMsg (out.FLAKE_IMAGE_ATTR == "stub:.#packages.dummy.dummy")
+      "runners-stub-row-run-artifacts (ADR 0069): FLAKE_IMAGE_ATTR is the row's to render, got: ${builtins.toJSON out}";
+    assert assertMsg (builtins.elem "STUB_ONLY_KEY" keys && builtins.elem "RUNNER_KIND" keys)
+      "runners-stub-row-run-artifacts (ADR 0069): documentArtifactKeysFor must include the stub row's key and the shared keys, got: ${builtins.toJSON keys}";
+    assert assertMsg (!(builtins.elem "IMAGE_ARCHIVE" keys))
+      "runners-stub-row-run-artifacts (ADR 0069): documentArtifactKeysFor must derive keys from the given rows only, got: ${builtins.toJSON keys}";
+    pkgs.runCommand "runners-stub-row-run-artifacts" { } "touch $out";
+
   # Each kind row's `filerRelayGate` is the env var the Box tests to decide
   # whether to file relayed findings (issue #5669); a typo there silently turns
   # the Filer relay off for that kind. Every row sets one, so an empty or

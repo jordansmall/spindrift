@@ -1395,12 +1395,21 @@ rec {
       # goName names the exported Go var and the Kind constant; it is not a
       # Descriptor field.
       knownFields = [ "goName" ] ++ map (f: f.attr) rowFields;
+      # Nix-side row facts the Go descriptor never sees: lib/preambles.nix
+      # renders the run document (and lib/mkHarness.nix the default image attr) from
+      # them, so every row must carry them.
+      nixOnlyFields = [
+        "runArtifacts"
+        "imageAttrName"
+      ];
       checkRow =
         row:
         let
           where = "lib/runners/${row.name or "?"}.nix";
-          unknown = builtins.filter (attr: !(builtins.elem attr knownFields)) (builtins.attrNames row);
-          missing = builtins.filter (attr: !(row ? ${attr})) knownFields;
+          unknown = builtins.filter (attr: !(builtins.elem attr (knownFields ++ nixOnlyFields))) (
+            builtins.attrNames row
+          );
+          missing = builtins.filter (attr: !(row ? ${attr})) (knownFields ++ nixOnlyFields);
         in
         if unknown != [ ] then
           throw "${where}: row has unknown field(s): ${builtins.concatStringsSep ", " unknown}"

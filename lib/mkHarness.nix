@@ -107,12 +107,7 @@
   # The flake output attribute the image (OCI) or agent closure (bwrap) is
   # exposed under, and the one the baked freshness probe realizes. A second
   # Harness in one flake needs its own name (ADR 0064, issue #5049).
-  imageAttrName ? (
-    if ((import ./runners/index.nix { }).forRuntime runtime).artifact == "store-closure" then
-      "agent-closure"
-    else
-      "agent-image"
-  ),
+  imageAttrName ? ((import ./runners/index.nix { }).forRuntime runtime).imageAttrName,
   # The agent CLI Driver (ADR 0009, issues #261/#262): selects one entry from
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
   # to the Go launcher as DRIVER (host-side half). "claude", "opencode" and "pi".
@@ -1515,13 +1510,10 @@ let
   ];
   agentClosurePath = builtins.unsafeDiscardStringContext (toString agentClosure);
 
-  # The runner row (lib/runners) that lists the runtime knob; runnerKind is the
-  # adapter family the launcher knows, and the row's artifact picks the flake
-  # package below.
+  # The runner row (lib/runners) that lists the runtime knob; its artifact picks
+  # the flake package below.
   runners = import ./runners/index.nix { };
   runnerRow = runners.forRuntime runtime;
-  runnerKind = runnerRow.name;
-  boxArtifact = runnerRow.artifact;
 
   # One renderer over the flakeOption schema entries, used by the entrypoint's
   # Box-side preamble and the document's `settings` section below. Box env is
@@ -1539,9 +1531,8 @@ let
   # The document's `run` and `build` artifacts sections (ADR 0020): the
   # nix-computed plumbing (image refs, agent files, driver name).
   runArtifacts = preambles.runArtifacts {
+    row = runnerRow;
     inherit
-      runnerKind
-      boxArtifact
       agentFilesPath
       agentEnvPath
       passwdFilePath
@@ -2142,12 +2133,17 @@ else
 
     packages =
       basePackages
-      # The OCI image is not relevant for the bwrap runner (no image build/load).
-      // lib.optionalAttrs (isLinux && runnerRow.artifact == "oci-image") { ${imageAttrName} = image; }
-      # The bwrap counterpart: one flake package standing in for the whole
-      # agent closure, so freshness (issue #2667) has a single attr to realize.
-      // lib.optionalAttrs (isLinux && runnerRow.artifact == "store-closure") {
-        ${imageAttrName} = agentClosure;
+      # One flake package under ${imageAttrName}, whose artifact the runner row
+      # picks: the OCI image (not built for bwrap, which has no image
+      # build/load) or, for bwrap, the whole agent closure, so freshness
+      # (issue #2667) has a single attr to realize.
+      // lib.optionalAttrs isLinux {
+        ${imageAttrName} =
+          {
+            oci-image = image;
+            store-closure = agentClosure;
+          }
+          .${runnerRow.artifact};
       };
 
     apps.default = {
