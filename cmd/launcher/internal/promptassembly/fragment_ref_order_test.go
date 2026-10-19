@@ -22,13 +22,22 @@ func TestFragmentsReferenceOnlyRowsAbove(t *testing.T) {
 		rowOf[row.Var] = i
 	}
 	for i, row := range reg.Rows {
-		body, err := os.ReadFile(filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment))
-		if err != nil {
-			t.Fatal(err)
+		files := []string{filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment)}
+		if row.Axis != "" {
+			files, err = filepath.Glob(filepath.Join(repopath.PromptsDir(), "fragments", "*", row.Fragment))
+			if err != nil || len(files) == 0 {
+				t.Fatalf("axis row %s: no per-backend files found (err=%v)", row.Fragment, err)
+			}
 		}
-		for v, j := range rowOf {
-			if j >= i && strings.Contains(string(body), "${"+v+"}") {
-				t.Errorf("%s (row %d) references ${%s}, whose row %d does not render above it", row.Fragment, i, v, j)
+		for _, file := range files {
+			body, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for v, j := range rowOf {
+				if j >= i && strings.Contains(string(body), "${"+v+"}") {
+					t.Errorf("%s (row %d) references ${%s}, whose row %d does not render above it", file, i, v, j)
+				}
 			}
 		}
 	}

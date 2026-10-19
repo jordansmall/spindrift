@@ -315,10 +315,11 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 }
 
 // The BOX_TRACKER_AXIS_* env vars must reach Env's TrackerAxis* fields
-// (issue #2533 slice 2). ISSUE_TRACKER stays "github" on purpose:
-// gates_tracker.go reads the axis fields directly instead of re-deriving
-// them, and checkCoveredCell no longer re-validates IssueTracker (issue
-// #2540), so the axis fields are the sole gate input.
+// (issue #2533 slice 2). gates_tracker.go reads the axis fields directly
+// instead of re-deriving them, and checkCoveredCell no longer re-validates
+// IssueTracker (issue #2540), so the axis fields are the sole gate input.
+// ISSUE_TRACKER is set to match only because ${ISSUE_READ_STEP} resolves its
+// fragment from the tracker's own folder (issue #5646), not from a gate.
 func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -326,6 +327,7 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
+	t.Setenv("ISSUE_TRACKER", "forgejo")
 	t.Setenv("BOX_TRACKER_AXIS_READ", "FORGEJO")
 	t.Setenv("BOX_TRACKER_AXIS_WRITE", "FORGEJO")
 	t.Setenv("BOX_TRACKER_AXIS_FILER", "FORGEJO")

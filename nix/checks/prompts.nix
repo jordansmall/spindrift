@@ -1500,7 +1500,8 @@ in
     pkgs.runCommand "issue-read-fragments-never-fetch-the-subject-issue" { }
       ''
         shopt -s nullglob
-        for f in ${../../templates/default/prompts/fragments}/*issue-read-*.md; do
+        for f in ${../../templates/default/prompts/fragments}/*issue-read-*.md \
+          ${../../templates/default/prompts/fragments}/*/issue-read.md; do
           ! grep -q 'gh issue view' "$f" || {
             echo "$f: expected no 'gh issue view' (subject-issue fetch), found one" >&2
             exit 1

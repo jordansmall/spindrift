@@ -3,7 +3,6 @@
 package promptassembly_test
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -105,8 +104,13 @@ func TestRegistryRowsShipAsFragmentFiles(t *testing.T) {
 		t.Fatal("registry has no rows, check is vacuous")
 	}
 	for _, row := range reg.Rows {
-		if _, err := os.Stat(filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment)); err != nil {
-			t.Errorf("registry row %q: %v", row.Fragment, err)
+		pattern := filepath.Join(repopath.PromptsDir(), "fragments", row.Fragment)
+		if row.Axis != "" {
+			// An axis row ships one file per backend folder; at least one must exist.
+			pattern = filepath.Join(repopath.PromptsDir(), "fragments", "*", row.Fragment)
+		}
+		if matches, err := filepath.Glob(pattern); err != nil || len(matches) == 0 {
+			t.Errorf("registry row %q: no file matching %s (err=%v)", row.Fragment, pattern, err)
 		}
 	}
 }
