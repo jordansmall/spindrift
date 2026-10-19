@@ -9,9 +9,14 @@ import (
 )
 
 // conformanceKit is the kit's directory under cmd/launcher. The Box-construction
-// pin exempts it and TestConformanceKitNotImportedByRuntime justifies the
+// pin exempts it and TestTestOnlyKitsNotImportedByRuntime justifies the
 // exemption, so both read this one path.
 const conformanceKit = "internal/driver/driverkit/conformance"
+
+// lifecycleKit is the runner lifecycle contract's directory (issue #5680). It
+// builds Boxes to drive a Runner, so the Box-construction pin exempts it and
+// TestTestOnlyKitsNotImportedByRuntime holds it to test-only use.
+const lifecycleKit = "internal/runner/runnertest/contract"
 
 // Every gh API call must stay behind the forge seam, so no file outside
 // internal/forge may shell out to gh directly.
@@ -180,9 +185,12 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 		// Box log this guard polices.
 		//
 		// The conformance kit classifies corpus logs from Driver packages'
-		// tests (issue #5506); nothing in the launcher's runtime imports it.
+		// tests (issue #5506), and the lifecycle kit builds Boxes to drive a
+		// Runner (issue #5680); nothing in the launcher's runtime imports
+		// either.
 		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") ||
-			strings.HasPrefix(filepath.ToSlash(path), conformanceKit) {
+			strings.HasPrefix(filepath.ToSlash(path), conformanceKit) ||
+			strings.HasPrefix(filepath.ToSlash(path), lifecycleKit) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -383,34 +391,37 @@ func TestNoMergeGateOutsideSettlePackage(t *testing.T) {
 	}
 }
 
-// The conformance kit classifies corpus logs and so trips the Box-construction
-// pin above; that exemption holds only while no runtime file imports it
-// (issue #5506). Driver packages reach it from _test.go files alone.
-func TestConformanceKitNotImportedByRuntime(t *testing.T) {
-	needle := "/" + conformanceKit + `"`
-	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if filepath.ToSlash(path) == conformanceKit {
-				return filepath.SkipDir
+// The conformance kit classifies corpus logs and the lifecycle kit drives a
+// Runner, so both trip the Box-construction pin above; that exemption holds
+// only while no runtime file imports either (issues #5506, #5680). Their
+// users reach them from _test.go files alone.
+func TestTestOnlyKitsNotImportedByRuntime(t *testing.T) {
+	for _, kit := range []string{conformanceKit, lifecycleKit} {
+		needle := "/" + kit + `"`
+		err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				if filepath.ToSlash(path) == kit {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(data), needle) {
+				t.Errorf("%s: imports %s — only _test.go files may", path, kit)
 			}
 			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
+		})
 		if err != nil {
-			return err
+			t.Fatalf("walk: %v", err)
 		}
-		if strings.Contains(string(data), needle) {
-			t.Errorf("%s: imports the conformance kit — only _test.go files may", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk: %v", err)
 	}
 }
