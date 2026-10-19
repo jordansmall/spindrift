@@ -20,6 +20,7 @@ func fakeGitlabRow() backendRow {
 			ValidAsTracker:   true,
 			ValidAsCodeForge: true,
 			TokenEnvVar:      "GITLAB_TOKEN",
+			BoxTokenEnvVar:   "BOX_GITLAB_TOKEN",
 			DoctorTokenHint:  "GITLAB_TOKEN",
 			DoctorSlugHint:   "GITLAB_BASE_URL",
 		},
@@ -35,7 +36,6 @@ func fakeGitlabRow() backendRow {
 		newCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return forge.NewFake()
 		},
-		boxTokenEnvVar: "BOX_GITLAB_TOKEN",
 	}
 }
 

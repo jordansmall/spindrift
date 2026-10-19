@@ -46,6 +46,12 @@
 # because "github" must render as "GitHub" and no capitalize-first rule
 # produces that.
 
+# boxTokenEnvVar is the ADR 0016 Box-side override of tokenEnvVar: the
+# operator's value under this name reaches the Box under tokenEnvVar's name,
+# while the launcher keeps its own token for merges and labels. Optional;
+# omitted means no override (jira, local, git). Forgejo's row derives the
+# field from its boxForgejoToken knob so the two cannot drift.
+
 # relayCapable covers every host-mediation seam a CODE_FORGE needs under
 # BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay always, plus draft-PR
 # create and commit subjects when the backend has a PR concept. Nix cannot

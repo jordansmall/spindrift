@@ -1,13 +1,14 @@
 # The forgejo backend row: data plus the env knobs it owns (issues #5633,
 # #5634). The registry (./default.nix) documents the fields and fixes this
 # row's order; lib/row-knobs.nix folds `knobs` into lib/env-schema.nix.
-{
+rec {
   name = "forgejo";
   goVar = "Forgejo";
   displayName = "Forgejo";
   validAsTracker = true;
   validAsCodeForge = true;
   tokenEnvVar = "FORGEJO_TOKEN";
+  boxTokenEnvVar = knobs.boxForgejoToken.env;
   doctorTokenHint = "FORGEJO_TOKEN";
   doctorSlugHint = "FORGEJO_BASE_URL";
   outboxRelayCapable = true;

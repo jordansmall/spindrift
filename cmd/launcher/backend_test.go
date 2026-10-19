@@ -125,8 +125,8 @@ func TestBackendRowsShape(t *testing.T) {
 			if row.TokenEnvVar != tc.tokenEnvVar {
 				t.Errorf("tokenEnvVar = %q, want %q", row.TokenEnvVar, tc.tokenEnvVar)
 			}
-			if row.boxTokenEnvVar != tc.boxTokenEnvVar {
-				t.Errorf("boxTokenEnvVar = %q, want %q", row.boxTokenEnvVar, tc.boxTokenEnvVar)
+			if row.BoxTokenEnvVar != tc.boxTokenEnvVar {
+				t.Errorf("BoxTokenEnvVar = %q, want %q", row.BoxTokenEnvVar, tc.boxTokenEnvVar)
 			}
 			if row.DoctorTokenHint != tc.doctorTokenHint {
 				t.Errorf("doctorTokenHint = %q, want %q", row.DoctorTokenHint, tc.doctorTokenHint)

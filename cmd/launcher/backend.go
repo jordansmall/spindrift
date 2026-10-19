@@ -39,10 +39,6 @@ type backendRow struct {
 	// this forge cannot host a butler Ledger yet (git).
 	newLedger func(c config) (ledger.Backend, butler.Tree, func(), error)
 
-	// boxTokenEnvVar is the ADR 0016 Box-side token override name; empty when
-	// the backend carries no bearer token (git, local).
-	boxTokenEnvVar string
-
 	// readOnlyTokenGate checks the Box's own token for this backend under
 	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1950); gateRegistry runs it
 	// as read-only-token-<Name>. nil means the backend has no Box token to gate.
@@ -91,13 +87,9 @@ func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butl
 // initialiser, so the registry is populated by then.
 var backendRows = strategyRows()
 
-// Until ADR 0068 decision 6 moves them onto the rows, the Box token override
-// name and the read-only token gate stay launcher-side, keyed on backend name.
+// Until ADR 0068 decision 6 moves it onto the rows, the read-only token gate
+// stays launcher-side, keyed on backend name.
 var (
-	backendBoxTokenEnvVars = map[string]string{
-		backend.GitHub.Name:  "BOX_GH_TOKEN",
-		backend.Forgejo.Name: "BOX_FORGEJO_TOKEN",
-	}
 	backendTokenGates = map[string]func(c config, w io.Writer) error{
 		backend.GitHub.Name: func(c config, w io.Writer) error {
 			// ghTokenIntrospector is a var tests swap, so read it at call time.
@@ -135,7 +127,6 @@ func strategyRows() []backendRow {
 func rowFromStrategy(s backendkit.Strategy) backendRow {
 	r := backendRow{
 		Descriptor:        s.Descriptor,
-		boxTokenEnvVar:    backendBoxTokenEnvVars[s.Name],
 		readOnlyTokenGate: backendTokenGates[s.Name],
 	}
 	var blank func(config, string) error
