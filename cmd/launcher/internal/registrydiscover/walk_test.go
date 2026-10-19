@@ -31,8 +31,8 @@ func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 		},
 	}
 
-	if _, _, err := extractRows(dir, []ecosystem.Row{row}); err != nil {
-		t.Fatalf("extractRows: unexpected error: %v", err)
+	if _, _, err := ExtractRows(dir, []ecosystem.Row{row}); err != nil {
+		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 	if gotContent != content {
 		t.Errorf("parser received %q, want %q", gotContent, content)
@@ -60,9 +60,9 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 		},
 	}
 
-	declared, notes, err := extractRows(dir, []ecosystem.Row{missing, present})
+	declared, notes, err := ExtractRows(dir, []ecosystem.Row{missing, present})
 	if err != nil {
-		t.Fatalf("extractRows: unexpected error: %v", err)
+		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 	if len(notes) != 0 {
 		t.Errorf("notes = %+v, want none", notes)
@@ -92,9 +92,9 @@ func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 		InTreeConfigPath: "a-directory",
 	}
 
-	declared, notes, err := extractRows(dir, []ecosystem.Row{noPath, noParser})
+	declared, notes, err := ExtractRows(dir, []ecosystem.Row{noPath, noParser})
 	if err != nil {
-		t.Fatalf("extractRows: unexpected error: %v", err)
+		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 	if len(declared) != 0 {
 		t.Errorf("declared = %+v, want none", declared)
@@ -119,9 +119,9 @@ func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 		},
 	}
 
-	declared, _, err := extractRows(dir, []ecosystem.Row{row})
+	declared, _, err := ExtractRows(dir, []ecosystem.Row{row})
 	if err != nil {
-		t.Fatalf("extractRows: unexpected error: %v", err)
+		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
@@ -146,9 +146,9 @@ func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 			},
 		}
 
-		declared, notes, err := extractRows(dir, []ecosystem.Row{row})
+		declared, notes, err := ExtractRows(dir, []ecosystem.Row{row})
 		if err != nil {
-			t.Fatalf("extractRows: unexpected error: %v", err)
+			t.Fatalf("ExtractRows: unexpected error: %v", err)
 		}
 		if len(declared) != 0 {
 			t.Errorf("declared = %+v, want none", declared)
@@ -189,9 +189,9 @@ func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
 		{Name: "r4", InTreeConfigPath: "r4.cfg", ConfigParser: noting(true)},
 	}
 
-	declared, notes, err := extractRows(dir, rows)
+	declared, notes, err := ExtractRows(dir, rows)
 	if err != nil {
-		t.Fatalf("extractRows: unexpected error: %v", err)
+		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 
 	var gotHosts []string
@@ -242,9 +242,9 @@ func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 		},
 	}
 
-	_, _, err := extractRows(dir, rows)
+	_, _, err := ExtractRows(dir, rows)
 	if err == nil {
-		t.Fatal("extractRows: expected an error, got nil")
+		t.Fatal("ExtractRows: expected an error, got nil")
 	}
 	want := "registrydiscover: parsing bad.cfg: " + errTestParse.Error()
 	if err.Error() != want {
@@ -282,9 +282,9 @@ func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {
 		},
 	}
 
-	_, _, err := extractRows(dir, rows)
+	_, _, err := ExtractRows(dir, rows)
 	if err == nil {
-		t.Fatal("extractRows: expected an error, got nil")
+		t.Fatal("ExtractRows: expected an error, got nil")
 	}
 	if !strings.HasPrefix(err.Error(), "registrydiscover: reading not-a-file.cfg: ") {
 		t.Errorf("err = %q, want it to start with the walker's reading-error prefix naming not-a-file.cfg", err.Error())

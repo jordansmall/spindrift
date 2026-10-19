@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -38,7 +39,12 @@ type dedupeKey struct {
 // index subtrees. Hosts come out in first-declaration order, subtrees in
 // declaration order. go and gradle declare no in-tree path, so derive nothing.
 func Derive(repoDir string) ([]HostPathSet, error) {
-	declared, _, err := registrydiscover.Extract(repoDir)
+	return DeriveRows(repoDir, ecosystem.Table)
+}
+
+// DeriveRows is Derive over the given rows rather than ecosystem.Table.
+func DeriveRows(repoDir string, rows []ecosystem.Row) ([]HostPathSet, error) {
+	declared, _, err := registrydiscover.ExtractRows(repoDir, rows)
 	if err != nil {
 		return nil, err
 	}

@@ -14,14 +14,15 @@ import (
 
 // Extract scans repoDir against ecosystem.Table.
 func Extract(repoDir string) ([]ecosystem.Declaration, []ecosystem.Note, error) {
-	return extractRows(repoDir, ecosystem.Table)
+	return ExtractRows(repoDir, ecosystem.Table)
 }
 
-// extractRows owns every bit of I/O and stamping that a row's ConfigParser hook
-// must not do itself. rows is a parameter so this package's own tests can pass a
-// fake row. Order is deterministic: row order, then declaration order within a
-// file (cargo's TOML map has no source order, so its parser sorts by name).
-func extractRows(repoDir string, rows []ecosystem.Row) ([]ecosystem.Declaration, []ecosystem.Note, error) {
+// ExtractRows owns every bit of I/O and stamping that a row's ConfigParser hook
+// must not do itself. rows is a parameter so a caller can pass a fake row
+// rather than mutate ecosystem.Table. Order is deterministic: row order, then
+// declaration order within a file (cargo's TOML map has no source order, so its
+// parser sorts by name).
+func ExtractRows(repoDir string, rows []ecosystem.Row) ([]ecosystem.Declaration, []ecosystem.Note, error) {
 	var declared []ecosystem.Declaration
 	var notes []ecosystem.Note
 

@@ -267,7 +267,7 @@ func TestMaterializeRef_ParentDirSymlinkResolvesToTargetContent(t *testing.T) {
 }
 
 // A directory at a config path skips like a missing file, although
-// extractRows hard-errors reading one in a checkout.
+// ExtractRows hard-errors reading one in a checkout.
 func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
 		".npmrc/inner": "anything",
@@ -277,7 +277,7 @@ func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 	mustNotExist(t, filepath.Join(dir, ".npmrc"))
 }
 
-// The checkout side of the parity above: extractRows does hard-error reading
+// The checkout side of the parity above: ExtractRows does hard-error reading
 // a directory at the config path, unlike the ref snapshot it is compared
 // against.
 func TestUncoveredHosts_DirectoryAtConfigPathErrors(t *testing.T) {

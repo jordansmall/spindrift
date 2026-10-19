@@ -201,31 +201,44 @@ func TestEnvExportRows_SortsByEnvExportOrderNotTableOrder(t *testing.T) {
 	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
 		return nil, nil
 	}
-	// Swapping the package-level Table bars t.Parallel here and in every other
-	// test in this package, since a parallel neighbour would observe the stub.
-	original := Table
-	Table = []Row{
+	rows := []Row{
 		{Name: "third", EnvExports: renderer, EnvExportOrder: 9},
 		{Name: "no-exports", EnvExportOrder: 1},
 		{Name: "second", EnvExports: renderer, EnvExportOrder: 5},
 		{Name: "tie-a", EnvExports: renderer},
 		{Name: "tie-b", EnvExports: renderer},
 	}
-	defer func() { Table = original }()
 
 	var got []string
-	for _, row := range EnvExportRows() {
+	for _, row := range EnvExportRowsOf(rows) {
 		got = append(got, row.Name)
 	}
 
 	want := []string{"tie-a", "tie-b", "second", "third"}
 	if len(got) != len(want) {
-		t.Fatalf("EnvExportRows() = %v, want %v", got, want)
+		t.Fatalf("EnvExportRowsOf() = %v, want %v", got, want)
 	}
 	for i, name := range want {
 		if got[i] != name {
 			t.Errorf("row %d = %q, want %q (full order %v)", i, got[i], name, got)
 		}
+	}
+}
+
+func TestHomeConfigRowsOf_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
+	rows := []Row{
+		{Name: "b", HomeConfig: &HomeConfig{}},
+		{Name: "none"},
+		{Name: "a", HomeConfig: &HomeConfig{}},
+	}
+
+	var got []string
+	for _, row := range HomeConfigRowsOf(rows) {
+		got = append(got, row.Name)
+	}
+
+	if len(got) != 2 || got[0] != "b" || got[1] != "a" {
+		t.Errorf("HomeConfigRowsOf() = %v, want [b a]", got)
 	}
 }
 
