@@ -42,6 +42,16 @@ type prepared struct {
 	arm func(d dispatch.Dispatcher, step *settleRun) error
 }
 
+// scopeSourceFor picks c's Scope source adapter from its catalog row. It is the
+// only place that reads c.Records. whenNow is Sweep's instant, the one run
+// later stamps the claim with.
+func (r *Runner) scopeSourceFor(c chore.Chore, head string, whenNow time.Time) (scopeSource, error) {
+	if c.Records {
+		return newRecordsSource(r, c.Name, head, whenNow)
+	}
+	return &treeSource{tree: r.tree, head: head}, nil
+}
+
 // treeSource scopes a Chore to the repo checkout: it owns the head-keyed due
 // check, the tracked-file listing and the commit/tree-walk cursor slice.
 type treeSource struct {
