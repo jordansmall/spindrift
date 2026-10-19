@@ -1,0 +1,56 @@
+[
+  {
+    "record_id": "b",
+    "kind": "work",
+    "dispatch_key": "101",
+    "claim_time": "2026-10-07T12:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 1,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 2,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "w1",
+    "kind": "work",
+    "dispatch_key": "102",
+    "claim_time": "2026-10-09T09:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 2,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 3,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "w2",
+    "kind": "work",
+    "dispatch_key": "103",
+    "claim_time": "2026-10-09T10:00:00Z",
+    "outcome": "failed",
+    "reason": "ci-red",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 3,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 5,
+        "duration_ms": 120000
+      }
+    ]
+  }
+]

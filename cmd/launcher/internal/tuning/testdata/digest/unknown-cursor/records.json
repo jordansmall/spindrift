@@ -1,0 +1,74 @@
+[
+  {
+    "record_id": "u1",
+    "kind": "work",
+    "dispatch_key": "101",
+    "claim_time": "2026-10-06T12:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 1,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 2,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "u2",
+    "kind": "work",
+    "dispatch_key": "102",
+    "claim_time": "2026-10-07T12:00:00Z",
+    "outcome": "failed",
+    "reason": "ci-red",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 2,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 3,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "u3",
+    "kind": "work",
+    "dispatch_key": "103",
+    "claim_time": "2026-10-08T12:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 3,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 4,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "pending",
+    "kind": "work",
+    "dispatch_key": "104",
+    "claim_time": "2026-10-09T10:00:00Z",
+    "outcome": "",
+    "reason": "merged",
+    "outcome_source": "",
+    "settled_seq": 4,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 9,
+        "duration_ms": 120000
+      }
+    ]
+  }
+]

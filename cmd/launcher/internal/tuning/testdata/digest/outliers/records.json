@@ -1,0 +1,215 @@
+[
+  {
+    "record_id": "c1",
+    "kind": "work",
+    "dispatch_key": "101",
+    "claim_time": "2026-10-09T11:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 1,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 2,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "c2",
+    "kind": "work",
+    "dispatch_key": "102",
+    "claim_time": "2026-10-09T10:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 2,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 4,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "c3",
+    "kind": "work",
+    "dispatch_key": "103",
+    "claim_time": "2026-10-09T09:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 3,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 6,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "c4",
+    "kind": "work",
+    "dispatch_key": "104",
+    "claim_time": "2026-10-09T08:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 4,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 8,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "c5",
+    "kind": "work",
+    "dispatch_key": "105",
+    "claim_time": "2026-10-09T07:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 5,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 10,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "c6",
+    "kind": "work",
+    "dispatch_key": "106",
+    "claim_time": "2026-10-09T06:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 6,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 12,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "c7",
+    "kind": "work",
+    "dispatch_key": "107",
+    "claim_time": "2026-10-09T05:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 7,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 14,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "cheap-failed",
+    "kind": "work",
+    "dispatch_key": "108",
+    "claim_time": "2026-10-09T04:00:00Z",
+    "outcome": "failed",
+    "reason": "ci-red",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 8,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 0.5,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "cheap-blocked",
+    "kind": "work",
+    "dispatch_key": "109",
+    "claim_time": "2026-10-09T03:00:00Z",
+    "outcome": "failed",
+    "reason": "blocked",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 9,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 0.7,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.2,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "the retry loop never backs off"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.3,
+        "duration_ms": 90000,
+        "dispositions": "added a backoff"
+      }
+    ]
+  },
+  {
+    "record_id": "cheap-ambiguous",
+    "kind": "work",
+    "dispatch_key": "110",
+    "claim_time": "2026-10-09T02:00:00Z",
+    "outcome": "ambiguous",
+    "reason": "",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 10,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 0.3,
+        "duration_ms": 120000
+      }
+    ]
+  },
+  {
+    "record_id": "r1",
+    "kind": "research",
+    "dispatch_key": "111",
+    "claim_time": "2026-10-09T01:00:00Z",
+    "outcome": "complete",
+    "reason": "verdict",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 11,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 1,
+        "duration_ms": 120000
+      }
+    ]
+  }
+]

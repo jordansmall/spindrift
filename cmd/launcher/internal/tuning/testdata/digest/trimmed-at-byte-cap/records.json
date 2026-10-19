@@ -1,0 +1,266 @@
+[
+  {
+    "record_id": "fa",
+    "kind": "work",
+    "dispatch_key": "101",
+    "claim_time": "2026-10-09T11:30:00Z",
+    "outcome": "failed",
+    "reason": "ci-red",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 1,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 1,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "faxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "faxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "fb",
+    "kind": "work",
+    "dispatch_key": "102",
+    "claim_time": "2026-10-09T11:00:00Z",
+    "outcome": "failed",
+    "reason": "ci-red",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 2,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 1,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "fbxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "fbxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "c0",
+    "kind": "work",
+    "dispatch_key": "103",
+    "claim_time": "2026-10-09T10:30:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 3,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 10,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "c0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "c0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "c1",
+    "kind": "work",
+    "dispatch_key": "104",
+    "claim_time": "2026-10-09T10:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 4,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 11,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "c1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "c1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "c2",
+    "kind": "work",
+    "dispatch_key": "105",
+    "claim_time": "2026-10-09T09:30:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 5,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 12,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "c2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "c2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "c3",
+    "kind": "work",
+    "dispatch_key": "106",
+    "claim_time": "2026-10-09T09:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 6,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 13,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "c3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "c3xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "c4",
+    "kind": "work",
+    "dispatch_key": "107",
+    "claim_time": "2026-10-09T08:30:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 7,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 14,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "c4xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "c4xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  },
+  {
+    "record_id": "c5",
+    "kind": "work",
+    "dispatch_key": "108",
+    "claim_time": "2026-10-09T08:00:00Z",
+    "outcome": "complete",
+    "reason": "merged",
+    "outcome_source": "dispatch_settled",
+    "settled_seq": 8,
+    "passes": [
+      {
+        "ordinal": 1,
+        "role": "implement",
+        "usd": 15,
+        "duration_ms": 120000
+      },
+      {
+        "ordinal": 2,
+        "role": "review",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "verdict": "BLOCK",
+        "verdict_text": "c5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      {
+        "ordinal": 3,
+        "role": "fix",
+        "usd": 0.1,
+        "duration_ms": 60000,
+        "dispositions": "c5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    ]
+  }
+]

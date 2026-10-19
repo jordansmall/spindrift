@@ -1,0 +1,44 @@
+{
+  "cursor": "",
+  "now": "2026-10-09T12:00:00Z",
+  "min_sample": 2,
+  "max_bytes": 0,
+  "prior": [
+    {
+      "Number": "7",
+      "Open": false,
+      "Metric": "avg-usd",
+      "Body": "## Evidence\n| role:implement:avg-usd | implement avg USD per pass |\n\n## Proposal\nBackoff."
+    },
+    {
+      "Number": "8",
+      "Open": true,
+      "Reopened": true,
+      "Metric": "passes-per-record"
+    },
+    {
+      "Number": "9",
+      "Open": true,
+      "Metric": "usd-per-record"
+    },
+    {
+      "Number": "10",
+      "Open": false,
+      "NotPlanned": true,
+      "Metric": "landed-share"
+    },
+    {
+      "Number": "11",
+      "Open": false,
+      "Metric": "reverted"
+    },
+    {
+      "Number": "12",
+      "Open": true,
+      "Metric": "churn"
+    }
+  ],
+  "merged": {
+    "https://forge.example/pulls/8": "def8888"
+  }
+}
