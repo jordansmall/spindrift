@@ -49,12 +49,18 @@ func renderEnvExports(exports []ecosystem.EnvExport) string {
 	return rendered
 }
 
-// runBindRegistryWithDeps parses the flags and runs whichever of three modes they
+// runBindRegistryWithDeps is runBindRegistryWithRows over ecosystem.Table, the
+// production rows.
+func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
+	return runBindRegistryWithRows(args, ecosystem.Table, stdout, probe, spawn, lookPath, timeout, pollInterval)
+}
+
+// runBindRegistryWithRows parses the flags and runs whichever of three modes they
 // select: bindings, in-tree (issue #2932) and the lockfile scan. Any mode's flags may
 // be given alone or with another's. probe, spawn, timeout and pollInterval are
 // injected so tests can exercise the readiness paths without a real socat or
 // listener. Bindings and in-tree apply share one gate, so neither respawns (#3141).
-func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
+func runBindRegistryWithRows(args []string, rows []ecosystem.Row, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
 	fs := flag.NewFlagSet("bind-registry", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional; triggers bindings mode alone)")
@@ -115,7 +121,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 
 	switch *intreeAction {
 	case "revert":
-		if bindregistry.RevertInTreeBindings(*intreeWorkDir, bindregistry.InTreeBindings(), "driver-exec bind-registry", stdout) {
+		if bindregistry.RevertInTreeBindings(*intreeWorkDir, bindregistry.InTreeBindingsOf(rows), "driver-exec bind-registry", stdout) {
 			return 1
 		}
 	case "apply":
@@ -123,13 +129,13 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		if *intreeBindingsEnvOutput != "" {
 			publish = writeEnvFile(stdout, *intreeBindingsEnvOutput, "write intree bindings env output:")
 		}
-		if !bindregistry.ApplyInTree(stdout, *intreeWorkDir, gate, publish) {
+		if !bindregistry.ApplyInTree(stdout, *intreeWorkDir, rows, gate, publish) {
 			return 1
 		}
 	}
 
 	if *bindingsEnvOutput != "" {
-		if !bindregistry.BindHomes(stdout, gate, writeEnvFile(stdout, *bindingsEnvOutput, "write bindings env output:")) {
+		if !bindregistry.BindHomes(stdout, rows, gate, writeEnvFile(stdout, *bindingsEnvOutput, "write bindings env output:")) {
 			return 1
 		}
 	}

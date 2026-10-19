@@ -17,13 +17,15 @@ import (
 // the write site and the cleanup site cannot drift into two prefixes.
 const intreebindingTempFilePattern = ".intreebinding-*"
 
-// InTreeBindings returns every ecosystem.Table row whose registry pin lives in
-// a tracked config file rather than an env var (ADR 0044), in table order:
-// npm's .npmrc, yarn berry's .yarnrc.yml (issue #2856), and pnpm's
-// pnpm-workspace.yaml (issue #2855).
-func InTreeBindings() []ecosystem.Row {
+// InTreeBindings is InTreeBindingsOf over ecosystem.Table, the production rows.
+func InTreeBindings() []ecosystem.Row { return InTreeBindingsOf(ecosystem.Table) }
+
+// InTreeBindingsOf returns every row whose registry pin lives in a tracked config
+// file rather than an env var (ADR 0044), in rows order: npm's .npmrc, yarn
+// berry's .yarnrc.yml (issue #2856), and pnpm's pnpm-workspace.yaml (issue #2855).
+func InTreeBindingsOf(all []ecosystem.Row) []ecosystem.Row {
 	var rows []ecosystem.Row
-	for _, row := range ecosystem.Table {
+	for _, row := range all {
 		// A row with a RepoAwareHomeConfig binds by re-rendering that home config
 		// once the Target repo is on disk (issue #3201), and the two rewrites do
 		// not compose: once one swaps the index host away, the other has nothing

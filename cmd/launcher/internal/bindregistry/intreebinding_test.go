@@ -164,6 +164,36 @@ var npmBinding = ecosystem.Row{Name: "npm", InTreeConfigPath: ".npmrc"}
 var yarnBinding = ecosystem.Row{Name: "yarn", InTreeConfigPath: ".yarnrc.yml"}
 var pnpmBinding = ecosystem.Row{Name: "pnpm", InTreeConfigPath: "pnpm-workspace.yaml"}
 
+// ApplyInTree must walk the supplied rows, not ecosystem.Table: a row only the
+// caller knows about gets its in-tree config rewritten, which a call site
+// reaching for the Table-bound InTreeBindings() would never see.
+func TestApplyInTreeWalksSuppliedRows(t *testing.T) {
+	stub := ecosystem.Row{Name: "stub-ecosystem", InTreeConfigPath: ".stubrc"}
+	dir := newTestRepo(t)
+	writeConfig(t, dir, stub.InTreeConfigPath, "registry=https://upstream.example/stub/\n", true)
+
+	gate := Gate{
+		outcome:  gateReady,
+		port:     27182,
+		manifest: registrymanifest.Manifest{Routes: []registrymanifest.Route{{Prefix: "r0", UpstreamHost: "upstream.example"}}},
+	}
+	var stdout strings.Builder
+	if !ApplyInTree(&stdout, dir, []ecosystem.Row{stub}, gate, func([]ecosystem.EnvExport) bool { return true }) {
+		t.Fatalf("ApplyInTree = false, want true (stdout=%q)", stdout.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, stub.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "upstream.example") {
+		t.Errorf("stub row's config still mentions upstream.example: %s", got)
+	}
+	if !skipWorktreeSet(t, dir, stub.InTreeConfigPath) {
+		t.Error("skip-worktree bit not set on the stub row's config")
+	}
+}
+
 func TestApplyInTreeBindingRewritesTrackedFileBothSchemes(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "[source.crates-io]\nreplace-with = \"proxy\"\n\n[source.proxy]\nregistry = \"sparse+https://upstream.example/index/\"\n\n[registries.proxy]\nindex = \"http://upstream.example/other/\"\n"
