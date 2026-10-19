@@ -7,6 +7,17 @@ let
   builtinsCompat = import ./builtins-compat.nix;
   cliFlags = import ./cli-flags.nix;
   skillNamePattern = (import ./skills.nix).namePattern;
+  # The runtime enum and default come from the runner rows, so the generated
+  # table never names a runtime itself. The `meaning` prose below does, as
+  # Consumer-facing explanation.
+  runtimeCells =
+    let
+      quoted = import ./quoted-runtimes.nix;
+    in
+    {
+      type = builtins.concatStringsSep " \\| " quoted;
+      default = builtins.head quoted;
+    };
   hasShort = e: (e.short or null) != null;
   preToolUseRows = column: builtins.filter (r: r ? ${column} && r.event == "PreToolUse");
   inherit (builtinsCompat) concatStrings mapAttrsToList oneLine;
@@ -571,7 +582,7 @@ rec {
         | `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
         | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body; the name must match `${skillNamePattern}` and not be `.` or `..`, else evaluation fails, issue #5022) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
         | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
-        | `runtime`   | `${path "runtime" structuralPaths}` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
+        | `runtime`   | `${path "runtime" structuralPaths}` | shared         | ${runtimeCells.type} | ${runtimeCells.default} | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
         | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | ${deprecationNote "agents.drivers.<name>"} The attribute name is the Driver; see [Several Drivers side by side](#several-drivers-side-by-side). The agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default), `"opencode"` and `"pi"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
         | `nixInBox`  | `${path "nixInBox" structuralPaths}` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
         | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |

@@ -10,6 +10,7 @@
 let
   deprecationNote = import ./driver-deprecation-note.nix;
   skillNamePattern = (import ./skills.nix).namePattern;
+  quotedRuntimes = import ./quoted-runtimes.nix;
 in
 {
   driver = {
@@ -57,9 +58,11 @@ in
   };
 
   runtime = {
+    # The prose names runtimes as Consumer-facing explanation; docType and
+    # docDefault are derived from the runner rows.
     doc = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
-    docType = ''`"podman"` | `"docker"` | `"rancher"` | `"bwrap"`'';
-    docDefault = ''`"podman"`'';
+    docType = builtins.concatStringsSep " | " quotedRuntimes;
+    docDefault = builtins.head quotedRuntimes;
   };
 
   packages = {
