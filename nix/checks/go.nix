@@ -13,6 +13,7 @@ let
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNames = builtins.attrNames driverRegistry.entries;
   backendNames = map (row: row.name) (import ../../lib/backends/default.nix);
+  runnerNames = map (row: row.name) (import ../../lib/runners/index.nix { }).rows;
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
   adapterGoTestAttr = prefix: name: "${prefix}-${name}-go-test";
   driverGoTestAttr = adapterGoTestAttr "drivers";
@@ -39,21 +40,25 @@ let
       )
     )
     ++ map (d: launcherDir + "/${d}") ([ "testdata" ] ++ bundleMains ++ bundleFixtureDirs);
-  # `files` without the Drivers (and so their corpora), the bundle and the
-  # binaries.
+  allRunnerDirs = map (name: launcherDir + "/internal/runner/${name}") runnerNames;
+  # `files` without the Drivers (and so their corpora), the runner families,
+  # the bundle and the binaries.
   coreFiles =
     files:
     fs.difference files (
-      fs.unions (allDriverDirs ++ [ (launcherDir + "/internal/driver/bundle") ] ++ bundleBinaryDirs)
+      fs.unions (
+        allDriverDirs ++ allRunnerDirs ++ [ (launcherDir + "/internal/driver/bundle") ] ++ bundleBinaryDirs
+      )
     );
-  # The vendor tree is re-derived from a source without any Driver, bundle or
-  # binary, so editing one Driver never changes another's drvPath nor the core
-  # go test's (a plain launcherGoModules would, its src being the whole tree).
-  # Fixed-output with the same vendorHash, so its outPath equals
-  # launcherGoModules' and nothing is fetched twice. `go mod vendor -e`
-  # tolerates the packages that import the absent directories. Gotcha: a Driver
-  # or main importing a third-party module no other package uses changes the
-  # vendored set, and the narrowed derivation then mismatches launcherVendorHash.
+  # The vendor tree is re-derived from a source without any Driver, runner
+  # family, bundle or binary, so editing one Driver or family never changes
+  # another's drvPath nor the core go test's (a plain launcherGoModules would,
+  # its src being the whole tree). Fixed-output with the same vendorHash, so
+  # its outPath equals launcherGoModules' and nothing is fetched twice. `go
+  # mod vendor -e` tolerates the packages that import the absent directories.
+  # Gotcha: a Driver, runner family or main importing a third-party module no
+  # other package uses changes the vendored set, and the narrowed derivation
+  # then mismatches launcherVendorHash.
   vendorFor =
     files:
     launcherGoModules.overrideAttrs (_: {
@@ -110,8 +115,8 @@ let
   # adapter's package directory under cmd/launcher; `sharedFor name` the extra
   # packages its tests reach. `files` is the cmd/launcher fileset every source
   # is cut from; the independence check perturbs it. The vendor tree is
-  # `vendorFor files`, so one Driver's edits never move another's drvPath;
-  # coreFiles strips no backend, so a backend edit moves every backend's
+  # `vendorFor files`, so one Driver's or runner family's edits never move
+  # another's drvPath; coreFiles strips no backend, so a backend edit moves every backend's
   # drvPath, though not its outPath.
   # `setupFor name` is shell run after the copy for files outside cmd/launcher
   # its tests read.
@@ -249,6 +254,75 @@ let
     files = launcherDir;
     names = backendNames;
   };
+  # Packages the runner families' tests reach (go list -test -deps over every
+  # family's package): the union of their closures, so one list serves every
+  # family. A family whose tests import a new internal package must add it
+  # here, and a stale list fails the build loudly. Never a family's
+  # directory. The runner and driver roots are listed
+  # file by file because the family and Driver directories lie beneath them;
+  # the driver root is bwrap's credential-rule import, non-test files only.
+  runnerGoTestShared =
+    map (p: internalDir + "/${p}") [
+      "agentpaths"
+      "backend"
+      "chore"
+      "connlimit"
+      "dispatch"
+      "dispatchkey"
+      "dispatchkind"
+      "dispatchrecord"
+      "doctor"
+      "driver/driverkit"
+      "ecosystem"
+      "flock"
+      "freshness"
+      "gitexec"
+      "hostop"
+      "hostpaths"
+      "landdelta"
+      "ledger"
+      "logscan"
+      "outcome"
+      "panicguard"
+      "passmachine"
+      "passmanifest"
+      "promptassembly"
+      "promptfence"
+      "registrymanifest"
+      "registryprobe"
+      "registryproxy"
+      "registryvocab"
+      "report"
+      "retry"
+      "runner/runnertest"
+      "signalclient"
+      "signalsocket"
+      "signalwire"
+      "terminate"
+      "testutil/repopath"
+      "unixsocket"
+      "usage"
+    ]
+    ++ rootGoFiles (internalDir + "/forge")
+    ++ rootGoFiles (internalDir + "/driver")
+    ++ rootGoFiles (internalDir + "/runner");
+  runnerGoTestsFor =
+    { files, names }:
+    adapterGoTests {
+      inherit files names;
+      prefix = "runners";
+      pkgFor = name: "internal/runner/${name}";
+      sharedFor = _: runnerGoTestShared;
+      # runnertest reads the prompt templates beside cmd/launcher.
+      setupFor = _: ''
+        cp -r ${../../templates} src/templates
+      '';
+      nativeBuildInputs = goTestInputs;
+    };
+  runnerGoTests = runnerGoTestsFor {
+    files = launcherDir;
+    names = runnerNames;
+  };
   # go test guards config-parsing regressions (#112). docs/, .github/,
   # .forgejo/, templates/, agent/, README.md (if present) and lib/ are copied
   # beside cmd/launcher, mirroring the repo layout, so the tests resolve their relative
@@ -295,6 +369,12 @@ let
           exit 1
         fi
       done
+      for held in ${pkgs.lib.concatStringsSep " " runnerNames}; do
+        if [ -e "src/cmd/launcher/internal/runner/$held" ]; then
+          echo "launcher-go-test's source holds internal/runner/$held" >&2
+          exit 1
+        fi
+      done
       corpora=$(find src/cmd/launcher/internal/driver -path '*/testdata/corpus')
       if [ -n "$corpora" ]; then
         echo "launcher-go-test's source holds a Driver corpus: $corpora" >&2
@@ -320,6 +400,7 @@ let
 in
 driverGoTests
 // backendGoTests
+// runnerGoTests
 // {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     unformatted=$(gofmt -l ${../../cmd/launcher})
@@ -706,16 +787,10 @@ driverGoTests
   # go list -deps catches an import that arrives through a third package too;
   # -test makes a family import from only a _test.go file count as well.
   launcher-runner-family-isolation =
-    let
-      families = [
-        "oci"
-        "bwrap"
-      ];
-    in
     pkgs.runCommand "launcher-runner-family-isolation"
       {
         nativeBuildInputs = [ pkgs.go ];
-        families = pkgs.lib.concatStringsSep " " families;
+        families = pkgs.lib.concatStringsSep " " runnerNames;
       }
       ''
         cp -r ${../../cmd/launcher} src
