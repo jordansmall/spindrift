@@ -6677,14 +6677,14 @@ expires).
 Like the digest knobs it is host-only.
 
 **Snapshot and validation.** The host stores the rendered digest in the Dispatch
-Records store's `tuning_snapshots` table, keyed by the sweep's Record ID, before
-it launches the Box; the Ledger's Done commit carries only `snapshot: {sweep,
-sha256}`, so the digest itself is never pushed. A tuning finding names the
-digest anchors it argues from (a repeatable `-cite <anchor>`, or `"cites"` on
-the log carrier) and the one metric it concerns (`-metric <slug>`, a lowercase
-slug, or `"metric"`). Only the socket carrier enforces this in the Box:
-`driver-exec signal issue-intent` requires both whenever `CHORE_INPUT` is set
-and rejects a finding without them. On the log carrier
+Records store's `snapshots` table, keyed by the Chore and the sweep's Record ID,
+before it launches the Box; the Ledger's Done commit carries only `snapshot:
+{sweep, sha256}`, so the digest itself is never pushed. A tuning finding
+names the digest anchors it argues from (a repeatable `-cite <anchor>`,
+or `"cites"` on the log carrier) and the one metric it concerns (`-metric
+<slug>`, a lowercase slug, or `"metric"`). Only the socket carrier enforces
+this in the Box: `driver-exec signal issue-intent` requires both whenever
+`CHORE_INPUT` is set and rejects a finding without them. On the log carrier
 (`SPINDRIFT_ISSUE_INTENT` lines) nothing checks them in the Box; the host drops
 a finding with no cites at settle, but does not check that a metric is present,
 so a log-carrier finding with no metric is still filed. The target file is the
@@ -6933,7 +6933,7 @@ Record until it gains output.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 11. Version 2 added the `verdict_text` and
+own. The current schema is version 13. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. An older store opens, migrates, and keeps
 its rows; the migrations also mark every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
@@ -6959,6 +6959,10 @@ it as `settled_seq` (omitted until the Record is settled). Version 11 adds the
 `tuning_snapshots` table (sweep Record ID, SHA-256, rendered digest, creation
 time) holding the digest a tuning Chore sweep was served; it is host-private
 and never pushed, since the Ledger carries only the Record ID and hash.
+Version 12 adds the `pass_agents` table of per-pass, per-agent usage.
+Version 13 replaces `tuning_snapshots` with a `snapshots` table keyed by Chore
+and Record ID, so every records Chore stores the digest it was served;
+tuning's rows carry over.
 The store uses WAL journaling, so another process can read it while `stats`
 writes. Because Records are kept in the database, they survive deleting the
 logs they came from. Deleting the database instead loses every Record whose
