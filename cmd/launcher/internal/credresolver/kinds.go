@@ -6,6 +6,7 @@ import "slices"
 // must never import ecosystem, registrydiscover, or registryvocab.
 // Importing registrydiscover would be a cycle (it imports credresolver);
 // the other two bans keep credresolver below the registry layer.
+// importgraph_test.go enforces all three.
 // Host and HostKey hold different values: npmrc's store keys on the raw
 // host, gradle-properties' on registryvocab.HostKey(host).
 type StoreFacts struct {
