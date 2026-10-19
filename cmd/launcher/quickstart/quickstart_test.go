@@ -2430,6 +2430,7 @@ func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.
 		Name:             "gitlab",
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
+		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
 	})
 	defer func() { backend.Registry = original }()
 
@@ -2461,6 +2462,7 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 		Name:             "gitlab",
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
+		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
 		DoctorTokenHint:  "GITLAB_TOKEN",
 		DoctorSlugHint:   "GITLAB_BASE_URL",
 	})
@@ -2481,6 +2483,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 		Name:             "gitlab",
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
+		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
 		TokenEnvVar:      "GITLAB_TOKEN",
 	})
 	defer func() { backend.Registry = original }()
@@ -3020,6 +3023,7 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 		Name:             "gitlab",
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
+		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
 		TokenEnvVar:      "GITLAB_TOKEN",
 	})
 	defer func() { backend.Registry = originalRegistry }()

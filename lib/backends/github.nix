@@ -13,4 +13,11 @@
   relayCapable = true;
   hostPostingCapable = true;
   labelRegistry = true;
+  quickstart = {
+    hosts = [ "github.com" ];
+    axes = [
+      "tracker"
+      "forge"
+    ];
+  };
 }

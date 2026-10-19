@@ -909,7 +909,7 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker
 		// generated flake lands code on the same instance doctor validated.
 		settingsLines += fmt.Sprintf("            %s = \"forgejo\";\n", pathCodeForge)
 		if tracker.forgejoBaseURL != "" && tracker.forgejoBaseURL != codebergBaseURL {
-			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", pathForgejoBaseURL, nixEscape(tracker.forgejoBaseURL))
+			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", quickstartKnobs["FORGEJO_BASE_URL"].path, nixEscape(tracker.forgejoBaseURL))
 		}
 	}
 

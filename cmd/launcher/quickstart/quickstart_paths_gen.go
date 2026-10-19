@@ -12,9 +12,6 @@ package main
 // pathCodeForge is the nix option path for the quickstart wizard's codeForge knob.
 const pathCodeForge = "forge.backend"
 
-// pathForgejoBaseURL is the nix option path for the quickstart wizard's forgejoBaseURL knob.
-const pathForgejoBaseURL = "issues.forgejo.baseURL"
-
 // pathGitUserEmail is the nix option path for the quickstart wizard's gitUserEmail knob.
 const pathGitUserEmail = "git.user.email"
 
@@ -29,3 +26,16 @@ const pathRepoSlug = "forge.repoSlug"
 
 // pathRuntime is the nix option path for the quickstart wizard's runtime knob.
 const pathRuntime = "infra.runtime"
+
+// defaultCodeForge is the CODE_FORGE schema default; the wizard omits the
+// codeForge line when the chosen backend equals it.
+const defaultCodeForge = "github"
+
+// quickstartKnob is one flakeOption knob of a quickstart-capable backend row:
+// its nix option path and schema default.
+type quickstartKnob struct{ path, dflt string }
+
+// quickstartKnobs lists those knobs by env name (lib/backends rows' `knobs`).
+var quickstartKnobs = map[string]quickstartKnob{
+	"FORGEJO_BASE_URL": {path: "issues.forgejo.baseURL", dflt: "https://codeberg.org"},
+}

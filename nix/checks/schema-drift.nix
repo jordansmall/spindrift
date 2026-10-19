@@ -914,6 +914,65 @@ checkedMerge {
       "backend-registry-axis-read-guard (issue #4183): a row setting trackerAxisRead, trackerAxisWrite, and trackerAxisFiler must still render successfully, but it failed";
     pkgs.runCommand "backend-registry-axis-read-guard" { } "touch $out";
 
+  # checkRow must reject a malformed `quickstart` block (ADR 0068 decision 8):
+  # empty hosts or axes, an unknown axis, no "tracker" axis, an axis the row
+  # cannot serve. The valid row is the control that keeps the rejections
+  # from being vacuous.
+  backend-registry-quickstart-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      baseRow = {
+        name = "synthetic";
+        goVar = "Synthetic";
+        displayName = "Synthetic";
+        validAsTracker = true;
+        validAsCodeForge = true;
+      };
+      block = {
+        hosts = [ "example.org" ];
+        axes = [
+          "tracker"
+          "forge"
+        ];
+      };
+      render = row: builtins.tryEval (renderers.renderBackendRegistryGo [ row ]);
+      withBlock = b: render (baseRow // { quickstart = b; });
+      rejected = {
+        emptyHosts = withBlock (block // { hosts = [ ]; });
+        emptyAxes = withBlock (block // { axes = [ ]; });
+        unknownAxis = withBlock (
+          block
+          // {
+            axes = [
+              "tracker"
+              "bogus"
+            ];
+          }
+        );
+        noTracker = withBlock (block // { axes = [ "forge" ]; });
+        notTracker = render (
+          baseRow
+          // {
+            validAsTracker = false;
+            quickstart = block;
+          }
+        );
+        notForge = render (
+          baseRow
+          // {
+            validAsCodeForge = false;
+            quickstart = block;
+          }
+        );
+      };
+      wronglyAccepted = builtins.attrNames (pkgs.lib.filterAttrs (_: r: r.success) rejected);
+    in
+    assert assertMsg (withBlock block).success
+      "backend-registry-quickstart-guard: a valid quickstart block must render, but it failed -- the guard would be vacuous";
+    assert assertMsg (wronglyAccepted == [ ])
+      "backend-registry-quickstart-guard: renderBackendRegistryGo must reject these malformed quickstart blocks: ${builtins.concatStringsSep ", " wronglyAccepted}";
+    pkgs.runCommand "backend-registry-quickstart-guard" { } "touch $out";
+
   # Regenerate with `nix run .#regen` when lib/env-schema.nix's bool or
   # emptyDisables knobs change; gofmt-normalized the same way regen
   # normalizes it (issue #4617).
