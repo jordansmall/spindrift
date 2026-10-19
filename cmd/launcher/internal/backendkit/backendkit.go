@@ -8,6 +8,8 @@
 package backendkit
 
 import (
+	"fmt"
+
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -89,4 +91,13 @@ func ByName(name string) (Strategy, bool) {
 // Strategies returns every registered Strategy in registration order.
 func Strategies() []Strategy {
 	return append([]Strategy(nil), registry...)
+}
+
+// RequireRepoSlug is the ValidateTracker check shared by the backends whose
+// issue tracker is keyed on REPO_SLUG.
+func RequireRepoSlug(s Shared, trackerName string) error {
+	if s.RepoSlug == "" {
+		return fmt.Errorf("set REPO_SLUG when ISSUE_TRACKER=%s", trackerName)
+	}
+	return nil
 }

@@ -43,3 +43,21 @@ func TestStrategyLedgerURLUsesLookupBaseURL(t *testing.T) {
 		t.Errorf("URL = %q, want it built from the looked-up base URL and slug", site.URL)
 	}
 }
+
+func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
+	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": "tok"})
+	err := forgejo.Strategy.ValidateTracker(backendkit.Shared{}, l)
+	if err == nil || err.Error() != "set REPO_SLUG when ISSUE_TRACKER=forgejo" {
+		t.Errorf("err = %v, want the REPO_SLUG message", err)
+	}
+	if err := forgejo.Strategy.ValidateTracker(backendkit.Shared{RepoSlug: "o/r"}, l); err != nil {
+		t.Errorf("err = %v, want nil with a slug", err)
+	}
+}
+
+func TestStrategyValidateCodeForgeIgnoresSlug(t *testing.T) {
+	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "https://forge.example", "FORGEJO_TOKEN": "tok"})
+	if err := forgejo.Strategy.ValidateCodeForge(backendkit.Shared{}, l); err != nil {
+		t.Errorf("err = %v, want nil: the slug is a tracker-axis requirement", err)
+	}
+}

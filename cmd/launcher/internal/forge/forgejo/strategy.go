@@ -9,7 +9,7 @@ import (
 // Strategy is the forgejo backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
 	Descriptor:        backend.Forgejo,
-	ValidateTracker:   validate("ISSUE_TRACKER"),
+	ValidateTracker:   validateTracker,
 	ValidateCodeForge: validate("CODE_FORGE"),
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
 		k, err := ReadKnobs(Lookup(l))
@@ -70,4 +70,13 @@ func codeForgeConfig(s backendkit.Shared, k Knobs) ForgejoCodeForgeConfig {
 		BranchPrefix: s.BranchPrefix,
 		MergeMethod:  s.MergeMethod,
 	}
+}
+
+// validateTracker is the tracker axis's validate plus the REPO_SLUG the issue
+// tracker adapter is keyed on.
+func validateTracker(s backendkit.Shared, l backendkit.Lookup) error {
+	if err := validate("ISSUE_TRACKER")(s, l); err != nil {
+		return err
+	}
+	return backendkit.RequireRepoSlug(s, backend.Forgejo.Name)
 }

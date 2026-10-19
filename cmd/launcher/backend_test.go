@@ -53,6 +53,7 @@ func TestBackendRowsShape(t *testing.T) {
 			boxTokenEnvVar:     "BOX_GH_TOKEN",
 			outboxRelayCapable: true,
 
+			hasValidateTracker:      true,
 			hasNewIssueTracker:      true,
 			hasNewCodeForge:         true,
 			hasNewReadOnlyCodeForge: true,

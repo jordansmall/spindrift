@@ -10,6 +10,9 @@ import (
 // its closures ignore the Lookup.
 var Strategy = backendkit.Strategy{
 	Descriptor: backend.GitHub,
+	ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
+		return backendkit.RequireRepoSlug(s, backend.GitHub.Name)
+	},
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
 		return NewExecClient(s.RepoSlug, s.Labels, s.BranchPrefix, WithVerdictLabels(s.VerdictLabels)), nil
 	},
