@@ -91,21 +91,17 @@ func (p Policy) loadSnapshot(chore, recordID string) (snap dispatchrecord.Snapsh
 // tuningSnapshot is a records-scoped sweep's digest. chore and ref.Sweep key
 // the stored row; ref goes on the Done commit; rendered is the text of that
 // row, filled by load at settle; digest is the Strategy whose hooks judge the
-// findings; policy and tree reach the store, the sample floor and the scanned
-// HEAD's tracked files.
+// findings and knobs the values it read, so Render and Validate see the same
+// sample floor; policy and tree reach the store and the scanned HEAD's
+// tracked files.
 type tuningSnapshot struct {
 	chore    string
 	ref      ledger.Snapshot
 	rendered string
 	digest   recordsdigest.Strategy
+	knobs    recordsdigest.Knobs
 	policy   Policy
 	tree     Tree
-}
-
-// digestLimits is what the Digest's Render is handed and its Validate judges
-// under, so both see the same sample floor.
-func (p Policy) digestLimits() recordsdigest.Limits {
-	return recordsdigest.Limits{MinSample: p.TuningMinSample, MaxBytes: p.TuningDigestBytes}
 }
 
 // load fills rendered from the stored snapshot rather than the digest the Box

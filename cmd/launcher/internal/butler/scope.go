@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
@@ -101,6 +102,10 @@ type recordsSource struct {
 	digest recordsdigest.Strategy
 	chore  string
 	head   string
+	// minRecords is the knob chore.MinRecordsKnob names for this Chore; knobs is
+	// what its Digest's own ReadKnobs read. Both resolve once, at build.
+	minRecords int
+	knobs      recordsdigest.Knobs
 	// records is read once per candidate, so the digest renders the very
 	// Records the Chore was judged due on.
 	records   []dispatchrecord.Record
@@ -116,10 +121,44 @@ func newRecordsSource(r *Runner, choreName, head string, claimedAt time.Time) (r
 	if err != nil {
 		return recordsSource{}, err
 	}
+	minRecords, err := r.policy.minRecords(choreName)
+	if err != nil {
+		return recordsSource{}, err
+	}
+	knobs, err := digest.Knobs(r.policy.Knobs)
+	if err != nil {
+		return recordsSource{}, fmt.Errorf("butler: %s: %w", choreName, err)
+	}
 	return recordsSource{
 		policy: r.policy, tree: r.tree, it: r.it, warn: r.warn, merged: r.mergeLookup(choreName), digest: digest,
-		chore: choreName, head: head, records: records, claimedAt: claimedAt,
+		chore: choreName, head: head, minRecords: minRecords, knobs: knobs, records: records, claimedAt: claimedAt,
 	}, nil
+}
+
+// minRecords resolves the knob the Chore's row names as its minimum new-Record
+// count. A knob that is unset or not an integer is an error: the Chore would
+// otherwise be due on a made-up threshold (the adapter, unlike the row's
+// generated reader, has no row default to fall back to; the launcher's lookup
+// always resolves one). A Chore whose row names no knob has
+// no floor beyond CheckRecords' own "at least one new Record".
+func (p Policy) minRecords(choreName string) (int, error) {
+	env := chore.MinRecordsKnob(choreName)
+	if env == "" {
+		return 0, nil
+	}
+	var v string
+	var ok bool
+	if p.Knobs != nil {
+		v, ok = p.Knobs(env)
+	}
+	if !ok {
+		return 0, fmt.Errorf("butler: %s: %s is not set", choreName, env)
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("butler: %s: %s: %q is not an integer: %w", choreName, env, v, err)
+	}
+	return n, nil
 }
 
 func (s recordsSource) newSettled(tip ledger.Tip) int {
@@ -127,11 +166,11 @@ func (s recordsSource) newSettled(tip ledger.Tip) int {
 }
 
 func (s recordsSource) Due(tip ledger.Tip, recent []ledger.Entry, now time.Time, room chore.Room, cfg chore.DueConfig) chore.NotDue {
-	return chore.CheckRecords(tip, recent, s.newSettled(tip), s.policy.TuningMinRecords, now, room, cfg)
+	return chore.CheckRecords(tip, recent, s.newSettled(tip), s.minRecords, now, room, cfg)
 }
 
 func (s recordsSource) NextDue(tip ledger.Tip, recent []ledger.Entry, now time.Time, room chore.Room, cfg chore.DueConfig) (time.Time, bool) {
-	return chore.NextDueRecords(tip, recent, s.newSettled(tip), s.policy.TuningMinRecords, now, room, cfg)
+	return chore.NextDueRecords(tip, recent, s.newSettled(tip), s.minRecords, now, room, cfg)
 }
 
 // Stage is a no-op: the Records were loaded when the source was built.
@@ -151,7 +190,7 @@ func (s recordsSource) Prepare(claim ledger.Tip) (prepared, error) {
 	}
 	out := s.digest.Render(recordsdigest.Input{
 		Records: s.records, Cursor: claim.State.Cursor, Now: s.claimedAt,
-		Limits: s.policy.digestLimits(),
+		Limits: s.knobs.Limits,
 		Prior:  prior, Merged: s.merged,
 	})
 	return prepared{
@@ -176,6 +215,6 @@ func (s recordsSource) armSnapshot(d dispatch.Dispatcher, step *settleRun, diges
 	if err := s.policy.storeSnapshot(dispatchrecord.Snapshot{Chore: s.chore, RecordID: id, SHA256: ref.SHA256, Rendered: digest, CreatedAt: s.claimedAt}); err != nil {
 		return fmt.Errorf("butler: %s: %w", s.chore, err)
 	}
-	step.tuning = &tuningSnapshot{chore: s.chore, ref: ref, digest: s.digest, policy: s.policy, tree: s.tree}
+	step.tuning = &tuningSnapshot{chore: s.chore, ref: ref, digest: s.digest, knobs: s.knobs, policy: s.policy, tree: s.tree}
 	return nil
 }

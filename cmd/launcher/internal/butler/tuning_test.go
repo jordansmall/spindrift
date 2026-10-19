@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/promptfence"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
@@ -106,13 +108,27 @@ func seedRecordsSettled(t *testing.T, root string, keyBase, n int, first time.Ti
 	return ids
 }
 
+// mapKnobs serves a Policy.Knobs lookup from a fixed env map.
+func mapKnobs(m map[string]string) recordsdigest.Lookup {
+	return func(env string) (string, bool) { v, ok := m[env]; return v, ok }
+}
+
+// tuningKnobs is the tuning row's knobs as the launcher would resolve them,
+// with the byte cap off (0) unless a test sets one.
+func tuningKnobs(minRecords, digestBytes int) recordsdigest.Lookup {
+	return mapKnobs(map[string]string{
+		"BUTLER_TUNING_MIN_RECORDS":  strconv.Itoa(minRecords),
+		"BUTLER_TUNING_MIN_SAMPLE":   "15",
+		"BUTLER_TUNING_DIGEST_BYTES": strconv.Itoa(digestBytes),
+		"BUTLER_TUNING_COOLDOWN":     "720h",
+	})
+}
+
 func tuningPolicy(root string, minRecords int) Policy {
 	p := testRunPolicy(0, "tuning")
 	p.Chores = []chore.Chore{{Name: "tuning", Every: 24 * time.Hour, Records: true, FindingLabel: chore.FindingLabel("tuning")}}
 	p.RecordsRoot = root
-	p.TuningMinRecords = minRecords
-	p.TuningMinSample = 15
-	p.TuningCooldown = 720 * time.Hour
+	p.Knobs = tuningKnobs(minRecords, 0)
 	return p
 }
 
@@ -799,7 +815,7 @@ func sweepTuningInput(t *testing.T, root string, digestBytes int) string {
 	t.Helper()
 	tr := newTuningRun(t)
 	policy := tuningPolicy(root, 1)
-	policy.TuningDigestBytes = digestBytes
+	policy.Knobs = tuningKnobs(1, digestBytes)
 	if out, err := tr.sweepTuning(t, policy, tuningNow); err != nil || out.Kind != Swept {
 		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
 	}
@@ -899,7 +915,7 @@ func TestSweep_Tuning_CapTrimsPriorFindingsAfterOutliers(t *testing.T) {
 		tr := newTuningRun(t)
 		tr.backlog = newBacklogTracker(t, tr.fc.AsIssueFiler(), nil, closed)
 		policy := tuningPolicy(root, 1)
-		policy.TuningDigestBytes = digestBytes
+		policy.Knobs = tuningKnobs(1, digestBytes)
 		if out, err := tr.sweepTuning(t, policy, tuningNow); err != nil || out.Kind != Swept {
 			t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
 		}

@@ -63,20 +63,12 @@ type Policy struct {
 	// records-scoped Chore reads (ADR 0062); empty means no store, so such a
 	// Chore is never due.
 	RecordsRoot string
-	// TuningMinRecords is BUTLER_TUNING_MIN_RECORDS, the fewest new settled
-	// Records that make a records-scoped Chore due (ADR 0062).
-	TuningMinRecords int
-	// TuningMinSample is BUTLER_TUNING_MIN_SAMPLE, the per-row sample size
-	// under which the digest marks a row thin.
-	TuningMinSample int
-	// TuningDigestBytes is BUTLER_TUNING_DIGEST_BYTES, the byte cap on the
-	// digest: over it, Evidence is trimmed first, Outliers second, and Prior
-	// findings third, never the aggregate tables.
-	TuningDigestBytes int
-	// TuningCooldown is BUTLER_TUNING_COOLDOWN, how long a records Chore's
-	// finding closed as not planned keeps suppressing that Chore's refile of
-	// the same pattern; 0 never suppresses on a not-planned close.
-	TuningCooldown time.Duration
+	// Knobs resolves a row-owned knob's env name (BUTLER_TUNING_MIN_RECORDS and
+	// the like) to its resolved value (ADR 0068). The butler holds no per-Chore
+	// knob field: the records adapter reads the min-records knob the Chore's row
+	// names, and a Digest reads its own through Strategy.Knobs. Nil resolves
+	// none, so a records Chore whose row names a min-records knob is an error.
+	Knobs recordsdigest.Lookup
 }
 
 // DefaultPatchPaths is BUTLER_PATCH_PATHS' schema default (lib/env-schema.nix

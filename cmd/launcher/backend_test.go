@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 // Slice 1 of issue #2267 is purely additive: nothing calls backendRows yet, so
@@ -437,10 +438,10 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 	}
 }
 
-// Every backendKnobs key must be an env some backend package's generated
+// Every rowKnobs key must be an env some row's generated
 // ReadKnobs looks up, and ReadKnobs over the config's lookup must succeed:
 // the latter pins mustBuild's claim that its error is unreachable.
-func TestBackendKnobsAreRowKnobs(t *testing.T) {
+func TestRowKnobsAreDeclaredByRows(t *testing.T) {
 	c := minimalValidConfig()
 	seen := map[string]bool{}
 	rec := func(env string) (string, bool) {
@@ -456,12 +457,15 @@ func TestBackendKnobsAreRowKnobs(t *testing.T) {
 	if _, err := local.ReadKnobs(rec); err != nil {
 		t.Errorf("local.ReadKnobs: %v", err)
 	}
+	if _, err := tuning.Strategy.Knobs(rec); err != nil {
+		t.Errorf("tuning.Strategy.Knobs: %v", err)
+	}
 	if _, err := git.ReadKnobs(rec); err != nil {
 		t.Errorf("git.ReadKnobs: %v", err)
 	}
-	for key := range backendKnobs {
+	for key := range rowKnobs {
 		if !seen[key] {
-			t.Errorf("backendKnobs key %q is not declared by any backend row", key)
+			t.Errorf("rowKnobs key %q is not declared by any row", key)
 		}
 	}
 }
