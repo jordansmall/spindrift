@@ -22,8 +22,8 @@ func ValidateRuntimeWithLookup(runtime string, lookPath func(string) (string, er
 	}
 	cli := BinaryFor(runtime)
 	if _, err := lookPath(cli); err != nil {
-		if runtime == "rancher" {
-			return fmt.Errorf("nerdctl not found on PATH — is Rancher Desktop running in containerd mode?")
+		if hint := runtimeAliases[runtime].missingHint; hint != "" {
+			return fmt.Errorf("%s not found on PATH — %s", cli, hint)
 		}
 		return fmt.Errorf("%s not found on PATH", cli)
 	}
