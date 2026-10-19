@@ -11,6 +11,7 @@ const namePnpm = "pnpm"
 // renders all three npm-family vars, pnpm's included, in one call.
 var pnpmRow = Row{
 	Name:             namePnpm,
+	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"pnpm-lock.yaml"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: "pnpm-workspace.yaml",
