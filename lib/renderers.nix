@@ -847,6 +847,14 @@ rec {
       ];
       promptFields = [
         {
+          attr = "issue";
+          go = "Issue";
+        }
+        {
+          attr = "fix";
+          go = "Fix";
+        }
+        {
           attr = "base";
           go = "Base";
         }

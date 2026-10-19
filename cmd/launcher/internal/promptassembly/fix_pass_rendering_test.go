@@ -227,3 +227,18 @@ func TestAssembleFixPassInjectedBlocksCarryBakedSkillSteps(t *testing.T) {
 		})
 	}
 }
+
+// Recover runs no Box and its row names no prompt: assembling for it must say
+// so, not fail reading the prompts directory itself.
+func TestAssembleKindWithoutPromptErrors(t *testing.T) {
+	reg := loadTestRegistry(t)
+	for _, fixPass := range []int{0, 2} {
+		env := coveredEnv()
+		env.DispatchKind = "recover"
+		env.FixPass = fixPass
+		_, err := Assemble(env, reg)
+		if err == nil || !strings.Contains(err.Error(), "kind recover has no prompt") {
+			t.Errorf("FixPass=%d: Assemble err = %v, want \"kind recover has no prompt\"", fixPass, err)
+		}
+	}
+}
