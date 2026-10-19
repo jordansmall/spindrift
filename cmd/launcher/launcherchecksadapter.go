@@ -11,6 +11,11 @@ import (
 // repo-slug/gh-token exemption needs (true when the kind's Tracker axis names
 // the research tracker), since launcherchecks has no dispatch kind string.
 func launcherCheckConfig(c config) launcherchecks.Config {
+	researchDispatch := false
+	switch c.kind().Tracker {
+	case dispatchkind.TrackerResearch:
+		researchDispatch = true
+	}
 	return launcherchecks.Config{
 		RepoSlug:     c.repoSlug,
 		GitUserName:  c.gitUserName,
@@ -34,7 +39,7 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		IssueTracker: c.issueTracker,
 		CodeForge:    c.codeForge,
 
-		ResearchDispatch: c.kind().Tracker == dispatchkind.TrackerResearch,
+		ResearchDispatch: researchDispatch,
 		SelfContained:    c.selfContained,
 	}
 }
