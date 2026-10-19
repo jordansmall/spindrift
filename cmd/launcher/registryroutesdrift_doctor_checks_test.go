@@ -309,9 +309,8 @@ func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 	}
 }
 
-// AC2's counterpart to
-// TestBwrapCapabilityChecks_CgroupDelegationRendersAdvisoryNotMissing in
-// bwrap_doctor_checks_test.go. The row's Advisory Tier drives the
+// AC2's counterpart to TestPrerequisites_RenderTiers in
+// internal/runner/bwrap/prerequisites_test.go. The row's Advisory Tier drives the
 // "advisory:" framing, so a genuine drift finding carries a bare Probe
 // error, not a doctor.ErrDegraded wrap.
 func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *testing.T) {

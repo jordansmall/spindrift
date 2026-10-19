@@ -164,6 +164,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 		FailedLabel:      c.failedLabel,
 		CompleteLabel:    c.completeLabel,
 		Runtime:          c.runtime,
+		RuntimeProbe:     runtimePrerequisiteProbe(c),
 		MergePolicy:      c.mergeMode,
 		BaseBranch:       c.baseBranch,
 	}, rep, bufio.NewScanner(stdin), interactive, extraChecks); err != nil {

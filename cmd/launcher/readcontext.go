@@ -76,7 +76,7 @@ type readValidation struct {
 
 // validation runs cmdDoctor's full-report config classification against
 // rc.config through validateConfigChecks, the doctor-only variant that omits
-// doctor.RuntimeCheck and the --self-contained check, never validate()'s
+// the runtime prerequisite and the --self-contained check, never validate()'s
 // fail-fast dispatch gating (issue #2992). It is a method so that reconcile,
 // which never calls it, pays no validation I/O.
 func (rc readContext) validation() readValidation {

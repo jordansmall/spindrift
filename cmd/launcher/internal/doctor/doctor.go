@@ -161,30 +161,6 @@ func allLabelsPresentMessage() string {
 	return "all " + strings.Join(nouns[:last], ", ") + ", and " + nouns[last] + " labels present"
 }
 
-// RuntimeCheckName is exported so callers filtering the row out of a larger slice
-// match this constant, not the bare literal "runtime". Matching the literal would
-// let a rename here silently reintroduce double-reporting of the runtime row.
-const RuntimeCheckName = "runtime"
-
-// RuntimeCheck builds the Required-tier "runtime" Check row backing
-// launcherchecks.RequiredKnobChecks, which feeds validate()'s fatal startup gate.
-// The advisory runtime line doctor and Quickstart print is a separate path
-// (Config.Runtime), and both callers strip this row before calling Run so the two
-// never both report for one invocation (issue #2559 AC2).
-func RuntimeCheck(runtime string) Check {
-	return Check{
-		Name:   RuntimeCheckName,
-		Tier:   Required,
-		Remedy: "set RUNTIME to podman, docker, rancher, or bwrap, and ensure the matching CLI is on PATH",
-		Probe: func() (any, error) {
-			return nil, runner.ValidateRuntime(runtime)
-		},
-		SuccessMsg: func(output any) string {
-			return fmt.Sprintf("runtime %q found on PATH", runtime)
-		},
-	}
-}
-
 // Config is the minimal slice of launcher config Run needs.
 type Config struct {
 	IssueTracker string
@@ -226,6 +202,12 @@ type Config struct {
 	// operator deliberately scaffold with an uninstalled runtime, so doctor must
 	// not turn that accepted state into a hard failure.
 	Runtime string
+
+	// RuntimeProbe is the active runner family's runtime prerequisite Probe,
+	// reported on the Runtime advisory line. Nil defaults to
+	// runner.RuntimePrerequisite(Runtime).Probe, for callers (Quickstart) that
+	// have no runner family.
+	RuntimeProbe func() (any, error)
 
 	// MergePolicy is the configured post-green merge policy (immediate|auto|manual,
 	// MERGE_MODE). The branch-protection row is Required under immediate/auto,
@@ -364,7 +346,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	// Runtime row, advisory and never fatal. Rationale on Config.Runtime.
 	if c.Runtime == "" {
 		rep.Finding(Advisory, "RUNTIME not set — skipping runtime check")
-	} else if rerr := runner.ValidateRuntime(c.Runtime); rerr != nil {
+	} else if _, rerr := runtimeProbe(c)(); rerr != nil {
 		rep.Finding(Advisory, "runtime %q not ready: %v — does not fail this check", c.Runtime, rerr)
 	} else {
 		rep.Success("runtime %q found on PATH", c.Runtime)
@@ -547,4 +529,12 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	}
 	rep.Success("%s", allLabelsPresentMessage())
 	return nil
+}
+
+// runtimeProbe is c.RuntimeProbe, defaulting to the runtime prerequisite's.
+func runtimeProbe(c Config) func() (any, error) {
+	if c.RuntimeProbe != nil {
+		return c.RuntimeProbe
+	}
+	return runner.RuntimePrerequisite(c.Runtime).Probe
 }

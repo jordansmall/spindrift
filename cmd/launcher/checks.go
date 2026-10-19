@@ -6,6 +6,7 @@ import (
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/launcherchecks"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // launcherChecks and the helpers below adapt internal/launcherchecks, which
@@ -17,8 +18,19 @@ func launcherChecks(c config) []doctor.Check {
 }
 
 // launcherRequiredKnobChecks builds the Required-tier rows that run before
-// validate()'s validateChoice calls.
+// validate()'s validateChoice calls: the knob rows, then the active runner
+// family's LaunchWithConfig prerequisites (the runtime CLI on PATH).
 func launcherRequiredKnobChecks(c config) []doctor.Check {
+	rows := launcherConfigKnobChecks(c)
+	for _, p := range runner.LaunchGates(runnerPrerequisites(c), runner.LaunchWithConfig) {
+		rows = append(rows, doctor.PrerequisiteCheck(p))
+	}
+	return rows
+}
+
+// launcherConfigKnobChecks is launcherRequiredKnobChecks without the runner
+// prerequisites.
+func launcherConfigKnobChecks(c config) []doctor.Check {
 	return append([]doctor.Check{removedKnobsCheck()},
 		launcherchecks.RequiredKnobChecks(launcherCheckConfig(c), launcherCheckDeps(c))...)
 }
@@ -29,13 +41,14 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 	return launcherchecks.CrossKnobChecks(launcherCheckConfig(c), launcherCrossKnobDeps(c))
 }
 
-// doctorExtraChecks returns launcherChecks(c) without the "runtime" row, which
-// doctor.Run already reports through Config.Runtime's advisory line.
+// doctorExtraChecks returns launcherChecks(c) without the runner family's
+// LaunchWithConfig prerequisites (the "runtime" row), which doctor.Run already
+// reports through Config.RuntimeProbe's advisory line.
 // validateConfig (main.go) also uses this set to classify exit 2, so
-// bwrapCapabilityChecks rows must stay out: a bwrap host missing pasta is an
-// installation fault, not a configuration one (issue #2671).
+// runner launch-gate prerequisites must stay out: a bwrap host missing pasta
+// is an installation fault, not a configuration one (issue #2671).
 func doctorExtraChecks(c config) []doctor.Check {
-	return launcherchecks.WithoutRuntime(launcherChecks(c))
+	return append(launcherConfigKnobChecks(c), launcherCrossKnobChecks(c)...)
 }
 
 // registryProxyRoutesCheckName keeps the row's Name field and its SuccessMsg

@@ -208,7 +208,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate actually calls bwrap.ValidatePasta()
+	t.Setenv("NETWORK_MODE", "open") // not host/none, so the pasta launch gate actually calls bwrap.ValidatePasta()
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate
 	// (readonly_token_gate.go) would also fail if the walk reached it.
 
@@ -216,10 +216,10 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
-		t.Fatal("newGatedContext() = nil error, want checkBwrapPastaGate's pasta-missing rejection")
+		t.Fatal("newGatedContext() = nil error, want the bwrap pasta launch gate's pasta-missing rejection")
 	}
 	if !strings.Contains(err.Error(), "pasta") {
-		t.Errorf("newGatedContext() error = %q, want it to mention pasta (checkBwrapPastaGate), not a token gate", err.Error())
+		t.Errorf("newGatedContext() error = %q, want it to mention pasta (bwrap launch gate), not a token gate", err.Error())
 	}
 	if strings.Contains(err.Error(), "BOX_GH_TOKEN") {
 		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-pasta before ever reaching the token gate", err.Error())
@@ -233,7 +233,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 // second bwrap gate. ValidateOverlay() has no injectable exec seam from this
 // package and ends in a real kernel probe that passes on any host with
 // unprivileged-userns-overlayfs, so the only deterministic failure is bwrap
-// absent from PATH. NETWORK_MODE=host makes checkBwrapPastaGate a no-op.
+// absent from PATH. NETWORK_MODE=host makes the pasta launch gate a no-op.
 func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
 	// while leaving bwrap absent, so ValidateOverlay()'s exec("bwrap", ...)
@@ -252,7 +252,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "host") // checkBwrapPastaGate no-ops (issue #2666), isolating the overlay gate's failure
+	t.Setenv("NETWORK_MODE", "host") // the pasta launch gate no-ops (issue #2666), isolating the overlay gate's failure
 	t.Setenv("NIX_STORE_WRITABLE", "true")
 	t.Setenv("NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate would also
@@ -262,10 +262,10 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
 
 	if err == nil {
-		t.Fatal("newGatedContext() = nil error, want checkBwrapOverlayGate's overlay-probe rejection")
+		t.Fatal("newGatedContext() = nil error, want the bwrap overlay launch gate's overlay-probe rejection")
 	}
 	if !strings.Contains(err.Error(), "overlay") {
-		t.Errorf("newGatedContext() error = %q, want it to mention overlay (checkBwrapOverlayGate), not a token gate", err.Error())
+		t.Errorf("newGatedContext() error = %q, want it to mention overlay (bwrap launch gate), not a token gate", err.Error())
 	}
 	if strings.Contains(err.Error(), "BOX_GH_TOKEN") {
 		t.Errorf("newGatedContext() error = %q, want it to stop at bwrap-overlay before ever reaching the token gate", err.Error())
@@ -280,7 +280,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 // to fail, so the capability gate's error winning proves the walk stops at the
 // earlier registry gate.
 func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *testing.T) {
-	// pasta absent from PATH would fail checkBwrapPastaGate if the walk reached
+	// pasta absent from PATH would fail the pasta launch gate if the walk reached
 	// it.
 	withFixtureBinary(t, "true")
 
@@ -296,7 +296,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	t.Setenv("RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate would call bwrap.ValidatePasta() if reached
+	t.Setenv("NETWORK_MODE", "open") // not host/none, so the pasta launch gate would call bwrap.ValidatePasta() if reached
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -353,7 +353,7 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 }
 
 // withFixtureBinary points PATH at a temp dir holding one executable that exits
-// 0. That is enough for RUNTIME's required-knob check (doctor.RuntimeCheck) to
+// 0. That is enough for RUNTIME's runtime prerequisite (runner.RuntimePrerequisite) to
 // resolve something, while every other binary (pasta, bwrap, and the rest) is
 // absent, so a gate that shells out to one fails whatever the host has
 // installed.

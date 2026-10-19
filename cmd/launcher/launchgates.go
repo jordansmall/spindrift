@@ -62,12 +62,13 @@ func readOnlyTokenGates(rows []backendRow) []launchGate {
 }
 
 // gateRegistry is the ordered set of launch gates shared by the gated tier's
-// enforcement path and doctor's reporting path. The two bwrap gates are
-// excluded on purpose: doctor reports them separately, with richer dynamic
-// Tier and remedy semantics, via bwrapCapabilityChecks in
-// bwrap_doctor_checks.go. The read-only token gates follow, one per backend
-// row that carries one. It is built once at package init, so a test that swaps
-// backendRows at runtime changes tokenGateApplicable but not the gate set.
+// enforcement path and doctor's reporting path. The runner family's launch
+// gates are excluded on purpose: they are Runner prerequisites, run at launch
+// by checkRunnerLaunchPrerequisites and reported by doctor through
+// prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
+// read-only token gates follow, one per backend row that carries one. It is
+// built once at package init, so a test that swaps backendRows at runtime
+// changes tokenGateApplicable but not the gate set.
 var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)

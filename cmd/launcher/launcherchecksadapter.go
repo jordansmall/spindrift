@@ -34,8 +34,6 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		}),
 		Credentials: launcherCredentials(c),
 
-		Runtime: c.runtime,
-
 		IssueTracker: c.issueTracker,
 		CodeForge:    c.codeForge,
 

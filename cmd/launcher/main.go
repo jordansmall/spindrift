@@ -595,8 +595,9 @@ func validate(c config) error {
 }
 
 // validateConfig runs the configuration-correctness checks validate gates
-// dispatch on, minus doctor.RuntimeCheck (advisory, issue #2561; it must not
-// fold into cmdDoctor's exit-2 classification, issue #2569) and minus the
+// dispatch on, minus the runtime prerequisite (doctor renders it on its own
+// advisory line, issue #2561; folding it in would break
+// cmdDoctor's exit-2 classification, issue #2569) and minus the
 // --self-contained check (cmdDoctor always passes selfContained=false). It
 // runs every row and joins the failures so cmdDoctor names them all at once.
 func validateConfig(c config) error {
@@ -824,6 +825,7 @@ func runnerConfig(c config) runner.Config {
 		SyscallFilterPath: c.syscallFilterPath,
 		SyscallFilterDrv:  c.syscallFilterDrv,
 		BwrapUnshareNet:   c.bwrapUnshareNet,
+		MaxParallel:       c.maxParallel,
 		MountParams: runner.MountParams{
 			PromptDir:             c.spindriftPromptDir,
 			SkillsDir:             c.spindriftSkillsDir,
@@ -1235,39 +1237,6 @@ func checkNetworkModeRuntimeGate(c config) error {
 		return newLaunchGateConfigError("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
 	}
 	return nil
-}
-
-// checkBwrapPastaGate refuses to launch rather than silently share the host
-// network namespace when the bwrap runner needs pasta (issue #2666) and pasta
-// is not on PATH. It reads the plan's Pasta decision
-// (runner.Config.BwrapNetwork), so it never probes for a Box that will not
-// invoke pasta.
-func checkBwrapPastaGate(c config) error {
-	if c.runnerKind != runner.KindBwrap {
-		return nil
-	}
-	if !runnerConfig(c).BwrapNetwork().Pasta {
-		return nil
-	}
-	return bwrap.ValidatePasta()
-}
-
-// checkBwrapOverlayGate refuses to launch rather than let bwrap fail deep in
-// sandbox startup when the in-box /nix/store needs an ephemeral tmpfs overlay
-// (ADR 0042, issue #2665) but the host kernel bars an unprivileged user
-// namespace from mounting overlayfs. The three no-op arms mirror bwrap.go's
-// own AND-gate, where the overlay flags never render at all.
-func checkBwrapOverlayGate(c config) error {
-	if c.runnerKind != runner.KindBwrap {
-		return nil
-	}
-	if !c.nixStoreWritable {
-		return nil
-	}
-	if c.nixConfigFile == "" {
-		return nil
-	}
-	return bwrap.ValidateOverlay()
 }
 
 // errQueueEmpty means discoverIssues found no open dispatchable issues, or

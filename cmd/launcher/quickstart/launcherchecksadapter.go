@@ -28,8 +28,6 @@ func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 		Driver:      a.driver,
 		Credentials: credentialValues(a.credentials),
 
-		Runtime: a.runtime,
-
 		IssueTracker: a.choice.name,
 		CodeForge:    codeForge,
 

@@ -506,7 +506,7 @@ func scratchDoc(t *testing.T, docPath string, edit func(artifacts map[string]str
 }
 
 // TestSeamSmokeBwrapOverlayProbe runs the launcher on a bwrap document with
-// nixStoreWritable and a nix.conf, the pair that makes checkBwrapOverlayGate
+// nixStoreWritable and a nix.conf, the pair that makes the bwrap overlay launch gate
 // probe overlayfs before the Box run. The shipped fixture leaves nixInBox off
 // (issue #2664), so the knobs are set on a scratch copy.
 func TestSeamSmokeBwrapOverlayProbe(t *testing.T) {

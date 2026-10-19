@@ -364,9 +364,25 @@ func TestDoctorExtraChecks_StripsRuntimeRowOnly(t *testing.T) {
 		t.Fatalf("doctorExtraChecks returned %d rows, want %d (launcherChecks rows minus the runtime row)", len(extra), len(all)-1)
 	}
 	for _, ch := range extra {
-		if ch.Name == doctor.RuntimeCheckName {
-			t.Errorf("doctorExtraChecks output still contains a row named %q", doctor.RuntimeCheckName)
+		if ch.Name == runner.RuntimePrerequisiteName {
+			t.Errorf("doctorExtraChecks output still contains a row named %q", ch.Name)
 		}
+	}
+}
+
+// validate()'s fail-fast set ends with the runner family's runtime
+// prerequisite, where the retired hard-wired runtime row used to sit.
+func TestLauncherRequiredKnobChecks_EndsWithRuntimePrerequisite(t *testing.T) {
+	c := minimalValidConfig()
+	rows := launcherRequiredKnobChecks(c)
+	last := rows[len(rows)-1]
+	if last.Name != runner.RuntimePrerequisiteName || last.Tier != doctor.Required {
+		t.Errorf("last launcherRequiredKnobChecks row = %q (tier %v), want the Required %q row", last.Name, last.Tier, runner.RuntimePrerequisiteName)
+	}
+	c.runtime = "not-a-real-runtime-binary"
+	last = launcherRequiredKnobChecks(c)[len(rows)-1]
+	if _, err := last.Probe(); err == nil {
+		t.Error("runtime row Probe() = nil for an unresolvable RUNTIME, want an error")
 	}
 }
 
