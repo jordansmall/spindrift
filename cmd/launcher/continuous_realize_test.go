@@ -197,6 +197,7 @@ func TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue(
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = "bwrap"
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"

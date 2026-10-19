@@ -52,6 +52,7 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -128,6 +129,7 @@ func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -228,6 +230,7 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -285,6 +288,7 @@ func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testin
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -344,6 +348,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -420,6 +425,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -481,6 +487,7 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"
@@ -531,6 +538,7 @@ func TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain(t *testing.T) {
 	c.continuousDispatch = true
 	c.maxParallel = 1
 	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.label = "ready-for-agent"
 	c.issueTracker = "local"

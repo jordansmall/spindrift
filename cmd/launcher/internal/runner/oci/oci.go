@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
@@ -237,7 +238,7 @@ func (a *ociAdapter) loadImage(archive string) error {
 	// buildLayeredImage names the archive "<repo>:latest" where repo matches
 	// a.imageTag's own repo, so re-tag from that derived source rather than a
 	// hardcoded "spindrift:latest", which misses a driver-scoped archive.
-	sourceTag := imageRepo(a.imageTag) + ":latest"
+	sourceTag := freshness.ImageRepo(a.imageTag) + ":latest"
 	tag := exec.Command(a.cli, "tag", sourceTag, a.imageTag)
 	tag.Stdout = os.Stdout
 	tag.Stderr = os.Stderr
@@ -246,17 +247,6 @@ func (a *ociAdapter) loadImage(archive string) error {
 	}
 	fmt.Printf("==> done: %s + %s\n", sourceTag, a.imageTag)
 	return nil
-}
-
-// imageRepo returns the repo portion of an "<repo>:<tag>" reference, splitting
-// on the LAST colon since a repo can itself contain one (a registry host:port
-// prefix). A tag with no colon falls back to the default "spindrift" repo.
-func imageRepo(imageTag string) string {
-	i := strings.LastIndex(imageTag, ":")
-	if i < 0 {
-		return "spindrift"
-	}
-	return imageTag[:i]
 }
 
 // gitSafeDirectoryPrelude marks the bind-mounted /workspace safe so Nix's

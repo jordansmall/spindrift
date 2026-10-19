@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
@@ -6872,5 +6873,30 @@ func TestSettledLabels_ByKind(t *testing.T) {
 	wantCustom := []string{custom.failedLabel, "r-yes"}
 	if got := settledLabels(custom); !slices.Equal(got, wantCustom) {
 		t.Errorf("custom RESEARCH_VERDICTS settledLabels = %v, want %v", got, wantCustom)
+	}
+}
+
+// An unset BOX_ARTIFACT takes its default from the runner family, so a
+// RUNNER_KIND=bwrap run without the key compares a store path as a store
+// closure rather than as an OCI image.
+func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
+	for _, tc := range []struct {
+		runnerKind string
+		want       freshness.Artifact
+	}{
+		{runner.KindBwrap, freshness.StoreClosure},
+		{runner.KindOCI, freshness.OCIImage},
+		{"", freshness.OCIImage},
+	} {
+		c := baseConfig()
+		c.runnerKind = tc.runnerKind
+		c.boxArtifact = ""
+		got, err := c.artifact()
+		if err != nil {
+			t.Fatalf("runnerKind %q: artifact() err = %v", tc.runnerKind, err)
+		}
+		if got.Name != tc.want.Name {
+			t.Errorf("runnerKind %q: artifact() = %q, want %q", tc.runnerKind, got.Name, tc.want.Name)
+		}
 	}
 }

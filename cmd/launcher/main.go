@@ -192,6 +192,23 @@ func (c config) effectiveBoxForgeAndIssueAccess() string {
 	return c.boxForgeAndIssueAccess
 }
 
+// artifact resolves c.boxArtifact to the freshness adapter that owns how the
+// Box artifact is identified, named, and diagnosed. An unset BOX_ARTIFACT takes
+// the runner family's artifact, so a RUNNER_KIND=bwrap run without the key is
+// not compared as an OCI image; an unknown BOX_ARTIFACT is an error rather than
+// a silent OCI default.
+func (c config) artifact() (freshness.Artifact, error) {
+	name := c.boxArtifact
+	if name == "" {
+		fam, err := runner.DescriptorFor(c.runnerKind)
+		if err != nil {
+			return freshness.Artifact{}, err
+		}
+		name = fam.Artifact
+	}
+	return freshness.LookupArtifact(name)
+}
+
 // runnerNetworkMode is c.networkMode as runner's typed NETWORK_MODE;
 // schemaconfig_gen.go keeps the generated field a plain string.
 func (c config) runnerNetworkMode() runner.NetworkMode {
@@ -1861,6 +1878,10 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	forgeDesc, _ := backend.ByName(c.codeForge)
 	trackerDesc, _ := backend.ByName(c.issueTracker)
 	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
+	art, err := c.artifact()
+	if err != nil {
+		return err
+	}
 
 	// firstQueryEmpty separates "no open issues at all" from "open issues that
 	// turned out blocked or deferred"; only the former maps
@@ -1916,7 +1937,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 	fresh := func() (bool, bool, string) {
 		res := freshness.Probe(freshness.ProbeSpec{
-			RunnerKind:         c.runnerKind,
+			Artifact:           art,
 			Pwd:                pwd,
 			BaseBranch:         c.baseBranch,
 			FlakeImageAttr:     c.flakeImageAttr,
@@ -1944,7 +1965,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			swapClassified = true
 			swapHostTainted = disposition == freshness.HostTainted
 			if swapHostTainted {
-				fmt.Fprintln(stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
+				fmt.Fprintln(stdout, art.HostTaintDiagnostic(c.baseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
 				return drain()
 			}
 			if err := freshness.RealizeSync(realize, pwd, res, c.flakeImageAttr); err != nil {
@@ -2043,7 +2064,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			if !swapClassified {
 				hostTainted = guard.Classify(staleResult) == freshness.HostTainted
 				if hostTainted {
-					fmt.Fprintln(stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
+					fmt.Fprintln(stdout, art.HostTaintDiagnostic(c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
 				}
 			}
 			if hostTainted {
@@ -2106,9 +2127,13 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 	// stairstepping across the screen. The sidebar activity feed re-renders the
 	// same lines from the pass log anyway (issue #1583).
 	lc.factory.SetHeartbeatOut(io.Discard)
-	fresh, rebuild := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
+	fresh, rebuild, err := newConsoleFreshness(lc.config, lc.pwd, runner.NixEvaluator{},
 		func() (string, string, error) { return consoleGitSync(lc.pwd, lc.config.baseBranch) },
 		func() (string, error) { return consoleNixBuild(lc.pwd) })
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	researchTracker, researchFactory, researchSettle := researchLaunchStack(lc)
 	defer researchFactory.Cleanup()
 	launch := &console.Launcher{

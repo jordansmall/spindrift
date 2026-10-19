@@ -13,17 +13,17 @@ import (
 
 var errEvalBoom = errors.New("nix eval boom")
 
-// Probe does not special-case a "bwrap" runnerKind into always reporting
+// Probe does not special-case a store-closure artifact into always reporting
 // not-applicable. It runs the same fetch-base-tip and eval logic as any
-// other runnerKind and reports not-applicable only for the same underlying
-// reasons, naming that reason rather than stale bwrap-specific wording.
+// other artifact and reports not-applicable only for the same underlying
+// reasons, naming that reason rather than stale closure-specific wording.
 // Mirrors TestProbe_NotAGitRepo.
 func TestProbe_Bwrap_NotApplicable_WhenNotAGitRepo(t *testing.T) {
 	pwd := t.TempDir()
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-closure"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "bwrap",
+		Artifact:       StoreClosure,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-closure",
@@ -50,7 +50,7 @@ func TestProbe_Bwrap_FreshWhenClosureOutPathMatches(t *testing.T) {
 	eval := &Fake{OutPath: closurePath}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "bwrap",
+		Artifact:       StoreClosure,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-closure",
@@ -78,7 +78,7 @@ func TestProbe_Bwrap_RebuildNeededWhenClosureOutPathDiffers(t *testing.T) {
 	eval := &Fake{OutPath: freshPath}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "bwrap",
+		Artifact:       StoreClosure,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-closure",
@@ -109,7 +109,7 @@ func TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage(t *testing.T) {
 	eval := &Fake{OutPath: freshPath}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "bwrap",
+		Artifact:       StoreClosure,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-closure",
@@ -120,11 +120,11 @@ func TestProbe_Bwrap_RebuildNeededMessage_SaysClosureNotImage(t *testing.T) {
 		t.Errorf("Message %q does not say \"loaded closure\"", res.Message)
 	}
 	if strings.Contains(res.Message, "loaded image") {
-		t.Errorf("Message %q says \"loaded image\", want \"loaded closure\" for a bwrap runnerKind", res.Message)
+		t.Errorf("Message %q says \"loaded image\", want \"loaded closure\" for a store-closure artifact", res.Message)
 	}
 }
 
-// The launcher dimension still composes for a bwrap runnerKind: a matching
+// The launcher dimension still composes for a store-closure artifact: a matching
 // closure outPath with a stale launcher hash leaves ImageFresh true, and
 // Message names the launcher rather than "image:" as the cause.
 func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
@@ -138,7 +138,7 @@ func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "bwrap",
+		Artifact:           StoreClosure,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-closure",
@@ -164,17 +164,14 @@ func TestProbe_Bwrap_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	}
 }
 
-// Issue #2538's regression test for a surviving runtime-name comparison at
-// probe.go:93. The runnerKind "oci" is not itself any real runtime CLI name
-// (unlike "podman" and "docker" used elsewhere here), so Probe proceeding
-// past the early return proves the comparison keys off the literal string
-// "bwrap", not a coincidental match against a known runtime executable.
-func TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName(t *testing.T) {
+// An OCI artifact proceeds past the early returns and compares by repo:tag;
+// the artifact, not any runtime CLI name, selects the comparison.
+func TestProbe_OCIImage_KeysOffArtifactNotRuntimeName(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "oci",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -182,7 +179,7 @@ func TestProbe_RunnerKindNotApplicable_KeysOffValueNotRuntimeName(t *testing.T) 
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for runnerKind %q (not bwrap)", "oci")
+		t.Fatalf("Applicable = false, want true for the %s artifact", OCIImage.Name)
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the image tag matches; message: %s", res.Message)
@@ -201,7 +198,7 @@ func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -209,7 +206,7 @@ func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the image tag matches; message: %s", res.Message)
@@ -235,7 +232,7 @@ func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -258,7 +255,7 @@ func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -266,7 +263,7 @@ func TestProbe_RebuildNeededWhenImageHashDiffers(t *testing.T) {
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false when the image tag differs; message: %s", res.Message)
@@ -280,7 +277,7 @@ func TestProbe_RebuildNeededSetsTipTag(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -305,7 +302,7 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 	loadedTag := "spindrift:" + hash
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -313,7 +310,7 @@ func TestProbe_LivelockRegression_FreshWhenTagMatchesDespiteOutPathNameDrift(t *
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the tip's image tag matches the loaded tag; message: %s", res.Message)
@@ -328,7 +325,7 @@ func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -336,7 +333,7 @@ func TestProbe_DriverScopedRepo_FreshWhenImageHashMatches(t *testing.T) {
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if !res.Fresh {
 		t.Errorf("Fresh = false, want true when the driver-scoped image tag matches; message: %s", res.Message)
@@ -350,7 +347,7 @@ func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) 
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -358,7 +355,7 @@ func TestProbe_DriverScopedRepo_RebuildNeededWhenImageHashDiffers(t *testing.T) 
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false when the driver-scoped image tag's hash differs; message: %s", res.Message)
@@ -378,7 +375,7 @@ func TestProbe_LauncherStale_ImageFresh_RebuildNeeded(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "podman",
+		Artifact:           OCIImage,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-image",
@@ -417,7 +414,7 @@ func TestProbe_ImageStale_LauncherFresh_RebuildNeeded(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "podman",
+		Artifact:           OCIImage,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-image",
@@ -450,7 +447,7 @@ func TestProbe_ImageAndLauncherBothStale_RebuildNeeded(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "podman",
+		Artifact:           OCIImage,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-image",
@@ -483,7 +480,7 @@ func TestProbe_ImageAndLauncherBothFresh(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "podman",
+		Artifact:           OCIImage,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-image",
@@ -514,7 +511,7 @@ func TestProbe_LauncherNotConfigured_ImageFresh_Fresh(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -550,7 +547,7 @@ func TestProbe_LauncherEvalFailure_TipTagEmptyImageFresh(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "podman",
+		Artifact:           OCIImage,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-image",
@@ -590,7 +587,7 @@ func TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:         "podman",
+		Artifact:           OCIImage,
 		Pwd:                pwd,
 		BaseBranch:         "main",
 		FlakeImageAttr:     ".#packages.x86_64-linux.agent-image",
@@ -632,8 +629,8 @@ func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := imageRepo(c.imageTag); got != c.want {
-				t.Errorf("imageRepo(%q) = %q, want %q", c.imageTag, got, c.want)
+			if got := ImageRepo(c.imageTag); got != c.want {
+				t.Errorf("ImageRepo(%q) = %q, want %q", c.imageTag, got, c.want)
 			}
 		})
 	}
@@ -651,7 +648,7 @@ func TestProbe_Rev_MatchesFetchedTip(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.DiffHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -668,7 +665,7 @@ func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	eval := &Fake{Err: errEvalBoom}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -676,7 +673,7 @@ func TestProbe_EvalFailureFailsClosed(t *testing.T) {
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false (fail closed) on eval error")
@@ -698,7 +695,7 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -706,7 +703,7 @@ func TestProbe_FetchFailureFailsClosed(t *testing.T) {
 	}, eval)
 
 	if !res.Applicable {
-		t.Fatalf("Applicable = false, want true for a non-bwrap runnerKind (podman)")
+		t.Fatalf("Applicable = false, want true for a non-closure artifact")
 	}
 	if res.Fresh {
 		t.Errorf("Fresh = true, want false (fail closed) on fetch error")
@@ -725,7 +722,7 @@ func TestProbe_NotAGitRepo(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -754,7 +751,7 @@ func TestProbe_MissingRemoteRefNotApplicable(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "release",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -784,7 +781,7 @@ func TestProbe_NoOriginRemoteNotApplicable(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -815,7 +812,7 @@ func TestProbe_ImageAttrMissingNotApplicable(t *testing.T) {
 	eval := &Fake{Err: attrErr}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -842,7 +839,7 @@ func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -865,7 +862,7 @@ func TestProbe_NeverMutatesWorkingCopy(t *testing.T) {
 	}
 
 	res := Probe(ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
