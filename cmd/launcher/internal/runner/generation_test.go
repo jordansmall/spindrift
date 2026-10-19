@@ -1,0 +1,574 @@
+package runner
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"testing"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
+)
+
+// fakeVacuumInto stubs ExecCommand so a sqlite3 call writes content to the temp
+// path named in its VACUUM INTO statement and exits with code; every other
+// command is the scripted fake. onVacuum, if non-nil, runs before the write
+// with the parsed temp path.
+func fakeVacuumInto(t *testing.T, script, content string, code int, onVacuum func(tmp string)) {
+	t.Helper()
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
+		if name != "sqlite3" {
+			return exec.Command(script, args...)
+		}
+		stmt := args[len(args)-1]
+		tmp := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(stmt, "VACUUM INTO '"), "';"), "''", "'")
+		if onVacuum != nil {
+			onVacuum(tmp)
+		}
+		return exec.Command("sh", "-c", `printf %s "$1" > "$2"; exit "$3"`, "sh", content, tmp, fmt.Sprint(code))
+	}
+}
+
+// snapshotDest is the db.sqlite SnapshotGeneration writes for closure's generation.
+func snapshotDest(pwd, closure string) string {
+	return filepath.Join(NixVarSnapshotDir(pwd, ClosureGeneration(closure)), "nix", "db", "db.sqlite")
+}
+
+// tempSiblings lists leftover vacuum temp files next to db.sqlite.
+func tempSiblings(t *testing.T, dir string) []string {
+	t.Helper()
+	m, err := filepath.Glob(filepath.Join(dir, vacuumTempPrefix+"*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// A launcher killed along with sqlite3 leaves its temp behind (issue #4817), so
+// the next vacuum removes temps no live launcher holds the flock on, and leaves
+// one a concurrent launcher is still writing.
+func TestVacuumStoreDBInto_SweepsOnlyUnlockedTemps(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	fakeVacuumInto(t, script, "fresh", 0, nil)
+	dir := t.TempDir()
+	dbDir := filepath.Join(dir, "nix", "db")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dbDir, vacuumTempPrefix+"111")
+	staleJournal := stale + "-journal"
+	live := filepath.Join(dbDir, vacuumTempPrefix+"222")
+	for _, p := range []string{stale, staleJournal, live} {
+		if err := os.WriteFile(p, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lf, err := os.Open(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := VacuumStoreDBInto(dir, InstallReplace); err != nil {
+		t.Fatalf("VacuumStoreDBInto = %v, want nil", err)
+	}
+
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale temp stat err = %v, want not-exist (unlocked temp swept)", err)
+	}
+	if _, err := os.Stat(staleJournal); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale journal stat err = %v, want not-exist (leaked with its temp)", err)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Errorf("live temp stat err = %v, want it left alone (flock held)", err)
+	}
+}
+
+// sqlite3 writes <tmp>-journal beside a live vacuum target and no process
+// flocks it, so a sweep from a concurrent launcher must not mistake it for a
+// stale temp: unlinking it fails the running VACUUM with "disk I/O error".
+func TestVacuumStoreDBInto_SweepLeavesLiveVacuumJournal(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	dir := t.TempDir()
+	fakeVacuumInto(t, script, "fresh", 0, func(tmp string) {
+		journal := tmp + "-journal"
+		if err := os.WriteFile(journal, []byte("journal"), 0o600); err != nil {
+			t.Errorf("write journal: %v", err)
+		}
+		sweepStaleVacuumTemps(filepath.Dir(tmp))
+		if _, err := os.Stat(journal); err != nil {
+			t.Errorf("journal stat err = %v, want it left alone during a live vacuum", err)
+		}
+	})
+
+	if err := VacuumStoreDBInto(dir, InstallReplace); err != nil {
+		t.Fatalf("VacuumStoreDBInto = %v, want nil", err)
+	}
+}
+
+// installVacuumTempSweepHook installs a vacuumTempRaceWindowHook that unlinks every
+// vacuum temp in dir, as a concurrent sweepStaleVacuumTemps would inside the
+// CreateTemp-to-Flock window. onlyFirst limits it to the first call. It returns
+// the call counter; t.Cleanup restores the hook.
+func installVacuumTempSweepHook(t *testing.T, dir string, onlyFirst bool) *int {
+	t.Helper()
+	orig := vacuumTempRaceWindowHook
+	t.Cleanup(func() { vacuumTempRaceWindowHook = orig })
+	calls := 0
+	vacuumTempRaceWindowHook = func() {
+		calls++
+		if onlyFirst && calls > 1 {
+			return
+		}
+		matches := tempSiblings(t, dir)
+		for _, m := range matches {
+			if err := os.Remove(m); err != nil {
+				t.Fatalf("Remove(%q): %v", m, err)
+			}
+		}
+	}
+	return &calls
+}
+
+func TestCreateLockedVacuumTemp_RetriesAfterSweep(t *testing.T) {
+	dir := t.TempDir()
+	calls := installVacuumTempSweepHook(t, dir, true)
+
+	f, err := createLockedVacuumTemp(dir)
+	if err != nil {
+		t.Fatalf("createLockedVacuumTemp: %v", err)
+	}
+	defer f.Close()
+
+	if *calls != 2 {
+		t.Errorf("hook fired %d times, want 2 (one swept attempt, one retry)", *calls)
+	}
+	if !LockedFDMatchesPath(f, f.Name()) {
+		t.Errorf("returned fd does not identify %s", f.Name())
+	}
+	matches := tempSiblings(t, dir)
+	if len(matches) != 1 || matches[0] != f.Name() {
+		t.Errorf("temps in dir = %v, want only %s", matches, f.Name())
+	}
+}
+
+func TestCreateLockedVacuumTemp_GivesUpWhenEveryAttemptSwept(t *testing.T) {
+	dir := t.TempDir()
+	calls := installVacuumTempSweepHook(t, dir, false)
+
+	f, err := createLockedVacuumTemp(dir)
+	if err == nil {
+		f.Close()
+		t.Fatal("createLockedVacuumTemp succeeded, want error after every attempt was swept")
+	}
+	if want := fmt.Sprintf("%d attempts", maxVacuumTempAttempts); !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not mention %q", err, want)
+	}
+	if *calls != maxVacuumTempAttempts {
+		t.Errorf("hook fired %d times, want %d", *calls, maxVacuumTempAttempts)
+	}
+	matches := tempSiblings(t, dir)
+	if len(matches) != 0 {
+		t.Errorf("temps left in dir = %v, want none", matches)
+	}
+}
+
+// sqlite3 killed alone (SIGKILL, OOM) leaves <tmp>-journal behind while the
+// launcher survives; the sweep skips that name, so the failure path must clear it.
+func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	dir := t.TempDir()
+	fakeVacuumInto(t, script, "partial", 1, func(tmp string) {
+		if err := os.WriteFile(tmp+"-journal", []byte("journal"), 0o644); err != nil {
+			t.Fatalf("WriteFile journal: %v", err)
+		}
+	})
+
+	if err := VacuumStoreDBInto(dir, InstallReplace); err == nil {
+		t.Fatal("VacuumStoreDBInto = nil, want the sqlite3 failure")
+	}
+	if left := tempSiblings(t, filepath.Join(dir, "nix", "db")); len(left) != 0 {
+		t.Errorf("leftover temp or journal after failure: %v, want none", left)
+	}
+}
+
+// With no prior snapshot, a failed VACUUM INTO that left partial bytes must
+// leave dest absent (issue #4817): SnapshotGeneration's existence check would
+// otherwise trust the partial file forever, and a second call must re-run
+// sqlite3 rather than skip.
+func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	fakeVacuumInto(t, script, "partial", 1, nil)
+	vacuums := 0
+	inner := ExecCommand
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "sqlite3" {
+			vacuums++
+		}
+		return inner(name, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+
+	if err := SnapshotGeneration(pwd, closure); err == nil {
+		t.Fatal("SnapshotGeneration [1st] = nil, want error from scripted sqlite3 failure")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) after failed vacuum = %v, want IsNotExist", dest, err)
+	}
+	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
+		t.Errorf("leftover siblings after failure: %v, want none", left)
+	}
+
+	if err := SnapshotGeneration(pwd, closure); err == nil {
+		t.Fatal("SnapshotGeneration [2nd] = nil, want the scripted failure again")
+	}
+	if vacuums != 2 {
+		t.Errorf("sqlite3 invoked %d times, want 2 (2nd call must re-vacuum, not skip on a partial file)", vacuums)
+	}
+}
+
+// Two launchers hot-swapping one closure both see dest missing under the shared
+// lock; the loser must not replace a db.sqlite the winner's live Box already
+// reads (ADR 0043). The stub installs the winner's dest mid-vacuum.
+func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+	fakeVacuumInto(t, script, "loser snapshot", 0, func(string) {
+		if err := os.WriteFile(dest, []byte("winner snapshot"), 0o644); err != nil {
+			t.Errorf("WriteFile(%q) = %v, want nil", dest, err)
+		}
+	})
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "winner snapshot" {
+		t.Errorf("dest = %q, %v; want the winner's snapshot left in place", got, err)
+	}
+	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
+		t.Errorf("leftover siblings: %v, want none", left)
+	}
+}
+
+// Issue #2682 slice 2: a hot-swap never wrote the nix-var store-DB snapshot
+// generation it went on to name, since IsReady/Run only read generations
+// EnsureReady wrote. SnapshotGeneration is the run-time counterpart: it
+// derives the same generation label NewAgentGeneration does and vacuums the
+// host nix store DB into that generation's own dir.
+func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+
+	var gotNames []string
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
+		gotNames = append(gotNames, name)
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
+	}
+	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
+		t.Errorf("ExecCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
+	}
+	if got := runnertest.CallCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1", got)
+	}
+
+	// The fake sqlite3 stub writes nothing to the temp, so dest is an empty file;
+	// the dir and the argv naming a temp sibling of dest are what pin
+	// SnapshotGeneration onto the derived-generation dir.
+	wantDest := filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "abc-agent-closure", "nix", "db", "db.sqlite")
+	if _, err := os.Stat(filepath.Dir(wantDest)); err != nil {
+		t.Errorf("os.Stat(%q) = %v, want the destination dir created at the derived generation dir", filepath.Dir(wantDest), err)
+	}
+	call := runnertest.ReadCall(t, dir, 0)
+	if len(call) != 2 {
+		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
+	}
+	if !strings.Contains(call[1], filepath.Join(filepath.Dir(wantDest), vacuumTempPrefix)) {
+		t.Errorf("sqlite3 statement = %q, want it to reference a temp sibling of dest %q", call[1], wantDest)
+	}
+}
+
+// Issue #2682 review Finding B: generations are immutable once created, and a
+// generation already snapshotted by an earlier swap to the same closure (a
+// revert, say) may be --overlay-src-mounted by a live Box. VacuumStoreDBInto
+// would replace the existing db.sqlite with a fresh one, which ADR
+// 0043 forbids, so a repeat call must skip the vacuum entirely.
+func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) [1st] = %v, want nil", pwd, closure, err)
+	}
+
+	// The first call installs the (empty) temp as dest, so the second call
+	// finds an existing snapshot without any setup here.
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration(%q, %q) [2nd] = %v, want nil", pwd, closure, err)
+	}
+
+	if got := runnertest.CallCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1 (2nd call must skip vacuum, dest already exists)", got)
+	}
+}
+
+// A temp leaked by a killed launcher must be swept even when a concurrent
+// launcher already installed dest, which makes SnapshotGeneration skip the vacuum.
+func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+	stale := filepath.Join(filepath.Dir(dest), vacuumTempPrefix+"111")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{dest, stale} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale temp stat err = %v, want not-exist (swept)", err)
+	}
+	if got := runnertest.CallCount(t, dir); got != 0 {
+		t.Errorf("callCount = %d, want 0 (dest exists, vacuum skipped)", got)
+	}
+}
+
+// Two different closure generations must nest into two different,
+// non-overlapping directories under the same nix-var-snapshot root, rather
+// than sharing the one flat path every closure used to collide on.
+func TestNixVarSnapshotDir_DifferentGenerationsProduceDistinctDirs(t *testing.T) {
+	root := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
+	got1 := NixVarSnapshotDir("/pwd", "abc123-agent-closure")
+	got2 := NixVarSnapshotDir("/pwd", "def456-agent-closure")
+
+	if got1 == got2 {
+		t.Fatalf("NixVarSnapshotDir with different generations returned the same dir: %q", got1)
+	}
+	for _, got := range []string{got1, got2} {
+		if !strings.HasPrefix(got, root+string(filepath.Separator)) {
+			t.Errorf("NixVarSnapshotDir(%q) = %q, want it nested under root %q", got, got, root)
+		}
+	}
+}
+
+// An empty generation (no closure known, say a bare test-constructed adapter)
+// preserves the pre-#2680 flat path exactly, so a run that only ever uses one
+// closure is unchanged.
+func TestNixVarSnapshotDir_EmptyGenerationProducesFlatPath(t *testing.T) {
+	got := NixVarSnapshotDir("/pwd", "")
+	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
+	if got != want {
+		t.Errorf("NixVarSnapshotDir(%q, \"\") = %q, want %q", "/pwd", got, want)
+	}
+}
+
+// ClosureGeneration must fall back to "" (the pre-#2680 flat path) whenever
+// filepath.Base(imageTag) is not a safe single path component: imageTag comes
+// from an environment variable an untrusted source can influence, and the
+// generation is threaded into a path reclaimStaleSnapshots os.RemoveAll's
+// (issue #2680). A rejected non-empty tag warns and names it (issue #2967).
+func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
+	cases := []struct {
+		name     string
+		imageTag string
+		want     string
+		wantWarn bool
+	}{
+		{"empty", "", "", false},
+		{"normal store path", "/nix/store/abc123-agent-closure", "abc123-agent-closure", false},
+		{"trailing separator", "/nix/store/abc123-agent-closure/", "abc123-agent-closure", false},
+		{"dot-dot", "..", "", true},
+		{"dot", ".", "", true},
+		{"root separator", "/", "", true},
+		{"dot-dot after separator", "abc/..", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			out := runnertest.CaptureStdoutDuring(t, func() {
+				got = ClosureGeneration(tc.imageTag)
+			})
+			if got != tc.want {
+				t.Errorf("ClosureGeneration(%q) = %q, want %q", tc.imageTag, got, tc.want)
+			}
+			gotWarn := strings.Contains(out, "==> bwrap runner: warning: ")
+			if gotWarn != tc.wantWarn {
+				t.Errorf("ClosureGeneration(%q) warning printed = %v, want %v (captured: %q)", tc.imageTag, gotWarn, tc.wantWarn, out)
+			}
+			if tc.wantWarn && !strings.Contains(out, fmt.Sprintf("%q", tc.imageTag)) {
+				t.Errorf("ClosureGeneration(%q) warning %q does not name the rejected imageTag", tc.imageTag, out)
+			}
+		})
+	}
+}
+
+// The rejected label is untrusted input with no length bound of its own, so
+// the warning must truncate it rather than log an arbitrarily long line.
+func TestClosureGeneration_TruncatesOverlongRejectedLabel(t *testing.T) {
+	long := strings.Repeat("a", generationLabelWarnLimit*2) + "/.."
+	var got string
+	out := runnertest.CaptureStdoutDuring(t, func() {
+		got = ClosureGeneration(long)
+	})
+	if got != "" {
+		t.Errorf("ClosureGeneration(<%d-byte unsafe label>) = %q, want %q", len(long), got, "")
+	}
+	if strings.Contains(out, long) {
+		t.Errorf("warning echoes the full untrusted label; want it truncated (captured %d bytes)", len(out))
+	}
+	if len(out) > 2*generationLabelWarnLimit {
+		t.Errorf("warning line is %d bytes, want it bounded near %d", len(out), generationLabelWarnLimit)
+	}
+	if !strings.Contains(out, strings.Repeat("a", generationLabelWarnLimit)) {
+		t.Errorf("warning %q does not name the truncated prefix of the rejected label", out)
+	}
+}
+
+// The helper's three outcomes: an fd that still identifies whatever sits at
+// path returns true; an fd whose path was swapped (removed and a same-named
+// file recreated, so fstat identity changes but os.Stat succeeds) returns
+// false; an fd whose path was removed outright, so the fresh os.Stat fails,
+// also returns false rather than panicking or trusting a nil stat.
+func TestLockedFDMatchesPath(t *testing.T) {
+	t.Run("fd still identifies path", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "lock")
+		lf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			t.Fatalf("OpenFile: %v", err)
+		}
+		defer lf.Close()
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+			t.Fatalf("Flock: %v", err)
+		}
+		if !LockedFDMatchesPath(lf, path) {
+			t.Errorf("LockedFDMatchesPath(%q) = false, want true", path)
+		}
+	})
+
+	t.Run("path swapped for a different inode", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "lock")
+		lf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			t.Fatalf("OpenFile: %v", err)
+		}
+		defer lf.Close()
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+			t.Fatalf("Flock: %v", err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		if LockedFDMatchesPath(lf, path) {
+			t.Errorf("LockedFDMatchesPath(%q) = true, want false (path now resolves to a different inode)", path)
+		}
+	})
+
+	t.Run("path removed entirely", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "lock")
+		lf, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+		if err != nil {
+			t.Fatalf("OpenFile: %v", err)
+		}
+		defer lf.Close()
+		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+			t.Fatalf("Flock: %v", err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+		if LockedFDMatchesPath(lf, path) {
+			t.Errorf("LockedFDMatchesPath(%q) = true, want false (os.Stat(path) should fail)", path)
+		}
+	})
+}
+
+// NewAgentGeneration treats its argument as the agent-closure linkFarm's own
+// store path (res.TipTag under bwrap), not the agentFiles derivation: it
+// derives the "files", "env", "nix-config" and "prefetch" children (issue
+// #2954). Generation comes from the closure path via the same
+// SafePathComponent rule ClosureGeneration uses for a baked Config.ImageTag.
+func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T) {
+	cases := []struct {
+		name    string
+		closure string
+		want    AgentGeneration
+	}{
+		{
+			"normal store path",
+			"/nix/store/abc123-agent-closure",
+			AgentGeneration{
+				AgentFiles:    "/nix/store/abc123-agent-closure/files",
+				AgentEnv:      "/nix/store/abc123-agent-closure/env",
+				NixConfigFile: "/nix/store/abc123-agent-closure/nix-config",
+				PrefetchFile:  "/nix/store/abc123-agent-closure/prefetch",
+				Generation:    "abc123-agent-closure",
+			},
+		},
+		// filepath.Join elides an empty first element rather than preserving
+		// it, so an empty closure still yields relative "files"/"env"/
+		// "nix-config"/"prefetch" (not ""); Generation still comes out ""
+		// since SafePathComponent rejects an empty input directly.
+		{"empty", "", AgentGeneration{AgentFiles: "files", AgentEnv: "env", NixConfigFile: "nix-config", PrefetchFile: "prefetch", Generation: ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := NewAgentGeneration(tc.closure)
+			if got != tc.want {
+				t.Errorf("NewAgentGeneration(%q) = %+v, want %+v", tc.closure, got, tc.want)
+			}
+		})
+	}
+}
