@@ -1749,7 +1749,7 @@ checkedMerge {
     pkgs.runCommand "mkharness-jira-status-mapping-guard-not-triggered" { } "touch $out";
 
   # A non-jira tracker never reaches jira.ParseStatusMapping in
-  # trackerbuild.go, so a stale JIRA_STATUS_MAPPING left from a prior
+  # the jira Strategy, so a stale JIRA_STATUS_MAPPING left from a prior
   # ISSUE_TRACKER=jira config must not fail a github-tracker build.
   mkharness-jira-status-mapping-guard-non-jira-tracker-not-triggered =
     let
