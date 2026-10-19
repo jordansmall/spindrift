@@ -22,7 +22,14 @@ func KindOf(d *dispatchkind.Descriptor) Kind {
 // tracker issue; false for a Kind that names no descriptor.
 func (k Kind) choreKeyed() bool {
 	d, ok := dispatchkind.ByVerb(string(k))
-	return ok && d.Keying == dispatchkind.ByChore
+	if !ok {
+		return false
+	}
+	switch d.Keying {
+	case dispatchkind.ByChore:
+		return true
+	}
+	return false
 }
 
 // ParseKind parses a CLI/config kind string. "" defaults to work dispatch so

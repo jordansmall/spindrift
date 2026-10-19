@@ -349,14 +349,19 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	// Go-derived (issueTextSection's fenced text, never e.IssueText raw),
 	// while scalars mirrors the raw-env substitution list byte for byte.
 	issueSection := issueTextSection(e)
-	if mask && e.descriptor().Keying != dispatchkind.ByChore {
-		// Unconditional, so the hash does not depend on whether this
-		// Dispatch happened to carry issue text. The fixed section prose
-		// stays; only the interpolated facts are masked.
-		me := e
-		me.IssueNumber = maskPlaceholder("ISSUE_NUMBER")
-		me.IssueText = maskPlaceholder("ISSUE_TEXT")
-		issueSection = issueTextSection(me)
+	if mask {
+		switch e.descriptor().Keying {
+		case dispatchkind.ByChore:
+			// A chore dispatch carries no issue facts to mask.
+		default:
+			// Unconditional, so the hash does not depend on whether this
+			// Dispatch happened to carry issue text. The fixed section prose
+			// stays; only the interpolated facts are masked.
+			me := e
+			me.IssueNumber = maskPlaceholder("ISSUE_NUMBER")
+			me.IssueText = maskPlaceholder("ISSUE_TEXT")
+			issueSection = issueTextSection(me)
+		}
 	}
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
