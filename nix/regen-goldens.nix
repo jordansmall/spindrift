@@ -4,7 +4,8 @@
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
 # cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
-# cmd/launcher/internal/driver/<driver>/corpus_test.go) with
+# cmd/launcher/internal/driver/<driver>/corpus_test.go,
+# cmd/launcher/internal/ecosystem/referencedocs_test.go) with
 # UPDATE_GOLDENS=1, which flips their compare helpers from fail to
 # overwrite. Separate from nix/regen.nix's regen verb because these
 # goldens are the output of running the test, not a pure render of a
@@ -83,5 +84,7 @@ pkgs.writeShellApplication {
     # hence the docs link above (issue #5248).
     go test -count=1 -run '^TestStats_(.*Golden|By.*)$' .
     go test -count=1 -run '^TestCorpus$' "''${driver_pkgs[@]}"
+    # Rewrites the generated spans in docs/reference.md (the docs link above).
+    go test -count=1 -run '^TestReferenceDocs_GeneratedSpans$' ./internal/ecosystem
   '';
 }
