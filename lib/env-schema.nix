@@ -54,28 +54,6 @@ withRowKnobs {
     # directly too, so no boxEnvOnly.
     boxEnv = true;
   };
-  localIssuesDir = {
-    env = "LOCAL_ISSUES_DIR";
-    group = "issues";
-    flag = "local-dir";
-    default = ".spindrift/issues";
-    doc = "directory scanned for issue files when ISSUE_TRACKER=local; keep it git-ignored so breakout issues stay private";
-    flakeOption = true;
-    nixSubPath = "localDir";
-    boxEnv = false;
-  };
-  localIssueReference = {
-    env = "LOCAL_ISSUE_REFERENCE";
-    group = "issues";
-    flag = "local-reference";
-    default = false;
-    kind = "bool";
-    doc = "when enabled and ISSUE_TRACKER=local, the PR body includes a non-auto-closing `Local-issue: <slug>` breadcrumb; default off keeps the private local ticket slug out of the PR body entirely (ISSUE_TRACKER=github is unaffected -- `Closes #ISSUE_NUMBER` stays either way)";
-    flakeOption = true;
-    nixSubPath = "localReference";
-    boxEnv = true;
-    boxEnvOnly = true;
-  };
   baseBranch = {
     env = "BASE_BRANCH";
     group = "git";
@@ -359,49 +337,6 @@ withRowKnobs {
     doc = "path to a TOML routes file declaring registry routes (ADR 0045); each route binds match-host and serves the whole matched host under its prefix -- host-rooted serving (ADR 0047) is the only serving model there is: the route forwards the verbatim remaining path onto the upstream origin, and its requests are checked unconditionally against a path-set the launcher derives host-side from the Target repo's own committed registry config at dispatch time -- a request outside that derived set is answered 403 naming the policy and the derived set, before any upstream dial and with no credential attached, and there is no off switch: allow (below) is the only recourse for a path shape the derived set misses; a route therefore needs a snapshot of the Target repo's committed config to derive from, and the launch fails naming the route when none is available -- under CODE_FORGE=local that snapshot is the bare Accumulation repo's own BASE_BRANCH ref (ADR 0033), read host-side before any Box starts -- never a checkout around the launcher's cwd, so a dirty or unpushed working tree can neither widen nor narrow the derived set; under every other Code Forge it is a Target-repo checkout resolved from the launcher's cwd and positively identified against the forge's own remote (ADR 0047 #3310), optional auth-scheme (bearer default; basic and header:<Name>), optional upstream-origin (an absolute http(s) origin -- scheme://host with an optional port, no path, no query or fragment, and no userinfo, rejected at parse time otherwise with an error naming the route -- that overrides the origin the launcher would otherwise derive from the Target repo's committed config; it covers the two things that committed config cannot always supply on its own: a non-default scheme or an explicit port, and a host serving only ecosystems with no committed in-tree config to derive an origin from at all; a declared origin replaces the derived origin only, never the derived path-set, so a route on a host the Target repo does declare a registry on still enforces exactly what was derived for it; a route declaring upstream-origin for a host the Target repo declares nothing on resolves on the strength of that key alone, enforcing exactly its own allow plus its own declared paths -- which is the empty set, and therefore default-deny, when it declares none -- ADR 0047 #3261), one optional [routes.ecosystems.<name>] block per ecosystem this route serves, <name> an ecosystem spindrift knows -- an unknown name is rejected at parse time with an error naming the route and the name (ADR 0048 #3405); every block accepts the one typed key every ecosystem row shares, path, which must be an absolute path with a leading slash and no '.', '..', or empty segment -- any trailing slash is stripped rather than rejected (so '/dl/' is stored as '/dl') -- and must not be the bare root '/' (nor '//', which strips to it) or contain whitespace, a dollar sign, a backtick, a backslash, a '?', or a '#', rejected otherwise with an error naming the route; beyond path, the ecosystem's own row validates any further key its block accepts, cargo's registries being the one such key today: names of the Target repo's [registries.NAME] entries this route serves, each restricted to letters, digits, '-', and '_'; cargo binds to a named registry through source replacement rendered into the Box's $CARGO_HOME/config.toml, keyed off the repo's own un-rewritten .cargo/config.toml -- not a rewrite of that file -- so when registries is present it restricts which of the repo's declared registries get a replacement stanza on this route, and when absent every declared registry whose index host matches this route does; the CARGO_REGISTRIES_<PROXY-SOURCE-NAME>_TOKEN placeholder this produces is keyed to cargo's own replacement source name, not the repo's registry name, since cargo binds credential lookups to the replacement source once a source is replaced -- ADR 0044 #3201 amendment; when the repo's own .cargo/config.toml already claims a declared registry's index URL under its own [source.NAME], the render reuses that name instead of minting spindrift-upstream-<name> so the stanzas merge rather than colliding, and on a repo that also replaces crates-io with that source, a plain crates-io fetch chains crates-io -> that named source -> this route, so the crates-io route's own prefix may see no traffic and this route's credential and enforcement policy govern those fetches -- ADR 0044 #3248 amendment; gradle has no committed in-tree config to derive a path from, so an operator declares gradle's path in its block directly; omitting gradle's block leaves its binding inert -- no repository redirection at all -- falling back to whatever repositories the build declares itself; go likewise has no committed in-tree config to derive a path from -- a go.mod names no registry host -- so an operator declares go's path in its block directly; the declared path joins the route's enforced path-set as operator-owned policy, and when present GOPROXY is bound to the Forwarder URL carrying that full path; omitting go's block leaves it unbound through that route entirely -- no GOPROXY export at all, so go falls back to its own default public proxy rather than to a bare-root URL that was never declared for it), optional allow (empty in the happy path; a list of extra path patterns that extend a route's derived enforced path-set for a path shape the Target repo's own committed config doesn't expose -- e.g. an Artifactory-style sibling download endpoint -- ADR 0047 #3258; each pattern is validated at parse time and must already be in canonical absolute-path form -- a leading slash, no trailing slash, no '.' or '..' segment, and no '?' or '#' -- rejected otherwise with an error naming the route and the offending pattern; the bare root pattern '/' is rejected too, since it would blanket-authorize the whole host, exactly the off switch this key must never be; a request matching an allow pattern forwards with the route's credential exactly like a request matching a derived path, the same 403-or-forward check and code path; allow only ever widens the enforced set, never a way to disable or narrow enforcement -- there is no enforce = false and this key doesn't add one), and an optional credential source reference (exactly one when present; an absent credential key leaves that route unauthenticated, a plain pass-through) -- a match-host and a credential alone are a complete route; a routes file still declaring a key either ADR 0047 (#3261) or ADR 0048 (#3405) retired -- upstream-base-url, enforce-allowlist, cargo-registries, gradle-path, or go-path -- is rejected at parse time with an error naming the route and the retired key(s) and printing the equivalent replacement stanza -- the equivalent [[routes]] entry for the first two, the equivalent [routes.ecosystems.<name>] block for the latter three -- so migrating is one mechanical edit -- a route whose credential table is itself malformed (an unknown key, a mistyped value, or no source named), or whose upstream-origin, auth-scheme, or allow is invalid, fails on that error first, before any stanza is printed, so the stanza only ever echoes fields the parser accepted and never silently drops or changes the route's authentication (#3436); the file carries credential source REFERENCES (env var names, file paths), never secret values; the inbound Authorization header is stripped from every proxied request before any route credential is attached (ADR 0047); unset disables the registry proxy entirely; this is the only declaration surface for registry routes; the proxy routes strictly by a per-route path prefix slugged from each route's match-host -- a request under no known prefix is refused before any upstream is dialed";
     flakeOption = true;
     legacySettingsExempt = true;
-    boxEnv = false;
-  };
-  jiraBaseURL = {
-    env = "JIRA_BASE_URL";
-    group = "issues";
-    doc = "Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira";
-    flakeOption = true;
-    nixSubPath = "jira.baseURL";
-    boxEnv = false;
-  };
-  jiraProjectKey = {
-    env = "JIRA_PROJECT_KEY";
-    group = "issues";
-    doc = "Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira";
-    flakeOption = true;
-    nixSubPath = "jira.projectKey";
-    boxEnv = false;
-  };
-  jiraEmail = {
-    env = "JIRA_EMAIL";
-    group = "issues";
-    doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; setting it also selects Jira Cloud's search APIs; leave empty for Bearer-token auth (Jira Server/Data Center PATs, which keep the v2 /search)";
-    flakeOption = true;
-    nixSubPath = "jira.email";
-    boxEnv = false;
-  };
-  jiraStatusMapping = {
-    env = "JIRA_STATUS_MAPPING";
-    group = "issues";
-    default = "";
-    doc = "JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow";
-    flakeOption = true;
-    nixSubPath = "jira.statusMapping";
-    boxEnv = false;
-  };
-  jiraIncludeComments = {
-    env = "JIRA_INCLUDE_COMMENTS";
-    group = "issues";
-    default = false;
-    kind = "bool";
-    doc = "DEPRECATED no-op: Jira comments always reach the prompt (the last 10, attributed, through the adapter's comment lister) whether or not this is set. Kept so existing configs still evaluate; will be removed";
-    flakeOption = true;
-    nixSubPath = "jira.includeComments";
     boxEnv = false;
   };
   researchVerdicts = {
@@ -725,13 +660,6 @@ withRowKnobs {
     doc = "DeepSeek API key for the pi Driver's deepseek Provider; required when DRIVER=pi and any model tier is deepseek/<model>; forwarded into every Box when set, whatever the Driver";
     boxEnv = true;
   };
-  jiraToken = {
-    env = "JIRA_TOKEN";
-    secret = true;
-    hostConfig = true;
-    doc = "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira";
-    boxEnv = false;
-  };
   gitUserName = {
     env = "GIT_USER_NAME";
     group = "git";
@@ -766,25 +694,6 @@ withRowKnobs {
     flakeOption = true;
     nixSubPath = "backend";
     boxEnv = true;
-  };
-  codeForgeRemoteURL = {
-    env = "CODE_FORGE_REMOTE_URL";
-    group = "forge";
-    flag = "remote-url";
-    doc = "plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo); required when CODE_FORGE=git, unused otherwise";
-    flakeOption = true;
-    nixSubPath = "remoteURL";
-    boxEnv = true;
-  };
-  codeForgeAccumulationRepoDir = {
-    env = "CODE_FORGE_ACCUMULATION_REPO_DIR";
-    group = "forge";
-    flag = "accumulation-repo-dir";
-    doc = "host path to the bare Accumulation repo (ADR 0033), mounted read-only into the Box and landed into host-side; when CODE_FORGE=local, defaults to .spindrift/accum.git under the launcher's working directory (auto-created and seeded) and an explicit value still overrides it; unused otherwise";
-    flakeOption = true;
-    hostDerived = true;
-    nixSubPath = "accumulationRepoDir";
-    boxEnv = false;
   };
   boxForgeAndIssueAccess = {
     env = "BOX_FORGE_AND_ISSUE_ACCESS";
