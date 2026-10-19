@@ -426,3 +426,23 @@ func TestFindingLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestRows(t *testing.T) {
+	rows := Rows()
+	if len(rows) != len(builtinChores) {
+		t.Fatalf("Rows() has %d rows, want %d", len(rows), len(builtinChores))
+	}
+	byName := map[string]Row{}
+	for i, r := range rows {
+		if r.Name != builtinChores[i] {
+			t.Errorf("Rows()[%d].Name = %q, want %q (builtinChores order)", i, r.Name, builtinChores[i])
+		}
+		byName[r.Name] = r
+	}
+	if want := (Row{Name: "tuning", FindingLabel: "agent-tuning-finding", MergeByHand: true}); byName["tuning"] != want {
+		t.Errorf("tuning row = %+v, want %+v", byName["tuning"], want)
+	}
+	if want := (Row{Name: "bugs"}); byName["bugs"] != want {
+		t.Errorf("bugs row = %+v, want %+v", byName["bugs"], want)
+	}
+}
