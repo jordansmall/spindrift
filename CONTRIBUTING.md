@@ -134,7 +134,8 @@ the artifacts it drives — `templates/default/harness.env.example`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`,
 `cmd/launcher/internal/inputdoc/emptyissetting_gen.go`,
 `cmd/launcher/internal/inputdoc/schemadefaults_gen.go`,
-`cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go`, and the generated section of
+`cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go`, each knob-declaring row's
+`knobs_gen.go` reader (`lib/row-knob-readers.nix`), and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
 hand-editing them until the drift-guard checks (`nix/checks/schema-drift.nix`) go quiet:
 

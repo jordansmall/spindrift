@@ -62,6 +62,7 @@ let
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
   promptAssemblyBoxEnvFile = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
+  rowKnobReaders = import ../lib/row-knob-readers.nix;
   documentedFacts = import ../lib/documented-facts.nix { inherit (pkgs) lib; };
   # write_between below builds on this shared marker-splice implementation
   # (issue #2949). nix/checks/schema-drift.nix and nix/checks/baked-skills.nix
@@ -212,6 +213,21 @@ pkgs.writeShellApplication {
     }
     ${writeGenerated "cmd/launcher/internal/promptassembly/boxenv_gen.go" promptAssemblyBoxEnvFile}
     gofmt -w "$root/cmd/launcher/internal/promptassembly/boxenv_gen.go"
+    ${concatStrings (
+      map (
+        target:
+        writeGenerated (escapeShellArg target.path) (renderers.renderRowKnobsGo target)
+        + "\n"
+        + ''
+          gofmt -w "$root/"${escapeShellArg target.path}
+        ''
+      ) rowKnobReaders.generated
+    )}
+    ${concatStrings (
+      map (path: ''
+        rm -f "$root/"${escapeShellArg path}
+      '') rowKnobReaders.absent
+    )}
   '';
 }
 # `//` only adds an attribute, leaving outPath alone, so flake.nix's
