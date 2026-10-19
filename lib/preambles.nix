@@ -7,9 +7,10 @@ let
   unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   builtinsCompat = import ./builtins-compat.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList escapeShellArg;
-  # Shared by runArtifacts' bwrap and OCI branches so the FLAKE_IMAGE_ATTR
-  # shape is assembled once (issue #2667 review fix).
+  # The value handed to each row as `flakeImageAttr`, so the attr shape is
+  # assembled once (issue #2667 review fix) while each row renders the key.
   flakeImageAttrFor = system: name: ".#packages.${system}.${name}";
+  runnerRows = (import ./runners/index.nix { }).rows;
 in
 rec {
   # Shell-escapes each baked default via escapeShellArg so a value containing
@@ -78,36 +79,20 @@ rec {
     );
 
   # The Launcher input document's `artifacts` section of the run input
-  # (ADR 0020, issue #625). OCI run also carries the build-time vars so
-  # EnsureReady can build the image on demand when it is absent: the workflow
-  # is `build` first, but `run` must still handle a missing image on any
-  # machine.
-  runArtifacts =
+  # (ADR 0020, issue #625). The keys only one runner family renders come from
+  # that family's row (lib/runners, `runArtifacts`, ADR 0069 decision 7), so
+  # this function names no family; `...` carries the row-only inputs through,
+  # and `runArtifacts` below rejects any name no row or this trailer takes.
+  renderRunArtifacts =
     {
-      runnerKind,
-      # The runner row's artifact (lib/runners): which Box artifact the family boots.
-      boxArtifact,
+      # The runner row (lib/runners): its name and artifact (which Box artifact
+      # the family boots) become RUNNER_KIND and BOX_ARTIFACT, and its
+      # `runArtifacts` function renders the family's own keys.
+      row,
       driverEntry,
-      agentFilesPath,
-      agentEnvPath,
-      passwdFilePath,
-      groupFilePath,
-      # `spindrift build` runs against this run document, so the bwrap branch
-      # needs its build-time drv counterparts (issue #2672).
-      agentFilesDrv,
-      agentEnvDrv,
-      passwdFileDrv,
-      groupFileDrv,
-      agentClosurePath,
-      prefetch,
-      imagePath,
-      imageHash,
       launcherCurrencyHash,
-      imageName,
       imageAttrName,
       runtime,
-      imageDrv,
-      nixBuilderImage,
       # The host system and its Linux twin, bundled (issue #2770 slice 1). See
       # the FLAKE_LAUNCHER_ATTR comment below for why the two fields diverge.
       systems,
@@ -141,71 +126,16 @@ rec {
       # (issue #4783), stamped onto each Pass log's dispatch_start.
       roleModels,
       driverVersion,
-      # The bwrap-only nix.conf artifact (issue #2664), from the same
-      # nixConfigFile derivation the OCI image bakes in directly. Defaults to
-      # "" so a non-nixInBox Consumer renders the key present-but-empty rather
-      # than omitting it.
-      nixConfigPath ? "",
-      # The bwrap ephemeral-overlay-store knob (ADR 0042, issue #2665). No `?`
-      # default: unlike nixConfigPath, which is meaningless and so blanked to
-      # "" when nixInBox is off, this is a real Consumer knob independent of
-      # nixInBox and must always render its true value. The AND-gate with
-      # NixConfigFile lives in cmd/launcher/internal/runner/bwrap/bwrap.go, not here.
-      nixStoreWritable,
-      # The drv counterpart of nixConfigPath above (issue #2672), defaulting
-      # to "" for the same nixInBox-off reason.
-      nixConfigDrv ? "",
-      # The compiled BPF syscall-filter artifact (issue #2670 slice 3). Unlike
-      # nixConfigPath above, this bwrap hardening is orthogonal to nix-in-box:
-      # it always builds, so no `?` default and no on/off knob.
-      syscallFilterPath,
-      # The build-time drv counterpart of syscallFilterPath above
-      # (issue #2672), same reasoning as agentFilesDrv.
-      syscallFilterDrv,
-    }:
-    (
-      if runnerKind == "bwrap" then
-        {
-          RUNTIME = "bwrap";
-          DRIVER = driverEntry.name;
-          AGENT_FILES = agentFilesPath;
-          AGENT_ENV = agentEnvPath;
-          PASSWD_FILE = passwdFilePath;
-          GROUP_FILE = groupFilePath;
-          BAKED_PREFETCH = prefetch;
-          NIX_CONFIG_FILE = nixConfigPath;
-          NIX_STORE_WRITABLE = if nixStoreWritable then "true" else "false";
-          SYSCALL_FILTER = syscallFilterPath;
-          # The same two keys the OCI branch below renders, populated with the
-          # bwrap agent closure's own flake attr and output path, so Probe()
-          # can compare them without caring which runnerKind produced them
-          # (issue #2667).
-          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux imageAttrName;
-          IMAGE_TAG = agentClosurePath;
-          # cmdBuild reads the run document, so it needs the drv behind each
-          # bwrap artifact, as the OCI branch carries IMAGE_DRV (issue #2672).
-          AGENT_FILES_DRV = agentFilesDrv;
-          AGENT_ENV_DRV = agentEnvDrv;
-          PASSWD_FILE_DRV = passwdFileDrv;
-          GROUP_FILE_DRV = groupFileDrv;
-          NIX_CONFIG_FILE_DRV = nixConfigDrv;
-          SYSCALL_FILTER_DRV = syscallFilterDrv;
-        }
-      else
-        {
-          IMAGE_ARCHIVE = imagePath;
-          IMAGE_TAG = "${imageName}:${imageHash}";
-          RUNTIME = runtime;
-          DRIVER = driverEntry.name;
-          IMAGE_DRV = imageDrv;
-          NIX_BUILDER_IMAGE = nixBuilderImage;
-          NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux imageAttrName;
-        }
-    )
+      ...
+    }@args:
+    row.runArtifacts (args // { flakeImageAttr = flakeImageAttrFor systems.linux imageAttrName; })
     // {
-      RUNNER_KIND = runnerKind;
-      BOX_ARTIFACT = boxArtifact;
+      RUNNER_KIND = row.name;
+      BOX_ARTIFACT = row.artifact;
+      # forRuntime picks the bwrap row only for runtime=bwrap, so this is the
+      # literal "bwrap" there and the chosen runtime on the OCI family.
+      RUNTIME = runtime;
+      DRIVER = driverEntry.name;
       DRIVER_SKILLS_DIR = "/home/agent/${driverEntry.skillsDirRelative}";
       DRIVER_SESSION_CACHE_DIR =
         if driverEntry ? sessionCacheDirRelative then
@@ -213,7 +143,7 @@ rec {
         else
           "";
       BOX_ENV_VARS = boxEnvVars;
-      # Unlike FLAKE_IMAGE_ATTR above, rendered against systems.linux for
+      # Unlike the rows' FLAKE_IMAGE_ATTR, rendered against systems.linux for
       # Linux-bound OCI artifacts, the launcher is a per-host-system Go binary
       # that runs on every platform including bwrap/darwin, so this renders
       # against systems.host.
@@ -235,78 +165,96 @@ rec {
       DRIVER_VERSION = driverVersion;
     };
 
+  # Restores the unknown-argument error that `...` above would swallow: every
+  # name must be a formal of the trailer or of some row's `runArtifacts`
+  # (mkHarness passes the union of all rows' inputs, whichever row it picked).
+  runArtifacts =
+    args:
+    let
+      allowed =
+        builtins.foldl' (acc: fn: acc // builtins.functionArgs fn)
+          (builtins.functionArgs renderRunArtifacts)
+          (map (row: row.runArtifacts) (runnerRows ++ [ args.row ]));
+      unknown = builtins.filter (n: !(allowed ? ${n})) (builtins.attrNames args);
+    in
+    if unknown != [ ] then
+      throw "preambles.runArtifacts: unknown argument(s) ${builtins.concatStringsSep ", " unknown}: neither the shared trailer nor any runner row (lib/runners) takes them"
+    else
+      renderRunArtifacts args;
+
+  # Placeholder arguments for deriving the artifact keys that render: only the
+  # output keys matter, so every value is a dummy. Exposed so
+  # nix/checks/schema-drift.nix can render a stub row without a parallel copy.
+  dummyRunArtifactArgs = {
+    driverEntry = {
+      name = "dummy";
+      skillsDirRelative = "dummy";
+      sessionCacheDirRelative = "dummy";
+    };
+    agentFilesPath = "dummy";
+    agentEnvPath = "dummy";
+    passwdFilePath = "dummy";
+    groupFilePath = "dummy";
+    agentFilesDrv = "dummy";
+    agentEnvDrv = "dummy";
+    passwdFileDrv = "dummy";
+    groupFileDrv = "dummy";
+    agentClosurePath = "dummy";
+    prefetch = "dummy";
+    imagePath = "dummy";
+    imageHash = "dummy";
+    imageAttrName = "dummy";
+    flakeImageAttr = "dummy";
+    launcherCurrencyHash = "dummy";
+    imageName = "dummy";
+    runtime = "dummy";
+    imageDrv = "dummy";
+    nixBuilderImage = "dummy";
+    systems = {
+      host = "dummy";
+      linux = "dummy";
+    };
+    boxEnvVars = "dummy";
+    hostMediatedRemote = false;
+    outboxRelayCapable = false;
+    inBoxUnreachableTracker = false;
+    fullyLocal = false;
+    trackerAxisRead = "dummy";
+    trackerAxisWrite = "dummy";
+    trackerAxisFiler = "dummy";
+    forgeBackend = "dummy";
+    filerEnabled = false;
+    workerProvisioned = false;
+    scoutProvisioned = false;
+    choreCatalog = "dummy";
+    roleModels = "dummy";
+    driverVersion = "dummy";
+    nixConfigPath = "dummy";
+    nixConfigDrv = "dummy";
+    nixStoreWritable = false;
+    syscallFilterPath = "dummy";
+    syscallFilterDrv = "dummy";
+  };
+
   # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
   # what actually renders instead of a parallel list that can silently drift
-  # (issue #810). The placeholder args below are safe because only the output
-  # keys matter. IMAGE and GITHUB_OUTPUT (#2324) are env-only escape hatches
+  # (issue #810). IMAGE and GITHUB_OUTPUT (#2324) are env-only escape hatches
   # runArtifacts does not emit, so they are added by hand.
-  documentArtifactKeys =
-    let
-      dummyDriverEntry = {
-        name = "dummy";
-        skillsDirRelative = "dummy";
-        sessionCacheDirRelative = "dummy";
-      };
-      dummyRunArtifacts =
-        runnerKind:
-        runArtifacts {
-          inherit runnerKind;
-          boxArtifact = "dummy";
-          driverEntry = dummyDriverEntry;
-          agentFilesPath = "dummy";
-          agentEnvPath = "dummy";
-          passwdFilePath = "dummy";
-          groupFilePath = "dummy";
-          agentFilesDrv = "dummy";
-          agentEnvDrv = "dummy";
-          passwdFileDrv = "dummy";
-          groupFileDrv = "dummy";
-          agentClosurePath = "dummy";
-          prefetch = "dummy";
-          imagePath = "dummy";
-          imageHash = "dummy";
-          imageAttrName = "dummy";
-          launcherCurrencyHash = "dummy";
-          imageName = "dummy";
-          runtime = "dummy";
-          imageDrv = "dummy";
-          nixBuilderImage = "dummy";
-          systems = {
-            host = "dummy";
-            linux = "dummy";
-          };
-          boxEnvVars = "dummy";
-          hostMediatedRemote = false;
-          outboxRelayCapable = false;
-          inBoxUnreachableTracker = false;
-          fullyLocal = false;
-          trackerAxisRead = "dummy";
-          trackerAxisWrite = "dummy";
-          trackerAxisFiler = "dummy";
-          forgeBackend = "dummy";
-          filerEnabled = false;
-          workerProvisioned = false;
-          scoutProvisioned = false;
-          choreCatalog = "dummy";
-          roleModels = "dummy";
-          driverVersion = "dummy";
-          nixConfigPath = "dummy";
-          nixConfigDrv = "dummy";
-          nixStoreWritable = false;
-          syscallFilterPath = "dummy";
-          syscallFilterDrv = "dummy";
-        };
-      allKeys =
-        builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [
-          "bwrap"
-          "oci"
-        ]
+  documentArtifactKeysFor =
+    rows:
+    builtins.sort builtins.lessThan (
+      unique (
+        builtins.concatMap (
+          row: builtins.attrNames (runArtifacts (dummyRunArtifactArgs // { inherit row; }))
+        ) rows
         ++ [
           "IMAGE"
           "GITHUB_OUTPUT"
-        ];
-    in
-    builtins.sort builtins.lessThan (unique allKeys);
+        ]
+      )
+    );
+
+  documentArtifactKeys = documentArtifactKeysFor (import ./runners/index.nix { }).rows;
 
   # The Launcher input document (ADR 0020): a `settings` section of resolved
   # knob values keyed by env var name, and an `artifacts` section of

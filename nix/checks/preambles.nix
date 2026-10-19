@@ -10,8 +10,7 @@ let
   # sibling below, which differ only in whether nixConfigPath is set
   # (issue #2664).
   bwrapRunArtifactsBase = {
-    runnerKind = "bwrap";
-    boxArtifact = "store-closure";
+    row = import ../../lib/runners/bwrap.nix;
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
@@ -61,8 +60,7 @@ let
   # Shared by preambles-run-artifacts-oci and the OCI case of
   # preambles-run-artifacts-image-attr-name below.
   ociRunArtifactsBase = {
-    runnerKind = "oci";
-    boxArtifact = "oci-image";
+    row = import ../../lib/runners/oci.nix;
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
@@ -626,8 +624,7 @@ in
   preambles-run-artifacts-oci-driver-scoped-image-name =
     let
       out = preambles.runArtifacts {
-        runnerKind = "oci";
-        boxArtifact = "oci-image";
+        row = import ../../lib/runners/oci.nix;
         driverEntry = {
           name = "opencode";
           skillsDirRelative = ".claude/skills";

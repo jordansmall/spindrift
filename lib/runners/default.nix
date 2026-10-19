@@ -8,7 +8,11 @@
 # exported Go var and its Kind constant (OCI, KindOCI). Adding a field is one
 # entry in rowFields (lib/renderers.nix) plus the struct field, guarded by
 # TestDescriptorFieldsMatchNixRows. `nix run .#regen` renders the rows into
-# families_gen.go.
+# families_gen.go. `runArtifacts` and `imageAttrName` are the Nix-only fields,
+# allowed via nixOnlyFields in lib/renderers.nix and never rendered to Go:
+# `runArtifacts` is a function returning the row's run-document keys, consumed
+# by lib/preambles.nix; `imageAttrName` is the default flake package name that
+# lib/mkHarness.nix exposes the family's artifact under.
 
 # A plain list with no `{ lib }:` wrapper, matching lib/dispatch-kinds/default.nix.
 # Order is load-bearing: the concatenated `runtimes` are the runtime option's
