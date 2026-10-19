@@ -3918,7 +3918,8 @@ such block and are experimental, so you select them by editing
 
 When either backend knob selects forgejo — `ISSUE_TRACKER=forgejo` or
 `CODE_FORGE=forgejo` — the image bakes [`fj`](https://codeberg.org/Cyborus/forgejo-cli)
-(forgejo-cli) onto the Box's PATH; a github-backend image never carries it.
+(forgejo-cli) onto the Box's PATH, because the forgejo backend row declares it
+as its `cliPackage`; an image selecting no such backend never carries it.
 This is the forgejo analog of the `gh` load out: in the default read-write
 mode an Agent reads its issue, comments, posts research verdicts, and opens
 the PR through `fj` porcelain rather than hand-assembled REST calls.

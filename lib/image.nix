@@ -45,10 +45,12 @@ let
   # here or in the research-verdict prompt budget that derives from them
   # (issue #3669).
   outputCaps = import ./output-caps.nix;
-  # Bakes fj (forgejo-cli) into the image when ISSUE_TRACKER or CODE_FORGE
-  # selects the forgejo backend (issue #1963). Defaults to false because a
-  # caller may omit the knob.
-  forgejoBackend = knobs.forgejoBackend or false;
+  # Backend-specific CLIs (nixpkgs attribute names, e.g. forgejo-cli for fj)
+  # the selected tracker and forge rows declare (issue #1963). Defaults to none
+  # because a caller may omit the knob.
+  backendCLIPackages = map (
+    name: pkgs.${name} or (throw "backend row cliPackage \"${name}\" is not a nixpkgs attribute")
+  ) (knobs.backendCLIPackages or [ ]);
 
   # Drop a leading `#!...` line so a complete, standalone-runnable script can be
   # fed to writeShellApplication as its body (it supplies its own shebang).
@@ -83,9 +85,9 @@ let
     # The nix CLI so `nix flake check` / `nix develop` work inside the box.
     # Omitted only when the Consumer opts into the lean image.
     ++ lib.optional knobs.nixInBox pkgs.nix
-    # Baked only for a forgejo-backend Consumer (issue #1963), so a
-    # github-backend image never gains an unused CLI.
-    ++ lib.optional forgejoBackend pkgs.forgejo-cli;
+    # Only the CLIs the selected backends declare (issue #1963), so an image
+    # never gains an unused one.
+    ++ backendCLIPackages;
 
   agentEnv = pkgs.buildEnv {
     name = "agent-env";
@@ -119,9 +121,9 @@ let
         driver.orchestratorBin # in-box orchestrator (#1996)
         driver.boxBin # in-box settle sequence (#4292)
       ])
-      # On PATH for the entrypoint's fj credential setup only when the
-      # Consumer's backend is forgejo (issue #1963).
-      ++ lib.optional forgejoBackend pkgs.forgejo-cli;
+      # On PATH for the Box binary's backend CLI setup (fj for
+      # forgejo, issue #1963).
+      ++ backendCLIPackages;
     # AGENTS_JSON_TEMPLATE is baked as a fixed value, not a :-default, because
     # it comes from the configured models rather than a standalone knob.
     text =
