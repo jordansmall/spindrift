@@ -77,3 +77,10 @@ func TestNewJiraClient_BuildsRESTClient(t *testing.T) {
 		t.Fatal("jiraClient.rest is nil, want a constructed *rest.Client")
 	}
 }
+
+func TestNewJiraClient_NilHTTPClientIsTimed(t *testing.T) {
+	jc := NewJiraClient(JiraConfig{BaseURL: "http://example.test"}).(*jiraClient)
+	if timeout := jc.rest.HTTPClientForTest().Timeout; timeout != defaultJiraHTTPTimeout {
+		t.Fatalf("rest client Timeout = %v, want defaultJiraHTTPTimeout (%v), never the untimed http.DefaultClient", timeout, defaultJiraHTTPTimeout)
+	}
+}

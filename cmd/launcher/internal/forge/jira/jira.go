@@ -18,6 +18,10 @@ import (
 	"spindrift.dev/launcher/internal/forge/rest"
 )
 
+// defaultJiraHTTPTimeout bounds every Jira REST call so a server that accepts
+// the connection but never answers cannot stall a caller forever.
+const defaultJiraHTTPTimeout = 30 * time.Second
+
 // JiraConfig configures the Jira IssueTracker adapter.
 type JiraConfig struct {
 	BaseURL    string // Jira site base URL, e.g. https://yourcompany.atlassian.net
@@ -37,7 +41,8 @@ type JiraConfig struct {
 	// verdicts is deferred (ADR 0022).
 	VerdictLabels forge.VerdictLabels
 
-	// HTTPClient overrides the client used for Jira REST calls; nil uses
+	// HTTPClient overrides the client used for Jira REST calls; nil gets a
+	// client bounded by defaultJiraHTTPTimeout, never the untimed
 	// http.DefaultClient.
 	HTTPClient *http.Client
 }
@@ -101,7 +106,7 @@ type jiraClient struct {
 func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = &http.Client{Timeout: defaultJiraHTTPTimeout}
 	}
 	restClient := rest.New(cfg.BaseURL, jiraAuthStrategy{email: cfg.Email, token: cfg.Token}, "jira", jiraStatusMap(), hc)
 	return &jiraClient{cfg: cfg, rest: restClient, cloud: cfg.Email != ""}
