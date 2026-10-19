@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -1283,19 +1284,37 @@ var daemonKnobEnvVars = []string{
 	"MAX_RECOVER_ATTEMPTS", "TRANSIENT_BACKOFF_SECS", "DAEMON_AWAKE_WINDOW",
 	"BUTLER_CHORES", "BUTLER_EVERY", "BUTLER_CHORE_CLASSES",
 	"DAEMON_SELF_APP", "SPINDRIFT_DAEMON_PROGRAM", "DAEMON_PROBE_INTERVAL",
-	"ISSUE_TRACKER", "LOCAL_ISSUES_DIR", "LABEL", "IN_PROGRESS_LABEL",
-	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL", "FORGEJO_TOKEN",
-	"GH_TOKEN_REFRESH_FILE", "JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN",
-	"JIRA_STATUS_MAPPING", "FORGEJO_TOKEN_CMD", "JIRA_TOKEN_CMD",
+	"ISSUE_TRACKER", "LABEL", "IN_PROGRESS_LABEL",
+	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL",
+	"GH_TOKEN_REFRESH_FILE",
 	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
 // test, so an ambient export in the host/CI environment cannot shadow the
-// input document values these tests set up.
+// input document values these tests set up. The backend knobs are read through
+// the Strategies' Lookup, not literally, so they are discovered by running
+// every tracker Strategy against a recording Lookup (the generated ReadKnobs
+// reads every row knob whatever the values).
 func clearKnobEnvT(t *testing.T) {
 	t.Helper()
-	for _, v := range daemonKnobEnvVars {
+	keys := slices.Clone(daemonKnobEnvVars)
+	record := func(env string) (string, bool) {
+		keys = append(keys, env)
+		return "", false
+	}
+	for _, s := range backendkit.Strategies() {
+		if s.ValidateTracker != nil {
+			_ = s.ValidateTracker(backendkit.Shared{}, record)
+		}
+		if s.NewIssueTracker != nil {
+			_, _ = s.NewIssueTracker(backendkit.Shared{}, record)
+		}
+		if s.TokenEnvVar != "" {
+			keys = append(keys, s.TokenEnvVar+"_CMD")
+		}
+	}
+	for _, v := range keys {
 		t.Setenv(v, "")
 	}
 }

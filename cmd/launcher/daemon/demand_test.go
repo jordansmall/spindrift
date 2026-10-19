@@ -517,6 +517,23 @@ func TestBuildDemandSources_TokenCmdFormHintNamesKnobNotValue(t *testing.T) {
 	}
 }
 
+// The hint explains a blank token; a different validation failure (here the
+// missing REPO_SLUG) must not claim the _CMD form is the problem.
+func TestBuildDemandSources_TokenCmdHintOnlyForTokenErrors(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Setenv("GH_TOKEN_CMD", "rbw get hush-hush-entry")
+	_, missing := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
+	}), allDemandKinds)
+	got := missing[daemon.KindOf(dispatchkind.Work)]
+	if !strings.Contains(got, "REPO_SLUG") {
+		t.Fatalf("reason = %q, want the REPO_SLUG error", got)
+	}
+	if strings.Contains(got, "_CMD") {
+		t.Errorf("reason = %q, want no _CMD hint on a slug error", got)
+	}
+}
+
 func TestBuildDemandSources_NoTokenCmdNoHint(t *testing.T) {
 	clearKnobEnvT(t)
 	_, missing := buildDemandSources(demandDocT(map[string]string{
@@ -716,6 +733,27 @@ func TestBuildDemandSources_MissingReasonPerProbedKind(t *testing.T) {
 				}
 				if !ok || !strings.Contains(got, want) {
 					t.Errorf("%s reason = %q (present %v), want it to contain %q", kind, got, ok, want)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildDemandSources_NonTrackerNameFailsWithValidList(t *testing.T) {
+	for _, name := range []string{"bogus", "git"} {
+		t.Run(name, func(t *testing.T) {
+			clearKnobEnvT(t)
+			src, missing := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": name, "LABEL": "ready-for-agent"}), allDemandKinds)
+			for _, kind := range []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)} {
+				if _, ok := src[kind]; ok {
+					t.Errorf("%s has a source for ISSUE_TRACKER=%s", kind, name)
+				}
+				want := fmt.Sprintf("unknown ISSUE_TRACKER %q (valid: github, forgejo, jira, local)", name)
+				if name == "git" {
+					want = fmt.Sprintf("%q is not a valid ISSUE_TRACKER (valid: github, forgejo, jira, local)", name)
+				}
+				if got := missing[kind]; !strings.Contains(got, want) {
+					t.Errorf("%s reason = %q, want it to contain %q", kind, got, want)
 				}
 			}
 		})
