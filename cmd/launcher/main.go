@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/console"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -27,7 +28,6 @@ import (
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers, backends, and runner families
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/hostop"
@@ -727,16 +727,14 @@ func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) strin
 
 // forgeLandedLine is the all-delivered banner for a kind that lands code.
 func forgeLandedLine(c config) string {
-	switch c.codeForge {
-	case "git", "forgejo":
-		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
-	case "local":
-		return "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
-	default:
-		// validate restricts c.codeForge to git, local, forgejo, or github, so
-		// a future forge fails loud there rather than inheriting this wording.
-		return fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	s, ok := backendkit.ByName(c.codeForge)
+	if !ok || s.LandedBanner == nil {
+		// validate restricts c.codeForge to a registered Code Forge, so a
+		// backend missing its banner fails loud here rather than printing a
+		// blank clause.
+		panic(fmt.Sprintf("no landed banner for CODE_FORGE=%q", c.codeForge))
 	}
+	return fmt.Sprintf("==> all agents finished — %s.\n", s.LandedBanner(backendShared(c)))
 }
 
 // delivered reports whether o earns the all-delivered banner line. Only a
@@ -1123,18 +1121,15 @@ func checkAutoMergePreflight(c config, caps forge.Capabilities) error {
 		return nil
 	}
 	if caps.PRForge == nil {
-		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github or forgejo (got %q) — auto-merge is a native PR-forge feature with no meaning off a PR forge; switch to MERGE_MODE=manual or immediate", c.codeForge)
+		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=%s (got %q) — auto-merge is a native PR-forge feature with no meaning off a PR forge; switch to MERGE_MODE=manual or immediate", backendkit.AutoMergeForges(backendkit.Strategies()), c.codeForge)
 	}
 	canAuto, err := caps.PRForge.CanAutoMerge()
 	if err != nil {
 		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)
 	}
 	if !canAuto {
-		remedy := `enable "Allow auto-merge" in repo Settings → General`
-		if c.codeForge == "forgejo" {
-			remedy = fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`, forgejo.MergeStyle(c.mergeMethod))
-		}
-		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge — %s; or switch to MERGE_MODE=manual", remedy)
+		s, _ := backendkit.ByName(c.codeForge)
+		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge%s; or switch to MERGE_MODE=manual", s.AutoMergeRemedyClause(backendShared(c)))
 	}
 	return nil
 }

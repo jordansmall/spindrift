@@ -26,3 +26,13 @@ func TestBackendStrategiesMatchNixRows(t *testing.T) {
 		}
 	}
 }
+
+// A Code Forge row without a LandedBanner would panic main's forgeLandedLine at
+// the end of a run, so the gap is caught here instead.
+func TestCodeForgeStrategiesHaveLandedBanner(t *testing.T) {
+	for _, s := range backendkit.Strategies() {
+		if s.ValidAsCodeForge && s.LandedBanner == nil {
+			t.Errorf("Code Forge Strategy %q has no LandedBanner", s.Name)
+		}
+	}
+}
