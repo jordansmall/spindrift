@@ -3,6 +3,7 @@ package runner_test
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
@@ -99,5 +100,44 @@ func TestKilledBySignal(t *testing.T) {
 				t.Errorf("KilledBySignal(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+// Go reports a child killed directly (as bwrap's Kill does) as ExitCode() ==
+// -1; AsRunError must translate that to the 128+N code podman/docker report.
+func TestAsRunError_SignalledChildFollows128PlusN(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	err := runner.AsRunError(cmd.Wait())
+
+	var runErr *runner.RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("want *RunError, got %T: %v", err, err)
+	}
+	if runErr.ExitCode != 137 {
+		t.Errorf("ExitCode: want 137, got %d", runErr.ExitCode)
+	}
+	if !runner.KilledBySignal(err) {
+		t.Errorf("KilledBySignal(%v) = false, want true", err)
+	}
+}
+
+func TestAsRunError_OrdinaryExitKeepsCode(t *testing.T) {
+	err := runner.AsRunError(exec.Command("sh", "-c", "exit 3").Run())
+
+	var runErr *runner.RunError
+	if !errors.As(err, &runErr) {
+		t.Fatalf("want *RunError, got %T: %v", err, err)
+	}
+	if runErr.ExitCode != 3 {
+		t.Errorf("ExitCode: want 3, got %d", runErr.ExitCode)
+	}
+	if runner.KilledBySignal(err) {
+		t.Errorf("KilledBySignal(%v) = true, want false", err)
 	}
 }

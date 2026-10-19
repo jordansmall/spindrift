@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"syscall"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
@@ -197,29 +198,39 @@ func (e *RunError) Unwrap() error {
 	return e.Err
 }
 
+// Exit codes under the shell's 128+N killed-by-signal convention.
+const (
+	ExitSIGKILL = 128 + int(syscall.SIGKILL)
+	ExitSIGTERM = 128 + int(syscall.SIGTERM)
+)
+
 // AsRunError translates an error that unwraps to *exec.ExitError into a
-// *RunError carrying the box process's exit code. Podman/docker and bwrap both
-// surface the 128+N killed-by-signal convention as an ordinary exit code, so
-// nothing here reads a raw syscall.WaitStatus. Other errors pass through.
+// *RunError carrying the box process's exit code. Podman/docker report the
+// 128+N killed-by-signal convention as an ordinary exit code, but a child
+// signalled directly (bwrap's Kill) reaches Go as ExitCode() == -1, so the
+// signal is read from the WaitStatus and mapped to 128+N too. Other errors
+// pass through.
 func AsRunError(err error) error {
 	if err == nil {
 		return nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return &RunError{ExitCode: exitErr.ExitCode(), Msg: err.Error(), Err: exitErr}
+		code := exitErr.ExitCode()
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			code = 128 + int(ws.Signal())
+		}
+		return &RunError{ExitCode: code, Msg: err.Error(), Err: exitErr}
 	}
 	return err
 }
 
 // KilledBySignal reports whether err unwraps to a *RunError whose ExitCode
-// matches the 128+N convention for SIGKILL (137) or SIGTERM (143). bwrap's own
-// Kill signals the tracked child directly, which Go reports as ExitCode() ==
-// -1, so it is never detected here, only an externally signalled bwrap child.
+// matches the 128+N convention for SIGKILL or SIGTERM.
 func KilledBySignal(err error) bool {
 	var runErr *RunError
 	if !errors.As(err, &runErr) {
 		return false
 	}
-	return runErr.ExitCode == 137 || runErr.ExitCode == 143
+	return runErr.ExitCode == ExitSIGKILL || runErr.ExitCode == ExitSIGTERM
 }
