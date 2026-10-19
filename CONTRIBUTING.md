@@ -197,6 +197,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   those a registry row owns via `row-knobs.nix`; the
   `launcher-env-coverage` check fails if the launcher and the schema drift,
   and internal non-knob env names sit on that check's own allowlist),
+  `dispatch-kinds/default.nix` (the Dispatch kind descriptor rows — one row
+  per kind, each in its own `dispatch-kinds/<name>.nix` file, rendered into
+  `cmd/launcher/internal/dispatchkind/kinds_gen.go` by `renderers.nix`'s
+  `renderDispatchKindsGo`, drift-guarded by the `dispatch-kinds-gen` check),
   `backends/default.nix` (the backend descriptor registry — one row per
   ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
   file; `env-schema.nix`'s tracker/forge choices derive from it),
@@ -217,14 +221,17 @@ and in the in-box `box` program; the only bash left is the generated shim that
   behavior lives at the top level; `internal/` holds the seams — `forge`,
   `outcome`, `runner`, `driver` (the Driver interface and registry; each
   Driver's own behavior lives in a sibling subpackage, e.g. `driver/claude`),
+  `dispatchkind` (the Dispatch kind descriptors; `kinds_gen.go` is generated
+  from `lib/dispatch-kinds/default.nix`),
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
   `lib/backends/default.nix`), `trackerbuild` (the shared Issue Tracker
   adapter construction the launcher and daemon both use), `usage`. The
   flag table (`flagtable_gen.go`),
   which also carries each knob's baked-in default (`schemaFlags[].dflt`), is
   generated and pinned by a check; don't hand-edit it — neither are
-  `registry_gen.go` nor `cliflags_gen.go` (generated from `lib/cli-flags.nix`
-  by `renderers.nix`'s `renderCliFlagsGo`, pinned by the `cli-flags-gen` check).
+  `registry_gen.go`, `kinds_gen.go`, nor `cliflags_gen.go` (generated from
+  `lib/cli-flags.nix` by `renderers.nix`'s `renderCliFlagsGo`, pinned by the
+  `cli-flags-gen` check).
   Go tests use standard `_test` files alongside the code.
 - **`dashboard/`** — the read-only Dashboard web view of the Daemon's status
   file and Events file ([ADR 0060](docs/adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md)).
