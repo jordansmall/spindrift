@@ -56,7 +56,7 @@ func TestBwrapOverlayGate_NixConfigFileEmptyIsNoOp(t *testing.T) {
 	}
 }
 
-// This is the one case that reaches runner.ValidateOverlay, which runs a real
+// This is the one case that reaches bwrap.ValidateOverlay, which runs a real
 // bwrap unprivileged-overlay probe. A plain `go test` sandbox guarantees
 // neither a bwrap binary on PATH nor a kernel that allows unprivileged
 // overlayfs, so the assertion is loose: it only pins that the gate reached the

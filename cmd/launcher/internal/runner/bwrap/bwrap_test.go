@@ -1,4 +1,4 @@
-package runner
+package bwrap
 
 import (
 	"errors"
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -24,16 +25,16 @@ import (
 // bwrap; TestBwrapRun_PastaIsTopLevelProgramByDefault covers the pasta default.
 func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotName string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
-	err := a.Run(Box{Env: map[string]string{}})
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	err := a.Run(runner.Box{Env: map[string]string{}})
 
 	if gotName != "bwrap" {
 		t.Errorf("ExecCommand called with %q, want %q", gotName, "bwrap")
@@ -69,16 +70,16 @@ func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 // (zero-value) networkMode must make pasta the top-level program.
 func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotName string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -94,13 +95,13 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 // "prlimit" substring.
 func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 	t.Run("bare bwrap", func(t *testing.T) {
-		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "512"}
-		program, args, _ := a.execTarget("", Box{Env: map[string]string{}})
+		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "512"}
+		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}})
 
 		if program != "bwrap" {
 			t.Errorf("execTarget program = %q, want %q", program, "bwrap")
 		}
-		wantArgs := a.buildArgs("", Box{Env: map[string]string{}})
+		wantArgs := a.buildArgs("", runner.Box{Env: map[string]string{}})
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
 		}
@@ -114,14 +115,14 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 
 	t.Run("pasta", func(t *testing.T) {
 		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
-		program, args, _ := a.execTarget("", Box{Env: map[string]string{}})
+		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}})
 
 		if program != "pasta" {
 			t.Errorf("execTarget program = %q, want %q", program, "pasta")
 		}
 		wantArgs := append([]string{}, pastaHardenedFlags...)
 		wantArgs = append(wantArgs, "--dns-forward", pastaDNSForwardAddr, "-f", "--", "bwrap")
-		wantArgs = append(wantArgs, a.buildArgs("", Box{Env: map[string]string{}})...)
+		wantArgs = append(wantArgs, a.buildArgs("", runner.Box{Env: map[string]string{}})...)
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
 		}
@@ -141,11 +142,11 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 // os.RemoveAll(etcDir) has already fired by the time Run returns.
 func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotResolvConf []byte
 	var readErr error
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		for i, arg := range args {
 			if arg == "--ro-bind" && i+2 < len(args) && args[i+2] == "/etc/resolv.conf" {
 				gotResolvConf, readErr = os.ReadFile(args[i+1])
@@ -155,7 +156,7 @@ func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -178,16 +179,16 @@ func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 // pins that this does not widen the ambient-leak guarantee.
 func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -207,19 +208,19 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 // type instead of a raw *exec.ExitError.
 func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 137})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	err := a.Run(Box{Env: map[string]string{}})
+	err := a.Run(runner.Box{Env: map[string]string{}})
 
 	if err == nil {
 		t.Fatal("Run: want error, got nil")
 	}
-	var runErr *RunError
+	var runErr *runner.RunError
 	if !errors.As(err, &runErr) {
 		t.Fatalf("Run: want error to unwrap to *RunError, got %v (%T)", err, err)
 	}
@@ -230,10 +231,10 @@ func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 
 func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotName string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -256,9 +257,9 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 // (issue #2663).
 func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -282,9 +283,9 @@ func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 // stop before the group-file closure runs (issue #2663).
 func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -307,9 +308,9 @@ func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T)
 // The group-file realization is the fourth and final closure (issue #2663).
 func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -340,13 +341,13 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
 	var gotNames []string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -410,8 +411,8 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
@@ -420,7 +421,7 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 	snapshotDir := filepath.Join(root, "gen-a")
 	lockPath := SnapshotLockPath(snapshotDir)
 	probed := false
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "sqlite3" {
 			probed = true
 			lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
@@ -584,8 +585,8 @@ func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
 // that happens to have a real host nix db.
 func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statCalled := false
@@ -594,7 +595,7 @@ func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) 
 		return nil
 	}
 	var gotNames []string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -633,12 +634,12 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1},
 	)
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -667,13 +668,13 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 // is 5, not 0.
 func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return errors.New("no such file or directory") }
 	var gotNames []string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -705,15 +706,15 @@ func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *test
 // sets no cgroup fields and leaves cgroupFSRoot untouched, so IsRunning
 // have no cgroup to query and Kill is the only observable path.
 func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
 	done := make(chan error, 1)
-	go func() { done <- a.Run(Box{Name: "agent-issue-9", Env: map[string]string{}}) }()
+	go func() { done <- a.Run(runner.Box{Name: "agent-issue-9", Env: map[string]string{}}) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -748,9 +749,9 @@ func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
 // so a later reclaim can tell the generation is still in use. Once Run
 // returns the lock must be released so reclaim can proceed.
 func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -768,7 +769,7 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 		nixVarSnapshotDir: snapshotDir,
 	}
 	done := make(chan error, 1)
-	go func() { done <- a.Run(Box{Name: "agent-issue-9", Env: map[string]string{}}) }()
+	go func() { done <- a.Run(runner.Box{Name: "agent-issue-9", Env: map[string]string{}}) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -816,9 +817,9 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 // protect, so Run must not create a lock file at all.
 func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -835,7 +836,7 @@ func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 		nixConfigFile:     "",
 		nixVarSnapshotDir: snapshotDir,
 	}
-	if err := a.Run(Box{Name: "agent-issue-10", Env: map[string]string{}}); err != nil {
+	if err := a.Run(runner.Box{Name: "agent-issue-10", Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -851,9 +852,9 @@ func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 // a regression that drops the fmt.Printf (issue #2680 review finding).
 func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -873,7 +874,7 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		runErr = a.Run(Box{Name: "agent-issue-11", Env: map[string]string{}})
+		runErr = a.Run(runner.Box{Name: "agent-issue-11", Env: map[string]string{}})
 	})
 
 	if runErr != nil {
@@ -891,9 +892,9 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 // exec'ing bwrap against a mountpoint that no longer exists.
 func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -906,7 +907,7 @@ func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing
 		nixConfigFile:     "/fake/nix.conf",
 		nixVarSnapshotDir: snapshotDir,
 	}
-	err := a.Run(Box{Name: "agent-issue-12", Env: map[string]string{}})
+	err := a.Run(runner.Box{Name: "agent-issue-12", Env: map[string]string{}})
 
 	if err == nil {
 		t.Fatal("Run: want error when nix-var snapshot dir is gone once the lock is held, got nil")
@@ -938,9 +939,9 @@ func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing
 // path so exec.Command skips its own LookPath, which resolves bare names
 // only, and the failure comes from cmd.Start() itself.
 func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(filepath.Join(t.TempDir(), "no-such-binary"), args...)
 	}
 
@@ -953,7 +954,7 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 		nixConfigFile:     "/fake/nix.conf",
 		nixVarSnapshotDir: snapshotDir,
 	}
-	err := a.Run(Box{Name: "agent-issue-13", Env: map[string]string{}})
+	err := a.Run(runner.Box{Name: "agent-issue-13", Env: map[string]string{}})
 
 	if err == nil {
 		t.Fatal("Run: want error when cmd.Start() fails, got nil")
@@ -981,9 +982,9 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 // would fail with "no longer exists".
 func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1006,7 +1007,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 		nixVarSnapshotRoot: root,
 	}
 
-	if err := a.Run(Box{Name: "agent-issue-gen1", Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/gen1/agent-files", Generation: "gen1"}}); err != nil {
+	if err := a.Run(runner.Box{Name: "agent-issue-gen1", Env: map[string]string{}, ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/gen1/agent-files", Generation: "gen1"}}); err != nil {
 		t.Fatalf("Run (gen1): %v", err)
 	}
 	if _, err := os.Stat(gen1Dir + ".lock"); err != nil {
@@ -1016,7 +1017,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 		t.Errorf("gen1 argv: want a --ro-bind of /gen1/agent-files/agent, got %v", argv)
 	}
 
-	if err := a.Run(Box{Name: "agent-issue-gen2", Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: "gen2"}}); err != nil {
+	if err := a.Run(runner.Box{Name: "agent-issue-gen2", Env: map[string]string{}, ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: "gen2"}}); err != nil {
 		t.Fatalf("Run (gen2): %v", err)
 	}
 	if _, err := os.Stat(gen2Dir + ".lock"); err != nil {
@@ -1037,9 +1038,9 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 // NixConfigFile override, the way AgentFiles/AgentEnv already do.
 func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1058,12 +1059,12 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 		nixVarSnapshotRoot: root,
 	}
 
-	gen := &AgentGeneration{
+	gen := &runner.AgentGeneration{
 		AgentFiles:    "/gen1/agent-files",
 		NixConfigFile: "/gen1/swapped-nix.conf",
 		Generation:    "gen1",
 	}
-	if err := a.Run(Box{Name: "agent-issue-gen1", Env: map[string]string{}, ClosureGeneration: gen}); err != nil {
+	if err := a.Run(runner.Box{Name: "agent-issue-gen1", Env: map[string]string{}, ClosureGeneration: gen}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -1083,12 +1084,12 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 // AgentGeneration.Generation always name the same thing.
 func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1099,7 +1100,7 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 
-	gen := NewAgentGeneration(closure)
+	gen := runner.NewAgentGeneration(closure)
 	a := &bwrapAdapter{
 		agentFiles:         "/fake/agent",
 		agentEnv:           "/fake/env",
@@ -1109,7 +1110,7 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 	}
 
-	err := a.Run(Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen})
+	err := a.Run(runner.Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen})
 	if err != nil {
 		t.Fatalf("Run() after SnapshotGeneration = %v, want nil (snapshot dir must exist)", err)
 	}
@@ -1122,12 +1123,12 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 // The unlocked sibling generation here is exactly what reclaim would sweep.
 func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1298,16 +1299,16 @@ func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
 func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 	t.Setenv("SOME_UNDECLARED_SECRET", "leaked-value")
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	if err := a.Run(Box{Env: map[string]string{"GH_TOKEN": "box-token"}}); err != nil {
+	if err := a.Run(runner.Box{Env: map[string]string{"GH_TOKEN": "box-token"}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -1351,14 +1352,18 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 		"FORGEJO_TOKEN":             "forgejo-token-value",
 		"ISSUE_TEXT":                "issue-text-value",
 	}
-	for _, k := range driverCredentialEnv {
-		boxEnv[k] = k + "-value"
+	// Driver credential keys are generated into the runner package and not
+	// exported, so take them from OffArgvKeys itself; the explicit keys above
+	// must each be among them.
+	for k := range boxEnv {
+		if !runner.OffArgvKeys[k] {
+			t.Fatalf("fixture key %q is not an OffArgvKeys entry", k)
+		}
 	}
-
-	// Guards the "All" in this test's name: as the map grows, a fixture left
-	// behind would otherwise keep passing.
-	if len(boxEnv) != len(OffArgvKeys) {
-		t.Fatalf("fixture has %d keys, OffArgvKeys has %d -- update the fixture to cover every OffArgvKeys entry", len(boxEnv), len(OffArgvKeys))
+	for k := range runner.OffArgvKeys {
+		if _, ok := boxEnv[k]; !ok {
+			boxEnv[k] = k + "-value"
+		}
 	}
 
 	got := resolvedRunEnv(boxEnv)
@@ -1433,16 +1438,16 @@ func TestResolvedRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
 	t.Setenv("GH_TOKEN", "launcher-token")
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	if err := a.Run(Box{Env: map[string]string{"GH_TOKEN": "box-token"}}); err != nil {
+	if err := a.Run(runner.Box{Env: map[string]string{"GH_TOKEN": "box-token"}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -1471,16 +1476,16 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 	t.Setenv("OPENCODE_AUTH_CONTENT", sentinel)
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	box := Box{Env: map[string]string{"OPENCODE_AUTH_CONTENT": sentinel}}
+	box := runner.Box{Env: map[string]string{"OPENCODE_AUTH_CONTENT": sentinel}}
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1510,16 +1515,16 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "registry-proxy-tcp-secret-sentinel-value"
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	box := Box{Env: map[string]string{"REGISTRY_PROXY_TCP_SECRET": sentinel}}
+	box := runner.Box{Env: map[string]string{"REGISTRY_PROXY_TCP_SECRET": sentinel}}
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1549,16 +1554,16 @@ func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "signal-socket-secret-sentinel-value"
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	box := Box{Env: map[string]string{"SIGNAL_SOCKET_SECRET": sentinel}}
+	box := runner.Box{Env: map[string]string{"SIGNAL_SOCKET_SECRET": sentinel}}
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1588,16 +1593,16 @@ func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "forgejo-token-sentinel-value"
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	box := Box{Env: map[string]string{"FORGEJO_TOKEN": sentinel}}
+	box := runner.Box{Env: map[string]string{"FORGEJO_TOKEN": sentinel}}
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1630,16 +1635,16 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 	t.Setenv("ISSUE_TEXT", decoy)
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	box := Box{Env: map[string]string{"ISSUE_TEXT": sentinel}}
+	box := runner.Box{Env: map[string]string{"ISSUE_TEXT": sentinel}}
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1670,9 +1675,9 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 // and print a warning saying why containment is unavailable.
 func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1687,10 +1692,10 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 	// subtree.
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		runErr = a.Run(Box{Name: "test-box", Env: map[string]string{}})
+		runErr = a.Run(runner.Box{Name: "test-box", Env: map[string]string{}})
 	})
 
 	if runErr != nil {
@@ -1708,8 +1713,8 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 // removed the dir by the time Run returns.
 func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -1721,14 +1726,14 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
 	var gotPidsMax, gotMemoryMax []byte
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
-	if err := a.Run(Box{Name: "test-box", Env: map[string]string{}}); err != nil {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	if err := a.Run(runner.Box{Name: "test-box", Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -1750,23 +1755,23 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 // the limits at the anchored path means a wrong anchor cannot pass silently.
 func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 
 	userService, scope := systemdUserSessionFixture(t, "memory pids")
 
 	wantDir := filepath.Join(userService, "spindrift-anchored-box")
 	var gotPidsMax, gotMemoryMax []byte
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		runErr = a.Run(Box{Name: "anchored-box", Env: map[string]string{}})
+		runErr = a.Run(runner.Box{Name: "anchored-box", Env: map[string]string{}})
 	})
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
@@ -1806,8 +1811,8 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 // (ADR 0042 warn-and-proceed) rather than erroring.
 func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -1827,13 +1832,13 @@ func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 
 	wantDir := filepath.Join(selfDir, "spindrift-fallback-box")
 	var gotPidsMax []byte
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		return exec.Command(script, args...)
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256"}
-	if err := a.Run(Box{Name: "fallback-box", Env: map[string]string{}}); err != nil {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256"}
+	if err := a.Run(runner.Box{Name: "fallback-box", Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -1851,7 +1856,7 @@ func TestBwrapAnchoredCgroup_StaysDiscoverable(t *testing.T) {
 	userService, _ := systemdUserSessionFixture(t, "pids")
 
 	a := &bwrapAdapter{pidsLimit: "256"}
-	dir := a.provisionCgroup(Box{Name: "test-box"})
+	dir := a.provisionCgroup(runner.Box{Name: "test-box"})
 	wantDir := filepath.Join(userService, "spindrift-test-box")
 	if dir != wantDir {
 		t.Fatalf("provisionCgroup dir = %q, want anchored at %q", dir, wantDir)
@@ -1886,9 +1891,9 @@ func TestBwrapAnchoredCgroup_StaysDiscoverable(t *testing.T) {
 func runCgroupDelegatedBoxWithFailingLimit(t *testing.T, a *bwrapAdapter, failingLimit string) {
 	t.Helper()
 
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -1911,7 +1916,7 @@ func runCgroupDelegatedBoxWithFailingLimit(t *testing.T, a *bwrapAdapter, failin
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-degraded-box")
 	done := make(chan error, 1)
-	go func() { done <- a.Run(Box{Name: "degraded-box", Env: map[string]string{}}) }()
+	go func() { done <- a.Run(runner.Box{Name: "degraded-box", Env: map[string]string{}}) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -2282,7 +2287,7 @@ func TestBwrapProvisionCgroup_PidsMaxWriteFailureKeepsDirAndWritesMemoryMax(t *t
 	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(Box{Name: "test-box"})
+		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2323,7 +2328,7 @@ func TestBwrapProvisionCgroup_MemoryMaxWriteFailureKeepsDir(t *testing.T) {
 	a := &bwrapAdapter{memoryLimit: "5g"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(Box{Name: "test-box"})
+		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2352,7 +2357,7 @@ func TestBwrapProvisionCgroup_MalformedMemoryLimitKeepsDir(t *testing.T) {
 	a := &bwrapAdapter{memoryLimit: "not-a-size"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(Box{Name: "test-box"})
+		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2386,7 +2391,7 @@ func TestBwrapProvisionCgroup_BothLimitWritesFailKeepsDir(t *testing.T) {
 	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
 	var dir string
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		dir = a.provisionCgroup(Box{Name: "test-box"})
+		dir = a.provisionCgroup(runner.Box{Name: "test-box"})
 	})
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
@@ -2560,9 +2565,9 @@ func stubCgroupSeams(t *testing.T, self func() (string, error), newCmd func(stri
 		readSelfCgroup = self
 	}
 	if newCmd != nil {
-		origExec := ExecCommand
-		t.Cleanup(func() { ExecCommand = origExec })
-		ExecCommand = newCmd
+		origExec := runner.ExecCommand
+		t.Cleanup(func() { runner.ExecCommand = origExec })
+		runner.ExecCommand = newCmd
 	}
 	return cgroupFSRoot
 }
@@ -2593,7 +2598,7 @@ func TestBwrapRun_ReleasesProvisioningGuardAfterCompletedRun(t *testing.T) {
 	assertProvisioningGuardReleased(t, func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}, func(a *bwrapAdapter) {
-		if err := a.Run(Box{Name: "test-box", Env: map[string]string{}}); err != nil {
+		if err := a.Run(runner.Box{Name: "test-box", Env: map[string]string{}}); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
 	})
@@ -2607,7 +2612,7 @@ func TestBwrapRun_ReleasesProvisioningGuardAfterStartFailure(t *testing.T) {
 	assertProvisioningGuardReleased(t, func(name string, args ...string) *exec.Cmd {
 		return exec.Command(missing, args...)
 	}, func(a *bwrapAdapter) {
-		if err := a.Run(Box{Name: "test-box", Env: map[string]string{}}); err == nil {
+		if err := a.Run(runner.Box{Name: "test-box", Env: map[string]string{}}); err == nil {
 			t.Fatal("Run: want error when cmd.Start() fails, got nil")
 		}
 	})
@@ -2808,10 +2813,10 @@ func TestBwrapListRunning_EmptyWhenSelfCgroupDirMissing(t *testing.T) {
 // Run still succeeds and prints a warning rather than failing the launch.
 func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -2820,12 +2825,12 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
 		bakedPrefetch:     "echo ok",
-		networkMode:       NetworkModeHost,
+		networkMode:       runner.NetworkModeHost,
 		syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
 	}
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		runErr = a.Run(Box{Name: "test-box", Env: map[string]string{}})
+		runErr = a.Run(runner.Box{Name: "test-box", Env: map[string]string{}})
 	})
 
 	if runErr != nil {
@@ -2850,10 +2855,10 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 // read the compiled BPF filter from.
 func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -2867,10 +2872,10 @@ func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
 		bakedPrefetch:     "echo ok",
-		networkMode:       NetworkModeHost,
+		networkMode:       runner.NetworkModeHost,
 		syscallFilterPath: filterPath,
 	}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -3408,12 +3413,12 @@ func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) 
 				runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 				runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 			)
-			orig := ExecCommand
-			t.Cleanup(func() { ExecCommand = orig })
+			orig := runner.ExecCommand
+			t.Cleanup(func() { runner.ExecCommand = orig })
 			origStat := statHostNixDB
 			t.Cleanup(func() { statHostNixDB = origStat })
 			statHostNixDB = func() error { return nil }
-			ExecCommand = func(name string, args ...string) *exec.Cmd {
+			runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 				return exec.Command(script, args...)
 			}
 
@@ -3470,12 +3475,12 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -3511,10 +3516,10 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 // override the adapter's startup-baked a.agentEnv in the rendered --setenv
 // args.
 func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
-	box := Box{
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	box := runner.Box{
 		Env:               map[string]string{},
-		ClosureGeneration: &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", Generation: "swapped"},
+		ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", Generation: "swapped"},
 	}
 
 	args := a.buildArgs("", box)
@@ -3543,10 +3548,10 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 // #2954: a bwrap hot-swap otherwise kept feeding every post-swap Box the
 // stale baked PREFETCH).
 func TestBuildArgs_PrefetchSetenv(t *testing.T) {
-	swappedWith := func(prefetchFile string) *AgentGeneration {
-		return &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}
+	swappedWith := func(prefetchFile string) *runner.AgentGeneration {
+		return &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}
 	}
-	swappedWithContent := func(t *testing.T, content string) *AgentGeneration {
+	swappedWithContent := func(t *testing.T, content string) *runner.AgentGeneration {
 		t.Helper()
 		prefetchFile := filepath.Join(t.TempDir(), "prefetch")
 		if err := os.WriteFile(prefetchFile, []byte(content), 0o644); err != nil {
@@ -3556,12 +3561,12 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 	}
 	cases := []struct {
 		name  string
-		setup func(t *testing.T) *AgentGeneration
+		setup func(t *testing.T) *runner.AgentGeneration
 		want  string
 	}{
 		{
 			name:  "readable file overrides baked",
-			setup: func(t *testing.T) *AgentGeneration { return swappedWithContent(t, "echo swapped") },
+			setup: func(t *testing.T) *runner.AgentGeneration { return swappedWithContent(t, "echo swapped") },
 			want:  "echo swapped",
 		},
 		{
@@ -3569,29 +3574,29 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 			// (lib/mkHarness.nix's prefetch ? ""), not "unset": it must render
 			// empty rather than fall back to baked.
 			name:  "empty-content file yields empty value, not baked",
-			setup: func(t *testing.T) *AgentGeneration { return swappedWithContent(t, "") },
+			setup: func(t *testing.T) *runner.AgentGeneration { return swappedWithContent(t, "") },
 			want:  "",
 		},
 		{
 			name:  "nil ClosureGeneration falls back to baked",
-			setup: func(*testing.T) *AgentGeneration { return nil },
+			setup: func(*testing.T) *runner.AgentGeneration { return nil },
 			want:  "echo baked",
 		},
 		{
 			name:  "empty PrefetchFile falls back to baked",
-			setup: func(*testing.T) *AgentGeneration { return swappedWith("") },
+			setup: func(*testing.T) *runner.AgentGeneration { return swappedWith("") },
 			want:  "echo baked",
 		},
 		{
 			name:  "nonexistent PrefetchFile falls back to baked",
-			setup: func(*testing.T) *AgentGeneration { return swappedWith("/nonexistent/prefetch/path") },
+			setup: func(*testing.T) *runner.AgentGeneration { return swappedWith("/nonexistent/prefetch/path") },
 			want:  "echo baked",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: NetworkModeHost}
-			box := Box{Env: map[string]string{}, ClosureGeneration: tc.setup(t)}
+			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: runner.NetworkModeHost}
+			box := runner.Box{Env: map[string]string{}, ClosureGeneration: tc.setup(t)}
 
 			args := a.buildArgs("", box)
 
@@ -3608,9 +3613,9 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 // Not parallel: runnertest.CaptureStderrDuring swaps the global os.Stderr.
 func TestBuildArgs_PrefetchFallbackLoggedOncePerFile(t *testing.T) {
 	const diagnostic = "unreadable, falling back"
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: runner.NetworkModeHost}
 	launch := func(prefetchFile string) string {
-		box := Box{Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}}
+		box := runner.Box{Env: map[string]string{}, ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}}
 		var got string
 		logged := runnertest.CaptureStderrDuring(t, func() {
 			got = setenvValue(t, a.buildArgs("", box), "PREFETCH")
@@ -3677,7 +3682,7 @@ func newReclaimFixture(t *testing.T, procs string) *reclaimFixture {
 	if err := os.WriteFile(filepath.Join(f.dir, "cgroup.procs"), []byte(procs), 0o644); err != nil {
 		t.Fatalf("seed cgroup.procs: %v", err)
 	}
-	f.adapter = &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	f.adapter = &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
 	return f
 }
 
@@ -3685,7 +3690,7 @@ func (f *reclaimFixture) run(t *testing.T) string {
 	t.Helper()
 	var runErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		runErr = f.adapter.Run(Box{Name: "leftover-box", Env: map[string]string{}})
+		runErr = f.adapter.Run(runner.Box{Name: "leftover-box", Env: map[string]string{}})
 	})
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
@@ -3764,7 +3769,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	var dir string
 	probed, reclaimed, existedAfter := false, true, false
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
 	root := stubCgroupSeams(t,
 		func() (string, error) { return "", nil },
 		func(name string, args ...string) *exec.Cmd {
@@ -3785,7 +3790,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 
 	var runErr error
 	runnertest.CaptureStdoutDuring(t, func() {
-		runErr = a.Run(Box{Name: "launch-box", Env: map[string]string{}})
+		runErr = a.Run(runner.Box{Name: "launch-box", Env: map[string]string{}})
 	})
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
@@ -3818,16 +3823,16 @@ func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
 			t.Setenv(name, sentinel)
 
 			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-			orig := ExecCommand
-			t.Cleanup(func() { ExecCommand = orig })
+			orig := runner.ExecCommand
+			t.Cleanup(func() { runner.ExecCommand = orig })
 			var gotCmd *exec.Cmd
-			ExecCommand = func(_ string, args ...string) *exec.Cmd {
+			runner.ExecCommand = func(_ string, args ...string) *exec.Cmd {
 				gotCmd = exec.Command(script, args...)
 				return gotCmd
 			}
 
 			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-			box := Box{Env: map[string]string{name: sentinel}}
+			box := runner.Box{Env: map[string]string{name: sentinel}}
 			if err := a.Run(box); err != nil {
 				t.Fatalf("Run: %v", err)
 			}

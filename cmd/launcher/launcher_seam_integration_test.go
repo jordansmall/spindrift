@@ -284,7 +284,7 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 	overlay := c.runtime == "bwrap" && bwrapStoreOverlay(doc)
 	if overlay {
 		// The nix-var snapshot a `launcher build` leaves behind, which --no-build
-		// requires; the generation mirrors runner.ClosureGeneration's
+		// requires; the generation mirrors bwrap.ClosureGeneration's
 		// SafePathComponent (an unusable tag yields the flat legacy path).
 		tag := doc.Artifacts["IMAGE_TAG"]
 		gen := filepath.Base(tag)

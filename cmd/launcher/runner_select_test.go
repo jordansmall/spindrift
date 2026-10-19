@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/bwrap"
 	"spindrift.dev/launcher/internal/runner/oci"
 )
 
@@ -27,9 +28,9 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 
 	for _, sel := range selectors {
 		t.Run(sel.name, func(t *testing.T) {
-			bwrapWant := runner.NewBwrap(rc, pwd)
+			bwrapWant := bwrap.NewBwrap(rc, pwd)
 			if sel.name == "buildRunnerForKind" {
-				bwrapWant = runner.NewBwrapBuild(rc, pwd)
+				bwrapWant = bwrap.NewBwrapBuild(rc, pwd)
 			}
 			cases := []struct {
 				name       string

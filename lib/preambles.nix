@@ -148,7 +148,7 @@ rec {
       # default: unlike nixConfigPath, which is meaningless and so blanked to
       # "" when nixInBox is off, this is a real Consumer knob independent of
       # nixInBox and must always render its true value. The AND-gate with
-      # NixConfigFile lives in cmd/launcher/internal/runner/bwrap.go, not here.
+      # NixConfigFile lives in cmd/launcher/internal/runner/bwrap/bwrap.go, not here.
       nixStoreWritable,
       # The drv counterpart of nixConfigPath above (issue #2672), defaulting
       # to "" for the same nixInBox-off reason.

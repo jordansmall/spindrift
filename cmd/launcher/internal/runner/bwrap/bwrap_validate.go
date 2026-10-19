@@ -1,4 +1,4 @@
-package runner
+package bwrap
 
 import (
 	"errors"
@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // ValidatePasta checks that pasta is on PATH, required whenever a bwrap Box
@@ -30,7 +32,7 @@ func ValidatePastaWithLookup(lookPath func(string) (string, error)) error {
 // issue #2665). Without the check, bwrap's --overlay-src/--tmp-overlay mount
 // fails deep inside sandbox startup and the launcher cannot say why.
 func ValidateOverlay() error {
-	return ValidateOverlayWithExec(ExecCommand)
+	return ValidateOverlayWithExec(runner.ExecCommand)
 }
 
 // ValidateOverlayWithExec is ValidateOverlay with the exec seam injected for

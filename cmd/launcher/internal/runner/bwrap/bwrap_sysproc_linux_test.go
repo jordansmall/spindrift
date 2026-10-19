@@ -1,6 +1,6 @@
 //go:build linux
 
-package runner
+package bwrap
 
 import (
 	"os"
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -21,16 +22,16 @@ import (
 // Linux-only in syscall.SysProcAttr, hence the build tag.
 func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
-	if err := a.Run(Box{Env: map[string]string{}}); err != nil {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -45,10 +46,10 @@ func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
 // so this exercises the retry on a fresh Cmd plus the post-Start write; the
 // successful clone itself needs a real cgroupfs.
 func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 	var cmds []*exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		c := exec.Command("sleep", "5")
 		cmds = append(cmds, c)
 		return c
@@ -65,9 +66,9 @@ func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
 	if err := os.WriteFile(filter, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, syscallFilterPath: filter}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost, syscallFilterPath: filter}
 	done := make(chan error, 1)
-	go func() { done <- a.Run(Box{Name: "clone-box", Env: map[string]string{"FOO": "bar"}}) }()
+	go func() { done <- a.Run(runner.Box{Name: "clone-box", Env: map[string]string{"FOO": "bar"}}) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -128,10 +129,10 @@ func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
 // cgroup fd.
 func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	t.Cleanup(func() { ExecCommand = origExec })
+	origExec := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 	var cmds []*exec.Cmd
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		c := exec.Command(script, args...)
 		cmds = append(cmds, c)
 		return c
@@ -143,9 +144,9 @@ func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
 	t.Cleanup(func() { cgroupFSRoot = origRoot })
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
 	runnertest.CaptureStdoutDuring(t, func() {
-		if err := a.Run(Box{Name: "plain-box", Env: map[string]string{}}); err != nil {
+		if err := a.Run(runner.Box{Name: "plain-box", Env: map[string]string{}}); err != nil {
 			t.Errorf("Run: %v", err)
 		}
 	})

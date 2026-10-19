@@ -32,7 +32,7 @@ func TestAdapterRendersOnly_NoDuplicatedMountDecisions(t *testing.T) {
 }
 
 // The same mount config reaches both backends by construction: both render the
-// same BuildMountSpecs list. The bwrap half lives in the runner package.
+// same BuildMountSpecs list. The bwrap half lives in the bwrap package.
 func TestMountSpecs_RenderedByOCI(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()
