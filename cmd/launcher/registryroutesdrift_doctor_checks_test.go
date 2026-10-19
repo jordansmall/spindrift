@@ -445,7 +445,7 @@ func TestRegistryRouteDriftCheckForRoutes_LocalForgeReadsFromAccumulationRepo(t 
 	t.Chdir(t.TempDir())
 
 	t.Run("drift", func(t *testing.T) {
-		accumRepo := mustLocalAccumulationRepo(t, "registry=https://uncovered.example.com/\n")
+		accumRepo := mustLocalAccumulationRepo(t, ".npmrc", "registry=https://uncovered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
@@ -468,7 +468,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 	})
 
 	t.Run("no drift", func(t *testing.T) {
-		accumRepo := mustLocalAccumulationRepo(t, "registry=https://covered.example.com/\n")
+		accumRepo := mustLocalAccumulationRepo(t, ".npmrc", "registry=https://covered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
@@ -508,7 +508,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 // ref it does not have also skips the row, rather than failing with a git
 // error where a checkout-availability skip belongs.
 func TestRegistryRouteDriftCheckForRoutes_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
-	accumRepo := mustLocalAccumulationRepo(t, "registry=https://uncovered.example.com/\n")
+	accumRepo := mustLocalAccumulationRepo(t, ".npmrc", "registry=https://uncovered.example.com/\n")
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.baseBranch = "does-not-exist"
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
