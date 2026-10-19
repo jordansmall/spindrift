@@ -44,4 +44,7 @@ var Strategy = backendkit.Strategy{
 		}
 		return backendkit.LedgerSite{Repo: k.CodeForgeAccumulationRepoDir}, nil
 	},
+	CloneURL: func(_ backendkit.Shared, _ backendkit.Lookup, repoMountDir string) (string, error) {
+		return repoMountDir, nil
+	},
 }

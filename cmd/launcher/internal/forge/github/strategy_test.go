@@ -44,3 +44,52 @@ func TestStrategyValidateTrackerRequiresSlug(t *testing.T) {
 		t.Errorf("err = %v, want nil with a slug", err)
 	}
 }
+
+func TestStrategyCloneURLIsLiteralGithubCom(t *testing.T) {
+	t.Setenv("GH_HOST", "ghe.example.com")
+	got, err := Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, nil, "")
+	if err != nil || got != "https://github.com/o/r.git" {
+		t.Errorf("CloneURL = %q, %v, want https://github.com/o/r.git", got, err)
+	}
+}
+
+func TestStrategyWebURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, ghHost, slug, want string
+	}{
+		{"default host", "", "o/r", "https://github.com/o/r"},
+		{"GH_HOST", "ghe.example.com", "o/r", "https://ghe.example.com/o/r"},
+		{"empty slug", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GH_HOST", tc.ghHost)
+			if got := Strategy.WebURL(backendkit.Shared{RepoSlug: tc.slug}, nil); got != tc.want {
+				t.Errorf("WebURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStrategyRemoteMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, ghHost, slug, remote string
+		want                       bool
+	}{
+		{"scp", "", "owner/repo", "git@github.com:owner/repo.git", true},
+		{"https", "", "owner/repo", "https://github.com/owner/repo.git", true},
+		{"case-insensitive slug", "", "owner/repo", "git@github.com:Owner/Repo.git", true},
+		{"other repo", "", "owner/repo", "git@github.com:other/elsewhere.git", false},
+		{"GH_HOST scp", "ghe.example.com", "owner/repo", "git@ghe.example.com:owner/repo.git", true},
+		{"GH_HOST https", "ghe.example.com", "owner/repo", "https://ghe.example.com/owner/repo.git", true},
+		{"GH_HOST case-insensitive", "GHE.Example.com", "owner/repo", "git@ghe.example.com:owner/repo.git", true},
+		{"github.com stops matching under GH_HOST", "ghe.example.com", "owner/repo", "git@github.com:owner/repo.git", false},
+		{"empty slug", "", "", "git@github.com:owner/repo.git", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GH_HOST", tc.ghHost)
+			if got := Strategy.RemoteMatch(backendkit.Shared{RepoSlug: tc.slug}, nil, tc.remote); got != tc.want {
+				t.Errorf("RemoteMatch(%q) = %v, want %v", tc.remote, got, tc.want)
+			}
+		})
+	}
+}

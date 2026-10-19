@@ -1,11 +1,15 @@
 package forgejo
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitremote"
 )
 
 // Strategy is the forgejo backend's Go half (ADR 0068).
@@ -53,6 +57,61 @@ var Strategy = backendkit.Strategy{
 		}
 		return backendkit.LedgerSite{URL: GitRemoteURL(k.ForgejoBaseURL, s.RepoSlug, k.ForgejoToken)}, nil
 	},
+	// Hand-built rather than GitRemoteURL: this mirrors the Box's former shell
+	// clone exactly, including the schemeless-base case GitRemoteURL handles
+	// differently. The Box's envLookup maps a blank FORGEJO_BASE_URL to unset,
+	// so the codeberg default here agrees with identityBase treating blank as
+	// no identity.
+	CloneURL: func(s backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
+		k, err := ReadKnobs(Lookup(l))
+		if err != nil {
+			return "", err
+		}
+		if k.ForgejoToken == "" {
+			return "", errors.New("FORGEJO_TOKEN is required when CODE_FORGE=forgejo")
+		}
+		base := strings.TrimSuffix(k.ForgejoBaseURL, "/")
+		scheme, rest, ok := strings.Cut(base, "://")
+		if !ok {
+			// Mirrors the shell's ${base%%://*} / ${base#*://}, which yield
+			// the whole string for both when there is no scheme.
+			scheme, rest = base, base
+		}
+		return fmt.Sprintf("%s://%s@%s/%s.git", scheme, k.ForgejoToken, rest, s.RepoSlug), nil
+	},
+	WebURL: func(s backendkit.Shared, l backendkit.Lookup) string {
+		base := identityBase(l)
+		if s.RepoSlug == "" || base == "" {
+			return ""
+		}
+		return strings.TrimSuffix(base, "/") + "/" + s.RepoSlug
+	},
+	RemoteMatch: func(s backendkit.Shared, l backendkit.Lookup, remote string) bool {
+		base := identityBase(l)
+		if s.RepoSlug == "" || base == "" {
+			return false
+		}
+		u, err := url.Parse(base)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		host, slug := gitremote.ParseHostSlug(remote)
+		return strings.EqualFold(host, u.Host) && strings.EqualFold(slug, s.RepoSlug)
+	},
+}
+
+// identityBase is FORGEJO_BASE_URL for the web and remote-match facets. An
+// explicitly blank value yields "" (the launcher rejects it, so those facets
+// stay silent), while an unset one takes ReadKnobs' codeberg default.
+func identityBase(l backendkit.Lookup) string {
+	if v, ok := l("FORGEJO_BASE_URL"); ok && v == "" {
+		return ""
+	}
+	k, err := ReadKnobs(Lookup(l))
+	if err != nil {
+		return ""
+	}
+	return k.ForgejoBaseURL
 }
 
 // validate checks the forgejo knobs for one axis (ISSUE_TRACKER or
