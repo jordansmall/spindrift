@@ -209,6 +209,11 @@ descriptor from the rows. The descriptor is all data, so nothing is lost.
 - **The rows feed the Nix side.** `image.nix` and `mkHarness` map over the
   rows' prompt files. The Consumer `*Prompt` parameters stay versioned
   surface, and each feeds its row.
+- **The label check reads the rows.** `nix/checks/dispatch-labels.nix` takes
+  each kind's `findingLabel` and `patchLabel` from the rows instead of
+  extracting them from the generated Go, and
+  `dispatch-kinds-filer-relay-gate` pins each row's `filerRelayGate` to a gate
+  in the fragment registry.
 - **Statuses come from one place.** They are read from `prompt-contract.nix`.
 - **The guards are generated.** Their kind-name patterns are built from the
   registry. The Go guard bans comparisons on every tag axis, not only Settle
