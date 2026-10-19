@@ -549,3 +549,30 @@ func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
 		}
 	}
 }
+
+// Every deprecated row warns at runtime and names the slot var replacing it.
+func TestAssembleValidateDeprecatedWarningNamesSlot(t *testing.T) {
+	for _, r := range removedFragmentVars {
+		if r.severity != severityDeprecated {
+			continue
+		}
+		t.Run(r.name, func(t *testing.T) {
+			if r.replacement == "" {
+				t.Fatalf("deprecated %s names no replacement slot", r.name)
+			}
+			env := coveredEnv()
+			env.PromptsDir = stagePromptsCopy(t)
+			appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${"+r.name+"}\n")
+
+			warnings := assembleValidateWarnings(t, env)
+			want := "use ${" + r.replacement + "} instead"
+			found := false
+			for _, w := range warnings {
+				found = found || (strings.Contains(w, "${"+r.name+"}") && strings.Contains(w, want))
+			}
+			if !found {
+				t.Errorf("warnings = %q, want one naming ${%s} and %q", warnings, r.name, want)
+			}
+		})
+	}
+}
