@@ -116,9 +116,10 @@ in
       "lib/env-schema.nix"
       # Row-owned knobs (ADR 0068) put part of the env schema on registry
       # rows, folded by lib/row-knobs.nix from the registries
-      # lib/row-knob-registries.nix lists (issue #5634).
+      # lib/row-knob-registries.nix lists (issues #5634, #5686).
       "lib/backends/**"
       "lib/chores/**"
+      "lib/runners/**"
       "lib/row-knobs.nix"
       "lib/row-knob-registries.nix"
       "flake.nix"

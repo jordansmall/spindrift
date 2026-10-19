@@ -135,6 +135,8 @@ that rewrote the reviewer prompt would merge itself once green.
    `lib/row-knobs.nix` and `lib/row-knob-registries.nix`. Amended by issue
    #5700: the tuning row and its `BUTLER_TUNING_*` knobs live in
    `lib/chores/tuning.nix`, so the list also names `lib/chores/**`.)
+   (Amended by issue #5686: the network knobs move onto the runner rows, so
+   the list also names `lib/runners/**`.)
 
 ## Considered Options
 

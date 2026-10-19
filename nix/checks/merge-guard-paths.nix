@@ -27,6 +27,7 @@ let
     "lib/env-schema.nix"
     "lib/backends/**"
     "lib/chores/**"
+    "lib/runners/**"
     "lib/row-knobs.nix"
     "lib/row-knob-registries.nix"
     "flake.nix"

@@ -125,14 +125,16 @@ let
         }) registry.rows
       ) registries
     )).${name} or { };
-  # Pinned regression list of the knobs issues #5635 and #5700 (and the forgejo move)
-  # placed on rows, not a general rule. Three GitHub-named knobs stay shared
-  # because the core launcher reads them ungated: GH_TOKEN (Box env guard,
-  # bootstrap, and git's gh credential helper), GH_TOKEN_REFRESH_FILE (token
-  # refresh bootstrap and daemon watch), and BOX_GH_TOKEN (boxTokenResolver
-  # swaps it in for the Box's GH_TOKEN under every forge, git included).
+  # Pinned regression list of the knobs moved onto rows, not a general rule.
+  # Three GitHub-named knobs stay shared because the core launcher reads
+  # them ungated: GH_TOKEN (Box env guard, bootstrap, and git's gh credential
+  # helper), GH_TOKEN_REFRESH_FILE (token refresh bootstrap and daemon watch),
+  # and BOX_GH_TOKEN (boxTokenResolver swaps it in for the Box's GH_TOKEN under
+  # every forge, git included).
   owners = {
     git.codeForgeRemoteURL = "CODE_FORGE_REMOTE_URL";
+    oci.podmanNetwork = "PODMAN_NETWORK";
+    bwrap.bwrapUnshareNet = "BWRAP_UNSHARE_NET";
     forgejo = {
       forgejoBaseURL = "FORGEJO_BASE_URL";
       forgejoToken = "FORGEJO_TOKEN";

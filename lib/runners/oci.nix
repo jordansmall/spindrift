@@ -1,3 +1,6 @@
+# The oci runner row: data plus the env knobs it owns (issue #5686, ADR 0068).
+# The registry (./default.nix) documents the fields and fixes this row's order;
+# lib/row-knobs.nix folds `knobs` into lib/env-schema.nix.
 # "rancher" is an alias for Rancher Desktop's containerd mode (ADR 0027).
 {
   name = "oci";
@@ -40,4 +43,15 @@
       NIX_BUILDER_IMAGE = nixBuilderImage;
       NIX_VOLUME = "spindrift-nix";
     };
+
+  knobs = {
+    podmanNetwork = {
+      env = "PODMAN_NETWORK";
+      group = "infra";
+      doc = "--network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress";
+      flakeOption = true;
+      nixSubPath = "network.podman";
+      boxEnv = false;
+    };
+  };
 }

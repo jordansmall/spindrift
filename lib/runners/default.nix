@@ -14,6 +14,12 @@
 # by lib/preambles.nix; `imageAttrName` is the default flake package name that
 # lib/mkHarness.nix exposes the family's artifact under.
 
+# A row may also carry `knobs`: an attrset keyed by env-schema key, each value
+# an env-schema entry. lib/row-knobs.nix folds them into lib/env-schema.nix, so
+# the row owns its runner-specific knobs; the generated Descriptor ignores the
+# field, and an env name or key a row shares with another declaration fails
+# eval (ADR 0068).
+
 # A plain list with no `{ lib }:` wrapper, matching lib/dispatch-kinds/default.nix.
 # Order is load-bearing: the concatenated `runtimes` are the runtime option's
 # enum and the quickstart's first-listed value. Keep it an explicit list:
