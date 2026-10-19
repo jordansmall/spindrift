@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "gradle-properties",
+      "FromEnv": "",
+      "FromFile": "stores/gradle-properties",
+      "MatchHost": "registry.acme.test",
+      "PropertyKey": "registry.acme.test",
+      "RegistryName": "",
+      "UpstreamURL": "https://registry.acme.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "registry.acme.test",
+    "UpstreamOrigin": ""
+  }
+]

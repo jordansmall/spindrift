@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SPINDRIFT_REGISTRY_CREDENTIAL_REGISTRY_ACME_TEST",
+      "FromFile": "",
+      "MatchHost": "registry.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://registry.acme.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "registry.acme.test",
+    "UpstreamOrigin": ""
+  }
+]

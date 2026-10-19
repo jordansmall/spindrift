@@ -1,0 +1,14 @@
+{
+  "name": "@acme/gadget",
+  "dist-tags": {"latest": "1.0.0"},
+  "versions": {
+    "1.0.0": {
+      "name": "@acme/gadget",
+      "version": "1.0.0",
+      "dist": {
+        "tarball": "https://registry.acme.test/@acme/gadget/-/gadget-1.0.0.tgz",
+        "integrity": "sha512-Y29ycHVzLXRlc3QtZmFrZS1pbnRlZ3JpdHktbm90LXJlYWw="
+      }
+    }
+  }
+}
