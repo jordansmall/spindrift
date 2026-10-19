@@ -180,13 +180,13 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	// predicate the daemon's gateKinds uses, so doctor cannot disagree with
 	// it. Off is a normal configuration, hence Success rather than a finding.
 	for _, d := range dispatchkind.All {
-		if d.Enablement != dispatchkind.EnabledByOutboxRelay {
-			continue
-		}
-		if backend.RelaysOutbox(c.codeForge, c.boxForgeAndIssueAccess) {
-			rep.Success("%s kind: on — CODE_FORGE=%s relays a read-only Box's outbox bundle", d.Name, c.codeForge)
-		} else {
-			rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s relays no outbox bundle; run `spindrift %s <n>` by hand", d.Name, c.codeForge, c.boxForgeAndIssueAccess, d.Verb)
+		switch d.Enablement {
+		case dispatchkind.EnabledByOutboxRelay:
+			if backend.RelaysOutbox(c.codeForge, c.boxForgeAndIssueAccess) {
+				rep.Success("%s kind: on — CODE_FORGE=%s relays a read-only Box's outbox bundle", d.Name, c.codeForge)
+			} else {
+				rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s relays no outbox bundle; run `spindrift %s <n>` by hand", d.Name, c.codeForge, c.boxForgeAndIssueAccess, d.Verb)
+			}
 		}
 	}
 	// Walk the launch gates (issue #2942) through the same

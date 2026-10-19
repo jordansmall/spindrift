@@ -239,7 +239,14 @@ func newSchedule(kinds []Kind, reservation int, floor, idleCap time.Duration, pr
 			tracker = string(k)
 		}
 		src := kindDemandSource(k)
-		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, idleCap), tracker: tracker, reported: src == dispatchkind.DemandChildReported && probe[k] == 0, upperBound: src == dispatchkind.DemandHostOutbox}
+		var reported, upperBound bool
+		switch src {
+		case dispatchkind.DemandChildReported:
+			reported = probe[k] == 0
+		case dispatchkind.DemandHostOutbox:
+			upperBound = true
+		}
+		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, idleCap), tracker: tracker, reported: reported, upperBound: upperBound}
 	}
 	return s
 }
@@ -322,7 +329,8 @@ func (k kindSched) deadline(now time.Time) time.Time {
 func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 	running := 0
 	for k, n := range occ.Running {
-		if kindPriority(k) == dispatchkind.PriorityReserved {
+		switch kindPriority(k) {
+		case dispatchkind.PriorityReserved:
 			running += n
 		}
 	}
