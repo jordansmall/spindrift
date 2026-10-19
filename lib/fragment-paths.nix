@@ -60,6 +60,10 @@ in
   # reads another one.
   inherit pathsOf pathsIn;
 
+  # The fragments/ folder one backend row reads from on `axis`, the same folder
+  # pathsIn lists for that row.
+  folderOf = axis: backend: folderOf (axes.${axis}.signal backend);
+
   # Files a scan of `fragmentsDir` may read: pathsIn plus a deprecated row's
   # legacyFragment, but only when no primary file exists there, mirroring the
   # Go assembler (legacy read only when the primary is missing) so a stale

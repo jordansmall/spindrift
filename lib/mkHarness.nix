@@ -691,16 +691,16 @@ let
 
   # Build-time reject arm (issue #2250): resolves both validateMarkers
   # "reject" rows against this build's static knowledge. The relay fragment is
-  # one shared root file for github, forgejo and jira (which rides github's
-  # arm); local has its own file under local/, so only those three name a
-  # file to check. For the rest the id is omitted from
-  # contentByRowId and the row resolves to "advise". buildTimeRejectOk below
-  # forces the list.
-  researchRelayChecksFragment = builtins.elem mergedDefaults.issueTracker [
-    "github"
-    "forgejo"
-    "jira"
-  ];
+  # one shared root file for every tracker whose tracker-axis folder has no
+  # relay file of its own; a tracker whose folder carries one resolves per
+  # arm, so only the former name a file to check. For the rest the id is
+  # omitted from contentByRowId and the row resolves to "advise".
+  # buildTimeRejectOk below forces the list.
+  researchRelayChecksFragment =
+    issueTrackerRow ? name
+    && !builtins.pathExists (
+      fragmentsDir + "/${fragmentPaths.folderOf "tracker" issueTrackerRow}/research-verdict-relay.md"
+    );
   buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
     staticGates = {
       reviewPrompt = true;
@@ -1986,20 +1986,18 @@ let
     else
       true;
 
-  # lib/jira-status-mapping.nix's `parse` mirrors the runtime validation in
-  # jira.go's ParseStatusMapping, so an unknown-key mapping fails the build
-  # here (issue #2539). Gated on ISSUE_TRACKER=jira: elsewhere the knob is
-  # dead config and must not fail a github/forgejo/local build.
-  # `builtins.seq` forces the result so the `assert` below triggers a throw.
-  jiraStatusMapping = import ./jira-status-mapping.nix;
-  jiraStatusMappingOk =
-    if mergedDefaults.issueTracker != "jira" then
-      true
-    else
-      builtins.seq (jiraStatusMapping.parse (mergedDefaults.jiraStatusMapping or "")) true;
+  # A selected backend row's `validateKnobs` (lib/backends/jira.nix: its
+  # JIRA_STATUS_MAPPING parse, which mirrors jira.go's ParseStatusMapping,
+  # issue #2539) fails the build here. Only the selected rows run, so the
+  # knobs are dead config elsewhere and must not fail a github/forgejo/local
+  # build. `builtins.all` forces the result so the `assert` below throws.
+  backendKnobsOk = builtins.all (row: (row.validateKnobs or (_: true)) mergedDefaults) [
+    issueTrackerRow
+    codeForgeRow
+  ];
 
   # lib/awake-window.nix's `parse` mirrors the runtime validation in
-  # awake.go's ParseWindow (issue #3542). Unlike jiraStatusMappingOk this
+  # awake.go's ParseWindow (issue #3542). Unlike backendKnobsOk this
   # needs no backend gate -- the knob is valid or not regardless of
   # tracker/forge. `builtins.seq` forces the result so the `assert` below
   # triggers a throw.
@@ -2058,7 +2056,7 @@ else
   assert choicesCheckOk;
   assert networkModeCoherenceOk;
   assert readOnlyCapabilityOk;
-  assert jiraStatusMappingOk;
+  assert backendKnobsOk;
   assert daemonAwakeWindowOk;
   assert butlerChoresPromptOk;
   assert imageAttrNameOk;

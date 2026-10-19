@@ -13,6 +13,12 @@
   # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)
   # relay through the host.
   inBoxUnwritableTracker = true;
+  # Build-time check of the merged defaults, run by lib/mkHarness.nix when this
+  # row is the selected tracker (issue #2539): an unknown-key JIRA_STATUS_MAPPING
+  # fails the build here, and stays dead config on every other tracker.
+  validateKnobs =
+    defaults:
+    builtins.seq ((import ../jira-status-mapping.nix).parse (defaults.jiraStatusMapping or "")) true;
   knobs = {
     jiraBaseURL = {
       env = "JIRA_BASE_URL";
