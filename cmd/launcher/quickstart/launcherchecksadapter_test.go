@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
+	"spindrift.dev/launcher/internal/backendkit"
 	"strings"
 	"testing"
 
@@ -196,25 +197,33 @@ func TestHarnessEnvTokenEnvVar_MatchesRenderedFile(t *testing.T) {
 	}
 }
 
-// These backends' cmd/launcher validators read knobs the wizard never
-// collects: local's reads MERGE_MODE, git's reads CODE_FORGE_REMOTE_URL,
-// jira's reads the JIRA_* knobs, and github declares no validator. Binding
-// them would validate invented values, so they stay nil and their rows check
-// axis membership only.
-func TestQuickstartCheckDeps_NonForgejoValidatorsStayNil(t *testing.T) {
+// Every Strategy's own validators are bound, not just forgejo's, so no row is
+// special-cased by name; github's needs only the repo slug the wizard holds.
+func TestQuickstartCheckDeps_BindsEachStrategyValidators(t *testing.T) {
 	a := validAnswers()
 	deps := quickstartCheckDeps(a)
-	for _, name := range []string{"github", "jira", "local", "git"} {
-		b, ok := deps.Backend(name)
+	for _, s := range backendkit.Strategies() {
+		b, ok := deps.Backend(s.Name)
 		if !ok {
-			t.Fatalf("quickstartCheckDeps(a).Backend(%q) ok = false, want true", name)
+			t.Fatalf("Backend(%q) ok = false, want true", s.Name)
 		}
-		if b.ValidateTracker != nil {
-			t.Errorf("quickstartCheckDeps(a).Backend(%q).ValidateTracker != nil, want nil", name)
+		if (b.ValidateTracker != nil) != (s.ValidateTracker != nil) {
+			t.Errorf("Backend(%q).ValidateTracker bound = %v, want %v", s.Name, b.ValidateTracker != nil, s.ValidateTracker != nil)
 		}
-		if b.ValidateCodeForge != nil {
-			t.Errorf("quickstartCheckDeps(a).Backend(%q).ValidateCodeForge != nil, want nil", name)
+		if (b.ValidateCodeForge != nil) != (s.ValidateCodeForge != nil) {
+			t.Errorf("Backend(%q).ValidateCodeForge bound = %v, want %v", s.Name, b.ValidateCodeForge != nil, s.ValidateCodeForge != nil)
 		}
+	}
+}
+
+func TestQuickstartCheckDeps_GithubValidatorPassesWizardAnswers(t *testing.T) {
+	a := validAnswers()
+	if _, err := launcherRow(t, a, "github", "issue-tracker-config").Probe(); err != nil {
+		t.Errorf("issue-tracker-config Probe() = %v, want nil", err)
+	}
+	a.repoSlug = ""
+	if _, err := launcherRow(t, a, "github", "issue-tracker-config").Probe(); err == nil || !strings.Contains(err.Error(), "REPO_SLUG") {
+		t.Errorf("issue-tracker-config Probe() = %v, want an error naming REPO_SLUG", err)
 	}
 }
 
@@ -238,9 +247,7 @@ func launcherRow(t *testing.T, a answers, codeForge, name string) doctor.Check {
 	return doctor.Check{}
 }
 
-// Forgejo is the one backend whose validator inputs the wizard already holds
-// (see quickstartCheckDeps), so it binds forgejo.ValidateForgejoEnv and its
-// rows must reach the same verdict `spindrift doctor` reaches, not the
+// Forgejo's validator inputs are already held by the wizard, so its rows must reach the same verdict `spindrift doctor` reaches, not the
 // weaker axis-membership check.
 func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 	for _, tc := range []struct {
@@ -248,7 +255,6 @@ func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 		mutate  func(a *answers)
 		wantErr string
 	}{
-		{name: "missing base URL", mutate: func(a *answers) { a.choice.knobs["FORGEJO_BASE_URL"] = "" }, wantErr: "FORGEJO_BASE_URL"},
 		{name: "missing token", mutate: func(a *answers) { a.token = "" }, wantErr: "FORGEJO_TOKEN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

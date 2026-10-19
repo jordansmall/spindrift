@@ -86,6 +86,33 @@ var quickstartStrategies = func() []backendkit.Strategy {
 	return rows
 }
 
+// The axes a quickstart block may name (lib/renderers.nix quickstartAxes).
+const (
+	axisTracker = "tracker"
+	axisForge   = "forge"
+)
+
+// effectiveForge names the Code Forge a quickstart choice lands code on: the
+// backend itself when its row drives the forge axis, else defaultCodeForge.
+// buildForge, the rendered flake and the doctor checks all resolve through it
+// so they cannot disagree.
+func effectiveForge(s backendkit.Strategy) string {
+	if s.Quickstart != nil && slices.Contains(s.Quickstart.Axes, axisForge) {
+		return s.Name
+	}
+	return defaultCodeForge
+}
+
+// quickstartForge is effectiveForge for the named quickstart row.
+func quickstartForge(name string) string {
+	for _, s := range quickstartStrategies() {
+		if s.Name == name {
+			return effectiveForge(s)
+		}
+	}
+	return defaultCodeForge
+}
+
 // quickstartBackendNames returns the backend names the wizard accepts when no
 // quickstart row claims the git remote host. A newly registered row appears
 // here unedited.
@@ -148,11 +175,6 @@ const (
 	defaultBaseBranch  = "main"
 	defaultMergePolicy = "manual"
 )
-
-// codebergBaseURL is the Forgejo adapter's default, so a forgejoBaseURL of
-// exactly this value must not be emitted as an explicit
-// issues.forgejo.baseURL line in the generated flake.
-const codebergBaseURL = "https://codeberg.org"
 
 // quickstartRerunCmd is quoted once so rewording the command the error hints
 // name doesn't mean hunting down every message that mentions it.
@@ -247,10 +269,10 @@ func buildForge(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup
 		return nil, nil, fmt.Errorf("build %s issue tracker: %w", s.Name, err)
 	}
 	cs := s
-	if s.Quickstart == nil || !slices.Contains(s.Quickstart.Axes, "forge") {
+	if forgeName := effectiveForge(s); forgeName != s.Name {
 		var ok bool
-		if cs, ok = backendkit.ByName(defaultCodeForge); !ok {
-			return nil, nil, fmt.Errorf("default code forge %q is not registered", defaultCodeForge)
+		if cs, ok = backendkit.ByName(forgeName); !ok {
+			return nil, nil, fmt.Errorf("code forge %q is not registered", forgeName)
 		}
 	}
 	if cs.NewCodeForge == nil {
@@ -261,6 +283,17 @@ func buildForge(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup
 		return nil, nil, fmt.Errorf("build %s code forge: %w", cs.Name, err)
 	}
 	return it, cf, nil
+}
+
+// quickstartShared is the Shared the wizard hands every Strategy hook.
+func quickstartShared(repoSlug, gitUserName, gitUserEmail string) backendkit.Shared {
+	return backendkit.Shared{
+		RepoSlug:     repoSlug,
+		Labels:       defaultDispatchLabels,
+		BranchPrefix: defaultBranchPrefix,
+		GitUserName:  gitUserName,
+		GitUserEmail: gitUserEmail,
+	}
 }
 
 // knobLookup resolves the backend's remote-derived knobs plus, once acquired,
@@ -422,13 +455,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	if strategy.AcquireToken == nil {
 		return fmt.Errorf("backend %q declares no AcquireToken hook, so quickstart cannot set up its token", strategy.Name)
 	}
-	shared := backendkit.Shared{
-		RepoSlug:     repoSlug,
-		Labels:       defaultDispatchLabels,
-		BranchPrefix: defaultBranchPrefix,
-		GitUserName:  gitUserName,
-		GitUserEmail: gitUserEmail,
-	}
+	shared := quickstartShared(repoSlug, gitUserName, gitUserEmail)
 	token, err := strategy.AcquireToken(
 		shared,
 		knobLookup(knobs, "", ""),
@@ -470,6 +497,11 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		credentials:  credentials,
 	}
 
+	files, err := render(a)
+	if err != nil {
+		return err
+	}
+
 	// Backup runs only here, after every prompt and abort point above has
 	// succeeded, so an operator who aborts earlier never loses a file to a
 	// rename with nothing written to replace it. A failed rename reverses
@@ -501,7 +533,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	}
 
 	var written []string
-	for _, f := range render(a) {
+	for _, f := range files {
 		outcome, err := preserveExisting(dir, f, w)
 		if err != nil {
 			return err
@@ -540,7 +572,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	tokenHint, slugHint, noLabelRegistry := doctorHints(choice.name)
 	// doctor.Config.Runtime below already reports runtime validity, so the
 	// extraChecks rows must be runtime-stripped or the row reports twice.
-	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, choice.name), quickstartCheckDeps(a)))
+	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, quickstartForge(choice.name)), quickstartCheckDeps(a)))
 	// Verbose: quickstart's finish line always reports in full, whatever
 	// `spindrift doctor`'s own quiet default does (issue #3777).
 	rep := doctor.NewReporter(w, true)
@@ -764,32 +796,47 @@ type scaffoldFile struct {
 // render turns answers into the whole scaffold with no I/O of its own. Every
 // operator string crosses the nixEscape seam inside this call, before
 // runQuickstart writes to disk.
-func render(a answers) []scaffoldFile {
+func render(a answers) ([]scaffoldFile, error) {
+	flakeNix, err := renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.choice)
+	if err != nil {
+		return nil, err
+	}
 	return []scaffoldFile{
-		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.choice), mode: 0o644},
+		{path: "flake.nix", content: flakeNix, mode: 0o644},
 		{path: "harness.env", content: renderHarnessEnv(a.choice.name, a.token, a.credentials), mode: 0o600},
 		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
 		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
-	}
+	}, nil
 }
 
 // renderFlakeNix generates a minimal Consumer flake.nix carrying only the
 // options the wizard collected (ADR 0027). No prompts/ directory is
 // scaffolded, because the harness defaults every prompt.
-func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice backendChoice) string {
+func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice backendChoice) (string, error) {
 	trackerLine := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(choice.name))
 
 	settingsLines := trackerLine
-	if choice.name == "forgejo" {
-		// forgejo drives both axes, ISSUE_TRACKER and CODE_FORGE, so the
-		// generated flake lands code on the same instance doctor validated.
-		settingsLines += fmt.Sprintf("            %s = \"forgejo\";\n", pathCodeForge)
-		if base := choice.knobs["FORGEJO_BASE_URL"]; base != "" && base != codebergBaseURL {
-			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", quickstartKnobs["FORGEJO_BASE_URL"].path, nixEscape(base))
+	// A row driving the forge axis lands code on the instance doctor
+	// validated; the default forge needs no line.
+	if forgeName := quickstartForge(choice.name); forgeName != defaultCodeForge {
+		settingsLines += fmt.Sprintf("            %s = \"%s\";\n", pathCodeForge, nixEscape(forgeName))
+	}
+	envs := make([]string, 0, len(choice.knobs))
+	for env := range choice.knobs {
+		envs = append(envs, env)
+	}
+	slices.Sort(envs)
+	for _, env := range envs {
+		knob, ok := quickstartKnobs[env]
+		if !ok {
+			return "", fmt.Errorf("backend %q derives knob %s from the remote, but quickstartKnobs has no entry for it", choice.name, env)
+		}
+		if v := choice.knobs[env]; v != "" && v != knob.dflt {
+			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", knob.path, nixEscape(v))
 		}
 	}
 
-	return fmt.Sprintf(`{
+	out := fmt.Sprintf(`{
   description = "A spindrift consumer — headless coding agents, one disposable container per issue";
 
   inputs = {
@@ -836,6 +883,7 @@ func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice 
 		pathGitUserName, nixEscape(gitUserName),
 		pathGitUserEmail, nixEscape(gitUserEmail),
 		settingsLines)
+	return out, nil
 }
 
 // nixEscape escapes a string for a Nix double-quoted literal. Go's %q is not
