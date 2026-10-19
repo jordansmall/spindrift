@@ -57,10 +57,6 @@
 # pull requests" in the prompt's IF BLOCKED PR gates, read-write Boxes included
 # (issue #5276). The same Go test enforces it against DraftPRCreator.
 
-# inBoxOpenPRQueryable marks a CODE_FORGE whose open PRs the Box can query
-# itself (in-box client plus token), which branch recovery needs before
-# force-resetting a prior agent branch; only github (issue #4449).
-
 # inBoxGHCredentialHelper marks a CODE_FORGE whose Box clone runs
 # `gh auth setup-git`; github and git (its remote URL may be github.com), not
 # forgejo (token URL, ADR 0038) or local (filesystem mount, ADR 0033; issue #4452).

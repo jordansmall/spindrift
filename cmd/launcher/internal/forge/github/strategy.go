@@ -32,6 +32,10 @@ var Strategy = backendkit.Strategy{
 	NewReadOnlyCodeForge: func(s backendkit.Shared, _ backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
 		return NewReadOnlyCodeForge(s.RepoSlug, s.Labels, s.BranchPrefix, codeForgeOpts(s)...), nil
 	},
+	OpenPRForBranch: func(repoSlug, branch string) (bool, error) {
+		_, open, err := NewExecClient(repoSlug, forge.DispatchLabels{}, "").OpenPRForBranch(branch)
+		return open, err
+	},
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
 		url, gitArgs := GitRemote(s.RepoSlug)
 		return backendkit.LedgerSite{URL: url, GitArgs: gitArgs}, nil

@@ -8,7 +8,6 @@
   validAsCodeForge = true;
   tokenEnvVar = "GH_TOKEN";
   outboxRelayCapable = true;
-  inBoxOpenPRQueryable = true;
   inBoxGHCredentialHelper = true;
   relayCapable = true;
   hostPostingCapable = true;

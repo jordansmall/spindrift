@@ -1183,7 +1183,6 @@ rec {
         (optional "inBoxUnreachableTracker" "InBoxUnreachableTracker" false)
         (optional "inBoxUnwritableTracker" "InBoxUnwritableTracker" false)
         (optional "outboxRelayCapable" "OutboxRelayCapable" false)
-        (optional "inBoxOpenPRQueryable" "InBoxOpenPRQueryable" false)
         (optional "inBoxGHCredentialHelper" "InBoxGHCredentialHelper" false)
         (optional "relayCapable" "RelayCapable" false)
         (optional "hostPostingCapable" "HostPostingCapable" false)

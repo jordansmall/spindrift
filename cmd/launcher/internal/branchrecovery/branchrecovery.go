@@ -22,9 +22,6 @@ type Config struct {
 	BaseBranch string
 	// CodeForge is CODE_FORGE, defaulted to github by the caller; narration only.
 	CodeForge string
-	// QueryOpenPR is set when the Box can ask CODE_FORGE about open PRs
-	// (backend.Descriptor.InBoxOpenPRQueryable, which records why the rest cannot).
-	QueryOpenPR bool
 	// Push is BOX_WRITE_ENABLED: the Box holds a push-capable token. A
 	// read-only Box relays through the outbox bundle instead (issue #1979:
 	// a force-push there 403s before the agent ever runs), behind the same
@@ -48,9 +45,11 @@ type Outcome struct {
 // origin/base and publishes at once when nothing is left to resolve. Narration
 // goes to w. An error means the Box must abort.
 //
-// openPR is consulted only when cfg.QueryOpenPR, and only when origin/Branch
-// exists. Its error must abort: a silent empty answer (network/auth failure)
-// is indistinguishable from "no PR" and must not trigger the force-reset.
+// openPR nil means the forge cannot be asked
+// (backendkit.Strategy.OpenPRForBranch); it is consulted only when non-nil,
+// and only when origin/Branch exists. Its error must abort: a silent empty
+// answer (network/auth failure) is indistinguishable from "no PR" and must
+// not trigger the force-reset.
 func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, error) {
 	var out Outcome
 	base := "origin/" + cfg.BaseBranch
@@ -71,7 +70,7 @@ func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, err
 	}
 
 	switch {
-	case !cfg.QueryOpenPR:
+	case openPR == nil:
 		// A stale refs/remotes/origin/<branch> is superseded by a fresh checkout.
 		fmt.Fprintf(w, "==> CODE_FORGE=%s: starting %s fresh from %s\n", cfg.CodeForge, cfg.Branch, base)
 		if err := fresh(); err != nil {

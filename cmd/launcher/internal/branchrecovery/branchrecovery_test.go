@@ -67,7 +67,7 @@ func newFixture(t *testing.T) *fixture {
 	git(t, f.work, "config", "user.email", "t@example.com")
 	f.cfg = branchrecovery.Config{
 		WorkDir: f.work, Branch: branch, BaseBranch: "main",
-		CodeForge: "github", QueryOpenPR: true, Push: true, OutboxDir: f.outbox,
+		CodeForge: "github", Push: true, OutboxDir: f.outbox,
 	}
 	return f
 }
@@ -301,12 +301,11 @@ func TestRecoverOpenPRErrorAborts(t *testing.T) {
 func TestRecoverWithoutOpenPRQueryStartsFresh(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.CodeForge = "github"
-	f.cfg.QueryOpenPR = false
 	f.withPriorBranch(t, "prior.txt", "prior\n")
 	before := f.originRef(t, "refs/heads/"+branch)
 
 	var w bytes.Buffer
-	out, err := branchrecovery.Recover(f.cfg, never(t), &w)
+	out, err := branchrecovery.Recover(f.cfg, nil, &w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,9 +342,8 @@ func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
 	recoverFresh := func(t *testing.T) *fixture {
 		t.Helper()
 		f := newFixture(t)
-		f.cfg.QueryOpenPR = false
 		f.withPriorBranch(t, "prior.txt", "prior\n")
-		if _, err := branchrecovery.Recover(f.cfg, never(t), &bytes.Buffer{}); err != nil {
+		if _, err := branchrecovery.Recover(f.cfg, nil, &bytes.Buffer{}); err != nil {
 			t.Fatal(err)
 		}
 		return f
@@ -385,14 +383,17 @@ func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
 // A clone leaves origin/<branch> without a reflog, which leaves git's
 // --force-if-includes cutoff uninitialized; Recover must seed one.
 func TestRecoverSeedsTheRemoteTrackingReflog(t *testing.T) {
-	for _, queryOpenPR := range []bool{true, false} {
-		t.Run(fmt.Sprintf("QueryOpenPR=%t", queryOpenPR), func(t *testing.T) {
+	for _, queryable := range []bool{true, false} {
+		t.Run(fmt.Sprintf("queryable=%t", queryable), func(t *testing.T) {
 			f := newFixture(t)
-			f.cfg.QueryOpenPR = queryOpenPR
 			f.withPriorBranch(t, "prior.txt", "prior\n")
 			ref := "refs/remotes/origin/" + branch
 			git(t, f.work, "reflog", "drop", ref)
-			if _, err := branchrecovery.Recover(f.cfg, func() (bool, error) { return true, nil }, &bytes.Buffer{}); err != nil {
+			var openPR func() (bool, error)
+			if queryable {
+				openPR = answer(true)
+			}
+			if _, err := branchrecovery.Recover(f.cfg, openPR, &bytes.Buffer{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := exec.Command("git", "-C", f.work, "reflog", "exists", ref).Run(); err != nil {

@@ -106,8 +106,10 @@ type fixture struct {
 	recovery    branchrecovery.Outcome
 	recoverErr  error
 	recoverCfgs []branchrecovery.Config
-	publishCfgs []branchrecovery.Config
-	publishErr  error
+	// recoverQueryable records, per recovery call, whether an open-PR query was passed.
+	recoverQueryable []bool
+	publishCfgs      []branchrecovery.Config
+	publishErr       error
 
 	// cloneCfgs, chdirs and cloneErr script and record the clone step; set
 	// records what box exported into its own environment.
@@ -191,7 +193,8 @@ func newFixture(t *testing.T) *fixture {
 			f.knobs[k] = v
 			return nil
 		},
-		Recover: func(cfg branchrecovery.Config, _ func() (bool, error), _ io.Writer) (branchrecovery.Outcome, error) {
+		Recover: func(cfg branchrecovery.Config, openPR func() (bool, error), _ io.Writer) (branchrecovery.Outcome, error) {
+			f.recoverQueryable = append(f.recoverQueryable, openPR != nil)
 			f.recoverCfgs = append(f.recoverCfgs, cfg)
 			return f.recovery, f.recoverErr
 		},
