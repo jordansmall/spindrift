@@ -83,6 +83,7 @@ let
     // (import ./read-only-capability.nix common)
     // (import ./network-mode.nix common)
     // (import ./row-knobs.nix common)
+    // (import ./runner-names-guard.nix common)
     // (import ./merge-guard-paths.nix common)
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)
@@ -191,6 +192,9 @@ let
     "nix-checks-lore-parity"
     "prompts"
     "roster"
+    # Reads no docs, but scans every *.nix in the repo (trailing comments included),
+    # which a comment-only edit can reach.
+    "runner-names-guard"
     "schema-drift"
     "versioning-prompt-template-carve-out"
   ];
