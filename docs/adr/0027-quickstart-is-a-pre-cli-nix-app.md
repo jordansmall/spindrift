@@ -96,7 +96,7 @@ The Forgejo on-ramp (issue #1966), part of [ADR
 `github` for a github.com remote or no remote, with no prompt; `forgejo`,
 auto-detected and announced, for a codeberg.org remote; and for any other host
 a `Backend` prompt over the quickstart-eligible backends in the shared backend
-registry (`backend.QuickstartEligible()`, today `github` and `forgejo`),
+registry (the rows with a `quickstart` block, today `github` and `forgejo`),
 defaulting to `github`. The answer is written as `issues.tracker`.
 
 A `forgejo` choice sets both the Issue Tracker and the Code Forge to

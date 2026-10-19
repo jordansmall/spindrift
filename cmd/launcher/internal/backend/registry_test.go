@@ -32,14 +32,6 @@ func TestByName(t *testing.T) {
 	}
 }
 
-func TestQuickstartEligible(t *testing.T) {
-	got := QuickstartEligible()
-	want := []Descriptor{GitHub, Forgejo}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("QuickstartEligible() = %+v, want %+v", got, want)
-	}
-}
-
 // TestRelayCapableAndHostPostingCapable pins the two read-only capability bits
 // (issue #2526) that mkHarness's eval assert reads straight off the registry
 // rows: RelayCapable on the forge axis and HostPostingCapable on the tracker
@@ -255,6 +247,27 @@ func TestResearchVerdictRelayed(t *testing.T) {
 	for _, tc := range cases {
 		if got := ResearchVerdictRelayed(tc.tracker, tc.filer); got != tc.want {
 			t.Errorf("ResearchVerdictRelayed(%q, %v) = %v, want %v", tc.tracker, tc.filer, got, tc.want)
+		}
+	}
+}
+
+// TestQuickstartBlocks pins the shipped rows' quickstart declarations; every
+// block must name the tracker axis, since quickstart's answer is the tracker.
+func TestQuickstartBlocks(t *testing.T) {
+	want := map[string]QuickstartBlock{
+		"github":  {Hosts: []string{"github.com"}, Axes: []string{"tracker", "forge"}},
+		"forgejo": {Hosts: []string{"codeberg.org"}, Axes: []string{"tracker", "forge"}},
+	}
+	for _, d := range Registry {
+		w, ok := want[d.Name]
+		if !ok {
+			if d.Quickstart != nil {
+				t.Errorf("%s carries an unexpected quickstart block %+v", d.Name, *d.Quickstart)
+			}
+			continue
+		}
+		if d.Quickstart == nil || !reflect.DeepEqual(*d.Quickstart, w) {
+			t.Errorf("%s quickstart = %+v, want %+v", d.Name, d.Quickstart, w)
 		}
 	}
 }

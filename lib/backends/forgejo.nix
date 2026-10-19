@@ -18,6 +18,13 @@
   trackerAxisWrite = "FORGEJO";
   trackerAxisFiler = "FORGEJO";
   forgeBackend = "FORGEJO";
+  quickstart = {
+    hosts = [ "codeberg.org" ];
+    axes = [
+      "tracker"
+      "forge"
+    ];
+  };
 
   knobs = {
     forgejoBaseURL = {

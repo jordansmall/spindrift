@@ -118,6 +118,18 @@ type Descriptor struct {
 	// ForgeBackend is this code-forge's backend suffix ("GH" or "FORGEJO");
 	// empty means "GH".
 	ForgeBackend string
+
+	// Quickstart is the backend's opt-in to `spindrift quickstart` (ADR 0068
+	// decision 8); nil means hand-edit only, never offered by the wizard.
+	Quickstart *QuickstartBlock
+}
+
+// QuickstartBlock is a row's quickstart declaration: Hosts are the git remote
+// hosts that identify the backend, Axes the axes it sets ("tracker", "forge").
+// renderBackendRegistryGo guarantees Axes includes "tracker".
+type QuickstartBlock struct {
+	Hosts []string
+	Axes  []string
 }
 
 // Registry and its named per-backend vars are generated into registry_gen.go
@@ -170,19 +182,6 @@ func ForgeBackendSignal(codeForge string) string {
 		return "GH"
 	}
 	return row.ForgeBackend
-}
-
-// QuickstartEligible returns the descriptors Quickstart's wizard can drive
-// end-to-end today: valid as both tracker and code forge, with a real remote to
-// push to.
-func QuickstartEligible() []Descriptor {
-	var out []Descriptor
-	for _, d := range Registry {
-		if d.ValidAsTracker && d.ValidAsCodeForge && !d.HostMediatedRemote {
-			out = append(out, d)
-		}
-	}
-	return out
 }
 
 // NeedsGHToken reports whether a forge/tracker pairing reaches GitHub: a GitHub
