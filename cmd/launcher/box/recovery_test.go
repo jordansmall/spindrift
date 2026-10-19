@@ -16,7 +16,7 @@ func TestRecoverBranch_RunsForAWorkDispatchWithTheEnvsConfig(t *testing.T) {
 	f.run()
 	want := []branchrecovery.Config{{
 		WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
-		CodeForge: "github", QueryOpenPR: true, Push: false, OutboxDir: f.in.OutboxDir,
+		CodeForge: "github", Push: false, OutboxDir: f.in.OutboxDir,
 	}}
 	if !reflect.DeepEqual(f.recoverCfgs, want) {
 		t.Fatalf("recover configs = %+v, want %+v", f.recoverCfgs, want)
@@ -67,11 +67,11 @@ func TestRecoveryConfig_QueriesOpenPROnlyWhereTheBoxCan(t *testing.T) {
 			f := newFixture(t)
 			f.env.CodeForge = forge
 			f.run()
-			if len(f.recoverCfgs) != 1 {
-				t.Fatalf("recover configs = %+v, want one", f.recoverCfgs)
+			if len(f.recoverQueryable) != 1 {
+				t.Fatalf("recover calls = %d, want one", len(f.recoverQueryable))
 			}
-			if got := f.recoverCfgs[0].QueryOpenPR; got != want {
-				t.Errorf("QueryOpenPR = %v, want %v", got, want)
+			if got := f.recoverQueryable[0]; got != want {
+				t.Errorf("open-PR query passed = %v, want %v", got, want)
 			}
 		})
 	}

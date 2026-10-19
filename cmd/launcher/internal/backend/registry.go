@@ -42,15 +42,6 @@ type Descriptor struct {
 	// DraftPRCreator.
 	OutboxRelayCapable bool
 
-	// InBoxOpenPRQueryable is true only for a CODE_FORGE whose open PRs the Box
-	// can query itself (an in-box client plus a token for it), so branch
-	// recovery asks it before force-resetting a prior agent branch. forgejo has
-	// PRs but its Box has no client wired into branch recovery and no GH_TOKEN
-	// (issue #3942); local and git have no PR concept (ADR 0033, ADR 0013).
-	// Flipping it for another forge also needs that forge's client in the Box's
-	// openPR (cmd/launcher/box/recovery.go).
-	InBoxOpenPRQueryable bool
-
 	// InBoxGHCredentialHelper is true for a CODE_FORGE whose Box clone runs
 	// `gh auth setup-git`, so gh's credential helper authenticates the clone and
 	// fetch. git keeps it because CODE_FORGE_REMOTE_URL may point at github.com;
