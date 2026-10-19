@@ -7,13 +7,14 @@ Issues live on GitHub (`jordansmall/spindrift`). File agent-ready issues via the
 
 ### Dispatch kinds
 
-The four kinds (work, research, butler, recover) are declared once, in
-`cmd/launcher/internal/dispatchkind`. Every kind fact — keying, label
-family, prompt file, settle strategy, and the rest — is a row on that
-descriptor; neither the launcher nor the Box branches on a kind name to
-re-derive one. See [ADR
+The four kinds (work, research, butler, recover) are declared once, as
+the Nix kind rows in `lib/dispatch-kinds/`, and `nix run .#regen` renders
+them into the descriptor package `cmd/launcher/internal/dispatchkind`
+(`kinds_gen.go`). Every kind fact — keying, label family, prompt file,
+settle strategy, and the rest — is an axis on that row; neither the
+launcher nor the Box branches on a kind name to re-derive one. See [ADR
 0056](docs/adr/0056-the-butler-is-an-issueless-dispatch-kind-with-its-state-in-git.md)
-(amendment, issue #3996).
+(amendments, issues #3996 and #5668).
 
 ### Triage label lifecycle
 
