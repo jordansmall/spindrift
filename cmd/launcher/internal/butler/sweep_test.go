@@ -343,3 +343,33 @@ func TestSweep_NotDueBudgetLiftsAtPolicyZoneMidnight(t *testing.T) {
 		t.Errorf("next_due = %+v, want At %v (midnight in %v)", got, want, zone)
 	}
 }
+
+// TestSweep_TrackedFilesErrorLeavesLedgerUnclaimed pins that a tree-scoped
+// Chore's file listing runs before the claim: a listing failure surfaces from
+// Sweep with the Ledger untouched, so the next sweep retries rather than
+// waiting out a stale takeover.
+func TestSweep_TrackedFilesErrorLeavesLedgerUnclaimed(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	boom := errors.New("ls-tree failed")
+	tree := fakeTree{head: "headsha", filesErr: boom}
+	it := forge.NewFake().AsIssueFiler()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	r := New(backend, tree, it, func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), func() time.Time { return now })
+
+	_, err := r.Sweep([]string{"bugs"})
+	if !errors.Is(err, boom) {
+		t.Fatalf("Sweep err = %v, want %v", err, boom)
+	}
+	if !strings.HasPrefix(err.Error(), "butler: bugs: ") {
+		t.Errorf("err = %q, want the butler: bugs: prefix", err)
+	}
+
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.State.Phase == ledger.Claimed {
+		t.Errorf("Phase = %q, want the Ledger left unclaimed", tip.State.Phase)
+	}
+}

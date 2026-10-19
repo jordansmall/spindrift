@@ -6,8 +6,6 @@
 package butler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,7 +16,6 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/report"
@@ -283,32 +280,18 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", c.Name, err)
 		}
 		cfg := chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout}
-		// A records-scoped Chore reads the Dispatch Records store once here and
-		// hands it to run, so the digest renders the very Records it was
-		// judged due on.
-		var records []dispatchrecord.Record
-		newSettled := 0
-		var verdict chore.NotDue
-		if c.Records {
-			if records, err = r.policy.loadRecords(); err != nil {
-				return Outcome{}, fmt.Errorf("butler: %s: %w", c.Name, err)
-			}
-			newSettled = len(chore.NewSettledRecords(records, tip.State.Cursor))
-			verdict = chore.CheckRecords(tip, recent, newSettled, r.policy.TuningMinRecords, whenNow, room, cfg)
-		} else {
-			verdict = chore.Check(tip, recent, head, whenNow, room, cfg)
+		// The source is built once here and handed to run, so a records-scoped
+		// Chore's digest renders the very Records it was judged due on.
+		src, err := r.scopeSourceFor(c, head, whenNow)
+		if err != nil {
+			return Outcome{}, fmt.Errorf("butler: %s: %w", c.Name, err)
 		}
+		verdict := src.Due(tip, recent, whenNow, room, cfg)
 		if verdict != chore.Due {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", c.Name, verdict))
 			// NextDue reads the budget day from now's Location, so it gets the
 			// policy zone, as the day totals above did.
-			var at time.Time
-			var onTipMove bool
-			if c.Records {
-				at, onTipMove = chore.NextDueRecords(tip, recent, newSettled, r.policy.TuningMinRecords, whenNow.In(r.policy.Zone), room, cfg)
-			} else {
-				at, onTipMove = chore.NextDue(tip, recent, head, whenNow.In(r.policy.Zone), room, cfg)
-			}
+			at, onTipMove := src.NextDue(tip, recent, whenNow.In(r.policy.Zone), room, cfg)
 			// (zero, false): nothing time- or head-based lifts it, so there is
 			// nothing to tell the daemon.
 			if !at.IsZero() || onTipMove {
@@ -316,7 +299,7 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 			}
 			continue
 		}
-		return r.run(c, tip, head, records, whenNow, room)
+		return r.run(c, src, tip, whenNow, room)
 	}
 
 	// Reported only on this exit: the daemon reads not_due records when the
@@ -340,25 +323,24 @@ func (p Policy) choreNames() []string {
 	return names
 }
 
-// run claims c's Ledger (already read as tip, at head), computes this
-// run's scan Scope (internal/chore.NextScope), dispatches one Box through
-// r.newBox, and settles the result (ADR 0056). claimedAt is Sweep's whenNow,
-// reused for ClaimedBy.Start so the claim is stamped at the same instant its
-// due decision was made; r.now is called fresh at settle time instead. room
-// is Sweep's own chore.Room, handed to the Box and to settle rather than
+// run claims c's Ledger (already read as tip), has src Prepare this run's
+// scan Scope and Box input, dispatches one Box through r.newBox, and settles
+// the result (ADR 0056). claimedAt is Sweep's whenNow, reused for
+// ClaimedBy.Start so the claim is stamped at the same instant its due
+// decision was made; r.now is called fresh at settle time instead. room is
+// Sweep's own chore.Room, handed to the Box and to settle rather than
 // re-walked. Once the Box has run, whether its settle step actually wrote
 // the done commit (Box success) or left the claim standing (Box crash, ADR
 // 0056) is read off the settle step's own return, never by re-reading the
 // Ledger -- a crashed run's settle writes nothing at all, so there would be
 // nothing new there to read back anyway.
-func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispatchrecord.Record, claimedAt time.Time, room chore.Room) (Outcome, error) {
+func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt time.Time, room chore.Room) (Outcome, error) {
 	choreName := c.Name
-	var files []string
-	if !c.Records {
-		var err error
-		if files, err = r.tree.TrackedFiles(head); err != nil {
-			return Outcome{}, err
-		}
+
+	// Staged before the claim, so a failure leaves the Ledger untouched and the
+	// next sweep retries.
+	if err := src.Stage(); err != nil {
+		return Outcome{}, fmt.Errorf("butler: %s: %w", choreName, err)
 	}
 
 	claim, err := ledger.Claim(r.backend, choreName, tip, ledger.ClaimedBy{Host: r.policy.Host, Slot: 0, Start: claimedAt})
@@ -372,31 +354,9 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 		return Outcome{}, fmt.Errorf("butler: claim %s: %w", choreName, err)
 	}
 
-	// A records-scoped Chore has no file slice: its input is the digest of the
-	// Records past the cursor, and the next cursor is the latest Record ID it
-	// covered, carried in Scope.NextCursor so settle's Done commit is
-	// unchanged.
-	var scope chore.Scope
-	var input string
-	var claimTime time.Time
-	if c.Records {
-		findings, err := settle.TuningFindings(r.it)
-		if err != nil {
-			fmt.Fprintf(r.warn, "    ?? %s: prior tuning findings: %v\n", choreName, err)
-		}
-		prior := make([]tuning.Prior, 0, len(findings))
-		for _, f := range findings {
-			prior = append(prior, tuning.Prior{Number: f.Issue.Number, Open: f.Open, NotPlanned: f.Issue.ClosedNotPlanned, Reopened: f.Issue.Reopened, Metric: f.Metric, Body: f.Issue.Body})
-		}
-		dg := tuning.Render(records, claim.State.Cursor, claimedAt,
-			tuning.Limits{MinSample: r.policy.TuningMinSample, MaxBytes: r.policy.TuningDigestBytes}, prior, r.mergeLookup(choreName))
-		scope = chore.Scope{Head: head, NextCursor: dg.Latest}
-		input = dg.Text
-		// The sweep's Record ID keys the stored digest, so it is pinned to the
-		// claim instant to be known before the Box runs.
-		claimTime = claimedAt
-	} else {
-		scope = chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
+	p, err := src.Prepare(claim)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("butler: %s: %w", choreName, err)
 	}
 	// A nil patchForge means this Runner never opted into the patch rung
 	// (WithPatchForge), so patchesPerDay reads as 0 regardless of the
@@ -438,22 +398,13 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 	if promo.patchEnabled && len(promotionClasses) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: input, ClaimTime: claimTime})
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: p.scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: p.input, ClaimTime: p.claimTime})
 	defer d.Close()
-	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
-	if c.Records {
-		// Fail closed: a Box launched without a stored digest could report
-		// findings nothing can validate. The claim stands until stale takeover.
-		id := d.RecordID()
-		if id == "" {
-			return Outcome{}, fmt.Errorf("butler: %s: dispatch has no record ID to key the tuning snapshot", choreName)
+	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
+	if p.arm != nil {
+		if err := p.arm(d, step); err != nil {
+			return Outcome{}, err
 		}
-		sum := sha256.Sum256([]byte(input))
-		ref := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
-		if err := r.policy.storeSnapshot(dispatchrecord.TuningSnapshot{RecordID: id, SHA256: ref.SHA256, Rendered: input, CreatedAt: claimedAt}); err != nil {
-			return Outcome{}, fmt.Errorf("butler: %s: %w", choreName, err)
-		}
-		step.tuning = &tuningSnapshot{ref: ref, policy: r.policy, tree: r.tree}
 	}
 	if c.FindingLabel != "" {
 		step.labels = []string{c.FindingLabel}
