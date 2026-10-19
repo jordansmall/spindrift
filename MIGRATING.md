@@ -1,32 +1,117 @@
 # Migration Guide
 
-## The issue-read prompt step is one backend-keyed variable (issue #5646)
+## Backend-varying prompt steps are slot variables (issues #5646, #5647)
 
-The prompt's "read the issue" step is now a single slot, `${ISSUE_READ_STEP}`,
-filled from the active `ISSUE_TRACKER` backend's own fragment folder:
-`fragments/<backend>/issue-read.md`. A backend with no such file renders an
-empty step. The shipped `issue-prompt.md` already uses it, so nothing breaks
-for the default prompt; this only matters to a Consumer whose prompt
-directory (`--prompt-dir`, `SPINDRIFT_PROMPT_DIR`, or
-`perSystem.spindrift.agents.promptDir`) overrides it.
+Every prompt step that used to fork per backend, with one variable and one
+fragment file per backend, is now a single slot variable. The slot is filled
+from the active backend's own fragment folder, `fragments/<backend>/<step>.md`,
+or from one shared file at the root of `fragments/` when every backend reads
+alike. The shipped prompts already use the slots, so nothing breaks for the
+default prompt; this only matters to a Consumer whose prompt directory
+(`--prompt-dir`, `SPINDRIFT_PROMPT_DIR`, or
+`perSystem.spindrift.agents.promptDir`) overrides a prompt or a fragment.
+
+How a slot finds its file:
+
+- The folder comes from the signal the step is about, not from a backend name:
+  the tracker read arm (`ISSUE_TRACKER`) for the issue-read, verdict, blocked
+  comment, outcome landing and PR body steps; the tracker Filer arm for the
+  Filer steps; `CODE_FORGE` for the fix-ci, open-PR and if-blocked PR steps.
+  GitHub's folder is `github`, and a backend that rides another's arm reads
+  that folder, so `jira` reads `github/` (there is no `jira/issue-read.md` any
+  more).
+- A step whose body is the same everywhere is one root file naming the active
+  backend with `${FORGE_DISPLAY_NAME}`, the `displayName` of the backend's row
+  in `lib/backends/`. A backend folder's own file still wins over the root one.
+- A backend with no file for a slot renders an empty step, not an error.
 
 What breaks in an override prompt directory:
 
-- `${ISSUE_READ_GITHUB_STEP}`, `${ISSUE_READ_LOCAL_STEP}` and
-  `${ISSUE_READ_FORGEJO_STEP}` are deprecated. They still render, each for its
-  own backend, but warn. Replace the three with one `${ISSUE_READ_STEP}`.
-  The `RESEARCH_` and `SCOUT_` issue-read variables are unchanged.
-- The fragment files moved: `fragments/issue-read-github.md`,
-  `issue-read-local.md` and `issue-read-forgejo.md` are now
-  `fragments/github/issue-read.md`, `fragments/local/issue-read.md` and
-  `fragments/forgejo/issue-read.md`, and `fragments/jira/issue-read.md` is
-  new. If your override copies the old files, move them to the new paths.
-  While the variables are deprecated, an override directory still on the old
-  layout keeps working: each deprecated variable falls back to its old root
-  file when the new path is missing. `${ISSUE_READ_STEP}` has no such
-  fallback, so a directory on the old layout renders that step empty. A
-  runtime `--prompt-dir` replaces the whole prompts directory, so it never
-  falls back to the shipped files.
+- The per-backend variables below are deprecated. Each still renders what it
+  did before, but warns. Replace every variable in the left column's row with
+  the one on the right; where one slot replaces several variables, an
+  override that named several of them now names the slot once.
+
+  | Deprecated variables | Replacement |
+  | --- | --- |
+  | `ISSUE_READ_GITHUB_STEP`, `ISSUE_READ_LOCAL_STEP`, `ISSUE_READ_FORGEJO_STEP` | `ISSUE_READ_STEP` |
+  | `RESEARCH_ISSUE_READ_GITHUB_STEP`, `RESEARCH_ISSUE_READ_LOCAL_STEP`, `RESEARCH_ISSUE_READ_FORGEJO_STEP` | `RESEARCH_ISSUE_READ_STEP` |
+  | `SCOUT_ISSUE_READ_GITHUB_STEP`, `SCOUT_ISSUE_READ_FORGEJO_STEP` | `SCOUT_ISSUE_READ_STEP` |
+  | `FILER_DEDUP_SEARCH_STEP`, `FILER_DEDUP_SEARCH_FORGEJO_STEP`, `FILER_DEDUP_SEARCH_LOCAL_STEP` | `FILER_DEDUP_STEP` |
+  | `RESEARCH_VERDICT_GITHUB_STEP`, `RESEARCH_VERDICT_FORGEJO_STEP` | `RESEARCH_VERDICT_STEP` |
+  | `RESEARCH_VERDICT_GITHUB_READONLY_STEP`, `RESEARCH_VERDICT_FORGEJO_READONLY_STEP`, `RESEARCH_VERDICT_LOCAL_STEP` | `RESEARCH_VERDICT_RELAY_STEP` |
+  | `RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP`, `RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP`, `RESEARCH_VERDICT_LOCAL_SOCKET_STEP` | `RESEARCH_VERDICT_RELAY_SOCKET_STEP` |
+  | `RESEARCH_OUTCOME_LANDING_GITHUB_STEP`, `RESEARCH_OUTCOME_LANDING_FORGEJO_STEP` | `RESEARCH_OUTCOME_LANDING_STEP` |
+  | `ISSUE_BLOCKED_COMMENT_GITHUB_STEP`, `ISSUE_BLOCKED_COMMENT_FORGEJO_STEP` | `ISSUE_BLOCKED_COMMENT_STEP` |
+  | `ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP`, `ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP`, `ISSUE_BLOCKED_COMMENT_LOCAL_STEP` | `ISSUE_BLOCKED_COMMENT_RELAY_STEP` |
+  | `FILER_FILE_DIRECT_STEP`, `FILER_FILE_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_FILE_STEP` |
+  | `FILER_LABEL_DIRECT_STEP`, `FILER_LABEL_DIRECT_FORGEJO_STEP` | `FILER_DIRECT_LABEL_STEP` |
+  | `FIX_CI_READ_GITHUB_STEP`, `FIX_CI_READ_FORGEJO_STEP` | `FIX_CI_READ_STEP` |
+  | `OPEN_PR_CREATE_READ_WRITE_STEP`, `OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP` | `OPEN_PR_CREATE_DIRECT_STEP` |
+  | `IF_BLOCKED_PR_READ_WRITE_STEP`, `IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP` | `IF_BLOCKED_PR_DIRECT_STEP` |
+  | `PR_BODY_LOCAL_REF_STEP` | `PR_BODY_ISSUE_REF_STEP` |
+  | `PR_BODY_LOCAL_NOREF_STEP` | `PR_BODY_NO_ISSUE_REF_STEP` |
+  | `COMMIT_PUSH_LOCAL_STEP` | `COMMIT_PUSH_HOST_MEDIATED_STEP` |
+  | `IF_BLOCKED_TRIAGE_LOCAL_STEP` | `IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP` |
+  | `IF_BLOCKED_PUSH_LOCAL_STEP` | `IF_BLOCKED_PUSH_HOST_MEDIATED_STEP` |
+
+  `lib/removed-fragment-vars.nix` is the authoritative list. Variables not in
+  the table, such as `COMMIT_PUSH_READ_WRITE_STEP`, are unchanged.
+- The fragment files moved. Most per-backend files are now in the backend's
+  folder under a shorter name, and the files that were the same for several
+  backends collapsed into one root file:
+
+  | Old file under `fragments/` | New file |
+  | --- | --- |
+  | `issue-read-github.md`, `issue-read-forgejo.md` | `issue-read.md` |
+  | `issue-read-local.md` | `local/issue-read.md` |
+  | `research-issue-read-github.md`, `research-issue-read-forgejo.md` | `research-issue-read.md` |
+  | `research-issue-read-local.md` | `local/research-issue-read.md` |
+  | `scout-issue-read-github.md`, `scout-issue-read-forgejo.md` | `scout-issue-read.md` |
+  | `filer-dedup-search.md` | `github/filer-dedup.md` |
+  | `filer-dedup-search-forgejo.md` | `forgejo/filer-dedup.md` |
+  | `filer-dedup-search-local.md` | `local/filer-dedup.md` |
+  | `filer-file-direct.md` | `github/filer-direct-file.md` |
+  | `filer-file-direct-forgejo.md` | `forgejo/filer-direct-file.md` |
+  | `filer-label-direct.md` | `github/filer-direct-label.md` |
+  | `filer-label-direct-forgejo.md` | `forgejo/filer-direct-label.md` |
+  | `research-verdict-github.md` | `github/research-verdict.md` |
+  | `research-verdict-forgejo.md` | `forgejo/research-verdict.md` |
+  | `research-verdict-github-readonly.md`, `research-verdict-forgejo-readonly.md` | `research-verdict-relay.md` |
+  | `research-verdict-github-readonly-socket.md`, `research-verdict-forgejo-readonly-socket.md` | `research-verdict-relay-socket.md` |
+  | `research-verdict-local.md` | `local/research-verdict-relay.md` |
+  | `research-verdict-local-socket.md` | `local/research-verdict-relay-socket.md` |
+  | `research-outcome-landing-github.md` | `github/research-outcome-landing.md` |
+  | `research-outcome-landing-forgejo.md` | `forgejo/research-outcome-landing.md` |
+  | `issue-blocked-comment-github.md` | `github/issue-blocked-comment.md` |
+  | `issue-blocked-comment-forgejo.md` | `forgejo/issue-blocked-comment.md` |
+  | `issue-blocked-comment-github-readonly.md`, `issue-blocked-comment-forgejo-readonly.md` | `issue-blocked-comment-relay.md` |
+  | `issue-blocked-comment-local.md` | `local/issue-blocked-comment-relay.md` |
+  | `fix-ci-read-github.md` | `github/fix-ci-read.md` |
+  | `fix-ci-read-forgejo.md` | `forgejo/fix-ci-read.md` |
+  | `open-pr-create-git.md` | `github/open-pr-create.md` |
+  | `open-pr-create-forgejo.md` | `forgejo/open-pr-create.md` |
+  | `if-blocked-pr-git.md` | `github/if-blocked-pr.md` |
+  | `if-blocked-pr-forgejo.md` | `forgejo/if-blocked-pr.md` |
+  | `pr-body-local-ref.md` | `local/pr-body-issue-ref.md` |
+  | `pr-body-local-noref.md` | `local/pr-body-no-issue-ref.md` |
+  | `commit-push-local.md` | `commit-push-host-mediated.md` |
+  | `if-blocked-triage-local.md` | `if-blocked-triage-host-mediated.md` |
+  | `if-blocked-push-local.md` | `if-blocked-push-host-mediated.md` |
+
+  The merged root files use `${FORGE_DISPLAY_NAME}` where the old files named
+  a backend, so an override that copies one of them and edits it should keep
+  the variable rather than hard-code a name. If your override copies the old
+  files, move them to the new paths.
+- The slot variables have no old-layout fallback: a directory still on the old
+  layout renders `${ISSUE_READ_STEP}` and the other slots empty. The
+  deprecated variables do fall back, each to its old root file when the new
+  path is missing, so an override that has not moved yet keeps working through
+  the deprecation window. A runtime `--prompt-dir` replaces the whole prompts
+  directory, so it never falls back to the shipped files. The
+  `ISSUE_READ_{GITHUB,FORGEJO}_STEP` fills now read the shared root
+  `issue-read.md`, not `github/issue-read.md`, so an override directory on the
+  unreleased #5646 layout that still uses them must move its file to the root.
 
 A leftover deprecated variable warns at `nix build` (`mkHarness` eval) and
 again when the launcher assembles the prompt, with text like:
@@ -37,9 +122,9 @@ variable deprecated in issue #5646 that still renders; use
 ${ISSUE_READ_STEP} instead (see MIGRATING.md)
 ```
 
-The three variables are deprecated from 0.29.0 and may be removed from 0.30.0,
-the minor release after it. Once removed, a leftover reference fails the
-build and prompt assembly like any other removed fragment variable (issue
+The deprecated variables are deprecated from 0.29.0 and may be removed from
+0.30.0, the minor release after it. Once removed, a leftover reference fails
+the build and prompt assembly like any other removed fragment variable (issue
 #4401).
 
 ## Adding the pi Driver to an existing Consumer flake (issue #5486)
