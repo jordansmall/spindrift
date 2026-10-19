@@ -145,7 +145,8 @@ func requireSlug(s Settings, name string) error {
 // research states always ride the label fallback (ADR 0022, issue #4919), so
 // the research tracker gets none.
 func JiraStatusMappingFor(t dispatchkind.Tracker, mapping string) string {
-	if t == dispatchkind.TrackerResearch {
+	switch t {
+	case dispatchkind.TrackerResearch:
 		return ""
 	}
 	return mapping

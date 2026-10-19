@@ -157,8 +157,11 @@ func (l *Launcher) Pick(tracker forge.IssueTracker, num, title string, kind Kind
 // claim lands its TransitionState call on the tracker instance carrying that
 // same label family (issue #1708).
 func (l *Launcher) trackerFor(kind Kind, workTracker forge.IssueTracker) forge.IssueTracker {
-	if kind.Tracker == dispatchkind.TrackerResearch && l.ResearchTracker != nil {
-		return l.ResearchTracker
+	switch kind.Tracker {
+	case dispatchkind.TrackerResearch:
+		if l.ResearchTracker != nil {
+			return l.ResearchTracker
+		}
 	}
 	return workTracker
 }
