@@ -805,6 +805,172 @@ rec {
     + "// the struct-sync test; it is not read at runtime.\n"
     + "var descriptorRowFields = []string{${descriptorFieldNames}}\n";
 
+  # cmd/launcher/internal/dispatchkind/kinds_gen.go content (issue #5668): one
+  # Go `Descriptor` var per lib/dispatch-kinds row, in row order, plus All and
+  # Default. Emits unaligned Go; gofmt owns column alignment.
+  renderDispatchKindsGo =
+    kindRows:
+    let
+      # Fields in Descriptor struct order; TestDescriptorFieldsMatchNixRows
+      # pins the hand-written struct to this table. `shape` selects the Go
+      # rendering (see shapes): str and flag are omitted when ""/false, enum is a bare Go
+      # constant identifier and always rendered. passRoles is renderer-supplied,
+      # not a row attribute; it is listed only so the struct-parity test sees it.
+      field = attr: go: shape: { inherit attr go shape; };
+      rowFields = [
+        (field "name" "Name" "str")
+        (field "verb" "Verb" "str")
+        (field "keying" "Keying" "enum")
+        (field "labels" "Labels" "enum")
+        (field "prompts" "Prompts" "prompts")
+        (field "settle" "Settle" "enum")
+        (field "adviseOnly" "AdviseOnly" "flag")
+        (field "completeBanner" "CompleteBanner" "str")
+        (field "readOnlyBox" "ReadOnlyBox" "flag")
+        (field "daemonPriority" "DaemonPriority" "enum")
+        (field "demandSource" "DemandSource" "enum")
+        (field "findingLabel" "FindingLabel" "str")
+        (field "patchLabel" "PatchLabel" "str")
+        (field "contract" "Contract" "enum")
+        (field "filerRelayGate" "FilerRelayGate" "str")
+        (field "tracker" "Tracker" "enum")
+        (field "announceVerb" "AnnounceVerb" "str")
+        (field "enablement" "Enablement" "enum")
+        (field "preflight" "Preflight" "preflight")
+        (field "unclaimedGate" "UnclaimedGate" "flag")
+        (field "statuses" "Statuses" "statuses")
+        (field "passRoles" "PassRoles" "passRoles")
+      ];
+      promptFields = [
+        {
+          attr = "base";
+          go = "Base";
+        }
+        {
+          attr = "selfContainedBase";
+          go = "SelfContainedBase";
+        }
+        {
+          attr = "reviewer";
+          go = "Reviewer";
+        }
+      ];
+      promptsLiteral =
+        prompts:
+        let
+          set = builtins.filter (f: (prompts.${f.attr} or "") != "") promptFields;
+        in
+        if set == [ ] then
+          ""
+        else
+          "Prompts: Prompts{"
+          + builtins.concatStringsSep ", " (map (f: "${f.go}: ${builtins.toJSON prompts.${f.attr}}") set)
+          + "},\n";
+      preflightLiteral =
+        row:
+        let
+          p = row.preflight;
+          flag =
+            if (p.flag or "") == "" then
+              throw "lib/dispatch-kinds/${row.name}.nix: preflight when='${p.when}' needs a flag"
+            else
+              builtins.toJSON p.flag;
+        in
+        if p.when == "none" then
+          "NoPreflight()"
+        else if p.when == "named" then
+          "PreflightWhenNamed(${flag})"
+        else if p.when == "drawn" then
+          "PreflightWhenDrawn(${flag})"
+        else
+          throw "lib/dispatch-kinds/${row.name}.nix: preflight.when must be none, named, or drawn, got '${p.when}'";
+      shapes = {
+        passRoles = _: _: "PassRoles: passRoles(),\n";
+        prompts = row: _: promptsLiteral (row.prompts or { });
+        preflight = row: _: "Preflight: ${preflightLiteral row},\n";
+        statuses =
+          row: _:
+          if (row.statuses or [ ]) == [ ] then
+            ""
+          else
+            "Statuses: []string{${builtins.concatStringsSep ", " (map builtins.toJSON row.statuses)}},\n";
+        enum =
+          row: f:
+          if row ? ${f.attr} then
+            "${f.go}: ${row.${f.attr}},\n"
+          else
+            throw "lib/dispatch-kinds/${row.name}.nix: ${f.attr} is required";
+        flag = row: f: if (row.${f.attr} or null) == true then "${f.go}: true,\n" else "";
+        str =
+          row: f:
+          let
+            value = row.${f.attr} or "";
+          in
+          if value == "" then "" else "${f.go}: ${builtins.toJSON value},\n";
+      };
+      fieldLine =
+        row: f:
+        (shapes.${f.shape}
+          or (throw "lib/renderers.nix: renderDispatchKindsGo has no rendering for shape '${f.shape}' (field ${f.go})")
+        )
+          row
+          f;
+      # A misspelled row attribute or prompts key would otherwise render as the
+      # Go zero value; fail the build instead, as renderBackendRegistryGo does.
+      # goVar and default drive the var name and Default, not a Descriptor
+      # field; passRoles is renderer-supplied, so a row setting it is an error.
+      knownFields = [
+        "goVar"
+        "default"
+      ]
+      ++ map (f: f.attr) (builtins.filter (f: f.shape != "passRoles") rowFields);
+      checkRow =
+        row:
+        let
+          unknown = builtins.filter (attr: !(builtins.elem attr knownFields)) (builtins.attrNames row);
+          unknownPrompts = builtins.filter (k: !(builtins.elem k (map (f: f.attr) promptFields))) (
+            builtins.attrNames (row.prompts or { })
+          );
+        in
+        if unknown != [ ] then
+          throw "lib/dispatch-kinds/${row.name or "?"}.nix: row has unknown field(s): ${builtins.concatStringsSep ", " unknown}"
+        else if unknownPrompts != [ ] then
+          throw "lib/dispatch-kinds/${row.name or "?"}.nix: prompts has unknown key(s): ${builtins.concatStringsSep ", " unknownPrompts}"
+        else
+          row;
+      renderRow =
+        row:
+        "// ${row.goVar} is the ${row.name} Dispatch kind, declared in lib/dispatch-kinds/${row.name}.nix.\n"
+        + "${row.goVar} = &Descriptor{\n"
+        + concatStrings (map (fieldLine row) rowFields)
+        + "}\n";
+      checkedRows = map checkRow kindRows;
+      defaults = builtins.filter (row: row.default or false) checkedRows;
+      defaultRow =
+        if builtins.length defaults == 1 then
+          builtins.head defaults
+        else
+          throw "lib/dispatch-kinds: exactly one row must set `default = true`, found ${toString (builtins.length defaults)}";
+    in
+    "// Code generated by nix/regen.nix from lib/dispatch-kinds/*.nix. DO NOT EDIT.\n"
+    + "package dispatchkind\n"
+    + "\n"
+    + "var (\n"
+    + concatStrings (map renderRow checkedRows)
+    + ")\n"
+    + "\n"
+    + "// All lists every kind in lib/dispatch-kinds/default.nix order; that order is\n"
+    + "// the daemon's default pool order.\n"
+    + "var All = []*Descriptor{${builtins.concatStringsSep ", " (map (r: r.goVar) checkedRows)}}\n"
+    + "\n"
+    + "// Default is the kind a \"\" (unnamed) dispatch defaults to.\n"
+    + "var Default = ${defaultRow.goVar}\n"
+    + "\n"
+    + "// descriptorRowFields lists the Descriptor fields kinds_gen.go populates:\n"
+    + "// PassRoles from the renderer, the rest from row attributes. It feeds the\n"
+    + "// struct-sync test and is not read at runtime.\n"
+    + "var descriptorRowFields = []string{${renderGoStringSlice (map (f: f.go) rowFields)}}\n";
+
   # cmd/launcher/internal/chore/builtins_gen.go content (issues #3991, #4766).
   # choreCatalog is lib/chore-catalog.nix's export. Names are sorted so a
   # catalog reorder (which is load-bearing for classesDefault's byte layout)

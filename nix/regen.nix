@@ -30,6 +30,7 @@ let
       extraOptionPaths;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverDescriptorsFile = renderers.renderDriverDescriptorsGo driverRegistry.entries;
+  dispatchKindsFile = renderers.renderDispatchKindsGo (import ../lib/dispatch-kinds);
   choreCatalog = import ../lib/chore-catalog.nix;
   choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
@@ -175,6 +176,8 @@ pkgs.writeShellApplication {
     ${writeGenerated "docs/flake-options.md" flakeOptionsDoc}
     ${writeGenerated "cmd/launcher/internal/driver/descriptor_gen.go" driverDescriptorsFile}
     gofmt -w "$root/cmd/launcher/internal/driver/descriptor_gen.go"
+    ${writeGenerated "cmd/launcher/internal/dispatchkind/kinds_gen.go" dispatchKindsFile}
+    gofmt -w "$root/cmd/launcher/internal/dispatchkind/kinds_gen.go"
     ${writeGenerated "cmd/launcher/internal/chore/builtins_gen.go" choreBuiltinsFile}
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/runtimevalues_gen.go" runtimeValuesFile}

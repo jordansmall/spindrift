@@ -306,7 +306,7 @@ let
     # filer-label-relay.md splits by dispatch kind (issue #2593): the relay
     # mechanism is identical for work and research, but the label the launcher
     # applies host-side differs (agent-review-finding for work,
-    # agent-research-finding for research -- each kind's dispatchkind.go
+    # agent-research-finding for research -- each kind's lib/dispatch-kinds row
     # FindingLabel) and this fragment's prose names it. The two gates are
     # never both true.
     {

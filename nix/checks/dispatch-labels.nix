@@ -183,8 +183,8 @@ let
   # pulls the literal from its own known syntactic position, span-scanned so a
   # reformat cannot hide it.
   harnessSurfaces = {
-    "cmd/launcher/internal/dispatchkind/dispatchkind.go" = {
-      src = builtins.readFile ../../cmd/launcher/internal/dispatchkind/dispatchkind.go;
+    "cmd/launcher/internal/dispatchkind/kinds_gen.go" = {
+      src = builtins.readFile ../../cmd/launcher/internal/dispatchkind/kinds_gen.go;
       extract = extractDispatchkindLabels;
     };
     "templates/default/prompts/fragments/filer-label-direct.md" = {
@@ -578,10 +578,10 @@ mapAttrs (
     let
       doctoredDispatchkindSrc =
         replaceStrings [ ''"agent-review-finding"'' ] [ ''"review-finding"'' ]
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+        "cmd/launcher/internal/dispatchkind/kinds_gen.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go"
           // {
             src = doctoredDispatchkindSrc;
           };
@@ -592,7 +592,7 @@ mapAttrs (
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
+      "label-registry-covers-harness-writes-regression: expected assertHarnessWritesInRegistry to reject a synthetic kinds_gen.go with agent-review-finding de-prefixed to review-finding, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-regression" { } "touch $out";
 
   # Proves extractLabelCreateTokens still catches an unregistered label once
@@ -687,10 +687,10 @@ mapAttrs (
     let
       doctoredDispatchkindSrc =
         replaceStrings [ "FindingLabel:" ] [ "ProvenanceLabel:" ]
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+        "cmd/launcher/internal/dispatchkind/kinds_gen.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go"
           // {
             src = doctoredDispatchkindSrc;
           };
@@ -701,7 +701,7 @@ mapAttrs (
       });
     in
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-field-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with FindingLabel: renamed to ProvenanceLabel:, but it evaluated successfully";
+      "label-registry-covers-harness-writes-field-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic kinds_gen.go with FindingLabel: renamed to ProvenanceLabel:, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-field-rename-regression" { } "touch $out";
 
   # Proves one descriptor's FindingLabel moving to a named constant still
@@ -710,7 +710,7 @@ mapAttrs (
   # and the butler's label goes uncovered.
   label-registry-covers-harness-writes-named-constant-regression = expectNamedConstantRejection {
     name = "label-registry-covers-harness-writes-named-constant-regression";
-    path = "cmd/launcher/internal/dispatchkind/dispatchkind.go";
+    path = "cmd/launcher/internal/dispatchkind/kinds_gen.go";
     needle = ''FindingLabel:   "agent-butler-finding"'';
     constant = "FindingLabel:   butlerFindingLabel";
     what = "the butler descriptor's FindingLabel literal";
@@ -859,10 +859,10 @@ mapAttrs (
         replaceStrings
           [ ''FindingLabel:   "agent-review-finding",'' ]
           [ "FindingLabel:\n\t\t\t\"agent-unregistered-label\",\n" ]
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
+        "cmd/launcher/internal/dispatchkind/kinds_gen.go" =
+          harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go"
           // {
             src = doctoredDispatchkindSrc;
           };
@@ -879,7 +879,7 @@ mapAttrs (
     assert assertMsg (elem "agent-unregistered-label" extractedLabels)
       "label-registry-covers-harness-writes-finding-label-multiline-regression: expected the dispatchkind extractor to find \"agent-unregistered-label\" among ${builtins.toJSON extractedLabels} on the reformatted FindingLabel: assignment (value moved to its own line), but it didn't";
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-finding-label-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the FindingLabel: assignment gofmt-reformatted onto its own line and its value swapped to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-finding-label-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic kinds_gen.go with the FindingLabel: assignment gofmt-reformatted onto its own line and its value swapped to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-finding-label-multiline-regression" { }
       "touch $out";
 
@@ -887,7 +887,7 @@ mapAttrs (
   # registry (issue #4897); production reads it in butler/settle.go and doctor.
   label-registry-covers-harness-writes-patch-label-drift-regression =
     let
-      originalDispatchkindSrc = harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
+      originalDispatchkindSrc = harnessSurfaces."cmd/launcher/internal/dispatchkind/kinds_gen.go".src;
       doctoredDispatchkindSrc =
         replaceStrings [ ''"agent-butler-patch"'' ] [ ''"agent-unregistered-label"'' ]
           originalDispatchkindSrc;
@@ -896,7 +896,7 @@ mapAttrs (
         extract = extractDispatchkindLabels;
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = withSurfaceSrc "cmd/launcher/internal/dispatchkind/dispatchkind.go" doctoredDispatchkindSrc;
+        harnessSurfaces = withSurfaceSrc "cmd/launcher/internal/dispatchkind/kinds_gen.go" doctoredDispatchkindSrc;
         registryLabels = allRegistryLabels;
       });
     in
@@ -905,7 +905,7 @@ mapAttrs (
     assert assertMsg (elem "agent-unregistered-label" extractedLabels)
       "label-registry-covers-harness-writes-patch-label-drift-regression: expected the dispatchkind extractor to find \"agent-unregistered-label\" among ${builtins.toJSON extractedLabels} on the PatchLabel: assignment, but it didn't";
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-patch-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the butler's PatchLabel swapped to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-patch-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic kinds_gen.go with the butler's PatchLabel swapped to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-patch-label-drift-regression" { }
       "touch $out";
 
@@ -915,7 +915,7 @@ mapAttrs (
     expectNamedConstantRejection
       {
         name = "label-registry-covers-harness-writes-patch-label-named-constant-regression";
-        path = "cmd/launcher/internal/dispatchkind/dispatchkind.go";
+        path = "cmd/launcher/internal/dispatchkind/kinds_gen.go";
         needle = ''"agent-butler-patch"'';
         constant = "butlerPatchLabel";
         what = "the butler descriptor's PatchLabel literal";
