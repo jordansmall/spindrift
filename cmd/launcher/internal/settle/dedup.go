@@ -86,10 +86,6 @@ func isProvenanceTerm(k string) bool {
 	return ok && slices.ContainsFunc(catalogRows(), func(r chore.Row) bool { return r.Name == name })
 }
 
-// tuningChore names the tuning Chore for its own not-planned expiry, not the
-// merge hold, which reads the catalog row instead.
-const tuningChore = "tuning"
-
 // dedupPunctRun matches a run of site-key separators plus any touching space,
 // so "Type.Field", "Type:Field", "type#field", "type_field", and
 // "Type. Field" fold alike.
@@ -256,13 +252,13 @@ func isFindingIssue(labels []string) bool {
 // keyed by its marker's dedup terms and valued "#<number>". A non-finding
 // issue is skipped: dedup only ever consults an issue fileIssueIntentsDetailed
 // itself filed. Later calls overwrite earlier ones for a shared key. An issue
-// that notPlannedExpired at notPlannedBefore is skipped too.
-func indexFindingIssues(index map[string]string, issues []forge.Issue, notPlannedBefore time.Time) {
+// that notPlannedExpired for chore at notPlannedBefore is skipped too.
+func indexFindingIssues(index map[string]string, issues []forge.Issue, chore string, notPlannedBefore time.Time) {
 	for _, iss := range issues {
 		if !isFindingIssue(iss.Labels) {
 			continue
 		}
-		if notPlannedExpired(iss, notPlannedBefore) {
+		if notPlannedExpired(iss, chore, notPlannedBefore) {
 			continue
 		}
 		ref := "#" + iss.Number
@@ -275,19 +271,20 @@ func indexFindingIssues(index map[string]string, issues []forge.Issue, notPlanne
 	}
 }
 
-// notPlannedExpired reports whether iss is a tuning finding closed
+// notPlannedExpired reports whether iss is a finding of chore closed
 // not-planned at or before cutoff (ADR 0062 §6: a rejected idea may return
-// once its cooldown ends). A zero cutoff or an unknown ClosedAt never
-// expires one, and a code finding, carrying no tuning marker, never does.
-func notPlannedExpired(iss forge.Issue, cutoff time.Time) bool {
-	return !cutoff.IsZero() && iss.ClosedNotPlanned && !iss.ClosedAt.IsZero() &&
-		!iss.ClosedAt.After(cutoff) && carriesChoreMarker(iss.Body, tuningChore)
+// once its cooldown ends). A zero cutoff, an unknown ClosedAt, or an empty
+// chore never expires one, and a finding carrying another Chore's marker (or
+// none, as a code finding) never does.
+func notPlannedExpired(iss forge.Issue, chore string, cutoff time.Time) bool {
+	return chore != "" && !cutoff.IsZero() && iss.ClosedNotPlanned && !iss.ClosedAt.IsZero() &&
+		!iss.ClosedAt.After(cutoff) && carriesChoreMarker(iss.Body, chore)
 }
 
 // backlogDedupIndex maps every dedup key already covered to a
 // human-readable reference: a "#<number>" for a key covered by a finding
 // issue, open or closed -- closing a finding is a durable triage decision the
-// host enforces (issue #3873), except that a tuning finding closed
+// host enforces (issue #3873), except that a finding of chore closed
 // not-planned expires at notPlannedBefore (see notPlannedExpired) -- or a
 // `this run's "<title>"` string for a key fileIssueIntentsDetailed adds in
 // place as this same run files its own intents. A list failure is non-fatal:
@@ -299,7 +296,7 @@ func notPlannedExpired(iss forge.Issue, cutoff time.Time) bool {
 // actively tracked, wins a shared key. Every real adapter implements
 // forge.LabeledBacklogLister; a tracker without it (a test fake) falls back
 // to ListOpenIssues, open-only.
-func backlogDedupIndex(it forge.IssueTracker, num string, notPlannedBefore time.Time) map[string]string {
+func backlogDedupIndex(it forge.IssueTracker, num, chore string, notPlannedBefore time.Time) map[string]string {
 	index := make(map[string]string)
 	lister, ok := it.(forge.LabeledBacklogLister)
 	if !ok {
@@ -308,7 +305,7 @@ func backlogDedupIndex(it forge.IssueTracker, num string, notPlannedBefore time.
 			fmt.Fprintf(os.Stderr, "    ?? #%s: list open issues (unlabelled fallback) failed: %v\n", num, err)
 			return index
 		}
-		indexFindingIssues(index, issues, notPlannedBefore)
+		indexFindingIssues(index, issues, chore, notPlannedBefore)
 		return index
 	}
 	for _, state := range []forge.IssueState{forge.IssueClosed, forge.IssueOpen} {
@@ -316,7 +313,7 @@ func backlogDedupIndex(it forge.IssueTracker, num string, notPlannedBefore time.
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: list %s finding issues failed: %v\n", num, strings.ToLower(string(state)), err)
 		}
-		indexFindingIssues(index, issues, notPlannedBefore)
+		indexFindingIssues(index, issues, chore, notPlannedBefore)
 	}
 	return index
 }
@@ -478,8 +475,10 @@ type DedupPolicy struct {
 	// Terms, when set, replaces a finding's own DedupTerms as both its dedup
 	// key set and its marker terms.
 	Terms func(Finding) []string
-	// NotPlannedBefore: a closed-not-planned tuning finding closed at or
-	// before it no longer suppresses; zero never expires.
+	// Chore and NotPlannedBefore: a closed-not-planned finding of Chore
+	// (carrying its chore=<name> marker term) closed at or before
+	// NotPlannedBefore no longer suppresses; zero never expires.
+	Chore            string
 	NotPlannedBefore time.Time
 }
 

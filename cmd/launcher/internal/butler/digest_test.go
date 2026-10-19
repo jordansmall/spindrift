@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
@@ -163,5 +164,63 @@ func TestRecordsChoreWithNilValidateStillDropsBadCites(t *testing.T) {
 	want := []ledger.Drop{{Title: "uncited", Reason: "unknown-cite"}, {Title: "unknown", Reason: "unknown-cite"}}
 	if !slices.Equal(tip.State.Drops, want) {
 		t.Errorf("Drops = %v, want %v", tip.State.Drops, want)
+	}
+}
+
+// The records adapter expires a closed-not-planned finding on the cooldown for
+// any records Chore, not only tuning: a synthetic Digest's finding closed before
+// now-cooldown no longer suppresses a re-filing, one closed after still does.
+func TestRecordsChoreNotPlannedCooldownExpiresItsOwnFindings(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		want int
+	}{
+		{"closed before the cutoff", 721 * time.Hour, 1},
+		{"closed inside the cooldown", 24 * time.Hour, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+			p := tuningPolicy(root, 1)
+			p.Chores = []chore.Chore{{Name: noPriorChore, Every: time.Hour, Records: true, FindingLabel: chore.FindingLabel(noPriorChore)}}
+			fc := forge.NewFake()
+			fc.PostIssueURL = "https://example.com/issues/77"
+			backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+			newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+				d := readyDispatcher()
+				d.RunResult = dispatch.Succeeded(dispatch.Result{
+					Resolved:          outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "butler-" + noPriorChore, Status: outcome.StatusReady, Note: "swept"}},
+					IssueIntentsFound: true,
+					IssueIntents:      []string{tuningIntent(t, "first", "prompt-gap", []string{noPriorAnchor}, "nowhere.go:Foo")},
+				})
+				d.RecordIDResult = dispatchrecord.RecordID(noPriorChore, c.Name, c.ClaimTime)
+				return d
+			}
+			sweep := func(it forge.IssueTracker, now time.Time) {
+				t.Helper()
+				r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, it, newBox, p, func() time.Time { return now })
+				if out, err := r.Sweep([]string{noPriorChore}); err != nil || out.Kind != Swept {
+					t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+				}
+			}
+			sweep(fc.AsIssueFiler(), tuningNow.Add(-48*time.Hour))
+			if len(fc.PostIssueCalls) != 1 {
+				t.Fatalf("first Sweep filed %d, want 1", len(fc.PostIssueCalls))
+			}
+			// noprior is no catalog Chore, so the host stamps no chore term on its
+			// finding; add the one a registered records Chore's finding carries.
+			body := strings.TrimSuffix(fc.PostIssueCalls[0].Body, " -->") + ", chore=" + noPriorChore + " -->"
+			filed := forge.Issue{
+				Number: "77", Body: body,
+				Labels:           []string{dispatchkind.Butler.FindingLabel, chore.FindingLabel(noPriorChore)},
+				ClosedNotPlanned: true, ClosedAt: tuningNow.Add(-tc.age),
+			}
+			seedRecords(t, root, 10, 3, tuningNow.Add(-24*time.Hour))
+			sweep(newBacklogTracker(t, fc.AsIssueFiler(), nil, []forge.Issue{filed}), tuningNow)
+			if got := len(fc.PostIssueCalls) - 1; got != tc.want {
+				t.Errorf("second Sweep filed %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
