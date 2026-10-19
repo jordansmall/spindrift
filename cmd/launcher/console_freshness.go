@@ -17,21 +17,26 @@ import (
 // process at nix-wrapper invocation time and cannot be recomputed in-process,
 // so a bare Probe call reports the pre-rebuild verdict forever; the checker
 // caches the rev rebuild landed on and treats a stale verdict there as fresh.
-func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error)) {
+func newConsoleFreshness(c config, pwd string, eval freshness.Evaluator, pull func() (string, string, error), build func() (string, error)) (waves.FreshnessChecker, func() (string, string, error), error) {
+	art, err := c.artifact()
+	if err != nil {
+		return nil, nil, err
+	}
 	probe := func() freshness.Result {
 		// FlakeLauncherAttr and LoadedLauncherHash stay zero: issue #1364 scopes
 		// host-launcher freshness to the headless wave path. The Console rebuilds
 		// only the loaded artifact (issue #2667), never the host launcher binary,
 		// so a launcher-stale verdict here would be one it can never resolve.
 		return freshness.Probe(freshness.ProbeSpec{
-			RunnerKind:     c.runnerKind,
+			Artifact:       art,
 			Pwd:            pwd,
 			BaseBranch:     c.baseBranch,
 			FlakeImageAttr: c.flakeImageAttr,
 			ImageTag:       c.imageTag,
 		}, eval)
 	}
-	return newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
+	fresh, rebuild := newConsoleFreshnessChecker(c.baseBranch, probe, pull, build)
+	return fresh, rebuild, nil
 }
 
 // newConsoleFreshnessChecker holds the rev-caching logic, with the probe, pull

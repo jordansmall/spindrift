@@ -33,7 +33,7 @@ func TestRunContinuous_RealProbe_LauncherStaleImageFresh(t *testing.T) {
 	var lastMessage string
 	fresh := func() (bool, bool, string) {
 		res := freshness.Probe(freshness.ProbeSpec{
-			RunnerKind:         "podman",
+			Artifact:           freshness.OCIImage,
 			Pwd:                pwd,
 			BaseBranch:         "main",
 			FlakeImageAttr:     imageAttr,

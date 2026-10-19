@@ -191,8 +191,9 @@ func TestPreviewIssues_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 	}
 }
 
-// probe.go no longer special-cases bwrap before the fetch step, so a bwrap and
-// an OCI runnerKind reach the same not-a-git-repository path when pwd is not a
+// Probe no longer branches on the runner family (it once special-cased only
+// KindBwrap before the fetch step), so a store-closure and an OCI image
+// artifact reach the same not-a-git-repository path when pwd is not a
 // checkout. c.runtime stays set to "podman" here, but nothing in this path
 // reads it; internal/freshness's own tests cover that.
 func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
@@ -200,7 +201,7 @@ func TestPreviewIssues_PrintsFreshnessLine(t *testing.T) {
 	c.repoSlug = "owner/repo"
 	c.label = "ready-for-agent"
 	c.runtime = "podman"
-	c.runnerKind = "bwrap"
+	c.boxArtifact = "store-closure"
 	fc := forge.NewFake()
 
 	var buf bytes.Buffer
@@ -228,7 +229,7 @@ func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	c := baseConfig()
 	c.repoSlug = "owner/repo"
 	c.label = "ready-for-agent"
-	c.runnerKind = "bwrap"
+	c.boxArtifact = "store-closure"
 	c.baseBranch = "main"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + staleHash + "-agent-closure"
@@ -386,5 +387,19 @@ func TestPreviewIssues_DepsOfCheckFailure_AnnotatesDistinctly(t *testing.T) {
 	}
 	if !strings.Contains(out, "#15  clean\n") {
 		t.Errorf("output missing plain line for unaffected #15; got:\n%s", out)
+	}
+}
+
+// An unknown BOX_ARTIFACT must fail preview loudly rather than fall back to
+// the OCI comparison and print a misleading verdict.
+func TestPreviewIssues_UnknownBoxArtifactIsAnError(t *testing.T) {
+	c := baseConfig()
+	c.boxArtifact = "bogus"
+	fc := forge.NewFake()
+
+	var buf bytes.Buffer
+	err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("previewIssues err = %v, want an error naming the unknown artifact", err)
 	}
 }

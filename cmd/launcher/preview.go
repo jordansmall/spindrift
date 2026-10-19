@@ -17,8 +17,12 @@ import (
 // (issue #1364), so the launcher-currency-attr line below it only echoes
 // config and is not a second verdict.
 func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, w io.Writer, issueNums []string, pwd string, eval freshness.Evaluator) error {
+	art, err := c.artifact()
+	if err != nil {
+		return err
+	}
 	res := freshness.Probe(freshness.ProbeSpec{
-		RunnerKind:         c.runnerKind,
+		Artifact:           art,
 		Pwd:                pwd,
 		BaseBranch:         c.baseBranch,
 		FlakeImageAttr:     c.flakeImageAttr,

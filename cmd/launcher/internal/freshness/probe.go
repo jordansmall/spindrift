@@ -1,7 +1,7 @@
-// Package freshness answers whether the loaded agent image (OCI) or bundled
-// agent closure (bwrap) would be rebuilt if dispatch ran against the current
-// base-branch tip (ADR 0019, #478). Probe evaluates the image attr at the
-// fetched base rev, never a checkout or pull, and compares the identity
+// Package freshness answers whether the loaded Box artifact (an OCI image or a
+// store closure; see Artifact) would be rebuilt if dispatch ran against the
+// current base-branch tip (ADR 0019, #478). Probe evaluates the image attr at
+// the fetched base rev, never a checkout or pull, and compares the identity
 // build/EnsureReady gates on. It mutates nothing.
 package freshness
 
@@ -10,8 +10,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-
-	"spindrift.dev/launcher/internal/runner"
 )
 
 // Evaluator hermetically evaluates a flake attribute's output path at a git rev.
@@ -24,12 +22,12 @@ type Evaluator interface {
 // Result is the outcome of a Probe call.
 type Result struct {
 	// Applicable is false when the probe cannot be checked at all, for any
-	// runnerKind: pwd isn't a git repository, the base branch or origin remote
+	// artifact: pwd isn't a git repository, the base branch or origin remote
 	// is missing, or the flake doesn't provide the image attr.
 	Applicable bool
 	// Fresh is true when the evaluated identity matches the loaded one, a
-	// content-hash tag for OCI or a raw nix store path for bwrap (#2667).
-	// Meaningless when Applicable is false.
+	// content-hash tag for an OCI image or a raw nix store path for a store
+	// closure (#2667). Meaningless when Applicable is false.
 	Fresh bool
 	// Message is a human-readable summary safe to print on `preview`.
 	Message string
@@ -39,7 +37,7 @@ type Result struct {
 	// without re-parsing Message.
 	Rev string
 	// TipTag is the identity a rebuild would load: the "<repo>:<hash>" tag for
-	// an OCI runnerKind, the raw nix store outPath for bwrap. Empty when the
+	// an OCI image, the raw nix store outPath for a store closure. Empty when the
 	// probe never derived it, when the image dimension is fresh (no divergence
 	// to name), or on a launcher eval/hash-derive failure. The non-convergence
 	// diagnostic (#2113) names it alongside the loaded value.
@@ -93,17 +91,6 @@ func storeHash(outPath string) (string, error) {
 	return outPath[storeHashPrefixLen : storeHashPrefixLen+storeHashLen], nil
 }
 
-// imageRepo returns everything before the LAST colon of an "<repo>:<tag>"
-// reference, since a repo can itself contain a colon (a registry host:port
-// prefix). Falls back to "spindrift" when imageTag has no colon at all.
-func imageRepo(imageTag string) string {
-	i := strings.LastIndex(imageTag, ":")
-	if i < 0 {
-		return "spindrift"
-	}
-	return imageTag[:i]
-}
-
 // trimFlakeAttrPrefix strips the ".#" flake-CLI shorthand so Probe's Eval call
 // and RealizeTip's Start call address the same attribute string whichever form
 // flakeImageAttr was configured with.
@@ -113,11 +100,12 @@ func trimFlakeAttrPrefix(attr string) string {
 
 // ProbeSpec is the set of params Probe needs to answer a freshness check.
 type ProbeSpec struct {
-	// RunnerKind is the RUNNER_KIND document artifact (#2538 AC1): runner.KindBwrap
-	// selects the bwrap comparison path, any other value an OCI kind.
-	RunnerKind, Pwd, BaseBranch string
-	// ImageTag is the loaded image's tag, an OCI "repo:tag" string or, for
-	// runner.KindBwrap, a bare nix store path.
+	// Artifact is the Box artifact being compared (ADR 0069 decision 3); it
+	// owns how the tip identity is derived and what the loaded value is called.
+	Artifact        Artifact
+	Pwd, BaseBranch string
+	// ImageTag is the loaded artifact's identity: a "repo:tag" string for
+	// OCIImage, a bare nix store path for StoreClosure.
 	FlakeImageAttr, ImageTag string
 	// FlakeLauncherAttr and LoadedLauncherHash drive the optional
 	// host-launcher freshness dimension (#1364); a non-empty FlakeLauncherAttr
@@ -125,11 +113,11 @@ type ProbeSpec struct {
 	FlakeLauncherAttr, LoadedLauncherHash string
 }
 
-// Probe answers whether the loaded image (OCI or bwrap agent closure) would be
-// rebuilt if dispatch ran against the current base-branch tip. A caller must
-// pass config.runnerKind, not the raw RUNTIME value: a bwrap-kind harness can
-// carry an OCI runtime name, which a runtime-name comparison misclassifies as
-// OCI. The launcher dimension (#1364) evaluates at the same fetched rev.
+// Probe answers whether the loaded Box artifact would be rebuilt if dispatch
+// ran against the current base-branch tip. The artifact comes from the run
+// document's BOX_ARTIFACT, never the raw RUNTIME value: a store-closure
+// harness can carry an OCI runtime name. The launcher dimension (#1364)
+// evaluates at the same fetched rev.
 func Probe(spec ProbeSpec, eval Evaluator) Result {
 	rev, err := fetchBaseTip(spec.Pwd, spec.BaseBranch)
 	if err != nil {
@@ -175,26 +163,16 @@ func Probe(spec ProbeSpec, eval Evaluator) Result {
 		}
 	}
 
-	var tipTag string
-	var imageFresh bool
-	// bwrap has no "repo:tag" registry concept, so compare the evaluated outPath
-	// directly against the loaded imageTag, itself a bare store path. Any other
-	// runnerKind, including an OCI runtime name, is treated as an OCI kind.
-	if spec.RunnerKind == runner.KindBwrap {
-		tipTag = outPath
-		imageFresh = outPath == spec.ImageTag
-	} else {
-		tipTag, err = imageTagFromOutPath(outPath, imageRepo(spec.ImageTag))
-		if err != nil {
-			return Result{
-				Applicable: true,
-				Fresh:      false,
-				Message:    fmt.Sprintf("could not derive image tag at %s tip %s: %v — assuming rebuild needed", spec.BaseBranch, rev, err),
-				Rev:        rev,
-			}
+	tipTag, err := spec.Artifact.TipIdentity(outPath, spec.ImageTag)
+	if err != nil {
+		return Result{
+			Applicable: true,
+			Fresh:      false,
+			Message:    fmt.Sprintf("could not derive image tag at %s tip %s: %v — assuming rebuild needed", spec.BaseBranch, rev, err),
+			Rev:        rev,
 		}
-		imageFresh = tipTag == spec.ImageTag
 	}
+	imageFresh := tipTag == spec.ImageTag
 
 	launcherConfigured := spec.FlakeLauncherAttr != ""
 	launcherFresh := true
@@ -234,7 +212,7 @@ func Probe(spec ProbeSpec, eval Evaluator) Result {
 		Fresh:           imageFresh && launcherFresh,
 		LauncherFresh:   launcherFresh,
 		ImageFresh:      imageFresh,
-		Message:         freshnessMessage(spec.RunnerKind, spec.BaseBranch, rev, launcherConfigured, imageFresh, launcherFresh, tipTag, spec.ImageTag, tipLauncherHash, spec.LoadedLauncherHash),
+		Message:         freshnessMessage(spec.Artifact.Noun, spec.BaseBranch, rev, launcherConfigured, imageFresh, launcherFresh, tipTag, spec.ImageTag, tipLauncherHash, spec.LoadedLauncherHash),
 		Rev:             rev,
 		TipTag:          resultTipTag,
 		TipLauncherHash: tipLauncherHash,
@@ -243,14 +221,10 @@ func Probe(spec ProbeSpec, eval Evaluator) Result {
 
 // freshnessMessage names whichever dimensions drove a rebuild-needed verdict.
 // With launcherConfigured false it keeps the original image-only wording.
-// runnerKind picks the noun for the loaded value: "image" for OCI, "closure"
-// for bwrap (#2667), where that slot holds a raw nix store path.
-func freshnessMessage(runnerKind, baseBranch, rev string, launcherConfigured, imageFresh, launcherFresh bool, tipTag, imageTag, tipLauncherHash, loadedLauncherHash string) string {
-	loaded := "image"
-	if runnerKind == runner.KindBwrap {
-		loaded = "closure"
-	}
-
+// loaded is the artifact's noun for the loaded value: "image" for an OCI
+// image, "closure" for a store closure (#2667), whose slot holds a raw nix
+// store path.
+func freshnessMessage(loaded, baseBranch, rev string, launcherConfigured, imageFresh, launcherFresh bool, tipTag, imageTag, tipLauncherHash, loadedLauncherHash string) string {
 	if !launcherConfigured {
 		if imageFresh {
 			return fmt.Sprintf("fresh (%s tip %s matches the loaded %s %s)", baseBranch, rev, loaded, imageTag)

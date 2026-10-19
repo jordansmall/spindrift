@@ -153,30 +153,31 @@ func TestNewConsoleFreshnessChecker_Rebuild_PropagatesPullNotice(t *testing.T) {
 	}
 }
 
-// newConsoleFreshness must wire config.runnerKind, not config.runtime, into
-// freshness.Probe (issue #2538 AC1/AC2). The bwrap arm compares outPath to
-// imageTag byte-for-byte, while a runtime-name read takes the OCI arm and
-// derives a "spindrift:<hash>" tag that can never equal this colon-less
-// imageTag, so Fresh=true with no "spindrift:" tells the two reads apart.
-func TestNewConsoleFreshness_UsesRunnerKindNotRuntime(t *testing.T) {
+// newConsoleFreshness must wire config.boxArtifact, not config.runtime, into
+// freshness.Probe (issue #2538 AC1/AC2). The store-closure artifact compares
+// outPath to imageTag byte-for-byte, while a runtime-name read takes the OCI
+// arm and derives a "spindrift:<hash>" tag that can never equal this
+// colon-less imageTag, so Fresh=true with no "spindrift:" tells the two reads
+// apart.
+func TestNewConsoleFreshness_UsesBoxArtifactNotRuntime(t *testing.T) {
 	const outPath = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-agent-closure"
 
 	c := baseConfig()
-	c.runnerKind = "bwrap"
+	c.boxArtifact = "store-closure"
 	c.runtime = "podman"
 	c.baseBranch = "main"
 	c.imageTag = outPath // bare store path with no colon, bwrap's own tag shape
 	eval := &freshness.Fake{OutPath: outPath}
 
 	pwd := newConsoleGitRepo(t, "main")
-	fresh, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
+	fresh, _, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
 
 	applicable, isFresh, msg := fresh()
 	if !applicable || !isFresh {
-		t.Fatalf("fresh() = applicable=%v fresh=%v msg=%q, want applicable=true fresh=true (the bwrap arm's direct outPath-vs-imageTag comparison; a wrong c.runtime read would take the OCI arm instead, which can never match a colon-less imageTag)", applicable, isFresh, msg)
+		t.Fatalf("fresh() = applicable=%v fresh=%v msg=%q, want applicable=true fresh=true (the store-closure artifact compares outPath to imageTag directly; a wrong c.runtime read would pick the OCI artifact instead, whose derived tag can never match a colon-less imageTag)", applicable, isFresh, msg)
 	}
 	if strings.Contains(msg, "spindrift:") {
-		t.Errorf("fresh() message %q names an OCI-style %q tag, want the bwrap arm's bare-outPath comparison — proves runnerKind (not runtime) drove Probe", msg, "spindrift:")
+		t.Errorf("fresh() message %q names an OCI-style %q tag, want the store-closure artifact's bare-outPath comparison — proves boxArtifact (not runtime) drove Probe", msg, "spindrift:")
 	}
 }
 
@@ -190,7 +191,7 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 	const launcherHashOnDisk = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // mismatches loadedLauncherHash below
 
 	c := baseConfig()
-	c.runnerKind = "podman"
+	c.boxArtifact = "oci-image"
 	c.baseBranch = "main"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-image"
 	c.imageTag = "spindrift:" + imageHash
@@ -205,7 +206,7 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 	}
 
 	pwd := newConsoleGitRepo(t, "main")
-	fresh, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
+	fresh, _, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
 
 	applicable, isFresh, msg := fresh()
 	if !applicable || !isFresh {
@@ -269,7 +270,7 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 
 	eval := &freshness.Fake{OutPath: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-agent-image"}
 	res := freshness.Probe(freshness.ProbeSpec{
-		RunnerKind:     "podman",
+		Artifact:       freshness.OCIImage,
 		Pwd:            pwd,
 		BaseBranch:     "main",
 		FlakeImageAttr: ".#packages.x86_64-linux.agent-image",
@@ -396,4 +397,16 @@ func newConsoleGitRepo(t *testing.T, baseBranch string) string {
 	gitRun(t, clone, "push", "-u", "origin", baseBranch)
 
 	return clone
+}
+
+// An unknown BOX_ARTIFACT must fail the Console's freshness wiring rather than
+// fall back to the OCI comparison.
+func TestNewConsoleFreshness_UnknownBoxArtifactIsAnError(t *testing.T) {
+	c := baseConfig()
+	c.boxArtifact = "bogus"
+
+	_, _, err := newConsoleFreshness(c, t.TempDir(), &freshness.Fake{}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("newConsoleFreshness err = %v, want an error naming the unknown artifact", err)
+	}
 }

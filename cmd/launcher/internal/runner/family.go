@@ -1,5 +1,7 @@
 package runner
 
+import "fmt"
+
 // Descriptor is one runner family, rendered into families_gen.go from the
 // lib/runners rows. TestDescriptorFieldsMatchNixRows fails if the struct and
 // the row table disagree.
@@ -22,3 +24,15 @@ var ValidValues = func() []string {
 	}
 	return vs
 }()
+
+// DescriptorFor returns the family row for kind, resolving an empty kind to
+// the default family the way Lookup does.
+func DescriptorFor(kind string) (Descriptor, error) {
+	kind = orDefault(kind)
+	for _, f := range Families {
+		if f.Name == kind {
+			return f, nil
+		}
+	}
+	return Descriptor{}, fmt.Errorf("unknown RUNNER_KIND %q; registered runner families: %v", kind, Names())
+}
