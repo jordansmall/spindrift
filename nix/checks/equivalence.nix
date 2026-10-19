@@ -2096,6 +2096,7 @@ in
         "directFileFragmentRows"
         "readOnlyReachableFragmentRows"
         "researchPromptContentByName"
+        "kindPrompts"
         "rosterWarnings"
         "deprecatedFragmentVarWarnings"
       ];

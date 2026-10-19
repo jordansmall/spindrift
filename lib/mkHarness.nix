@@ -82,6 +82,13 @@
   # research-verdict-*-readonly.md lookup at a broken fixture directory
   # without touching the real templates tree.
   fragmentsDir ? ../templates/default/prompts/fragments,
+  # The dispatch kind rows (lib/dispatch-kinds), whose `prompts` axis lists
+  # every kind prompt the image bakes (issue #5671). Not Consumer-tunable;
+  # overridable here only so nix/checks/prompts.nix can add a stub row.
+  dispatchKinds ? import ./dispatch-kinds,
+  # Where a row prompt no Consumer parameter binds is read from; overridable
+  # only so the same check can point a stub row at a fixture file.
+  kindPromptsDir ? ../templates/default/prompts,
   # Skill files baked into the image at /agent/skills, alongside the
   # harness-owned skills. Each element is a path/derivation (copied under its
   # basename) or a { name; src; } content entry (issue #597) re-realized with
@@ -283,13 +290,114 @@ let
   # no case passes the template through byte for byte.
   researchVerdicts = import ./research-verdicts.nix;
   researchVerdictsKnob = mergedDefaults.researchVerdicts or "";
-  researchPromptRendered = researchVerdicts.render researchVerdictsKnob researchPrompt;
-  # Same verdict-set rendering, applied to the self-contained sub-mode prompt
-  # (issue #2202) so a custom RESEARCH_VERDICTS knob reaches both prompts.
-  researchSelfContainedPromptRendered = researchVerdicts.render researchVerdictsKnob researchSelfContainedPrompt;
   researchPromptSourceRendered = researchVerdicts.render researchVerdictsKnob researchPromptSource;
   researchOutcomeContract = sliceFromMarker researchOutcomeContractMarker researchPromptSourceRendered;
   injectResearchOutcomeContract = injectSection researchOutcomeContractMarker researchOutcomeContract;
+
+  # The work row's issue prompt role: keyed below and filtered on by the
+  # forbidden-marker scan, so one binding keeps them in step.
+  issueRole = "issue";
+
+  # The one place a Consumer prompt parameter meets a dispatch kind row, keyed
+  # by kind name then prompt role. A row prompt with no entry here is read
+  # from kindPromptsDir instead (issue #5671).
+  consumerKindPrompts =
+    let
+      bind = source: text: { inherit source text; };
+    in
+    {
+      work = {
+        ${issueRole} = bind "prompt" prompt;
+        fix = bind "fixPrompt" fixPrompt;
+      };
+      research = {
+        base = bind "researchPrompt" researchPrompt;
+        selfContainedBase = bind "researchSelfContainedPrompt" researchSelfContainedPrompt;
+      };
+      butler = {
+        base = bind "butlerPrompt" butlerPrompt;
+        reviewer = bind "butlerReviewPrompt" butlerReviewPrompt;
+      };
+    };
+
+  # What a row's Contract axis does to a prompt before it is baked: the
+  # verdict set renders into research prompts (issue #2201), then each
+  # harness-owned block is injected. A prompt the contract names nothing for
+  # is baked verbatim.
+  renderByContract.ContractVerdict = researchVerdicts.render researchVerdictsKnob;
+  injectByContract = {
+    ContractLanding = {
+      ${issueRole} = injectOutcomeContract;
+      fix = injectFixSharedBlocks;
+    };
+    ContractVerdict = {
+      base = injectResearchOutcomeContract;
+      selfContainedBase = injectResearchOutcomeContract;
+    };
+  };
+
+  # A key in consumerKindPrompts, injectByContract or renderByContract that no
+  # row declares would be skipped silently by the lookups below (a Consumer
+  # override dropped, an injection omitted), so a rename or typo fails eval.
+  kindPromptKeyStrays =
+    let
+      rowPrompts = lib.concatMap (
+        row:
+        map (role: {
+          inherit (row) name contract;
+          inherit role;
+        }) (lib.attrNames (row.prompts or { }))
+      ) dispatchKinds;
+      declared = pred: lib.any pred rowPrompts;
+      pathsOf =
+        attrs:
+        lib.concatMap (outer: map (inner: { inherit outer inner; }) (lib.attrNames attrs.${outer})) (
+          lib.attrNames attrs
+        );
+    in
+    map (p: "consumerKindPrompts.${p.outer}.${p.inner}") (
+      lib.filter (p: !declared (r: r.name == p.outer && r.role == p.inner)) (pathsOf consumerKindPrompts)
+    )
+    ++ map (p: "injectByContract.${p.outer}.${p.inner}") (
+      lib.filter (p: !declared (r: r.contract == p.outer && r.role == p.inner)) (pathsOf injectByContract)
+    )
+    ++ map (c: "renderByContract.${c}") (
+      lib.filter (c: !declared (r: r.contract == c)) (lib.attrNames renderByContract)
+    );
+
+  # Forces kindPromptKeyStrays, the way forbiddenMarkerCheckOk forces its
+  # violations; asserted ahead of the returned attrset.
+  kindPromptKeysOk =
+    if kindPromptKeyStrays == [ ] then
+      true
+    else
+      throw "mkHarness: kind prompt binding names no dispatch kind row prompt (renamed or misspelled row, role or contract?): ${lib.concatStringsSep ", " kindPromptKeyStrays}";
+
+  # Every prompt every dispatch kind row declares: `raw` is the Consumer text
+  # (or the template), `text` has the Contract's rendering applied, `baked` is
+  # what lands in /agent/prompts.
+  kindPrompts = lib.concatMap (
+    row:
+    lib.mapAttrsToList (
+      role: file:
+      let
+        bound =
+          consumerKindPrompts.${row.name}.${role} or {
+            source = file;
+            text = builtins.readFile (kindPromptsDir + "/${file}");
+          };
+        text = (renderByContract.${row.contract} or lib.id) bound.text;
+      in
+      {
+        kind = row.name;
+        inherit (row) contract;
+        inherit role file text;
+        inherit (bound) source;
+        raw = bound.text;
+        baked = (injectByContract.${row.contract}.${role} or lib.id) text;
+      }
+    ) (row.prompts or { })
+  ) dispatchKinds;
 
   # driverEntry is the selected Driver's in-box half (ADR 0009): invocation
   # binary and flags, agent-config rendering, skill wiring, and outcome
@@ -649,12 +757,15 @@ let
     # Just these three: issue #2510 scopes the shared-template half of this
     # rule to the issue, review and filer prompts by name. fix-prompt.md and
     # the research prompts also carry forbiddenMarkers substrings, but
-    # bringing them under this scan is out of scope.
+    # bringing them under this scan is out of scope. The issue prompt is
+    # whatever file the rows give the `issue` role.
     templateContentByFile = {
-      "issue-prompt.md" = prompt;
       "review-prompt.md" = reviewPrompt;
       "filer-prompt.md" = filerPrompt;
-    };
+    }
+    // lib.listToAttrs (
+      map (e: lib.nameValuePair e.file e.raw) (builtins.filter (e: e.role == issueRole) kindPrompts)
+    );
   };
 
   # Forces forbiddenMarkerViolations' evaluation, the way buildTimeRejectOk
@@ -680,20 +791,15 @@ let
     let
       promptArgs = {
         inherit
-          prompt
           scoutPrompt
           reviewPrompt
           reviewAxisPrompt
           filerPrompt
           workerPrompt
           conflictResolvePrompt
-          fixPrompt
-          researchPrompt
-          researchSelfContainedPrompt
-          butlerPrompt
-          butlerReviewPrompt
           ;
-      };
+      }
+      // lib.listToAttrs (map (e: lib.nameValuePair e.source e.raw) kindPrompts);
       labelled = label: attrs: lib.mapAttrs' (n: v: lib.nameValuePair "${label} ${n}" v) attrs;
       fragmentFiles = builtins.listToAttrs (
         # A fragment missing from a Consumer fragmentsDir renders empty, so
@@ -772,15 +878,16 @@ let
   # research-file-issues-relay.md row says why.
   directFileFragmentRows = builtins.filter isDirectFileGate fragments;
 
-  # The research prompts scanned for a direct-file placeholder (issue #2595).
-  # Hand-typed, not derived from a directory listing, so a third
-  # research*-prompt.md template would silently miss this scan. Named so
-  # nix/checks/prompts.nix can read it back through `internals` below and
-  # assert its keys still cover every research*-prompt.md file on disk.
-  researchPromptContentByName = {
-    "research-prompt.md" = researchPromptRendered;
-    "research-self-contained-prompt.md" = researchSelfContainedPromptRendered;
-  };
+  # The research prompts scanned for a direct-file placeholder (issue #2595):
+  # every prompt of a row whose Contract renders the verdict set into it (a key
+  # of renderByContract). Named so nix/checks/prompts.nix can read it back
+  # through `internals` below and assert its keys still cover every
+  # research*-prompt.md file on disk.
+  researchPromptContentByName = lib.listToAttrs (
+    map (e: lib.nameValuePair e.file e.text) (
+      builtins.filter (e: renderByContract ? ${e.contract}) kindPrompts
+    )
+  );
 
   researchDirectFileViolations = promptContract.buildTimeResearchDirectFileViolations {
     inherit directFileFragmentRows researchPromptContentByName;
@@ -1173,30 +1280,20 @@ let
       commsBlock
       checkBlock
       researchOutcomeContract
-      injectOutcomeContract
-      injectFixSharedBlocks
-      injectResearchOutcomeContract
       ;
   };
   imagePrompts = {
     inherit
-      prompt
       scoutPrompt
       reviewPrompt
       reviewAxisPrompt
       filerPrompt
       workerPrompt
       conflictResolvePrompt
-      fixPrompt
       fragmentsSourceDir
-      butlerPrompt
-      butlerReviewPrompt
       choresSourceDir
       ;
-    # Carries the verdict contract rendered from RESEARCH_VERDICTS (#2201).
-    researchPrompt = researchPromptRendered;
-    # The self-contained sub-mode's own prompt (issue #2202), same rendering.
-    researchSelfContainedPrompt = researchSelfContainedPromptRendered;
+    kindPrompts = map (e: { inherit (e) file baked; }) kindPrompts;
   };
   imageKnobs = {
     inherit
@@ -1259,7 +1356,9 @@ let
   # bind-mounted by default, and so SPINDRIFT_PROMPT_DIR can point to it.
   promptDir = hostPkgs.runCommand "prompt-dir" { } ''
     mkdir -p $out
-    cp ${hostPkgs.writeText "issue-prompt.md" (imageContracts.injectOutcomeContract imagePrompts.prompt)} $out/issue-prompt.md
+    ${lib.concatMapStrings (
+      e: "cp ${hostPkgs.writeText e.file e.baked} $out/${e.file}\n"
+    ) imagePrompts.kindPrompts}
     cp ${hostPkgs.writeText "scout-prompt.md" imagePrompts.scoutPrompt} $out/scout-prompt.md
     cp ${hostPkgs.writeText "review-prompt.md" imagePrompts.reviewPrompt} $out/review-prompt.md
     cp ${hostPkgs.writeText "review-axis-prompt.md" imagePrompts.reviewAxisPrompt} $out/review-axis-prompt.md
@@ -1273,11 +1372,6 @@ let
       "cp ${hostPkgs.writeText pf e.prompt} $out/${pf}\n"
     ) imageAgents.customRosterPromptFiles}
     cp ${hostPkgs.writeText "conflict-resolve-prompt.md" imagePrompts.conflictResolvePrompt} $out/conflict-resolve-prompt.md
-    cp ${hostPkgs.writeText "fix-prompt.md" (imageContracts.injectFixSharedBlocks imagePrompts.fixPrompt)} $out/fix-prompt.md
-    cp ${hostPkgs.writeText "research-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchPrompt)} $out/research-prompt.md
-    cp ${hostPkgs.writeText "research-self-contained-prompt.md" (imageContracts.injectResearchOutcomeContract imagePrompts.researchSelfContainedPrompt)} $out/research-self-contained-prompt.md
-    cp ${hostPkgs.writeText "butler-prompt.md" imagePrompts.butlerPrompt} $out/butler-prompt.md
-    cp ${hostPkgs.writeText "butler-review-prompt.md" imagePrompts.butlerReviewPrompt} $out/butler-review-prompt.md
     cp -r ${imagePrompts.fragmentsSourceDir} $out/fragments
     cp -r ${imagePrompts.choresSourceDir} $out/chores
   '';
@@ -1914,6 +2008,7 @@ if defaultsKeyError != null then
 else
   assert buildTimeRejectOk;
   assert bareModelCheckOk;
+  assert kindPromptKeysOk;
   assert forbiddenMarkerCheckOk;
   assert removedFragmentVarCheckOk;
   assert researchDirectFileCheckOk;
@@ -1989,6 +2084,7 @@ else
         directFileFragmentRows
         readOnlyReachableFragmentRows
         researchPromptContentByName
+        kindPrompts
         ;
 
       inherit rosterWarnings deprecatedFragmentVarWarnings;

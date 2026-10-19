@@ -2669,4 +2669,88 @@ in
         done
         touch $out
       '';
+
+  # Issue #5671: the image and promptDir bake whatever prompts the dispatch
+  # kind rows declare, so a row added with a prompt file needs no mkHarness
+  # edit. A stub row, its prompt resolved from a fixture directory (no
+  # Consumer parameter binds it), proves the row is baked and scanned; each of
+  # the six Consumer *Prompt parameters must reach its own row's baked file.
+  mkharness-kind-row-prompts-baked-and-wired =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      stubRow = {
+        name = "stub";
+        contract = "ContractInline";
+        prompts.base = "stub-prompt.md";
+      };
+      templateText = file: builtins.readFile (../../templates/default + "/prompts/${file}");
+      # Each override is the real template plus a trailing marker, so the
+      # Contract's rendering and injection still see the text they expect.
+      overrides = {
+        prompt = "issue-prompt.md";
+        fixPrompt = "fix-prompt.md";
+        researchPrompt = "research-prompt.md";
+        researchSelfContainedPrompt = "research-self-contained-prompt.md";
+        butlerPrompt = "butler-prompt.md";
+        butlerReviewPrompt = "butler-review-prompt.md";
+      };
+      markerOf = param: "CUSTOM-${pkgs.lib.toUpper param}-MARKER";
+      stubbed = import ../../lib/mkHarness.nix (
+        {
+          inherit nixpkgs system;
+          packages = p: [ p.hello ];
+          dispatchKinds = (import ../../lib/dispatch-kinds) ++ [ stubRow ];
+          kindPromptsDir = ../fixtures/kind-prompts;
+        }
+        // builtins.mapAttrs (param: file: templateText file + "\n${markerOf param}\n") overrides
+      );
+      kindPrompts = stubbed.internals.kindPrompts;
+      byFile = file: builtins.filter (e: e.file == file) kindPrompts;
+      stub = builtins.head (byFile "stub-prompt.md");
+      warning = builtins.head stubbed.internals.deprecatedFragmentVarWarnings;
+      researchNames = builtins.attrNames stubbed.internals.researchPromptContentByName;
+      markerChecks = pkgs.lib.mapAttrsToList (
+        param: file:
+        let
+          marker = markerOf param;
+          holders = map (e: e.file) (builtins.filter (e: hasInfix marker e.baked) kindPrompts);
+        in
+        assertMsg (
+          holders == [ file ]
+        ) "${param} marker must reach ${file} and no other baked prompt, got: ${builtins.toJSON holders}"
+      ) overrides;
+    in
+    assert assertMsg (
+      builtins.length (byFile "stub-prompt.md") == 1
+    ) "the stub row's prompt must be in the baked kind prompt set exactly once";
+    assert assertMsg (
+      stub.baked == builtins.readFile ../fixtures/kind-prompts/stub-prompt.md
+    ) "a ContractInline row prompt must be baked verbatim from kindPromptsDir";
+    assert assertMsg (hasInfix "stub-prompt.md" warning)
+      "the stub row's prompt must be a removed-fragment-variable scan source: ${warning}";
+    assert assertMsg (
+      builtins.length (byFile "issue-prompt.md") == 1
+    ) "the real rows' prompts must still be baked alongside the stub";
+    assert assertMsg (
+      !(builtins.elem "stub-prompt.md" researchNames)
+    ) "a non-verdict row's prompt must stay out of researchPromptContentByName";
+    assert assertMsg
+      (builtins.all (f: builtins.elem f researchNames) [
+        "research-prompt.md"
+        "research-self-contained-prompt.md"
+      ])
+      "researchPromptContentByName must cover both research prompts, got: ${builtins.toJSON researchNames}";
+    assert builtins.all (x: x) markerChecks;
+    pkgs.runCommand "mkharness-kind-row-prompts-baked-and-wired" { } ''
+      d=${stubbed.internals.promptDir}
+      cmp $d/stub-prompt.md ${../fixtures/kind-prompts/stub-prompt.md}
+      grep -qF ${markerOf "fixPrompt"} $d/fix-prompt.md
+      grep -qF 'LAND THE CHANGE' $d/fix-prompt.md
+      grep -qF ${markerOf "prompt"} $d/issue-prompt.md
+      grep -qF ${markerOf "researchPrompt"} $d/research-prompt.md
+      grep -qF ${markerOf "researchSelfContainedPrompt"} $d/research-self-contained-prompt.md
+      grep -qF ${markerOf "butlerPrompt"} $d/butler-prompt.md
+      grep -qF ${markerOf "butlerReviewPrompt"} $d/butler-review-prompt.md
+      touch $out
+    '';
 }
