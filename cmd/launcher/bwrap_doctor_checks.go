@@ -4,15 +4,16 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/bwrap"
 )
 
 // Seams so a test can substitute a distinguishable fake per capability.
-// Without them, swapping runner.ValidateOverlay and runner.ValidatePasta
+// Without them, swapping bwrap.ValidateOverlay and bwrap.ValidatePasta
 // between the two rows would leave every test green (issue #2671).
 var (
-	validateOverlayFn          = runner.ValidateOverlay
-	validatePastaFn            = runner.ValidatePasta
-	validateCgroupDelegationFn = runner.ValidateCgroupDelegation
+	validateOverlayFn          = bwrap.ValidateOverlay
+	validatePastaFn            = bwrap.ValidatePasta
+	validateCgroupDelegationFn = bwrap.ValidateCgroupDelegation
 )
 
 // bwrapCapabilityChecks builds the three bwrap-capability rows (issue #2671).
@@ -73,7 +74,7 @@ func bwrapCapabilityChecks(c config) []doctor.Check {
 				// The controller set comes from the same config values main.go
 				// feeds runner.Config, so the row asks about exactly the
 				// delegation this config needs and no more (issue #3273).
-				return nil, validateCgroupDelegationFn(runner.CgroupControllers(c.memoryLimit, c.pidsLimit))
+				return nil, validateCgroupDelegationFn(bwrap.CgroupControllers(c.memoryLimit, c.pidsLimit))
 			},
 		},
 	}

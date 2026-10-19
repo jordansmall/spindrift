@@ -1,4 +1,4 @@
-package runner
+package bwrap
 
 import (
 	"errors"
@@ -16,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // statResolvConf is the test seam for buildArgs' "does the host have
@@ -85,9 +86,9 @@ type bwrapAdapter struct {
 	// mountParams passes this run's host-mount facts from Config to
 	// BuildMountSpecs unmodified. DriverSessionCacheDir is ADR 0009; the
 	// CODE_FORGE=local mount specs are issue #1697.
-	mountParams MountParams
-	unshareNet  bool        // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
-	networkMode NetworkMode // NETWORK_MODE knob; every value except the "host" opt-out isolates from the host netns (issue #2666)
+	mountParams runner.MountParams
+	unshareNet  bool               // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
+	networkMode runner.NetworkMode // NETWORK_MODE knob; every value except the "host" opt-out isolates from the host netns (issue #2666)
 	// pidsLimit is the PIDS_LIMIT knob (empty disables it). bwrap imposes no
 	// process-count cap of its own, so the per-Box cgroup v2 pids.max control
 	// file is the only containment mechanism (ADR 0042, provisionCgroup).
@@ -135,7 +136,7 @@ type bwrapAdapter struct {
 // By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
 // adapter isolates the sandbox into its own network namespace, with egress
 // restored via a hardened pasta helper (ADR 0042), matching rootless podman.
-func NewBwrap(cfg Config, pwd string) Runner {
+func NewBwrap(cfg runner.Config, pwd string) runner.Runner {
 	return &bwrapAdapter{
 		agentFiles:         cfg.AgentFiles,
 		agentEnv:           cfg.AgentEnv,
@@ -189,8 +190,8 @@ func (a *bwrapAdapter) IsReady() error {
 
 // mountSpecs computes the host-to-box mounts that apply for box, shared with
 // the OCI adapter (BuildMountSpecs); only the rendering below differs.
-func (a *bwrapAdapter) mountSpecs(box Box) []MountSpec {
-	return BuildMountSpecs(a.mountParams, box)
+func (a *bwrapAdapter) mountSpecs(box runner.Box) []runner.MountSpec {
+	return runner.BuildMountSpecs(a.mountParams, box)
 }
 
 // RegistryProxyTransport always reports a unix Endpoint for bwrap: an
@@ -208,14 +209,14 @@ func (a *bwrapAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool
 // knob can only force isolation on, already the default, and is kept for defense
 // in depth.
 func (a *bwrapAdapter) isolateNet() bool {
-	return a.unshareNet || a.networkMode != NetworkModeHost
+	return a.unshareNet || a.networkMode != runner.NetworkModeHost
 }
 
 // pastaPath reports whether the isolated network namespace gets egress restored
 // via a pasta helper. networkMode="none" is the exception: fully offline, bare
 // --unshare-net, no helper, no egress at all.
 func (a *bwrapAdapter) pastaPath() bool {
-	return a.isolateNet() && a.networkMode != NetworkModeNone
+	return a.isolateNet() && a.networkMode != runner.NetworkModeNone
 }
 
 // pick returns override when non-empty, else baked. A ClosureGeneration with an
@@ -231,7 +232,7 @@ func pick(override, baked string) string {
 
 // agentFilesFor resolves the agent-closure store path box's launch should bind.
 // Callers append "/agent" and "/home/agent" to the result.
-func (a *bwrapAdapter) agentFilesFor(box Box) string {
+func (a *bwrapAdapter) agentFilesFor(box runner.Box) string {
 	if box.ClosureGeneration == nil {
 		return a.agentFiles
 	}
@@ -241,7 +242,7 @@ func (a *bwrapAdapter) agentFilesFor(box Box) string {
 // agentEnvFor resolves the agentEnv store path box's launch should bind for
 // PATH/SSL_CERT_FILE/GIT_SSL_CAINFO. Callers append "/bin" and
 // "/etc/ssl/certs/ca-bundle.crt" to the result.
-func (a *bwrapAdapter) agentEnvFor(box Box) string {
+func (a *bwrapAdapter) agentEnvFor(box runner.Box) string {
 	if box.ClosureGeneration == nil {
 		return a.agentEnv
 	}
@@ -250,7 +251,7 @@ func (a *bwrapAdapter) agentEnvFor(box Box) string {
 
 // nixConfigFileFor resolves the nix.conf store path box's launch binds at
 // /etc/nix/nix.conf.
-func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
+func (a *bwrapAdapter) nixConfigFileFor(box runner.Box) string {
 	if box.ClosureGeneration == nil {
 		return a.nixConfigFile
 	}
@@ -263,7 +264,7 @@ func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
 // not "unset". A read error falls back to a.bakedPrefetch, logging only
 // the first error per PrefetchFile, since an unreadable swapped prefetch child
 // must never take down a Box.
-func (a *bwrapAdapter) prefetchFor(box Box) string {
+func (a *bwrapAdapter) prefetchFor(box runner.Box) string {
 	if box.ClosureGeneration == nil || box.ClosureGeneration.PrefetchFile == "" {
 		return a.bakedPrefetch
 	}
@@ -290,9 +291,9 @@ func (a *bwrapAdapter) prefetchFor(box Box) string {
 // Generation falls back to the baked dir: joining a raw "" resolves to the root
 // itself, which has no db.sqlite, and ".." escapes it. Joins onto
 // a.nixVarSnapshotRoot directly, since nixVarSnapshotDir would re-append it.
-func (a *bwrapAdapter) snapshotDirFor(box Box) string {
+func (a *bwrapAdapter) snapshotDirFor(box runner.Box) string {
 	if box.ClosureGeneration != nil {
-		if gen := SafePathComponent(box.ClosureGeneration.Generation); gen != "" {
+		if gen := runner.SafePathComponent(box.ClosureGeneration.Generation); gen != "" {
 			return filepath.Join(a.nixVarSnapshotRoot, gen)
 		}
 	}
@@ -304,7 +305,7 @@ func (a *bwrapAdapter) snapshotDirFor(box Box) string {
 // --clearenv); see OffArgvKeys. etcDir is only still needed for the synthesised
 // /etc/resolv.conf on the pasta path, since passwd/group are baked store paths
 // (issue #2663). Pasta is never part of this return value; see execTarget.
-func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
+func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 	isolateNet := a.isolateNet()
 	var args []string
 	if a.nixConfigFile != "" && a.nixStoreWritable {
@@ -382,7 +383,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 		"--setenv", "PREFETCH", a.prefetchFor(box),
 	)
 	for k, v := range box.Env {
-		if !OffArgvKeys[k] {
+		if !runner.OffArgvKeys[k] {
 			args = append(args, "--setenv", k, v)
 		}
 	}
@@ -415,7 +416,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 // buildArgs' unshare-net comment). childExecsByName is true when that program
 // execs its own child by bare argv name via execvp, so Run must forward a PATH:
 // Go's exec.Command LookPath only ever resolves the top-level program itself.
-func (a *bwrapAdapter) execTarget(etcDir string, box Box) (string, []string, bool) {
+func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box) (string, []string, bool) {
 	bwrapArgs := a.buildArgs(etcDir, box)
 	var program string
 	var args []string
@@ -481,8 +482,8 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 // needs it (buildArgs delivers every other key on argv). TERM/LANG/TZ/TMPDIR and
 // the proxy vars are excluded on the OCI runner's precedent: it forwards none.
 func resolvedRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(OffArgvKeys))
-	for k := range OffArgvKeys {
+	keys := make([]string, 0, len(runner.OffArgvKeys))
+	for k := range runner.OffArgvKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -510,6 +511,22 @@ func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
 
 func (a *bwrapAdapter) cgroupControllers() []string {
 	return CgroupControllers(a.memoryLimit, a.pidsLimit)
+}
+
+// CgroupControllers returns the cgroup v2 controllers the given limits need:
+// "memory" iff memoryLimit is set, "pids" iff pidsLimit is set.
+// resolveCgroupAnchor rejects an ancestor missing one of these without
+// over-rejecting one missing a controller nothing configured here needs.
+// Exported so `spindrift doctor` resolves the same set and cannot drift (#3273).
+func CgroupControllers(memoryLimit, pidsLimit string) []string {
+	var want []string
+	if memoryLimit != "" {
+		want = append(want, "memory")
+	}
+	if pidsLimit != "" {
+		want = append(want, "pids")
+	}
+	return want
 }
 
 // cgroupSubtreeControlHasAll reports whether dir's cgroup.subtree_control lists
@@ -681,7 +698,7 @@ func (a *bwrapAdapter) reclaimLeftoverCgroupDir(name, dir string) bool {
 // exists it is kept, since a failed limit write leaves it usable for PID tracking.
 // A leftover empty dir from a crashed launcher is reclaimed rather than failing
 // every retry on EEXIST (issue #4164).
-func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
+func (a *bwrapAdapter) provisionCgroup(box runner.Box) (dir string) {
 	dir, err := a.cgroupDirForName(box.Name)
 	if err != nil {
 		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running box %q without cgroup resource containment\n", err, box.Name)
@@ -701,7 +718,7 @@ func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 		}
 	}
 	if a.memoryLimit != "" {
-		bytesLimit, err := MemoryLimitToBytes(a.memoryLimit)
+		bytesLimit, err := runner.MemoryLimitToBytes(a.memoryLimit)
 		if err != nil {
 			fmt.Printf("==> bwrap runner: warning: invalid MEMORY_LIMIT %q (%v); box %q keeps cgroup tracking but runs without a memory limit\n", a.memoryLimit, err, box.Name)
 		} else if err := writeCgroupLimit(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
@@ -712,7 +729,7 @@ func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 }
 
 // Run launches a single issue into a bubblewrap sandbox.
-func (a *bwrapAdapter) Run(box Box) error {
+func (a *bwrapAdapter) Run(box runner.Box) error {
 	// Only the synthesised /etc/resolv.conf lives here; passwd/group are baked
 	// store paths (issue #2663).
 	etcDir, err := os.MkdirTemp("", "spindrift-etc-*")
@@ -771,7 +788,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 	// A func, not a value: exec.Cmd.Start is one-shot, and the CLONE_INTO_CGROUP
 	// attempt below may need a fresh Cmd for its fallback.
 	newCmd := func() *exec.Cmd {
-		cmd := ExecCommand(program, execArgs...)
+		cmd := runner.ExecCommand(program, execArgs...)
 		// Pdeathsig kills this direct child (bwrap or pasta) the moment the launcher
 		// dies, so a crashed launcher never leaves an orphaned Box. Separate from
 		// bwrap's own --die-with-parent, which only protects bwrap against ITS
@@ -879,7 +896,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 			}
 		}()
 	}
-	return AsRunError(cmd.Wait())
+	return runner.AsRunError(cmd.Wait())
 }
 
 // untrackRunning drops name's tracked process once Run's Wait returns.
@@ -1032,7 +1049,7 @@ type bwrapBuildAdapter struct {
 // NewBwrapBuild constructs a bwrap adapter for the build command from cfg and
 // pwd (the launcher's own working directory). EnsureReady realizes the agent
 // store closures and, when nixInBox is on, snapshots the host nix store DB.
-func NewBwrapBuild(cfg Config, pwd string) Runner {
+func NewBwrapBuild(cfg runner.Config, pwd string) runner.Runner {
 	generation := ClosureGeneration(cfg.ImageTag)
 	return &bwrapBuildAdapter{
 		agentFilesDrv:      cfg.AgentFilesDrv,
@@ -1225,7 +1242,7 @@ func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations 
 // realize runs `nix build <drv>^* --no-link` for a single closure, wrapping
 // any failure with label so the caller can tell which closure failed.
 func (a *bwrapBuildAdapter) realize(label, drv string) error {
-	cmd := ExecCommand("nix", "build", drv+"^*", "--no-link")
+	cmd := runner.ExecCommand("nix", "build", drv+"^*", "--no-link")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -1241,7 +1258,7 @@ func (a *bwrapBuildAdapter) IsReady() error { return nil }
 func (a *bwrapBuildAdapter) RemoveHostTree(path string) error { return os.RemoveAll(path) }
 
 // Run is not supported by the build adapter.
-func (a *bwrapBuildAdapter) Run(_ Box) error {
+func (a *bwrapBuildAdapter) Run(_ runner.Box) error {
 	return fmt.Errorf("bwrap-build adapter: Run not supported (use bwrap run adapter)")
 }
 

@@ -1,6 +1,6 @@
 //go:build integration
 
-package runner
+package bwrap
 
 import (
 	"bytes"
@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // resolveSandboxBin resolves name to an absolute path reachable inside a bwrap
@@ -151,7 +153,7 @@ func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 		passwdFile:    filepath.Join(etcDir, "passwd"),
 		groupFile:     filepath.Join(etcDir, "group"),
 		bakedPrefetch: "true",
-		networkMode:   NetworkModeNone,
+		networkMode:   runner.NetworkModeNone,
 	}
 	return a, etcDir
 }
@@ -229,7 +231,7 @@ func newIntegrationBwrapAdapterWithWritableStore(t *testing.T) (*bwrapAdapter, s
 // --proc/--dev mounts a nested sandbox can't nest (see stripMountPair), and
 // swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via bash -c.
 // Every other mount/hardening flag reaches bwrap as production would send it.
-func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
+func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) []string {
 	args := a.buildArgs(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
@@ -242,7 +244,7 @@ func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script str
 // its own binary via /proc/self/exe and fails immediately without a real /proc
 // mounted. Those probes guard with requireRealBwrapProc instead of
 // requireRealBwrap.
-func nixProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) []string {
+func nixProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) []string {
 	args := a.buildArgs(etcDir, box)
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
 	return append(args, bashBin, "-c", script)
@@ -253,7 +255,7 @@ func nixProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script strin
 // with bwrap's own argv nested inside), strips the same --proc/--dev pair from
 // that nested argv, and swaps the nested tail for script. The returned program
 // is "pasta" whenever pastaPath() applies, matching what Run() would exec.
-func pastaProbeArgs(a *bwrapAdapter, etcDir string, box Box, bashBin, script string) (string, []string) {
+func pastaProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) (string, []string) {
 	program, args, _ := a.execTarget(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
@@ -269,7 +271,7 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	// networkMode="none" skips the --ro-bind /etc/resolv.conf mount, which a
 	// nested sandbox can't remount and which this assertion doesn't need.
 	a, etcDir := newIntegrationBwrapAdapter(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/spindrift-integration-write-probe")
 
 	cmd := exec.Command("bwrap", args...)
@@ -288,7 +290,7 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 func TestBwrapIntegration_SandboxUID(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapter(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo $EUID")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
@@ -307,7 +309,7 @@ func TestBwrapIntegration_SandboxUID(t *testing.T) {
 func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapter(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	// bash's /dev/tcp pseudo-device is interpreted by bash itself, so it
 	// needs no real /dev mount inside the sandbox.
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "exec 3<>/dev/tcp/1.1.1.1/80")
@@ -340,7 +342,7 @@ func TestBwrapIntegration_HomeAgentStagingReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, catBin+" "+homeAgentStagingDir+"/marker.txt")
 
 	out, err := exec.Command("bwrap", args...).CombinedOutput()
@@ -363,7 +365,7 @@ func TestBwrapIntegration_SecretNotOnProcessArgv(t *testing.T) {
 	const marker = "spindrift-integration-secret-9f3c2a"
 	t.Setenv("GH_TOKEN", marker)
 	a, etcDir := newIntegrationBwrapAdapter(t)
-	box := Box{Env: map[string]string{"GH_TOKEN": marker}}
+	box := runner.Box{Env: map[string]string{"GH_TOKEN": marker}}
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, sleepBin+" 2")
 
 	cmd := exec.Command("bwrap", args...)
@@ -412,7 +414,7 @@ func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 		accepted <- true
 	}()
 
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	script := fmt.Sprintf("exec 3<>/dev/tcp/%s/%d && echo CONNECTED || echo BLOCKED", pastaDNSForwardAddr, port)
 	program, args := pastaProbeArgs(a, etcDir, box, bashBin, script)
 
@@ -446,7 +448,7 @@ func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	ipBin := resolveSandboxBin(t, "ip")
 	a, etcDir := newIntegrationBwrapAdapterIsolated(t)
 
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	// "ip link show" talks to the kernel over an AF_NETLINK socket, so unlike
 	// /sys/class/net it needs neither /sys nor /proc mounted, both stripped
 	// from this probe's argv.
@@ -477,7 +479,7 @@ func TestBwrapIntegration_NixTrustsHostStorePaths(t *testing.T) {
 	bashBin := requireRealBwrapProc(t)
 	nixBin := resolveSandboxBin(t, "nix")
 	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 
 	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' path-info %s", nixBin, bashBin)
 	args := nixProbeArgs(a, etcDir, box, bashBin, script)
@@ -504,7 +506,7 @@ func TestBwrapIntegration_NixRejectsEmptyStoreSnapshot(t *testing.T) {
 	nixBin := resolveSandboxBin(t, "nix")
 	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
 	a.nixVarSnapshotDir = t.TempDir() // empty: no nix/db/db.sqlite in it at all
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 
 	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' path-info %s", nixBin, bashBin)
 	args := nixProbeArgs(a, etcDir, box, bashBin, script)
@@ -527,7 +529,7 @@ func TestBwrapIntegration_NixBuildSubstitutesNothingForValidSnapshot(t *testing.
 	bashBin := requireRealBwrapProc(t)
 	nixBin := resolveSandboxBin(t, "nix")
 	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 
 	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' build --no-link %s", nixBin, bashBin)
 	args := nixProbeArgs(a, etcDir, box, bashBin, script)
@@ -553,7 +555,7 @@ func TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot(t *te
 	nixBin := resolveSandboxBin(t, "nix")
 	a, etcDir := newIntegrationBwrapAdapterWithNix(t)
 	a.nixVarSnapshotDir = t.TempDir() // empty: no nix/db/db.sqlite in it at all
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 
 	script := fmt.Sprintf("export HOME=/tmp; %s --extra-experimental-features 'nix-command flakes' build --no-link %s", nixBin, bashBin)
 	args := nixProbeArgs(a, etcDir, box, bashBin, script)
@@ -575,7 +577,7 @@ func TestBwrapIntegration_NixBuildAttemptsSubstitutionOnEmptyStoreSnapshot(t *te
 func TestBwrapIntegration_StoreWritableWhenOverlayEnabled(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	const marker = "spindrift-integration-overlay-write-probe"
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/"+marker)
 
@@ -593,7 +595,7 @@ func TestBwrapIntegration_StoreWritableWhenOverlayEnabled(t *testing.T) {
 func TestBwrapIntegration_HostStoreUnchangedAfterOverlayWrite(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	const marker = "spindrift-integration-overlay-write-probe-host-check"
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo x > /nix/store/"+marker)
 
@@ -681,7 +683,7 @@ func TestBwrapIntegration_SyscallFilterDeniesKill(t *testing.T) {
 	}
 	a.syscallFilterPath = filterPath
 
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	// bash's "kill -0 $$" is a builtin that calls kill(2) against bash's own
 	// pid, so no extra binary is needed, and nothing else bash does at startup
 	// touches kill(2).
@@ -722,7 +724,7 @@ func TestBwrapIntegration_SyscallFilterAllowsNormalWork(t *testing.T) {
 	}
 	a.syscallFilterPath = filterPath
 
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	args := bwrapProbeArgs(a, etcDir, box, bashBin, "echo ok")
 	if !strings.Contains(strings.Join(args, " "), "--seccomp 3") {
 		t.Fatalf("expected --seccomp 3 in the constructed argv: %v", args)
@@ -753,7 +755,7 @@ func TestBwrapIntegration_SyscallFilterAllowsNormalWork(t *testing.T) {
 func TestBwrapIntegration_OverlayUpperNotSharedAcrossInvocations(t *testing.T) {
 	bashBin := requireRealBwrap(t)
 	a, etcDir := newIntegrationBwrapAdapterWithWritableStore(t)
-	box := Box{Env: map[string]string{}}
+	box := runner.Box{Env: map[string]string{}}
 	const marker = "spindrift-integration-overlay-write-probe-not-shared"
 	storePath := "/nix/store/" + marker
 

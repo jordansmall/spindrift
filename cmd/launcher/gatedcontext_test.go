@@ -192,7 +192,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 // live network call.
 func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
-	// while leaving pasta absent, so runner.ValidatePasta() fails whatever this
+	// while leaving pasta absent, so bwrap.ValidatePasta() fails whatever this
 	// host has installed.
 	withFixtureBinary(t, "true")
 
@@ -208,7 +208,7 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate actually calls runner.ValidatePasta()
+	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate actually calls bwrap.ValidatePasta()
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate
 	// (readonly_token_gate.go) would also fail if the walk reached it.
 
@@ -296,7 +296,7 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	t.Setenv("RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate would call runner.ValidatePasta() if reached
+	t.Setenv("NETWORK_MODE", "open") // not host/none, so checkBwrapPastaGate would call bwrap.ValidatePasta() if reached
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)

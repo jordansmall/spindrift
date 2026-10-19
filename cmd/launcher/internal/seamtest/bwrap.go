@@ -9,7 +9,7 @@ import (
 
 // BwrapConfig is the bwrap fake's JSON config. bwrap has no subcommands, so
 // every invocation is a Box run and Runs scripts them in order, except the
-// launcher's overlay probe (runner.ValidateOverlay), which exits 0 silently
+// launcher's overlay probe (bwrap.ValidateOverlay), which exits 0 silently
 // and takes no scripted run.
 type BwrapConfig struct {
 	// Record is the file every invocation's argv is appended to.

@@ -39,6 +39,7 @@ import (
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/bwrap"
 	"spindrift.dev/launcher/internal/runner/oci"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
@@ -816,7 +817,7 @@ func runnerConfig(c config) runner.Config {
 // operator-facing runtime names that aren't "oci" literally.
 func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
-		return runner.NewBwrap(rc, pwd)
+		return bwrap.NewBwrap(rc, pwd)
 	}
 	return oci.NewOCI(rc, pwd)
 }
@@ -826,7 +827,7 @@ func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 // running an agent.
 func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
-		return runner.NewBwrapBuild(rc, pwd)
+		return bwrap.NewBwrapBuild(rc, pwd)
 	}
 	return oci.NewOCI(rc, pwd)
 }
@@ -1222,7 +1223,7 @@ func checkBwrapPastaGate(c config) error {
 	if mode := c.runnerNetworkMode(); mode == runner.NetworkModeHost || mode == runner.NetworkModeNone {
 		return nil
 	}
-	return runner.ValidatePasta()
+	return bwrap.ValidatePasta()
 }
 
 // checkBwrapOverlayGate refuses to launch rather than let bwrap fail deep in
@@ -1240,7 +1241,7 @@ func checkBwrapOverlayGate(c config) error {
 	if c.nixConfigFile == "" {
 		return nil
 	}
-	return runner.ValidateOverlay()
+	return bwrap.ValidateOverlay()
 }
 
 // errQueueEmpty means discoverIssues found no open dispatchable issues, or
@@ -1255,7 +1256,7 @@ var errQueueEmpty = errors.New("queue empty")
 // for a hot-swapped closure. It is a package-level test seam, like exec.go's
 // ExecCommand, rather than a threaded parameter, so runContinuousDispatch's
 // many nixInBox-indifferent test call sites need not pass it.
-var snapshotGeneration = runner.SnapshotGeneration
+var snapshotGeneration = bwrap.SnapshotGeneration
 
 // installStopSignal is a package-level test seam, like snapshotGeneration
 // above, so tests drive waves.Config.Stop and waves.Config.Abort through

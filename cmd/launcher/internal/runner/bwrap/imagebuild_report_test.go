@@ -1,15 +1,16 @@
-package runner
+package bwrap
 
 import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 func TestBwrapBuildEnsureReady_ReportsStartedThenFinished(t *testing.T) {
 	drain := runnertest.InstallImageBuildPipe(t)
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 0})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 0})
 	a := &bwrapBuildAdapter{agentFilesDrv: "/fake/files.drv"}
 
 	if err := a.EnsureReady(); err != nil {
@@ -20,7 +21,7 @@ func TestBwrapBuildEnsureReady_ReportsStartedThenFinished(t *testing.T) {
 
 func TestBwrapBuildEnsureReady_RealizeFailureStillReportsFinished(t *testing.T) {
 	drain := runnertest.InstallImageBuildPipe(t)
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1})
 	a := &bwrapBuildAdapter{agentFilesDrv: "/fake/files.drv"}
 
 	if err := a.EnsureReady(); err == nil {

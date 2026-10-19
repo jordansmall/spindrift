@@ -1,6 +1,6 @@
 //go:build !linux
 
-package runner
+package bwrap
 
 import "os/exec"
 

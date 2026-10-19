@@ -712,7 +712,7 @@ const signalSocketFile = "signal.sock"
 const spindriftSignalSocketDirPattern = "spindrift-signal-socket-*"
 
 // registryProxyMkdirTemp and registryProxyRemoveAll are swappable in tests the
-// way statCgroupControllerFile is (runner/bwrap_validate.go, issue #3103): the
+// way statCgroupControllerFile is (runner/bwrap/bwrap_validate.go, issue #3103): the
 // RemoveAll failure branch below is reachable only through an
 // EACCES/EROFS/EBUSY-class error no test can provoke deterministically. Both
 // the registry proxy's and the Signal socket's directories are created

@@ -1,8 +1,8 @@
 // Package runner manages agent sandbox life-cycles. It holds the Runner
 // contract, the shared Box and Config, and the mount plan; the OCI adapter
-// (podman/docker) lives in the oci subpackage and the bubblewrap adapter
-// here, both implementing Runner so the orchestration loop never branches on
-// runtime.
+// (podman/docker) lives in the oci subpackage and the bubblewrap adapter in the
+// bwrap subpackage, both implementing Runner so the orchestration loop never
+// branches on runtime.
 package runner
 
 import (

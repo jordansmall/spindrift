@@ -43,19 +43,3 @@ func MemoryLimitToBytes(limit string) (int64, error) {
 	}
 	return n * mult, nil
 }
-
-// CgroupControllers returns the cgroup v2 controllers the given limits need:
-// "memory" iff memoryLimit is set, "pids" iff pidsLimit is set.
-// resolveCgroupAnchor rejects an ancestor missing one of these without
-// over-rejecting one missing a controller nothing configured here needs.
-// Exported so `spindrift doctor` resolves the same set and cannot drift (#3273).
-func CgroupControllers(memoryLimit, pidsLimit string) []string {
-	var want []string
-	if memoryLimit != "" {
-		want = append(want, "memory")
-	}
-	if pidsLimit != "" {
-		want = append(want, "pids")
-	}
-	return want
-}
