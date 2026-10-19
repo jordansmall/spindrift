@@ -1,0 +1,11 @@
+{
+  "homeConfig": {
+    "configPath": "config.toml",
+    "content": "[source.crates-io]\nreplace-with = \"spindrift-registry-proxy\"\n\n[source.spindrift-registry-proxy]\nregistry = \"sparse+http://127.0.0.1:27182/crates-acme-test/\"\n",
+    "homeEnvVar": "CARGO_HOME"
+  },
+  "warnings": [
+    "==> WARNING: cargo registry \"undeclared\" matches route prefix \"crates-acme-test\"'s upstream host but is not declared in that route's cargo-registries",
+    "==> WARNING: cargo registry \"declared\" is declared on route prefix \"crates-acme-test\" (upstream host \"crates.acme.test\") but the repo's .cargo/config.toml has no [registries.declared] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml"
+  ]
+}
