@@ -136,8 +136,15 @@ const (
 // The slice is fresh, but its Row copies share their LockfileNames backing
 // array with Table, which callers must not write through.
 func EnvExportRows() []Row {
-	rows := make([]Row, 0, len(Table))
-	for _, row := range Table {
+	return EnvExportRowsOf(Table)
+}
+
+// EnvExportRowsOf is EnvExportRows over the given rows rather than Table. The
+// slice is fresh, but its Row copies share their LockfileNames backing array
+// with in, which callers must not write through.
+func EnvExportRowsOf(in []Row) []Row {
+	rows := make([]Row, 0, len(in))
+	for _, row := range in {
 		if row.EnvExports == nil {
 			continue
 		}
@@ -153,8 +160,15 @@ func EnvExportRows() []Row {
 // copies share their LockfileNames backing array with Table, which callers
 // must not write through.
 func HomeConfigRows() []Row {
-	rows := make([]Row, 0, len(Table))
-	for _, row := range Table {
+	return HomeConfigRowsOf(Table)
+}
+
+// HomeConfigRowsOf is HomeConfigRows over the given rows rather than Table. The
+// slice is fresh, but its Row copies share their LockfileNames backing array
+// with in, which callers must not write through.
+func HomeConfigRowsOf(in []Row) []Row {
+	rows := make([]Row, 0, len(in))
+	for _, row := range in {
 		if row.HomeConfig == nil {
 			continue
 		}

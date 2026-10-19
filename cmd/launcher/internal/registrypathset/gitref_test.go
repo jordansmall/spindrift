@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -226,5 +227,33 @@ func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("DeriveFromGitRef = %+v, want no host path sets", got)
+	}
+}
+
+// A row that is not in ecosystem.Table is walked end to end: materialized from
+// the ref, parsed, and derived, proving the rows parameter reaches both stages.
+func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
+	bare := mustBareRepoWithConfigs(t, "main", map[string]string{
+		"fake.cfg": "x",
+	}, nil)
+	row := ecosystem.Row{
+		Name:             "fake",
+		InTreeConfigPath: "fake.cfg",
+		ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
+			return []ecosystem.Declaration{{Host: "fake.example.com", UpstreamBaseURL: "https://fake.example.com/repo"}}, true, nil
+		},
+	}
+
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Row{row})
+	if err != nil {
+		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
+	}
+	want := []HostPathSet{{
+		Host:     "fake.example.com",
+		Origin:   "https://fake.example.com",
+		Subtrees: []registryvocab.Subtree{{Ecosystem: "fake", Path: "/repo"}},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DeriveFromGitRefRows = %+v, want %+v", got, want)
 	}
 }

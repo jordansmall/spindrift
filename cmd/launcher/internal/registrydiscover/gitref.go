@@ -23,23 +23,29 @@ import (
 // A symlink inside ref's tree, at the config path or at a parent directory,
 // resolves to its target's content, as a checkout's os.ReadFile would. Two
 // shapes deliberately part from a checkout and skip like a missing file: a
-// directory at the config path, which extractRows hard-errors on, since a
+// directory at the config path, which ExtractRows hard-errors on, since a
 // snapshot has no failing read to report, only nothing to declare; and an
 // absolute or out-of-tree symlink, since a snapshot must never read the host
 // file it names. A dangling link skips too.
 func MaterializeRef(repoDir, ref string) (dir string, cleanup func(), err error) {
+	return MaterializeRefRows(repoDir, ref, ecosystem.Table)
+}
+
+// MaterializeRefRows is MaterializeRef over the given rows rather than
+// ecosystem.Table.
+func MaterializeRefRows(repoDir, ref string, rows []ecosystem.Row) (dir string, cleanup func(), err error) {
 	noop := func() {}
 
 	if err := ResolveRef(repoDir, ref); err != nil {
 		return "", noop, err
 	}
 
-	// Walking ecosystem.Table, the same table Extract walks, keeps the
-	// materialized file set from drifting from the scanned one: a config path
-	// added to Table is picked up here with no second list to maintain.
+	// Walking rows, the same rows ExtractRows walks, keeps the materialized
+	// file set from drifting from the scanned one: a config path added to a row
+	// is picked up here with no second list to maintain.
 	var paths []string
 	var stdin bytes.Buffer
-	for _, row := range ecosystem.Table {
+	for _, row := range rows {
 		if row.InTreeConfigPath == "" {
 			continue
 		}
