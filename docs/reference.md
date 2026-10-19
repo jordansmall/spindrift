@@ -1922,12 +1922,14 @@ Detection covers the following files (first match wins) — a lockfile for most
 ecosystems, but Gradle projects don't always commit one, so any of its
 build/settings files is enough on its own:
 
+<!-- BEGIN GENERATED LOCKFILE CLASSIFICATION -- nix run .#regen-goldens -- DO NOT EDIT -->
 | file(s)                                                                                         | reported ecosystem |
 | ----------------------------------------------------------------------------------------------- | ------------------ |
 | `Cargo.lock`                                                                                    | cargo              |
-| `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`                                              | npm/pnpm/yarn      |
+| `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`                                              | npm/pnpm/yarn      |
 | `go.sum`                                                                                        | go mod             |
 | `build.gradle`, `build.gradle.kts`, `settings.gradle`, `settings.gradle.kts`, `gradle.lockfile` | gradle             |
+<!-- END GENERATED LOCKFILE CLASSIFICATION -->
 
 Unrecognized ecosystems emit no hint. The hint is suppressed entirely when
 `prefetch` is already configured, so it is ignorable once you have acted on it.
@@ -7248,20 +7250,24 @@ level.
 
 `spindrift registry discover <repo-dir> <routes-file>` (ADR 0045) writes a
 registry routes file without hand-transcription: it scans the Target repo's
-own committed registry config — `.cargo/config.toml`, `.npmrc`,
-`.yarnrc.yml`, `pnpm-workspace.yaml` — for declared hosts, base URLs, and
-cargo registry names, then matches each host to a credential across the
-operator's own credential stores, searched **in this order**: `netrc`,
-`npmrc`, `cargo-credentials`, `gradle-properties`. A host that carries more
-than one registry — say, one Artifactory instance serving both an internal
-cargo mirror and a crates.io passthrough — still collapses to a single
-route, since matching is host-keyed. It stops at the first store that has
-a credential for that host, then probes the upstream base URL and reads
-its `WWW-Authenticate` response header to guess the auth scheme (`bearer`
-or `basic`, defaulting to `bearer` when the registry is unreachable or
-answers with neither). It's a setup-time, operator-run tool, never invoked
-from inside the Box — a Box-influenced route would let an Agent steer a
-real credential at a host of its choosing. Once a route is configured,
+own committed registry config for declared hosts, base URLs, and cargo
+registry names, then matches each host to a credential across the operator's
+own credential stores:
+
+<!-- BEGIN GENERATED REGISTRY DISCOVERY SOURCES -- nix run .#regen-goldens -- DO NOT EDIT -->
+- Config files read from the Target repo: `.cargo/config.toml`, `.npmrc`, `.yarnrc.yml`, `pnpm-workspace.yaml`
+- Credential stores, searched **in this order**: `netrc` (`~/.netrc`), `npmrc` (`~/.npmrc`), `cargo-credentials` (`~/.cargo/credentials.toml`), `gradle-properties` (`~/.gradle/gradle.properties`)
+<!-- END GENERATED REGISTRY DISCOVERY SOURCES -->
+
+A host that carries more than one registry — say, one Artifactory instance
+serving both an internal cargo mirror and a crates.io passthrough — still
+collapses to a single route, since matching is host-keyed. `discover` stops
+at the first store that has a credential for that host, then probes the
+upstream base URL and reads its `WWW-Authenticate` response header to guess
+the auth scheme (`bearer` or `basic`, defaulting to `bearer` when the
+registry is unreachable or answers with neither). It's a setup-time,
+operator-run tool, never invoked from inside the Box — a Box-influenced
+route would let an Agent steer a real credential at a host of its choosing. Once a route is configured,
 how a proxied dispatch actually reaches the Box over it — socket or
 every-interface TCP — is a separate, cached decision; see [Registry transport
 probe cache](#registry-transport-probe-cache).

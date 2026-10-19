@@ -172,8 +172,11 @@ a struct, say) sets `postSplice = "gofmt";` so the checker `gofmt -w`s a
 reconstruction of the whole host file before diffing it, and the regenerator
 `gofmt -w`s the real host file after writing the spliced content.
 MIGRATING.md's legacy
-settings mapping block predates the registry and is the one deliberate
-exception, out of this migration's scope (see `lib/documented-facts.nix`).
+settings mapping block predates the registry and is a deliberate exception,
+out of this migration's scope (see `lib/documented-facts.nix`). The other is
+`docs/reference.md`'s LOCKFILE CLASSIFICATION and REGISTRY DISCOVERY SOURCES
+spans: their rows live only in Go, so `TestReferenceDocs_GeneratedSpans` in
+`cmd/launcher/internal/ecosystem` renders them instead.
 
 To exercise the whole loop end to end against a live repo, run the daemon
 (`nix run .#daemon`, or `nix run .#dogfood-bwrap-daemon` for spindrift's own
