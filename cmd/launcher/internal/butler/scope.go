@@ -1,11 +1,19 @@
 package butler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 // scopeSource is a Chore's Scope source (ADR 0070 decision 1): the one place
@@ -64,4 +72,96 @@ func (s *treeSource) Stage() error {
 
 func (s *treeSource) Prepare(claim ledger.Tip) (prepared, error) {
 	return prepared{scope: chore.NextScope(claim.State, s.head, s.files, chore.DefaultSliceSize)}, nil
+}
+
+// recordsSource scopes a Chore to the Dispatch Records store (ADR 0062): it
+// owns the Record ID cursor, the settled-Records count that makes the Chore
+// due, and the digest of the Records past the cursor.
+//
+// A records-scoped Chore has no file slice: its input is that digest, and the
+// next cursor is the latest Record ID it covered, carried in Scope.NextCursor
+// so settle's Done commit is unchanged.
+type recordsSource struct {
+	policy Policy
+	tree   Tree
+	it     forge.IssueTracker
+	warn   io.Writer
+	// merged is built once per source: its rate-limit state is per digest.
+	merged tuning.MergeLookup
+	chore  string
+	head   string
+	// records is read once per candidate, so the digest renders the very
+	// Records the Chore was judged due on.
+	records   []dispatchrecord.Record
+	claimedAt time.Time
+}
+
+func newRecordsSource(r *Runner, choreName, head string, claimedAt time.Time) (recordsSource, error) {
+	records, err := r.policy.loadRecords()
+	if err != nil {
+		return recordsSource{}, err
+	}
+	return recordsSource{
+		policy: r.policy, tree: r.tree, it: r.it, warn: r.warn, merged: r.mergeLookup(choreName),
+		chore: choreName, head: head, records: records, claimedAt: claimedAt,
+	}, nil
+}
+
+func (s recordsSource) newSettled(tip ledger.Tip) int {
+	return len(chore.NewSettledRecords(s.records, tip.State.Cursor))
+}
+
+func (s recordsSource) Due(tip ledger.Tip, recent []ledger.Entry, now time.Time, room chore.Room, cfg chore.DueConfig) chore.NotDue {
+	return chore.CheckRecords(tip, recent, s.newSettled(tip), s.policy.TuningMinRecords, now, room, cfg)
+}
+
+func (s recordsSource) NextDue(tip ledger.Tip, recent []ledger.Entry, now time.Time, room chore.Room, cfg chore.DueConfig) (time.Time, bool) {
+	return chore.NextDueRecords(tip, recent, s.newSettled(tip), s.policy.TuningMinRecords, now, room, cfg)
+}
+
+// Stage is a no-op: the Records were loaded when the source was built.
+func (s recordsSource) Stage() error { return nil }
+
+func (s recordsSource) Prepare(claim ledger.Tip) (prepared, error) {
+	findings, err := settle.TuningFindings(s.it)
+	if err != nil {
+		fmt.Fprintf(s.warn, "    ?? %s: prior tuning findings: %v\n", s.chore, err)
+	}
+	prior := make([]tuning.Prior, 0, len(findings))
+	for _, f := range findings {
+		prior = append(prior, tuning.Prior{
+			Number:     f.Issue.Number,
+			Open:       f.Open,
+			NotPlanned: f.Issue.ClosedNotPlanned,
+			Reopened:   f.Issue.Reopened,
+			Metric:     f.Metric,
+			Body:       f.Issue.Body,
+		})
+	}
+	dg := tuning.Render(s.records, claim.State.Cursor, s.claimedAt,
+		tuning.Limits{MinSample: s.policy.TuningMinSample, MaxBytes: s.policy.TuningDigestBytes}, prior, s.merged)
+	return prepared{
+		scope: chore.Scope{Head: s.head, NextCursor: dg.Latest},
+		input: dg.Text,
+		// The sweep's Record ID keys the stored digest, so it is pinned to the
+		// claim instant to be known before the Box runs.
+		claimTime: s.claimedAt,
+		arm:       func(d dispatch.Dispatcher, step *settleRun) error { return s.armSnapshot(d, step, dg.Text) },
+	}, nil
+}
+
+func (s recordsSource) armSnapshot(d dispatch.Dispatcher, step *settleRun, digest string) error {
+	// Fail closed: a Box launched without a stored digest could report
+	// findings nothing can validate. The claim stands until stale takeover.
+	id := d.RecordID()
+	if id == "" {
+		return fmt.Errorf("butler: %s: dispatch has no record ID to key the tuning snapshot", s.chore)
+	}
+	sum := sha256.Sum256([]byte(digest))
+	ref := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
+	if err := s.policy.storeSnapshot(dispatchrecord.TuningSnapshot{RecordID: id, SHA256: ref.SHA256, Rendered: digest, CreatedAt: s.claimedAt}); err != nil {
+		return fmt.Errorf("butler: %s: %w", s.chore, err)
+	}
+	step.tuning = &tuningSnapshot{ref: ref, policy: s.policy, tree: s.tree}
+	return nil
 }
