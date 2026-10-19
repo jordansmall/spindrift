@@ -1,12 +1,14 @@
 package ecosystem_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystemtest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // TestCorpus replays each corpus directory through the ecosystemtest kit
@@ -40,4 +42,59 @@ func tableRow(name string) (ecosystem.Row, bool) {
 		}
 	}
 	return ecosystem.Row{}, false
+}
+
+// TestCorpus_EveryInTreeRowDerivesAPath guards the Table against a row whose
+// in-tree config parses but derives no path, which would leave the proxy
+// refusing every request that ecosystem makes, or one whose subtree admits no
+// path beneath itself. Rows with an empty InTreeConfigPath derive nothing by
+// design and are excluded.
+func TestCorpus_EveryInTreeRowDerivesAPath(t *testing.T) {
+	for _, row := range ecosystem.Table {
+		if row.InTreeConfigPath == "" {
+			continue
+		}
+		t.Run(row.Name, func(t *testing.T) {
+			found := false
+			goldens, err := filepath.Glob(filepath.Join("testdata", "corpus", row.Name, "*", "pathset.golden.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, g := range goldens {
+				raw, err := os.ReadFile(g)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var doc struct {
+					Derived []struct {
+						Subtrees []struct {
+							Ecosystem string `json:"ecosystem"`
+							Path      string `json:"path"`
+						}
+					} `json:"derived"`
+				}
+				if err := json.Unmarshal(raw, &doc); err != nil {
+					t.Fatalf("%s: %v", g, err)
+				}
+				for _, d := range doc.Derived {
+					roots := make(registryvocab.PathSet, len(d.Subtrees))
+					for i, s := range d.Subtrees {
+						roots[i] = s.Path
+					}
+					for _, s := range d.Subtrees {
+						if s.Ecosystem != row.Name {
+							continue
+						}
+						found = true
+						if !roots.Admits(s.Path + "/config.json") {
+							t.Errorf("%s: derived %s subtree %q does not admit a path under itself", g, row.Name, s.Path)
+						}
+					}
+				}
+			}
+			if !found {
+				t.Errorf("no corpus case under testdata/corpus/%s derives a %s subtree", row.Name, row.Name)
+			}
+		})
+	}
 }

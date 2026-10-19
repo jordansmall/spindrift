@@ -1,0 +1,11 @@
+[registries.internal]
+index = "sparse+https://artifacts.acme.test/api/cargo/internal/index/"
+
+[registries.remote]
+index = "sparse+https://artifacts.acme.test/api/cargo/remote/index/"
+
+[source.crates-io]
+replace-with = "remote"
+
+[source.remote]
+registry = "sparse+https://artifacts.acme.test/api/cargo/remote/index/"
