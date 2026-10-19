@@ -928,9 +928,18 @@ let
   # internal/golden and internal/passmachine, which no in-box fileset carries,
   # and `go mod vendor` loads every package in the tree, not just subPackages.
   # Nothing in-box imports it (Driver packages call it from _test.go only).
-  driverTreeFiles = lib.fileset.difference (lib.fileset.fileFilter (
-    f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-  ) ../cmd/launcher/internal/driver) ../cmd/launcher/internal/driver/driverkit/conformance;
+  # bundle/runners.go registers the runner families, which no Box constructs.
+  driverTreeFiles =
+    lib.fileset.difference
+      (lib.fileset.fileFilter (
+        f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+      ) ../cmd/launcher/internal/driver)
+      (
+        lib.fileset.unions [
+          ../cmd/launcher/internal/driver/driverkit/conformance
+          ../cmd/launcher/internal/driver/bundle/runners.go
+        ]
+      );
 
   # The Bundle in driverTreeFiles registers the Backend Strategies too (ADR
   # 0068), so every fileset carrying it also needs the backend adapters and
