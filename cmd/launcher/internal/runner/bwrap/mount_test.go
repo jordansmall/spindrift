@@ -1,7 +1,6 @@
 package bwrap
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -9,59 +8,29 @@ import (
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// The prompt-dir and skills-dir gates and their operator messages must live
-// only in BuildMountSpecs, never duplicated in an adapter file. The
-// driver-cache gate has no unique string to pin, since its rationale comment
-// legitimately differs per adapter, so this pins the two mounts that carry
-// operator messages. The oci half lives in the oci package.
+// The prompt-dir and skills-dir gates live only in BuildMountSpecs, never in
+// an adapter file. The oci half lives in the oci package.
 func TestAdapterRendersOnly_NoDuplicatedMountDecisions(t *testing.T) {
-	markers := []string{
-		"SPINDRIFT_PROMPT_DIR set",
-		"SPINDRIFT_SKILLS_DIR set",
-	}
-	data, err := os.ReadFile("bwrap.go")
-	if err != nil {
-		t.Fatalf("read bwrap.go: %v", err)
-	}
-	for _, marker := range markers {
-		if strings.Contains(string(data), marker) {
-			t.Errorf("bwrap.go contains mount-decision marker %q; operator messages must come from the shared BuildMountSpecs, not be duplicated in the adapter", marker)
-		}
-	}
+	runnertest.AssertNoMountDecisionMarkers(t, "bwrap.go")
 }
 
 // The same mount config reaches both backends by construction: both render the
 // same BuildMountSpecs list. The oci half lives in the oci package.
 func TestMountSpecs_RenderedByBwrap(t *testing.T) {
-	promptDir := t.TempDir()
-	skillsDir := t.TempDir()
-	cacheDir := t.TempDir()
-	proxySocket := runnertest.NewTestSocket(t, "registry-proxy.sock")
-
+	fx := runnertest.NewMountFixture(t)
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
 		mountParams: runner.MountParams{
-			PromptDir:             promptDir,
-			SkillsDir:             skillsDir,
-			DriverSessionCacheDir: "/home/agent/.claude/projects",
+			PromptDir:             fx.PromptDir,
+			SkillsDir:             fx.SkillsDir,
+			DriverSessionCacheDir: runnertest.DriverSessionCacheTarget,
 		},
 	}
-	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, Sockets: []runner.SocketMount{{Source: proxySocket, Target: runner.RegistryProxySocketTarget}}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: fx.CacheDir, Sockets: []runner.SocketMount{{Source: fx.ProxySocket, Target: runner.RegistryProxySocketTarget}}}
 
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
-
-	for _, mount := range []struct{ source, target string }{
-		{promptDir, "/agent/prompts"},
-		{skillsDir, "/operator-skills"},
-		{cacheDir, "/home/agent/.claude/projects"},
-		{proxySocket, "/registry-proxy.sock"},
-	} {
-		if !strings.Contains(bwrapArgs, mount.source+" "+mount.target) {
-			t.Errorf("bwrap missing mount %s -> %s in args: %s", mount.source, mount.target, bwrapArgs)
-		}
-	}
+	fx.AssertRendered(t, "bwrap", strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " "), " ")
 }
 
 // ADR 0033, issue #1697: the Accumulation-repo and outbox mounts must reach
