@@ -17,9 +17,10 @@ import (
 // still sees failures. The report prints on the error and zero-route paths
 // too, so an operator still sees which hosts matched; only the `route ...`
 // lines mean a file was written. Zero routes is a failure: a header-only file
-// would fail registryroutes.Parse.
-func runRegistryDiscover(stdout, stderr io.Writer, repoDir, outPath string, force bool, stores []registrydiscover.Store, storesByEcosystem map[string][]string, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
-	routes, report, err := registrydiscover.Discover(repoDir, stores, storesByEcosystem, lookup, probe)
+// would fail registryroutes.Parse. rows is the ecosystem table to discover
+// over: production passes ecosystem.Table, tests a synthetic row.
+func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Row, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
+	routes, report, err := registrydiscover.DiscoverRows(repoDir, rows, stores, ecosystem.CredentialStores(rows), lookup, probe)
 	if err != nil {
 		// An Extract error carries a zero Report, which prints nothing:
 		// every printRegistryDiscoverReport section is guarded by len > 0.
@@ -103,8 +104,9 @@ func printRegistryDiscoverEnvHint(w io.Writer, routes []registrydiscover.Route) 
 }
 
 // cmdRegistryDiscover is the `registry discover` subcommand: parse its args and
-// hand runRegistryDiscover the production stores, StoreLookup, and HTTP probe.
-func cmdRegistryDiscover(args []string, stdout, stderr io.Writer) int {
+// hand runRegistryDiscover rows plus the production stores, StoreLookup, and
+// HTTP probe (production passes ecosystem.Table).
+func cmdRegistryDiscover(rows []ecosystem.Row, args []string, stdout, stderr io.Writer) int {
 	force := false
 	var positional []string
 	for _, a := range args {
@@ -129,7 +131,7 @@ func cmdRegistryDiscover(args []string, stdout, stderr io.Writer) int {
 		return registrydiscover.HTTPProbe(registrydiscover.DefaultProbeClient(), u)
 	}
 
-	return runRegistryDiscover(stdout, stderr, positional[0], positional[1], force, stores, ecosystem.CredentialStores(), registrydiscover.StoreLookup, probe)
+	return runRegistryDiscover(stdout, stderr, rows, positional[0], positional[1], force, stores, registrydiscover.StoreLookup, probe)
 }
 
 // defaultRegistryDiscoverStores names the operator credential stores discovery

@@ -25,6 +25,7 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -2405,7 +2406,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, subcommandUsage("registry"))
 			return 1
 		}
-		return cmdRegistryDiscover(args[1:], stdout, stderr)
+		return cmdRegistryDiscover(ecosystem.Table, args[1:], stdout, stderr)
 	},
 }
 
