@@ -82,7 +82,7 @@ func TestNetworkModeRuntimeGate_OpenModeIsNoOp(t *testing.T) {
 // The second gap this gate backstops (review finding on issue #2562): a
 // runtime override can set a non-open NETWORK_MODE on an image already baked
 // with a raw knob (PODMAN_NETWORK / BWRAP_UNSHARE_NET), past mkHarness's
-// networkModeCoherenceOk assert, and runner/oci.go's networkArg() then picks
+// networkModeCoherenceOk assert, and runner/oci/oci.go's networkArg() then picks
 // the raw knob over the mode and renders full egress instead of isolation.
 func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 	cases := []struct {

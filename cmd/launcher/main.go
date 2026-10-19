@@ -39,6 +39,7 @@ import (
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/oci"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/stopsignal"
@@ -817,7 +818,7 @@ func runnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
 		return runner.NewBwrap(rc, pwd)
 	}
-	return runner.NewOCI(rc, pwd)
+	return oci.NewOCI(rc, pwd)
 }
 
 // buildRunnerForKind is runnerForKind's `launcher build` counterpart: the
@@ -827,7 +828,7 @@ func buildRunnerForKind(c config, rc runner.Config, pwd string) runner.Runner {
 	if c.runnerKind == freshness.KindBwrap {
 		return runner.NewBwrapBuild(rc, pwd)
 	}
-	return runner.NewOCI(rc, pwd)
+	return oci.NewOCI(rc, pwd)
 }
 
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).

@@ -1,4 +1,4 @@
-package runner
+package oci
 
 import (
 	"bytes"
@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -38,19 +39,19 @@ type ociAdapter struct {
 	// mountParams passes host-mount facts from Config to BuildMountSpecs
 	// unmodified. DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local
 	// mount specs are issue #1697.
-	mountParams   MountParams
-	podmanNetwork string      // optional raw --network value; empty omits the flag
-	networkMode   NetworkMode // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/"host"/"")
-	pidsLimit     string      // --pids-limit value; empty disables the flag
-	memoryLimit   string      // --memory value; empty disables the flag
+	mountParams   runner.MountParams
+	podmanNetwork string             // optional raw --network value; empty omits the flag
+	networkMode   runner.NetworkMode // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/"host"/"")
+	pidsLimit     string             // --pids-limit value; empty disables the flag
+	memoryLimit   string             // --memory value; empty disables the flag
 }
 
 // NewOCI constructs an OCI adapter from cfg. pwd is the working directory the
 // container-fallback build mounts as /workspace, a per-invocation dependency
 // passed separately from cfg.
-func NewOCI(cfg Config, pwd string) Runner {
+func NewOCI(cfg runner.Config, pwd string) runner.Runner {
 	return &ociAdapter{
-		cli:             BinaryFor(cfg.Runtime),
+		cli:             runner.BinaryFor(cfg.Runtime),
 		image:           cfg.Image,
 		imageArchive:    cfg.ImageArchive,
 		imageDrv:        cfg.ImageDrv,
@@ -136,7 +137,7 @@ func (a *ociAdapter) EnsureReady() error {
 
 	// Tee stderr so a failure is both visible and inspectable below.
 	var hostStderr bytes.Buffer
-	nixBuild := ExecCommand("nix", "build", a.imageDrv+"^*", "--no-link")
+	nixBuild := runner.ExecCommand("nix", "build", a.imageDrv+"^*", "--no-link")
 	nixBuild.Stdout = os.Stdout
 	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
 	if err := nixBuild.Run(); err == nil {
@@ -413,8 +414,8 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 
 // mountSpecs computes the host-to-box mounts for box, shared with the bwrap
 // adapter; only the rendering below differs.
-func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
-	return BuildMountSpecs(a.mountParams, box)
+func (a *ociAdapter) mountSpecs(box runner.Box) []runner.MountSpec {
+	return runner.BuildMountSpecs(a.mountParams, box)
 }
 
 // networkArg resolves `--network` from the raw podmanNetwork escape hatch and
@@ -427,13 +428,13 @@ func (a *ociAdapter) networkArg() string {
 		return a.podmanNetwork
 	}
 	switch a.networkMode {
-	case NetworkModeNoHostLoopback:
+	case runner.NetworkModeNoHostLoopback:
 		if a.cli == "podman" {
 			return "pasta"
 		}
 		return "bridge"
-	case NetworkModeNone:
-		return string(NetworkModeNone)
+	case runner.NetworkModeNone:
+		return string(runner.NetworkModeNone)
 	default:
 		return ""
 	}
@@ -441,13 +442,13 @@ func (a *ociAdapter) networkArg() string {
 
 // buildRunArgs assembles the argument slice for `podman/docker run`. Split out
 // of Run so the arg construction can be tested without exec.
-func (a *ociAdapter) buildRunArgs(box Box) []string {
+func (a *ociAdapter) buildRunArgs(box runner.Box) []string {
 	args := []string{"run", "--name", box.Name}
 	if network := a.networkArg(); network != "" {
 		args = append(args, "--network", network)
 	}
 	for k, v := range box.Env {
-		if OffArgvKeys[k] {
+		if runner.OffArgvKeys[k] {
 			// Bare "-e KEY" forwards KEY's value from the CLI process's own
 			// environment, which ociRunEnv sets, so the value never lands in
 			// argv, where ps/proc exposes it to any local user for the
@@ -550,10 +551,10 @@ const registryProbeEntrypoint = "driver-exec"
 // --rm is added because a probe must leave no stopped container behind, unlike
 // a real Box, which the caller reaps explicitly.
 func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName string) []string {
-	box := Box{Name: containerName, Sockets: []SocketMount{{Source: hostSocketPath, Target: RegistryProxySocketTarget}}}
+	box := runner.Box{Name: containerName, Sockets: []runner.SocketMount{{Source: hostSocketPath, Target: runner.RegistryProxySocketTarget}}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
-	return append(args, a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget)
+	return append(args, a.image, "probe-registry-socket", "-path", runner.RegistryProxySocketTarget)
 }
 
 // registryTCPProbeArgs assembles the run args for a throwaway container that
@@ -562,7 +563,7 @@ func (a *ociAdapter) registrySocketProbeArgs(hostSocketPath, containerName strin
 // finding B). Setting a TCP Endpoint on the throwaway Box fires buildRunArgs'
 // own --add-host branch, wiring the probe like a real TCP-transport Box.
 func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName string, addHost bool) []string {
-	box := Box{Name: containerName, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint(host, ""), TCPAddHost: addHost}}
+	box := runner.Box{Name: containerName, RegistryProxy: runner.RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint(host, ""), TCPAddHost: addHost}}
 	full := a.buildRunArgs(box)
 	args := append([]string{full[0], "--rm", "--entrypoint", registryProbeEntrypoint}, probeArgsFromRunArgs(full)...)
 	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
@@ -826,8 +827,8 @@ func reapOrphanedRebaseDirs(root string) {
 // replacing it as bwrap's allowlist-only resolvedRunEnv does. The appended
 // values exist only for buildRunArgs' bare "-e KEY" entries to forward.
 func ociRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(OffArgvKeys))
-	for k := range OffArgvKeys {
+	keys := make([]string, 0, len(runner.OffArgvKeys))
+	for k := range runner.OffArgvKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -841,7 +842,7 @@ func ociRunEnv(boxEnv map[string]string) []string {
 }
 
 // Run launches a single issue into a podman/docker container.
-func (a *ociAdapter) Run(box Box) error {
+func (a *ociAdapter) Run(box runner.Box) error {
 	reapOrphanedRebaseDirs(rebaseTempRoot())
 	// Never touch a live container: a concurrent launcher invocation may own
 	// one that is not terminal and still within midCreationGrace, and a
@@ -853,7 +854,7 @@ func (a *ociAdapter) Run(box Box) error {
 	c, ok := a.inspectContainer(box.Name)
 	if ok {
 		if !c.reapable(time.Now()) {
-			return ErrAlreadyRunning
+			return runner.ErrAlreadyRunning
 		}
 		_ = a.remove(c)
 	}
@@ -883,13 +884,13 @@ func (a *ociAdapter) Run(box Box) error {
 	// through to RunError whatever it printed (issue #3633).
 	if err != nil && looksLikeNameCollision(head.String(), box.Name) {
 		if c, ok := a.inspectContainer(box.Name); ok && !c.reapable(time.Now()) {
-			return ErrAlreadyRunning
+			return runner.ErrAlreadyRunning
 		}
 	}
 	if reapAfterSuccess(err) {
 		a.reap(box.Name)
 	}
-	return AsRunError(err)
+	return runner.AsRunError(err)
 }
 
 // collisionHeadLimit bounds headTee's retained prefix: enough to hold the
@@ -1003,4 +1004,26 @@ func (a *ociAdapter) remove(c container) error {
 		return nil
 	}
 	return exec.Command(a.cli, "rm", "-f", c.id).Run()
+}
+
+// addHostTargets returns the distinct TCP hosts needing an explicit
+// --add-host <host>:host-gateway mapping, in registry-proxy-then-Signal-socket
+// order, skipping a duplicate when both resolve to the same host (they share
+// one transport verdict, so that is the normal TCP case).
+func addHostTargets(box runner.Box) []string {
+	var hosts []string
+	add := func(want bool, host string) {
+		if !want {
+			return
+		}
+		for _, h := range hosts {
+			if h == host {
+				return
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	add(box.RegistryProxy.TCPAddHost, box.RegistryProxy.Endpoint.Host())
+	add(box.SignalSocket.TCPAddHost, box.SignalSocket.Endpoint.Host())
+	return hosts
 }

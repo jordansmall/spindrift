@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/oci"
 )
 
 // TestRunnerForKind_And_BuildRunnerForKind pins that both selectors key solely
@@ -36,8 +37,8 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 				want       runner.Runner
 			}{
 				{name: "bwrap", runnerKind: "bwrap", want: bwrapWant},
-				{name: "oci", runnerKind: "oci", want: runner.NewOCI(rc, pwd)},
-				{name: "empty defaults to oci", runnerKind: "", want: runner.NewOCI(rc, pwd)},
+				{name: "oci", runnerKind: "oci", want: oci.NewOCI(rc, pwd)},
+				{name: "empty defaults to oci", runnerKind: "", want: oci.NewOCI(rc, pwd)},
 			}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {

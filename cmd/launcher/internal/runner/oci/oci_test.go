@@ -1,4 +1,4 @@
-package runner
+package oci
 
 import (
 	"bytes"
@@ -16,6 +16,7 @@ import (
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -332,7 +333,7 @@ func TestContainerBuildCmd_SafeDirectoryPreludePrecedesNixBuild(t *testing.T) {
 // An operator override renders its own value, and only that value.
 func TestBuildRunArgs_CustomLimitsRendered(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", pidsLimit: "256", memoryLimit: "2g"}
-	args := a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
+	args := a.buildRunArgs(runner.Box{Name: "agent-issue-1", Env: map[string]string{}})
 
 	for _, flag := range []string{"--pids-limit=256", "--memory=2g"} {
 		if !runnertest.ContainsArg(args, flag) {
@@ -359,7 +360,7 @@ func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 		pidsLimit:   "512",
 		memoryLimit: "4g",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
 	args := a.buildRunArgs(box)
 
 	for _, flag := range []string{
@@ -381,7 +382,7 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 		pidsLimit:   "",
 		memoryLimit: "",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	if !runnertest.ContainsArg(args, "--cap-drop=all") {
@@ -409,7 +410,7 @@ func TestNetworkArg(t *testing.T) {
 	cases := []struct {
 		name          string
 		cli           string
-		networkMode   NetworkMode
+		networkMode   runner.NetworkMode
 		podmanNetwork string
 		want          string
 	}{
@@ -437,7 +438,7 @@ func TestNetworkArg(t *testing.T) {
 // networkArg helper.
 func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "no-host-loopback"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 	if !runnertest.ContainsArg(args, "--network") {
 		t.Fatalf("--network missing from args: %v", args)
@@ -454,7 +455,7 @@ func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 // A raw podmanNetwork renders verbatim as the --network value.
 func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", podmanNetwork: "pasta"}
-	args := a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
+	args := a.buildRunArgs(runner.Box{Name: "agent-issue-1", Env: map[string]string{}})
 	for i, arg := range args {
 		if arg == "--network" {
 			if i+1 >= len(args) || args[i+1] != "pasta" {
@@ -470,7 +471,7 @@ func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
 // is set either.
 func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "open"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 	if runnertest.ContainsArg(args, "--network") {
 		t.Errorf("--network must be absent for networkMode=open; args: %v", args)
@@ -484,7 +485,7 @@ func TestBuildRunArgsImageIsLast(t *testing.T) {
 		pidsLimit:   "256",
 		memoryLimit: "2g",
 	}
-	box := Box{Name: "agent-issue-99", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-99", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	imageIdx := -1
@@ -516,9 +517,9 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{SkillsDir: dir},
+		mountParams: runner.MountParams{SkillsDir: dir},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	want := dir + ":/operator-skills:ro"
@@ -531,10 +532,10 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 // message on stdout.
 func TestBuildRunArgs_SkillsDirPrintsMountMessage(t *testing.T) {
 	dir := t.TempDir()
-	a := &ociAdapter{cli: "podman", image: "spindrift:test", mountParams: MountParams{SkillsDir: dir}}
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", mountParams: runner.MountParams{SkillsDir: dir}}
 
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
+		a.buildRunArgs(runner.Box{Name: "agent-issue-1", Env: map[string]string{}})
 	})
 
 	want := "==> SPINDRIFT_SKILLS_DIR set; mounting " + dir + " over /operator-skills\n"
@@ -551,9 +552,9 @@ func TestBuildRunArgs_NeverRendersIssuesMount(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{},
+		mountParams: runner.MountParams{},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
@@ -568,9 +569,9 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
+		mountParams: runner.MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
 
 	want := dir + ":/home/agent/.claude/projects"
@@ -591,7 +592,7 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []runner.SocketMount{{Source: sock, Target: runner.RegistryProxySocketTarget}}}
 	args := a.buildRunArgs(box)
 
 	want := sock + ":/registry-proxy.sock"
@@ -606,13 +607,13 @@ func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
 	sockA := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	sockB := runnertest.NewTestSocket(t, "signal.sock")
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []SocketMount{
-		{Source: sockA, Target: RegistryProxySocketTarget},
-		{Source: sockB, Target: SignalSocketTarget},
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []runner.SocketMount{
+		{Source: sockA, Target: runner.RegistryProxySocketTarget},
+		{Source: sockB, Target: runner.SignalSocketTarget},
 	}}
 	args := a.buildRunArgs(box)
 
-	for _, want := range []string{sockA + ":" + RegistryProxySocketTarget, sockB + ":" + SignalSocketTarget} {
+	for _, want := range []string{sockA + ":" + runner.RegistryProxySocketTarget, sockB + ":" + runner.SignalSocketTarget} {
 		if !runnertest.ContainsArg(args, want) {
 			t.Errorf("missing socket mount %q in args: %v", want, args)
 		}
@@ -629,7 +630,7 @@ func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
 // finding A).
 func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{
 		"REGISTRY_PROXY_TCP_SECRET": "s3cr3t-token",
 		"GH_TOKEN":                  "gh-s3cr3t",
 		"FORGEJO_TOKEN":             "forgejo-s3cr3t",
@@ -666,7 +667,7 @@ func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 // REGISTRY_PROXY_TCP_SECRET's treatment above.
 func TestBuildRunArgs_SignalSocketSecretRendersBareFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{
 		"SIGNAL_SOCKET_SECRET": "s1gnal-s3cr3t-token",
 	}}
 	args := a.buildRunArgs(box)
@@ -704,7 +705,7 @@ func TestOciRunEnv(t *testing.T) {
 	// guard below fails loudly in that case instead.
 	offArgv := []string{"FORGEJO_TOKEN", "GH_TOKEN", "ISSUE_TEXT", "REGISTRY_PROXY_TCP_SECRET"}
 	for _, k := range offArgv {
-		if !OffArgvKeys[k] {
+		if !runner.OffArgvKeys[k] {
 			t.Fatalf("ociRunEnv fixture: %s is no longer an OffArgvKeys member; update this test alongside the set", k)
 		}
 	}
@@ -749,7 +750,7 @@ func TestBuildRunArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 
 	t.Run("absent", func(t *testing.T) {
-		box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
+		box := runner.Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
 		args := a.buildRunArgs(box)
 		if runnertest.ContainsArg(args, "ISSUE_TEXT") {
 			t.Errorf("buildRunArgs emitted -e ISSUE_TEXT for a box.Env with no ISSUE_TEXT key: %v", args)
@@ -757,7 +758,7 @@ func TestBuildRunArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	})
 
 	t.Run("empty string", func(t *testing.T) {
-		box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_TEXT": ""}}
+		box := runner.Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_TEXT": ""}}
 		args := a.buildRunArgs(box)
 		if !runnertest.ContainsArg(args, "ISSUE_TEXT") {
 			t.Errorf("buildRunArgs: current behaviour still emits bare -e ISSUE_TEXT for an empty-string value; got %v", args)
@@ -803,7 +804,7 @@ func TestOciRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 // TCP-transport fallback, since plain Linux docker offers none by default.
 func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.containers.internal", ""), TCPAddHost: true}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: runner.RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.containers.internal", ""), TCPAddHost: true}}
 	args := a.buildRunArgs(box)
 
 	if !runnertest.ContainsArg(args, "--add-host") {
@@ -827,7 +828,7 @@ func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 // with the in-VM bridge gateway (measured: reachable without it, refused with).
 func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.docker.internal", "5000")}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: runner.RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.docker.internal", "5000")}}
 	args := a.buildRunArgs(box)
 
 	if runnertest.ContainsArg(args, "--add-host") {
@@ -837,7 +838,7 @@ func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
 
 func TestBuildRunArgs_TCPHostUnset_NoAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	if runnertest.ContainsArg(args, "--add-host") {
@@ -863,7 +864,7 @@ func addHostCount(args []string) int {
 // being set.
 func TestBuildRunArgs_SignalSocketOnlyAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, SignalSocket: SignalSocketLocation{
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, SignalSocket: runner.SignalSocketLocation{
 		Endpoint:   registrymanifest.NewTCPEndpoint("host.containers.internal", ""),
 		TCPAddHost: true,
 	}}
@@ -888,14 +889,14 @@ func TestBuildRunArgs_SignalSocketOnlyAddHost(t *testing.T) {
 // not two.
 func TestBuildRunArgs_ProxyAndSignalSocketSameHost_OneAddHost(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{
+	box := runner.Box{
 		Name: "agent-issue-1",
 		Env:  map[string]string{},
-		RegistryProxy: RegistryProxyLocation{
+		RegistryProxy: runner.RegistryProxyLocation{
 			Endpoint:   registrymanifest.NewTCPEndpoint("host.containers.internal", ""),
 			TCPAddHost: true,
 		},
-		SignalSocket: SignalSocketLocation{
+		SignalSocket: runner.SignalSocketLocation{
 			Endpoint:   registrymanifest.NewTCPEndpoint("host.containers.internal", ""),
 			TCPAddHost: true,
 		},
@@ -911,14 +912,14 @@ func TestBuildRunArgs_ProxyAndSignalSocketSameHost_OneAddHost(t *testing.T) {
 // their own --add-host, proxy first.
 func TestBuildRunArgs_ProxyAndSignalSocketDifferentHosts_BothAddHostInOrder(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
-	box := Box{
+	box := runner.Box{
 		Name: "agent-issue-1",
 		Env:  map[string]string{},
-		RegistryProxy: RegistryProxyLocation{
+		RegistryProxy: runner.RegistryProxyLocation{
 			Endpoint:   registrymanifest.NewTCPEndpoint("proxy-host.internal", ""),
 			TCPAddHost: true,
 		},
-		SignalSocket: SignalSocketLocation{
+		SignalSocket: runner.SignalSocketLocation{
 			Endpoint:   registrymanifest.NewTCPEndpoint("signal-host.internal", ""),
 			TCPAddHost: true,
 		},
@@ -971,11 +972,11 @@ func TestRegistrySocketProbeArgs(t *testing.T) {
 	if len(args) < 2 || args[0] != "run" || args[1] != "--rm" {
 		t.Fatalf("want args[0:2] = [run --rm], got %v", args)
 	}
-	want := sock + ":" + RegistryProxySocketTarget
+	want := sock + ":" + runner.RegistryProxySocketTarget
 	if !runnertest.ContainsArg(args, want) {
 		t.Errorf("missing socket mount %q in args: %v", want, args)
 	}
-	tail := []string{a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget}
+	tail := []string{a.image, "probe-registry-socket", "-path", runner.RegistryProxySocketTarget}
 	if strings.Join(args[len(args)-len(tail):], " ") != strings.Join(tail, " ") {
 		t.Errorf("want trailing command %v, got tail of %v", tail, args)
 	}
@@ -1050,11 +1051,11 @@ func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *test
 		t.Fatalf("want call[0:2] = [run --rm], got %v", call)
 	}
 	joined := strings.Join(call, " ")
-	if !strings.Contains(joined, ":"+RegistryProxySocketTarget) {
-		t.Errorf("expected socket mount ending in :%s in call: %v", RegistryProxySocketTarget, call)
+	if !strings.Contains(joined, ":"+runner.RegistryProxySocketTarget) {
+		t.Errorf("expected socket mount ending in :%s in call: %v", runner.RegistryProxySocketTarget, call)
 	}
 	if !strings.Contains(joined, "--entrypoint driver-exec") ||
-		!strings.Contains(joined, "probe-registry-socket -path "+RegistryProxySocketTarget) {
+		!strings.Contains(joined, "probe-registry-socket -path "+runner.RegistryProxySocketTarget) {
 		t.Errorf("expected probe trailing command in call: %v", call)
 	}
 	if got := runnertest.CallCount(t, dir); got != 1 {
@@ -1185,7 +1186,7 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 // cannot reach with no diagnostic (issue #3111 finding B). Scripts one call and
 // asserts callCount stays at 1: DeniesHostLoopback hard-errors before any more.
 func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *testing.T) {
-	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
+	for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
 			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
@@ -1216,7 +1217,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 // Scripts two calls (socket ExitIncapable, TCP sub-probe ExitCapable); with one,
 // the repeat would give the sub-probe ExitIncapable and now correctly error.
 func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *testing.T) {
-	for _, mode := range []NetworkMode{"open", ""} {
+	for _, mode := range []runner.NetworkMode{"open", ""} {
 		t.Run("mode="+string(mode), func(t *testing.T) {
 			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
@@ -1540,11 +1541,11 @@ func TestRegistryProxyTransport_SocketNoVerdict_ControlIncapable_ReportsTCP(t *t
 	}
 	control := runnertest.ReadCall(t, dir, 1)
 	joined := strings.Join(control, " ")
-	if strings.Contains(joined, ":"+RegistryProxySocketTarget) {
+	if strings.Contains(joined, ":"+runner.RegistryProxySocketTarget) {
 		t.Errorf("control probe must omit the socket mount, got: %v", control)
 	}
 	if !strings.Contains(joined, "--entrypoint driver-exec") ||
-		!strings.Contains(joined, "probe-registry-socket -path "+RegistryProxySocketTarget) {
+		!strings.Contains(joined, "probe-registry-socket -path "+runner.RegistryProxySocketTarget) {
 		t.Errorf("control probe must still run the socket probe verb, got: %v", control)
 	}
 }
@@ -1630,7 +1631,7 @@ func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T)
 // TCP because the verdict came from the control probe. Scripts two calls and
 // asserts callCount stays at 2: the TCP sub-probe must never run after that.
 func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_ReturnsError(t *testing.T) {
-	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
+	for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
 			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125}, runnertest.Call{Exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
@@ -1667,7 +1668,7 @@ func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing
 		"control-confirmed-incapable": {{Exit: 125}, {Exit: registryprobe.ExitIncapable}, {Exit: registryprobe.ExitCapable}},
 	}
 	for outcome, calls := range outcomes {
-		for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone, "open", ""} {
+		for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone, "open", ""} {
 			if !mode.DeniesHostLoopback() {
 				continue
 			}
@@ -1931,9 +1932,9 @@ func TestBuildRunArgs_DriverCacheDirMounted_BakedSkillsSurvive(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
+		mountParams: runner.MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
@@ -1948,9 +1949,9 @@ func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
+		mountParams: runner.MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
 
 	for _, flag := range []string{"--cap-drop=all", "--security-opt=no-new-privileges"} {
@@ -1965,7 +1966,7 @@ func TestBuildRunArgs_DriverCacheDirUnset_NoMount(t *testing.T) {
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
@@ -1983,9 +1984,9 @@ func TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T)
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{DriverSessionCacheDir: "/home/agent/custom-driver/state"},
+		mountParams: runner.MountParams{DriverSessionCacheDir: "/home/agent/custom-driver/state"},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
 
 	want := dir + ":/home/agent/custom-driver/state"
@@ -2003,7 +2004,7 @@ func TestBuildRunArgs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: dir}
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
@@ -2017,9 +2018,9 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       "spindrift:test",
-		mountParams: MountParams{SkillsDir: ""},
+		mountParams: runner.MountParams{SkillsDir: ""},
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	for _, arg := range args {
@@ -2037,10 +2038,10 @@ func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
-	if !errors.Is(err, ErrAlreadyRunning) {
+	if !errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
 	if calls := runnertest.CallCount(t, dir); calls != 1 {
@@ -2059,7 +2060,7 @@ func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
 		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2085,7 +2086,7 @@ func TestRun_ReapsByIDNotByName(t *testing.T) {
 		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2110,10 +2111,10 @@ func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-created", "created", time.Now().Add(-5*time.Second))},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
-	if !errors.Is(err, ErrAlreadyRunning) {
+	if !errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning for a container still being created, got %v", err)
 	}
 	if calls := runnertest.CallCount(t, dir); calls != 1 {
@@ -2134,7 +2135,7 @@ func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
 		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2163,7 +2164,7 @@ func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
 		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2194,9 +2195,9 @@ func TestRun_UndecodableInspectBodyRemovesNothing(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "abc123", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
-	if err := a.Run(box); !errors.Is(err, ErrAlreadyRunning) {
+	if err := a.Run(box); !errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
 	if call := runnertest.ReadCall(t, dir, 1); runnertest.ContainsArg(call, "rm") {
@@ -2212,7 +2213,7 @@ func TestRun_NoContainerLaunchesDirectly(t *testing.T) {
 		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2237,13 +2238,13 @@ func TestRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 		runnertest.Call{Exit: 143}, // run
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
 	if err == nil {
 		t.Fatal("Run: want error, got nil")
 	}
-	var runErr *RunError
+	var runErr *runner.RunError
 	if !errors.As(err, &runErr) {
 		t.Fatalf("Run: want error to unwrap to *RunError, got %v (%T)", err, err)
 	}
@@ -2265,10 +2266,10 @@ func TestRun_LostCreateRacePodmanRefusalIsAlreadyRunning(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
-	if !errors.Is(err, ErrAlreadyRunning) {
+	if !errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
 	if calls := runnertest.CallCount(t, dir); calls != 3 {
@@ -2290,10 +2291,10 @@ func TestRun_LostCreateRaceDockerRefusalIsAlreadyRunning(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
-	if !errors.Is(err, ErrAlreadyRunning) {
+	if !errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
 }
@@ -2316,13 +2317,13 @@ func TestRun_EchoedCollisionTextWithGenuineFailureIsRunError(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "own-id", "exited", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
-	if errors.Is(err, ErrAlreadyRunning) {
+	if errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: attacker-echoed collision text steered classification to ErrAlreadyRunning, want RunError")
 	}
-	var runErr *RunError
+	var runErr *runner.RunError
 	if !errors.As(err, &runErr) {
 		t.Fatalf("Run: want *RunError, got %v (%T)", err, err)
 	}
@@ -2343,10 +2344,10 @@ func TestRun_LostCreateRacePostFailureInspectSeesCreated(t *testing.T) {
 		runnertest.Call{Stdout: inspectJSONStdout(t, "0123456789ab", "created", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
 	err := a.Run(box)
-	if !errors.Is(err, ErrAlreadyRunning) {
+	if !errors.Is(err, runner.ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
 	if calls := runnertest.CallCount(t, dir); calls != 3 {
@@ -2367,7 +2368,7 @@ func TestRun_TeesFullOutputToBoxOutput(t *testing.T) {
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	var buf bytes.Buffer
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Output: &buf}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, Output: &buf}
 
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
@@ -2392,7 +2393,7 @@ func TestBuildRunArgs_NoRmFlag(t *testing.T) {
 		cli:   "podman",
 		image: "spindrift:test",
 	}
-	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
 	if runnertest.ContainsArg(args, "--rm") {
@@ -2765,10 +2766,10 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	cliScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // image inspect: absent
 
 	nixScript, nixDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := runner.ExecCommand
+	t.Cleanup(func() { runner.ExecCommand = orig })
 	var gotName string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(nixScript, args...)
 	}
@@ -2817,7 +2818,7 @@ func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 		runnertest.Call{},        // load
 		runnertest.Call{},        // tag
 	)
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 0})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 0})
 
 	a := &ociAdapter{
 		cli:          cliScript,
@@ -2857,7 +2858,7 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 		runnertest.Call{},        // load
 		runnertest.Call{},        // tag
 	)
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	pwd := t.TempDir()
 	pinned := "docker.io/nixos/nix@sha256:0123456789abcdef"
@@ -2925,7 +2926,7 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 		runnertest.Call{Exit: 1}, // image inspect: absent under the lock
 		runnertest.Call{Exit: 1}, // run (container build) fails
 	)
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	a := &ociAdapter{
 		cli:             cliScript,
@@ -2950,7 +2951,7 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 // missing pieces instead of a bare exec failure.
 func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 	redirectImageLockDir(t)
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	a := &ociAdapter{
 		cli:      "spindrift-no-such-runtime",
@@ -2978,7 +2979,7 @@ func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 func TestEnsureReady_RealNixError_SurfacesStderrWithoutContainerRun(t *testing.T) {
 	redirectImageLockDir(t)
 	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // every call fails, so a fallback `run` would still "pass" on error alone
-	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: undefined variable 'frobnicate'"})
+	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: undefined variable 'frobnicate'"})
 
 	a := &ociAdapter{
 		cli:             cliScript,

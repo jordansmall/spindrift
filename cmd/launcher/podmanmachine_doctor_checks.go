@@ -6,6 +6,7 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/oci"
 )
 
 // podmanMachineMemoryCheckName is the Name of the podman-machine-memory
@@ -21,7 +22,7 @@ const vmOverheadMiB = 512
 // fake instead of shelling out to a real podman machine (issue #3537). The
 // real query itself lives in internal/runner, not here: pins_test.go's guard
 // keeps every runtime-binary invocation confined to that one package.
-var podmanMachineMemoryFn = runner.PodmanMachineMemoryMiB
+var podmanMachineMemoryFn = oci.PodmanMachineMemoryMiB
 
 // memoryLimitMiB converts a podman/docker-style limit string to MiB via
 // runner.MemoryLimitToBytes, so this doctor-side sizing check and the

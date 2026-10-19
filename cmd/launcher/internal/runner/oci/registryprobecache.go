@@ -1,4 +1,4 @@
-package runner
+package oci
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // registryProbeCacheVersion tags the on-disk payload shape. Bumping it on a
@@ -26,7 +27,7 @@ type registryProbeCacheKey struct {
 	// aliases that resolve to one binary share a cache entry.
 	runtime     string
 	image       string
-	networkMode NetworkMode
+	networkMode runner.NetworkMode
 }
 
 // registryProbeCacheEntry is the on-disk payload. It carries the verdict in
@@ -35,13 +36,13 @@ type registryProbeCacheKey struct {
 // rejects the path-less, port-less values the probe returns (the caller mints
 // the real path or port afterwards).
 type registryProbeCacheEntry struct {
-	Version     int         `json:"version"`
-	Runtime     string      `json:"runtime"`
-	Image       string      `json:"image"`
-	NetworkMode NetworkMode `json:"networkMode"`
-	Transport   string      `json:"transport"`
-	TCPHost     string      `json:"tcpHost,omitempty"`
-	TCPAddHost  bool        `json:"tcpAddHost"`
+	Version     int                `json:"version"`
+	Runtime     string             `json:"runtime"`
+	Image       string             `json:"image"`
+	NetworkMode runner.NetworkMode `json:"networkMode"`
+	Transport   string             `json:"transport"`
+	TCPHost     string             `json:"tcpHost,omitempty"`
+	TCPAddHost  bool               `json:"tcpAddHost"`
 }
 
 // registryProbeCachePath returns the cache path for pwd, or "" when pwd is

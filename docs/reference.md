@@ -8061,7 +8061,7 @@ deleting it would only reopen a race with a concurrent acquirer. A refused
 acquire is recorded in the event stream as well as on stderr: a `halt`
 event whose `reason` is prefixed `instance-lock:`, and the daemon exits 1.
 
-**Image realize lock.** `EnsureReady` (`cmd/launcher/internal/runner/oci.go`)
+**Image realize lock.** `EnsureReady` (`cmd/launcher/internal/runner/oci/oci.go`)
 takes its own lock around the realize/load/re-tag it does whenever the
 configured image is absent (issue #3632): without it, concurrent Dispatch
 children sharing a host — a daemon's own pool very much included — each
@@ -8069,7 +8069,7 @@ independently realize, load and re-tag the same absent image at once,
 turning one build into as many concurrent builds as `MAX_PARALLEL`
 allows. The lock sits outside any checkout, at
 `<os.TempDir()>/spindrift-image-<sha256(image)[:16]>.lock`
-(`imageLockPath`, `cmd/launcher/internal/runner/imagelock.go`) — hashed
+(`imageLockPath`, `cmd/launcher/internal/runner/oci/imagelock.go`) — hashed
 because an image reference carries `/` and `:`, neither safe in a
 filename, and keyed on the image reference itself rather than on the
 checkout or the daemon's own instance lock, so two Consumers realizing two
