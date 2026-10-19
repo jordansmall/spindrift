@@ -1,0 +1,13 @@
+{
+  "envExports": [
+    {
+      "Name": "npm_config_registry",
+      "Value": "http://127.0.0.1:27182/registry-acme-test/"
+    }
+  ],
+  "inTree": {
+    "configPath": ".npmrc",
+    "content": "registry=http://:8080/\n@acme:registry=http://127.0.0.1:27182/registry-acme-test/\n",
+    "outcome": "applied"
+  }
+}
