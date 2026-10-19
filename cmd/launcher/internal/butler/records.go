@@ -88,13 +88,13 @@ func (p Policy) loadSnapshot(chore, recordID string) (snap dispatchrecord.Snapsh
 	return snap, ok, nil
 }
 
-// tuningSnapshot is a records-scoped sweep's digest. chore and ref.Sweep key
+// recordsSnapshot is a records-scoped sweep's digest. chore and ref.Sweep key
 // the stored row; ref goes on the Done commit; rendered is the text of that
 // row, filled by load at settle; digest is the Strategy whose hooks judge the
 // findings and knobs the values it read, so Render and Validate see the same
 // sample floor; policy and tree reach the store and the scanned HEAD's
 // tracked files.
-type tuningSnapshot struct {
+type recordsSnapshot struct {
 	chore    string
 	ref      ledger.Snapshot
 	rendered string
@@ -108,18 +108,18 @@ type tuningSnapshot struct {
 // was handed, so validation holds the Box to what the store says it was served.
 // A missing row, or one whose text no longer hashes to ref.SHA256, is an error:
 // the settle fails and the claim stands.
-func (t *tuningSnapshot) load() error {
-	snap, ok, err := t.policy.loadSnapshot(t.chore, t.ref.Sweep)
+func (r *recordsSnapshot) load() error {
+	snap, ok, err := r.policy.loadSnapshot(r.chore, r.ref.Sweep)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("%s snapshot %s is missing from the dispatch records store", t.chore, t.ref.Sweep)
+		return fmt.Errorf("%s snapshot %s is missing from the dispatch records store", r.chore, r.ref.Sweep)
 	}
 	sum := sha256.Sum256([]byte(snap.Rendered))
-	if got := hex.EncodeToString(sum[:]); snap.SHA256 != t.ref.SHA256 || got != t.ref.SHA256 {
-		return fmt.Errorf("%s snapshot %s does not match its ledger ref %s", t.chore, t.ref.Sweep, t.ref.SHA256)
+	if got := hex.EncodeToString(sum[:]); snap.SHA256 != r.ref.SHA256 || got != r.ref.SHA256 {
+		return fmt.Errorf("%s snapshot %s does not match its ledger ref %s", r.chore, r.ref.Sweep, r.ref.SHA256)
 	}
-	t.rendered = snap.Rendered
+	r.rendered = snap.Rendered
 	return nil
 }

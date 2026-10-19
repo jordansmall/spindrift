@@ -101,6 +101,10 @@ type Strategy struct {
 	Validate func(in signalwire.IssueIntent, digest string, limits Limits, tracked func() (map[string]bool, error)) (reason string, err error)
 	// DedupTerms returns the Chore's dedup pattern terms for a finding.
 	DedupTerms func(settle.Finding) []string
+	// Evidence renders the host-written block appended to a filed finding's
+	// body, from the stored digest and the finding's cites; "" appends nothing.
+	// Nil means the Chore appends no block.
+	Evidence func(digest string, cites []string) string
 }
 
 // Knobs reads the Chore's row-owned settings; a Chore with no ReadKnobs owns

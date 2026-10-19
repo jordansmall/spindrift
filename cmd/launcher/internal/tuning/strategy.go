@@ -70,6 +70,9 @@ var Strategy = recordsdigest.Strategy{
 		}
 		return terms
 	},
+	Evidence: func(digest string, cites []string) string {
+		return Evidence(Rows(digest), cites)
+	},
 }
 
 // readKnobs maps the row's generated knob reader onto the Digest's Knobs. A

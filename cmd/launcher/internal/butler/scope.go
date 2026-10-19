@@ -215,6 +215,6 @@ func (s recordsSource) armSnapshot(d dispatch.Dispatcher, step *settleRun, diges
 	if err := s.policy.storeSnapshot(dispatchrecord.Snapshot{Chore: s.chore, RecordID: id, SHA256: ref.SHA256, Rendered: digest, CreatedAt: s.claimedAt}); err != nil {
 		return fmt.Errorf("butler: %s: %w", s.chore, err)
 	}
-	step.tuning = &tuningSnapshot{chore: s.chore, ref: ref, digest: s.digest, knobs: s.knobs, policy: s.policy, tree: s.tree}
+	step.records = &recordsSnapshot{chore: s.chore, ref: ref, digest: s.digest, knobs: s.knobs, policy: s.policy, tree: s.tree}
 	return nil
 }
