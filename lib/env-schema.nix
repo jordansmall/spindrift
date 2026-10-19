@@ -286,27 +286,6 @@ withRowKnobs {
     nixSubPath = "network.mode";
     boxEnv = false;
   };
-  podmanNetwork = {
-    env = "PODMAN_NETWORK";
-    group = "infra";
-    doc = "--network value for podman run; empty applies no flag (podman NAT default); set to 'pasta' to restrict egress";
-    flakeOption = true;
-    nixSubPath = "network.podman";
-    boxEnv = false;
-  };
-  bwrapUnshareNet = {
-    env = "BWRAP_UNSHARE_NET";
-    group = "infra";
-    default = false;
-    # `kind` opts this flag into presence parsing (issue #2145): it takes
-    # `--bwrap-unshare-net` bare or `--bwrap-unshare-net=<value>`, but never a
-    # space-separated value.
-    kind = "bool";
-    doc = "when non-empty, forces bwrap's network-namespace isolation on (pasta-backed since issue #2666, no longer DNS-breaking); redundant with the new isolate-by-default posture unless paired with NETWORK_MODE=host, which nix eval already rejects -- see network.mode";
-    flakeOption = true;
-    nixSubPath = "network.bwrapUnshare";
-    boxEnv = false;
-  };
   memoryLimit = {
     env = "MEMORY_LIMIT";
     group = "infra";

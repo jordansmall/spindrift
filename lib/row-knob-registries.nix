@@ -17,4 +17,9 @@
     # not collide with an unrelated internal package.
     goPackageDir = name: "cmd/launcher/internal/${name}";
   }
+  {
+    source = "lib/runners";
+    rows = import ./runners/default.nix;
+    goPackageDir = name: "cmd/launcher/internal/runner/${name}";
+  }
 ]

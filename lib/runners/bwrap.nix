@@ -1,3 +1,6 @@
+# The bwrap runner row: data plus the env knobs it owns (issue #5686, ADR 0068).
+# The registry (./default.nix) documents the fields and fixes this row's order;
+# lib/row-knobs.nix folds `knobs` into lib/env-schema.nix.
 {
   name = "bwrap";
   goName = "Bwrap";
@@ -78,4 +81,20 @@
       NIX_CONFIG_FILE_DRV = nixConfigDrv;
       SYSCALL_FILTER_DRV = syscallFilterDrv;
     };
+
+  knobs = {
+    bwrapUnshareNet = {
+      env = "BWRAP_UNSHARE_NET";
+      group = "infra";
+      default = false;
+      # `kind` opts this flag into presence parsing (issue #2145): it takes
+      # `--bwrap-unshare-net` bare or `--bwrap-unshare-net=<value>`, but never a
+      # space-separated value.
+      kind = "bool";
+      doc = "when non-empty, forces bwrap's network-namespace isolation on (pasta-backed since issue #2666, no longer DNS-breaking); redundant with the new isolate-by-default posture unless paired with NETWORK_MODE=host, which nix eval already rejects -- see network.mode";
+      flakeOption = true;
+      nixSubPath = "network.bwrapUnshare";
+      boxEnv = false;
+    };
+  };
 }
