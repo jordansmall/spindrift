@@ -1,12 +1,12 @@
 # Eval-level pins for lib/preambles.nix (issue #513), on top of the
 # byte-identity equivalence checks in equivalence.nix that already cover
 # mkHarness.nix's generated output.
-{ pkgs, ... }:
+{ pkgs, fixtures, ... }:
 let
   preambles = import ../../lib/preambles.nix;
   inherit (pkgs.lib) assertMsg hasInfix;
 
-  bwrapRow = import ../../lib/runners/bwrap.nix;
+  inherit (fixtures) bwrapRow;
   ociRow = import ../../lib/runners/oci.nix;
   allRows = (import ../../lib/runners/index.nix { }).rows;
 
@@ -69,7 +69,7 @@ let
     launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
     imageName = "spindrift";
     imageAttrName = "agent-closure";
-    runtime = builtins.head bwrapRow.runtimes;
+    runtime = fixtures.bwrapRuntime;
     imageDrv = "/nix/store/ddd-image.drv";
     nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
     systems = {
@@ -429,7 +429,7 @@ runArtifactsRowChecks allRows
       );
     in
     assert assertMsg (
-      out.RUNTIME == builtins.head bwrapRow.runtimes
+      out.RUNTIME == fixtures.bwrapRuntime
     ) "runArtifacts (bwrap) must set RUNTIME to the row runtime, got: ${builtins.toJSON out}";
     assert assertMsg (
       out.BOX_ARTIFACT == "store-closure"

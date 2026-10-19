@@ -26,6 +26,9 @@ let
     splitString
     ;
   driverMap = import ../../lib/driver-map.nix;
+  # These fixtures test store-closure behaviour (agent-closure output, no OCI
+  # image).
+  storeClosureRuntime = fixtures.bwrapRuntime;
   # FLAKE_IMAGE_ATTR names the image's Linux twin, not a darwin host.
   linuxSystem = (import ../../lib/nixpkgs-shared.nix).linuxTwin.${system};
   schema = import ../../lib/env-schema.nix;
@@ -792,7 +795,7 @@ in
       twoApps = appsOf two;
       twoPkgs = outputs two;
       onePkgs = outputs claude;
-      bwrapPkgs = outputs (recursiveUpdate two { infra.runtime = "bwrap"; });
+      bwrapPkgs = outputs (recursiveUpdate two { infra.runtime = storeClosureRuntime; });
     in
     assert assertMsg
       (
@@ -864,11 +867,11 @@ in
         agents.drivers.opencode = ocModels;
       };
       withTop = recursiveUpdate base { dispatch.daemonApp = ".#custom"; };
-      bwrap = recursiveUpdate base { infra.runtime = "bwrap"; };
+      bwrap = recursiveUpdate base { infra.runtime = storeClosureRuntime; };
       ocBwrap = direct (
         ocArgs
         // {
-          runtime = "bwrap";
+          runtime = storeClosureRuntime;
           imageAttrName = "agent-closure-opencode";
         }
       );
