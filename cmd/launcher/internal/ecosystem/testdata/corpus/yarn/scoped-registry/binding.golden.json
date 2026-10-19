@@ -1,4 +1,10 @@
 {
+  "envExports": [
+    {
+      "Name": "YARN_NPM_REGISTRY_SERVER",
+      "Value": "http://127.0.0.1:27182/registry-npmjs-org/"
+    }
+  ],
   "inTree": {
     "configPath": ".yarnrc.yml",
     "content": "npmRegistryServer: \"http://127.0.0.1:27182/registry-npmjs-org\"\n\nnpmScopes:\n  acme:\n    npmRegistryServer: \"http://127.0.0.1:27182/npm-acme-test\"\n",

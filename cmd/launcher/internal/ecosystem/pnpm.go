@@ -1,22 +1,31 @@
 package ecosystem
 
-import "strings"
+import (
+	"strings"
 
-// namePnpm is pnpmRow's Name. npmFamilyVars (npm.go) compares against this
-// const rather than pnpmRow.Name to avoid a package initialization cycle.
-const namePnpm = "pnpm"
+	"spindrift.dev/launcher/internal/registrymanifest"
+)
 
-// pnpmRow is the pnpm ecosystem's Table entry. It carries a BindingEnvVar
-// despite a nil EnvExports because npmRow's EnvExports (NpmFamilyBindings)
-// renders all three npm-family vars, pnpm's included, in one call.
+// namePnpm and pnpmBindingEnvVar are consts because pnpmRow's EnvExports cannot
+// read pnpmRow.Name or pnpmRow.BindingEnvVar without a package initialization
+// cycle. Sharing the const keeps BindingEnvVar and the exported var one name.
+const (
+	namePnpm          = "pnpm"
+	pnpmBindingEnvVar = "pnpm_config_registry"
+)
+
+// pnpmRow is the pnpm ecosystem's Table entry.
 var pnpmRow = Row{
 	Name:             namePnpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"pnpm-lock.yaml"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: "pnpm-workspace.yaml",
-	BindingEnvVar:    "pnpm_config_registry",
-	ConfigParser:     parsePnpmRegistryConfig,
+	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		return npmFamilyBinding(port, prefix, routes, pnpmBindingEnvVar, namePnpm)
+	},
+	BindingEnvVar: pnpmBindingEnvVar,
+	ConfigParser:  parsePnpmRegistryConfig,
 }
 
 // isPnpmRegistryKey reports whether key is the bare top-level "registry" or a

@@ -85,10 +85,10 @@ type Row struct {
 	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
 
 	// BindingEnvVar names the one env var the row's binding lands in (npm,
-	// pnpm, yarn, go); yarn and pnpm set it though npm's NpmFamilyBindings
-	// renders all three. A file-bound row (cargo, gradle) leaves it empty and
-	// names its HomeConfig path. Naming a var is no promise the run rendered it
-	// (issues #3259, #3260): confirm it against the exports (see ExportValue).
+	// pnpm, yarn, go), the same name its EnvExports renders. A file-bound row
+	// (cargo, gradle) leaves it empty and names its HomeConfig path. Naming a var
+	// is no promise the run rendered it (issues #3259, #3260): confirm it against
+	// the exports (see ExportValue).
 	BindingEnvVar string
 
 	// RewriteRows is empty for a row declaring no response rewrite. The two

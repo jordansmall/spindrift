@@ -21,82 +21,101 @@ func npmFamilyTaggedRoutes() []registrymanifest.Route {
 	}}
 }
 
-func TestNpmFamilyBindings_ThreeExportsCorrectURL(t *testing.T) {
-	got, warnings := NpmFamilyBindings(27182, "r0", npmFamilyTaggedRoutes())
-	if len(got) != 3 {
-		t.Fatalf("len(NpmFamilyBindings) = %d, want 3", len(got))
+// npmFamilyCases pairs each npm-family row, whose name is also the ecosystem
+// tag it reads, with the env var it binds. The strings are spelled out rather
+// than read from the rows so a rename of either side fails here.
+var npmFamilyCases = []struct {
+	row, envVar string
+}{
+	{"npm", "npm_config_registry"},
+	{"pnpm", "pnpm_config_registry"},
+	{"yarn", "YARN_NPM_REGISTRY_SERVER"},
+}
+
+func taggedRoute(prefix string, paths ...registryvocab.Subtree) []registrymanifest.Route {
+	return []registrymanifest.Route{{Prefix: prefix, EnforcedPaths: paths}}
+}
+
+func rowExports(t *testing.T, name string, port int, prefix string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+	t.Helper()
+	row := rowByName(t, name)
+	if row.EnvExports == nil {
+		t.Fatalf("%s row has nil EnvExports", name)
 	}
-	if len(warnings) != 0 {
-		t.Fatalf("got warnings %v, want none", warnings)
-	}
-	want := map[string]string{
-		"npm_config_registry":      "http://127.0.0.1:27182/r0/npm/",
-		"pnpm_config_registry":     "http://127.0.0.1:27182/r0/pnpm/",
-		"YARN_NPM_REGISTRY_SERVER": "http://127.0.0.1:27182/r0/yarn/",
-	}
-	for name, wantValue := range want {
-		value, ok := ExportValue(got, name)
-		if !ok {
-			t.Errorf("%s missing from NpmFamilyBindings", name)
-			continue
-		}
-		if value != wantValue {
-			t.Errorf("%s = %q, want %q", name, value, wantValue)
-		}
+	return row.EnvExports(port, prefix, stubGetenv(nil), routes)
+}
+
+// Each row binds its BindingEnvVar and nothing else, from its own tagged path
+// (issue #3259): the other two ecosystems' paths never reach it.
+func TestNpmFamilyRows_BindOnlyOwnVarFromOwnTaggedPath(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			if got := rowByName(t, tc.row).BindingEnvVar; got != tc.envVar {
+				t.Fatalf("BindingEnvVar = %q, want %q", got, tc.envVar)
+			}
+			got, warnings := rowExports(t, tc.row, 27182, "r0", npmFamilyTaggedRoutes())
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			want := []EnvExport{{Name: tc.envVar, Value: "http://127.0.0.1:27182/r0/" + tc.row + "/"}}
+			if len(got) != 1 || got[0] != want[0] {
+				t.Errorf("exports = %v, want %v", got, want)
+			}
+		})
 	}
 }
 
-func TestNpmFamilyBindings_DifferentPortDifferentURL(t *testing.T) {
-	got, _ := NpmFamilyBindings(9999, "r0", npmFamilyTaggedRoutes())
-	value, ok := ExportValue(got, "npm_config_registry")
-	if !ok {
-		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
-	}
-	if value != "http://127.0.0.1:9999/r0/npm/" {
-		t.Errorf("npm_config_registry = %q, want %q", value, "http://127.0.0.1:9999/r0/npm/")
+func TestNpmFamilyRows_DifferentPortDifferentURL(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			got, _ := rowExports(t, tc.row, 9999, "r0", npmFamilyTaggedRoutes())
+			want := "http://127.0.0.1:9999/r0/" + tc.row + "/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
+			}
+		})
 	}
 }
 
 // The route prefix, not just the port, must land in the rendered URL
 // (issue #3142).
-func TestNpmFamilyBindings_DifferentPrefixDifferentURL(t *testing.T) {
-	got, _ := NpmFamilyBindings(27182, "artifactory-npm", npmFamilyTaggedRoutes())
-	value, ok := ExportValue(got, "npm_config_registry")
-	if !ok {
-		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
-	}
-	if value != "http://127.0.0.1:27182/artifactory-npm/npm/" {
-		t.Errorf("npm_config_registry = %q, want %q", value, "http://127.0.0.1:27182/artifactory-npm/npm/")
+func TestNpmFamilyRows_DifferentPrefixDifferentURL(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			got, _ := rowExports(t, tc.row, 27182, "artifactory-npm", npmFamilyTaggedRoutes())
+			want := "http://127.0.0.1:27182/artifactory-npm/" + tc.row + "/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
+			}
+		})
 	}
 }
 
-// pnpm and yarn have no tagged path of their own on this route, so they get
-// no export at all (AC3's fallback).
-func TestNpmFamilyBindings_SingleTaggedPath(t *testing.T) {
-	routes := []registrymanifest.Route{{
-		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "npm", Path: "/artifactory/api/npm/npm-local"},
-		},
-	}}
-	got, warnings := NpmFamilyBindings(27182, "r0", routes)
-	if len(warnings) != 0 {
-		t.Fatalf("got warnings %v, want none", warnings)
-	}
+// A route tagging only one ecosystem leaves the other two rows with no export
+// at all (AC3's fallback).
+func TestNpmFamilyRows_SingleTaggedPath(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-local"})
+			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			want := "http://127.0.0.1:27182/r0/artifactory/api/npm/npm-local/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
+			}
 
-	value, ok := ExportValue(got, "npm_config_registry")
-	if !ok {
-		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
-	}
-	want := "http://127.0.0.1:27182/r0/artifactory/api/npm/npm-local/"
-	if value != want {
-		t.Errorf("npm_config_registry = %q, want %q", value, want)
-	}
-
-	for _, name := range []string{"pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER"} {
-		if _, ok := ExportValue(got, name); ok {
-			t.Errorf("%s exported, want no export (no tagged path for this ecosystem)", name)
-		}
+			for _, other := range npmFamilyCases {
+				if other.row == tc.row {
+					continue
+				}
+				otherGot, otherWarnings := rowExports(t, other.row, 27182, "r0", routes)
+				if len(otherGot) != 0 || len(otherWarnings) != 0 {
+					t.Errorf("%s row = (%v, %v) on a %s-only route, want nothing", other.row, otherGot, otherWarnings, tc.row)
+				}
+			}
+		})
 	}
 }
 
@@ -104,100 +123,94 @@ func TestNpmFamilyBindings_SingleTaggedPath(t *testing.T) {
 // registrypathset's whole-host marker, must render as the bare-root URL with
 // exactly one trailing slash. A double slash can 404 on a strict registry.
 // Mirrors cargo's ""-means-"no path" convention (see cargoIndexPath).
-func TestNpmFamilyBindings_WholeHostTaggedPath(t *testing.T) {
-	routes := []registrymanifest.Route{{
-		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "npm", Path: "/"},
-		},
-	}}
-	got, warnings := NpmFamilyBindings(27182, "r0", routes)
-	if len(warnings) != 0 {
-		t.Fatalf("got warnings %v, want none", warnings)
-	}
-
-	value, ok := ExportValue(got, "npm_config_registry")
-	if !ok {
-		t.Fatalf("npm_config_registry missing from NpmFamilyBindings")
-	}
-	want := "http://127.0.0.1:27182/r0/"
-	if value != want {
-		t.Errorf("npm_config_registry = %q, want %q", value, want)
+func TestNpmFamilyRows_WholeHostTaggedPath(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/"})
+			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			want := "http://127.0.0.1:27182/r0/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
+			}
+		})
 	}
 }
 
 // AC3's fallback: absence of declaration is absence of binding, not an
 // error, so a missing tagged path warns about nothing.
-func TestNpmFamilyBindings_ZeroTaggedPaths(t *testing.T) {
-	routes := []registrymanifest.Route{{Prefix: "r0"}}
-	got, warnings := NpmFamilyBindings(27182, "r0", routes)
-	if len(got) != 0 {
-		t.Errorf("got exports %v, want none", got)
-	}
-	if len(warnings) != 0 {
-		t.Errorf("got warnings %v, want none", warnings)
-	}
-}
-
-// Two or more npm-tagged paths on the matched route leave no way to tell
-// which is the default registry, so npm_config_registry gets no export and
-// a warning naming the ecosystem, the ambiguous paths, and the prefix.
-func TestNpmFamilyBindings_AmbiguousTaggedPaths(t *testing.T) {
-	routes := []registrymanifest.Route{{
-		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "npm", Path: "/artifactory/api/npm/npm-local"},
-			{Ecosystem: "npm", Path: "/artifactory/api/npm/npm-other"},
-		},
-	}}
-	got, warnings := NpmFamilyBindings(27182, "r0", routes)
-	if _, ok := ExportValue(got, "npm_config_registry"); ok {
-		t.Errorf("npm_config_registry exported, want no export (ambiguous)")
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
-	}
-	w := warnings[0]
-	if !strings.HasPrefix(w, "==> WARNING: ") {
-		t.Errorf("warning %q missing \"==> WARNING: \" prefix", w)
-	}
-	for _, want := range []string{"npm", "r0", "/artifactory/api/npm/npm-local", "/artifactory/api/npm/npm-other"} {
-		if !strings.Contains(w, want) {
-			t.Errorf("warning %q missing %q", w, want)
-		}
+func TestNpmFamilyRows_ZeroTaggedPaths(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			got, warnings := rowExports(t, tc.row, 27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
+			if len(got) != 0 {
+				t.Errorf("got exports %v, want none", got)
+			}
+			if len(warnings) != 0 {
+				t.Errorf("got warnings %v, want none", warnings)
+			}
+		})
 	}
 }
 
-// npm, pnpm, and yarn each resolve their own tagged path in one call, so the
-// three vars are not computed from one shared match.
-func TestNpmFamilyBindings_IndependentPerEcosystem(t *testing.T) {
-	routes := []registrymanifest.Route{{
-		Prefix: "r0",
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "npm", Path: "/npm-repo"},
-			{Ecosystem: "pnpm", Path: "/pnpm-repo"},
-			{Ecosystem: "yarn", Path: "/yarn-repo"},
-		},
-	}}
-	got, warnings := NpmFamilyBindings(27182, "r0", routes)
-	if len(warnings) != 0 {
-		t.Fatalf("got warnings %v, want none", warnings)
+// Two or more same-tagged paths on the matched route leave no way to tell
+// which is the default registry, so the row's var gets no export and a
+// warning naming the ecosystem, the var, the ambiguous paths, and the prefix.
+func TestNpmFamilyRows_AmbiguousTaggedPaths(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := taggedRoute("r0",
+				registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-local"},
+				registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-other"},
+			)
+			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			if _, ok := ExportValue(got, tc.envVar); ok {
+				t.Errorf("%s exported, want no export (ambiguous)", tc.envVar)
+			}
+			if len(warnings) != 1 {
+				t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
+			}
+			w := warnings[0]
+			if !strings.HasPrefix(w, "==> WARNING: ") {
+				t.Errorf("warning %q missing \"==> WARNING: \" prefix", w)
+			}
+			for _, want := range []string{tc.row, tc.envVar, "r0", "/artifactory/api/npm/npm-local", "/artifactory/api/npm/npm-other"} {
+				if !strings.Contains(w, want) {
+					t.Errorf("warning %q missing %q", w, want)
+				}
+			}
+		})
 	}
+}
 
-	cases := map[string]string{
-		"npm_config_registry":      "http://127.0.0.1:27182/r0/npm-repo/",
-		"pnpm_config_registry":     "http://127.0.0.1:27182/r0/pnpm-repo/",
-		"YARN_NPM_REGISTRY_SERVER": "http://127.0.0.1:27182/r0/yarn-repo/",
-	}
-	for name, want := range cases {
-		value, ok := ExportValue(got, name)
-		if !ok {
-			t.Errorf("%s missing from NpmFamilyBindings", name)
-			continue
-		}
-		if value != want {
-			t.Errorf("%s = %q, want %q", name, value, want)
-		}
+// Each row resolves its own tagged path, so distinct paths per ecosystem do
+// not bleed into one another and one row's ambiguity does not silence another.
+func TestNpmFamilyRows_IndependentPerEcosystem(t *testing.T) {
+	routes := taggedRoute("r0",
+		registryvocab.Subtree{Ecosystem: "npm", Path: "/npm-repo"},
+		registryvocab.Subtree{Ecosystem: "pnpm", Path: "/pnpm-repo"},
+		registryvocab.Subtree{Ecosystem: "yarn", Path: "/yarn-repo"},
+		registryvocab.Subtree{Ecosystem: "yarn", Path: "/yarn-other"},
+	)
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			if tc.row == "yarn" {
+				if len(got) != 0 || len(warnings) != 1 {
+					t.Errorf("yarn = (%v, %v), want no export and one ambiguity warning", got, warnings)
+				}
+				return
+			}
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			want := "http://127.0.0.1:27182/r0/" + tc.row + "-repo/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
+			}
+		})
 	}
 }
 
