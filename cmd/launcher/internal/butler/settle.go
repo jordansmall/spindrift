@@ -135,7 +135,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	var drops []ledger.Drop
 	if s.tuning != nil {
 		err := s.tuning.load()
-		if err == nil && s.tuning.digest.Validate != nil {
+		if err == nil {
 			result.IssueIntents, drops, err = s.validateFindings(num, result.IssueIntents)
 		}
 		if err != nil {
@@ -531,8 +531,27 @@ func (s *settleRun) extraLabels(more ...string) []string {
 	return append(slices.Clone(s.labels), more...)
 }
 
-// validateFindings drops every finding in raw that the Digest's Validate hook
-// refuses, returning the rest and a Drop for each. A payload
+// dropUnknownCite is the Ledger drop reason for a finding that cites nothing
+// or an anchor the stored digest does not hold.
+const dropUnknownCite = "unknown-cite"
+
+// citeDrop returns dropUnknownCite unless cites is non-empty and every one is
+// an anchor: a finding must trace back to rows the host served.
+func citeDrop(cites []string, anchors map[string]bool) string {
+	if len(cites) == 0 {
+		return dropUnknownCite
+	}
+	for _, c := range cites {
+		if !anchors[c] {
+			return dropUnknownCite
+		}
+	}
+	return ""
+}
+
+// validateFindings drops every finding in raw that cites nothing, cites an
+// anchor outside the stored digest, or the Digest's Validate hook (when it has
+// one) refuses, returning the rest and a Drop for each. A payload
 // that filing would reject (settle.ParseIssueIntent) passes through for it to
 // skip, so its unvetted fields never reach a Drop. A tracked-files
 // error fails the settle rather than dropping anything: the claim stands and
@@ -553,6 +572,7 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 		}
 		return tracked, nil
 	}
+	anchors := s.tuning.digest.Anchors(s.tuning.rendered)
 	var kept []string
 	var drops []ledger.Drop
 	for _, r := range raw {
@@ -561,9 +581,13 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 			kept = append(kept, r)
 			continue
 		}
-		reason, err := s.tuning.digest.Validate(in, s.tuning.rendered, s.tuning.policy.digestLimits(), trackedFiles)
-		if err != nil {
-			return nil, nil, err
+		reason := citeDrop(in.Cites, anchors)
+		if reason == "" && s.tuning.digest.Validate != nil {
+			var err error
+			reason, err = s.tuning.digest.Validate(in, s.tuning.rendered, s.tuning.policy.digestLimits(), trackedFiles)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		if reason == "" {
 			kept = append(kept, r)

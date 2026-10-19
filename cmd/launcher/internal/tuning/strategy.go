@@ -21,6 +21,7 @@ var Strategy = recordsdigest.Strategy{
 		d := Render(in.Records, in.Cursor, in.Now, in.Limits, prior, in.Merged)
 		return recordsdigest.Output{Text: d.Text, Latest: d.Latest}
 	},
+	Anchors: Anchors,
 	ParsePrior: func(f settle.PriorFinding) any {
 		p := Prior{
 			Number:     f.Issue.Number,
@@ -36,17 +37,6 @@ var Strategy = recordsdigest.Strategy{
 		return p
 	},
 	Validate: func(in signalwire.IssueIntent, digest string, lim recordsdigest.Limits, tracked func() (map[string]bool, error)) (string, error) {
-		// A tuning finding must trace back to rows the host served, so one with
-		// no cites at all fails like one citing an unknown anchor.
-		if len(in.Cites) == 0 {
-			return dropUnknownCite, nil
-		}
-		anchors := Anchors(digest)
-		for _, c := range in.Cites {
-			if !anchors[c] {
-				return dropUnknownCite, nil
-			}
-		}
 		files := settle.DedupFiles(in.DedupTerms)
 		if len(files) == 0 {
 			return dropMissingTarget, nil
@@ -81,7 +71,6 @@ var Strategy = recordsdigest.Strategy{
 
 // Drop reasons recorded in the Ledger for a tuning finding settle refused.
 const (
-	dropUnknownCite   = "unknown-cite"
 	dropMissingTarget = "missing-target"
 	dropThinEvidence  = "thin-evidence"
 )

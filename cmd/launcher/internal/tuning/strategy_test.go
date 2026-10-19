@@ -42,8 +42,6 @@ func TestStrategyValidate(t *testing.T) {
 		limits recordsdigest.Limits
 		want   string
 	}{
-		{"no cites", signalwire.IssueIntent{Class: "prompt-gap", DedupTerms: []string{"a.go:F"}}, limits, "unknown-cite"},
-		{"unknown cite", signalwire.IssueIntent{Class: "prompt-gap", Cites: []string{anchor, "summary:nope"}, DedupTerms: []string{"a.go:F"}}, limits, "unknown-cite"},
 		{"no target", signalwire.IssueIntent{Class: "prompt-gap", Cites: []string{anchor}}, limits, "missing-target"},
 		{"untracked target", signalwire.IssueIntent{Class: "prompt-gap", Cites: []string{anchor}, DedupTerms: []string{"a.go:F", "gone.md:k"}}, limits, "missing-target"},
 		{"thin evidence", signalwire.IssueIntent{Class: "prompt-gap", Cites: []string{anchor}, DedupTerms: []string{"a.go:F"}}, recordsdigest.Limits{MinSample: 5}, "thin-evidence"},

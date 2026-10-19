@@ -1,6 +1,7 @@
 package butler
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,10 @@ import (
 	"spindrift.dev/launcher/internal/tuning"
 )
 
-const noPriorChore = "noprior"
+const (
+	noPriorChore  = "noprior"
+	noPriorAnchor = "row:a"
+)
 
 // The butler's tests exercise the tuning records path, which the production
 // binary registers from the host bundle; a library test may not import that.
@@ -27,6 +31,7 @@ func init() {
 		Render: func(in recordsdigest.Input) recordsdigest.Output {
 			return recordsdigest.Output{Text: "digest", Latest: "latest"}
 		},
+		Anchors: func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
 	})
 }
 
@@ -78,8 +83,9 @@ func TestRecordsSourceWithoutParsePriorSkipsBacklog(t *testing.T) {
 }
 
 // A Digest that registers no Validate or DedupTerms gets neither tuning's
-// settle rules nor its pattern keys: an uncited finding files, and findings on
-// one site dedup on their own DedupTerms rather than class:file:metric.
+// settle rules nor its pattern keys: an untracked-target finding files, and
+// findings on one site dedup on their own DedupTerms rather than
+// class:file:metric.
 func TestRecordsChoreWithNilHooksSettlesWithoutTuningRules(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
@@ -94,8 +100,8 @@ func TestRecordsChoreWithNilHooksSettlesWithoutTuningRules(t *testing.T) {
 			Resolved:          outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "butler-" + noPriorChore, Status: outcome.StatusReady, Note: "swept"}},
 			IssueIntentsFound: true,
 			IssueIntents: []string{
-				tuningIntentMetric(t, "first", "prompt-gap", "usd", nil, "nowhere.go:Foo"),
-				tuningIntentMetric(t, "second", "prompt-gap", "tokens", nil, "nowhere.go:Foo"),
+				tuningIntentMetric(t, "first", "prompt-gap", "usd", []string{noPriorAnchor}, "nowhere.go:Foo"),
+				tuningIntentMetric(t, "second", "prompt-gap", "tokens", []string{noPriorAnchor}, "nowhere.go:Foo"),
 			},
 		})
 		d.RecordIDResult = dispatchrecord.RecordID(noPriorChore, c.Name, c.ClaimTime)
@@ -107,7 +113,7 @@ func TestRecordsChoreWithNilHooksSettlesWithoutTuningRules(t *testing.T) {
 		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
 	}
 	if n := len(fc.PostIssueCalls); n != 1 {
-		t.Errorf("filed %d findings, want 1: the uncited, untracked-target finding passes, its site-key twin dedups", n)
+		t.Errorf("filed %d findings, want 1: the untracked-target finding passes, its site-key twin dedups", n)
 	}
 	tip, err := backend.Read(noPriorChore)
 	if err != nil {
@@ -115,5 +121,47 @@ func TestRecordsChoreWithNilHooksSettlesWithoutTuningRules(t *testing.T) {
 	}
 	if tip.State.Dropped != 0 {
 		t.Errorf("Drops = %v, want none: no Validate hook means no drop rules", tip.State.Drops)
+	}
+}
+
+// The cite check belongs to the records adapter, not the Digest: a Digest with
+// no Validate still has an uncited or unknown-anchor finding dropped.
+func TestRecordsChoreWithNilValidateStillDropsBadCites(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
+	p := tuningPolicy(root, 1)
+	p.Chores = []chore.Chore{{Name: noPriorChore, Every: time.Hour, Records: true, FindingLabel: chore.FindingLabel(noPriorChore)}}
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/77"
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
+		d := readyDispatcher()
+		d.RunResult = dispatch.Succeeded(dispatch.Result{
+			Resolved:          outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "butler-" + noPriorChore, Status: outcome.StatusReady, Note: "swept"}},
+			IssueIntentsFound: true,
+			IssueIntents: []string{
+				tuningIntent(t, "uncited", "prompt-gap", nil, "a.go:Foo"),
+				tuningIntent(t, "unknown", "prompt-gap", []string{noPriorAnchor, "row:nope"}, "b.go:Foo"),
+				tuningIntent(t, "cited", "prompt-gap", []string{noPriorAnchor}, "c.go:Foo"),
+			},
+		})
+		d.RecordIDResult = dispatchrecord.RecordID(noPriorChore, c.Name, c.ClaimTime)
+		return d
+	}
+	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), newBox, p, func() time.Time { return tuningNow })
+	out, err := r.Sweep([]string{noPriorChore})
+	if err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	if n := len(fc.PostIssueCalls); n != 1 {
+		t.Errorf("filed %d findings, want 1: only the validly cited one", n)
+	}
+	tip, err := backend.Read(noPriorChore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ledger.Drop{{Title: "uncited", Reason: "unknown-cite"}, {Title: "unknown", Reason: "unknown-cite"}}
+	if !slices.Equal(tip.State.Drops, want) {
+		t.Errorf("Drops = %v, want %v", tip.State.Drops, want)
 	}
 }
