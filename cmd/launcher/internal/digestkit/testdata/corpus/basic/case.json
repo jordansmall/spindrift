@@ -1,0 +1,8 @@
+{
+  "cursor": "rec-0",
+  "now": "2026-01-02T03:04:05Z",
+  "min_sample": 2,
+  "max_bytes": 4096,
+  "prior": {"findings": ["slow-ci"]},
+  "merged": {"https://forge.example/pr/7": "abc123"}
+}

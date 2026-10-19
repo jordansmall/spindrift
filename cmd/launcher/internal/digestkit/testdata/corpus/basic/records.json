@@ -1,0 +1,17 @@
+[
+  {
+    "record_id": "rec-1",
+    "kind": "work",
+    "dispatch_key": "7",
+    "claim_time": "2026-01-01T00:00:00Z",
+    "outcome": "complete",
+    "pr_url": "https://forge.example/pr/7"
+  },
+  {
+    "record_id": "rec-2",
+    "kind": "work",
+    "dispatch_key": "8",
+    "claim_time": "2026-01-01T01:00:00Z",
+    "outcome": "failed"
+  }
+]
