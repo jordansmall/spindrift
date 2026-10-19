@@ -11,6 +11,9 @@ import (
 // Strategy is the local backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
 	Descriptor: backend.Local,
+	LandedBanner: func(backendkit.Shared) string {
+		return "seams landed host-side into their own Integration branches in the Accumulation repo"
+	},
 	ValidateCodeForge: func(s backendkit.Shared, _ backendkit.Lookup) error {
 		if s.MergeMode != "immediate" {
 			return fmt.Errorf(

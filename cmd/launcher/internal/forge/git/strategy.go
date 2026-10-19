@@ -11,6 +11,9 @@ import (
 // Strategy is the git backend's Go half (ADR 0068).
 var Strategy = backendkit.Strategy{
 	Descriptor: backend.Git,
+	LandedBanner: func(s backendkit.Shared) string {
+		return "branches pushed on " + s.RepoSlug
+	},
 	ValidateCodeForge: func(_ backendkit.Shared, l backendkit.Lookup) error {
 		k, err := ReadKnobs(Lookup(l))
 		if err != nil {

@@ -13,6 +13,12 @@ var Strategy = backendkit.Strategy{
 	ValidateTracker: func(s backendkit.Shared, _ backendkit.Lookup) error {
 		return backendkit.RequireRepoSlug(s, backend.GitHub.Name)
 	},
+	LandedBanner: func(s backendkit.Shared) string {
+		return "branches pushed and PRs opened on " + s.RepoSlug
+	},
+	AutoMergeRemedy: func(backendkit.Shared) string {
+		return `enable "Allow auto-merge" in repo Settings → General`
+	},
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
 		return NewExecClient(s.RepoSlug, s.Labels, s.BranchPrefix, WithVerdictLabels(s.VerdictLabels)), nil
 	},

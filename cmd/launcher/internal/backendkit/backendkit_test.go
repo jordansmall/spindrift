@@ -71,3 +71,36 @@ func TestStrategiesReturnsACopy(t *testing.T) {
 		t.Fatalf("mutating Strategies() result changed the registry")
 	}
 }
+
+func withRemedy(name, remedy string) Strategy {
+	s := strategy(name)
+	s.AutoMergeRemedy = func(Shared) string { return remedy }
+	return s
+}
+
+func TestAutoMergeForgesNamesOnlyRemedyBackendsInOrder(t *testing.T) {
+	ss := []Strategy{withRemedy("b", "x"), strategy("plain"), withRemedy("a", "y")}
+	if got := AutoMergeForges(ss); got != "b or a" {
+		t.Fatalf("AutoMergeForges = %q; want %q", got, "b or a")
+	}
+	if got := AutoMergeForges([]Strategy{strategy("plain")}); got != "" {
+		t.Fatalf("AutoMergeForges with no remedy backend = %q; want empty", got)
+	}
+}
+
+func TestAutoMergeRemedyClause(t *testing.T) {
+	if got := withRemedy("a", "do it").AutoMergeRemedyClause(Shared{}); got != " — do it" {
+		t.Fatalf("clause = %q; want %q", got, " — do it")
+	}
+	if got := strategy("plain").AutoMergeRemedyClause(Shared{}); got != "" {
+		t.Fatalf("clause without hook = %q; want empty", got)
+	}
+}
+
+func TestAutoMergeRemedyClauseReadsShared(t *testing.T) {
+	s := strategy("a")
+	s.AutoMergeRemedy = func(sh Shared) string { return "use " + sh.MergeMethod }
+	if got := s.AutoMergeRemedyClause(Shared{MergeMethod: "squash"}); got != " — use squash" {
+		t.Fatalf("clause = %q", got)
+	}
+}
