@@ -20,3 +20,12 @@ func passRoles() map[string]string {
 		"land":         ImplementorRole,
 	}
 }
+
+// passRoleTable is the shared read-only table PassRole serves; the per-row
+// copies on each Descriptor stay independent of it.
+var passRoleTable = passRoles()
+
+// PassRole is the attribution role pass names (a passmachine PassKind.String()
+// literal), or "" for a pass with none. Every kind shares one table, so a
+// caller with no descriptor in hand need not borrow a specific kind's.
+func PassRole(pass string) string { return passRoleTable[pass] }

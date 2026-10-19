@@ -383,6 +383,19 @@ func TestPassRolesNotShared(t *testing.T) {
 	}
 }
 
+func TestPassRoleAgreesWithEveryRow(t *testing.T) {
+	for _, d := range All {
+		for pass, want := range d.PassRoles {
+			if got := PassRole(pass); got != want {
+				t.Errorf("PassRole(%q) = %q, kind %s carries %q", pass, got, d.Name, want)
+			}
+		}
+	}
+	if got := PassRole("no-such-pass"); got != "" {
+		t.Errorf("PassRole(unknown) = %q, want empty", got)
+	}
+}
+
 // TestPromptsShape pins the shapes prompt assembly switches on: a non-empty
 // Base is the "kind owns its prompt" discriminator so it never coexists with
 // Issue/Fix, and the by-pass pair is set together or not at all.
