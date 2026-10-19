@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // TestNixRealizer_Start_ChildInOwnProcessGroup pins what Setpgid buys: the
@@ -20,10 +22,10 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "pid")
 	script := filepath.Join(dir, "fake-nix")
-	// This script is hand-rolled rather than the shared newFakeCLI (oci_test.go),
-	// which never records the child's own pid. The sleep keeps the child alive
-	// until Getpgid runs below: aarch64-darwin CI reaps an exited child first,
-	// turning the lookup into "no such process".
+	// This script is hand-rolled rather than the shared
+	// runnertest.NewFakeCLI, which never records the child's own pid. The
+	// sleep keeps the child alive until Getpgid runs below: aarch64-darwin CI
+	// reaps an exited child first, turning the lookup into "no such process".
 	scriptContent := "#!/bin/sh\necho $$ > " + pidFile + "\nsleep 1\n"
 	if err := os.WriteFile(script, []byte(scriptContent), 0o755); err != nil {
 		t.Fatal(err)
@@ -80,7 +82,7 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 // hands `nix build`: a hermetic git+file URL at the fetched rev, never the
 // working tree, and with no .outPath suffix, unlike NixEvaluator.Eval's ref.
 func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -95,7 +97,7 @@ func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 		t.Fatalf("wait() error = %v", err)
 	}
 
-	call := readCall(t, dir, 0)
+	call := runnertest.ReadCall(t, dir, 0)
 	want := "git+file:///repo?rev=deadbeef#packages.x86_64-linux.agent-image"
 	if got := call[len(call)-2]; got != want {
 		t.Errorf("nix build ref = %q, want %q", got, want)
@@ -103,7 +105,7 @@ func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 }
 
 func TestNixRealizer_Start_ViaSeam(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 1, stdout: "boom"})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "boom"})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -126,7 +128,7 @@ func TestNixRealizer_Start_ViaSeam(t *testing.T) {
 }
 
 func TestNixRealizer_Start_SuccessReturnsNil(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {

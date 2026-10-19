@@ -16,50 +16,8 @@ import (
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
-
-// fakeCall scripts one invocation of a fake CLI binary: the exit code it
-// returns and the stdout/stderr it prints. Real podman/docker print their
-// name-collision refusal to stderr, not stdout, so a test pinning that
-// refusal must use stderr to actually exercise the stream Run tees.
-type fakeCall struct {
-	exit   int
-	stdout string
-	stderr string
-}
-
-// newFakeCLI writes a stub runtime binary that records each invocation's argv
-// to call-NN.txt (zero-indexed) in a temp dir and exits/prints per the scripted
-// calls in order. Once the invocation count exceeds len(calls), the last
-// scripted call repeats. Returns the script path (for ociAdapter.cli) and the
-// dir (for reading recorded calls back).
-func newFakeCLI(t *testing.T, calls ...fakeCall) (script, dir string) {
-	t.Helper()
-	if len(calls) == 0 {
-		t.Fatal("newFakeCLI: at least one scripted call required")
-	}
-	dir = t.TempDir()
-	script = filepath.Join(dir, "fake-cli")
-
-	var b strings.Builder
-	b.WriteString("#!/bin/sh\n")
-	fmt.Fprintf(&b, "n=$(ls %q/call-*.txt 2>/dev/null | wc -l)\n", dir)
-	fmt.Fprintf(&b, "printf '%%s\\n' \"$@\" > %q/call-$(printf '%%02d' $n).txt\n", dir)
-	b.WriteString("case $n in\n")
-	for i, c := range calls {
-		pattern := fmt.Sprintf("%d", i)
-		if i == len(calls)-1 {
-			pattern += "|*"
-		}
-		fmt.Fprintf(&b, "%s) printf '%%s' %q; printf '%%s' %q >&2; exit %d ;;\n", pattern, c.stdout, c.stderr, c.exit)
-	}
-	b.WriteString("esac\n")
-
-	if err := os.WriteFile(script, []byte(b.String()), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return script, dir
-}
 
 // inspectJSONStdout builds the stdout inspectContainer now expects from
 // `inspect --format={{json .}}`: an object with Id, Created (RFC3339Nano,
@@ -82,28 +40,6 @@ func inspectJSONStdout(t *testing.T, id, status string, created time.Time) strin
 		t.Fatal(err)
 	}
 	return string(b)
-}
-
-// readCall returns the argv (split on newline) recorded for the n-th
-// (zero-indexed) invocation of a fake CLI built by newFakeCLI.
-func readCall(t *testing.T, dir string, n int) []string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("call-%02d.txt", n)))
-	if err != nil {
-		t.Fatalf("call-%02d.txt not written: %v", n, err)
-	}
-	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-}
-
-// callCount returns the number of invocations recorded for a fake CLI built
-// by newFakeCLI.
-func callCount(t *testing.T, dir string) int {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(dir, "call-*.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return len(matches)
 }
 
 // EnsureReady emits an "already loaded" line when the image is already loaded,
@@ -399,7 +335,7 @@ func TestBuildRunArgs_CustomLimitsRendered(t *testing.T) {
 	args := a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
 
 	for _, flag := range []string{"--pids-limit=256", "--memory=2g"} {
-		if !containsArg(args, flag) {
+		if !runnertest.ContainsArg(args, flag) {
 			t.Errorf("missing flag %q in args: %v", flag, args)
 		}
 	}
@@ -432,7 +368,7 @@ func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 		"--pids-limit=512",
 		"--memory=4g",
 	} {
-		if !containsArg(args, flag) {
+		if !runnertest.ContainsArg(args, flag) {
 			t.Errorf("missing flag %q in args: %v", flag, args)
 		}
 	}
@@ -448,10 +384,10 @@ func TestBuildRunArgsEmptyLimitsOmitted(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
-	if !containsArg(args, "--cap-drop=all") {
+	if !runnertest.ContainsArg(args, "--cap-drop=all") {
 		t.Errorf("--cap-drop=all always required; args: %v", args)
 	}
-	if !containsArg(args, "--security-opt=no-new-privileges") {
+	if !runnertest.ContainsArg(args, "--security-opt=no-new-privileges") {
 		t.Errorf("--security-opt=no-new-privileges always required; args: %v", args)
 	}
 
@@ -503,7 +439,7 @@ func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "no-host-loopback"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
-	if !containsArg(args, "--network") {
+	if !runnertest.ContainsArg(args, "--network") {
 		t.Fatalf("--network missing from args: %v", args)
 	}
 	for i, arg := range args {
@@ -536,7 +472,7 @@ func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", networkMode: "open"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
-	if containsArg(args, "--network") {
+	if runnertest.ContainsArg(args, "--network") {
 		t.Errorf("--network must be absent for networkMode=open; args: %v", args)
 	}
 }
@@ -586,7 +522,7 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	want := dir + ":/operator-skills:ro"
-	if !containsArg(args, want) {
+	if !runnertest.ContainsArg(args, want) {
 		t.Errorf("skills mount %q not found in args: %v", want, args)
 	}
 }
@@ -597,7 +533,7 @@ func TestBuildRunArgs_SkillsDirPrintsMountMessage(t *testing.T) {
 	dir := t.TempDir()
 	a := &ociAdapter{cli: "podman", image: "spindrift:test", mountParams: MountParams{SkillsDir: dir}}
 
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
 	})
 
@@ -638,10 +574,10 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	want := dir + ":/home/agent/.claude/projects"
-	if !containsArg(args, want) {
+	if !runnertest.ContainsArg(args, want) {
 		t.Errorf("driver cache mount %q not found in args: %v", want, args)
 	}
-	if containsArg(args, want+":ro") {
+	if runnertest.ContainsArg(args, want+":ro") {
 		t.Errorf("driver cache mount must be writable, not :ro; args: %v", args)
 	}
 }
@@ -650,7 +586,7 @@ func TestBuildRunArgs_DriverCacheDirMountedWritable(t *testing.T) {
 // path produces a -v <source>:/registry-proxy.sock entry (ADR 0044, issue
 // #2849; issue #3723).
 func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
-	sock := newTestSocket(t, "registry-proxy.sock")
+	sock := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{
 		cli:   "podman",
 		image: "spindrift:test",
@@ -659,7 +595,7 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	want := sock + ":/registry-proxy.sock"
-	if !containsArg(args, want) {
+	if !runnertest.ContainsArg(args, want) {
 		t.Errorf("registry-proxy socket mount %q not found in args: %v", want, args)
 	}
 }
@@ -667,8 +603,8 @@ func TestBuildRunArgs_RegistryProxySocketMounted(t *testing.T) {
 // issue #3723: two Box.Sockets entries each render their own -v flag, in
 // order, none read-only.
 func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
-	sockA := newTestSocket(t, "registry-proxy.sock")
-	sockB := newTestSocket(t, "signal.sock")
+	sockA := runnertest.NewTestSocket(t, "registry-proxy.sock")
+	sockB := runnertest.NewTestSocket(t, "signal.sock")
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, Sockets: []SocketMount{
 		{Source: sockA, Target: RegistryProxySocketTarget},
@@ -677,10 +613,10 @@ func TestBuildRunArgs_MultipleSockets_TwoMountFlags(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	for _, want := range []string{sockA + ":" + RegistryProxySocketTarget, sockB + ":" + SignalSocketTarget} {
-		if !containsArg(args, want) {
+		if !runnertest.ContainsArg(args, want) {
 			t.Errorf("missing socket mount %q in args: %v", want, args)
 		}
-		if containsArg(args, want+":ro") {
+		if runnertest.ContainsArg(args, want+":ro") {
 			t.Errorf("socket mount %q must be writable, not :ro; args: %v", want, args)
 		}
 	}
@@ -703,7 +639,7 @@ func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	for _, key := range []string{"REGISTRY_PROXY_TCP_SECRET", "GH_TOKEN", "FORGEJO_TOKEN", "ISSUE_TEXT"} {
-		if !containsArg(args, key) {
+		if !runnertest.ContainsArg(args, key) {
 			t.Errorf("expected bare -e %s in args: %v", key, args)
 		}
 		for _, arg := range args {
@@ -720,7 +656,7 @@ func TestBuildRunArgs_OffArgvKeyRendersBareFlag(t *testing.T) {
 			t.Errorf("ISSUE_TEXT value must never appear on argv; found %q in args: %v", arg, args)
 		}
 	}
-	if !containsArg(args, "ISSUE_NUMBER=1") {
+	if !runnertest.ContainsArg(args, "ISSUE_NUMBER=1") {
 		t.Errorf("expected off-argv-exempt ISSUE_NUMBER=1 to render unchanged in args: %v", args)
 	}
 }
@@ -735,7 +671,7 @@ func TestBuildRunArgs_SignalSocketSecretRendersBareFlag(t *testing.T) {
 	}}
 	args := a.buildRunArgs(box)
 
-	if !containsArg(args, "SIGNAL_SOCKET_SECRET") {
+	if !runnertest.ContainsArg(args, "SIGNAL_SOCKET_SECRET") {
 		t.Errorf("expected bare -e SIGNAL_SOCKET_SECRET in args: %v", args)
 	}
 	for _, arg := range args {
@@ -777,19 +713,19 @@ func TestOciRunEnv(t *testing.T) {
 	if len(got) != len(baseline)+len(offArgv) {
 		t.Fatalf("ociRunEnv: want len %d (os.Environ()+%d off-argv keys), got %d: %v", len(baseline)+len(offArgv), len(offArgv), len(got), got)
 	}
-	if !containsArg(got, "REGISTRY_PROXY_TCP_SECRET=s3cr3t-token") {
+	if !runnertest.ContainsArg(got, "REGISTRY_PROXY_TCP_SECRET=s3cr3t-token") {
 		t.Errorf("ociRunEnv: missing REGISTRY_PROXY_TCP_SECRET=s3cr3t-token in %v", got)
 	}
-	if !containsArg(got, "GH_TOKEN=gh-s3cr3t") {
+	if !runnertest.ContainsArg(got, "GH_TOKEN=gh-s3cr3t") {
 		t.Errorf("ociRunEnv: missing GH_TOKEN=gh-s3cr3t in %v", got)
 	}
-	if !containsArg(got, "FORGEJO_TOKEN=forgejo-s3cr3t") {
+	if !runnertest.ContainsArg(got, "FORGEJO_TOKEN=forgejo-s3cr3t") {
 		t.Errorf("ociRunEnv: missing FORGEJO_TOKEN=forgejo-s3cr3t in %v", got)
 	}
-	if !containsArg(got, "ISSUE_TEXT=issue-text-value") {
+	if !runnertest.ContainsArg(got, "ISSUE_TEXT=issue-text-value") {
 		t.Errorf("ociRunEnv: missing ISSUE_TEXT=issue-text-value in %v", got)
 	}
-	if containsArg(got, "ISSUE_NUMBER=1") {
+	if runnertest.ContainsArg(got, "ISSUE_NUMBER=1") {
 		t.Errorf("ociRunEnv: non-secret key must not be appended; got %v", got)
 	}
 	pathSeen := false
@@ -815,7 +751,7 @@ func TestBuildRunArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
 		box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_NUMBER": "1"}}
 		args := a.buildRunArgs(box)
-		if containsArg(args, "ISSUE_TEXT") {
+		if runnertest.ContainsArg(args, "ISSUE_TEXT") {
 			t.Errorf("buildRunArgs emitted -e ISSUE_TEXT for a box.Env with no ISSUE_TEXT key: %v", args)
 		}
 	})
@@ -823,7 +759,7 @@ func TestBuildRunArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	t.Run("empty string", func(t *testing.T) {
 		box := Box{Name: "agent-issue-1", Env: map[string]string{"ISSUE_TEXT": ""}}
 		args := a.buildRunArgs(box)
-		if !containsArg(args, "ISSUE_TEXT") {
+		if !runnertest.ContainsArg(args, "ISSUE_TEXT") {
 			t.Errorf("buildRunArgs: current behaviour still emits bare -e ISSUE_TEXT for an empty-string value; got %v", args)
 		}
 		for _, arg := range args {
@@ -855,7 +791,7 @@ func TestOciRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 
 	t.Run("empty string", func(t *testing.T) {
 		got := ociRunEnv(map[string]string{"ISSUE_TEXT": ""})
-		if !containsArg(got, "ISSUE_TEXT=") {
+		if !runnertest.ContainsArg(got, "ISSUE_TEXT=") {
 			t.Errorf("ociRunEnv: current behaviour still appends ISSUE_TEXT= (empty value) for a present-but-empty boxEnv entry; got %v", got)
 		}
 	})
@@ -870,7 +806,7 @@ func TestBuildRunArgs_TCPHostAddHostMounted(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.containers.internal", ""), TCPAddHost: true}}
 	args := a.buildRunArgs(box)
 
-	if !containsArg(args, "--add-host") {
+	if !runnertest.ContainsArg(args, "--add-host") {
 		t.Fatalf("--add-host missing from args: %v", args)
 	}
 	found := false
@@ -894,7 +830,7 @@ func TestBuildRunArgs_TCPHostWithoutAddHost_OmitsAddHost(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, RegistryProxy: RegistryProxyLocation{Endpoint: registrymanifest.NewTCPEndpoint("host.docker.internal", "5000")}}
 	args := a.buildRunArgs(box)
 
-	if containsArg(args, "--add-host") {
+	if runnertest.ContainsArg(args, "--add-host") {
 		t.Errorf("--add-host must be absent when TCPAddHost is false; args: %v", args)
 	}
 }
@@ -904,7 +840,7 @@ func TestBuildRunArgs_TCPHostUnset_NoAddHost(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
-	if containsArg(args, "--add-host") {
+	if runnertest.ContainsArg(args, "--add-host") {
 		t.Errorf("--add-host must be absent when TCPHost is unset; args: %v", args)
 	}
 }
@@ -1028,7 +964,7 @@ func TestHostGatewayHostname(t *testing.T) {
 // path, and the driver-exec probe trailing command in place of the image's
 // default entrypoint, without exec'ing anything.
 func TestRegistrySocketProbeArgs(t *testing.T) {
-	sock := newTestSocket(t, "registry-proxy.sock")
+	sock := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{cli: "podman", image: "spindrift:test"}
 	args := a.registrySocketProbeArgs(sock, "probe-container")
 
@@ -1036,20 +972,20 @@ func TestRegistrySocketProbeArgs(t *testing.T) {
 		t.Fatalf("want args[0:2] = [run --rm], got %v", args)
 	}
 	want := sock + ":" + RegistryProxySocketTarget
-	if !containsArg(args, want) {
+	if !runnertest.ContainsArg(args, want) {
 		t.Errorf("missing socket mount %q in args: %v", want, args)
 	}
 	tail := []string{a.image, "probe-registry-socket", "-path", RegistryProxySocketTarget}
 	if strings.Join(args[len(args)-len(tail):], " ") != strings.Join(tail, " ") {
 		t.Errorf("want trailing command %v, got tail of %v", tail, args)
 	}
-	if containsArg(args, "/agent/entrypoint.sh") {
+	if runnertest.ContainsArg(args, "/agent/entrypoint.sh") {
 		t.Errorf("probe args must not include the real entrypoint; args: %v", args)
 	}
-	if !containsArg(args, "--name") || !containsArg(args, "probe-container") {
+	if !runnertest.ContainsArg(args, "--name") || !runnertest.ContainsArg(args, "probe-container") {
 		t.Errorf("missing --name probe-container in args: %v", args)
 	}
-	if !containsArg(args, "--cap-drop=all") || !containsArg(args, "--security-opt=no-new-privileges") {
+	if !runnertest.ContainsArg(args, "--cap-drop=all") || !runnertest.ContainsArg(args, "--security-opt=no-new-privileges") {
 		t.Errorf("probe must reuse the same hardening flags as a real Box; args: %v", args)
 	}
 }
@@ -1060,7 +996,7 @@ func TestRegistrySocketProbeArgs(t *testing.T) {
 // hands bash an ELF binary as a script and bash exits 126, neither the probe
 // contract's 0 (capable) nor its 1 (incapable), so dispatch aborts with no Box.
 func TestRegistryProbeArgs_OverrideImageEntrypoint(t *testing.T) {
-	sock := newTestSocket(t, "registry-proxy.sock")
+	sock := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	a := &ociAdapter{cli: "docker", image: "spindrift:test"}
 
 	cases := []struct {
@@ -1095,7 +1031,7 @@ func TestRegistryProbeArgs_OverrideImageEntrypoint(t *testing.T) {
 // registryprobe.ExitCapable, scripted via a fake CLI so no real container
 // runtime is ever started (issue #3111's own acceptance criterion).
 func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1109,7 +1045,7 @@ func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *test
 		t.Errorf("RegistryProxyTransport: want empty host on a unix endpoint, got %q", endpoint.Host())
 	}
 
-	call := readCall(t, dir, 0)
+	call := runnertest.ReadCall(t, dir, 0)
 	if call[0] != "run" || call[1] != "--rm" {
 		t.Fatalf("want call[0:2] = [run --rm], got %v", call)
 	}
@@ -1121,7 +1057,7 @@ func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *test
 		!strings.Contains(joined, "probe-registry-socket -path "+RegistryProxySocketTarget) {
 		t.Errorf("expected probe trailing command in call: %v", call)
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1: a socket-capable verdict must never launch the tcp-reachability sub-probe", got)
 	}
 }
@@ -1132,7 +1068,7 @@ func TestRegistryProxyTransport_ScriptedCapableExit_ReportsSocketCapable(t *test
 // finding B) confirms the fallback route works. Scripts two calls: the socket
 // probe (ExitIncapable), then the TCP sub-probe (ExitCapable, reachable).
 func TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHost(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	// a.cli is a fake-script path, not literally "podman", so
@@ -1160,10 +1096,10 @@ func TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHos
 		t.Error("RegistryProxyTransport: want addHost=false when the sub-probe succeeds without the mapping")
 	}
 
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Fatalf("callCount = %d, want 2 (socket probe + tcp-reachability sub-probe)", got)
 	}
-	call := readCall(t, dir, 1)
+	call := runnertest.ReadCall(t, dir, 1)
 	if call[0] != "run" || call[1] != "--rm" {
 		t.Fatalf("want call[0:2] = [run --rm] for the tcp-reachability sub-probe, got %v", call)
 	}
@@ -1183,7 +1119,7 @@ func TestRegistryProxyTransport_ScriptedIncapableExit_ReportsIncapableWithTCPHos
 // naming the CLI and the host. The old behavior trusted the TCP fallback
 // unconditionally, with nothing listening on the route the Box would dial.
 func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitIncapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitIncapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1203,14 +1139,14 @@ func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t 
 	// Both wirings must be tried before giving up: the socket probe, then the
 	// sub-probe without --add-host, then the sub-probe with it. Failing after
 	// only the first wiring would condemn whichever platform needs the other.
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Errorf("callCount = %d, want 3 (socket probe + tcp sub-probe without and with --add-host)", got)
 	}
-	withoutCall := strings.Join(readCall(t, dir, 1), " ")
+	withoutCall := strings.Join(runnertest.ReadCall(t, dir, 1), " ")
 	if strings.Contains(withoutCall, "--add-host") {
 		t.Errorf("call 1 must probe without the mapping: %v", withoutCall)
 	}
-	withCall := strings.Join(readCall(t, dir, 2), " ")
+	withCall := strings.Join(runnertest.ReadCall(t, dir, 2), " ")
 	if !strings.Contains(withCall, "--add-host "+hostGatewayHostname(a.cli)+":host-gateway") {
 		t.Errorf("call 2 must probe with the mapping: %v", withCall)
 	}
@@ -1222,7 +1158,7 @@ func TestRegistryProxyTransport_TCPReachabilitySubProbeIncapable_ReturnsError(t 
 // is launched with it. Scripts three calls: socket probe (ExitIncapable),
 // sub-probe without the mapping (ExitIncapable), sub-probe with it (ExitCapable).
 func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, addHost, err := a.RegistryProxyTransport()
@@ -1238,7 +1174,7 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 	if !addHost {
 		t.Error("RegistryProxyTransport: want addHost=true when only the mapped route is reachable")
 	}
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Fatalf("callCount = %d, want 3", got)
 	}
 }
@@ -1251,7 +1187,7 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *testing.T) {
 	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
-			script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable})
+			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
 			endpoint, _, err := a.RegistryProxyTransport()
@@ -1267,7 +1203,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 			if !strings.Contains(err.Error(), string(mode)) {
 				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
 			}
-			if got := callCount(t, dir); got != 1 {
+			if got := runnertest.CallCount(t, dir); got != 1 {
 				t.Errorf("callCount = %d, want 1: the tcp-reachability sub-probe must never run when DeniesHostLoopback already hard-errored", got)
 			}
 		})
@@ -1282,7 +1218,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *testing.T) {
 	for _, mode := range []NetworkMode{"open", ""} {
 		t.Run("mode="+string(mode), func(t *testing.T) {
-			script, _ := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
+			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
 			// a.cli is a fake-script path, not literally "podman", so
@@ -1310,7 +1246,7 @@ func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *test
 // the same cli/image/networkMode) replays it without starting another probe
 // container.
 func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 
@@ -1321,7 +1257,7 @@ func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
 	if !endpoint.IsUnix() {
 		t.Fatal("RegistryProxyTransport (first call): want a unix endpoint")
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Fatalf("callCount after first call = %d, want 1", got)
 	}
 
@@ -1333,7 +1269,7 @@ func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
 	if !endpoint.IsUnix() {
 		t.Fatal("RegistryProxyTransport (second call): want a unix endpoint replayed from the cache")
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount after second call = %d, want still 1: a cache hit must start no container", got)
 	}
 }
@@ -1344,7 +1280,7 @@ func TestRegistryProxyTransport_CachesSocketCapableVerdict(t *testing.T) {
 // sub-probe with it ExitCapable) so the first call resolves tcpAddHost=true; a
 // second adapter sharing pwd must replay both without re-probing.
 func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitIncapable}, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 
@@ -1356,7 +1292,7 @@ func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
 		t.Fatalf("RegistryProxyTransport (first call): want a TCP endpoint with addHost=true, got endpoint=%+v addHost=%v", endpoint, addHost)
 	}
 	wantHost := endpoint.Host()
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Fatalf("callCount after first call = %d, want 3", got)
 	}
 
@@ -1374,7 +1310,7 @@ func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
 	if !addHost {
 		t.Error("RegistryProxyTransport (second call): want addHost=true replayed from the cache")
 	}
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Errorf("callCount after second call = %d, want still 3: a cache hit must start no container", got)
 	}
 }
@@ -1383,23 +1319,23 @@ func TestRegistryProxyTransport_CachesTCPVerdictWithAddHostMode(t *testing.T) {
 // different one sharing the same pwd: the cache key covers cli, so a runtime
 // swap re-probes rather than trusting a stale answer.
 func TestRegistryProxyTransport_RuntimeChangeInvalidatesCache(t *testing.T) {
-	script1, dir1 := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script1, dir1 := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script1, image: "spindrift:test", pwd: pwd}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (first call): %v", err)
 	}
 
-	script2, dir2 := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script2, dir2 := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	b := &ociAdapter{cli: script2, image: "spindrift:test", pwd: pwd}
 	if _, _, err := b.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (second call): %v", err)
 	}
-	if got := callCount(t, dir1); got != 1 {
-		t.Errorf("callCount(dir1) = %d, want 1", got)
+	if got := runnertest.CallCount(t, dir1); got != 1 {
+		t.Errorf("runnertest.CallCount(dir1) = %d, want 1", got)
 	}
-	if got := callCount(t, dir2); got != 1 {
-		t.Errorf("callCount(dir2) = %d, want 1: a different runtime binary must re-probe, not replay dir1's cached verdict", got)
+	if got := runnertest.CallCount(t, dir2); got != 1 {
+		t.Errorf("runnertest.CallCount(dir2) = %d, want 1: a different runtime binary must re-probe, not replay dir1's cached verdict", got)
 	}
 }
 
@@ -1408,13 +1344,13 @@ func TestRegistryProxyTransport_RuntimeChangeInvalidatesCache(t *testing.T) {
 // own user, measures the verdict, so a new image is re-probed rather than
 // trusting the old reading.
 func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (first call): %v", err)
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Fatalf("callCount after first call = %d, want 1", got)
 	}
 
@@ -1422,7 +1358,7 @@ func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
 	if _, _, err := b.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (second call): %v", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount after second call = %d, want 2: a different image ref must re-probe, not replay the other image's cached verdict", got)
 	}
 }
@@ -1433,13 +1369,13 @@ func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
 // TCP. "open" and "" both reach the live probe rather than DeniesHostLoopback's
 // hard-error branch, so both sides of this comparison actually probe.
 func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd, networkMode: "open"}
 	if _, _, err := a.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (first call): %v", err)
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Fatalf("callCount after first call = %d, want 1", got)
 	}
 
@@ -1447,7 +1383,7 @@ func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) 
 	if _, _, err := b.RegistryProxyTransport(); err != nil {
 		t.Fatalf("RegistryProxyTransport (second call): %v", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount after second call = %d, want 2: a different networkMode must re-probe, not replay the other mode's cached verdict", got)
 	}
 }
@@ -1456,7 +1392,7 @@ func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) 
 // matching the freshness Guard's corruption-tolerance idiom, rather than
 // failing the dispatch: the probe still runs and returns the right verdict.
 func TestRegistryProxyTransport_CorruptCacheFallsBackToProbing(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
 	writeRegistryProbeCacheFile(t, pwd, []byte("not json"))
 
@@ -1468,7 +1404,7 @@ func TestRegistryProxyTransport_CorruptCacheFallsBackToProbing(t *testing.T) {
 	if !endpoint.IsUnix() {
 		t.Error("RegistryProxyTransport: want a unix endpoint despite the corrupt cache file")
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1: a corrupt cache file must fall back to a live probe", got)
 	}
 }
@@ -1477,7 +1413,7 @@ func TestRegistryProxyTransport_CorruptCacheFallsBackToProbing(t *testing.T) {
 // remember, and caching it would turn one transient infrastructure failure
 // into a persistent one.
 func TestRegistryProxyTransport_ProbeErrorWritesNoCache(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 125})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 
@@ -1506,7 +1442,7 @@ func TestRegistryProxyTransport_ExecFailure_ReturnsError(t *testing.T) {
 // incapable answer (issue #3111 finding 2, issue #3120). The single scripted
 // call repeats, so the control probe also exits 125 and callCount is 2.
 func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125, Stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1519,7 +1455,7 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "125") {
 		t.Errorf("RegistryProxyTransport: error %q should mention the exit code 125", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount = %d, want 2: a no-verdict socket exit must run the control probe but never the tcp-reachability sub-probe", got)
 	}
 }
@@ -1530,7 +1466,7 @@ func TestRegistryProxyTransport_ScriptedExitCode125_ReturnsError(t *testing.T) {
 // the exit code and a launcher/image version mismatch. The single scripted call
 // repeats for the control probe, so callCount is 2 and the TCP probe never runs.
 func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1549,7 +1485,7 @@ func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *
 	if !strings.Contains(err.Error(), "version") {
 		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount = %d, want 2: a no-verdict socket exit must run the control probe but never the tcp-reachability sub-probe", got)
 	}
 }
@@ -1560,7 +1496,7 @@ func TestRegistryProxyTransport_ScriptedExitCode1_OldImageDrift_ReturnsError(t *
 // call repeats for the control probe too, so this is a no-verdict-from-both
 // outcome, matching the old-image-drift test's callCount shape.
 func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1573,7 +1509,7 @@ func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testi
 	if !strings.Contains(err.Error(), "version") {
 		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount = %d, want 2: a no-verdict socket exit must run the control probe too", got)
 	}
 }
@@ -1584,10 +1520,10 @@ func TestRegistryProxyTransport_ScriptedZeroExit_NoVerdict_ReturnsError(t *testi
 // The control probe, identical minus the socket mount, then exits ExitIncapable,
 // which must read as a clean incapable verdict and fall through to the TCP probe.
 func TestRegistryProxyTransport_SocketNoVerdict_ControlIncapable_ReportsTCP(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 125},
-		fakeCall{exit: registryprobe.ExitIncapable},
-		fakeCall{exit: registryprobe.ExitCapable},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 125},
+		runnertest.Call{Exit: registryprobe.ExitIncapable},
+		runnertest.Call{Exit: registryprobe.ExitCapable},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
@@ -1599,10 +1535,10 @@ func TestRegistryProxyTransport_SocketNoVerdict_ControlIncapable_ReportsTCP(t *t
 		t.Fatalf("RegistryProxyTransport: want a TCP endpoint, got %+v", endpoint)
 	}
 
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Fatalf("callCount = %d, want 3 (socket probe + control probe + tcp-reachability sub-probe)", got)
 	}
-	control := readCall(t, dir, 1)
+	control := runnertest.ReadCall(t, dir, 1)
 	joined := strings.Join(control, " ")
 	if strings.Contains(joined, ":"+RegistryProxySocketTarget) {
 		t.Errorf("control probe must omit the socket mount, got: %v", control)
@@ -1616,10 +1552,10 @@ func TestRegistryProxyTransport_SocketNoVerdict_ControlIncapable_ReportsTCP(t *t
 // The other no-verdict socket outcome (a bare exit 0) confirmed incapable by
 // the control probe, alongside the exit-125 case above.
 func TestRegistryProxyTransport_SocketZeroExit_ControlIncapable_ReportsTCP(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 0},
-		fakeCall{exit: registryprobe.ExitIncapable},
-		fakeCall{exit: registryprobe.ExitCapable},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: registryprobe.ExitIncapable},
+		runnertest.Call{Exit: registryprobe.ExitCapable},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
@@ -1630,7 +1566,7 @@ func TestRegistryProxyTransport_SocketZeroExit_ControlIncapable_ReportsTCP(t *te
 	if !endpoint.IsTCP() {
 		t.Fatalf("RegistryProxyTransport: want a TCP endpoint, got %+v", endpoint)
 	}
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Fatalf("callCount = %d, want 3 (socket probe + control probe + tcp-reachability sub-probe)", got)
 	}
 }
@@ -1640,7 +1576,7 @@ func TestRegistryProxyTransport_SocketZeroExit_ControlIncapable_ReportsTCP(t *te
 // exit codes and keeps the "possible launcher/image version mismatch" hint,
 // unlike the control-confirmed-91 case above, which must carry no such hint.
 func TestRegistryProxyTransport_SocketAndControlBothNoVerdict_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: 126})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125}, runnertest.Call{Exit: 126})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1656,7 +1592,7 @@ func TestRegistryProxyTransport_SocketAndControlBothNoVerdict_ReturnsError(t *te
 	if !strings.Contains(err.Error(), "version") {
 		t.Errorf("RegistryProxyTransport: error %q should name a launcher/image version mismatch", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount = %d, want 2: a no-verdict-from-both outcome must never launch the tcp-reachability sub-probe", got)
 	}
 }
@@ -1667,7 +1603,7 @@ func TestRegistryProxyTransport_SocketAndControlBothNoVerdict_ReturnsError(t *te
 // which belongs only to the both-no-verdict case, not to a path where the
 // control probe did produce a verdict.
 func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: registryprobe.ExitCapable})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125}, runnertest.Call{Exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -1683,7 +1619,7 @@ func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T)
 	if strings.Contains(err.Error(), "version") {
 		t.Errorf("RegistryProxyTransport: error %q should not carry the version-mismatch hint -- the control probe DID produce a verdict here", err)
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Errorf("callCount = %d, want 2: the tcp-reachability sub-probe must never run when the control probe reports capable", got)
 	}
 }
@@ -1696,7 +1632,7 @@ func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T)
 func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_ReturnsError(t *testing.T) {
 	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
-			script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: registryprobe.ExitIncapable})
+			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125}, runnertest.Call{Exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
 			endpoint, _, err := a.RegistryProxyTransport()
@@ -1712,7 +1648,7 @@ func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_Returns
 			if !strings.Contains(err.Error(), string(mode)) {
 				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
 			}
-			if got := callCount(t, dir); got != 2 {
+			if got := runnertest.CallCount(t, dir); got != 2 {
 				t.Errorf("callCount = %d, want 2 (socket probe + control probe): the tcp-reachability sub-probe must never run when DeniesHostLoopback already hard-errored", got)
 			}
 		})
@@ -1726,9 +1662,9 @@ func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_Returns
 // make the TCP sub-probe succeed if the guard ever let it run. Calls the live
 // probe directly: RegistryProxyTransport reads the on-disk cache first.
 func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing.T) {
-	outcomes := map[string][]fakeCall{
-		"socket-incapable":            {{exit: registryprobe.ExitIncapable}, {exit: registryprobe.ExitCapable}},
-		"control-confirmed-incapable": {{exit: 125}, {exit: registryprobe.ExitIncapable}, {exit: registryprobe.ExitCapable}},
+	outcomes := map[string][]runnertest.Call{
+		"socket-incapable":            {{Exit: registryprobe.ExitIncapable}, {Exit: registryprobe.ExitCapable}},
+		"control-confirmed-incapable": {{Exit: 125}, {Exit: registryprobe.ExitIncapable}, {Exit: registryprobe.ExitCapable}},
 	}
 	for outcome, calls := range outcomes {
 		for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone, "open", ""} {
@@ -1736,7 +1672,7 @@ func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing
 				continue
 			}
 			t.Run(outcome+"/"+string(mode), func(t *testing.T) {
-				script, _ := newFakeCLI(t, calls...)
+				script, _ := runnertest.NewFakeCLI(t, calls...)
 				a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
 				endpoint, _, err := a.probeRegistryProxyTransport()
@@ -1756,10 +1692,10 @@ func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing
 // exactly like a direct-91 TCP decision. A second adapter sharing pwd replays
 // the endpoint and addHost without starting any of the three probe containers.
 func TestRegistryProxyTransport_CachesControlConfirmedTCPVerdict(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 125},
-		fakeCall{exit: registryprobe.ExitIncapable},
-		fakeCall{exit: registryprobe.ExitCapable},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 125},
+		runnertest.Call{Exit: registryprobe.ExitIncapable},
+		runnertest.Call{Exit: registryprobe.ExitCapable},
 	)
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
@@ -1771,7 +1707,7 @@ func TestRegistryProxyTransport_CachesControlConfirmedTCPVerdict(t *testing.T) {
 	if !endpoint.IsTCP() {
 		t.Fatalf("RegistryProxyTransport (first call): want a TCP endpoint, got %+v", endpoint)
 	}
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Fatalf("callCount after first call = %d, want 3 (socket probe + control probe + tcp sub-probe)", got)
 	}
 
@@ -1786,7 +1722,7 @@ func TestRegistryProxyTransport_CachesControlConfirmedTCPVerdict(t *testing.T) {
 	if addHost2 != addHost {
 		t.Errorf("RegistryProxyTransport (second call): addHost = %v, want the cached %v replayed", addHost2, addHost)
 	}
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Errorf("callCount after second call = %d, want still 3: a control-probe-confirmed cache hit must start no container", got)
 	}
 }
@@ -1795,14 +1731,14 @@ func TestRegistryProxyTransport_CachesControlConfirmedTCPVerdict(t *testing.T) {
 // the RegistryProxyTransport doc comment's "a probe error is never cached"
 // contract, so a second call under the same pwd re-probes from scratch.
 func TestRegistryProxyTransport_BothNoVerdict_NeverCached(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: 126})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125}, runnertest.Call{Exit: 126})
 	pwd := t.TempDir()
 	a := &ociAdapter{cli: script, image: "spindrift:test", pwd: pwd}
 
 	if _, _, err := a.RegistryProxyTransport(); err == nil {
 		t.Fatal("RegistryProxyTransport (first call): want error when both socket and control probes produce no verdict")
 	}
-	if got := callCount(t, dir); got != 2 {
+	if got := runnertest.CallCount(t, dir); got != 2 {
 		t.Fatalf("callCount after first call = %d, want 2", got)
 	}
 
@@ -1810,7 +1746,7 @@ func TestRegistryProxyTransport_BothNoVerdict_NeverCached(t *testing.T) {
 	if _, _, err := b.RegistryProxyTransport(); err == nil {
 		t.Fatal("RegistryProxyTransport (second call): want error again -- a probe error must never be cached")
 	}
-	if got := callCount(t, dir); got != 4 {
+	if got := runnertest.CallCount(t, dir); got != 4 {
 		t.Errorf("callCount after second call = %d, want 4: an uncached error must re-run both probes on the next call", got)
 	}
 }
@@ -1893,7 +1829,7 @@ func TestProbeRegistryTCPReachable_TimesOut_ReturnsError(t *testing.T) {
 // no-verdict outcome also short-circuits (callCount stays at 1); there is no
 // reason to try the --add-host wiring when the route was never tested.
 func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 125, stdout: "boom"})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125, Stdout: "boom"})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	_, err := a.probeRegistryTCPReachable("host.docker.internal")
@@ -1903,7 +1839,7 @@ func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "125") {
 		t.Errorf("probeRegistryTCPReachable: error %q should mention the exit code 125", err)
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1: a no-verdict outcome must short-circuit rather than also try the --add-host wiring", got)
 	}
 }
@@ -1914,7 +1850,7 @@ func TestProbeRegistryTCPReachable_NonOneExitCode_ReturnsError(t *testing.T) {
 // --add-host wiring and summarised both as unreachable, a claim about a route
 // never probed. The no-verdict error returns straight out, callCount stays at 1.
 func TestProbeRegistryTCPReachable_OldImageDrift_ShortCircuits(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	_, err := a.probeRegistryTCPReachable("host.docker.internal")
@@ -1924,7 +1860,7 @@ func TestProbeRegistryTCPReachable_OldImageDrift_ShortCircuits(t *testing.T) {
 	if strings.Contains(err.Error(), "unreachable from the guest both with and without") {
 		t.Errorf("probeRegistryTCPReachable: error %q must not summarise as unreachable both ways -- the route was never tested", err)
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1: a no-verdict exit must short-circuit before trying the --add-host wiring", got)
 	}
 }
@@ -1974,7 +1910,7 @@ func TestRegistryProxyTransport_LongTMPDIR_StillWorks(t *testing.T) {
 	}
 	t.Setenv("TMPDIR", longBase)
 
-	script, _ := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: registryprobe.ExitCapable})
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 
 	endpoint, _, err := a.RegistryProxyTransport()
@@ -2018,7 +1954,7 @@ func TestBuildRunArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	args := a.buildRunArgs(box)
 
 	for _, flag := range []string{"--cap-drop=all", "--security-opt=no-new-privileges"} {
-		if !containsArg(args, flag) {
+		if !runnertest.ContainsArg(args, flag) {
 			t.Errorf("writable driver cache mount must not weaken hardening; missing %q in args: %v", flag, args)
 		}
 	}
@@ -2053,7 +1989,7 @@ func TestBuildRunArgs_DriverCacheMountTarget_FromDriverDeclaration(t *testing.T)
 	args := a.buildRunArgs(box)
 
 	want := dir + ":/home/agent/custom-driver/state"
-	if !containsArg(args, want) {
+	if !runnertest.ContainsArg(args, want) {
 		t.Errorf("driver cache mount %q not found in args: %v", want, args)
 	}
 }
@@ -2097,8 +2033,8 @@ func TestBuildRunArgs_SkillsDirUnset_NoMount(t *testing.T) {
 // ErrAlreadyRunning without ever invoking `podman/docker run`: the collision
 // must not be attempted, only recognized (issue #562).
 func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2107,7 +2043,7 @@ func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
-	if calls := callCount(t, dir); calls != 1 {
+	if calls := runnertest.CallCount(t, dir); calls != 1 {
 		t.Errorf("Run: want 1 call (inspect only), got %d", calls)
 	}
 }
@@ -2116,11 +2052,11 @@ func TestRun_AlreadyRunningContainerSkipsLaunch(t *testing.T) {
 // named container is reaped with `rm -f`, and the launch proceeds normally
 // (issue #562 acceptance criterion 3).
 func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "stale-id", "exited", time.Now())},
-		fakeCall{},        // rm
-		fakeCall{},        // run
-		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "stale-id", "exited", time.Now())},
+		runnertest.Call{},        // rm
+		runnertest.Call{},        // run
+		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2128,12 +2064,12 @@ func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-id") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "rm") || !runnertest.ContainsArg(rm, "-f") || !runnertest.ContainsArg(rm, "stale-id") {
 		t.Errorf("Run: did not reap the stale exited container: %v", rm)
 	}
-	run := readCall(t, dir, 2)
-	if !containsArg(run, "run") {
+	run := runnertest.ReadCall(t, dir, 2)
+	if !runnertest.ContainsArg(run, "run") {
 		t.Errorf("Run: did not launch after reaping the stale container, call 2 was %v", run)
 	}
 }
@@ -2142,11 +2078,11 @@ func TestRun_ExitedContainerReapedThenLaunches(t *testing.T) {
 // reaping a stale container — the ID-pinning invariant inspectContainer's
 // doc comment explains (issue #3633 acceptance criterion).
 func TestRun_ReapsByIDNotByName(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "stale-id-42", "exited", time.Now())},
-		fakeCall{},        // rm
-		fakeCall{},        // run
-		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "stale-id-42", "exited", time.Now())},
+		runnertest.Call{},        // rm
+		runnertest.Call{},        // run
+		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2154,11 +2090,11 @@ func TestRun_ReapsByIDNotByName(t *testing.T) {
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "stale-id-42") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "stale-id-42") {
 		t.Errorf("rm target: got %v, want the inspected ID stale-id-42", rm)
 	}
-	if containsArg(rm, box.Name) {
+	if runnertest.ContainsArg(rm, box.Name) {
 		t.Errorf("rm target: got %v, want it not to target the name %q", rm, box.Name)
 	}
 }
@@ -2170,8 +2106,8 @@ func TestRun_ReapsByIDNotByName(t *testing.T) {
 // invisible to it, silently destroyed, and this launcher's own `run` collided
 // on the name anyway.
 func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "cid-created", "created", time.Now().Add(-5*time.Second))},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-created", "created", time.Now().Add(-5*time.Second))},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2180,7 +2116,7 @@ func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning for a container still being created, got %v", err)
 	}
-	if calls := callCount(t, dir); calls != 1 {
+	if calls := runnertest.CallCount(t, dir); calls != 1 {
 		t.Errorf("Run: want 1 call (inspect only, no rm or run), got %d", calls)
 	}
 }
@@ -2191,11 +2127,11 @@ func TestRun_RecentlyCreatedContainerSkipsLaunchWithoutReap(t *testing.T) {
 // cleared exactly this; the fix must still clear it, or the issue becomes
 // permanently undispatchable (blocking finding, issue #3633).
 func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "stale-created-id", "created", time.Now().Add(-3*time.Hour))},
-		fakeCall{},        // rm
-		fakeCall{},        // run
-		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "stale-created-id", "created", time.Now().Add(-3*time.Hour))},
+		runnertest.Call{},        // rm
+		runnertest.Call{},        // run
+		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2203,12 +2139,12 @@ func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-created-id") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "rm") || !runnertest.ContainsArg(rm, "-f") || !runnertest.ContainsArg(rm, "stale-created-id") {
 		t.Errorf("Run: want `rm -f stale-created-id`, got %v", rm)
 	}
-	run := readCall(t, dir, 2)
-	if !containsArg(run, "run") {
+	run := runnertest.ReadCall(t, dir, 2)
+	if !runnertest.ContainsArg(run, "run") {
 		t.Errorf("Run: did not launch after reaping the stale created container, call 2 was %v", run)
 	}
 }
@@ -2220,11 +2156,11 @@ func TestRun_StaleCreatedContainerReapedThenLaunches(t *testing.T) {
 // pre-#3633 behaviour of clearing a container this launcher cannot classify,
 // rather than wedging the issue permanently undispatchable (issue #3633).
 func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: `{"Id":"cid-only","Created":"not-a-timestamp","State":{"Status":"created"}}`},
-		fakeCall{},        // rm
-		fakeCall{},        // run
-		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: `{"Id":"cid-only","Created":"not-a-timestamp","State":{"Status":"created"}}`},
+		runnertest.Call{},        // rm
+		runnertest.Call{},        // run
+		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2232,12 +2168,12 @@ func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "cid-only") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "cid-only") {
 		t.Errorf("Run: want the container reaped by its ID, got rm call %v", rm)
 	}
-	run := readCall(t, dir, 2)
-	if !containsArg(run, "run") {
+	run := runnertest.ReadCall(t, dir, 2)
+	if !runnertest.ContainsArg(run, "run") {
 		t.Errorf("Run: did not launch after reaping the unparseable-timestamp container, call 2 was %v", run)
 	}
 }
@@ -2249,13 +2185,13 @@ func TestRun_UnparseableInspectOutputReapedThenLaunches(t *testing.T) {
 // live — surfaces as ErrAlreadyRunning, so the issue is skipped rather than
 // failed (issue #3633).
 func TestRun_UndecodableInspectBodyRemovesNothing(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: "not json at all"},
-		fakeCall{
-			stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by abc123`,
-			exit:   125,
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: "not json at all"},
+		runnertest.Call{
+			Stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by abc123`,
+			Exit:   125,
 		},
-		fakeCall{stdout: inspectJSONStdout(t, "abc123", "running", time.Now())},
+		runnertest.Call{Stdout: inspectJSONStdout(t, "abc123", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2263,17 +2199,17 @@ func TestRun_UndecodableInspectBodyRemovesNothing(t *testing.T) {
 	if err := a.Run(box); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
-	if call := readCall(t, dir, 1); containsArg(call, "rm") {
+	if call := runnertest.ReadCall(t, dir, 1); runnertest.ContainsArg(call, "rm") {
 		t.Errorf("Run: removed a container it could not identify, call 1 was %v", call)
 	}
 }
 
 // No container at all: Run launches straight through, no rm invoked.
 func TestRun_NoContainerLaunchesDirectly(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 1}, // inspect: absent
-		fakeCall{},        // run
-		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // inspect: absent
+		runnertest.Call{},        // run
+		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2281,11 +2217,11 @@ func TestRun_NoContainerLaunchesDirectly(t *testing.T) {
 	if err := a.Run(box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	run := readCall(t, dir, 1)
-	if !containsArg(run, "run") {
+	run := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(run, "run") {
 		t.Errorf("Run: want the second call to launch, call 1 was %v", run)
 	}
-	if calls := callCount(t, dir); calls != 3 {
+	if calls := runnertest.CallCount(t, dir); calls != 3 {
 		t.Errorf("Run: want 3 calls (inspect, run, reapAfterSuccess re-inspect; no rm), got %d", calls)
 	}
 }
@@ -2295,10 +2231,10 @@ func TestRun_NoContainerLaunchesDirectly(t *testing.T) {
 // exit codes (128+N) through a runtime-agnostic type instead of a raw
 // *exec.ExitError.
 func TestRun_ExitCodeSurfacedAsRunError(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "exited", time.Now())},
-		fakeCall{},          // rm
-		fakeCall{exit: 143}, // run
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-1", "exited", time.Now())},
+		runnertest.Call{},          // rm
+		runnertest.Call{Exit: 143}, // run
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2322,11 +2258,11 @@ func TestRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 // concurrency signal: Run must report ErrAlreadyRunning, not a RunError, and
 // must never rm -f the name (issue #3633).
 func TestRun_LostCreateRacePodmanRefusalIsAlreadyRunning(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 1}, // inspect: container invisible to us
-		fakeCall{exit: 125, stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by 0123456789ab`},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // inspect: container invisible to us
+		runnertest.Call{Exit: 125, Stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by 0123456789ab`},
 		// post-failure inspect: the sibling that actually won the race is live
-		fakeCall{stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
+		runnertest.Call{Stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2335,11 +2271,11 @@ func TestRun_LostCreateRacePodmanRefusalIsAlreadyRunning(t *testing.T) {
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
-	if calls := callCount(t, dir); calls != 3 {
+	if calls := runnertest.CallCount(t, dir); calls != 3 {
 		t.Errorf("Run: want 3 calls (inspect, run, post-failure inspect), got %d", calls)
 	}
-	for i := 0; i < callCount(t, dir); i++ {
-		if argv := readCall(t, dir, i); len(argv) > 0 && argv[0] == "rm" {
+	for i := 0; i < runnertest.CallCount(t, dir); i++ {
+		if argv := runnertest.ReadCall(t, dir, i); len(argv) > 0 && argv[0] == "rm" {
 			t.Errorf("Run: call %d issued rm -f on a name-collision refusal: %v", i, argv)
 		}
 	}
@@ -2347,11 +2283,11 @@ func TestRun_LostCreateRacePodmanRefusalIsAlreadyRunning(t *testing.T) {
 
 // Same as above but with docker's wording of the same refusal.
 func TestRun_LostCreateRaceDockerRefusalIsAlreadyRunning(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{exit: 1}, // inspect: container invisible to us
-		fakeCall{exit: 125, stderr: `docker: Error response from daemon: Conflict. The container name "/agent-issue-1" is already in use by container "0123456789ab". You have to remove (or rename) that container to be able to reuse that name.`},
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // inspect: container invisible to us
+		runnertest.Call{Exit: 125, Stderr: `docker: Error response from daemon: Conflict. The container name "/agent-issue-1" is already in use by container "0123456789ab". You have to remove (or rename) that container to be able to reuse that name.`},
 		// post-failure inspect: the sibling that actually won the race is live
-		fakeCall{stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
+		runnertest.Call{Stdout: inspectJSONStdout(t, "0123456789ab", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2370,14 +2306,14 @@ func TestRun_LostCreateRaceDockerRefusalIsAlreadyRunning(t *testing.T) {
 // by a sibling, so the collision text is exposed as forged and Run must
 // still surface a RunError.
 func TestRun_EchoedCollisionTextWithGenuineFailureIsRunError(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 1}, // inspect: no pre-existing container
-		fakeCall{
-			exit:   7,
-			stdout: `the container name "agent-issue-1" is already in use`,
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // inspect: no pre-existing container
+		runnertest.Call{
+			Exit:   7,
+			Stdout: `the container name "agent-issue-1" is already in use`,
 		},
 		// post-failure inspect: this Box's own container, now exited
-		fakeCall{stdout: inspectJSONStdout(t, "own-id", "exited", time.Now())},
+		runnertest.Call{Stdout: inspectJSONStdout(t, "own-id", "exited", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2390,7 +2326,7 @@ func TestRun_EchoedCollisionTextWithGenuineFailureIsRunError(t *testing.T) {
 	if !errors.As(err, &runErr) {
 		t.Fatalf("Run: want *RunError, got %v (%T)", err, err)
 	}
-	if calls := callCount(t, dir); calls != 3 {
+	if calls := runnertest.CallCount(t, dir); calls != 3 {
 		t.Errorf("Run: want 3 calls (inspect, run, post-failure inspect), got %d", calls)
 	}
 }
@@ -2401,10 +2337,10 @@ func TestRun_EchoedCollisionTextWithGenuineFailureIsRunError(t *testing.T) {
 // "created" (not yet "running") — still a live claim on the name, so Run
 // must report ErrAlreadyRunning.
 func TestRun_LostCreateRacePostFailureInspectSeesCreated(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 1}, // inspect: container invisible to us
-		fakeCall{exit: 125, stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by 0123456789ab`},
-		fakeCall{stdout: inspectJSONStdout(t, "0123456789ab", "created", time.Now())},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // inspect: container invisible to us
+		runnertest.Call{Exit: 125, Stderr: `Error: creating container storage: the container name "agent-issue-1" is already in use by 0123456789ab`},
+		runnertest.Call{Stdout: inspectJSONStdout(t, "0123456789ab", "created", time.Now())},
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
@@ -2413,7 +2349,7 @@ func TestRun_LostCreateRacePostFailureInspectSeesCreated(t *testing.T) {
 	if !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("Run: want ErrAlreadyRunning, got %v", err)
 	}
-	if calls := callCount(t, dir); calls != 3 {
+	if calls := runnertest.CallCount(t, dir); calls != 3 {
 		t.Errorf("Run: want 3 calls (inspect, run, post-failure inspect), got %d", calls)
 	}
 }
@@ -2424,10 +2360,10 @@ func TestRun_LostCreateRacePostFailureInspectSeesCreated(t *testing.T) {
 // for issue #3633.
 func TestRun_TeesFullOutputToBoxOutput(t *testing.T) {
 	big := strings.Repeat("x", 8192) + "-tail-marker"
-	script, _ := newFakeCLI(t,
-		fakeCall{exit: 1}, // inspect: container absent
-		fakeCall{exit: 0, stdout: big},
-		fakeCall{exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // inspect: container absent
+		runnertest.Call{Exit: 0, Stdout: big},
+		runnertest.Call{Exit: 1}, // Run's own reapAfterSuccess re-inspects; report absent
 	)
 	a := &ociAdapter{cli: script, image: "spindrift:test"}
 	var buf bytes.Buffer
@@ -2459,42 +2395,22 @@ func TestBuildRunArgs_NoRmFlag(t *testing.T) {
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 	args := a.buildRunArgs(box)
 
-	if containsArg(args, "--rm") {
+	if runnertest.ContainsArg(args, "--rm") {
 		t.Errorf("--rm must not be in buildRunArgs (lifecycle is managed by Run); args: %v", args)
 	}
-}
-
-func containsArg(args []string, flag string) bool {
-	for _, a := range args {
-		if a == flag {
-			return true
-		}
-	}
-	return false
-}
-
-// wantTriple reports whether args contains the contiguous 3-element
-// subsequence a0, a1, a2 (e.g. a flag and its two positional values).
-func wantTriple(args []string, a0, a1, a2 string) bool {
-	for i := 0; i+2 < len(args); i++ {
-		if args[i] == a0 && args[i+1] == a1 && args[i+2] == a2 {
-			return true
-		}
-	}
-	return false
 }
 
 // The safety guard: when the fake CLI reports the container is running, reap
 // must not issue `rm -f`.
 func TestReap_NeverRemovesRunningContainer(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
 	)
 	a := &ociAdapter{cli: script}
 
 	a.reap("agent-issue-1")
 
-	if calls := callCount(t, dir); calls != 1 {
+	if calls := runnertest.CallCount(t, dir); calls != 1 {
 		t.Errorf("reap: want 1 call (inspect only), got %d", calls)
 	}
 }
@@ -2503,14 +2419,14 @@ func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 // state, not yet running, and still within midCreationGrace of its creation
 // timestamp, must also be left alone — a sibling launcher may own it.
 func TestReap_NeverRemovesCreatedContainer(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "cid-1", "created", time.Now().Add(-5*time.Second))},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "cid-1", "created", time.Now().Add(-5*time.Second))},
 	)
 	a := &ociAdapter{cli: script}
 
 	a.reap("agent-issue-1")
 
-	if calls := callCount(t, dir); calls != 1 {
+	if calls := runnertest.CallCount(t, dir); calls != 1 {
 		t.Errorf("reap: want 1 call (inspect only), got %d", calls)
 	}
 }
@@ -2519,19 +2435,19 @@ func TestReap_NeverRemovesCreatedContainer(t *testing.T) {
 // exited (reapable), reap issues `rm -f` against the inspected ID, not the
 // name passed in (issue #3633). A terminal status reaps regardless of age.
 func TestReap_RemovesStaleContainer(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "stale-cid", "exited", time.Now())},
-		fakeCall{},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "stale-cid", "exited", time.Now())},
+		runnertest.Call{},
 	)
 	a := &ociAdapter{cli: script}
 
 	a.reap("agent-issue-1")
 
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-cid") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "rm") || !runnertest.ContainsArg(rm, "-f") || !runnertest.ContainsArg(rm, "stale-cid") {
 		t.Errorf("reap: want `rm -f stale-cid`, got %v", rm)
 	}
-	if containsArg(rm, "agent-issue-1") {
+	if runnertest.ContainsArg(rm, "agent-issue-1") {
 		t.Errorf("reap: rm targeted the name, not the inspected ID: %v", rm)
 	}
 }
@@ -2540,16 +2456,16 @@ func TestReap_RemovesStaleContainer(t *testing.T) {
 // not owned by a sibling about to start it, so reap clears it just as it does
 // a terminal container (issue #3633).
 func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "stale-created-cid", "created", time.Now().Add(-3*time.Hour))},
-		fakeCall{},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "stale-created-cid", "created", time.Now().Add(-3*time.Hour))},
+		runnertest.Call{},
 	)
 	a := &ociAdapter{cli: script}
 
 	a.reap("agent-issue-1")
 
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-created-cid") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "rm") || !runnertest.ContainsArg(rm, "-f") || !runnertest.ContainsArg(rm, "stale-created-cid") {
 		t.Errorf("reap: want `rm -f stale-created-cid`, got %v", rm)
 	}
 }
@@ -2559,13 +2475,13 @@ func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
 // there is no container left to kill. Runner.Kill's contract treats that as
 // success, not a failure Terminate would otherwise misreport.
 func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1}) // inspect: no such container
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // inspect: no such container
 	a := &ociAdapter{cli: script}
 
 	if err := a.Kill("agent-issue-1"); err != nil {
 		t.Errorf("Kill: got %v, want nil for a missing container", err)
 	}
-	if calls := callCount(t, dir); calls != 1 {
+	if calls := runnertest.CallCount(t, dir); calls != 1 {
 		t.Errorf("Kill: want 1 call (inspect only, no rm attempted), got %d", calls)
 	}
 }
@@ -2574,9 +2490,9 @@ func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
 // issues `rm -f` unconditionally once existence is confirmed, so it reaches a
 // genuinely live container reap would refuse to touch.
 func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "kill-existing-id", "running", time.Now())},
-		fakeCall{}, // rm -f
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "kill-existing-id", "running", time.Now())},
+		runnertest.Call{}, // rm -f
 	)
 	a := &ociAdapter{cli: script}
 
@@ -2584,11 +2500,11 @@ func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	if calls := callCount(t, dir); calls != 2 {
+	if calls := runnertest.CallCount(t, dir); calls != 2 {
 		t.Errorf("Kill: want 2 calls (inspect then rm -f), got %d", calls)
 	}
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "kill-existing-id") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "rm") || !runnertest.ContainsArg(rm, "-f") || !runnertest.ContainsArg(rm, "kill-existing-id") {
 		t.Errorf("Kill: want `rm -f kill-existing-id`, got %v", rm)
 	}
 }
@@ -2597,20 +2513,20 @@ func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
 // — the same ID-pinning invariant Run and reap apply — so a sibling that
 // replaced the container between inspect and rm is untouched (issue #3633).
 func TestKill_RemovesByIDNotByName(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "kill-target-id", "running", time.Now())},
-		fakeCall{}, // rm -f
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "kill-target-id", "running", time.Now())},
+		runnertest.Call{}, // rm -f
 	)
 	a := &ociAdapter{cli: script}
 
 	if err := a.Kill("agent-issue-1"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
-	rm := readCall(t, dir, 1)
-	if !containsArg(rm, "kill-target-id") {
+	rm := runnertest.ReadCall(t, dir, 1)
+	if !runnertest.ContainsArg(rm, "kill-target-id") {
 		t.Errorf("rm target: got %v, want the inspected ID kill-target-id", rm)
 	}
-	if containsArg(rm, "agent-issue-1") {
+	if runnertest.ContainsArg(rm, "agent-issue-1") {
 		t.Errorf("rm target: got %v, want it not to target the name %q", rm, "agent-issue-1")
 	}
 }
@@ -2618,9 +2534,9 @@ func TestKill_RemovesByIDNotByName(t *testing.T) {
 // A scripted rm failure against a container confirmed to exist is returned, not
 // swallowed: Terminate needs to know a genuine reap failure happened.
 func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{stdout: inspectJSONStdout(t, "kill-failure-id", "running", time.Now())},
-		fakeCall{exit: 1}, // rm -f: fails
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Stdout: inspectJSONStdout(t, "kill-failure-id", "running", time.Now())},
+		runnertest.Call{Exit: 1}, // rm -f: fails
 	)
 	a := &ociAdapter{cli: script}
 
@@ -2632,9 +2548,9 @@ func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
 // loadImage issues `load -i <archive>` followed by `tag spindrift:latest
 // <imageTag>`, in that order.
 func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{},
-		fakeCall{},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{},
+		runnertest.Call{},
 	)
 	a := &ociAdapter{cli: script, imageTag: "spindrift:abc123"}
 
@@ -2642,13 +2558,13 @@ func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
 		t.Fatalf("loadImage: %v", err)
 	}
 
-	load := readCall(t, dir, 0)
+	load := runnertest.ReadCall(t, dir, 0)
 	want := []string{"load", "-i", "/tmp/spindrift-image.tar"}
 	if strings.Join(load, " ") != strings.Join(want, " ") {
 		t.Errorf("load call: got %v, want %v", load, want)
 	}
 
-	tag := readCall(t, dir, 1)
+	tag := runnertest.ReadCall(t, dir, 1)
 	want = []string{"tag", "spindrift:latest", "spindrift:abc123"}
 	if strings.Join(tag, " ") != strings.Join(want, " ") {
 		t.Errorf("tag call: got %v, want %v", tag, want)
@@ -2660,9 +2576,9 @@ func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
 // driver-scoped archive (an opencode image loads as
 // "spindrift-opencode:latest") is found by the re-tag (#262).
 func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{},
-		fakeCall{},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{},
+		runnertest.Call{},
 	)
 	a := &ociAdapter{cli: script, imageTag: "spindrift-opencode:abc123"}
 
@@ -2670,7 +2586,7 @@ func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
 		t.Fatalf("loadImage: %v", err)
 	}
 
-	tag := readCall(t, dir, 1)
+	tag := runnertest.ReadCall(t, dir, 1)
 	want := []string{"tag", "spindrift-opencode:latest", "spindrift-opencode:abc123"}
 	if strings.Join(tag, " ") != strings.Join(want, " ") {
 		t.Errorf("tag call: got %v, want %v", tag, want)
@@ -2678,7 +2594,7 @@ func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
 }
 
 func TestIsReady_ImageAbsentReturnsError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 1})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
 
 	if err := a.IsReady(); err == nil {
@@ -2687,7 +2603,7 @@ func TestIsReady_ImageAbsentReturnsError(t *testing.T) {
 }
 
 func TestIsReady_ImagePresentReturnsNil(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
 
 	if err := a.IsReady(); err != nil {
@@ -2700,7 +2616,7 @@ func TestIsReady_ImagePresentReturnsNil(t *testing.T) {
 // inspect (issue #3633).
 func TestIsRunning_ScriptedStatuses(t *testing.T) {
 	t.Run("running reports true regardless of age", func(t *testing.T) {
-		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "running", time.Now().Add(-3*time.Hour))})
+		script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: inspectJSONStdout(t, "cid", "running", time.Now().Add(-3*time.Hour))})
 		a := &ociAdapter{cli: script}
 		if !a.IsRunning("c") {
 			t.Error(`IsRunning: want true for "running" status`)
@@ -2708,7 +2624,7 @@ func TestIsRunning_ScriptedStatuses(t *testing.T) {
 	})
 
 	t.Run("recently created reports true (mid-creation sibling)", func(t *testing.T) {
-		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "created", time.Now().Add(-5*time.Second))})
+		script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: inspectJSONStdout(t, "cid", "created", time.Now().Add(-5*time.Second))})
 		a := &ociAdapter{cli: script}
 		if !a.IsRunning("c") {
 			t.Error(`IsRunning: want true for a recently "created" status, issue #3633`)
@@ -2716,7 +2632,7 @@ func TestIsRunning_ScriptedStatuses(t *testing.T) {
 	})
 
 	t.Run("stale created reports false (abandoned mid-create)", func(t *testing.T) {
-		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "created", time.Now().Add(-3*time.Hour))})
+		script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: inspectJSONStdout(t, "cid", "created", time.Now().Add(-3*time.Hour))})
 		a := &ociAdapter{cli: script}
 		if a.IsRunning("c") {
 			t.Error(`IsRunning: want false for a "created" status older than midCreationGrace`)
@@ -2724,7 +2640,7 @@ func TestIsRunning_ScriptedStatuses(t *testing.T) {
 	})
 
 	t.Run("exited reports false", func(t *testing.T) {
-		script, _ := newFakeCLI(t, fakeCall{stdout: inspectJSONStdout(t, "cid", "exited", time.Now())})
+		script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: inspectJSONStdout(t, "cid", "exited", time.Now())})
 		a := &ociAdapter{cli: script}
 		if a.IsRunning("c") {
 			t.Error(`IsRunning: want false for "exited" status`)
@@ -2732,7 +2648,7 @@ func TestIsRunning_ScriptedStatuses(t *testing.T) {
 	})
 
 	t.Run("failed inspect reports false", func(t *testing.T) {
-		script, _ := newFakeCLI(t, fakeCall{exit: 1})
+		script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 		a := &ociAdapter{cli: script}
 		if a.IsRunning("c") {
 			t.Error("IsRunning: want false when inspect fails (exit 1)")
@@ -2784,12 +2700,12 @@ func TestContainerReapable(t *testing.T) {
 // image.
 func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, _ := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent (outside the lock)
-		fakeCall{exit: 1}, // image inspect: still absent (re-probe under the lock)
-		fakeCall{},        // run (container build)
-		fakeCall{},        // load
-		fakeCall{},        // tag
+	cliScript, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // image inspect: absent (outside the lock)
+		runnertest.Call{Exit: 1}, // image inspect: still absent (re-probe under the lock)
+		runnertest.Call{},        // run (container build)
+		runnertest.Call{},        // load
+		runnertest.Call{},        // tag
 	)
 
 	// nix build is invoked directly (not through the cli field); stub it on
@@ -2846,9 +2762,9 @@ func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 // falling back to the container build.
 func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, _ := newFakeCLI(t, fakeCall{exit: 1}) // image inspect: absent
+	cliScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // image inspect: absent
 
-	nixScript, nixDir := newFakeCLI(t, fakeCall{exit: 1, stdout: "genuine derivation error"})
+	nixScript, nixDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -2871,33 +2787,21 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	if err == nil {
 		t.Error("expected error from scripted nix build failure, got nil")
 	}
-	if got := callCount(t, nixDir); got != 1 {
+	if got := runnertest.CallCount(t, nixDir); got != 1 {
 		t.Errorf("callCount = %d, want 1 (no container-build fallback for a genuine error)", got)
-	}
-}
-
-// stubHostNix routes the host `nix build` through the ExecCommand seam to a
-// fake that replays the given call.
-func stubHostNix(t *testing.T, call fakeCall) {
-	t.Helper()
-	nixScript, _ := newFakeCLI(t, call)
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command(nixScript, args...)
 	}
 }
 
 // IsReady probes the configured content-hash tag, never the mutable
 // spindrift:latest the archive carries.
 func TestIsReady_InspectsConfiguredImageTag(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
 
 	if err := a.IsReady(); err != nil {
 		t.Fatalf("IsReady: %v", err)
 	}
-	got := strings.Join(readCall(t, dir, 0), " ")
+	got := strings.Join(runnertest.ReadCall(t, dir, 0), " ")
 	if want := "image inspect spindrift:abc123"; got != want {
 		t.Errorf("inspect argv = %q, want %q", got, want)
 	}
@@ -2907,13 +2811,13 @@ func TestIsReady_InspectsConfiguredImageTag(t *testing.T) {
 // configured archive into the runtime.
 func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, cliDir := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent
-		fakeCall{exit: 1}, // image inspect: absent under the lock
-		fakeCall{},        // load
-		fakeCall{},        // tag
+	cliScript, cliDir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // image inspect: absent
+		runnertest.Call{Exit: 1}, // image inspect: absent under the lock
+		runnertest.Call{},        // load
+		runnertest.Call{},        // tag
 	)
-	stubHostNix(t, fakeCall{exit: 0})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 0})
 
 	a := &ociAdapter{
 		cli:          cliScript,
@@ -2924,7 +2828,7 @@ func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 	}
 
 	var ensureErr error
-	stdout := captureStdoutDuring(t, func() { ensureErr = a.EnsureReady() })
+	stdout := runnertest.CaptureStdoutDuring(t, func() { ensureErr = a.EnsureReady() })
 	if ensureErr != nil {
 		t.Fatalf("EnsureReady: %v", ensureErr)
 	}
@@ -2932,10 +2836,10 @@ func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 	if !strings.Contains(stdout, "image 'spindrift:abc123' not found — building first") {
 		t.Errorf("stdout missing the building-first line; got: %q", stdout)
 	}
-	if got := strings.Join(readCall(t, cliDir, 0), " "); got != "image inspect spindrift:abc123" {
+	if got := strings.Join(runnertest.ReadCall(t, cliDir, 0), " "); got != "image inspect spindrift:abc123" {
 		t.Errorf("inspect argv = %q", got)
 	}
-	if got, want := strings.Join(readCall(t, cliDir, 2), " "), "load -i /tmp/spindrift-image.tar"; got != want {
+	if got, want := strings.Join(runnertest.ReadCall(t, cliDir, 2), " "), "load -i /tmp/spindrift-image.tar"; got != want {
 		t.Errorf("load argv = %q, want %q", got, want)
 	}
 }
@@ -2946,14 +2850,14 @@ func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 // the supply-chain warning.
 func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, cliDir := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent
-		fakeCall{exit: 1}, // image inspect: absent under the lock
-		fakeCall{},        // run (container build)
-		fakeCall{},        // load
-		fakeCall{},        // tag
+	cliScript, cliDir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // image inspect: absent
+		runnertest.Call{Exit: 1}, // image inspect: absent under the lock
+		runnertest.Call{},        // run (container build)
+		runnertest.Call{},        // load
+		runnertest.Call{},        // tag
 	)
-	stubHostNix(t, fakeCall{exit: 1, stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	pwd := t.TempDir()
 	pinned := "docker.io/nixos/nix@sha256:0123456789abcdef"
@@ -2969,7 +2873,7 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 	}
 
 	var ensureErr error
-	stderr := captureStderrDuring(t, func() { ensureErr = a.EnsureReady() })
+	stderr := runnertest.CaptureStderrDuring(t, func() { ensureErr = a.EnsureReady() })
 	if ensureErr != nil {
 		t.Fatalf("EnsureReady: %v", ensureErr)
 	}
@@ -2977,7 +2881,7 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 		t.Errorf("digest-pinned builder must not warn; stderr: %q", stderr)
 	}
 
-	run := readCall(t, cliDir, 2)
+	run := runnertest.ReadCall(t, cliDir, 2)
 	if len(run) == 0 || run[0] != "run" {
 		t.Fatalf("run argv = %v, want a `run` call", run)
 	}
@@ -2987,10 +2891,10 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 			mounts = append(mounts, run[i+1])
 		}
 	}
-	if !containsArg(mounts, "custom-nix-vol:/nix") {
+	if !runnertest.ContainsArg(mounts, "custom-nix-vol:/nix") {
 		t.Errorf("run argv missing the nix volume mount: %v", run)
 	}
-	if !containsArg(run, pinned) {
+	if !runnertest.ContainsArg(run, pinned) {
 		t.Errorf("run argv missing builder image %q verbatim: %v", pinned, run)
 	}
 	var tmpDir string
@@ -3008,7 +2912,7 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
 		t.Errorf("staging dir %q should be removed after the build; stat err = %v", tmpDir, err)
 	}
-	if got, want := strings.Join(readCall(t, cliDir, 3), " "), "load -i "+filepath.Join(tmpDir, "image.tar"); got != want {
+	if got, want := strings.Join(runnertest.ReadCall(t, cliDir, 3), " "), "load -i "+filepath.Join(tmpDir, "image.tar"); got != want {
 		t.Errorf("load argv = %q, want %q", got, want)
 	}
 }
@@ -3016,12 +2920,12 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 // A failing container build reports itself and never reaches load.
 func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, cliDir := newFakeCLI(t,
-		fakeCall{exit: 1}, // image inspect: absent
-		fakeCall{exit: 1}, // image inspect: absent under the lock
-		fakeCall{exit: 1}, // run (container build) fails
+	cliScript, cliDir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 1}, // image inspect: absent
+		runnertest.Call{Exit: 1}, // image inspect: absent under the lock
+		runnertest.Call{Exit: 1}, // run (container build) fails
 	)
-	stubHostNix(t, fakeCall{exit: 1, stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	a := &ociAdapter{
 		cli:             cliScript,
@@ -3037,7 +2941,7 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "container build failed") {
 		t.Fatalf("EnsureReady error = %v, want one mentioning %q", err, "container build failed")
 	}
-	if got := callCount(t, cliDir); got != 3 {
+	if got := runnertest.CallCount(t, cliDir); got != 3 {
 		t.Errorf("CLI callCount = %d, want 3 (two inspects and the failed run; no load)", got)
 	}
 }
@@ -3046,7 +2950,7 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 // missing pieces instead of a bare exec failure.
 func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 	redirectImageLockDir(t)
-	stubHostNix(t, fakeCall{exit: 1, stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	a := &ociAdapter{
 		cli:      "spindrift-no-such-runtime",
@@ -3055,7 +2959,7 @@ func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 	}
 
 	var err error
-	stderr := captureStderrDuring(t, func() { err = a.EnsureReady() })
+	stderr := runnertest.CaptureStderrDuring(t, func() { err = a.EnsureReady() })
 	if err == nil {
 		t.Fatal("EnsureReady: want error with no builder and no runtime, got nil")
 	}
@@ -3073,8 +2977,8 @@ func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 // the doomed container fallback.
 func TestEnsureReady_RealNixError_SurfacesStderrWithoutContainerRun(t *testing.T) {
 	redirectImageLockDir(t)
-	cliScript, cliDir := newFakeCLI(t, fakeCall{exit: 1}) // every call fails, so a fallback `run` would still "pass" on error alone
-	stubHostNix(t, fakeCall{exit: 1, stderr: "error: undefined variable 'frobnicate'"})
+	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // every call fails, so a fallback `run` would still "pass" on error alone
+	runnertest.StubExec(t, &ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: undefined variable 'frobnicate'"})
 
 	a := &ociAdapter{
 		cli:             cliScript,
@@ -3084,14 +2988,14 @@ func TestEnsureReady_RealNixError_SurfacesStderrWithoutContainerRun(t *testing.T
 	}
 
 	var err error
-	stderr := captureStderrDuring(t, func() { err = a.EnsureReady() })
+	stderr := runnertest.CaptureStderrDuring(t, func() { err = a.EnsureReady() })
 	if err == nil {
 		t.Fatal("EnsureReady: want error for a real nix failure, got nil")
 	}
 	if !strings.Contains(stderr, "undefined variable 'frobnicate'") {
 		t.Errorf("nix stderr not surfaced; got: %q", stderr)
 	}
-	if got := callCount(t, cliDir); got != 2 {
+	if got := runnertest.CallCount(t, cliDir); got != 2 {
 		t.Errorf("CLI callCount = %d, want 2 (two inspects; no container run)", got)
 	}
 }

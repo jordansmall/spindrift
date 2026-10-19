@@ -1,10 +1,8 @@
 package runner
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -19,13 +17,14 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Run must go through the package-level ExecCommand seam, not a hardcoded
 // exec.Command("bwrap", ...). networkMode="host" keeps the exec target bare
 // bwrap; TestBwrapRun_PastaIsTopLevelProgramByDefault covers the pasta default.
 func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -43,7 +42,7 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	if err == nil {
 		t.Error("expected error from scripted bwrap failure, got nil")
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1", got)
 	}
 }
@@ -70,7 +69,7 @@ func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 // trailing argv with no namespace left to configure. The default
 // (zero-value) networkMode must make pasta the top-level program.
 func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -142,7 +141,7 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 // inside the ExecCommand seam, before Start/Wait, because Run's deferred
 // os.RemoveAll(etcDir) has already fired by the time Run returns.
 func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotResolvConf []byte
@@ -179,7 +178,7 @@ func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 // ever resolved "pasta". TestResolvedRunEnv_DropsUndeclaredAmbientVariable
 // pins that this does not widen the ambient-leak guarantee.
 func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -208,7 +207,7 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 // callers can detect signal-kill codes (128+N) through a runtime-agnostic
 // type instead of a raw *exec.ExitError.
 func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 137})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 137})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -231,7 +230,7 @@ func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 }
 
 func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 1})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -249,7 +248,7 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from scripted nix build failure, got nil")
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1 (must not proceed to agent-env build after failure)", got)
 	}
 }
@@ -257,7 +256,7 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 // The four closures are agent-files, agent-env, passwd-file and group-file
 // (issue #2663).
 func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -275,7 +274,7 @@ func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 	if err != nil {
 		t.Errorf("EnsureReady() = %v, want nil", err)
 	}
-	if got := callCount(t, dir); got != 4 {
+	if got := runnertest.CallCount(t, dir); got != 4 {
 		t.Errorf("callCount = %d, want 4 (agent-files + agent-env + passwd-file + group-file)", got)
 	}
 }
@@ -283,7 +282,7 @@ func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 // The passwd-file realization is the third closure, and a failure there must
 // stop before the group-file closure runs (issue #2663).
 func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 1})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -301,14 +300,14 @@ func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "nix build passwd-file") {
 		t.Errorf("EnsureReady() = %v, want error containing %q", err, "nix build passwd-file")
 	}
-	if got := callCount(t, dir); got != 3 {
+	if got := runnertest.CallCount(t, dir); got != 3 {
 		t.Errorf("callCount = %d, want 3 (must not proceed to group-file build after failure)", got)
 	}
 }
 
 // The group-file realization is the fourth and final closure (issue #2663).
 func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 1})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -326,7 +325,7 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "nix build group-file") {
 		t.Errorf("EnsureReady() = %v, want error containing %q", err, "nix build group-file")
 	}
-	if got := callCount(t, dir); got != 4 {
+	if got := runnertest.CallCount(t, dir); got != 4 {
 		t.Errorf("callCount = %d, want 4", got)
 	}
 }
@@ -338,9 +337,9 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 // round-trip correctly. VACUUM INTO targets a temp sibling of dest, never dest
 // itself (issue #4817).
 func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 0},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
@@ -367,7 +366,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 	if err != nil {
 		t.Fatalf("EnsureReady() = %v, want nil", err)
 	}
-	if got := callCount(t, dir); got != 6 {
+	if got := runnertest.CallCount(t, dir); got != 6 {
 		t.Errorf("callCount = %d, want 6", got)
 	}
 	if len(gotNames) != 6 {
@@ -383,7 +382,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 	}
 
 	wantDest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
-	call := readCall(t, dir, 5)
+	call := runnertest.ReadCall(t, dir, 5)
 	if len(call) != 2 {
 		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
 	}
@@ -408,9 +407,9 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 // of RemoveAll-ing it mid-write. flock locks are scoped to the open file
 // description, so a second fd in this process conflicts like another's would.
 func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 0},
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
@@ -500,7 +499,7 @@ func tempSiblings(t *testing.T, dir string) []string {
 // the next vacuum removes temps no live launcher holds the flock on, and leaves
 // one a concurrent launcher is still writing.
 func TestVacuumStoreDBInto_SweepsOnlyUnlockedTemps(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	fakeVacuumInto(t, script, "fresh", 0, nil)
 	dir := t.TempDir()
 	dbDir := filepath.Join(dir, "nix", "db")
@@ -543,7 +542,7 @@ func TestVacuumStoreDBInto_SweepsOnlyUnlockedTemps(t *testing.T) {
 // flocks it, so a sweep from a concurrent launcher must not mistake it for a
 // stale temp: unlinking it fails the running VACUUM with "disk I/O error".
 func TestVacuumStoreDBInto_SweepLeavesLiveVacuumJournal(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	dir := t.TempDir()
 	fakeVacuumInto(t, script, "fresh", 0, func(tmp string) {
 		journal := tmp + "-journal"
@@ -632,9 +631,9 @@ func TestCreateLockedVacuumTemp_GivesUpWhenEveryAttemptSwept(t *testing.T) {
 // a temp sibling and renames over dest after success, so a pre-existing
 // snapshot stays untouched while sqlite3 runs and is replaced atomically after.
 func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 0},
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
 	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
@@ -683,7 +682,7 @@ func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *test
 // sqlite3 killed alone (SIGKILL, OOM) leaves <tmp>-journal behind while the
 // launcher survives; the sweep skips that name, so the failure path must clear it.
 func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	dir := t.TempDir()
 	fakeVacuumInto(t, script, "partial", 1, func(tmp string) {
 		if err := os.WriteFile(tmp+"-journal", []byte("journal"), 0o644); err != nil {
@@ -704,9 +703,9 @@ func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
 // leaves partial bytes in the temp) must leave that exact content in place and
 // no temp sibling behind.
 func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0},
 	)
 	fakeVacuumInto(t, script, "partial", 1, nil)
 
@@ -733,7 +732,7 @@ func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.
 	if err == nil {
 		t.Fatal("EnsureReady() = nil, want error from scripted sqlite3 failure")
 	}
-	if got := callCount(t, dir); got != 5 {
+	if got := runnertest.CallCount(t, dir); got != 5 {
 		t.Errorf("callCount = %d, want 5 (the sqlite3 call goes through the stub)", got)
 	}
 	gotContent, readErr := os.ReadFile(dest)
@@ -753,7 +752,7 @@ func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.
 // otherwise trust the partial file forever, and a second call must re-run
 // sqlite3 rather than skip.
 func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	fakeVacuumInto(t, script, "partial", 1, nil)
 	vacuums := 0
 	inner := ExecCommand
@@ -790,7 +789,7 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 // lock; the loser must not replace a db.sqlite the winner's live Box already
 // reads (ADR 0043). The stub installs the winner's dest mid-vacuum.
 func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 	dest := snapshotDest(pwd, closure)
@@ -815,7 +814,7 @@ func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testi
 // IsReady only stats dest, so after a failed first-time vacuum it must report
 // not-ready rather than trust a partial snapshot (issue #4817).
 func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	fakeVacuumInto(t, script, "partial", 1, nil)
 
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
@@ -839,7 +838,7 @@ func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
 // real os.Stat default, so the assertion cannot pass silently on a machine
 // that happens to have a real host nix db.
 func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
@@ -868,7 +867,7 @@ func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) 
 	if err != nil {
 		t.Fatalf("EnsureReady() = %v, want nil", err)
 	}
-	if got := callCount(t, dir); got != 4 {
+	if got := runnertest.CallCount(t, dir); got != 4 {
 		t.Errorf("callCount = %d, want 4", got)
 	}
 	for _, n := range gotNames {
@@ -885,9 +884,9 @@ func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) 
 // nix store db snapshot" error. VACUUM INTO collapses backup and compact into
 // one invocation, so there is a single failure mode to cover.
 func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
-	script, dir := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 1},
+	script, dir := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1},
 	)
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
@@ -911,7 +910,7 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sqlite3 vacuum-into nix store db snapshot") {
 		t.Errorf("EnsureReady() = %v, want error containing %q", err, "sqlite3 vacuum-into nix store db snapshot")
 	}
-	if got := callCount(t, dir); got != 6 {
+	if got := runnertest.CallCount(t, dir); got != 6 {
 		t.Errorf("callCount = %d, want 6", got)
 	}
 }
@@ -922,7 +921,7 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 // since the snapshot preflight happens only after they succeed, so callCount
 // is 5, not 0.
 func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
@@ -947,7 +946,7 @@ func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *test
 	if err == nil || !strings.Contains(err.Error(), "host nix store db not found") {
 		t.Errorf("EnsureReady() = %v, want error containing %q", err, "host nix store db not found")
 	}
-	if got := callCount(t, dir); got != 5 {
+	if got := runnertest.CallCount(t, dir); got != 5 {
 		t.Errorf("callCount = %d, want 5 (closures run before the snapshot preflight check)", got)
 	}
 	for _, n := range gotNames {
@@ -1071,7 +1070,7 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 // itself (nixConfigFile != ""): with nix-in-box off there is nothing to
 // protect, so Run must not create a lock file at all.
 func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1106,7 +1105,7 @@ func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 // here, so os.OpenFile fails with ENOTDIR. Asserting the warning text catches
 // a regression that drops the fmt.Printf (issue #2680 review finding).
 func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1128,7 +1127,7 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	}
 
 	var runErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(Box{Name: "agent-issue-11", Env: map[string]string{}})
 	})
 
@@ -1146,7 +1145,7 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 // re-check the generation dir once it holds the lock and bail out instead of
 // exec'ing bwrap against a mountpoint that no longer exists.
 func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1170,7 +1169,7 @@ func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing
 	if !strings.Contains(err.Error(), "no longer exists") {
 		t.Errorf("Run error = %q, want it to mention %q", err.Error(), "no longer exists")
 	}
-	if got := callCount(t, dir); got != 0 {
+	if got := runnertest.CallCount(t, dir); got != 0 {
 		t.Errorf("callCount = %d, want 0 (Run must bail before exec'ing bwrap)", got)
 	}
 
@@ -1236,7 +1235,7 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 // never created, so a Run that used it instead of the per-launch override
 // would fail with "no longer exists".
 func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1268,7 +1267,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	if _, err := os.Stat(gen1Dir + ".lock"); err != nil {
 		t.Errorf("gen1 lock file %s: want present, got err=%v", gen1Dir+".lock", err)
 	}
-	if argv := readCall(t, dir, 0); !slices.Contains(argv, "/gen1/agent-files/agent") {
+	if argv := runnertest.ReadCall(t, dir, 0); !slices.Contains(argv, "/gen1/agent-files/agent") {
 		t.Errorf("gen1 argv: want a --ro-bind of /gen1/agent-files/agent, got %v", argv)
 	}
 
@@ -1278,7 +1277,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	if _, err := os.Stat(gen2Dir + ".lock"); err != nil {
 		t.Errorf("gen2 lock file %s: want present, got err=%v", gen2Dir+".lock", err)
 	}
-	if argv := readCall(t, dir, 1); !slices.Contains(argv, "/gen2/agent-files/agent") {
+	if argv := runnertest.ReadCall(t, dir, 1); !slices.Contains(argv, "/gen2/agent-files/agent") {
 		t.Errorf("gen2 argv: want a --ro-bind of /gen2/agent-files/agent, got %v", argv)
 	}
 
@@ -1292,7 +1291,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 // /etc/nix/nix.conf bind resolves through box.ClosureGeneration's
 // NixConfigFile override, the way AgentFiles/AgentEnv already do.
 func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1323,7 +1322,7 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 		t.Fatalf("Run: %v", err)
 	}
 
-	argv := readCall(t, dir, 0)
+	argv := runnertest.ReadCall(t, dir, 0)
 	if !slices.Contains(argv, "/gen1/swapped-nix.conf") {
 		t.Errorf("argv: want a --ro-bind of swapped /gen1/swapped-nix.conf, got %v", argv)
 	}
@@ -1338,7 +1337,7 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 // derives the same generation label NewAgentGeneration does and vacuums the
 // host nix store DB into that generation's own dir.
 func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
@@ -1360,7 +1359,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
 		t.Errorf("ExecCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
 	}
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1", got)
 	}
 
@@ -1371,7 +1370,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(wantDest)); err != nil {
 		t.Errorf("os.Stat(%q) = %v, want the destination dir created at the derived generation dir", filepath.Dir(wantDest), err)
 	}
-	call := readCall(t, dir, 0)
+	call := runnertest.ReadCall(t, dir, 0)
 	if len(call) != 2 {
 		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
 	}
@@ -1386,7 +1385,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 // via NewAgentGeneration, so a swap's snapshot dir and its bound
 // AgentGeneration.Generation always name the same thing.
 func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
@@ -1425,7 +1424,7 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 // landing in that window would delete a generation the Dispatch still needs.
 // The unlocked sibling generation here is exactly what reclaim would sweep.
 func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
@@ -1465,7 +1464,7 @@ func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 // would replace the existing db.sqlite with a fresh one, which ADR
 // 0043 forbids, so a repeat call must skip the vacuum entirely.
 func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
@@ -1488,7 +1487,7 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 		t.Fatalf("SnapshotGeneration(%q, %q) [2nd] = %v, want nil", pwd, closure, err)
 	}
 
-	if got := callCount(t, dir); got != 1 {
+	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1 (2nd call must skip vacuum, dest already exists)", got)
 	}
 }
@@ -1496,7 +1495,7 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 // A temp leaked by a killed launcher must be swept even when a concurrent
 // launcher already installed dest, which makes SnapshotGeneration skip the vacuum.
 func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1522,7 +1521,7 @@ func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stale temp stat err = %v, want not-exist (swept)", err)
 	}
-	if got := callCount(t, dir); got != 0 {
+	if got := runnertest.CallCount(t, dir); got != 0 {
 		t.Errorf("callCount = %d, want 0 (dest exists, vacuum skipped)", got)
 	}
 }
@@ -1669,7 +1668,7 @@ func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
 // seam, bwrap.go's `cmd.Env = resolvedRunEnv(box.Env)`.
 func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 	t.Setenv("SOME_UNDECLARED_SECRET", "leaked-value")
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -1807,7 +1806,7 @@ func TestResolvedRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 
 	t.Run("empty string", func(t *testing.T) {
 		got := resolvedRunEnv(map[string]string{"ISSUE_TEXT": ""})
-		if !containsArg(got, "ISSUE_TEXT=") {
+		if !runnertest.ContainsArg(got, "ISSUE_TEXT=") {
 			t.Errorf("resolvedRunEnv: current behaviour still returns ISSUE_TEXT= (empty value) for a present-but-empty boxEnv entry; got %v", got)
 		}
 	})
@@ -1820,7 +1819,7 @@ func TestResolvedRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 // computed, a gap a box-env-assembly test alone would miss.
 func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
 	t.Setenv("GH_TOKEN", "launcher-token")
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -1858,7 +1857,7 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "opencode-auth-content-sentinel-value"
 	t.Setenv("OPENCODE_AUTH_CONTENT", sentinel)
 
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -1897,7 +1896,7 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "registry-proxy-tcp-secret-sentinel-value"
 
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -1936,7 +1935,7 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "signal-socket-secret-sentinel-value"
 
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -1975,7 +1974,7 @@ func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "forgejo-token-sentinel-value"
 
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -2017,7 +2016,7 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 	const decoy = "ambient-issue-text-decoy"
 	t.Setenv("ISSUE_TEXT", decoy)
 
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -2057,7 +2056,7 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 // delegation), Run must still succeed, never reducing PidsLimit/MemoryLimit,
 // and print a warning saying why containment is unavailable.
 func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -2077,7 +2076,7 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
 	var runErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(Box{Name: "test-box", Env: map[string]string{}})
 	})
 
@@ -2095,7 +2094,7 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 // the ExecCommand seam, before Start/Wait, because Run's cleanup has already
 // removed the dir by the time Run returns.
 func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 
@@ -2137,7 +2136,7 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 // pids.max/memory.max written, and print no "no delegation" warning. Reading
 // the limits at the anchored path means a wrong anchor cannot pass silently.
 func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 
@@ -2153,7 +2152,7 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
 	var runErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(Box{Name: "anchored-box", Env: map[string]string{}})
 	})
 	if runErr != nil {
@@ -2193,7 +2192,7 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 // location under the launcher's own self-cgroup, and Run still succeeds
 // (ADR 0042 warn-and-proceed) rather than erroring.
 func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 
@@ -2646,54 +2645,6 @@ func TestBwrapAdapter_CgroupControllers(t *testing.T) {
 	}
 }
 
-// captureStdoutDuring runs fn with os.Stdout redirected to a pipe and returns
-// what was written. Both the restore and w.Close are deferred so a panic in
-// fn can neither strand os.Stdout on the pipe for the rest of the package's
-// tests nor leave the io.Copy below blocked on an unclosed writer.
-func captureStdoutDuring(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = orig }()
-	func() {
-		defer w.Close()
-		fn()
-	}()
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
-	return buf.String()
-}
-
-// captureStderrDuring is captureStdoutDuring's sibling for os.Stderr, with
-// the same deferred restore and w.Close: a warning written on the degrade
-// path is a stderr fact, and capturing it inline would strand os.Stderr on
-// the pipe if fn panicked.
-func captureStderrDuring(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stderr
-	os.Stderr = w
-	defer func() { os.Stderr = orig }()
-	func() {
-		defer w.Close()
-		fn()
-	}()
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatal(err)
-	}
-	return buf.String()
-}
-
 // ADR 0042 amendment (issue #3272): a failed pids.max write degrades only
 // that limit, not the whole cgroup. The dir survives, memory.max is still
 // attempted, and the warning names pids.max.
@@ -2717,7 +2668,7 @@ func TestBwrapProvisionCgroup_PidsMaxWriteFailureKeepsDirAndWritesMemoryMax(t *t
 
 	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
 	var dir string
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		dir = a.provisionCgroup(Box{Name: "test-box"})
 	})
 
@@ -2758,7 +2709,7 @@ func TestBwrapProvisionCgroup_MemoryMaxWriteFailureKeepsDir(t *testing.T) {
 
 	a := &bwrapAdapter{memoryLimit: "5g"}
 	var dir string
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		dir = a.provisionCgroup(Box{Name: "test-box"})
 	})
 
@@ -2787,7 +2738,7 @@ func TestBwrapProvisionCgroup_MalformedMemoryLimitKeepsDir(t *testing.T) {
 
 	a := &bwrapAdapter{memoryLimit: "not-a-size"}
 	var dir string
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		dir = a.provisionCgroup(Box{Name: "test-box"})
 	})
 
@@ -2821,7 +2772,7 @@ func TestBwrapProvisionCgroup_BothLimitWritesFailKeepsDir(t *testing.T) {
 
 	a := &bwrapAdapter{pidsLimit: "256", memoryLimit: "5g"}
 	var dir string
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		dir = a.provisionCgroup(Box{Name: "test-box"})
 	})
 
@@ -3024,7 +2975,7 @@ func assertProvisioningGuardReleased(t *testing.T, newCmd func(string, ...string
 // completes, no provisioning entry may remain for its box name, or a later
 // leftover cgroup dir for that name could never be reclaimed.
 func TestBwrapRun_ReleasesProvisioningGuardAfterCompletedRun(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 
 	assertProvisioningGuardReleased(t, func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
@@ -3291,7 +3242,7 @@ func TestMemoryLimitToBytes(t *testing.T) {
 // hardening gap, not a safety blocker (ADR 0042's degrade-don't-lie posture):
 // Run still succeeds and prints a warning rather than failing the launch.
 func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 	var gotCmd *exec.Cmd
@@ -3308,7 +3259,7 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 		syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
 	}
 	var runErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(Box{Name: "test-box", Env: map[string]string{}})
 	})
 
@@ -3333,7 +3284,7 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 // the mechanism by which bwrap's own --seccomp 3 argument finds an open fd to
 // read the compiled BPF filter from.
 func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 	var gotCmd *exec.Cmd
@@ -3425,7 +3376,7 @@ func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var got string
-			out := captureStdoutDuring(t, func() {
+			out := runnertest.CaptureStdoutDuring(t, func() {
 				got = ClosureGeneration(tc.imageTag)
 			})
 			if got != tc.want {
@@ -3447,7 +3398,7 @@ func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
 func TestClosureGeneration_TruncatesOverlongRejectedLabel(t *testing.T) {
 	long := strings.Repeat("a", generationLabelWarnLimit*2) + "/.."
 	var got string
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		got = ClosureGeneration(long)
 	})
 	if got != "" {
@@ -3856,7 +3807,7 @@ func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testin
 	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
 
 	var reclaimErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		reclaimErr = reclaimStaleSnapshots(root, "gen-a")
 	})
 
@@ -3895,7 +3846,7 @@ func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock
 	t.Cleanup(func() { _ = os.Chmod(stale, 0o755) })
 
 	var reclaimErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		reclaimErr = reclaimStaleSnapshots(root, "gen-a")
 	})
 
@@ -4040,9 +3991,9 @@ func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			script, _ := newFakeCLI(t,
-				fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-				fakeCall{exit: 0}, fakeCall{exit: 0},
+			script, _ := runnertest.NewFakeCLI(t,
+				runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+				runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 			)
 			orig := ExecCommand
 			t.Cleanup(func() { ExecCommand = orig })
@@ -4102,9 +4053,9 @@ func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) 
 // .spindrift also holds unrelated siblings like accum.git, which that surgery
 // would delete. EnsureReady must never sweep in this case.
 func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 0},
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
@@ -4279,14 +4230,14 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 // An unreadable PrefetchFile logs its fallback diagnostic once per adapter, not
 // once per launch (issue #3356), while every launch still renders the baked
 // value; a different unreadable file is a different generation and logs again.
-// Not parallel: captureStderrDuring swaps the global os.Stderr.
+// Not parallel: runnertest.CaptureStderrDuring swaps the global os.Stderr.
 func TestBuildArgs_PrefetchFallbackLoggedOncePerFile(t *testing.T) {
 	const diagnostic = "unreadable, falling back"
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: NetworkModeHost}
 	launch := func(prefetchFile string) string {
 		box := Box{Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}}
 		var got string
-		logged := captureStderrDuring(t, func() {
+		logged := runnertest.CaptureStderrDuring(t, func() {
 			got = setenvValue(t, a.buildArgs("", box), "PREFETCH")
 		})
 		if got != "echo baked" {
@@ -4334,7 +4285,7 @@ type reclaimFixture struct {
 
 func newReclaimFixture(t *testing.T, procs string) *reclaimFixture {
 	t.Helper()
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	f := &reclaimFixture{}
 	root := stubCgroupSeams(t,
 		func() (string, error) { return "", nil },
@@ -4358,7 +4309,7 @@ func newReclaimFixture(t *testing.T, procs string) *reclaimFixture {
 func (f *reclaimFixture) run(t *testing.T) string {
 	t.Helper()
 	var runErr error
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		runErr = f.adapter.Run(Box{Name: "leftover-box", Env: map[string]string{}})
 	})
 	if runErr != nil {
@@ -4435,7 +4386,7 @@ func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirOfTrackedSibling(t *testing.T) 
 // (real cgroupfs always has the file) until the post-Start PID write. A
 // sibling Run for the same name reclaiming then must not delete it.
 func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	var dir string
 	probed, reclaimed, existedAfter := false, true, false
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost, pidsLimit: "256", memoryLimit: "5g"}
@@ -4458,7 +4409,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 	dir = filepath.Join(root, "spindrift-launch-box")
 
 	var runErr error
-	captureStdoutDuring(t, func() {
+	runnertest.CaptureStdoutDuring(t, func() {
 		runErr = a.Run(Box{Name: "launch-box", Env: map[string]string{}})
 	})
 	if runErr != nil {
@@ -4491,7 +4442,7 @@ func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
 			sentinel := strings.ToLower(name) + "-sentinel-value"
 			t.Setenv(name, sentinel)
 
-			script, _ := newFakeCLI(t, fakeCall{exit: 0})
+			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 			orig := ExecCommand
 			t.Cleanup(func() { ExecCommand = orig })
 			var gotCmd *exec.Cmd

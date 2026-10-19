@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Values of OffArgvKeys must stay off bwrap's argv, where ps and /proc would
@@ -93,7 +95,7 @@ func TestBwrapArgs_DieWithParent(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !containsArg(args, "--die-with-parent") {
+	if !runnertest.ContainsArg(args, "--die-with-parent") {
 		t.Errorf("expected --die-with-parent in args: %v", args)
 	}
 }
@@ -128,7 +130,7 @@ func TestBwrapArgs_SkillsDirPrintsMountMessage(t *testing.T) {
 		mountParams:   MountParams{SkillsDir: dir},
 	}
 
-	out := captureStdoutDuring(t, func() {
+	out := runnertest.CaptureStdoutDuring(t, func() {
 		a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 	})
 
@@ -141,7 +143,7 @@ func TestBwrapArgs_SkillsDirPrintsMountMessage(t *testing.T) {
 // A Box.Sockets entry's unix path becomes a --bind onto its fixed target
 // (ADR 0044, issue #2849; issue #3723).
 func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
-	sock := newTestSocket(t, "registry-proxy.sock")
+	sock := runnertest.NewTestSocket(t, "registry-proxy.sock")
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
@@ -159,8 +161,8 @@ func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
 // issue #3723: two Box.Sockets entries each render their own --dir parent +
 // --bind pair, none as --ro-bind.
 func TestBwrapArgs_MultipleSockets_TwoBindPairs(t *testing.T) {
-	sockA := newTestSocket(t, "registry-proxy.sock")
-	sockB := newTestSocket(t, "signal.sock")
+	sockA := runnertest.NewTestSocket(t, "registry-proxy.sock")
+	sockB := runnertest.NewTestSocket(t, "signal.sock")
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
@@ -202,7 +204,7 @@ func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !wantTriple(args, "--ro-bind", "/fake/agent/home/agent", "/home-agent-staged") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/fake/agent/home/agent", "/home-agent-staged") {
 		t.Errorf("expected --ro-bind /fake/agent/home/agent /home-agent-staged in args: %v", args)
 	}
 }
@@ -222,10 +224,10 @@ func TestBwrapArgs_ClosureGenerationOverridesAgentFiles(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", box)
 
-	if !wantTriple(args, "--ro-bind", "/gen2/agent-files/agent", "/agent") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/gen2/agent-files/agent", "/agent") {
 		t.Errorf("expected --ro-bind /gen2/agent-files/agent /agent in args: %v", args)
 	}
-	if !wantTriple(args, "--ro-bind", "/gen2/agent-files/home/agent", homeAgentStagingDir) {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/gen2/agent-files/home/agent", homeAgentStagingDir) {
 		t.Errorf("expected --ro-bind /gen2/agent-files/home/agent %s in args: %v", homeAgentStagingDir, args)
 	}
 	for _, arg := range args {
@@ -251,16 +253,16 @@ func TestBwrapArgs_ClosureGenerationEmptyAgentFilesFallsBackToBaked(t *testing.T
 	}
 	args := a.buildArgs("/tmp/fake-etc", box)
 
-	if !wantTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
 		t.Errorf("expected --ro-bind /baked/agent-files/agent /agent in args: %v", args)
 	}
-	if !wantTriple(args, "--ro-bind", "/baked/agent-files/home/agent", homeAgentStagingDir) {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/baked/agent-files/home/agent", homeAgentStagingDir) {
 		t.Errorf("expected --ro-bind /baked/agent-files/home/agent %s in args: %v", homeAgentStagingDir, args)
 	}
-	if wantTriple(args, "--ro-bind", "/agent", "/agent") {
+	if runnertest.ContainsTriple(args, "--ro-bind", "/agent", "/agent") {
 		t.Errorf("bare host /agent bound into sandbox despite empty ClosureGeneration.AgentFiles: %v", args)
 	}
-	if wantTriple(args, "--ro-bind", "/home/agent", homeAgentStagingDir) {
+	if runnertest.ContainsTriple(args, "--ro-bind", "/home/agent", homeAgentStagingDir) {
 		t.Errorf("bare host /home/agent bound into sandbox despite empty ClosureGeneration.AgentFiles: %v", args)
 	}
 }
@@ -275,10 +277,10 @@ func TestBwrapArgs_ClosureGenerationNilKeepsBakedAgentFiles(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !wantTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/baked/agent-files/agent", "/agent") {
 		t.Errorf("expected --ro-bind /baked/agent-files/agent /agent in args: %v", args)
 	}
-	if !wantTriple(args, "--ro-bind", "/baked/agent-files/home/agent", homeAgentStagingDir) {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/baked/agent-files/home/agent", homeAgentStagingDir) {
 		t.Errorf("expected --ro-bind /baked/agent-files/home/agent %s in args: %v", homeAgentStagingDir, args)
 	}
 }
@@ -295,10 +297,10 @@ func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !wantTriple(args, "--ro-bind", "/nix/store/abc123-passwd/passwd", "/etc/passwd") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/nix/store/abc123-passwd/passwd", "/etc/passwd") {
 		t.Errorf("expected --ro-bind /nix/store/abc123-passwd/passwd /etc/passwd in args: %v", args)
 	}
-	if !wantTriple(args, "--ro-bind", "/nix/store/def456-group/group", "/etc/group") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/nix/store/def456-group/group", "/etc/group") {
 		t.Errorf("expected --ro-bind /nix/store/def456-group/group /etc/group in args: %v", args)
 	}
 }
@@ -324,13 +326,13 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !containsArg(args, "--unshare-net") {
+	if !runnertest.ContainsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net missing for networkMode=none; args: %v", args)
 	}
-	if containsArg(args, "/etc/resolv.conf") {
+	if runnertest.ContainsArg(args, "/etc/resolv.conf") {
 		t.Errorf("resolv.conf must not be bound for networkMode=none; args: %v", args)
 	}
-	if containsArg(args, "pasta") {
+	if runnertest.ContainsArg(args, "pasta") {
 		t.Errorf("pasta must be absent for networkMode=none (fully helper-free, no egress); args: %v", args)
 	}
 }
@@ -399,10 +401,10 @@ func TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if containsArg(args, "--unshare-net") {
+	if runnertest.ContainsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for networkMode=open; bwrap must inherit pasta's already-configured netns, not re-unshare into an empty one: args: %v", args)
 	}
-	if containsArg(args, "pasta") {
+	if runnertest.ContainsArg(args, "pasta") {
 		t.Errorf("pasta must be absent from buildArgs' own return for networkMode=open; it is now the outer process (see execTarget), not an argv token inside bwrap's own exec target: args: %v", args)
 	}
 	want := "--ro-bind /tmp/fake-etc/resolv.conf /etc/resolv.conf"
@@ -425,13 +427,13 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if containsArg(args, "--unshare-net") {
+	if runnertest.ContainsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for networkMode=no-host-loopback; hazard reopened: args: %v", args)
 	}
-	if containsArg(args, "pasta") {
+	if runnertest.ContainsArg(args, "pasta") {
 		t.Errorf("pasta must be absent from buildArgs' own return for networkMode=no-host-loopback; args: %v", args)
 	}
-	if !containsArg(args, "/tmp/fake-etc/resolv.conf") {
+	if !runnertest.ContainsArg(args, "/tmp/fake-etc/resolv.conf") {
 		t.Errorf("synthesized resolv.conf bind source missing for networkMode=no-host-loopback; args: %v", args)
 	}
 }
@@ -448,13 +450,13 @@ func TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if containsArg(args, "--unshare-net") {
+	if runnertest.ContainsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for zero-value networkMode; args: %v", args)
 	}
-	if containsArg(args, "pasta") {
+	if runnertest.ContainsArg(args, "pasta") {
 		t.Errorf("pasta must be absent from buildArgs' own return for zero-value networkMode; args: %v", args)
 	}
-	if !containsArg(args, "/tmp/fake-etc/resolv.conf") {
+	if !runnertest.ContainsArg(args, "/tmp/fake-etc/resolv.conf") {
 		t.Errorf("synthesized resolv.conf bind source missing for zero-value networkMode; args: %v", args)
 	}
 }
@@ -474,13 +476,13 @@ func TestBwrapArgs_NetworkModeHostSharesHostNetns(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if containsArg(args, "--unshare-net") {
+	if runnertest.ContainsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent for networkMode=host; args: %v", args)
 	}
-	if containsArg(args, "pasta") {
+	if runnertest.ContainsArg(args, "pasta") {
 		t.Errorf("pasta must be absent for networkMode=host; args: %v", args)
 	}
-	if !containsArg(args, "/etc/resolv.conf") {
+	if !runnertest.ContainsArg(args, "/etc/resolv.conf") {
 		t.Errorf("resolv.conf bind must be present for networkMode=host; args: %v", args)
 	}
 }
@@ -499,13 +501,13 @@ func TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if containsArg(args, "--unshare-net") {
+	if runnertest.ContainsArg(args, "--unshare-net") {
 		t.Errorf("--unshare-net must be absent from buildArgs' own return for unshareNet=true; args: %v", args)
 	}
-	if containsArg(args, "pasta") {
+	if runnertest.ContainsArg(args, "pasta") {
 		t.Errorf("pasta must be absent from buildArgs' own return for unshareNet=true; args: %v", args)
 	}
-	if !containsArg(args, "/tmp/fake-etc/resolv.conf") {
+	if !runnertest.ContainsArg(args, "/tmp/fake-etc/resolv.conf") {
 		t.Errorf("synthesized resolv.conf bind source missing for unshareNet=true; args: %v", args)
 	}
 }
@@ -648,7 +650,7 @@ func TestBwrapArgs_DriverCacheDirMounted_HardeningPreserved(t *testing.T) {
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}, DriverCacheDir: dir})
 
 	for _, flag := range []string{"--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts"} {
-		if !containsArg(args, flag) {
+		if !runnertest.ContainsArg(args, flag) {
 			t.Errorf("writable driver cache bind must not weaken hardening; missing %q in args: %v", flag, args)
 		}
 	}
@@ -776,7 +778,7 @@ func TestBwrapArgs_MountsNixConfigAndStoreDBSnapshotWhenSet(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !wantTriple(args, "--ro-bind", "/nix/store/fake-hash-nix-conf/nix.conf", "/etc/nix/nix.conf") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/nix/store/fake-hash-nix-conf/nix.conf", "/etc/nix/nix.conf") {
 		t.Errorf("expected --ro-bind /nix/store/fake-hash-nix-conf/nix.conf /etc/nix/nix.conf in args: %v", args)
 	}
 	if !strings.Contains(strings.Join(args, " "), "--overlay-src /fake/pwd/.spindrift/nix-var-snapshot --tmp-overlay /nix/var") {
@@ -898,7 +900,7 @@ func TestBwrapArgs_StoreReadOnlyBindWhenNotWritable(t *testing.T) {
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
 		t.Errorf("expected --ro-bind /nix/store /nix/store in args: %v", args)
 	}
 	for i := 0; i+1 < len(args); i++ {
@@ -924,7 +926,7 @@ func TestBwrapArgs_StoreOverlayWhenWritable(t *testing.T) {
 	if !strings.Contains(strings.Join(args, " "), "--overlay-src /nix/store --tmp-overlay /nix/store") {
 		t.Errorf("expected --overlay-src /nix/store --tmp-overlay /nix/store in args: %v", args)
 	}
-	if wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
+	if runnertest.ContainsTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
 		t.Errorf("/nix/store must not be plain read-only bound when nixStoreWritable is true: %v", args)
 	}
 }
@@ -940,7 +942,7 @@ func TestBwrapArgs_StoreReadOnlyWhenConfigFileEmptyEvenIfWritable(t *testing.T) 
 	}
 	args := a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
 
-	if !wantTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/nix/store", "/nix/store") {
 		t.Errorf("expected --ro-bind /nix/store /nix/store in args: %v", args)
 	}
 	for i := 0; i+1 < len(args); i++ {

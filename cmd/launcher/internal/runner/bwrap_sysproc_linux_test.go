@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Bubblewrap's own --die-with-parent only kills bwrap when its immediate OS
@@ -18,7 +20,7 @@ import (
 // must set Pdeathsig on its direct child too (issue #2669). Pdeathsig is
 // Linux-only in syscall.SysProcAttr, hence the build tag.
 func TestBwrapRun_ChildDiesWithLauncher(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
@@ -125,7 +127,7 @@ func TestBwrapRun_CgroupCloneFallsBackToFreshCmd(t *testing.T) {
 // Without a provisioned cgroup there is nothing to clone into: one Cmd, no
 // cgroup fd.
 func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	origExec := ExecCommand
 	t.Cleanup(func() { ExecCommand = origExec })
 	var cmds []*exec.Cmd
@@ -142,7 +144,7 @@ func TestBwrapRun_NoCgroupDirStartsOnceWithoutCgroupFD(t *testing.T) {
 	cgroupFSRoot = filepath.Join(t.TempDir(), "does-not-exist")
 
 	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: NetworkModeHost}
-	captureStdoutDuring(t, func() {
+	runnertest.CaptureStdoutDuring(t, func() {
 		if err := a.Run(Box{Name: "plain-box", Env: map[string]string{}}); err != nil {
 			t.Errorf("Run: %v", err)
 		}

@@ -3,6 +3,8 @@ package runner
 import (
 	"os/exec"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // TestNixEvaluatorEval_BuildsHermeticGitFileRef verifies that the flake
@@ -10,7 +12,7 @@ import (
 // the fetched rev via a hermetic git+file URL — never the working tree —
 // with .outPath appended to the attr.
 func TestNixEvaluatorEval_BuildsHermeticGitFileRef(t *testing.T) {
-	script, dir := newFakeCLI(t, fakeCall{exit: 0, stdout: "/nix/store/abc-drv"})
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0, Stdout: "/nix/store/abc-drv"})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -21,7 +23,7 @@ func TestNixEvaluatorEval_BuildsHermeticGitFileRef(t *testing.T) {
 		t.Fatalf("Eval() error = %v", err)
 	}
 
-	call := readCall(t, dir, 0)
+	call := runnertest.ReadCall(t, dir, 0)
 	want := "git+file:///repo?rev=deadbeef#packages.x86_64-linux.agent-image.outPath"
 	if got := call[len(call)-1]; got != want {
 		t.Errorf("nix eval ref = %q, want %q", got, want)
@@ -32,7 +34,7 @@ func TestNixEvaluatorEval_BuildsHermeticGitFileRef(t *testing.T) {
 // the package-level ExecCommand seam, and that a scripted failure surfaces
 // wrapped with the flake reference and stderr.
 func TestNixEvaluatorEval_ViaSeam(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 1, stdout: "boom"})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "boom"})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
@@ -54,7 +56,7 @@ func TestNixEvaluatorEval_ViaSeam(t *testing.T) {
 // TestNixEvaluatorEval_SuccessReturnsTrimmedOutput verifies that Eval trims
 // trailing whitespace from a scripted successful `nix eval` invocation.
 func TestNixEvaluatorEval_SuccessReturnsTrimmedOutput(t *testing.T) {
-	script, _ := newFakeCLI(t, fakeCall{exit: 0, stdout: "/nix/store/abc-drv "})
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0, Stdout: "/nix/store/abc-drv "})
 	orig := ExecCommand
 	t.Cleanup(func() { ExecCommand = orig })
 	ExecCommand = func(name string, args ...string) *exec.Cmd {
