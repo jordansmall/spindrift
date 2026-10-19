@@ -4,6 +4,8 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/chore"
 	"testing"
@@ -99,4 +101,41 @@ func TestEvidenceGapClassIsATuningChoreClass(t *testing.T) {
 	if !slices.Contains(cs[0].ClassList, evidenceGapClass) {
 		t.Errorf("tuning Chore classes = %v, want %q among them", cs[0].ClassList, evidenceGapClass)
 	}
+}
+
+func TestStrategyReadKnobs(t *testing.T) {
+	env := func(m map[string]string) recordsdigest.Lookup {
+		return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+	}
+	t.Run("defaults", func(t *testing.T) {
+		got, err := Strategy.Knobs(env(nil))
+		want := recordsdigest.Knobs{Limits: recordsdigest.Limits{MinSample: 15, MaxBytes: 49152}, Cooldown: 720 * time.Hour}
+		if err != nil || got != want {
+			t.Errorf("Knobs = %+v, %v; want %+v", got, err, want)
+		}
+	})
+	t.Run("overrides", func(t *testing.T) {
+		got, err := Strategy.Knobs(env(map[string]string{
+			"BUTLER_TUNING_MIN_SAMPLE":   "4",
+			"BUTLER_TUNING_DIGEST_BYTES": "100",
+			"BUTLER_TUNING_COOLDOWN":     "0s",
+		}))
+		want := recordsdigest.Knobs{Limits: recordsdigest.Limits{MinSample: 4, MaxBytes: 100}}
+		if err != nil || got != want {
+			t.Errorf("Knobs = %+v, %v; want %+v", got, err, want)
+		}
+	})
+	for _, bad := range []string{"soon", "-1h"} {
+		t.Run("cooldown "+bad, func(t *testing.T) {
+			_, err := Strategy.Knobs(env(map[string]string{"BUTLER_TUNING_COOLDOWN": bad}))
+			if err == nil || !strings.Contains(err.Error(), "BUTLER_TUNING_COOLDOWN") {
+				t.Errorf("err = %v, want one naming BUTLER_TUNING_COOLDOWN", err)
+			}
+		})
+	}
+	t.Run("malformed integer", func(t *testing.T) {
+		if _, err := Strategy.Knobs(env(map[string]string{"BUTLER_TUNING_MIN_SAMPLE": "x"})); err == nil {
+			t.Error("want error")
+		}
+	})
 }

@@ -1,8 +1,10 @@
 package tuning
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/settle"
@@ -12,7 +14,8 @@ import (
 // Strategy is the tuning Chore's Digest (ADR 0070 decision 2). The host-side
 // bundle registers it; this package does not.
 var Strategy = recordsdigest.Strategy{
-	Name: "tuning",
+	Name:      "tuning",
+	ReadKnobs: readKnobs,
 	Render: func(in recordsdigest.Input) recordsdigest.Output {
 		prior := make([]Prior, 0, len(in.Prior))
 		for _, p := range in.Prior {
@@ -67,6 +70,27 @@ var Strategy = recordsdigest.Strategy{
 		}
 		return terms
 	},
+}
+
+// readKnobs maps the row's generated knob reader onto the Digest's Knobs. A
+// zero cooldown is legal (a not-planned close then never suppresses a
+// refile); only a negative one is rejected.
+func readKnobs(l recordsdigest.Lookup) (recordsdigest.Knobs, error) {
+	k, err := ReadKnobs(Lookup(l))
+	if err != nil {
+		return recordsdigest.Knobs{}, err
+	}
+	cooldown, err := time.ParseDuration(k.ButlerTuningCooldown)
+	if err != nil {
+		return recordsdigest.Knobs{}, fmt.Errorf("BUTLER_TUNING_COOLDOWN: invalid duration %q: %w", k.ButlerTuningCooldown, err)
+	}
+	if cooldown < 0 {
+		return recordsdigest.Knobs{}, fmt.Errorf("BUTLER_TUNING_COOLDOWN: must be >= 0, got %q", k.ButlerTuningCooldown)
+	}
+	return recordsdigest.Knobs{
+		Limits:   recordsdigest.Limits{MinSample: k.ButlerTuningMinSample, MaxBytes: k.ButlerTuningDigestBytes},
+		Cooldown: cooldown,
+	}, nil
 }
 
 // Drop reasons recorded in the Ledger for a tuning finding settle refused.

@@ -28,9 +28,8 @@ func NotRegistered(chore string) error {
 	return fmt.Errorf("butler: chore %q is records-scoped (scopeSource = \"records\") but no Records digest is registered for it; records Chores are built in (ADR 0070)", chore)
 }
 
-// Limits are the row's sample floor and digest byte cap. They become
-// row-owned knobs the Digest reads itself (issue #5700); until then the
-// adapter hands them over.
+// Limits are the row's sample floor and digest byte cap. The Digest reads
+// them from its row-owned knobs through ReadKnobs (issue #5700).
 type Limits struct {
 	// MinSample marks a row thin when fewer window Records back it.
 	MinSample int
@@ -39,6 +38,17 @@ type Limits struct {
 	// always from the tail; its aggregate tables are never trimmed, so a cap
 	// below them is exceeded.
 	MaxBytes int
+}
+
+// Lookup resolves a row-owned knob's env name, in os.LookupEnv's shape.
+type Lookup func(env string) (value string, ok bool)
+
+// Knobs are the row-owned settings a Digest reads itself.
+type Knobs struct {
+	Limits Limits
+	// Cooldown is how long a finding closed as not planned keeps suppressing a
+	// refile of its pattern; zero never suppresses on a not-planned close.
+	Cooldown time.Duration
 }
 
 // Input is what a Digest renders from.
@@ -69,6 +79,9 @@ type Output struct {
 type Strategy struct {
 	// Name is the Chore name.
 	Name string
+	// ReadKnobs reads the Chore's row-owned settings through the lookup. Nil
+	// means the Chore owns none; call Knobs rather than this field.
+	ReadKnobs func(Lookup) (Knobs, error)
 	// Render builds the digest.
 	Render func(Input) Output
 	// Anchors lists what a finding may cite in a digest Render produced. The
@@ -90,6 +103,15 @@ type Strategy struct {
 	DedupTerms func(settle.Finding) []string
 }
 
+// Knobs reads the Chore's row-owned settings; a Chore with no ReadKnobs owns
+// none and gets zero Knobs.
+func (s Strategy) Knobs(l Lookup) (Knobs, error) {
+	if s.ReadKnobs == nil {
+		return Knobs{}, nil
+	}
+	return s.ReadKnobs(l)
+}
+
 // registry keeps registration order.
 var registry []Strategy
 
@@ -109,6 +131,11 @@ func Register(s Strategy) {
 		panic("recordsdigest: duplicate registration for " + s.Name)
 	}
 	registry = append(registry, s)
+}
+
+// All returns the registered Strategies in registration order.
+func All() []Strategy {
+	return append([]Strategy(nil), registry...)
 }
 
 // ByName returns the registered Strategy; ok is false for an unregistered
