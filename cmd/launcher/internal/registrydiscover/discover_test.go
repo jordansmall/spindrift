@@ -2,55 +2,63 @@ package registrydiscover
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
-func TestDiscover_CargoSingleRegistryMatchedRoute(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cargoConfig := `
-[registries.mycorp]
-index = "sparse+https://cargo.example.com/index/"
-`
-	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(cargoConfig), 0o644); err != nil {
-		t.Fatal(err)
-	}
+func noMatch(Store, ecosystem.Declaration) (bool, error)     { return false, nil }
+func alwaysMatch(Store, ecosystem.Declaration) (bool, error) { return true, nil }
 
-	stores := []Store{{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"}}
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
-		return store.Name == "cargo-credentials" && d.RegistryName == "mycorp", nil
-	}
-	probe := func(upstreamBaseURL string) string { return "bearer" }
+func probeAs(scheme string) Probe { return func(string) string { return scheme } }
 
-	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
+// storesOf maps each row to the credential stores it declares, the way
+// ecosystem.CredentialStores does for the table.
+func storesOf(rows ...ecosystem.Row) map[string][]string {
+	m := make(map[string][]string, len(rows))
+	for _, r := range rows {
+		m[r.Name] = slices.Clone(r.CredentialStores)
+	}
+	return m
+}
+
+// discoverSynthetic runs DiscoverRows over the synthetic row alone.
+func discoverSynthetic(t *testing.T, dir string, stores []Store, lookup Lookup, probe Probe) ([]Route, Report) {
+	t.Helper()
+	routes, report, err := DiscoverRows(dir, syntheticRows, stores, storesOf(syntheticRows...), lookup, probe)
 	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
+		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
+	return routes, report
+}
+
+func TestDiscover_SingleRegistryMatchedRoute(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/index/\n")
+
+	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
+	routes, report := discoverSynthetic(t, dir, stores, alwaysMatch, probeAs("bearer"))
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
 	want := Route{
-		MatchHost:        "cargo.example.com",
-		UpstreamBaseURL:  "https://cargo.example.com/index",
+		MatchHost:        "registry.example.com",
+		UpstreamBaseURL:  "https://registry.example.com/index",
 		AuthScheme:       "bearer",
-		CredentialSource: "cargo-credentials",
-		CredentialValue:  "/home/agent/.cargo/credentials.toml",
-		RegistryName:     "mycorp",
+		CredentialSource: "netrc",
+		CredentialValue:  "/home/agent/.netrc",
 	}
 	if routes[0] != want {
 		t.Errorf("routes[0] = %+v, want %+v", routes[0], want)
 	}
-	wantMatched := []MatchedHost{{Host: "cargo.example.com", StoreName: "cargo-credentials", StorePath: "/home/agent/.cargo/credentials.toml"}}
-	if len(report.Matched) != 1 || report.Matched[0] != wantMatched[0] {
+	wantMatched := []MatchedHost{{Host: "registry.example.com", StoreName: "netrc", StorePath: "/home/agent/.netrc"}}
+	if !slices.Equal(report.Matched, wantMatched) {
 		t.Errorf("report.Matched = %+v, want %+v", report.Matched, wantMatched)
 	}
 	if len(report.Unmatched) != 0 {
@@ -64,51 +72,34 @@ index = "sparse+https://cargo.example.com/index/"
 // Routes come back in extraction order, so these assertions are index-keyed.
 func TestDiscover_TwoHostsAcrossFilesTwoRoutes(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cargoConfig := `
-[registries.mycorp]
-index = "sparse+https://cargo.example.com/index/"
-`
-	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(cargoConfig), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	twin := synthetic.Twin("synthetic-twin")
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://first.example.com/index/\n")
+	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://second.example.com/\n")
 
+	rows := []ecosystem.Row{syntheticRows[0], twin}
 	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, _, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
+	routes, _, err := DiscoverRows(dir, rows, stores, storesOf(rows...), noMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
+		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
 	if len(routes) != 2 {
 		t.Fatalf("routes = %+v, want exactly 2", routes)
 	}
-	if routes[0].MatchHost != "cargo.example.com" {
-		t.Errorf("routes[0].MatchHost = %q, want cargo.example.com", routes[0].MatchHost)
+	if routes[0].MatchHost != "first.example.com" {
+		t.Errorf("routes[0].MatchHost = %q, want first.example.com", routes[0].MatchHost)
 	}
-	if routes[1].MatchHost != "npm.example.com" {
-		t.Errorf("routes[1].MatchHost = %q, want npm.example.com", routes[1].MatchHost)
+	if routes[1].MatchHost != "second.example.com" {
+		t.Errorf("routes[1].MatchHost = %q, want second.example.com", routes[1].MatchHost)
 	}
 }
 
 func TestDiscover_EcosystemWithoutDeclaredStoresIsAnError(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte("registry=https://reg.acme.example/\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://reg.acme.example/\n")
 
-	routes, report, err := Discover(dir, nil, map[string][]string{}, lookup, probe)
-	if err == nil || !strings.Contains(err.Error(), `"npm"`) {
-		t.Fatalf("err = %v, want an error naming ecosystem \"npm\"", err)
+	routes, report, err := DiscoverRows(dir, syntheticRows, nil, map[string][]string{}, noMatch, probeAs("bearer"))
+	if err == nil || !strings.Contains(err.Error(), `"`+synthetic.Row.Name+`"`) {
+		t.Fatalf("err = %v, want an error naming ecosystem %q", err, synthetic.Row.Name)
 	}
 	if routes != nil || !reflect.DeepEqual(report, Report{}) {
 		t.Errorf("routes = %v, report = %+v, want nil routes and empty report", routes, report)
@@ -117,39 +108,30 @@ func TestDiscover_EcosystemWithoutDeclaredStoresIsAnError(t *testing.T) {
 
 func TestDiscover_UnmatchedHostEnvPlaceholder(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://crates.acme.example/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.acme.example/\n")
 
 	stores := []Store{
 		{Name: "netrc", Path: "/home/agent/.netrc"},
-		{Name: "npmrc", Path: "/home/agent/.npmrc"},
+		{Name: "other-store", Path: "/home/agent/other"},
 	}
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, report := discoverSynthetic(t, dir, stores, noMatch, probeAs("bearer"))
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
 	if routes[0].CredentialSource != "env" {
 		t.Errorf("routes[0].CredentialSource = %q, want env", routes[0].CredentialSource)
 	}
-	wantValue := "SPINDRIFT_REGISTRY_CREDENTIAL_CRATES_ACME_EXAMPLE"
+	wantValue := "SPINDRIFT_REGISTRY_CREDENTIAL_REGISTRY_ACME_EXAMPLE"
 	if routes[0].CredentialValue != wantValue {
 		t.Errorf("routes[0].CredentialValue = %q, want %q", routes[0].CredentialValue, wantValue)
 	}
 	if len(report.Unmatched) != 1 {
 		t.Fatalf("report.Unmatched = %+v, want exactly 1", report.Unmatched)
 	}
-	wantSearched := []string{"netrc", "npmrc"}
+	wantSearched := []string{"netrc", "other-store"}
 	got := report.Unmatched[0]
-	if got.Host != "crates.acme.example" || len(got.StoresSearched) != 2 || got.StoresSearched[0] != wantSearched[0] || got.StoresSearched[1] != wantSearched[1] {
-		t.Errorf("report.Unmatched[0] = %+v, want Host=crates.acme.example StoresSearched=%v", got, wantSearched)
+	if got.Host != "registry.acme.example" || !slices.Equal(got.StoresSearched, wantSearched) {
+		t.Errorf("report.Unmatched[0] = %+v, want Host=registry.acme.example StoresSearched=%v", got, wantSearched)
 	}
 	if len(report.Matched) != 0 {
 		t.Errorf("report.Matched = %+v, want none", report.Matched)
@@ -158,22 +140,17 @@ func TestDiscover_UnmatchedHostEnvPlaceholder(t *testing.T) {
 
 func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/\n")
 
 	stores := []Store{
 		{Name: "netrc", Path: "/home/agent/.netrc"},
-		{Name: "npmrc", Path: "/home/agent/.npmrc"},
+		{Name: "other-store", Path: "/home/agent/other"},
 	}
 	// Both stores would report a match; earlier in the slice must win.
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
+	byEcosystem := map[string][]string{synthetic.Row.Name: {"netrc", "other-store"}}
+	routes, report, err := DiscoverRows(dir, syntheticRows, stores, byEcosystem, alwaysMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
+		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
@@ -186,98 +163,80 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	}
 }
 
-// A cargo-credentials lookup applies only to cargo declarations, so an npm
-// declaration must skip that store entirely.
-func TestDiscover_CargoCredentialsSkippedForNonCargoDeclaration(t *testing.T) {
+// A store outside the declaration's row is never queried, so its lookup must
+// not run for that declaration.
+func TestDiscover_StoreOutsideRowSkippedForDeclaration(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/\n")
 
 	stores := []Store{
-		{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"},
+		{Name: "outside-store", Path: "/home/agent/outside"},
 		{Name: "netrc", Path: "/home/agent/.netrc"},
 	}
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
-		if store.Name == "cargo-credentials" {
-			t.Fatalf("lookup called for cargo-credentials on a non-cargo declaration: %+v", d)
+		if store.Name == "outside-store" {
+			t.Fatalf("lookup called for outside-store on a declaration outside its row: %+v", d)
 		}
 		return false, nil
 	}
-	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
-	if len(routes) != 1 {
-		t.Fatalf("routes = %+v, want exactly 1", routes)
-	}
+	_, report := discoverSynthetic(t, dir, stores, lookup, probeAs("bearer"))
 	if len(report.Unmatched) != 1 {
 		t.Fatalf("report.Unmatched = %+v, want exactly 1", report.Unmatched)
 	}
-	// cargo-credentials is still named as searched even though its lookup never
+	// outside-store is still named as searched even though its lookup never
 	// ran: it was configured and considered, just found inapplicable. A report
 	// line must never name no stores at all.
-	wantSearched := []string{"cargo-credentials", "netrc"}
+	wantSearched := []string{"outside-store", "netrc"}
 	got := report.Unmatched[0].StoresSearched
-	if len(got) != 2 || got[0] != wantSearched[0] || got[1] != wantSearched[1] {
+	if !slices.Equal(got, wantSearched) {
 		t.Errorf("report.Unmatched[0].StoresSearched = %v, want %v", got, wantSearched)
 	}
 }
 
-func TestDiscover_CargoCredentialsOnlyStoreList_NamesStoreForNonCargoDeclaration(t *testing.T) {
+func TestDiscover_OutsideRowOnlyStoreList_NamesStoreForDeclaration(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/\n")
 
 	// The only configured store is skipped as inapplicable, leaving nothing
 	// else to search. The report must still name it rather than print an empty
 	// "searched" list.
-	stores := []Store{{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"}}
+	stores := []Store{{Name: "outside-store", Path: "/home/agent/outside"}}
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
-		t.Fatalf("lookup called for cargo-credentials on a non-cargo declaration: %+v", d)
+		t.Fatalf("lookup called for outside-store on a declaration outside its row: %+v", d)
 		return false, nil
 	}
-	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	_, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	_, report := discoverSynthetic(t, dir, stores, lookup, probeAs("bearer"))
 	if len(report.Unmatched) != 1 {
 		t.Fatalf("report.Unmatched = %+v, want exactly 1", report.Unmatched)
 	}
 	got := report.Unmatched[0].StoresSearched
-	if len(got) != 1 || got[0] != "cargo-credentials" {
-		t.Errorf("report.Unmatched[0].StoresSearched = %v, want [cargo-credentials]", got)
+	if !slices.Equal(got, []string{"outside-store"}) {
+		t.Errorf("report.Unmatched[0].StoresSearched = %v, want [outside-store]", got)
 	}
 }
 
-// No npm parser sets RegistryName yet, so Discover cannot reach this case;
-// firstMatch is tested directly to keep a future npm scope out of cargo's
-// credentials lookup.
-func TestFirstMatch_CargoCredentialsSkippedForNonCargoEcosystemWithRegistryName(t *testing.T) {
+// A declaration carrying a RegistryName must not widen which stores are
+// queried: the row's store set alone decides.
+func TestFirstMatch_StoreOutsideRowSkippedForDeclarationWithRegistryName(t *testing.T) {
 	stores := []Store{
-		{Name: "cargo-credentials", Path: "/home/agent/.cargo/credentials.toml"},
+		{Name: "outside-store", Path: "/home/agent/outside"},
 		{Name: "netrc", Path: "/home/agent/.netrc"},
 	}
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
-		if store.Name == "cargo-credentials" {
-			t.Fatalf("lookup called for cargo-credentials on a non-cargo declaration: %+v", d)
+		if store.Name == "outside-store" {
+			t.Fatalf("lookup called for outside-store on a declaration outside its row: %+v", d)
 		}
 		return false, nil
 	}
-	d := ecosystem.Declaration{Ecosystem: "npm", Host: "npm.example.com", RegistryName: "myorg"}
+	d := ecosystem.Declaration{Ecosystem: synthetic.Row.Name, Host: "registry.example.com", RegistryName: "myorg"}
 
-	_, searched, found := firstMatch(stores, ecosystem.CredentialStores(), lookup, d)
+	_, searched, found := firstMatch(stores, storesOf(syntheticRows...), lookup, d)
 	if found {
 		t.Errorf("firstMatch found = true, want false")
 	}
-	if want := []string{"cargo-credentials", "netrc"}; !slices.Equal(searched, want) {
+	if want := []string{"outside-store", "netrc"}; !slices.Equal(searched, want) {
 		t.Errorf("firstMatch searched = %v, want %v", searched, want)
 	}
 }
@@ -288,7 +247,7 @@ func TestFirstMatch_CargoCredentialsSkippedForNonCargoEcosystemWithRegistryName(
 func TestFirstMatch_QueriesOnlyStoresInRowSet(t *testing.T) {
 	stores := []Store{
 		{Name: "netrc", Path: "/home/agent/.netrc"},
-		{Name: "npmrc", Path: "/home/agent/.npmrc"},
+		{Name: "other-store", Path: "/home/agent/other"},
 	}
 	byEcosystem := map[string][]string{"rowA": {"netrc"}}
 
@@ -307,7 +266,7 @@ func TestFirstMatch_QueriesOnlyStoresInRowSet(t *testing.T) {
 		d := ecosystem.Declaration{Ecosystem: tc.ecosystem, Host: "reg.example.com"}
 
 		_, searched, _ := firstMatch(stores, byEcosystem, lookup, d)
-		if want := []string{"netrc", "npmrc"}; !slices.Equal(searched, want) {
+		if want := []string{"netrc", "other-store"}; !slices.Equal(searched, want) {
 			t.Errorf("%s: searched = %v, want %v", tc.ecosystem, searched, want)
 		}
 		if !slices.Equal(queried, tc.wantQueried) {
@@ -318,26 +277,19 @@ func TestFirstMatch_QueriesOnlyStoresInRowSet(t *testing.T) {
 
 func TestDiscover_NilStores_UnmatchedHostSearchedIsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/\n")
 
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		t.Fatalf("lookup called with no stores configured: %+v", d)
 		return false, nil
 	}
-	probe := func(upstreamBaseURL string) string { return "bearer" }
 
 	// An empty stores list has nothing to name, so unlike the
 	// configured-but-inapplicable case above this empty result is correct, not
 	// a firstMatch bug. The command layer owns the fix for the "empty report
 	// line" symptom: it must never pass empty stores when a home directory is
 	// available (see TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding).
-	_, report, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	_, report := discoverSynthetic(t, dir, nil, lookup, probeAs("bearer"))
 	if len(report.Unmatched) != 1 {
 		t.Fatalf("report.Unmatched = %+v, want exactly 1", report.Unmatched)
 	}
@@ -348,53 +300,33 @@ func TestDiscover_NilStores_UnmatchedHostSearchedIsEmpty(t *testing.T) {
 
 func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cargoConfig := "[net]\ngit-fetch-with-cli = true\n"
-	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(cargoConfig), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "# declares no registry\n")
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, report, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, report := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	if len(routes) != 0 {
 		t.Errorf("routes = %+v, want none", routes)
 	}
-	want := []ecosystem.Note{{ConfigPath: ".cargo/config.toml", Ecosystem: "cargo"}}
-	if len(report.NoRegistry) != 1 || report.NoRegistry[0] != want[0] {
+	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Row.Name}}
+	if !slices.Equal(report.NoRegistry, want) {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
 }
 
-// A port-only registry URL normalizes to an empty host, and registryroutes.Parse
-// rejects a route with an empty MatchHost (see runRegistryDiscover's invariant in
-// registrydiscover.go). Such a URL must be reported the way Extract reports any
-// other unusable one.
-func TestDiscover_PortOnlyHostYieldsNoRouteReportedAsSkipped(t *testing.T) {
+// A registry URL the row's parser rejects as unusable yields no route, and is
+// reported the way Extract reports any other unusable one. Discover has no
+// empty-MatchHost guard of its own: registryroutes.Parse rejects such a route
+// (see runRegistryDiscover's invariant in registrydiscover.go), so keeping it
+// out is the parser's job.
+func TestDiscover_UnusableURLYieldsNoRouteReportedAsSkipped(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=http://:8080/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = ftp://registry.example.com/\n")
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, report, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, report := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	if len(routes) != 0 {
-		t.Fatalf("routes = %+v, want none (a port-only host must never become a route)", routes)
+		t.Fatalf("routes = %+v, want none", routes)
 	}
-	want := []ecosystem.Note{{ConfigPath: ".npmrc", Ecosystem: "npm", Skipped: true}}
-	if len(report.NoRegistry) != 1 || report.NoRegistry[0] != want[0] {
+	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Row.Name, Skipped: true}}
+	if !slices.Equal(report.NoRegistry, want) {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
 }
@@ -402,21 +334,12 @@ func TestDiscover_PortOnlyHostYieldsNoRouteReportedAsSkipped(t *testing.T) {
 // envPlaceholder maps every non-alphanumeric byte to "_", so a host with a "."
 // and a host with a "-" in the same position collide onto one env var name, and
 // a token an operator sets for one would silently apply to the other. Both hosts
-// here go unmatched and must get distinct, deterministic CredentialValue names.
+// here stay unmatched and must get distinct, deterministic CredentialValue names.
 func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://a.b.example.com/\n@scoped:registry=https://a-b.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://a.b.example.com/\nscoped = https://a-b.example.com/\n")
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	if len(routes) != 2 {
 		t.Fatalf("routes = %+v, want exactly 2", routes)
 	}
@@ -447,10 +370,7 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 	// A second run over the same fixture confirms the names are stable across
 	// runs; it does not by itself show independence from declaration order or
 	// map iteration order, since neither the input nor its order changes here.
-	routes2, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes2, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	byHost2 := make(map[string]string, len(routes2))
 	for _, r := range routes2 {
 		byHost2[r.MatchHost] = r.CredentialValue
@@ -479,20 +399,12 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 		t.Fatalf("fixture premise broken: envPlaceholder(%q) = %q, want %q (= envPlaceholder(%q)+\"_\"+hostHash(%q)); "+
 			"the fixture hosts below no longer exercise the collision and need updating", thirdHost, got, want, firstHost, firstHost)
 	}
-	npmrc := fmt.Sprintf("registry=https://%s/\n"+
-		"@scope1:registry=https://%s/\n"+
-		"@scope2:registry=https://%s/\n", firstHost, secondHost, thirdHost)
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	cfg := fmt.Sprintf("main = https://%s/\n"+
+		"scope1 = https://%s/\n"+
+		"scope2 = https://%s/\n", firstHost, secondHost, thirdHost)
+	testutil.WriteFixture(t, dir, cfgPath, cfg)
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	if len(routes) != 3 {
 		t.Fatalf("routes = %+v, want exactly 3", routes)
 	}
@@ -527,22 +439,17 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 
 	// A fixture declaring the same three hosts in a different line order,
 	// including the relative order of a.b.example.com and a-b.example.com
-	// (each host keeping its own scope key), confirms the names are
+	// (each host keeping its own name key), confirms the names are
 	// independent of declaration order, not merely repeatable across
 	// identical re-runs of the same fixture: a scheme that picks a
 	// bucket's "winner" by first-seen order would pass a same-order
 	// re-run but fail here.
 	dir2 := t.TempDir()
-	npmrc2 := fmt.Sprintf("@scope1:registry=https://%s/\n"+
-		"@scope2:registry=https://%s/\n"+
-		"registry=https://%s/\n", secondHost, thirdHost, firstHost)
-	if err := os.WriteFile(filepath.Join(dir2, ".npmrc"), []byte(npmrc2), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	routes2, _, err := Discover(dir2, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	cfg2 := fmt.Sprintf("scope1 = https://%s/\n"+
+		"scope2 = https://%s/\n"+
+		"main = https://%s/\n", secondHost, thirdHost, firstHost)
+	testutil.WriteFixture(t, dir2, cfgPath, cfg2)
+	routes2, _ := discoverSynthetic(t, dir2, nil, noMatch, probeAs("bearer"))
 	byHost2 := make(map[string]string, len(routes2))
 	for _, r := range routes2 {
 		byHost2[r.MatchHost] = r.CredentialValue
@@ -622,18 +529,15 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 	const matchedHost = "matched.example.com"
 
 	dir := t.TempDir()
-	npmrc := fmt.Sprintf("registry=https://%s/\n@scope1:registry=https://%s/\n@scope2:registry=https://%s/\n", host1, host2, matchedHost)
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	cfg := fmt.Sprintf("main = https://%s/\nscope1 = https://%s/\nscope2 = https://%s/\n", host1, host2, matchedHost)
+	testutil.WriteFixture(t, dir, cfgPath, cfg)
 
 	stores := []Store{{Name: "netrc", Path: "/fake/.netrc"}}
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) {
 		return d.Host == matchedHost, nil
 	}
-	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
+	routes, report, err := DiscoverRows(dir, syntheticRows, stores, storesOf(syntheticRows...), lookup, probeAs("bearer"))
 	if err == nil {
 		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
 	}
@@ -661,25 +565,16 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 		t.Errorf("report.Unmatched hosts = %v, want %v", gotHosts, wantHosts)
 	}
 	wantMatched := []MatchedHost{{Host: matchedHost, StoreName: "netrc", StorePath: "/fake/.netrc"}}
-	if len(report.Matched) != 1 || report.Matched[0] != wantMatched[0] {
+	if !slices.Equal(report.Matched, wantMatched) {
 		t.Errorf("report.Matched = %+v, want %+v", report.Matched, wantMatched)
 	}
 }
 
 func TestDiscover_ProbeGarbageFallsBackToBearer(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "not-a-real-scheme" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("not-a-real-scheme"))
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
@@ -690,18 +585,9 @@ func TestDiscover_ProbeGarbageFallsBackToBearer(t *testing.T) {
 
 func TestDiscover_ProbeBasicHonored(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "basic" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("basic"))
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
@@ -712,18 +598,9 @@ func TestDiscover_ProbeBasicHonored(t *testing.T) {
 
 func TestDiscover_ProbeHeaderSchemeHonored(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://npm.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "header:X-JFrog-Art-Api" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("header:X-JFrog-Art-Api"))
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
@@ -734,86 +611,67 @@ func TestDiscover_ProbeHeaderSchemeHonored(t *testing.T) {
 
 func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://shared.example.com/npm/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	yarnrc := "npmRegistryServer: https://shared.example.com/yarn/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".yarnrc.yml"), []byte(yarnrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	twin := synthetic.Twin("synthetic-twin")
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://shared.example.com/first/\n")
+	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://shared.example.com/second/\n")
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
+	rows := []ecosystem.Row{syntheticRows[0], twin}
+	routes, _, err := DiscoverRows(dir, rows, nil, storesOf(rows...), noMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
+		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
-	// Extract's table order puts npm before yarn, so the npm declaration's
-	// upstream URL wins for the shared host.
-	if routes[0].UpstreamBaseURL != "https://shared.example.com/npm" {
-		t.Errorf("routes[0].UpstreamBaseURL = %q, want the npm declaration's URL", routes[0].UpstreamBaseURL)
+	// Row order decides, so the first row's declaration wins for the shared host.
+	if routes[0].UpstreamBaseURL != "https://shared.example.com/first" {
+		t.Errorf("routes[0].UpstreamBaseURL = %q, want the first row's URL", routes[0].UpstreamBaseURL)
 	}
 }
 
-// Route.RegistryName accompanies a cargo-credentials match only, so a cargo
-// declaration matched to netrc must leave it empty.
-func TestDiscover_RegistryNameOnlySetForCargoCredentialsMatch(t *testing.T) {
+// A matched store's companion values (registry name, property key) are exactly
+// what that kind's own StoreConfig derives from the declaration: Discover sets
+// them for every store kind, and a kind with a companion key must end up with
+// that companion filled in.
+func TestDiscover_MatchedStoreCompanionsComeFromKindStoreConfig(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cargoConfig := `
-[registries.mycorp]
-index = "sparse+https://cargo.example.com/index/"
-`
-	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(cargoConfig), 0o644); err != nil {
-		t.Fatal(err)
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://registry.example.com/index/\n")
+	decl := ecosystem.Declaration{
+		Host:            "registry.example.com",
+		UpstreamBaseURL: "https://registry.example.com/index",
+		RegistryName:    "main",
 	}
 
-	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
+	for _, kind := range storeKinds() {
+		t.Run(kind.SourceKey, func(t *testing.T) {
+			const path = "/home/agent/store"
+			stores := []Store{{Name: kind.SourceKey, Path: path}}
+			byEcosystem := map[string][]string{synthetic.Row.Name: {kind.SourceKey}}
+			routes, _, err := DiscoverRows(dir, syntheticRows, stores, byEcosystem, alwaysMatch, probeAs("bearer"))
+			if err != nil {
+				t.Fatalf("DiscoverRows: unexpected error: %v", err)
+			}
+			if len(routes) != 1 {
+				t.Fatalf("routes = %+v, want exactly 1", routes)
+			}
 
-	routes, _, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
-	if len(routes) != 1 {
-		t.Fatalf("routes = %+v, want exactly 1", routes)
-	}
-	if routes[0].CredentialSource != "netrc" {
-		t.Fatalf("routes[0].CredentialSource = %q, want netrc", routes[0].CredentialSource)
-	}
-	if routes[0].RegistryName != "" {
-		t.Errorf("routes[0].RegistryName = %q, want empty (companion of cargo-credentials only)", routes[0].RegistryName)
-	}
-}
-
-func TestDiscover_GradlePropertiesMatchSetsPropertyKeyToHost(t *testing.T) {
-	dir := t.TempDir()
-	npmrc := "registry=https://gradle.example.com/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stores := []Store{{Name: "gradle-properties", Path: "/home/agent/gradle.properties"}}
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, _, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
-	if len(routes) != 1 {
-		t.Fatalf("routes = %+v, want exactly 1", routes)
-	}
-	if routes[0].PropertyKey != "gradle.example.com" {
-		t.Errorf("routes[0].PropertyKey = %q, want gradle.example.com", routes[0].PropertyKey)
+			want := kind.StoreConfig(path, declarationFacts(decl))
+			if routes[0].RegistryName != want.RegistryName || routes[0].PropertyKey != want.PropertyKey {
+				t.Errorf("companions = %q/%q, want %q/%q", routes[0].RegistryName, routes[0].PropertyKey, want.RegistryName, want.PropertyKey)
+			}
+			if kind.CompanionKey == "" {
+				if routes[0].RegistryName != "" || routes[0].PropertyKey != "" {
+					t.Errorf("companions = %q/%q, want none for a kind with no companion key", routes[0].RegistryName, routes[0].PropertyKey)
+				}
+				return
+			}
+			// want is StoreConfig's own output, so also pin the companion to a
+			// fact the declaration supplies, independent of StoreConfig.
+			got := credresolver.Config{RegistryName: routes[0].RegistryName, PropertyKey: routes[0].PropertyKey}
+			if v := *kind.CompanionField(&got); v != decl.RegistryName && v != decl.Host {
+				t.Errorf("companion %s = %q, want the declaration's registry name %q or host %q", kind.CompanionKey, v, decl.RegistryName, decl.Host)
+			}
+		})
 	}
 }
 
@@ -821,18 +679,9 @@ func TestDiscover_GradlePropertiesMatchSetsPropertyKeyToHost(t *testing.T) {
 // makes these two declarations dedupe onto one route.
 func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 	dir := t.TempDir()
-	npmrc := "registry=https://Shared.Example.com:8443/npm/\n@myorg:registry=https://shared.example.com/other/\n"
-	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://Shared.Example.com:8443/first/\nother = https://shared.example.com/other/\n")
 
-	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
-
-	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
-	if err != nil {
-		t.Fatalf("Discover: unexpected error: %v", err)
-	}
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probeAs("bearer"))
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1 (case/port variants of the same host)", routes)
 	}
@@ -845,9 +694,7 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 // DiscoverRows walked the supplied rows rather than ecosystem.Table.
 func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteFixture(t, dir, "fake.cfg", "x")
 	row := ecosystem.Row{
 		Name:             "fake",
 		InTreeConfigPath: "fake.cfg",
@@ -855,10 +702,8 @@ func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 			return []ecosystem.Declaration{{Host: "reg.fake.example", UpstreamBaseURL: "https://reg.fake.example"}}, true, nil
 		},
 	}
-	lookup := func(Store, ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(string) string { return "bearer" }
 
-	routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, nil, map[string][]string{"fake": nil}, lookup, probe)
+	routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, nil, map[string][]string{"fake": nil}, noMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: %v", err)
 	}
