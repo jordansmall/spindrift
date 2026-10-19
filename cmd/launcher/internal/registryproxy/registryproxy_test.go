@@ -29,8 +29,8 @@ import (
 
 func TestNew_ForwardsGET(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/crates/foo" {
-			t.Errorf("upstream got path %q, want /crates/foo", r.URL.Path)
+		if r.URL.Path != "/files/foo" {
+			t.Errorf("upstream got path %q, want /files/foo", r.URL.Path)
 		}
 		w.Header().Set("X-Test", "yes")
 		w.WriteHeader(http.StatusOK)
@@ -39,7 +39,7 @@ func TestNew_ForwardsGET(t *testing.T) {
 
 	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -67,7 +67,7 @@ func TestNew_ForwardsHEAD(t *testing.T) {
 
 	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
-	rr := serve(p, httptest.NewRequest(http.MethodHead, "/r0/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodHead, "/r0/files/foo", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -109,7 +109,7 @@ func TestNew_ForwardsQueryString(t *testing.T) {
 
 			p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
-			target := "/r0/crates/foo"
+			target := "/r0/files/foo"
 			if tc.query != "" {
 				target += "?" + tc.query
 			}
@@ -162,7 +162,7 @@ func TestNew_CombinesUpstreamAndInboundQueryStrings(t *testing.T) {
 
 			p, _ := newPlainProxy(t, plainRoute(upstreamURL))
 
-			target := "/r0/crates/foo"
+			target := "/r0/files/foo"
 			if tc.inboundQuery != "" {
 				target += "?" + tc.inboundQuery
 			}
@@ -193,7 +193,7 @@ func TestNew_SetsXForwardedForHeader(t *testing.T) {
 
 	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil)
 	req.RemoteAddr = "203.0.113.7:12345"
 	rr := serve(p, req)
 
@@ -432,7 +432,7 @@ func TestNew_RootAndEmptySegmentPathsReturn404WithoutDialingUpstream(t *testing.
 	}
 }
 
-// Some npm clients separate a scoped package's "@scope" and name with "%2f".
+// Some clients separate a scoped package's "@scope" and name with "%2f".
 // Decoding it into a literal slash would make upstream read an extra path
 // segment (issue #3142).
 func TestNew_EscapedRemainderPreserved(t *testing.T) {
@@ -465,7 +465,7 @@ func TestNew_SingleRouteTableBackCompat(t *testing.T) {
 
 	p, routes := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+routes[0].Prefix+"/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+routes[0].Prefix+"/files/foo", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -504,7 +504,7 @@ func TestNew_RejectsNonGetHead(t *testing.T) {
 
 				p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: credential})
 
-				rr := serve(p, httptest.NewRequest(method, "/crates/foo", nil))
+				rr := serve(p, httptest.NewRequest(method, "/files/foo", nil))
 
 				if rr.Code != http.StatusMethodNotAllowed {
 					t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
@@ -566,7 +566,7 @@ func TestNew_RejectsNonGetHead_NeverDialsUpstream(t *testing.T) {
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 	ct := countUpstreamAttempts(t, p)
 
-	req := httptest.NewRequest(http.MethodPost, "/crates/foo", nil)
+	req := httptest.NewRequest(http.MethodPost, "/files/foo", nil)
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusMethodNotAllowed {
@@ -630,7 +630,7 @@ func TestCountingTransport_RecordsUpstreamAttemptAbandonedBeforeResponse(t *test
 	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 	ct := countUpstreamAttempts(t, p)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
@@ -665,7 +665,7 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -675,9 +675,9 @@ func TestNew_AttachesCredentialToOutboundRequest(t *testing.T) {
 	}
 }
 
-// Issue #3124: cargo sends a credentials.toml token verbatim as the
+// Issue #3124: some clients send a stored token verbatim as the
 // Authorization value rather than prepending a scheme, so registries
-// documenting a cargo setup bake the scheme into the token (Artifactory's own
+// documenting a client setup bake the scheme into the token (Artifactory's own
 // docs emit a Bearer-prefixed one). Such a credential is the whole header
 // value; one naming no scheme is still sent as Bearer.
 func TestAuthorizationHeaderValue_HonoursAnInlineScheme(t *testing.T) {
@@ -723,7 +723,7 @@ func TestNew_CredentialWithInlineSchemeIsNotDoublePrefixed(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Bearer eyJhbGciOiJSUzI1NiJ9"})
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -754,7 +754,7 @@ func TestNew_BasicAuthScheme(t *testing.T) {
 
 			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential})
 
-			serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+			serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 			if gotAuth != tc.want {
 				t.Errorf("upstream got Authorization %q, want %q", gotAuth, tc.want)
@@ -775,7 +775,7 @@ func TestNew_BasicCredentialReachesUpstreamUnchanged(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))})
 
-	serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if !gotOK {
 		t.Fatalf("upstream could not parse the request as HTTP Basic auth")
@@ -797,7 +797,7 @@ func TestNew_AttachesCredentialEvenWithConnectionHeaderTrick(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil)
 	req.Header.Set("Connection", "Authorization")
 	rr := serve(p, req)
 
@@ -827,7 +827,7 @@ func TestNew_RewritesHostHeaderToUpstream(t *testing.T) {
 		t.Fatalf("url.Parse(%q): %v", upstream.URL, err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil)
 	req.Host = "evil.example"
 	rr := serve(p, req)
 
@@ -852,7 +852,7 @@ func TestNew_HeaderAuthScheme(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "header:X-JFrog-Art-Api", Credential: "s3kr1t-api-key"})
 
-	serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if gotNamed != "s3kr1t-api-key" {
 		t.Errorf("upstream got X-JFrog-Art-Api %q, want %q", gotNamed, "s3kr1t-api-key")
@@ -875,7 +875,7 @@ func TestNew_EmptyCredentialSkipsHeaderRegardlessOfScheme(t *testing.T) {
 
 			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: scheme, Credential: ""})
 
-			serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+			serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 			if got := headers.Get("Authorization"); got != "" {
 				t.Errorf("upstream got Authorization %q, want none", got)
@@ -897,7 +897,7 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 
 	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
-	serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if sawHeader {
 		t.Errorf("upstream got Authorization %q, want none", gotAuth)
@@ -914,7 +914,7 @@ func TestNew_StripsTCPSecretHeaderUpstream(t *testing.T) {
 	})
 	handler, routes := newPlainProxy(t, plainRoute(upstream.URL))
 
-	req := httptest.NewRequest(http.MethodGet, "/"+routes[0].Prefix+"/crates/foo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+routes[0].Prefix+"/files/foo", nil)
 	req.Header.Set(registrymanifest.TCPSecretHeader, "s3kr1t-tcp-secret")
 	if rr := serve(handler, req); rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -937,7 +937,7 @@ func TestNew_DoesNotFollowRedirect(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if rr.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusFound)
@@ -968,7 +968,7 @@ func TestNew_VerifiesUpstreamTLSCertificate(t *testing.T) {
 	// failure.
 	captureLog(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil)
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusBadGateway {
@@ -990,7 +990,7 @@ func TestNew_NeverLogsCredential(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1009,7 +1009,7 @@ func TestNew_MethodGatePrecedes403(t *testing.T) {
 
 	p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "s3kr1t"})
 
-	rr := serve(p, httptest.NewRequest(http.MethodPost, "/r0/api/v1/crates/foo/1.0.0/download", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodPost, "/r0/files/foo/1.0.0.bin", nil))
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d (method gate must precede path-set enforcement)", rr.Code, http.StatusMethodNotAllowed)
@@ -1071,7 +1071,7 @@ func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
 			}
 			defer p.Close()
 
-			req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/api/v1/crates/foo/1.0.0/download", nil)
+			req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/files/foo/1.0.0.bin", nil)
 			if err != nil {
 				t.Fatalf("http.NewRequest: %v", err)
 			}
@@ -1140,10 +1140,10 @@ func TestNew_ConcurrentRequestsNoRace(t *testing.T) {
 	captureLog(t)
 
 	paths := []string{
-		"/r0/config.json",
+		"/r0/index.json",
 		"/r0/v2/foo/manifests/latest",
-		"/r0/artifactory/api/npm/npm-remote/foo",
-		"/r0/api/v1/crates/foo/1.0.0/download",
+		"/r0/artifactory/api/pkgs/pkg-remote/foo",
+		"/r0/files/foo/1.0.0.bin",
 	}
 
 	const goroutines = 20
@@ -1192,10 +1192,10 @@ func TestNew_ConcurrentRequestsAcrossRoutesNoRace(t *testing.T) {
 	var paths []string
 	for _, r := range assigned {
 		paths = append(paths,
-			"/"+r.Prefix+"/config.json",
-			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download",
-			"/"+r.Prefix+"/api/v1/crates/foo/1.0.0/download", // the same path again
-			"/"+r.Prefix+"/artifactory/api/npm/npm-remote/foo",
+			"/"+r.Prefix+"/index.json",
+			"/"+r.Prefix+"/files/foo/1.0.0.bin",
+			"/"+r.Prefix+"/files/foo/1.0.0.bin", // the same path again
+			"/"+r.Prefix+"/artifactory/api/pkgs/pkg-remote/foo",
 		)
 	}
 
@@ -1266,7 +1266,7 @@ func TestListenAndServeTCP_RejectsMissingOrWrongSecret_NeverDialsUpstream(t *tes
 			}
 			defer p.Close()
 
-			req, err := http.NewRequest(tc.method, "http://"+p.Addr().String()+"/crates/foo", nil)
+			req, err := http.NewRequest(tc.method, "http://"+p.Addr().String()+"/files/foo", nil)
 			if err != nil {
 				t.Fatalf("http.NewRequest: %v", err)
 			}
@@ -1306,7 +1306,7 @@ func TestListenAndServeTCP_CorrectSecretForwardsToUpstream(t *testing.T) {
 	}
 	defer p.Close()
 
-	req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/crates/foo", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/files/foo", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}
@@ -1355,7 +1355,7 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	}
 	defer p.Close()
 
-	req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/crates/foo", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://"+p.Addr().String()+"/r0/files/foo", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}
@@ -1443,7 +1443,7 @@ func TestListenAndServeTCP_CorrectSecretStillRejectsNonGetHead_NeverDialsUpstrea
 	}
 	defer p.Close()
 
-	req, err := http.NewRequest(http.MethodPost, "http://"+p.Addr().String()+"/crates/foo", nil)
+	req, err := http.NewRequest(http.MethodPost, "http://"+p.Addr().String()+"/files/foo", nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest: %v", err)
 	}
@@ -1583,7 +1583,7 @@ func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/api/v1/crates/foo/1.0.0/download", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo/1.0.0.bin", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1593,29 +1593,29 @@ func TestNew_NeverLogsCredentialForRefusedPath(t *testing.T) {
 	}
 }
 
-// The rewritten "dl" points at the address the client itself used to reach
-// the proxy (req.Host), with the route's prefix re-inserted and the dl's own
+// The rewritten "download" points at the address the client itself used to reach
+// the proxy (req.Host), with the route's prefix re-inserted and the download's own
 // path preserved.
-func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
+func TestModifyResponse_SyntheticIndex_RewritesDownload(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/config.json" {
-			t.Errorf("upstream got path %q, want /config.json", r.URL.Path)
+		if r.URL.Path != "/index.json" {
+			t.Errorf("upstream got path %q, want /index.json", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
+		_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files/pkg"}`))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
-	wantBody := `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates"}`
+	wantBody := `{"download":"http://forwarder.example:9999/` + prefix + `/files/pkg"}`
 	if got := rr.Body.String(); got != wantBody {
 		t.Errorf("body = %s, want %s", got, wantBody)
 	}
@@ -1624,24 +1624,30 @@ func TestModifyResponse_CargoConfigJSON_RewritesDL(t *testing.T) {
 	}
 }
 
-// A dl naming a host other than the route's match-host (a CDN) is relayed
+// A download naming a host other than the route's match-host (a CDN) is relayed
 // byte-identical, and exactly one log line records the deliberate skip, an
 // acceptance criterion of issue #3175.
-func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
+func TestModifyResponse_ForeignHostDownloadLeftAloneAndLogsSkipOnce(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
-	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
+	const body = `{"asset":"https://cdn.example.com/files/pkg"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
+	p, routes := newProxy(t, []registryvocab.RewriteRow{fakeManifestRow(rewriteFakeSingleAsset)}, []Route{{
+		MatchHost:        "widget.example.com",
+		EnforcedPaths:    []string{"/"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/"}},
+		Upstream:         upstream.URL,
+		Credential:       credential,
+	}})
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/manifest.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -1656,8 +1662,8 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 	if got := strings.Count(logged, "left unchanged"); got != 1 {
 		t.Errorf("skip log line occurred %d times in log output, want exactly 1: %q", got, logged)
 	}
-	if !strings.Contains(logged, "https://cdn.example.com/api/v1/crates") {
-		t.Errorf("skip log line did not name the skipped dl: %q", logged)
+	if !strings.Contains(logged, "https://cdn.example.com/files/pkg") {
+		t.Errorf("skip log line did not name the skipped download: %q", logged)
 	}
 	if strings.Contains(logged, credential) {
 		t.Errorf("log output contained the credential: %q", logged)
@@ -1666,11 +1672,11 @@ func TestModifyResponse_ForeignHostDLLeftAloneAndLogsSkipOnce(t *testing.T) {
 
 // This ordering cost is intended, not a bug. The Rewrite hook has only the
 // request shape to go on, so it forces Accept-Encoding: identity before anyone
-// knows whether the dl rewrite will apply. A client asking for gzip therefore
-// gets an identity response even when the dl names a foreign host and the
+// knows whether the download rewrite will apply. A client asking for gzip therefore
+// gets an identity response even when the download names a foreign host and the
 // rewrite is skipped.
-func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *testing.T) {
-	const body = `{"dl":"https://cdn.example.com/api/v1/crates"}`
+func TestModifyResponse_ForeignHostDownloadGzipRequestGetsIdentityFromUpstream(t *testing.T) {
+	const body = `{"download":"https://cdn.example.com/files/pkg"}`
 
 	var gotAcceptEncoding string
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1681,10 +1687,10 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rr := serve(p, req)
 
@@ -1700,19 +1706,19 @@ func TestModifyResponse_ForeignHostDLGzipRequestGetsIdentityFromUpstream(t *test
 }
 
 func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
-	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+	const body = `{"download":"https://registry.example.com/files/pkg"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	// The cargo download endpoint names no rewrite row, even though this
-	// fixture body carries a "dl" field naming the route's own match-host.
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil))
+	// A file path names no rewrite row, even though this
+	// fixture body carries a "download" field naming the route's own match-host.
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+"/files/foo/1.0.0.bin", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1726,20 +1732,20 @@ func TestModifyResponse_NoMatchingRowRelayedByteIdentical(t *testing.T) {
 }
 
 // Guards issue #2854's wrong-media-type defect: the reverted hook decided by
-// sniffing Content-Type and a "dl" field, so any response of that shape got
+// sniffing Content-Type and a "download" field, so any response of that shape got
 // rewritten whatever request produced it. This fixture has exactly that
 // shape, but its request path names no rewrite row.
 func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
-	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+	const body = `{"download":"https://registry.example.com/files/pkg"}`
 
-	for _, path := range []string{"/api/v1/crates", "/index/co/nf/config"} {
+	for _, path := range []string{"/files", "/other/index.json"} {
 		t.Run(path, func(t *testing.T) {
 			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(body))
 			})
 
-			p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+			p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 			prefix := routes[0].Prefix
 
 			rr := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+path, nil))
@@ -1748,7 +1754,7 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 			}
 			if got := rr.Body.String(); got != body {
-				t.Errorf("body = %s, want byte-identical to upstream's %s (issue #2854 wrong-media-type defect: a JSON dl body must not be rewritten just because it looks like one)", got, body)
+				t.Errorf("body = %s, want byte-identical to upstream's %s (issue #2854 wrong-media-type defect: a JSON download body must not be rewritten just because it looks like one)", got, body)
 			}
 		})
 	}
@@ -1756,20 +1762,20 @@ func TestModifyResponse_WrongMediaTypeShapeNotMatchedIsUntouched(t *testing.T) {
 
 // Guards issue #2854's HEAD-crash defect: a HEAD response has no body for
 // ModifyResponse to read, and the reverted hook crashed parsing one anyway.
-func TestModifyResponse_HeadForCargoConfigJSONUntouched(t *testing.T) {
+func TestModifyResponse_HeadForSyntheticIndexJSONUntouched(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Test", "head-response")
 		w.WriteHeader(http.StatusOK)
 		// net/http strips any body for a HEAD request, so none is written
 		// here even though Content-Type is set. That is the shape a real
-		// HEAD /config.json response has.
+		// HEAD /index.json response has.
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	rr := serve(p, httptest.NewRequest(http.MethodHead, "/"+prefix+"/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodHead, "/"+prefix+"/index.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -1789,13 +1795,13 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
+		_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files/pkg"}`))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, credential))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -1809,11 +1815,11 @@ func TestModifyResponse_RewrittenResponseNeverCarriesCredential(t *testing.T) {
 
 // Blocking review finding on issue #3175: net/http's Transport only
 // auto-decompresses a gzip response when it added Accept-Encoding itself, so
-// a real cargo client's own header leaves the bytes compressed by the time
+// a real client's own header leaves the bytes compressed by the time
 // modifyResponse reads them. Before the fix that body failed json.Decode and
 // was relayed untouched. The upstream compresses only when asked, like a CDN.
-func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
-	const rawBody = `{"dl":"https://crates.example.com/api/v1/crates"}`
+func TestModifyResponse_GzippedIndexJSONStillRewritten(t *testing.T) {
+	const rawBody = `{"download":"https://registry.example.com/files/pkg"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1827,10 +1833,10 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 		_, _ = w.Write([]byte(rawBody))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
@@ -1838,15 +1844,15 @@ func TestModifyResponse_GzippedConfigJSONStillRewritten(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
-	var config struct {
-		DL string `json:"dl"`
+	var index struct {
+		Download string `json:"download"`
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &config); err != nil {
+	if err := json.Unmarshal(rr.Body.Bytes(), &index); err != nil {
 		t.Fatalf("response body is not valid JSON (gzip bytes leaked through unrewritten?): %v, body = %q", err, rr.Body.String())
 	}
-	wantDL := "http://forwarder.example:9999/" + prefix + "/api/v1/crates"
-	if config.DL != wantDL {
-		t.Errorf("dl = %q, want %q", config.DL, wantDL)
+	wantDownload := "http://forwarder.example:9999/" + prefix + "/files/pkg"
+	if index.Download != wantDownload {
+		t.Errorf("download = %q, want %q", index.Download, wantDownload)
 	}
 }
 
@@ -1860,10 +1866,10 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0.0/download", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/files/foo/1.0.0.bin", nil)
 	req.Header.Set("Accept-Encoding", "gzip, deflate")
 	rr := serve(p, req)
 
@@ -1881,19 +1887,19 @@ func TestNew_NonMatchingShapePreservesClientAcceptEncoding(t *testing.T) {
 // credential nor any of the body.
 func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t *testing.T) {
 	const credential = "s3kr1t-do-not-log-me"
-	const body = `{"not-a-dl-field":"nothing to rewrite here"}`
+	const body = `{"not-a-download-field":"nothing to rewrite here"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, credential))
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -1905,13 +1911,13 @@ func TestModifyResponse_MatchedRowNoRewritableFieldLogsWithoutBodyOrCredential(t
 	}
 
 	logged := logBuf.String()
-	if !strings.Contains(logged, "cargo config.json") {
-		t.Errorf("log output = %q, want a line naming the matched row (\"cargo config.json\")", logged)
+	if !strings.Contains(logged, "synthetic index.json") {
+		t.Errorf("log output = %q, want a line naming the matched row (\"synthetic index.json\")", logged)
 	}
 	if strings.Contains(logged, credential) {
 		t.Errorf("log output contained the credential: %q", logged)
 	}
-	if strings.Contains(logged, "not-a-dl-field") || strings.Contains(logged, "nothing to rewrite here") {
+	if strings.Contains(logged, "not-a-download-field") || strings.Contains(logged, "nothing to rewrite here") {
 		t.Errorf("log output contained body content: %q", logged)
 	}
 }
@@ -1924,19 +1930,19 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 	const credential = "s3kr1t-sentinel-do-not-log-me"
 	const sentinelField = "sentinel-unrelated-field"
 	const sentinelValue = "sentinel-unrelated-value"
-	rawBody := `{"dl":"https://crates.example.com/api/v1/crates","` + sentinelField + `":"` + sentinelValue + `"}`
+	rawBody := `{"download":"https://registry.example.com/files/pkg","` + sentinelField + `":"` + sentinelValue + `"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(rawBody))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL, Credential: credential})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, credential))
 	prefix := routes[0].Prefix
 
 	logBuf := captureLog(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -1944,15 +1950,15 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	wantFrom := "https://crates.example.com/api/v1/crates"
-	wantTo := "http://forwarder.example:9999/" + prefix + "/api/v1/crates"
+	wantFrom := "https://registry.example.com/files/pkg"
+	wantTo := "http://forwarder.example:9999/" + prefix + "/files/pkg"
 	logged := logBuf.String()
 
-	if got := strings.Count(logged, "cargo config.json: rewrote"); got != 1 {
-		t.Errorf(`"cargo config.json: rewrote" occurred %d times in log output, want exactly 1: %q`, got, logged)
+	if got := strings.Count(logged, "synthetic index.json: rewrote"); got != 1 {
+		t.Errorf(`"synthetic index.json: rewrote" occurred %d times in log output, want exactly 1: %q`, got, logged)
 	}
 	if !strings.Contains(logged, wantFrom) || !strings.Contains(logged, wantTo) {
-		t.Errorf("log output = %q, want it to name both the before (%q) and after (%q) dl values", logged, wantFrom, wantTo)
+		t.Errorf("log output = %q, want it to name both the before (%q) and after (%q) download values", logged, wantFrom, wantTo)
 	}
 	if strings.Contains(logged, credential) {
 		t.Errorf("log output contained the credential: %q", logged)
@@ -1965,18 +1971,18 @@ func TestModifyResponse_SuccessfulRewriteLogsOnceWithoutCredentialOrBody(t *test
 // An HTTP/1.0 client sending no Host header leaves req.Host empty, so
 // ServeHTTP never sets selectedRoute.forwarder and modifyResponse must relay
 // the body rather than dereference the nil *url.URL.
-func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
-	const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+func TestModifyResponse_NilForwarderRelaysIndexJSONUnrewritten(t *testing.T) {
+	const body = `{"download":"https://registry.example.com/files/pkg"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "" // no Host header, so selectedRoute.forwarder stays nil
 	rr := serve(p, req)
 
@@ -1988,13 +1994,13 @@ func TestModifyResponse_NilForwarderRelaysConfigJSONUnrewritten(t *testing.T) {
 	}
 }
 
-// An error page arriving at the config.json shape is not a config.json
+// An error page arriving at the index.json shape is not a index.json
 // document, so it is relayed with its status rather than parsed and
 // rewritten.
 func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
-			const body = `{"dl":"https://crates.example.com/api/v1/crates"}`
+			const body = `{"download":"https://registry.example.com/files/pkg"}`
 
 			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -2002,10 +2008,10 @@ func TestModifyResponse_NonOKStatusSkipsRewrite(t *testing.T) {
 				_, _ = w.Write([]byte(body))
 			})
 
-			p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+			p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 			prefix := routes[0].Prefix
 
-			req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+			req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 			req.Host = "forwarder.example:9999"
 			rr := serve(p, req)
 
@@ -2041,17 +2047,17 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 		_, _ = w.Write(body)
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
-	wantLog := fmt.Sprintf("body over %d bytes on /%s/config.json, left unchanged", maxRewriteBodyBytes, prefix)
+	wantLog := fmt.Sprintf("body over %d bytes on /%s/index.json, left unchanged", maxRewriteBodyBytes, prefix)
 	if n := strings.Count(logs.String(), "body over"); n != 1 || !strings.Contains(logs.String(), wantLog) {
 		t.Errorf("log = %q, want exactly one line containing %q", logs.String(), wantLog)
 	}
@@ -2082,14 +2088,14 @@ func TestModifyResponse_BodyReadErrorReturns502(t *testing.T) {
 			t.Fatalf("hijack: %v", err)
 		}
 		defer conn.Close()
-		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"dl\":")
+		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"download\":")
 		_ = buf.Flush()
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{MatchHost: "crates.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/"}}, Upstream: upstream.URL})
+	p, routes := newWithSyntheticRow(t, syntheticRoute(upstream.URL, ""))
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -2111,13 +2117,13 @@ func TestNew_LogsUpstreamFailureStatus(t *testing.T) {
 
 			logBuf := captureLog(t)
 
-			rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+			rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 			if rr.Code != status {
 				t.Fatalf("status = %d, want %d", rr.Code, status)
 			}
 			logged := logBuf.String()
-			want := fmt.Sprintf("registryproxy: r0: upstream error status: %s /config.json %d", http.MethodGet, status)
+			want := fmt.Sprintf("registryproxy: r0: upstream error status: %s /index.json %d", http.MethodGet, status)
 			if got := strings.Count(logged, want); got != 1 {
 				t.Errorf("log output = %q, want exactly one line %q", logged, want)
 			}
@@ -2134,7 +2140,7 @@ func TestNew_NoLogForSuccessfulUpstreamStatus(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -2156,7 +2162,7 @@ func TestNew_RedirectStatusNeitherLoggedNorFollowed(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusFound {
 		t.Fatalf("status = %d, want %d (single-hop: redirect relayed, never followed)", rr.Code, http.StatusFound)
@@ -2182,7 +2188,7 @@ func TestNew_UpstreamFailureRelayedByteIdentical(t *testing.T) {
 
 	p, _ := newPlainProxy(t, plainRoute(upstream.URL))
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
@@ -2208,10 +2214,10 @@ func TestNew_SuppressesRepeatedUpstreamFailures(t *testing.T) {
 	logBuf := captureLog(t)
 
 	paths := []string{
-		"/r0/config.json", // first failure, logged in full
-		"/r0/other.json",  // second distinct failure, suppressed
-		"/r0/third.json",  // third distinct failure, suppressed
-		"/r0/config.json", // repeat of the first, neither logged nor counted
+		"/r0/index.json", // first failure, logged in full
+		"/r0/other.json", // second distinct failure, suppressed
+		"/r0/third.json", // third distinct failure, suppressed
+		"/r0/index.json", // repeat of the first, neither logged nor counted
 	}
 	for _, path := range paths {
 		rr := serve(p, httptest.NewRequest(http.MethodGet, path, nil))
@@ -2257,9 +2263,9 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	logBuf := captureLog(t)
 
 	requests := []string{
-		"/r0/config.json",
+		"/r0/index.json",
 		"/r0/other.json",
-		"/r1/config.json",
+		"/r1/index.json",
 		"/r1/other.json",
 		"/r1/third.json",
 	}
@@ -2272,9 +2278,9 @@ func TestNew_UpstreamFailuresArePerRoute(t *testing.T) {
 	}
 
 	logged := logBuf.String()
-	wantR0First := "registryproxy: r0: upstream error status: GET /config.json 404"
+	wantR0First := "registryproxy: r0: upstream error status: GET /index.json 404"
 	wantR0Summary := "registryproxy: r0: suppressed 1 further distinct upstream failure"
-	wantR1First := "registryproxy: r1: upstream error status: GET /config.json 500"
+	wantR1First := "registryproxy: r1: upstream error status: GET /index.json 500"
 	wantR1Summary := "registryproxy: r1: suppressed 2 further distinct upstream failures"
 	for _, want := range []string{wantR0First, wantR0Summary, wantR1First, wantR1Summary} {
 		if !strings.Contains(logged, want) {
@@ -2297,7 +2303,7 @@ func TestNew_NeverLogsCredentialForUpstreamFailure(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
@@ -2319,13 +2325,13 @@ func TestNew_LogsUpstreamTransportFailure(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
 	}
 	logged := logBuf.String()
-	want := fmt.Sprintf("registryproxy: r0: upstream request failed: %s /config.json:", http.MethodGet)
+	want := fmt.Sprintf("registryproxy: r0: upstream request failed: %s /index.json:", http.MethodGet)
 	if got := strings.Count(logged, want); got != 1 {
 		t.Errorf("log output = %q, want exactly one line starting %q", logged, want)
 	}
@@ -2352,12 +2358,12 @@ func TestNew_DistinguishesTransportFailureFromHTTPStatusFailure(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
-	serve(p, httptest.NewRequest(http.MethodGet, "/r1/config.json", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r1/index.json", nil))
 
 	logged := logBuf.String()
-	wantA := "registryproxy: r0: upstream error status: GET /config.json 401"
-	wantB := fmt.Sprintf("registryproxy: r1: upstream request failed: %s /config.json:", http.MethodGet)
+	wantA := "registryproxy: r0: upstream error status: GET /index.json 401"
+	wantB := fmt.Sprintf("registryproxy: r1: upstream request failed: %s /index.json:", http.MethodGet)
 	if !strings.Contains(logged, wantA) {
 		t.Errorf("log output = %q, want it to contain %q", logged, wantA)
 	}
@@ -2379,7 +2385,7 @@ func TestNew_NeverLogsCredentialForTransportFailure(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
@@ -2402,7 +2408,7 @@ func TestNew_SharesSuppressionAcrossTransportAndStatusFailures(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr1 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr1 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 	if rr1.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", rr1.Code, http.StatusNotFound)
 	}
@@ -2444,7 +2450,7 @@ func TestNew_NoTransportOrStatusLogForSuccessfulRequest(t *testing.T) {
 
 	logBuf := captureLog(t)
 
-	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil))
+	rr := serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil))
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
@@ -2476,7 +2482,7 @@ func TestNew_ClientAbortNotLoggedAsUpstreamFailure(t *testing.T) {
 		cancel()
 	}()
 
-	serve(p, httptest.NewRequest(http.MethodGet, "/r0/config.json", nil).WithContext(ctx))
+	serve(p, httptest.NewRequest(http.MethodGet, "/r0/index.json", nil).WithContext(ctx))
 
 	logged := logBuf.String()
 	if strings.Contains(logged, "upstream request failed") || strings.Contains(logged, "upstream error status") {
@@ -2511,13 +2517,13 @@ func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 
 	serve(p, httptest.NewRequest(http.MethodGet, "/r0/hang", nil).WithContext(ctx))
 
-	rr401 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/crates/foo", nil))
+	rr401 := serve(p, httptest.NewRequest(http.MethodGet, "/r0/files/foo", nil))
 
 	if rr401.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rr401.Code, http.StatusUnauthorized)
 	}
 	logged := logBuf.String()
-	want := "registryproxy: r0: upstream error status: GET /crates/foo 401"
+	want := "registryproxy: r0: upstream error status: GET /files/foo 401"
 	if !strings.Contains(logged, want) {
 		t.Errorf("log output = %q, want it to contain the full first-failure line %q", logged, want)
 	}

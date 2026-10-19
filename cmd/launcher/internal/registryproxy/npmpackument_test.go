@@ -8,8 +8,17 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
+
+// newWithEcosystemRows builds a handler with every ecosystem's real rewrite
+// rows, so these tests exercise the rows a production run uses. Production
+// code never imports ecosystem (see the import-graph check); only tests do.
+func newWithEcosystemRows(t *testing.T, routes ...Route) (http.Handler, []Route) {
+	t.Helper()
+	return newProxy(t, ecosystem.ResponseRewriteRows(), routes)
+}
 
 // These tests drive the real npm ecosystem row (newWithEcosystemRows) through
 // the same Forwarder round-trip harness registryproxy_test.go's cargo tests

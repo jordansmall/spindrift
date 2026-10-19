@@ -28,7 +28,7 @@ func TestNew_HostRootedRejectsUpstreamWithPath(t *testing.T) {
 	}
 }
 
-// A request that never touches config.json does not exercise EnforcedSubtrees
+// A request that never touches index.json does not exercise EnforcedSubtrees
 // at all (findResponseRewriteRow is where it does), so this pins only that New
 // accepts the field and still forwards normally.
 func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
@@ -36,21 +36,21 @@ func TestNew_ThreadsEnforcedSubtreesWithoutError(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, _ := newWithEcosystemRows(t, Route{
+	p, _ := newWithSyntheticRow(t, Route{
 		Upstream: upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/index-a/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/base-a/index.json", nil)
 	rr := serve(p, req)
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
 }
 
-// Issue #3256 AC 1: a host-rooted route with two enforced cargo index subtrees
+// Issue #3256 AC 1: a host-rooted route with two enforced subtrees
 // on one host forwards a request under either subtree to the upstream origin
 // at the verbatim remaining path, with the route credential attached.
 func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T) {
@@ -66,10 +66,10 @@ func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T
 		Upstream:   upstream.URL,
 		Credential: "s3kr1t",
 
-		EnforcedPaths: []string{"/index-a", "/index-b"},
+		EnforcedPaths: []string{"/base-a", "/base-b"},
 	})
 
-	for _, path := range []string{"/r0/index-a/config.json", "/r0/index-b/xy/zz/foo"} {
+	for _, path := range []string{"/r0/base-a/index.json", "/r0/base-b/xy/zz/foo"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rr := serve(p, req)
 		if rr.Code != http.StatusOK {
@@ -77,7 +77,7 @@ func TestHostRooted_ForwardsVerbatimRemainderForEachEnforcedSubtree(t *testing.T
 		}
 	}
 
-	wantPaths := []string{"/index-a/config.json", "/index-b/xy/zz/foo"}
+	wantPaths := []string{"/base-a/index.json", "/base-b/xy/zz/foo"}
 	if len(gotPaths) != len(wantPaths) {
 		t.Fatalf("upstream saw %d requests, want %d", len(gotPaths), len(wantPaths))
 	}
@@ -105,10 +105,10 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 		Upstream:   upstream.URL,
 		Credential: "s3kr1t",
 
-		EnforcedPaths: []string{"/index-a", "/index-b"},
+		EnforcedPaths: []string{"/base-a", "/base-b"},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/some-other-path/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/some-other-path/index.json", nil)
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusForbidden {
@@ -124,7 +124,7 @@ func TestHostRooted_RefusesPathOutsideEnforcedSet(t *testing.T) {
 	if !strings.Contains(string(body), "enforcement refused") {
 		t.Errorf("body = %q, want it to name the refusing policy", string(body))
 	}
-	if !strings.Contains(string(body), "/index-a") || !strings.Contains(string(body), "/index-b") {
+	if !strings.Contains(string(body), "/base-a") || !strings.Contains(string(body), "/base-b") {
 		t.Errorf("body = %q, want it to list the enforced paths", string(body))
 	}
 }
@@ -150,10 +150,10 @@ func TestHostRooted_RefusalNeverDialsUpstream(t *testing.T) {
 		Upstream:   upstream.URL,
 		Credential: "s3kr1t",
 
-		EnforcedPaths: []string{"/index-a"},
+		EnforcedPaths: []string{"/base-a"},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/r0/not-enforced/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/r0/not-enforced/index.json", nil)
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusForbidden {
@@ -206,31 +206,31 @@ func TestHostRooted_RootSubtreeAdmitsWholeHost(t *testing.T) {
 	}
 }
 
-// Issue #3257: a host-rooted route with two cargo index bases rewrites the
-// config.json served under either base, even where dl is a sibling of the
+// Issue #3257: a host-rooted route with two index bases rewrites the
+// index.json served under either base, even where download is a sibling of the
 // index base rather than nested under it (the Artifactory layout). The row
-// matches per declared index base, not just the bare "/config.json" literal a
+// matches per declared index base, not just the bare "/index.json" literal a
 // single-index route matches.
-func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
+func TestHostRooted_IndexJSONRewrittenPerIndexBase(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/index-a/config.json":
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-a"}`))
-		case "/index-b/config.json":
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-b"}`))
+		case "/base-a/index.json":
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files-a/pkg"}`))
+		case "/base-b/index.json":
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files-b/pkg"}`))
 		default:
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a", "/index-b"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}},
+		EnforcedPaths:    []string{"/base-a", "/base-b"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}, {Ecosystem: "synthetic", Path: "/base-b"}},
 	})
 	prefix := routes[0].Prefix
 
@@ -238,8 +238,8 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 		path     string
 		wantBody string
 	}{
-		{"/" + prefix + "/index-a/config.json", `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates-a"}`},
-		{"/" + prefix + "/index-b/config.json", `{"dl":"http://forwarder.example:9999/` + prefix + `/api/v1/crates-b"}`},
+		{"/" + prefix + "/base-a/index.json", `{"download":"http://forwarder.example:9999/` + prefix + `/files-a/pkg"}`},
+		{"/" + prefix + "/base-b/index.json", `{"download":"http://forwarder.example:9999/` + prefix + `/files-b/pkg"}`},
 	}
 	for _, tc := range tests {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -255,52 +255,52 @@ func TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase(t *testing.T) {
 	}
 }
 
-// The same per-index-base row match as
-// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase, for the Gitea layout
-// where dl nests under the index base instead of sitting beside it. The match
-// rule is layout-agnostic; rewriteCargoDL's host check, not the row match,
-// decides whether a given dl is rewritable.
-func TestHostRooted_ConfigJSONRewrittenWithDLNestedUnderIndexBase(t *testing.T) {
+// The same per-base row match as
+// TestHostRooted_IndexJSONRewrittenPerIndexBase, for a host-rooted layout
+// where download nests under the index base instead of sitting beside it. The match
+// rule is layout-agnostic; rewriteSyntheticDownload's host check, not the row match,
+// decides whether a given download is rewritable.
+func TestHostRooted_IndexJSONRewrittenWithDownloadNestedUnderIndexBase(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path != "/index-a/config.json" {
+		if r.URL.Path != "/base-a/index.json" {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/index-a/api/v1/crates"}`))
+		_, _ = w.Write([]byte(`{"download":"https://registry.example.com/base-a/files/pkg"}`))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/base-a/index.json", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
-	wantBody := `{"dl":"http://forwarder.example:9999/` + prefix + `/index-a/api/v1/crates"}`
+	wantBody := `{"download":"http://forwarder.example:9999/` + prefix + `/base-a/files/pkg"}`
 	if got := rr.Body.String(); got != wantBody {
 		t.Errorf("body = %s, want %s", got, wantBody)
 	}
 }
 
-// No suffix-guessing: a path that resembles "<base>/config.json" without
-// equalling it is never a config.json row match, so its body is relayed
-// byte-identical even when it is a JSON object with its own "dl" field.
-func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
-	const wantBody = `{"dl":"https://crates.example.com/some/other/thing"}`
+// No suffix-guessing: a path that resembles "<base>/index.json" without
+// equalling it is never an index.json row match, so its body is relayed
+// byte-identical even when it is a JSON object with its own "download" field.
+func TestHostRooted_PathResemblingIndexJSONNotMatchedAsRow(t *testing.T) {
+	const wantBody = `{"download":"https://registry.example.com/some/other/thing"}`
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/index-a/config-json-wannabe" {
+		if r.URL.Path != "/base-a/config-json-wannabe" {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -309,16 +309,16 @@ func TestHostRooted_PathResemblingConfigJSONNotMatchedAsRow(t *testing.T) {
 		_, _ = w.Write([]byte(wantBody))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config-json-wannabe", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/base-a/config-json-wannabe", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -370,7 +370,7 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 			tc.route.Upstream = upstream.URL
 			p, _ := newPlainProxy(t, tc.route)
 
-			req := httptest.NewRequest(http.MethodGet, "/r0/config.json", nil)
+			req := httptest.NewRequest(http.MethodGet, "/r0/index.json", nil)
 			req.Header.Set("Authorization", "Bearer inbound-client-token")
 			rr := serve(p, req)
 
@@ -389,19 +389,19 @@ func TestNew_StripsInboundAuthorization(t *testing.T) {
 	}
 }
 
-// Issue #3257 AC 1/2/3: once a config.json rewrite learns a same-host dl
-// subtree sitting beside the cargo index base rather than under it (the
+// Issue #3257 AC 1/2/3: once an index.json rewrite learns a same-host download
+// subtree sitting beside the index base rather than under it (the
 // Artifactory layout), a later download into that subtree is admitted even
 // though it was never in the route's static EnforcedPaths.
-func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
+func TestHostRooted_LearnedDownloadBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	var downloadRequests int
 	var downloadHeaders http.Header
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/index-a/config.json":
+		case "/base-a/index.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates"}`))
-		case "/api/v1/crates/foo/1.0/download":
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files/pkg"}`))
+		case "/files/foo/1.0.bin":
 			downloadRequests++
 			downloadHeaders = r.Header.Clone()
 			w.WriteHeader(http.StatusOK)
@@ -411,24 +411,24 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 		}
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 		Credential:       "s3kr1t",
 	})
 	prefix := routes[0].Prefix
 
-	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/base-a/index.json", nil)
 	configReq.Host = "forwarder.example:9999"
 	rr := serve(p, configReq)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
+		t.Fatalf("index.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
+	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/files/foo/1.0.bin", nil)
 	downloadReq.Host = "forwarder.example:9999"
 	rr = serve(p, downloadReq)
 	if rr.Code != http.StatusOK {
@@ -442,18 +442,18 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape(t *testing.T) {
 	}
 }
 
-// The Gitea layout version of
-// TestHostRooted_LearnedDLBaseAdmitsDownloadSiblingShape, where dl nests under
-// the cargo index base instead of sitting beside it, so the learning path is
+// The nested-download layout version of
+// TestHostRooted_LearnedDownloadBaseAdmitsDownloadSiblingShape, where download nests under
+// the index base instead of sitting beside it, so the learning path is
 // layout-agnostic in the same way the rewrite itself is.
-func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
+func TestHostRooted_LearnedDownloadBaseAdmitsDownloadNestedShape(t *testing.T) {
 	var downloadRequests int
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/index-a/config.json":
+		case "/base-a/index.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/index-a/api/v1/crates"}`))
-		case "/index-a/api/v1/crates/foo/1.0/download":
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com/base-a/files/pkg"}`))
+		case "/base-a/files/foo/1.0.bin":
 			downloadRequests++
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -462,23 +462,23 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 		}
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	prefix := routes[0].Prefix
 
-	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/base-a/index.json", nil)
 	configReq.Host = "forwarder.example:9999"
 	rr := serve(p, configReq)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
+		t.Fatalf("index.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/api/v1/crates/foo/1.0/download", nil)
+	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/base-a/files/foo/1.0.bin", nil)
 	downloadReq.Host = "forwarder.example:9999"
 	rr = serve(p, downloadReq)
 	if rr.Code != http.StatusOK {
@@ -489,26 +489,26 @@ func TestHostRooted_LearnedDLBaseAdmitsDownloadNestedShape(t *testing.T) {
 	}
 }
 
-// Issue #3257 AC 5: a download path requested before any config.json fetch
-// could learn its dl subtree is refused with 403, and the fake upstream
+// Issue #3257 AC 5: a download path requested before any index.json fetch
+// could learn its download subtree is refused with 403, and the fake upstream
 // records no request.
-func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
+func TestHostRooted_DownloadRefusedBeforeIndexJSONFetched(t *testing.T) {
 	var upstreamRequests int
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		upstreamRequests++
 		w.WriteHeader(http.StatusOK)
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	prefix := routes[0].Prefix
 
-	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/files/foo/1.0.bin", nil)
 	req.Host = "forwarder.example:9999"
 	rr := serve(p, req)
 
@@ -520,58 +520,58 @@ func TestHostRooted_DownloadRefusedBeforeConfigJSONFetched(t *testing.T) {
 	}
 }
 
-// Issue #3257 AC 4: a config.json response naming a dl on a host other than
+// Issue #3257 AC 4: an index.json response naming a download on a host other than
 // the route's match-host is relayed unrewritten, and the route learns nothing
-// from it, so a later request to what would have been the dl's path is still
+// from it, so a later request to what would have been the download's path is still
 // refused.
-func TestHostRooted_CrossHostDLNeverLearned(t *testing.T) {
+func TestHostRooted_CrossHostDownloadNeverLearned(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/index-a/config.json" {
+		if r.URL.Path != "/base-a/index.json" {
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"dl":"https://other.example.com/api/v1/crates"}`))
+		_, _ = w.Write([]byte(`{"download":"https://other.example.com/files/pkg"}`))
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	prefix := routes[0].Prefix
 
-	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/index-a/config.json", nil)
+	configReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/base-a/index.json", nil)
 	configReq.Host = "forwarder.example:9999"
 	rr := serve(p, configReq)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("config.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
+		t.Fatalf("index.json fetch: status = %d, want %d", rr.Code, http.StatusOK)
 	}
 
-	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/crates/foo/1.0/download", nil)
+	downloadReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/files/foo/1.0.bin", nil)
 	downloadReq.Host = "forwarder.example:9999"
 	rr = serve(p, downloadReq)
 	if rr.Code != http.StatusForbidden {
-		t.Fatalf("download: status = %d, want %d (a cross-host dl must never be learned)", rr.Code, http.StatusForbidden)
+		t.Fatalf("download: status = %d, want %d (a cross-host download must never be learned)", rr.Code, http.StatusForbidden)
 	}
 }
 
-// Issue #3257 AC 4: two cargo registries sharing one host each accumulate
-// their own dl subtree independently, and a third path neither config.json
+// Issue #3257 AC 4: two registries sharing one host each accumulate
+// their own download subtree independently, and a third path neither index.json
 // ever named is still refused.
 func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/index-a/config.json":
+		case "/base-a/index.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-a"}`))
-		case "/index-b/config.json":
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files-a/pkg"}`))
+		case "/base-b/index.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-b"}`))
-		case "/api/v1/crates-a/foo/1.0/download", "/api/v1/crates-b/bar/2.0/download":
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com/files-b/pkg"}`))
+		case "/files-a/foo/1.0.bin", "/files-b/bar/2.0.bin":
 			w.WriteHeader(http.StatusOK)
 		default:
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
@@ -579,16 +579,16 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 		}
 	})
 
-	p, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	p, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a", "/index-b"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}, {Ecosystem: "cargo", Path: "/index-b"}},
+		EnforcedPaths:    []string{"/base-a", "/base-b"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}, {Ecosystem: "synthetic", Path: "/base-b"}},
 	})
 	prefix := routes[0].Prefix
 
-	for _, indexPath := range []string{"/index-a/config.json", "/index-b/config.json"} {
+	for _, indexPath := range []string{"/base-a/index.json", "/base-b/index.json"} {
 		req := httptest.NewRequest(http.MethodGet, "/"+prefix+indexPath, nil)
 		req.Host = "forwarder.example:9999"
 		rr := serve(p, req)
@@ -597,7 +597,7 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 		}
 	}
 
-	for _, downloadPath := range []string{"/api/v1/crates-a/foo/1.0/download", "/api/v1/crates-b/bar/2.0/download"} {
+	for _, downloadPath := range []string{"/files-a/foo/1.0.bin", "/files-b/bar/2.0.bin"} {
 		req := httptest.NewRequest(http.MethodGet, "/"+prefix+downloadPath, nil)
 		req.Host = "forwarder.example:9999"
 		rr := serve(p, req)
@@ -606,7 +606,7 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 		}
 	}
 
-	unrelatedReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/api/v1/never-declared/baz/1.0/download", nil)
+	unrelatedReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/never-declared/baz/1.0.bin", nil)
 	unrelatedReq.Host = "forwarder.example:9999"
 	rr := serve(p, unrelatedReq)
 	if rr.Code != http.StatusForbidden {
@@ -614,19 +614,19 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 	}
 }
 
-// Learning the same dl subtree twice for one route must not grow its learned
-// set past one entry, or repeat config.json fetches would leak memory over a
+// Learning the same download subtree twice for one route must not grow its learned
+// set past one entry, or repeat index.json fetches would leak memory over a
 // long-lived Forwarder process.
 func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler, routes := newWithEcosystemRows(t, Route{
+	handler, routes := newWithSyntheticRow(t, Route{
 		Upstream: upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	h, ok := handler.(*routeLogHandler)
 	if !ok {
@@ -634,8 +634,8 @@ func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	}
 	prefix := routes[0].Prefix
 
-	h.learnRewriteBase(prefix, "/api/v1/crates")
-	h.learnRewriteBase(prefix, "/api/v1/crates")
+	h.learnRewriteBase(prefix, "/files")
+	h.learnRewriteBase(prefix, "/files")
 	if got := len(h.learnedPaths[prefix]); got != 1 {
 		t.Errorf("learnedPaths[%q] has %d entries after two identical learns, want 1", prefix, got)
 	}
@@ -644,18 +644,18 @@ func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 // Rows are caller input, so one handing back an empty LearnedPath (an edit
 // whose target sits at the upstream's own root) must not be stored verbatim:
 // it would then admit through PathSet.Admits' HasPrefix(cleaned, sub+"/")
-// branch instead of the "/" whole-host sentinel cargo's own rewriter
+// branch instead of the "/" whole-host sentinel the synthetic row's own rewriter
 // normalizes to.
 func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler, routes := newWithEcosystemRows(t, Route{
+	handler, routes := newWithSyntheticRow(t, Route{
 		Upstream: upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	h, ok := handler.(*routeLogHandler)
 	if !ok {
@@ -675,37 +675,37 @@ func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 	}
 }
 
-// Drives the dl rewrite through a real bindregistry.NewTCPForwarder in front
+// Drives the download rewrite through a real bindregistry.NewTCPForwarder in front
 // of the gated TCP listener, unlike
-// TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase above, which sets
+// TestHostRooted_IndexJSONRewrittenPerIndexBase above, which sets
 // req.Host by hand, then asserts the same download sent straight to the
 // listener, without the Forwarder, is refused with 401.
-func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing.T) {
+func TestHostRooted_IndexJSONDownloadNamesForwarderThroughGatedTCPListener(t *testing.T) {
 	const secret = "s3kr1t-e2e-secret"
-	const crateBody = "crate-bytes-for-foo"
-	const dlPath = "/api/v1/crates-a"
-	const cratePath = dlPath + "/foo-1.0.0.crate"
+	const blobBody = "crate-bytes-for-foo"
+	const downloadBase = "/files-a/pkg"
+	const blobPath = downloadBase + "/foo-1.0.0.bin"
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/index-a/config.json":
+		case "/base-a/index.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com` + dlPath + `"}`))
-		case cratePath:
+			_, _ = w.Write([]byte(`{"download":"https://registry.example.com` + downloadBase + `"}`))
+		case blobPath:
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(crateBody))
+			_, _ = w.Write([]byte(blobBody))
 		default:
 			t.Errorf("upstream got unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
 
-	handler, routes := newWithEcosystemRows(t, Route{
-		MatchHost: "crates.example.com",
+	handler, routes := newWithSyntheticRow(t, Route{
+		MatchHost: "registry.example.com",
 		Upstream:  upstream.URL,
 
-		EnforcedPaths:    []string{"/index-a"},
-		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index-a"}},
+		EnforcedPaths:    []string{"/base-a"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/base-a"}},
 	})
 	prefix := routes[0].Prefix
 
@@ -732,25 +732,25 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	defer forwarder.Close()
 	forwarderHost := forwarder.Listener.Addr().String()
 
-	configResp, err := http.Get(forwarder.URL + "/" + prefix + "/index-a/config.json")
+	configResp, err := http.Get(forwarder.URL + "/" + prefix + "/base-a/index.json")
 	if err != nil {
-		t.Fatalf("http.Get(config.json): %v", err)
+		t.Fatalf("http.Get(index.json): %v", err)
 	}
 	defer configResp.Body.Close()
 	if configResp.StatusCode != http.StatusOK {
-		t.Fatalf("config.json: status = %d, want %d", configResp.StatusCode, http.StatusOK)
+		t.Fatalf("index.json: status = %d, want %d", configResp.StatusCode, http.StatusOK)
 	}
 	configBody, err := io.ReadAll(configResp.Body)
 	if err != nil {
-		t.Fatalf("ReadAll(config.json): %v", err)
+		t.Fatalf("ReadAll(index.json): %v", err)
 	}
 
-	wantDL := "http://" + forwarderHost + "/" + prefix + dlPath
-	if got, want := string(configBody), `{"dl":"`+wantDL+`"}`; got != want {
-		t.Fatalf("config.json: body = %s, want %s", got, want)
+	wantDownload := "http://" + forwarderHost + "/" + prefix + downloadBase
+	if got, want := string(configBody), `{"download":"`+wantDownload+`"}`; got != want {
+		t.Fatalf("index.json: body = %s, want %s", got, want)
 	}
 
-	downloadResp, err := http.Get(wantDL + strings.TrimPrefix(cratePath, dlPath))
+	downloadResp, err := http.Get(wantDownload + strings.TrimPrefix(blobPath, downloadBase))
 	if err != nil {
 		t.Fatalf("http.Get(download): %v", err)
 	}
@@ -762,12 +762,12 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
 	}
-	if string(body) != crateBody {
-		t.Errorf("download body = %q, want %q", string(body), crateBody)
+	if string(body) != blobBody {
+		t.Errorf("download body = %q, want %q", string(body), blobBody)
 	}
 
 	// Negative control: skipping the Forwarder means no TCP secret header.
-	directResp, err := http.Get("http://" + p.Addr().String() + "/" + prefix + cratePath)
+	directResp, err := http.Get("http://" + p.Addr().String() + "/" + prefix + blobPath)
 	if err != nil {
 		t.Fatalf("http.Get(direct): %v", err)
 	}
