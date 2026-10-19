@@ -123,8 +123,8 @@ func stripMountPair(args []string, flag, target string) []string {
 // newIntegrationBwrapAdapter wires a bwrapAdapter and etc dir the same way
 // bwrapAdapter.Run does, with real passwd/group temp files mirroring
 // lib/image.nix (issue #2663), so buildArgs produces production's exact flags.
-// It pins networkMode="none" rather than the raw unshareNet knob: since issue
-// #2666 unshareNet=true gets pasta-wrapped, breaking the single-token strip.
+// It pins NETWORK_MODE=none rather than the raw BwrapUnshareNet knob: since issue
+// #2666 BwrapUnshareNet=true gets pasta-wrapped, breaking the single-token strip.
 func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	agentFiles := t.TempDir()
@@ -153,20 +153,20 @@ func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 		passwdFile:    filepath.Join(etcDir, "passwd"),
 		groupFile:     filepath.Join(etcDir, "group"),
 		bakedPrefetch: "true",
-		networkMode:   runner.NetworkModeNone,
+		network:       testNet(runner.NetworkModeNone),
 	}
 	return a, etcDir
 }
 
 // newIntegrationBwrapAdapterIsolated switches to the default (issue #2666)
-// isolate-with-pasta path: the zero-value networkMode, which pastaPath()
+// isolate-with-pasta path: an unset NETWORK_MODE, which Config.BwrapNetwork
 // treats like any non-"host"/non-"none" value. It is a separate helper so the
-// probes above keep their networkMode="none" pin. It writes the
+// probes above keep their NETWORK_MODE=none pin. It writes the
 // /etc/resolv.conf Run would write, since callers here go through execTarget.
 func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	a, etcDir := newIntegrationBwrapAdapter(t)
-	a.networkMode = ""
+	a.network = testNet("")
 	resolvConf := "nameserver " + pastaDNSForwardAddr + "\n"
 	if err := os.WriteFile(filepath.Join(etcDir, "resolv.conf"), []byte(resolvConf), 0o644); err != nil {
 		t.Fatal(err)
@@ -254,7 +254,7 @@ func nixProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, scrip
 // target: it takes a's real execTarget output (pasta as the top-level program,
 // with bwrap's own argv nested inside), strips the same --proc/--dev pair from
 // that nested argv, and swaps the nested tail for script. The returned program
-// is "pasta" whenever pastaPath() applies, matching what Run() would exec.
+// is "pasta" whenever network.Pasta applies, matching what Run() would exec.
 func pastaProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) (string, []string) {
 	program, args, _ := a.execTarget(etcDir, box)
 	args = stripMountPair(args, "--proc", "/proc")
@@ -268,7 +268,7 @@ func pastaProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, scr
 // not just the flag being present on argv (issue #576).
 func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	bashBin := requireRealBwrap(t)
-	// networkMode="none" skips the --ro-bind /etc/resolv.conf mount, which a
+	// NETWORK_MODE=none skips the --ro-bind /etc/resolv.conf mount, which a
 	// nested sandbox can't remount and which this assertion doesn't need.
 	a, etcDir := newIntegrationBwrapAdapter(t)
 	box := runner.Box{Env: map[string]string{}}
@@ -303,7 +303,7 @@ func TestBwrapIntegration_SandboxUID(t *testing.T) {
 }
 
 // TestBwrapIntegration_UnshareNetBlocksNetwork asserts from inside a real
-// bwrap sandbox with networkMode="none" (no pasta) that outbound network
+// bwrap sandbox with NETWORK_MODE=none (no pasta) that outbound network
 // access fails: the kernel enforcing --unshare-net with no egress path, not
 // just the flag being present on argv (issue #576).
 func TestBwrapIntegration_UnshareNetBlocksNetwork(t *testing.T) {

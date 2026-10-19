@@ -323,7 +323,7 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "none",
+		network:       testNet("none"),
 	}
 	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
@@ -398,7 +398,7 @@ func TestBwrapArgs_NetworkModeOpenOmitsBwrapSideUnshareNet(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "open",
+		network:       testNet("open"),
 	}
 	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
@@ -424,7 +424,7 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "no-host-loopback",
+		network:       testNet("no-host-loopback"),
 	}
 	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
@@ -445,6 +445,7 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 // an explicit "open".
 func TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate(t *testing.T) {
 	a := &bwrapAdapter{
+		network:       testNet(""),
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
@@ -473,7 +474,7 @@ func TestBwrapArgs_NetworkModeHostSharesHostNetns(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "host",
+		network:       testNet("host"),
 	}
 	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
@@ -498,7 +499,7 @@ func TestBwrapArgs_UnshareNetKnobOmitsBwrapSideUnshareNet(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		unshareNet:    true,
+		network:       runner.Config{BwrapUnshareNet: true}.BwrapNetwork(),
 	}
 	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
@@ -520,7 +521,7 @@ func TestExecTarget_NetworkModeOpenWrapsWithPasta(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "open",
+		network:       testNet("open"),
 	}
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 }
@@ -532,7 +533,7 @@ func TestExecTarget_NetworkModeNoHostLoopbackWrapsWithPasta(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "no-host-loopback",
+		network:       testNet("no-host-loopback"),
 	}
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 }
@@ -541,6 +542,7 @@ func TestExecTarget_NetworkModeNoHostLoopbackWrapsWithPasta(t *testing.T) {
 // TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate.
 func TestExecTarget_NetworkModeUnsetWrapsWithPasta(t *testing.T) {
 	a := &bwrapAdapter{
+		network:       testNet(""),
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
@@ -552,7 +554,7 @@ func TestExecTarget_NetworkModeUnsetWrapsWithPasta(t *testing.T) {
 // pins the literal ADR 0042 flags a renamed or loosened constant would
 // otherwise carry along silently.
 func TestExecTarget_DefaultPastaArgvLiteral(t *testing.T) {
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
 	_, args, _ := a.execTarget("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 
 	want := []string{
@@ -571,7 +573,7 @@ func TestExecTarget_UnshareNetKnobWrapsWithPasta(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		unshareNet:    true,
+		network:       runner.Config{BwrapUnshareNet: true}.BwrapNetwork(),
 	}
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 }
@@ -584,7 +586,7 @@ func TestExecTarget_NetworkModeHostReturnsBareBwrap(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "host",
+		network:       testNet("host"),
 	}
 	assertBareBwrapExecTarget(t, a, "/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 }
@@ -594,7 +596,7 @@ func TestExecTarget_NetworkModeNoneReturnsBareBwrap(t *testing.T) {
 		agentFiles:    "/fake/agent",
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		networkMode:   "none",
+		network:       testNet("none"),
 	}
 	assertBareBwrapExecTarget(t, a, "/tmp/fake-etc", runner.Box{Env: map[string]string{}})
 }

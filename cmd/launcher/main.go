@@ -1192,7 +1192,8 @@ func checkReadOnlyCapabilityGate(c config) error {
 // mkHarness's networkModeCoherenceOk assert cannot see, since NETWORK_MODE,
 // PODMAN_NETWORK and BWRAP_UNSHARE_NET are all runtime-overridable: bwrap
 // renders no-host-loopback no differently from open (issue #2562), and a
-// non-open mode beside a raw knob hits networkArg's raw-wins full egress.
+// non-open mode beside a raw knob hits runner.Config.OCINetwork's raw-wins
+// full egress.
 func checkNetworkModeRuntimeGate(c config) error {
 	// Keys on runnerKind, never runtime: RUNNER_KIND=bwrap/RUNTIME=podman is a
 	// supported pairing, and keying on runtime would miss that pairing and let
@@ -1217,15 +1218,14 @@ func checkNetworkModeRuntimeGate(c config) error {
 
 // checkBwrapPastaGate refuses to launch rather than silently share the host
 // network namespace when the bwrap runner needs pasta (issue #2666) and pasta
-// is not on PATH. NetworkMode "host" and "none" never invoke pasta, matching
-// bwrap.go's own pastaPath condition, so the gate is a no-op for them; host
-// beside BWRAP_UNSHARE_NET would invoke pasta, but checkNetworkModeRuntimeGate
-// refuses that pairing.
+// is not on PATH. It reads the plan's Pasta decision
+// (runner.Config.BwrapNetwork), so it never probes for a Box that will not
+// invoke pasta.
 func checkBwrapPastaGate(c config) error {
 	if c.runnerKind != runner.KindBwrap {
 		return nil
 	}
-	if mode := c.runnerNetworkMode(); mode == runner.NetworkModeHost || mode == runner.NetworkModeNone {
+	if !runnerConfig(c).BwrapNetwork().Pasta {
 		return nil
 	}
 	return bwrap.ValidatePasta()

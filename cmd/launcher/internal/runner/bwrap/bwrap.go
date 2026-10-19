@@ -87,8 +87,7 @@ type bwrapAdapter struct {
 	// BuildMountSpecs unmodified. DriverSessionCacheDir is ADR 0009; the
 	// CODE_FORGE=local mount specs are issue #1697.
 	mountParams runner.MountParams
-	unshareNet  bool               // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
-	networkMode runner.NetworkMode // NETWORK_MODE knob; every value except the "host" opt-out isolates from the host netns (issue #2666)
+	network     runner.BwrapNetwork // from runner.Config.BwrapNetwork
 	// pidsLimit is the PIDS_LIMIT knob (empty disables it). bwrap imposes no
 	// process-count cap of its own, so the per-Box cgroup v2 pids.max control
 	// file is the only containment mechanism (ADR 0042, provisionCgroup).
@@ -151,8 +150,7 @@ func New(cfg runner.Config, pwd string) runner.Runner {
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixStoreWritable:   cfg.NixStoreWritable,
 		mountParams:        cfg.MountParams,
-		unshareNet:         cfg.BwrapUnshareNet,
-		networkMode:        cfg.NetworkMode,
+		network:            cfg.BwrapNetwork(),
 		pidsLimit:          cfg.PidsLimit,
 		memoryLimit:        cfg.MemoryLimit,
 		syscallFilterPath:  cfg.SyscallFilterPath,
@@ -204,22 +202,6 @@ func (a *bwrapAdapter) mountSpecs(box runner.Box) []runner.MountSpec {
 // the real per-Box socket path once it knows the transport decision.
 func (a *bwrapAdapter) RegistryProxyTransport() (registrymanifest.Endpoint, bool, error) {
 	return registrymanifest.NewUnixEndpoint(""), false, nil
-}
-
-// isolateNet is the effective "cut off the host netns" decision (issue #2666,
-// ADR 0042): every NetworkMode except the explicit "host" opt-out isolates,
-// including the Go zero value and "no-host-loopback". The raw BwrapUnshareNet
-// knob can only force isolation on, already the default, and is kept for defense
-// in depth.
-func (a *bwrapAdapter) isolateNet() bool {
-	return a.unshareNet || a.networkMode != runner.NetworkModeHost
-}
-
-// pastaPath reports whether the isolated network namespace gets egress restored
-// via a pasta helper. networkMode="none" is the exception: fully offline, bare
-// --unshare-net, no helper, no egress at all.
-func (a *bwrapAdapter) pastaPath() bool {
-	return a.isolateNet() && a.networkMode != runner.NetworkModeNone
 }
 
 // pick returns override when non-empty, else baked. A ClosureGeneration with an
@@ -309,7 +291,6 @@ func (a *bwrapAdapter) snapshotDirFor(box runner.Box) string {
 // /etc/resolv.conf on the pasta path, since passwd/group are baked store paths
 // (issue #2663). Pasta is never part of this return value; see execTarget.
 func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
-	isolateNet := a.isolateNet()
 	var args []string
 	if a.nixConfigFile != "" && a.nixStoreWritable {
 		args = append(args, "--overlay-src", "/nix/store", "--tmp-overlay", "/nix/store")
@@ -335,11 +316,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 		args = append(args, "--ro-bind", a.nixConfigFileFor(box), "/etc/nix/nix.conf")
 		args = append(args, "--overlay-src", a.snapshotDirFor(box), "--tmp-overlay", "/nix/var")
 	}
-	if !isolateNet {
+	if !a.network.Isolate {
 		if err := statResolvConf(); err == nil {
 			args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
 		}
-	} else if a.pastaPath() {
+	} else if a.network.Pasta {
 		// Nothing else writes /etc/resolv.conf inside the guest, unlike the OCI
 		// runner where podman supplies one; Run writes this file pointed at
 		// pastaDNSForwardAddr before invoking bwrap.
@@ -401,7 +382,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 	// configures the fresh namespace (tap device, routes) for its COMMAND and
 	// then execs it there; bwrap must inherit that namespace rather than
 	// re-unshare a second, empty one on top of it (issue #2666).
-	if isolateNet && !a.pastaPath() {
+	if a.network.Isolate && !a.network.Pasta {
 		unshareFlags = append(unshareFlags, "--unshare-net")
 	}
 	args = append(args, unshareFlags...)
@@ -415,7 +396,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 }
 
 // execTarget computes the top-level host-exec'd program and argv for box's bwrap
-// invocation; pasta must be the outer process when pastaPath applies (see
+// invocation; pasta must be the outer process when network.Pasta applies (see
 // buildArgs' unshare-net comment). childExecsByName is true when that program
 // execs its own child by bare argv name via execvp, so Run must forward a PATH:
 // Go's exec.Command LookPath only ever resolves the top-level program itself.
@@ -423,7 +404,7 @@ func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box) (string, []stri
 	bwrapArgs := a.buildArgs(etcDir, box)
 	var program string
 	var args []string
-	if !a.pastaPath() {
+	if !a.network.Pasta {
 		program, args = "bwrap", bwrapArgs
 	} else {
 		pastaArgs := append([]string{}, pastaHardenedFlags...)
@@ -747,7 +728,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	}
 	defer os.RemoveAll(etcDir)
 
-	if a.pastaPath() {
+	if a.network.Pasta {
 		resolvConf := "nameserver " + pastaDNSForwardAddr + "\n"
 		if err := os.WriteFile(filepath.Join(etcDir, "resolv.conf"), []byte(resolvConf), 0o644); err != nil {
 			return err

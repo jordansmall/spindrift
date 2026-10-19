@@ -30,7 +30,7 @@ func (bwrapLifecycleHarness) adapter(t *testing.T, child func() *exec.Cmd) (*bwr
 		func() (string, error) { return "", nil },
 		func(string, ...string) *exec.Cmd { return child() },
 	)
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", networkMode: runner.NetworkModeHost}
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
 	return a, root
 }
 
