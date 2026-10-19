@@ -916,3 +916,19 @@ func TestPriorFindingsHeaderCountsListed(t *testing.T) {
 		t.Fatalf("head = %q, want a count of 2", s.head)
 	}
 }
+
+func TestStrategy_ParsePrior(t *testing.T) {
+	f := settle.PriorFinding{
+		Issue: forge.Issue{Number: "7", Body: "b", ClosedNotPlanned: true, Reopened: true},
+		Open:  true,
+		Terms: []string{"role:implement:avg-usd"},
+	}
+	want := Prior{Number: "7", Open: true, NotPlanned: true, Reopened: true, Metric: "avg-usd", Body: "b"}
+	if got := Strategy.ParsePrior(f); got != want {
+		t.Errorf("ParsePrior = %+v, want %+v", got, want)
+	}
+	f.Terms = nil
+	if got := Strategy.ParsePrior(f).(Prior); got.Metric != "" {
+		t.Errorf("Metric = %q, want empty without a pattern term", got.Metric)
+	}
+}

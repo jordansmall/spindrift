@@ -133,20 +133,14 @@ func (s recordsSource) NextDue(tip ledger.Tip, recent []ledger.Entry, now time.T
 func (s recordsSource) Stage() error { return nil }
 
 func (s recordsSource) Prepare(claim ledger.Tip) (prepared, error) {
-	findings, err := settle.TuningFindings(s.it)
+	findings, err := settle.PriorFindings(s.it, s.chore)
 	if err != nil {
 		fmt.Fprintf(s.warn, "    ?? %s: prior tuning findings: %v\n", s.chore, err)
 	}
 	prior := make([]tuning.Prior, 0, len(findings))
 	for _, f := range findings {
-		prior = append(prior, tuning.Prior{
-			Number:     f.Issue.Number,
-			Open:       f.Open,
-			NotPlanned: f.Issue.ClosedNotPlanned,
-			Reopened:   f.Issue.Reopened,
-			Metric:     f.Metric,
-			Body:       f.Issue.Body,
-		})
+		p := tuning.Strategy.ParsePrior(f).(tuning.Prior)
+		prior = append(prior, p)
 	}
 	dg := tuning.Render(s.records, claim.State.Cursor, s.claimedAt,
 		tuning.Limits{MinSample: s.policy.TuningMinSample, MaxBytes: s.policy.TuningDigestBytes}, prior, s.merged)

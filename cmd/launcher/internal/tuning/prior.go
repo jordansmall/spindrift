@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/recordstats"
 )
 
@@ -34,10 +35,9 @@ type Prior struct {
 	Body string
 }
 
-// MergeLookup reports whether the PR at prURL merged, and the commit it landed
-// as ("" when the forge cannot say). It is a forge round trip, so priorFindings
-// calls it at most once per listed finding.
-type MergeLookup func(prURL string) (commit string, ok bool)
+// MergeLookup reports whether the PR at prURL merged; priorFindings calls it at
+// most once per listed finding.
+type MergeLookup = recordsdigest.MergeLookup
 
 // priorFindings renders the newest PriorFindingsN findings of prior. A finding
 // whose closing work Dispatch merged, per its Record or per merged for a PR a

@@ -1,0 +1,91 @@
+package tuning
+
+import (
+	"slices"
+	"strings"
+
+	"spindrift.dev/launcher/internal/recordsdigest"
+	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/signalwire"
+)
+
+// Strategy is the tuning Chore's Digest (ADR 0070 decision 2). The host-side
+// bundle registers it; this package does not.
+var Strategy = recordsdigest.Strategy{
+	Name: "tuning",
+	Render: func(in recordsdigest.Input) recordsdigest.Output {
+		prior := make([]Prior, 0, len(in.Prior))
+		for _, p := range in.Prior {
+			prior = append(prior, p.(Prior))
+		}
+		d := Render(in.Records, in.Cursor, in.Now, in.Limits, prior, in.Merged)
+		return recordsdigest.Output{Text: d.Text, Latest: d.Latest}
+	},
+	ParsePrior: func(f settle.PriorFinding) any {
+		p := Prior{
+			Number:     f.Issue.Number,
+			Open:       f.Open,
+			NotPlanned: f.Issue.ClosedNotPlanned,
+			Reopened:   f.Issue.Reopened,
+			Body:       f.Issue.Body,
+		}
+		if len(f.Terms) > 0 {
+			t := f.Terms[0]
+			p.Metric = t[strings.LastIndex(t, ":")+1:]
+		}
+		return p
+	},
+	Validate: func(in signalwire.IssueIntent, digest string, lim recordsdigest.Limits, tracked func() (map[string]bool, error)) (string, error) {
+		// A tuning finding must trace back to rows the host served, so one with
+		// no cites at all fails like one citing an unknown anchor.
+		if len(in.Cites) == 0 {
+			return dropUnknownCite, nil
+		}
+		anchors := Anchors(digest)
+		for _, c := range in.Cites {
+			if !anchors[c] {
+				return dropUnknownCite, nil
+			}
+		}
+		files := settle.DedupFiles(in.DedupTerms)
+		if len(files) == 0 {
+			return dropMissingTarget, nil
+		}
+		set, err := tracked()
+		if err != nil {
+			return "", err
+		}
+		for _, f := range files {
+			if !set[f] {
+				return dropMissingTarget, nil
+			}
+		}
+		rows := Rows(digest)
+		if in.Class != evidenceGapClass && !slices.ContainsFunc(in.Cites, func(c string) bool { return rows[c].N >= lim.MinSample }) {
+			return dropThinEvidence, nil
+		}
+		return "", nil
+	},
+	// DedupTerms keys a finding on the pattern it names, one class:file:metric
+	// per file, not on the code site (ADR 0062 §6): two patterns on one prompt
+	// file stay distinct. It feeds only settle's dedup; f.DedupTerms stays the
+	// files, which the butler's backlink still reads.
+	DedupTerms: func(f settle.Finding) []string {
+		var terms []string
+		for _, file := range settle.DedupFiles(f.DedupTerms) {
+			terms = append(terms, f.Class+":"+file+":"+f.Metric)
+		}
+		return terms
+	},
+}
+
+// Drop reasons recorded in the Ledger for a tuning finding settle refused.
+const (
+	dropUnknownCite   = "unknown-cite"
+	dropMissingTarget = "missing-target"
+	dropThinEvidence  = "thin-evidence"
+)
+
+// evidenceGapClass is exempt from the sample floor: it reports a metric the
+// digest cannot yet support, so thin rows are its whole point.
+const evidenceGapClass = "evidence-gap"

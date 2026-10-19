@@ -4,10 +4,12 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/digestkit"
+	"spindrift.dev/launcher/internal/recordsdigest"
 )
 
 // TestDigestCorpus replays the Digest corpus under testdata/digest through
-// Render, pinning the digest text and the cursor it hands back (ADR 0070).
+// the tuning Strategy's Render, pinning the digest text and the cursor it
+// hands back (ADR 0070).
 func TestDigestCorpus(t *testing.T) {
 	digestkit.Run(t, renderDigest, "testdata/digest")
 }
@@ -19,13 +21,21 @@ func renderDigest(t testing.TB, c digestkit.Case) (text, latest string) {
 			t.Fatalf("tuning corpus: prior: %v", err)
 		}
 	}
-	var merged MergeLookup
+	in := recordsdigest.Input{
+		Records: c.Records,
+		Cursor:  c.Cursor,
+		Now:     c.Now,
+		Limits:  recordsdigest.Limits{MinSample: c.MinSample, MaxBytes: c.MaxBytes},
+	}
+	for _, p := range prior {
+		in.Prior = append(in.Prior, p)
+	}
 	if c.Merged != nil {
-		merged = func(prURL string) (string, bool) {
+		in.Merged = func(prURL string) (string, bool) {
 			commit, ok := c.Merged[prURL]
 			return commit, ok
 		}
 	}
-	d := Render(c.Records, c.Cursor, c.Now, Limits{MinSample: c.MinSample, MaxBytes: c.MaxBytes}, prior, merged)
-	return d.Text, d.Latest
+	out := Strategy.Render(in)
+	return out.Text, out.Latest
 }

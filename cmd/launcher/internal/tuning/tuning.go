@@ -44,6 +44,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/recordstats"
 )
 
@@ -94,15 +95,7 @@ func (r row) cells() (win, base, delta string) {
 }
 
 // Limits are the knobs a digest is rendered under.
-type Limits struct {
-	// MinSample marks a row thin when fewer window Records back it.
-	MinSample int
-	// MaxBytes caps the digest's size; zero or less means uncapped. Evidence
-	// is trimmed first, Outliers second, and Prior findings third, always from
-	// the tail; the aggregate tables are never trimmed, so a cap below them is
-	// exceeded.
-	MaxBytes int
-}
+type Limits = recordsdigest.Limits
 
 // Render builds the digest for the settled Records of records after cursor,
 // against a baseline of the settled Records before them claimed within
