@@ -5,11 +5,13 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // Blocking review finding on issue #3142: two routes naming the same UpstreamHost
-// (legal, e.g. one Artifactory host fronting separate npm and cargo prefixes)
+// (legal, e.g. one Artifactory host fronting separate registry prefixes)
 // cannot be told apart by ApplyInTreeBinding's host-only content match, so every
 // rewrite for the shared host is dropped rather than the first kept, while a
 // third route on a distinct host survives untouched.
@@ -127,13 +129,13 @@ func TestBindingSummaryProse_EmptyWhenNothingBound(t *testing.T) {
 // warnings and the repo-aware no-route warning rely on this shape to read as
 // operator prose rather than a raw comma-joined dump.
 func TestJoinProse(t *testing.T) {
-	if got, want := joinProse([]string{"cargo"}), "cargo"; got != want {
+	if got, want := joinProse([]string{"alpha"}), "alpha"; got != want {
 		t.Errorf("joinProse(1 item) = %q, want %q", got, want)
 	}
-	if got, want := joinProse([]string{"cargo", "npm"}), "cargo and npm"; got != want {
+	if got, want := joinProse([]string{"alpha", "beta"}), "alpha and beta"; got != want {
 		t.Errorf("joinProse(2 items) = %q, want %q", got, want)
 	}
-	if got, want := joinProse([]string{"cargo", "npm", "yarn"}), "cargo, npm, and yarn"; got != want {
+	if got, want := joinProse([]string{"alpha", "beta", "gamma"}), "alpha, beta, and gamma"; got != want {
 		t.Errorf("joinProse(3 items) = %q, want %q", got, want)
 	}
 }
@@ -141,13 +143,12 @@ func TestJoinProse(t *testing.T) {
 // Reviewer finding on issue #3142: a route whose UpstreamHost
 // buildIntreeHostRewrites already dropped as a collision must not survive
 // dropCollidedRoutes, since nothing on disk was ever rewritten to that route's
-// LocalURL. Cargo's exports-side analogue is covered by ecosystem's own package
-// tests (issue #3201).
+// LocalURL.
 func TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
 	routes := []registrymanifest.Route{
-		{Prefix: "r0", UpstreamHost: "shared.example", Ecosystems: ecosystem.CargoRouteBlock("collided-one")},
-		{Prefix: "r1", UpstreamHost: "shared.example", Ecosystems: ecosystem.CargoRouteBlock("collided-two")},
-		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: ecosystem.CargoRouteBlock("valid-registry")},
+		{Prefix: "r0", UpstreamHost: "shared.example", Ecosystems: stubRouteBlock("collided-one")},
+		{Prefix: "r1", UpstreamHost: "shared.example", Ecosystems: stubRouteBlock("collided-two")},
+		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: stubRouteBlock("valid-registry")},
 	}
 	_, collisions := buildIntreeHostRewrites(routes, 9999)
 
@@ -162,9 +163,9 @@ func TestDropCollidedRoutes_SkipsRouteWithCollidedUpstreamHost(t *testing.T) {
 // route must be dropped too.
 func TestDropCollidedRoutes_SkipsCaseVariantOfCollidedUpstreamHost(t *testing.T) {
 	routes := []registrymanifest.Route{
-		{Prefix: "r0", UpstreamHost: "artifactory.example.test", Ecosystems: ecosystem.CargoRouteBlock("collided-one")},
-		{Prefix: "r1", UpstreamHost: "ARTIFACTORY.example.test", Ecosystems: ecosystem.CargoRouteBlock("collided-two")},
-		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: ecosystem.CargoRouteBlock("valid-registry")},
+		{Prefix: "r0", UpstreamHost: "artifactory.example.test", Ecosystems: stubRouteBlock("collided-one")},
+		{Prefix: "r1", UpstreamHost: "ARTIFACTORY.example.test", Ecosystems: stubRouteBlock("collided-two")},
+		{Prefix: "r2", UpstreamHost: "distinct.example", Ecosystems: stubRouteBlock("valid-registry")},
 	}
 	_, collisions := buildIntreeHostRewrites(routes, 9999)
 
@@ -172,5 +173,13 @@ func TestDropCollidedRoutes_SkipsCaseVariantOfCollidedUpstreamHost(t *testing.T)
 
 	if len(filtered) != 1 || filtered[0].Prefix != "r2" {
 		t.Errorf("filtered = %+v, want exactly one surviving route (r2/distinct.example)", filtered)
+	}
+}
+
+// stubRouteBlock is a neutral per-ecosystem route declaration, standing in for
+// a real row's block where only the route's host matters.
+func stubRouteBlock(names ...string) registryvocab.RouteEcosystems {
+	return registryvocab.RouteEcosystems{
+		synthetic.Row.Name: registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue(names)},
 	}
 }
