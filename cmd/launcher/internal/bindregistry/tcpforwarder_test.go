@@ -113,8 +113,8 @@ func TestNewTCPForwarder_InvalidSecret(t *testing.T) {
 }
 
 // Go's SetURL rewrites the outbound Host, so the launcher proxy derived the
-// wrong Forwarder address for the cargo dl rewrite and every crate download
-// got a 401 (#3314). The inbound Host must survive the hop.
+// wrong Forwarder address for the download-URL rewrite and every artifact
+// download got a 401 (#3314). The inbound Host must survive the hop.
 func TestNewTCPForwarder_PreservesInboundHost(t *testing.T) {
 	const wantSecret = "s3cr3t-value"
 	const wantHost = "client.local:9999"

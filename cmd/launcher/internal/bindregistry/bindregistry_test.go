@@ -6,166 +6,83 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 )
 
-func TestClassify_Cargo(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Cargo.lock"), nil, 0o644); err != nil {
+// classifyRows are in precedence order: the synthetic row before a neutral second.
+var classifyRows = []ecosystem.Row{
+	synthetic.Row,
+	{Name: "second", LockfileNames: []string{"second.lock"}, Classification: "second-class"},
+}
+
+func writeEmpty(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-
-	got := Classify(dir)
-	if got != "cargo" {
-		t.Errorf("Classify(%q) = %q, want %q", dir, got, "cargo")
-	}
 }
 
-// The npm family sits ahead of go in the table (cargo, npm, yarn, pnpm, go,
-// gradle), so package-lock.json wins over go.sum. This is the only precedence
-// pair the table order actually decides.
-func TestClassify_NpmFamilyPrecedesGo(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "package-lock.json"), nil, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.sum"), nil, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	got := Classify(dir)
-	if got != "npm/pnpm/yarn" {
-		t.Errorf("Classify(%q) = %q, want %q", dir, got, "npm/pnpm/yarn")
-	}
-}
-
-func TestClassify_LockfileFamilies(t *testing.T) {
-	cases := []struct {
-		name     string
-		lockfile string
-		want     string
-	}{
-		{"npm", "package-lock.json", "npm/pnpm/yarn"},
-		{"yarn", "yarn.lock", "npm/pnpm/yarn"},
-		{"pnpm", "pnpm-lock.yaml", "npm/pnpm/yarn"},
-		{"go", "go.sum", "go mod"},
-		{"gradle build.gradle", "build.gradle", "gradle"},
-		{"gradle build.gradle.kts", "build.gradle.kts", "gradle"},
-		{"gradle settings.gradle", "settings.gradle", "gradle"},
-		{"gradle settings.gradle.kts", "settings.gradle.kts", "gradle"},
-		{"gradle gradle.lockfile", "gradle.lockfile", "gradle"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, tc.lockfile), nil, 0o644); err != nil {
-				t.Fatalf("WriteFile: %v", err)
-			}
-
-			got := Classify(dir)
-			if got != tc.want {
-				t.Errorf("Classify(%q) = %q, want %q", dir, got, tc.want)
-			}
-		})
-	}
-}
-
-// Classify walks ecosystem.Table directly, so this test guards drift without a
-// hand-mirrored map. It checks every lockfile name in a row, not just the
-// first, so gradle's five names are covered here rather than only in the
-// hand-maintained TestClassify_LockfileFamilies list.
-func TestClassify_MatchesEcosystemTable(t *testing.T) {
-	for _, row := range ecosystem.Table {
-		t.Run(row.Name, func(t *testing.T) {
-			if len(row.LockfileNames) == 0 {
-				t.Fatalf("row %q has no lockfile names", row.Name)
-			}
-			for _, lockfile := range row.LockfileNames {
-				t.Run(lockfile, func(t *testing.T) {
-					dir := t.TempDir()
-					if err := os.WriteFile(filepath.Join(dir, lockfile), nil, 0o644); err != nil {
-						t.Fatalf("WriteFile: %v", err)
-					}
-
-					got := Classify(dir)
-					if got != row.Classification {
-						t.Errorf("Classify(%q) = %q, want %q", dir, got, row.Classification)
-					}
-				})
-			}
-		})
-	}
-}
-
-func TestClassify_NoLockfile(t *testing.T) {
+func TestClassifyRows_NoLockfile(t *testing.T) {
 	dir := t.TempDir()
 
-	got := Classify(dir)
-	if got != "" {
-		t.Errorf("Classify(%q) = %q, want empty", dir, got)
+	if got := ClassifyRows(dir, classifyRows); got != "" {
+		t.Errorf("ClassifyRows(%q) = %q, want empty", dir, got)
 	}
 }
 
-// Table order decides the winner when several lockfiles are present, not
-// alphabetical or map iteration order: cargo comes first, so it beats go.sum.
-func TestClassify_Precedence(t *testing.T) {
+// Row order decides the winner when several lockfiles are present, not
+// alphabetical or map iteration order: "second.lock" sorts before
+// "synthetic.lock" yet loses to it, and the reversed rows must flip the result.
+func TestClassifyRows_Precedence(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "Cargo.lock"), nil, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.sum"), nil, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	writeEmpty(t, dir, "synthetic.lock")
+	writeEmpty(t, dir, "second.lock")
 
-	got := Classify(dir)
-	if got != "cargo" {
-		t.Errorf("Classify(%q) = %q, want %q", dir, got, "cargo")
+	if got := ClassifyRows(dir, classifyRows); got != "synthetic" {
+		t.Errorf("ClassifyRows = %q, want %q", got, "synthetic")
+	}
+	reversed := []ecosystem.Row{classifyRows[1], classifyRows[0]}
+	if got := ClassifyRows(dir, reversed); got != "second-class" {
+		t.Errorf("ClassifyRows(reversed rows) = %q, want %q", got, "second-class")
 	}
 }
 
 // The self-referential symlink makes os.Stat fail with ELOOP rather than
-// ENOENT. Classify skips such an entry like any other non-match instead of
+// ENOENT. ClassifyRows skips such an entry like any other non-match instead of
 // treating it as fatal, mirroring bash's `[ -f ]`, which is false on any
 // stat failure.
-func TestClassify_SkipsUnstatableLockfile(t *testing.T) {
+func TestClassifyRows_SkipsUnstatableLockfile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.sum"), nil, 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := os.Symlink("Cargo.lock", filepath.Join(dir, "Cargo.lock")); err != nil {
+	writeEmpty(t, dir, "second.lock")
+	if err := os.Symlink("synthetic.lock", filepath.Join(dir, "synthetic.lock")); err != nil {
 		t.Fatalf("Symlink: %v", err)
 	}
 
-	got := Classify(dir)
-	if got != "go mod" {
-		t.Errorf("Classify(%q) = %q, want %q", dir, got, "go mod")
+	if got := ClassifyRows(dir, classifyRows); got != "second-class" {
+		t.Errorf("ClassifyRows(%q) = %q, want %q", dir, got, "second-class")
 	}
 }
 
-// A directory named after a lockfile glob must never classify as that
-// ecosystem, pinning the old shell chain's `[ -f ]` semantics: only a regular
-// file matches.
-func TestClassify_IgnoresDirectory(t *testing.T) {
+// A directory named after a lockfile must never classify as that ecosystem,
+// pinning the old shell chain's `[ -f ]` semantics: only a regular file
+// matches.
+func TestClassifyRows_IgnoresDirectory(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "go.sum"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "synthetic.lock"), 0o755); err != nil {
 		t.Fatalf("Mkdir: %v", err)
 	}
 
-	got := Classify(dir)
-	if got != "" {
-		t.Errorf("Classify(%q) = %q, want empty (directory must not classify)", dir, got)
+	if got := ClassifyRows(dir, classifyRows); got != "" {
+		t.Errorf("ClassifyRows(%q) = %q, want empty (directory must not classify)", dir, got)
 	}
 }
 
 // ClassifyRows reads only the rows it is handed, so a row proves its own
-// lockfile classification without ecosystem.Table.
+// lockfile classification.
 func TestClassifyRows_UsesOnlyTheGivenRows(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"Cargo.lock", "own.lock"} {
-		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-	}
+	writeEmpty(t, dir, "synthetic.lock")
+	writeEmpty(t, dir, "own.lock")
 	own := ecosystem.Row{Name: "own", LockfileNames: []string{"own.lock"}, Classification: "own"}
 
 	if got := ClassifyRows(dir, []ecosystem.Row{own}); got != "own" {
