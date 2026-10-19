@@ -1,0 +1,3 @@
+main = https://one.example.test/a/
+mirror = http://two-mirror.example.test:8080
+bad = ftp://skipped.example.test/x
