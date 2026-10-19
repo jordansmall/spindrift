@@ -1,15 +1,20 @@
 {
   "lastSwept": "7fabea977b9dbe3d559a32d1abcb7d285321a56e",
   "cursor": "cmd/launcher/internal/driver/pi/testdata/corpus/reviewer-verdict/resolve-exit.golden.json",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-19T11:09:10.12587092-04:00"
+  },
   "usage": {
-    "input_tokens": 58,
-    "output_tokens": 11728,
-    "cache_read_input_tokens": 1841397,
-    "cache_creation_input_tokens": 82845,
-    "total_cost_usd": 1.2658313999999997,
-    "duration_ms": 177370,
-    "duration_api_ms": 174676,
-    "num_turns": 30
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
