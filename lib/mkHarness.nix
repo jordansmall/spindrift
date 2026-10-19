@@ -910,9 +910,9 @@ let
   spindriftVersion = (builtins.fromJSON (builtins.readFile ../.release-please-manifest.json)).".";
 
   # internal/forge's own Go files without its backend subpackages (github,
-  # forgejo, ...): the Box's import closure reaches only the shared verdict
-  # vocabulary at the top level (promptassembly, issue #4159), and the
-  # subpackages would drag in seambundle and the host-side REST clients.
+  # forgejo, ...): the top level carries the shared verdict vocabulary
+  # (promptassembly, issue #4159). The backends the Bundle links come in
+  # through backendBundleFiles.
   forgeTopLevelFiles = lib.fileset.unions (
     lib.mapAttrsToList (n: _: ../cmd/launcher/internal/forge + "/${n}") (
       lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".go" n && !lib.hasSuffix "_test.go" n) (
@@ -928,6 +928,34 @@ let
   driverTreeFiles = lib.fileset.difference (lib.fileset.fileFilter (
     f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
   ) ../cmd/launcher/internal/driver) ../cmd/launcher/internal/driver/driverkit/conformance;
+
+  # The Bundle in driverTreeFiles registers the Backend Strategies too (ADR
+  # 0068), so every fileset carrying it also needs the backend adapters and
+  # their internal import closure: `go mod vendor` loads every package in the
+  # tree. A backend edit therefore changes the in-box binaries' drvPaths.
+  backendBundleFiles = lib.fileset.unions (
+    map
+      (
+        d:
+        lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) (
+          ../cmd/launcher/internal + "/${d}"
+        )
+      )
+      [
+        "backendkit"
+        "flock"
+        "forge/bundlerelay"
+        "forge/forgejo"
+        "forge/git"
+        "forge/github"
+        "forge/gitplumbing"
+        "forge/jira"
+        "forge/local"
+        "forge/rest"
+        "gitexec"
+        "seambundle"
+      ]
+  );
 
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
   # inside the Project devShell, tees the stream to a log path, and filters
@@ -952,6 +980,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/driver-exec)
         driverTreeFiles
+        backendBundleFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
@@ -1088,6 +1117,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/boxclone)
         driverTreeFiles
+        backendBundleFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/landdelta)
@@ -1174,6 +1204,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/orchestrator)
         driverTreeFiles
+        backendBundleFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
