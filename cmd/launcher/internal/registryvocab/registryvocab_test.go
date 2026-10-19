@@ -36,7 +36,7 @@ func TestPathSet_Admits(t *testing.T) {
 		{"exact match", PathSet{"/index"}, "/index", true},
 		{"segment boundary child", PathSet{"/index"}, "/index/config.json", true},
 		{"segment boundary rejects suffix collision", PathSet{"/index"}, "/indexfoo", false},
-		{"nested child", PathSet{"/npm/registry"}, "/npm/registry/pkg/tarball", true},
+		{"nested child", PathSet{"/synthetic/registry"}, "/synthetic/registry/pkg/tarball", true},
 		{"trailing slash cleans to the root", PathSet{"/index"}, "/index/", true},
 		{"dot segment cleans away", PathSet{"/index"}, "/index/./config.json", true},
 		{"parent of the root is not admitted", PathSet{"/artifactory/index"}, "/artifactory", false},
@@ -52,10 +52,10 @@ func TestPathSet_Admits(t *testing.T) {
 		{"empty set admits nothing", PathSet{}, "/index", false},
 		{"empty set refuses the root itself", PathSet{}, "/", false},
 		{"empty set refuses a deep path", PathSet{}, "/api/v1/token", false},
-		{"root subtree admits a scoped npm tarball path", PathSet{"/"}, "/@myorg/pkg/-/pkg-1.0.0.tgz", true},
+		{"root subtree admits a scoped tarball path", PathSet{"/"}, "/@myorg/pkg/-/pkg-1.0.0.tgz", true},
 		{"empty path refused", PathSet{"/index"}, "", false},
-		{"second root in a multi-root set matches", PathSet{"/npm", "/index"}, "/index/config.json", true},
-		{"unrelated path outside a multi-root set is refused", PathSet{"/npm", "/index"}, "/api/token", false},
+		{"second root in a multi-root set matches", PathSet{"/synthetic", "/index"}, "/index/config.json", true},
+		{"unrelated path outside a multi-root set is refused", PathSet{"/synthetic", "/index"}, "/api/token", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -94,13 +94,13 @@ func TestIsValidHeaderFieldName(t *testing.T) {
 }
 
 func TestSubtree_JSONRoundTrip(t *testing.T) {
-	s := Subtree{Ecosystem: "npm", Path: "/npm", RegistryName: "internal"}
+	s := Subtree{Ecosystem: "synthetic", Path: "/synthetic", RegistryName: "internal"}
 
 	encoded, err := json.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"ecosystem":"npm","path":"/npm"}`
+	const want = `{"ecosystem":"synthetic","path":"/synthetic"}`
 	if string(encoded) != want {
 		t.Errorf("json.Marshal(%+v) = %s, want %s", s, encoded, want)
 	}

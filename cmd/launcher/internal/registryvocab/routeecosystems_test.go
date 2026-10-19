@@ -12,33 +12,33 @@ func TestRouteEcosystems_Path(t *testing.T) {
 		want string
 	}{
 		"present": {
-			r:    RouteEcosystems{"go": RouteDeclaration{RouteDeclarationPathKey: "/go-remote"}},
-			eco:  "go",
-			want: "/go-remote",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{RouteDeclarationPathKey: "/synthetic-remote"}},
+			eco:  "synthetic",
+			want: "/synthetic-remote",
 		},
 		"absent ecosystem": {
-			r:    RouteEcosystems{"go": RouteDeclaration{RouteDeclarationPathKey: "/go-remote"}},
-			eco:  "gradle",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{RouteDeclarationPathKey: "/synthetic-remote"}},
+			eco:  "other",
 			want: "",
 		},
 		"absent key": {
-			r:    RouteEcosystems{"go": RouteDeclaration{}},
-			eco:  "go",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{}},
+			eco:  "synthetic",
 			want: "",
 		},
 		"wrong type": {
-			r:    RouteEcosystems{"go": RouteDeclaration{RouteDeclarationPathKey: 42}},
-			eco:  "go",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{RouteDeclarationPathKey: 42}},
+			eco:  "synthetic",
 			want: "",
 		},
 		"empty string": {
-			r:    RouteEcosystems{"go": RouteDeclaration{RouteDeclarationPathKey: ""}},
-			eco:  "go",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{RouteDeclarationPathKey: ""}},
+			eco:  "synthetic",
 			want: "",
 		},
 		"nil receiver": {
 			r:    nil,
-			eco:  "go",
+			eco:  "synthetic",
 			want: "",
 		},
 	}
@@ -60,33 +60,33 @@ func TestRouteEcosystems_Strings(t *testing.T) {
 		want []string
 	}{
 		"happy path": {
-			r:    RouteEcosystems{"cargo": RouteDeclaration{"registries": []any{"internal", "crates-remote"}}},
-			eco:  "cargo",
-			key:  "registries",
-			want: []string{"internal", "crates-remote"},
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{"widgets": []any{"alpha", "beta"}}},
+			eco:  "synthetic",
+			key:  "widgets",
+			want: []string{"alpha", "beta"},
 		},
 		"absent key": {
-			r:    RouteEcosystems{"cargo": RouteDeclaration{}},
-			eco:  "cargo",
-			key:  "registries",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{}},
+			eco:  "synthetic",
+			key:  "widgets",
 			want: nil,
 		},
 		"non-array value": {
-			r:    RouteEcosystems{"cargo": RouteDeclaration{"registries": "internal"}},
-			eco:  "cargo",
-			key:  "registries",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{"widgets": "alpha"}},
+			eco:  "synthetic",
+			key:  "widgets",
 			want: nil,
 		},
 		"array with non-string element": {
-			r:    RouteEcosystems{"cargo": RouteDeclaration{"registries": []any{"internal", 7}}},
-			eco:  "cargo",
-			key:  "registries",
+			r:    RouteEcosystems{"synthetic": RouteDeclaration{"widgets": []any{"alpha", 7}}},
+			eco:  "synthetic",
+			key:  "widgets",
 			want: nil,
 		},
 		"nil receiver": {
 			r:    nil,
-			eco:  "cargo",
-			key:  "registries",
+			eco:  "synthetic",
+			key:  "widgets",
 			want: nil,
 		},
 	}
@@ -107,10 +107,10 @@ func TestRouteEcosystems_Strings(t *testing.T) {
 }
 
 func TestStringsValue_RoundTripsThroughStrings(t *testing.T) {
-	values := []string{"internal", "crates-remote"}
-	r := RouteEcosystems{"cargo": RouteDeclaration{"registries": StringsValue(values)}}
+	values := []string{"alpha", "beta"}
+	r := RouteEcosystems{"synthetic": RouteDeclaration{"widgets": StringsValue(values)}}
 
-	got := r.Strings("cargo", "registries")
+	got := r.Strings("synthetic", "widgets")
 	if len(got) != len(values) {
 		t.Fatalf("Strings after StringsValue = %#v, want %#v", got, values)
 	}
@@ -132,8 +132,8 @@ func TestStringsValue_EmptyInputIsNil(t *testing.T) {
 
 func TestRouteEcosystems_JSONRoundTrip(t *testing.T) {
 	original := RouteEcosystems{
-		"go":    RouteDeclaration{RouteDeclarationPathKey: "/go-remote"},
-		"cargo": RouteDeclaration{"registries": StringsValue([]string{"internal", "crates-remote"})},
+		"synthetic": RouteDeclaration{RouteDeclarationPathKey: "/synthetic-remote"},
+		"other":     RouteDeclaration{"widgets": StringsValue([]string{"alpha", "beta"})},
 	}
 
 	data, err := json.Marshal(original)
@@ -146,27 +146,27 @@ func TestRouteEcosystems_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if got, want := decoded.Path("go"), "/go-remote"; got != want {
-		t.Errorf("decoded.Path(go) = %q, want %q", got, want)
+	if got, want := decoded.Path("synthetic"), "/synthetic-remote"; got != want {
+		t.Errorf("decoded.Path(synthetic) = %q, want %q", got, want)
 	}
 
-	gotRegistries := decoded.Strings("cargo", "registries")
-	wantRegistries := []string{"internal", "crates-remote"}
-	if len(gotRegistries) != len(wantRegistries) {
-		t.Fatalf("decoded.Strings(cargo, registries) = %#v, want %#v", gotRegistries, wantRegistries)
+	gotWidgets := decoded.Strings("other", "widgets")
+	wantWidgets := []string{"alpha", "beta"}
+	if len(gotWidgets) != len(wantWidgets) {
+		t.Fatalf("decoded.Strings(other, widgets) = %#v, want %#v", gotWidgets, wantWidgets)
 	}
-	for i := range gotRegistries {
-		if gotRegistries[i] != wantRegistries[i] {
-			t.Fatalf("decoded.Strings(cargo, registries) = %#v, want %#v", gotRegistries, wantRegistries)
+	for i := range gotWidgets {
+		if gotWidgets[i] != wantWidgets[i] {
+			t.Fatalf("decoded.Strings(other, widgets) = %#v, want %#v", gotWidgets, wantWidgets)
 		}
 	}
 }
 
 func TestRouteDeclarationKeyLabel(t *testing.T) {
-	if got, want := RouteDeclarationKeyLabel("go", RouteDeclarationPathKey), "ecosystems.go.path"; got != want {
-		t.Errorf("RouteDeclarationKeyLabel(go, path) = %q, want %q", got, want)
+	if got, want := RouteDeclarationKeyLabel("synthetic", RouteDeclarationPathKey), "ecosystems.synthetic.path"; got != want {
+		t.Errorf("RouteDeclarationKeyLabel(synthetic, path) = %q, want %q", got, want)
 	}
-	if got, want := RouteDeclarationKeyLabel("cargo", "registries"), "ecosystems.cargo.registries"; got != want {
-		t.Errorf("RouteDeclarationKeyLabel(cargo, registries) = %q, want %q", got, want)
+	if got, want := RouteDeclarationKeyLabel("other", "widgets"), "ecosystems.other.widgets"; got != want {
+		t.Errorf("RouteDeclarationKeyLabel(other, widgets) = %q, want %q", got, want)
 	}
 }
