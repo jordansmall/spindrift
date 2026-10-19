@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -334,53 +333,43 @@ func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 // only in BuildMountSpecs, never duplicated in an adapter file. The
 // driver-cache gate has no unique string to pin, since its rationale comment
 // legitimately differs per adapter, so this pins the two mounts that carry
-// operator messages.
-func TestAdaptersRenderOnly_NoDuplicatedMountDecisions(t *testing.T) {
+// operator messages. The oci half lives in the oci package.
+func TestAdapterRendersOnly_NoDuplicatedMountDecisions(t *testing.T) {
 	markers := []string{
 		"SPINDRIFT_PROMPT_DIR set",
 		"SPINDRIFT_SKILLS_DIR set",
 	}
-	for _, path := range []string{"oci.go", "bwrap.go"} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		for _, marker := range markers {
-			if strings.Contains(string(data), marker) {
-				t.Errorf("%s contains mount-decision marker %q; operator messages must come from the shared BuildMountSpecs, not be duplicated in the adapter", path, marker)
-			}
+	data, err := os.ReadFile("bwrap.go")
+	if err != nil {
+		t.Fatalf("read bwrap.go: %v", err)
+	}
+	for _, marker := range markers {
+		if strings.Contains(string(data), marker) {
+			t.Errorf("bwrap.go contains mount-decision marker %q; operator messages must come from the shared BuildMountSpecs, not be duplicated in the adapter", marker)
 		}
 	}
 }
 
-// The same mount config reaches both backends by construction: add or remove a
-// spec and both adapters follow, because both render the same BuildMountSpecs
-// list.
-func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
+// The same mount config reaches both backends by construction: both render the
+// same BuildMountSpecs list. The oci half lives in the oci package.
+func TestMountSpecs_RenderedByBwrap(t *testing.T) {
 	promptDir := t.TempDir()
 	skillsDir := t.TempDir()
 	cacheDir := t.TempDir()
 	proxySocket := runnertest.NewTestSocket(t, "registry-proxy.sock")
 
-	mp := MountParams{
-		PromptDir:             promptDir,
-		SkillsDir:             skillsDir,
-		DriverSessionCacheDir: "/home/agent/.claude/projects",
-	}
-	oci := &ociAdapter{
-		cli:         "podman",
-		image:       "spindrift:test",
-		mountParams: mp,
-	}
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   mp,
+		mountParams: MountParams{
+			PromptDir:             promptDir,
+			SkillsDir:             skillsDir,
+			DriverSessionCacheDir: "/home/agent/.claude/projects",
+		},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: cacheDir, Sockets: []SocketMount{{Source: proxySocket, Target: RegistryProxySocketTarget}}}
 
-	ociArgs := strings.Join(oci.buildRunArgs(box), " ")
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
 
 	for _, mount := range []struct{ source, target string }{
@@ -389,9 +378,6 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 		{cacheDir, "/home/agent/.claude/projects"},
 		{proxySocket, "/registry-proxy.sock"},
 	} {
-		if !strings.Contains(ociArgs, mount.source+":"+mount.target) {
-			t.Errorf("OCI missing mount %s -> %s in args: %s", mount.source, mount.target, ociArgs)
-		}
 		if !strings.Contains(bwrapArgs, mount.source+" "+mount.target) {
 			t.Errorf("bwrap missing mount %s -> %s in args: %s", mount.source, mount.target, bwrapArgs)
 		}
@@ -399,35 +385,21 @@ func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 }
 
 // ADR 0033, issue #1697: the Accumulation-repo and outbox mounts must reach
-// both backends the same way the other mounts do.
-func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
+// the bwrap backend the same way the other mounts do.
+func TestLocalCodeForgeMounts_RenderedByBwrap(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
 
-	mp := MountParams{HostMediatedRemote: true, AccumulationRepoDir: repoDir}
-	oci := &ociAdapter{
-		cli:         "podman",
-		image:       "spindrift:test",
-		mountParams: mp,
-	}
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   mp,
+		mountParams:   MountParams{HostMediatedRemote: true, AccumulationRepoDir: repoDir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	ociArgSlice := oci.buildRunArgs(box)
-	ociArgs := strings.Join(ociArgSlice, " ")
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
 
-	if !slices.Contains(ociArgSlice, repoDir+":/repo:ro") {
-		t.Errorf("OCI missing read-only /repo mount in args: %s", ociArgs)
-	}
-	if !slices.Contains(ociArgSlice, outboxDir+":/outbox") {
-		t.Errorf("OCI missing writable /outbox mount in args: %s", ociArgs)
-	}
 	if !strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
 		t.Errorf("bwrap missing read-only /repo mount in args: %s", bwrapArgs)
 	}
@@ -436,67 +408,45 @@ func TestLocalCodeForgeMounts_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	}
 }
 
-// Issue #3957: the writable /outbox mount reaches both backends whenever
+// Issue #3957: the writable /outbox mount reaches the bwrap backend whenever
 // Box.OutboxDir is set, whatever MountParams says, with no /repo mount since
 // HostMediatedRemote is unset here.
-func TestOutboxMount_RenderedIdenticallyAcrossBackends(t *testing.T) {
+func TestOutboxMount_RenderedByBwrap(t *testing.T) {
 	outboxDir := t.TempDir()
 
-	mp := MountParams{}
-	oci := &ociAdapter{
-		cli:         "podman",
-		image:       "spindrift:test",
-		mountParams: mp,
-	}
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   mp,
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	ociArgSlice := oci.buildRunArgs(box)
-	ociArgs := strings.Join(ociArgSlice, " ")
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
 
-	if !slices.Contains(ociArgSlice, outboxDir+":/outbox") {
-		t.Errorf("OCI missing writable /outbox mount in args: %s", ociArgs)
-	}
 	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
 		t.Errorf("bwrap missing writable /outbox mount in args: %s", bwrapArgs)
 	}
-	if strings.Contains(ociArgs, "/repo") || strings.Contains(bwrapArgs, "/repo") {
-		t.Errorf("unexpected /repo mount for HostMediatedRemote=false: oci=%s bwrap=%s", ociArgs, bwrapArgs)
+	if strings.Contains(bwrapArgs, "/repo") {
+		t.Errorf("unexpected /repo mount for HostMediatedRemote=false: bwrap=%s", bwrapArgs)
 	}
 }
 
-// The Accumulation-repo dir is present on purpose, so this pins that neither
-// adapter leaks the /repo mount through its own render path when
+// The Accumulation-repo dir is present on purpose, so this pins that the
+// adapter does not leak the /repo mount through its own render path when
 // HostMediatedRemote is false.
-func TestLocalCodeForgeMounts_AbsentOnNonLocalBackends(t *testing.T) {
+func TestLocalCodeForgeMounts_AbsentOnNonLocalBwrap(t *testing.T) {
 	repoDir := t.TempDir()
 
-	mp := MountParams{AccumulationRepoDir: repoDir}
-	oci := &ociAdapter{
-		cli:         "podman",
-		image:       "spindrift:test",
-		mountParams: mp,
-	}
 	bwrap := &bwrapAdapter{
 		agentFiles:    t.TempDir(),
 		agentEnv:      "/fake/env",
 		bakedPrefetch: "echo ok",
-		mountParams:   mp,
+		mountParams:   MountParams{AccumulationRepoDir: repoDir},
 	}
 	box := Box{Name: "agent-issue-1", Env: map[string]string{}}
 
-	ociArgSlice := oci.buildRunArgs(box)
 	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
 
-	if slices.Contains(ociArgSlice, repoDir+":/repo:ro") {
-		t.Errorf("OCI must not mount /repo with HostMediatedRemote=false: %s", strings.Join(ociArgSlice, " "))
-	}
 	if strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
 		t.Errorf("bwrap must not mount /repo with HostMediatedRemote=false: %s", bwrapArgs)
 	}

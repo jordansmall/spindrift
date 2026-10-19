@@ -1,6 +1,8 @@
-// Package runner manages agent sandbox life-cycles. An OCI adapter drives
-// podman/docker and a bwrap adapter drives bubblewrap; both implement Runner
-// so the orchestration loop never branches on runtime.
+// Package runner manages agent sandbox life-cycles. It holds the Runner
+// contract, the shared Box and Config, and the mount plan; the OCI adapter
+// (podman/docker) lives in the oci subpackage and the bubblewrap adapter
+// here, both implementing Runner so the orchestration loop never branches on
+// runtime.
 package runner
 
 import (
@@ -115,28 +117,6 @@ type SignalSocketLocation struct {
 	// explicit --add-host <host>:host-gateway mapping, mirroring
 	// RegistryProxyLocation.TCPAddHost.
 	TCPAddHost bool
-}
-
-// addHostTargets returns the distinct TCP hosts needing an explicit
-// --add-host <host>:host-gateway mapping, in registry-proxy-then-Signal-socket
-// order, skipping a duplicate when both resolve to the same host (they share
-// one transport verdict, so that is the normal TCP case).
-func addHostTargets(box Box) []string {
-	var hosts []string
-	add := func(want bool, host string) {
-		if !want {
-			return
-		}
-		for _, h := range hosts {
-			if h == host {
-				return
-			}
-		}
-		hosts = append(hosts, host)
-	}
-	add(box.RegistryProxy.TCPAddHost, box.RegistryProxy.Endpoint.Host())
-	add(box.SignalSocket.TCPAddHost, box.SignalSocket.Endpoint.Host())
-	return hosts
 }
 
 // Runner manages agent sandbox life-cycles for one runtime.

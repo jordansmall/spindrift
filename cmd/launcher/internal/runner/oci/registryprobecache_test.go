@@ -1,4 +1,4 @@
-package runner
+package oci
 
 import (
 	"encoding/json"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/runner"
 )
 
 func TestRegistryProbeCache_RoundTripUnix(t *testing.T) {
@@ -184,7 +185,7 @@ func TestRegistryProbeCache_MissTCPEmptyHost(t *testing.T) {
 // host-loopback-denying NETWORK_MODE must still miss: the live probe refuses
 // that combination and the cache must not replay what the probe never could.
 func TestRegistryProbeCache_MissTCPUnderDeniedHostLoopback(t *testing.T) {
-	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
+	for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
 		t.Run(string(mode), func(t *testing.T) {
 			dir := t.TempDir()
 			key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: mode}

@@ -1,6 +1,6 @@
 //go:build integration
 
-package runner
+package oci
 
 import (
 	"bytes"
@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // integrationTestImage is a throwaway probe image. It never runs the real
@@ -69,7 +71,7 @@ func newIntegrationOCIAdapter(cli string) *ociAdapter {
 // ociProbeArgs reuses the real buildRunArgs output so every hardening and env
 // flag reaches the runtime exactly as production sends it, swapping only the
 // fixed image and entrypoint tail for integrationTestImage running script.
-func ociProbeArgs(a *ociAdapter, box Box, script string) []string {
+func ociProbeArgs(a *ociAdapter, box runner.Box, script string) []string {
 	args := a.buildRunArgs(box)
 	args = args[:len(args)-2] // drop image + "/agent/entrypoint.sh"
 	return append(args, a.image, "sh", "-c", script)
@@ -134,7 +136,7 @@ func statusField(t *testing.T, out []byte, prefix string) string {
 func TestOCIIntegration_CapabilitiesDropped(t *testing.T) {
 	cli := requireRealOCI(t)
 	a := newIntegrationOCIAdapter(cli)
-	box := Box{Name: integrationContainerName(t), Env: map[string]string{}}
+	box := runner.Box{Name: integrationContainerName(t), Env: map[string]string{}}
 	t.Cleanup(func() { _ = exec.Command(cli, "rm", "-f", box.Name).Run() })
 
 	args := ociProbeArgs(a, box, "grep ^CapEff /proc/self/status")
@@ -149,7 +151,7 @@ func TestOCIIntegration_CapabilitiesDropped(t *testing.T) {
 func TestOCIIntegration_NoNewPrivileges(t *testing.T) {
 	cli := requireRealOCI(t)
 	a := newIntegrationOCIAdapter(cli)
-	box := Box{Name: integrationContainerName(t), Env: map[string]string{}}
+	box := runner.Box{Name: integrationContainerName(t), Env: map[string]string{}}
 	t.Cleanup(func() { _ = exec.Command(cli, "rm", "-f", box.Name).Run() })
 
 	args := ociProbeArgs(a, box, "grep ^NoNewPrivs /proc/self/status")
@@ -166,7 +168,7 @@ func TestOCIIntegration_SecretNotOnContainerProcessArgv(t *testing.T) {
 	cli := requireRealOCI(t)
 	const marker = "spindrift-integration-secret-9f3c2a"
 	a := newIntegrationOCIAdapter(cli)
-	box := Box{Name: integrationContainerName(t), Env: map[string]string{"GH_TOKEN": marker}}
+	box := runner.Box{Name: integrationContainerName(t), Env: map[string]string{"GH_TOKEN": marker}}
 	t.Cleanup(func() { _ = exec.Command(cli, "rm", "-f", box.Name).Run() })
 
 	args := ociProbeArgs(a, box, "cat /proc/self/cmdline")

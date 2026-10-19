@@ -11,7 +11,7 @@ const (
 
 	// NetworkModeHost is a bwrap-only opt-out (issue #2666) that restores
 	// sharing the host's network namespace. It has no OCI rendering:
-	// oci.go's networkArg() default case treats it like "open".
+	// the oci adapter's networkArg method treats it like "open".
 	NetworkModeHost NetworkMode = "host"
 )
 

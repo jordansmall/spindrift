@@ -1,4 +1,4 @@
-package runner
+package oci
 
 import (
 	"crypto/sha256"

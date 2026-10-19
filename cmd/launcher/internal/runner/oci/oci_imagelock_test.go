@@ -1,4 +1,4 @@
-package runner
+package oci
 
 import (
 	"os/exec"
@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -48,16 +49,16 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 	// releases — scripted present, standing in for "the winner finished".
 	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 0})
 
-	origExec := ExecCommand
+	origExec := runner.ExecCommand
 	nixInvoked := false
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		// Never actually reached in the passing case (the loser must not
 		// build at all); if a regression does reach it, run a harmless
 		// no-op rather than a real "nix build" against a fake .drv path.
 		nixInvoked = true
 		return exec.Command("true")
 	}
-	t.Cleanup(func() { ExecCommand = origExec })
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 
 	a := &ociAdapter{cli: cliScript, image: image, imageDrv: "/nix/store/fake.drv"}
 
@@ -116,13 +117,13 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 	)
 
 	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
+	origExec := runner.ExecCommand
 	var gotName string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(nixScript, args...)
 	}
-	t.Cleanup(func() { ExecCommand = origExec })
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 
 	a := &ociAdapter{
 		cli:          cliScript,
@@ -167,11 +168,11 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 	)
 
 	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := ExecCommand
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := runner.ExecCommand
+	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(nixScript, args...)
 	}
-	t.Cleanup(func() { ExecCommand = origExec })
+	t.Cleanup(func() { runner.ExecCommand = origExec })
 
 	a := &ociAdapter{
 		cli:          cliScript,
