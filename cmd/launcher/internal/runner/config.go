@@ -11,7 +11,7 @@ const (
 
 	// NetworkModeHost is a bwrap-only opt-out (issue #2666) that restores
 	// sharing the host's network namespace. It has no OCI rendering:
-	// the oci adapter's networkArg method treats it like "open".
+	// Config.OCINetwork resolves it like "open".
 	NetworkModeHost NetworkMode = "host"
 )
 
@@ -42,7 +42,7 @@ type Config struct {
 
 	// PodmanNetwork is the raw --network escape hatch; NetworkMode is the
 	// NETWORK_MODE knob. nix eval-rejects setting both (lib/mkHarness.nix
-	// networkModeCoherenceOk), but the adapters still pick a deterministic
+	// networkModeCoherenceOk), but Config.OCINetwork still picks a deterministic
 	// winner (raw) since Go cannot observe that invariant.
 	PodmanNetwork string
 	NetworkMode   NetworkMode
