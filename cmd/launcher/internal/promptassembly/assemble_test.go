@@ -4308,7 +4308,7 @@ func TestAssembleUngatedRowRendersUnconditionally(t *testing.T) {
 }
 
 // An axis row reads fragments/<backend>/<fragment> for the active tracker or
-// forge; a backend without the file renders empty rather than failing, a gate
+// forge, picked by the axis signal rather than the backend name; a folder without the file renders empty rather than failing, a gate
 // still applies, and an unset backend takes the default.
 func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
 	dir := t.TempDir()
@@ -4319,7 +4319,6 @@ func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
 		"fragments/forgejo/step.md":   "forgejo-step\n",
 		"fragments/forgejo/other.md":  "forgejo-other\n",
 		"fragments/github/forge-s.md": "github-forge\n",
-		"fragments/git/forge-s.md":    "git-forge\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
@@ -4339,11 +4338,11 @@ func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
 		wantFragment string
 	}{
 		{"tracker axis picks the tracker folder", FragmentRow{Axis: "tracker", Fragment: "step.md", Var: "STEP"},
-			func(e *Env) { e.IssueTracker = "forgejo" }, "[forgejo-step\n\n]", "forgejo/step.md"},
+			func(e *Env) { e.IssueTracker, e.TrackerAxisRead = "forgejo", "FORGEJO" }, "[forgejo-step\n\n]", "forgejo/step.md"},
 		{"tracker axis defaults an empty tracker", FragmentRow{Axis: "tracker", Fragment: "step.md", Var: "STEP"},
 			func(e *Env) { e.IssueTracker = "" }, "[github-step\n\n]", "github/step.md"},
-		{"forge axis picks the forge folder", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},
-			func(e *Env) { e.ForgeBackend, e.CodeForge = "", "git" }, "[git-forge\n\n]", "git/forge-s.md"},
+		{"forge axis follows the signal, so git rides the github folder", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},
+			func(e *Env) { e.ForgeBackend, e.CodeForge = "", "git" }, "[github-forge\n\n]", "github/forge-s.md"},
 		{"forge axis prefers the pre-resolved backend", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},
 			func(e *Env) { e.ForgeBackend, e.CodeForge = "GH", "git" }, "[github-forge\n\n]", "github/forge-s.md"},
 		{"forge axis defaults an empty forge", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},

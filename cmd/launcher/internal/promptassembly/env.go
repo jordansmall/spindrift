@@ -13,7 +13,6 @@ import "spindrift.dev/launcher/internal/dispatchkind"
 // carried pre-resolved on Env.
 const (
 	defaultIssueTracker = "github"
-	defaultCodeForge    = "github"
 )
 
 // defaultDispatchKind is a var only because a const can't read

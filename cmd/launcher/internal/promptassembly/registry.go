@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 // FragmentRow is the Go mirror of one row in lib/fragments.nix's conditional
@@ -23,11 +24,18 @@ type FragmentRow struct {
 	// only when Fragment's file is missing: a deprecation-window fallback for
 	// an override directory still on the old layout (issue #5646).
 	LegacyFragment string `json:"legacyFragment,omitempty"`
-	// Axis is "" for a plain row, or "tracker" / "forge" for a row whose
-	// fragment comes from the active backend's own folder: <backend> is the
-	// active ISSUE_TRACKER (tracker) or CODE_FORGE (forge) backend name. A
-	// backend with no such file renders an empty step, not an error.
+	// Axis is "" for a plain row, or "tracker" / "filer" / "forge" for a row
+	// whose fragment comes from the folder of that axis's signal: the tracker
+	// read arm, the tracker Filer arm, or the CODE_FORGE arm. These are the
+	// signals the axis's gates test, so jira (on github's read arm) reads
+	// github/'s file. A folder with no such file renders an empty step, not
+	// an error, unless Shared is set.
 	Axis string `json:"axis,omitempty"`
+	// Shared (axis rows only) names a root-level fragment under
+	// prompts/fragments/ read when the axis folder has no file of its own:
+	// one body for every backend, naming the active one through
+	// ${FORGE_DISPLAY_NAME}. A backend folder's file still wins.
+	Shared bool `json:"shared,omitempty"`
 	// Var is the variable the fragment text is assigned to. The assignment
 	// still happens when the gate is off, with empty text.
 	Var string `json:"var"`
@@ -77,34 +85,71 @@ func LoadRegistryFile(path string) (Registry, error) {
 	return reg, nil
 }
 
-// resolvedFragment returns the fragment's path under prompts/fragments/. An
-// axis row resolves into the active backend's folder; an empty Env value takes
-// the same default the gates do.
-func (r FragmentRow) resolvedFragment(e Env) (string, error) {
-	var backend string
+// signalFolder maps an axis signal ("GH", "GITHUB", "LOCAL", "FORGEJO") to the
+// fragments/ folder holding that arm's files. "GH" is the forge/filer spelling
+// of the github arm, and an empty signal takes it too, as trackerGates does
+// for an empty itFiler, so a folder and its gate cannot disagree.
+func signalFolder(signal string) string {
+	if signal == "GH" || signal == "" {
+		return "github"
+	}
+	return strings.ToLower(signal)
+}
+
+// forgeSignal is Env's pre-resolved CODE_FORGE backend suffix, re-derived from
+// CodeForge for a host launcher older than #2533 that never sets ForgeBackend
+// (git and local ride the "GH" arm).
+func forgeSignal(e Env) string {
+	if e.ForgeBackend != "" {
+		return e.ForgeBackend
+	}
+	if e.CodeForge == "forgejo" {
+		return "FORGEJO"
+	}
+	return "GH"
+}
+
+// trackerReadFilerSignals is Env's tracker read and filer axis signals,
+// re-derived from IssueTracker for a host launcher that never sets them.
+func trackerReadFilerSignals(e Env) (read, filer string) {
+	read, filer = e.TrackerAxisRead, e.TrackerAxisFiler
+	if read == "" {
+		read, _, filer = issueTrackerAxisFallback(e.IssueTracker)
+	}
+	return read, filer
+}
+
+// axisFolder is the fragments/ folder an axis row reads from: the folder of
+// the same signal the axis's gates test, not of the backend's name, so a
+// backend riding another's arm (jira on github's, a local tracker's Filer on
+// GH) reads that arm's file. A plain row, with no axis, has no folder: "".
+func (r FragmentRow) axisFolder(e Env) (string, error) {
 	switch r.Axis {
 	case "":
-		return r.Fragment, nil
-	case "tracker":
-		if backend = e.IssueTracker; backend == "" {
-			backend = defaultIssueTracker
+		return "", nil
+	case "tracker", "filer":
+		read, filer := trackerReadFilerSignals(e)
+		if r.Axis == "filer" {
+			return signalFolder(filer), nil
 		}
+		return signalFolder(read), nil
 	case "forge":
-		// Prefer the pre-resolved ForgeBackend the forge gates read, so a
-		// forge-axis row lands in the folder its gates assume (git and local
-		// ride the "GH" arm).
-		switch e.ForgeBackend {
-		case "GH":
-			backend = "github"
-		case "FORGEJO":
-			backend = "forgejo"
-		default:
-			if backend = e.CodeForge; backend == "" {
-				backend = defaultCodeForge
-			}
-		}
+		return signalFolder(forgeSignal(e)), nil
 	default:
 		return "", fmt.Errorf("fragment %s (var %s): unknown axis %q", r.Fragment, r.Var, r.Axis)
 	}
-	return backend + "/" + r.Fragment, nil
+}
+
+// resolvedFragment returns the fragment's path under prompts/fragments/. An
+// axis row resolves into its axis signal's folder; an empty Env value takes
+// the same default the gates do.
+func (r FragmentRow) resolvedFragment(e Env) (string, error) {
+	folder, err := r.axisFolder(e)
+	if err != nil {
+		return "", err
+	}
+	if folder == "" {
+		return r.Fragment, nil
+	}
+	return folder + "/" + r.Fragment, nil
 }

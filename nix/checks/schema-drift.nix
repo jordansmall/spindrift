@@ -845,6 +845,7 @@ checkedMerge {
       controlRow = {
         name = "synthetic";
         goVar = "Synthetic";
+        displayName = "Synthetic";
         trackerAxisRead = "LOCAL";
         trackerAxisWrite = "FORGEJO";
       };
@@ -881,6 +882,7 @@ checkedMerge {
       bareRow = {
         name = "synthetic";
         goVar = "Synthetic";
+        displayName = "Synthetic";
       };
       render = row: builtins.tryEval (renderers.renderBackendRegistryGo [ row ]);
       writeOnly = render (bareRow // { trackerAxisWrite = "FORGEJO"; });

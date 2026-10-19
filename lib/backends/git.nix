@@ -4,6 +4,7 @@
 {
   name = "git";
   goVar = "Git";
+  displayName = "Git";
   validAsCodeForge = true;
   inBoxGHCredentialHelper = true;
   knobs = {

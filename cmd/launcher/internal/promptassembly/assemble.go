@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -295,7 +296,44 @@ var perDispatchVars = []string{
 var setupVars = []string{
 	"BASE_BRANCH", "IN_PROGRESS_LABEL", "COMPLETE_LABEL",
 	"CHORE_NAME", "CHORE_CLASS_LIST", chorePromptVar,
-	"SKILLS_FOUND", "REVIEW_FANOUT_AGENT",
+	"SKILLS_FOUND", "REVIEW_FANOUT_AGENT", forgeDisplayNameVar,
+}
+
+// forgeDisplayNameVar is the ${FORGE_DISPLAY_NAME} substitution: the display
+// name of the backend whose folder the row being rendered resolved to (issue
+// #5647). On tracker-axis and plain rows that is the tracker arm's backend,
+// not necessarily the forge: jira renders "GitHub" because it rides github's
+// arm. It is rebound before every row, so extraSubstRaw carries only the
+// initial value a base template sees.
+const forgeDisplayNameVar = "FORGE_DISPLAY_NAME"
+
+// rowDisplayName is the DisplayName of the backend folder row resolves to; a
+// plain row takes the tracker read axis's. A folder with no registered
+// backend falls back to the folder name.
+func rowDisplayName(row FragmentRow, e Env) (string, error) {
+	folder, err := row.axisFolder(e)
+	if err != nil {
+		return "", err
+	}
+	if folder == "" {
+		return trackerReadDisplayName(e), nil
+	}
+	return folderDisplayName(folder), nil
+}
+
+// folderDisplayName is the DisplayName of the backend named folder, or folder
+// itself when none is registered.
+func folderDisplayName(folder string) string {
+	if d, ok := backend.ByName(folder); ok && d.DisplayName != "" {
+		return d.DisplayName
+	}
+	return folder
+}
+
+// trackerReadDisplayName is the display name of the tracker read axis's arm.
+func trackerReadDisplayName(e Env) string {
+	read, _ := trackerReadFilerSignals(e)
+	return folderDisplayName(signalFolder(read))
 }
 
 // extraSubstRaw is the raw source of each extraSubstVars substitution var.
@@ -307,6 +345,7 @@ func extraSubstRaw(e Env) map[string]string {
 		"SKILLS_FOUND":        e.SkillsFound,
 		"CI_FAILURE_SUMMARY":  e.CIFailureSummary,
 		"REVIEW_FANOUT_AGENT": reviewFanoutAgentFor(e),
+		forgeDisplayNameVar:   initialDisplayName(e),
 	}
 }
 
@@ -436,17 +475,28 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		if err != nil {
 			return promptBodies{}, err
 		}
+		displayName, err := rowDisplayName(row, e)
+		if err != nil {
+			return promptBodies{}, err
+		}
+		vars[forgeDisplayNameVar] = varBody(forgeDisplayNameVar, displayName)
 		fragSource := Source{Kind: SourceFragment, Name: fragName}
 		// An ungated row (empty Gate) renders unconditionally, so the
 		// orchestrator fragments need no switch gate.
 		if row.Gate == "" || gates[row.Gate] {
 			var rendered body
-			// The legacy file is read only when the primary one is absent;
-			// fragName and fragSource then name the file actually read.
-			for _, name := range []string{fragName, row.LegacyFragment} {
-				if name == "" {
-					break
-				}
+			// Each fallback is read only when the one before is absent;
+			// fragName and fragSource then name the file actually read. A
+			// Shared axis row falls back to its root file first, then the
+			// legacy one.
+			candidates := []string{fragName}
+			if row.Axis != "" && row.Shared {
+				candidates = append(candidates, row.Fragment)
+			}
+			if row.LegacyFragment != "" {
+				candidates = append(candidates, row.LegacyFragment)
+			}
+			for _, name := range candidates {
 				fragName = name
 				fragSource = Source{Kind: SourceFragment, Name: name}
 				rendered, err = renderFileSegments(filepath.Join(e.PromptsDir, "fragments", name), fragSource, vars)
@@ -472,6 +522,9 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 			vars[row.Var] = body{}
 		}
 	}
+
+	// The last row's binding must not leak into the base templates.
+	vars[forgeDisplayNameVar] = varBody(forgeDisplayNameVar, initialDisplayName(e))
 
 	// Base template selection and session mode, in precedence order: research
 	// first regardless of FixPass, then a warm fix pass, then the default
@@ -934,4 +987,10 @@ func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, rev
 	}
 
 	return nil
+}
+
+// initialDisplayName is FORGE_DISPLAY_NAME's value outside any row's render:
+// the tracker read axis's, the same a plain row takes.
+func initialDisplayName(e Env) string {
+	return trackerReadDisplayName(e)
 }

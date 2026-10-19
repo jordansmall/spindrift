@@ -6,12 +6,21 @@
 # Nix boolean, and `fragment` is a basename under prompts/fragments/, from
 # templates/default or a SPINDRIFT_PROMPT_DIR override. A row that omits `gate`
 # is ungated and renders unconditionally; the export normalizes it to "".
-# A row with `axis` ("tracker" | "forge", issue #5646, ADR 0068) names its
-# `fragment` relative to the active backend's own folder instead:
-# `fragments/<backend>/<fragment>`, <backend> being the active ISSUE_TRACKER
-# or CODE_FORGE. A backend with no such file renders empty. An omitted `axis`
-# means a root-level fragment (Go's omitempty reads the absent key as "");
-# lib/fragment-paths.nix expands a row to its on-disk paths.
+# A row with `axis` ("tracker" | "filer" | "forge", issues #5646/#5647, ADR
+# 0068) names its `fragment` relative to a backend folder instead:
+# `fragments/<folder>/<fragment>`. <folder> comes from the axis's signal, the
+# one its gates test, not from the backend's name: "tracker" the tracker read
+# arm (jira rides github's), "filer" the tracker Filer arm (a local tracker's
+# rides github's), "forge" the CODE_FORGE arm (git and local ride github's). A
+# folder with no such file renders empty unless the row is `shared = true`, which
+# falls back to the root-level `fragments/<fragment>` (one body naming the active
+# backend through ${FORGE_DISPLAY_NAME}, the `displayName` of a backend row in
+# lib/backends/); a folder's own file still wins. ${FORGE_DISPLAY_NAME} is
+# bound per row to the folder backend's display name (a plain row takes the
+# tracker folder's), and a row whose fragment uses it lists it in
+# `extraSubstVars`. An omitted `axis` means a root-level fragment (Go's omitempty
+# reads the absent key as ""); lib/fragment-paths.nix expands a row to its
+# on-disk paths.
 
 # `extraSubstVars` (default []) lists allowlist entries a fragment's own body
 # interpolates; every other fragment is static prose once its gate is on,

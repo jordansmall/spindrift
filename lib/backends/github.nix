@@ -3,6 +3,7 @@
 {
   name = "github";
   goVar = "GitHub";
+  displayName = "GitHub";
   validAsTracker = true;
   validAsCodeForge = true;
   tokenEnvVar = "GH_TOKEN";

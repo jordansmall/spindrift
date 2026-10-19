@@ -11,6 +11,10 @@ import "sort"
 type Descriptor struct {
 	Name string
 
+	// DisplayName is the backend's human-facing name ("GitHub", "Forgejo",
+	// "local"), bound to the prompt's ${FORGE_DISPLAY_NAME} (issue #5647).
+	DisplayName string
+
 	ValidAsTracker   bool
 	ValidAsCodeForge bool
 

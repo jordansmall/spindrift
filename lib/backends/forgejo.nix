@@ -4,6 +4,7 @@
 {
   name = "forgejo";
   goVar = "Forgejo";
+  displayName = "Forgejo";
   validAsTracker = true;
   validAsCodeForge = true;
   tokenEnvVar = "FORGEJO_TOKEN";

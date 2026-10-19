@@ -4,6 +4,7 @@ package backend
 // GitHub is the descriptor for the "github" backend.
 var GitHub = Descriptor{
 	Name:                    "github",
+	DisplayName:             "GitHub",
 	ValidAsTracker:          true,
 	ValidAsCodeForge:        true,
 	TokenEnvVar:             "GH_TOKEN",
@@ -18,6 +19,7 @@ var GitHub = Descriptor{
 // Git is the descriptor for the "git" backend.
 var Git = Descriptor{
 	Name:                    "git",
+	DisplayName:             "Git",
 	ValidAsCodeForge:        true,
 	InBoxGHCredentialHelper: true,
 }
@@ -25,6 +27,7 @@ var Git = Descriptor{
 // Local is the descriptor for the "local" backend.
 var Local = Descriptor{
 	Name:                    "local",
+	DisplayName:             "local",
 	ValidAsTracker:          true,
 	ValidAsCodeForge:        true,
 	HostMediatedRemote:      true,
@@ -37,6 +40,7 @@ var Local = Descriptor{
 // Jira is the descriptor for the "jira" backend.
 var Jira = Descriptor{
 	Name:                   "jira",
+	DisplayName:            "Jira",
 	ValidAsTracker:         true,
 	TokenEnvVar:            "JIRA_TOKEN",
 	DoctorTokenHint:        "JIRA_TOKEN",
@@ -47,6 +51,7 @@ var Jira = Descriptor{
 // Forgejo is the descriptor for the "forgejo" backend.
 var Forgejo = Descriptor{
 	Name:               "forgejo",
+	DisplayName:        "Forgejo",
 	ValidAsTracker:     true,
 	ValidAsCodeForge:   true,
 	TokenEnvVar:        "FORGEJO_TOKEN",
@@ -66,4 +71,4 @@ var Registry = []Descriptor{GitHub, Git, Local, Jira, Forgejo}
 
 // descriptorRowFields lists the Descriptor fields the nix table renders, for
 // the struct-sync test; it is not read at runtime.
-var descriptorRowFields = []string{"Name", "ValidAsTracker", "ValidAsCodeForge", "TokenEnvVar", "DoctorTokenHint", "DoctorSlugHint", "HostMediatedRemote", "InBoxUnreachableTracker", "InBoxUnwritableTracker", "OutboxRelayCapable", "InBoxOpenPRQueryable", "InBoxGHCredentialHelper", "RelayCapable", "HostPostingCapable", "LabelRegistry", "TrackerAxisRead", "TrackerAxisWrite", "TrackerAxisFiler", "ForgeBackend"}
+var descriptorRowFields = []string{"Name", "DisplayName", "ValidAsTracker", "ValidAsCodeForge", "TokenEnvVar", "DoctorTokenHint", "DoctorSlugHint", "HostMediatedRemote", "InBoxUnreachableTracker", "InBoxUnwritableTracker", "OutboxRelayCapable", "InBoxOpenPRQueryable", "InBoxGHCredentialHelper", "RelayCapable", "HostPostingCapable", "LabelRegistry", "TrackerAxisRead", "TrackerAxisWrite", "TrackerAxisFiler", "ForgeBackend"}

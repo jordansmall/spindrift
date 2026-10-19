@@ -154,3 +154,15 @@ func TestResolvedFragmentForgeAxis(t *testing.T) {
 		})
 	}
 }
+
+// An empty signal maps to the github folder, the arm trackerGates takes for an
+// empty itFiler, so a row's folder and its gate cannot disagree.
+func TestSignalFolder(t *testing.T) {
+	for signal, want := range map[string]string{
+		"": "github", "GH": "github", "GITHUB": "github", "LOCAL": "local", "FORGEJO": "forgejo",
+	} {
+		if got := signalFolder(signal); got != want {
+			t.Errorf("signalFolder(%q) = %q, want %q", signal, got, want)
+		}
+	}
+}
