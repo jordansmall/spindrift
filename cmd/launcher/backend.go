@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strconv"
 
@@ -39,15 +38,15 @@ type backendRow struct {
 	// this forge cannot host a butler Ledger yet (git).
 	newLedger func(c config) (ledger.Backend, butler.Tree, func(), error)
 
-	// readOnlyTokenGate checks the Box's own token for this backend under
-	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1950); gateRegistry runs it
-	// as read-only-token-<Name>. nil means the backend has no Box token to gate.
-	readOnlyTokenGate func(c config, w io.Writer) error
-
 	// remoteMatch reports whether a checkout's origin remote names c's Target
 	// repo on this backend (doctor's registry-route-drift guard). nil means
 	// the backend has no remote identity and never matches.
 	remoteMatch func(c config, remote string) bool
+
+	// introspectToken is the Strategy's IntrospectToken hook, which the
+	// read-only token gate (read-only-token-<Name>, issue #1950) calls to probe
+	// the Box token. nil means the backend cannot introspect, and the gate warns.
+	introspectToken backendkit.TokenIntrospector
 }
 
 // remoteLedger builds a Ledger against a hosted forge: a fresh scratch repo
@@ -87,22 +86,6 @@ func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butl
 // initialiser, so the registry is populated by then.
 var backendRows = strategyRows()
 
-// Until ADR 0068 decision 6 moves it onto the rows, the read-only token gate
-// stays launcher-side, keyed on backend name.
-var (
-	backendTokenGates = map[string]func(c config, w io.Writer) error{
-		backend.GitHub.Name: func(c config, w io.Writer) error {
-			// ghTokenIntrospector is a var tests swap, so read it at call time.
-			_, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
-			return err
-		},
-		backend.Forgejo.Name: func(c config, w io.Writer) error {
-			_, err := checkReadOnlyForgejoTokenGate(c, w)
-			return err
-		},
-	}
-)
-
 // rejectBlankForgejoKnobs validates the forgejo knobs from c's resolved
 // fields. forgejo.ReadKnobs re-defaults a blank FORGEJO_BASE_URL to
 // codeberg, and an input document can set it to "", which would send a
@@ -126,8 +109,8 @@ func strategyRows() []backendRow {
 
 func rowFromStrategy(s backendkit.Strategy) backendRow {
 	r := backendRow{
-		Descriptor:        s.Descriptor,
-		readOnlyTokenGate: backendTokenGates[s.Name],
+		Descriptor:      s.Descriptor,
+		introspectToken: s.IntrospectToken,
 	}
 	var blank func(config, string) error
 	if s.Name == backend.Forgejo.Name {

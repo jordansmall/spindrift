@@ -6440,7 +6440,7 @@ func TestDoctor_ReadOnlyTokenGate_NonIntrospectableTokenDoesNotClaimVerified(t *
 	}
 }
 
-// runDoctor also surfaces checkReadOnlyForgejoTokenGate's outcome (issue
+// runDoctor also surfaces checkReadOnlyTokenGate's outcome (issue
 // #1964) when forgejo is the active backend: under read-only with
 // BOX_FORGEJO_TOKEN unset it fails the same fail-closed way a live dispatch
 // would at bootstrap.
@@ -6674,7 +6674,7 @@ func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T)
 		return backendkit.TokenIntrospection{}, nil
 	}
 	var buf bytes.Buffer
-	_, err := checkReadOnlyTokenGate(c, introspect, &buf)
+	_, err := checkReadOnlyTokenGate(c, rowWithIntrospector(t, "github", introspect), &buf)
 	if err == nil {
 		t.Fatal("checkReadOnlyTokenGate() error = nil, want a misconfiguration error")
 	}
@@ -6684,7 +6684,7 @@ func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T)
 	}
 }
 
-// The Forgejo-side sibling of the test above: checkReadOnlyForgejoTokenGate
+// The Forgejo-side sibling of the test above: checkReadOnlyTokenGate
 // wraps the same errReadOnlyGateMisconfigured sentinel, but only the GitHub
 // gate had a dispatch-path regression test pinning the fall-through to exit 1
 // rather than exitConfigInvalid (6).
@@ -6697,9 +6697,9 @@ func TestBootstrapExitCode_ReadOnlyForgejoTokenGateMisconfigured_ExitsOne(t *tes
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
 
 	var buf bytes.Buffer
-	_, err := checkReadOnlyForgejoTokenGate(c, &buf)
+	_, err := checkReadOnlyTokenGate(c, rowWithIntrospector(t, "forgejo", nil), &buf)
 	if err == nil {
-		t.Fatal("checkReadOnlyForgejoTokenGate() error = nil, want a misconfiguration error")
+		t.Fatal("checkReadOnlyTokenGate() error = nil, want a misconfiguration error")
 	}
 
 	if got := bootstrapExitCode(err); got != 1 {

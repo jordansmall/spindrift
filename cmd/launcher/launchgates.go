@@ -37,25 +37,31 @@ func tokenGateApplicable(c config, desc backend.Descriptor) bool {
 	return forgeRow.TokenEnvVar == desc.TokenEnvVar || trackerRow.TokenEnvVar == desc.TokenEnvVar
 }
 
-// readOnlyTokenGates returns one network gate per row carrying a
-// readOnlyTokenGate, in row order and named read-only-token-<Name>. The gate
-// applies under read-only access when c's codeForge or issueTracker shares the
-// row's token (tokenGateApplicable), so a renamed row on the same token still
-// triggers it.
+// readOnlyTokenGatePrefix precedes the backend row name in each read-only token
+// gate's Name.
+const readOnlyTokenGatePrefix = "read-only-token-"
+
+// readOnlyTokenGates returns one network gate per row with a BoxTokenEnvVar,
+// in row order and named read-only-token-<Name>. The gate applies under
+// read-only access when c's codeForge or issueTracker shares the row's token
+// (tokenGateApplicable), so a renamed row on the same token still triggers it,
+// and a tracker and forge on one backend share a single gate.
 func readOnlyTokenGates(rows []backendRow) []launchGate {
 	var gates []launchGate
 	for _, r := range rows {
-		if r.readOnlyTokenGate == nil {
+		if r.BoxTokenEnvVar == "" {
 			continue
 		}
-		desc := r.Descriptor
 		gates = append(gates, launchGate{
-			Name: "read-only-token-" + r.Name,
+			Name: readOnlyTokenGatePrefix + r.Name,
 			Applicable: func(c config) bool {
-				return c.boxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, desc)
+				return c.boxForgeAndIssueAccess == "read-only" && tokenGateApplicable(c, r.Descriptor)
 			},
 			Network: true,
-			Check:   r.readOnlyTokenGate,
+			Check: func(c config, w io.Writer) error {
+				_, err := checkReadOnlyTokenGate(c, r, w)
+				return err
+			},
 		})
 	}
 	return gates
@@ -66,9 +72,9 @@ func readOnlyTokenGates(rows []backendRow) []launchGate {
 // gates are excluded on purpose: they are Runner prerequisites, run at launch
 // by checkRunnerLaunchPrerequisites and reported by doctor through
 // prerequisiteChecks, with richer dynamic Tier and remedy semantics. The
-// read-only token gates follow, one per backend row that carries one. It is
-// built once at package init, so a test that swaps backendRows at runtime
-// changes tokenGateApplicable but not the gate set.
+// read-only token gates follow, one per backend row with a Box token. It is
+// built once at package init from backendRows, so a test that swaps
+// backendRows must rebuild it (see swapIntrospector).
 var gateRegistry = append([]launchGate{
 	{Name: "read-only-capability", Check: func(c config, _ io.Writer) error {
 		return checkReadOnlyCapabilityGate(c)
