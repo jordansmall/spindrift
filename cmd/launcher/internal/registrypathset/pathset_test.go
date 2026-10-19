@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -20,83 +21,74 @@ func (s HostPathSet) admits(requestPath string) bool {
 	return roots.Admits(requestPath)
 }
 
-// Discover dedupes by host and drops the second registry. Derive must not: a
-// repo declaring an internal and a remote cargo registry on one host needs both
-// index subtrees, or the enforced path set refuses the crates the second
-// registry serves.
-func TestDerive_TwoCargoRegistriesOneHost(t *testing.T) {
+var syntheticRows = []ecosystem.Row{synthetic.Row}
+
+// deriveSynthetic writes body to the synthetic row's config path in a fresh dir
+// and derives over that row alone.
+func deriveSynthetic(t *testing.T, body string) []HostPathSet {
+	t.Helper()
 	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".cargo/config.toml", `
-[registries.internal]
-index = "sparse+https://artifacts.example.com/artifactory/api/cargo/internal/index"
-
-[registries.remote]
-index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index"
-`)
-
-	got, err := Derive(dir)
+	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, body)
+	got, err := DeriveRows(dir, syntheticRows)
 	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
+		t.Fatalf("DeriveRows: unexpected error: %v", err)
 	}
+	return got
+}
+
+// Discover dedupes by host and drops the second registry. Derive must not: a
+// repo declaring two registries on one host needs both subtrees, or the
+// enforced path set refuses what the second registry serves.
+func TestDerive_TwoRegistriesOneHost(t *testing.T) {
+	got := deriveSynthetic(t, `
+internal = https://artifacts.example.com/artifactory/api/internal/index
+remote = https://artifacts.example.com/artifactory/api/remote/index
+`)
 	want := []HostPathSet{{
 		Host:   "artifacts.example.com",
 		Origin: "https://artifacts.example.com",
 		Subtrees: []registryvocab.Subtree{
-			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/internal/index", RegistryName: "internal"},
-			{Ecosystem: "cargo", Path: "/artifactory/api/cargo/remote/index", RegistryName: "remote"},
+			{Ecosystem: synthetic.Row.Name, Path: "/artifactory/api/internal/index", RegistryName: "internal"},
+			{Ecosystem: synthetic.Row.Name, Path: "/artifactory/api/remote/index", RegistryName: "remote"},
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Derive = %+v, want %+v", got, want)
+		t.Errorf("DeriveRows = %+v, want %+v", got, want)
 	}
 }
 
 // Two declarations disagreeing on scheme and port still merge into one
 // HostPathSet, because enforcement keys on the registryvocab.HostKey-normalized
-// host and a second entry for that host would be unreachable. ecosystem.Table
-// runs npm before yarn, so the .npmrc declaration comes first and its https
-// Origin is the one kept.
+// host and a second entry for that host would be unreachable. The first
+// declaration's https Origin is the one kept.
 func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
-	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://host.example.com/npm\n")
-	testutil.WriteFixture(t, dir, ".yarnrc.yml", "npmRegistryServer: http://host.example.com:8080/yarn\n")
-
-	got, err := Derive(dir)
-	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
-	}
+	got := deriveSynthetic(t, "a = https://host.example.com/one\nb = http://host.example.com:8080/two\n")
 	want := []HostPathSet{{
 		Host:   "host.example.com",
 		Origin: "https://host.example.com",
 		Subtrees: []registryvocab.Subtree{
-			{Ecosystem: "npm", Path: "/npm"},
-			{Ecosystem: "yarn", Path: "/yarn"},
+			{Ecosystem: synthetic.Row.Name, Path: "/one", RegistryName: "a"},
+			{Ecosystem: synthetic.Row.Name, Path: "/two", RegistryName: "b"},
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Derive = %+v, want %+v", got, want)
+		t.Errorf("DeriveRows = %+v, want %+v", got, want)
 	}
 }
 
 // The two hosts differ only in case deliberately: equivalent hosts but distinct
-// strings, so the npm row's byte-equal dedupe passes both through and Derive's
+// strings, so a row's byte-equal dedupe would pass both through and Derive's
 // own dedupe, over the registryvocab.HostKey-folded host, is what must collapse
 // them.
 func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
-	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://x.example.com/npm\n@scope:registry=https://X.example.com/npm\n")
-
-	got, err := Derive(dir)
-	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
-	}
+	got := deriveSynthetic(t, "a = https://x.example.com/repo\nb = https://X.example.com/repo\n")
 	want := []HostPathSet{{
 		Host:     "x.example.com",
 		Origin:   "https://x.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Derive = %+v, want %+v", got, want)
+		t.Errorf("DeriveRows = %+v, want %+v", got, want)
 	}
 }
 
@@ -104,76 +96,70 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 // Host unbrackets to stay comparable with a route's match-host, while Origin
 // keeps the brackets because that is the authority a client dials.
 func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
-	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".npmrc", "registry=http://[::1]/npm\n")
-
-	got, err := Derive(dir)
-	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
-	}
+	got := deriveSynthetic(t, "a = http://[::1]/repo\n")
 	want := []HostPathSet{{
 		Host:     "::1",
 		Origin:   "http://[::1]",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Derive = %+v, want %+v", got, want)
+		t.Errorf("DeriveRows = %+v, want %+v", got, want)
 	}
 }
 
 // Absence of declaration means absence of binding: neither an empty repo nor
-// one declaring only cargo may derive an npm path, because nothing in the
-// snapshot names an npm registry.
-func TestDerive_NoNpmConfigDerivesNoNpmPaths(t *testing.T) {
+// one declaring only another row may derive a path for the synthetic row,
+// because nothing in the snapshot names a registry for it.
+func TestDerive_NoDeclarationDerivesNoPaths(t *testing.T) {
 	t.Run("empty repo", func(t *testing.T) {
-		got, err := Derive(t.TempDir())
+		got, err := DeriveRows(t.TempDir(), syntheticRows)
 		if err != nil {
-			t.Fatalf("Derive: unexpected error: %v", err)
+			t.Fatalf("DeriveRows: unexpected error: %v", err)
 		}
 		if len(got) != 0 {
-			t.Errorf("Derive = %+v, want no host path sets", got)
+			t.Errorf("DeriveRows = %+v, want no host path sets", got)
 		}
 	})
 
-	t.Run("cargo but no npm", func(t *testing.T) {
+	t.Run("other row declared but not this one", func(t *testing.T) {
+		twin := synthetic.Twin("synthetic-twin")
 		dir := t.TempDir()
-		testutil.WriteFixture(t, dir, ".cargo/config.toml", `
-[registries.mycorp]
-index = "sparse+https://cargo.example.com/index"
-`)
+		testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "a = https://twin.example.com/index\n")
 
-		got, err := Derive(dir)
+		got, err := DeriveRows(dir, syntheticRows)
 		if err != nil {
-			t.Fatalf("Derive: unexpected error: %v", err)
+			t.Fatalf("DeriveRows: unexpected error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Errorf("DeriveRows over the synthetic row = %+v, want no host path sets: only the twin declares", got)
+		}
+
+		got, err = DeriveRows(dir, []ecosystem.Row{twin})
+		if err != nil {
+			t.Fatalf("DeriveRows: unexpected error: %v", err)
 		}
 		want := []HostPathSet{{
-			Host:     "cargo.example.com",
-			Origin:   "https://cargo.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: "cargo", Path: "/index", RegistryName: "mycorp"}},
+			Host:     "twin.example.com",
+			Origin:   "https://twin.example.com",
+			Subtrees: []registryvocab.Subtree{{Ecosystem: twin.Name, Path: "/index", RegistryName: "a"}},
 		}}
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("Derive = %+v, want %+v", got, want)
+			t.Errorf("DeriveRows over the twin = %+v, want %+v", got, want)
 		}
 	})
 }
 
-// A public registry declared with no path at all (the shape of a stock .npmrc)
-// is a whole-host registry, so it derives the root subtree rather than nothing.
+// A registry declared with no path at all is a whole-host registry, so it
+// derives the root subtree rather than nothing.
 func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
-	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://registry.npmjs.org\n")
-
-	got, err := Derive(dir)
-	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
-	}
+	got := deriveSynthetic(t, "a = https://registry.example.com\n")
 	want := []HostPathSet{{
-		Host:     "registry.npmjs.org",
-		Origin:   "https://registry.npmjs.org",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/"}},
+		Host:     "registry.example.com",
+		Origin:   "https://registry.example.com",
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Derive = %+v, want %+v", got, want)
+		t.Errorf("DeriveRows = %+v, want %+v", got, want)
 	}
 }
 
@@ -181,52 +167,29 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 // match-host, while Origin keeps the port (and the case url.Parse preserves) so
 // it stays a usable upstream origin.
 func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
-	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://HOST.example.com:8443/repo/npm\n")
-
-	got, err := Derive(dir)
-	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
-	}
+	got := deriveSynthetic(t, "a = https://HOST.example.com:8443/repo/index\n")
 	want := []HostPathSet{{
 		Host:     "host.example.com",
 		Origin:   "https://HOST.example.com:8443",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/repo/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo/index", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Derive = %+v, want %+v", got, want)
+		t.Errorf("DeriveRows = %+v, want %+v", got, want)
 	}
 }
 
 // This test is acceptance criterion 3, over the shape the 2026-09-04 field run
-// hit: an internal and a remote cargo registry on one Artifactory host, with
-// crates.io replaced through the remote. The derived set must admit that run's
-// real request paths and refuse the host's other registry API endpoints.
-func TestDerive_ArtifactoryFieldShape(t *testing.T) {
-	dir := t.TempDir()
-	// The [source.*] stanzas send crates.io traffic to the remote index. The
-	// cargo row's ConfigParser reads only [registries.*], which is enough here
-	// because the remote registry the replacement points at is itself declared.
-	testutil.WriteFixture(t, dir, ".cargo/config.toml", `
-[registries.internal]
-index = "sparse+https://artifacts.example.com/artifactory/api/cargo/internal/index"
-
-[registries.remote]
-index = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index"
-
-[source.crates-io]
-replace-with = "remote"
-
-[source.remote]
-registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/index"
+// hit: an internal and a remote registry on one Artifactory host. The derived
+// set must admit that run's real request paths and refuse the host's other API
+// endpoints. A real-row twin of this shape lives in the ecosystem corpus
+// (replaced-source-two-registries), which also covers a source replacement.
+func TestDerive_TwoRegistriesOneHostAdmitsOnlyDeclaredSubtrees(t *testing.T) {
+	got := deriveSynthetic(t, `
+internal = https://artifacts.example.com/artifactory/api/internal/index
+remote = https://artifacts.example.com/artifactory/api/remote/index
 `)
-
-	got, err := Derive(dir)
-	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
-	}
 	if len(got) != 1 {
-		t.Fatalf("Derive = %+v, want exactly one host path set", got)
+		t.Fatalf("DeriveRows = %+v, want exactly one host path set", got)
 	}
 	set := got[0]
 	if set.Host != "artifacts.example.com" {
@@ -234,12 +197,12 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 	}
 
 	admit := []string{
-		"/artifactory/api/cargo/internal/index",
-		"/artifactory/api/cargo/internal/index/config.json",
-		"/artifactory/api/cargo/internal/index/ax/um/axum",
-		"/artifactory/api/cargo/remote/index",
-		"/artifactory/api/cargo/remote/index/config.json",
-		"/artifactory/api/cargo/remote/index/ax/um/axum",
+		"/artifactory/api/internal/index",
+		"/artifactory/api/internal/index/config.json",
+		"/artifactory/api/internal/index/ax/um/axum",
+		"/artifactory/api/remote/index",
+		"/artifactory/api/remote/index/config.json",
+		"/artifactory/api/remote/index/ax/um/axum",
 	}
 	for _, p := range admit {
 		if !set.admits(p) {
@@ -253,13 +216,13 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 		// steerable at them.
 		"/artifactory/api/security/token",
 		"/artifactory/api/repositories",
-		"/artifactory/api/cargo/remote/index/../../security/token",
-		// The cargo download endpoint is a sibling of the index, not under it,
-		// so nothing committed in the repo declares it and refusing it is
-		// correct today. Spec #3253 decision 3 has the Forwarder learn the dl
-		// base from upstream's config.json in a later ticket. This derivation
-		// must not invent a dl path.
-		"/artifactory/api/cargo/remote/v1/crates/axum/0.7.5/download",
+		"/artifactory/api/remote/index/../../security/token",
+		// A download endpoint that is a sibling of the index, not under it, is
+		// something nothing committed in the repo declares, so it is refused
+		// today. Spec #3253 decision 3 has the Forwarder learn the download
+		// base from upstream in a later ticket. This derivation must not
+		// invent that path.
+		"/artifactory/api/remote/v1/pkgs/axum/0.7.5/download",
 	}
 	for _, p := range refuse {
 		if set.admits(p) {
@@ -268,68 +231,27 @@ registry = "sparse+https://artifacts.example.com/artifactory/api/cargo/remote/in
 	}
 }
 
-// inTreeFixtures maps an ecosystem.Table row name to a minimal config body for
-// that row's InTreeConfigPath, each declaring one distinguishable path.
-var inTreeFixtures = map[string]string{
-	"cargo": "[registries.mycorp]\nindex = \"sparse+https://cargo.example.com/repo/cargo/index\"\n",
-	"npm":   "registry=https://npm.example.com/repo/npm\n",
-	"yarn":  "npmRegistryServer: https://yarn.example.com/repo/yarn\n",
-	"pnpm":  "registry: https://pnpm.example.com/repo/pnpm\n",
-}
-
 // ecosystem.TestConfigParserMatchesInTreeConfigPath proves an in-tree row has a
-// parser; this one proves the row's declaration reaches a subtree. An ecosystem
-// whose config parses but derives no path would leave the proxy refusing every
-// request that ecosystem makes, with no other test failing. Rows with an empty
-// InTreeConfigPath (go, gradle) derive nothing by design and are excluded.
-func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
-	inTree := make(map[string]string)
-	for _, row := range ecosystem.Table {
-		if row.InTreeConfigPath != "" {
-			inTree[row.Name] = row.InTreeConfigPath
+// parser; this one proves a row's declaration reaches a subtree. A row whose
+// config parses but derives no path would leave the proxy refusing every
+// request that row makes, with no other test failing. The ecosystem corpus
+// proves the same for each ecosystem.Table row.
+func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
+	got := deriveSynthetic(t, "a = https://registry.example.com/repo/index\n")
+	found := false
+	for _, hps := range got {
+		for _, s := range hps.Subtrees {
+			if s.Ecosystem != synthetic.Row.Name {
+				continue
+			}
+			found = true
+			if !hps.admits(s.Path + "/config.json") {
+				t.Errorf("derived subtree %q does not admit a path under itself", s.Path)
+			}
 		}
 	}
-
-	for name := range inTree {
-		if _, ok := inTreeFixtures[name]; !ok {
-			t.Errorf("ecosystem.Table row %q has a non-empty InTreeConfigPath but no entry in inTreeFixtures", name)
-		}
-	}
-	for name := range inTreeFixtures {
-		if _, ok := inTree[name]; !ok {
-			t.Errorf("inTreeFixtures has an entry for %q, but no ecosystem.Table row of that name has a non-empty InTreeConfigPath", name)
-		}
-	}
-
-	for name, configPath := range inTree {
-		body, ok := inTreeFixtures[name]
-		if !ok {
-			continue
-		}
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			testutil.WriteFixture(t, dir, configPath, body)
-
-			got, err := Derive(dir)
-			if err != nil {
-				t.Fatalf("Derive: unexpected error: %v", err)
-			}
-			found := false
-			for _, hps := range got {
-				for _, s := range hps.Subtrees {
-					if s.Ecosystem != name {
-						continue
-					}
-					found = true
-					if !hps.admits(s.Path + "/config.json") {
-						t.Errorf("derived %s subtree %q does not admit a path under itself", name, s.Path)
-					}
-				}
-			}
-			if !found {
-				t.Errorf("Derive over a %s fixture at %s = %+v, want a %s subtree", name, configPath, got, name)
-			}
-		})
+	if !found {
+		t.Errorf("DeriveRows = %+v, want a %s subtree", got, synthetic.Row.Name)
 	}
 }
 
@@ -337,26 +259,26 @@ func TestDerive_CoversEveryInTreeEcosystem(t *testing.T) {
 // fixture must agree exactly. Map iteration order in the grouping would break
 // this.
 func TestDerive_DeterministicOverSnapshot(t *testing.T) {
+	twin := synthetic.Twin("synthetic-twin")
+	rows := []ecosystem.Row{synthetic.Row, twin}
 	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, ".cargo/config.toml", `
-[registries.zeta]
-index = "sparse+https://artifacts.example.com/artifactory/api/cargo/zeta/index"
-
-[registries.alpha]
-index = "sparse+https://artifacts.example.com/artifactory/api/cargo/alpha/index"
+	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, `
+zeta = https://artifacts.example.com/artifactory/api/zeta/index
+alpha = https://artifacts.example.com/artifactory/api/alpha/index
+a = https://one.example.com/repo
+b = https://other.example.com/repo
 `)
-	testutil.WriteFixture(t, dir, ".npmrc", "registry=https://npm.example.com/repo\n@myorg:registry=https://other.example.com/repo\n")
-	testutil.WriteFixture(t, dir, ".yarnrc.yml", "npmRegistryServer: https://yarn.example.com/repo\n")
+	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "a = https://twin.example.com/repo\n")
 
-	first, err := Derive(dir)
+	first, err := DeriveRows(dir, rows)
 	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
+		t.Fatalf("DeriveRows: unexpected error: %v", err)
 	}
-	second, err := Derive(dir)
+	second, err := DeriveRows(dir, rows)
 	if err != nil {
-		t.Fatalf("Derive: unexpected error: %v", err)
+		t.Fatalf("DeriveRows: unexpected error: %v", err)
 	}
 	if !reflect.DeepEqual(first, second) {
-		t.Errorf("Derive twice over one snapshot disagreed:\nfirst  = %+v\nsecond = %+v", first, second)
+		t.Errorf("DeriveRows twice over one snapshot disagreed:\nfirst  = %+v\nsecond = %+v", first, second)
 	}
 }

@@ -7,43 +7,42 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-func TestDeriveFromGitRef_CommittedNpmDerives(t *testing.T) {
+func TestDeriveFromGitRef_CommittedConfigDerives(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		synthetic.Row.InTreeConfigPath: "a = https://host.example.com/repo\n",
 	}, nil)
 
-	got, err := DeriveFromGitRef(bare, "main")
+	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
 	if err != nil {
-		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
 	want := []HostPathSet{{
 		Host:     "host.example.com",
 		Origin:   "https://host.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveFromGitRef = %+v, want %+v", got, want)
+		t.Errorf("DeriveFromGitRefRows = %+v, want %+v", got, want)
 	}
 }
 
-// The nested .cargo/config.toml pins that materialization creates parent
-// directories rather than only handling repo-root files.
-func TestDeriveFromGitRef_MultipleEcosystemsMaterializeAndDerive(t *testing.T) {
+// Both rows' config paths are nested, pinning that materialization creates
+// parent directories rather than only handling repo-root files.
+func TestDeriveFromGitRef_MultipleRowsMaterializeAndDerive(t *testing.T) {
+	twin := synthetic.Twin("synthetic-twin")
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://npm.example.com/repo/npm\n",
-		".cargo/config.toml": `
-[registries.mycorp]
-index = "sparse+https://cargo.example.com/repo/cargo/index"
-`,
+		synthetic.Row.InTreeConfigPath: "a = https://first.example.com/repo/first\n",
+		twin.InTreeConfigPath:          "a = https://second.example.com/repo/second\n",
 	}, nil)
 
-	got, err := DeriveFromGitRef(bare, "main")
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Row{synthetic.Row, twin})
 	if err != nil {
-		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
 
 	hosts := make(map[string]HostPathSet, len(got))
@@ -51,13 +50,13 @@ index = "sparse+https://cargo.example.com/repo/cargo/index"
 		hosts[hps.Host] = hps
 	}
 	if len(hosts) != 2 {
-		t.Fatalf("DeriveFromGitRef = %+v, want exactly 2 host path sets", got)
+		t.Fatalf("DeriveFromGitRefRows = %+v, want exactly 2 host path sets", got)
 	}
-	if hps, ok := hosts["npm.example.com"]; !ok || !hps.admits("/repo/npm/axios") {
-		t.Errorf("npm host path set = %+v, want an admitting /repo/npm subtree", hps)
+	if hps, ok := hosts["first.example.com"]; !ok || !hps.admits("/repo/first/pkg") {
+		t.Errorf("first host path set = %+v, want an admitting /repo/first subtree", hps)
 	}
-	if hps, ok := hosts["cargo.example.com"]; !ok || !hps.admits("/repo/cargo/index/config.json") {
-		t.Errorf("cargo host path set = %+v, want an admitting /repo/cargo/index subtree", hps)
+	if hps, ok := hosts["second.example.com"]; !ok || !hps.admits("/repo/second/config.json") {
+		t.Errorf("second host path set = %+v, want an admitting /repo/second subtree", hps)
 	}
 }
 
@@ -65,21 +64,22 @@ index = "sparse+https://cargo.example.com/repo/cargo/index"
 // ref, the derived set would admit a registry the Accumulation repo never
 // recorded.
 func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
+	twin := synthetic.Twin("synthetic-twin")
 	bare, src := testutil.BareRepoWithConfigs(t, "main",
-		map[string]string{".npmrc": "registry=https://committed.example.com/npm\n"}, nil)
-	testutil.WriteFixture(t, src, ".yarnrc.yml", "npmRegistryServer: https://uncommitted.example.com/yarn\n")
+		map[string]string{synthetic.Row.InTreeConfigPath: "a = https://committed.example.com/repo\n"}, nil)
+	testutil.WriteFixture(t, src, twin.InTreeConfigPath, "a = https://uncommitted.example.com/repo\n")
 
-	got, err := DeriveFromGitRef(bare, "main")
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Row{synthetic.Row, twin})
 	if err != nil {
-		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
 	want := []HostPathSet{{
 		Host:     "committed.example.com",
 		Origin:   "https://committed.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveFromGitRef = %+v, want only the committed host %+v", got, want)
+		t.Errorf("DeriveFromGitRefRows = %+v, want only the committed host %+v", got, want)
 	}
 }
 
@@ -95,22 +95,20 @@ func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 	testutil.GitRun(t, src, "commit", "-m", "main seed")
 
 	testutil.GitRun(t, src, "checkout", "-b", "other")
-	if err := os.WriteFile(filepath.Join(src, ".npmrc"), []byte("registry=https://other-branch.example.com/npm\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	testutil.GitRun(t, src, "add", ".npmrc")
+	testutil.WriteFixture(t, src, synthetic.Row.InTreeConfigPath, "a = https://other-branch.example.com/repo\n")
+	testutil.GitRun(t, src, "add", synthetic.Row.InTreeConfigPath)
 	testutil.GitRun(t, src, "commit", "-m", "other branch config")
 
 	bare := filepath.Join(t.TempDir(), "accum.git")
 	testutil.GitRun(t, "", "init", "--bare", bare)
 	testutil.GitRun(t, src, "push", bare, "+refs/heads/main:refs/heads/main", "+refs/heads/other:refs/heads/other")
 
-	got, err := DeriveFromGitRef(bare, "main")
+	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
 	if err != nil {
 		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("DeriveFromGitRef over main = %+v, want no host path sets: the npm config only exists on other", got)
+		t.Errorf("DeriveFromGitRefRows over main = %+v, want no host path sets: the config only exists on other", got)
 	}
 }
 
@@ -138,7 +136,7 @@ func TestDeriveFromGitRef_NotAGitRepoFails(t *testing.T) {
 // TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet for the other half.
 func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		".synthetic/registries": "a = https://host.example.com/repo\n",
 	}, nil)
 
 	_, err := DeriveFromGitRef(bare, "does-not-exist")
@@ -156,7 +154,7 @@ func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, nil)
 
-	got, err := DeriveFromGitRef(bare, "main")
+	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
 	if err != nil {
 		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
