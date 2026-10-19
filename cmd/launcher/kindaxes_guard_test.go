@@ -177,6 +177,48 @@ var kindAxisForbiddenPatterns = sync.OnceValue(func() []kindAxisForbidden {
 	}
 })
 
+// kindNameWhy explains namesKind's finding; Default is not in its pattern.
+const kindNameWhy = "names one kind -- read the axis from the descriptor in hand, walk dispatchkind.All, or use dispatchkind.Default for an unset kind; only an entry point selecting its own verb's kind may name it"
+
+// pickerFile is the one file allowed to bind a per-verb Kind<Verb> alias.
+const pickerFile = "internal/console/pick.go"
+
+var (
+	kindNameRef       = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\bdispatchkind\.` + kindVarAlternation() + `\b`) })
+	kindBootstrapCall = regexp.MustCompile(`\b(bootstrap|applyDispatchKind)\(`)
+	kindPickerAlias   = regexp.MustCompile(`^\s*Kind(\w+)\s*=\s*dispatchkind\.(\w+)\s*$`)
+)
+
+// namesKind reports whether line, read from path, names one kind outside an
+// entry point selecting its own verb's kind: package main's bootstrap calls,
+// and the console picker's per-verb aliases, each bound to its own verb.
+func namesKind(path, line string) bool {
+	if !kindNameRef().MatchString(line) {
+		return false
+	}
+	p := filepath.ToSlash(path)
+	if !strings.Contains(p, "/") && kindBootstrapCall.MatchString(line) {
+		return false
+	}
+	m := kindPickerAlias.FindStringSubmatch(line)
+	return p != pickerFile || m == nil || m[1] != m[2]
+}
+
+// kindVarAlternation is a capturing group of the exported var each registered
+// kind is generated as (its row Name, first letter upper-cased). Default is
+// left out: it is the sanctioned way to name "the unset kind".
+func kindVarAlternation() string {
+	var alts []string
+	for _, d := range dispatchkind.All {
+		alts = append(alts, regexp.QuoteMeta(kindVarName(d.Name)))
+	}
+	return "(" + strings.Join(alts, "|") + ")"
+}
+
+func kindVarName(rowName string) string {
+	return strings.ToUpper(rowName[:1]) + rowName[1:]
+}
+
 // findingLabelPattern is a capturing group alternating every non-empty
 // FindingLabel in the registry, so a new kind's label is guarded without
 // editing this file. Kinds that share a FindingLabel repeat an alternative,
@@ -206,6 +248,9 @@ func kindAxisViolations(path, line string) []string {
 		if fp.matches(line) && !slices.Contains(whys, fp.why) {
 			whys = append(whys, fp.why) // two patterns can read one comparison
 		}
+	}
+	if namesKind(path, line) {
+		whys = append(whys, kindNameWhy)
 	}
 	if strings.Contains(filepath.ToSlash(path), settleDir) && findingLabelLiteral.MatchString(line) {
 		whys = append(whys, "finding-label literal instead of the FindingLabel axis")
@@ -255,14 +300,10 @@ func TestKindAxesGuard(t *testing.T) {
 	}
 }
 
-// guardHits reports whether any forbidden pattern flags line.
+// guardHits reports whether the guard flags line in an ordinary file: one
+// outside settle, package main and the console picker.
 func guardHits(line string) bool {
-	for _, fp := range kindAxisForbiddenPatterns() {
-		if fp.matches(line) {
-			return true
-		}
-	}
-	return false
+	return len(kindAxisViolations("internal/x/x.go", line)) > 0
 }
 
 // TestKindAxesGuardPatterns pins which spellings the guard treats as a kind
@@ -299,6 +340,10 @@ func TestKindAxesGuardPatterns(t *testing.T) {
 		`if env["DISPATCH_KEYING"] == "chore" {`,
 		`case "chore":`,
 		`case "issue", "chore":`,
+		`x := dispatchkind.Work.FindingLabel`,
+		`return dispatchkind.Recover`,
+		`if d == dispatchkind.Butler {`,
+		`KindWork := dispatchkind.Work.Name`,
 	}
 	allowed := []string{
 		`switch c.kind().Settle {`,
@@ -320,6 +365,8 @@ func TestKindAxesGuardPatterns(t *testing.T) {
 		`if getenv("DISPATCH_KEYING") == "" {`,
 		`if "" != env["DISPATCH_KEYING"] {`,
 		`case jiraIssueType:`,
+		`d := dispatchkind.Default.Name`,
+		`for _, d := range dispatchkind.All {`,
 	}
 	for _, line := range forbidden {
 		if !guardHits(line) {
@@ -329,6 +376,35 @@ func TestKindAxesGuardPatterns(t *testing.T) {
 	for _, line := range allowed {
 		if guardHits(line) {
 			t.Errorf("guard flags legitimate use: %s", line)
+		}
+	}
+}
+
+// TestKindAxesGuardEntryPoints pins where an entry point may name its own
+// verb's kind: a bootstrap call in package main, and a Kind<Verb> alias bound
+// to its own verb in the console picker -- nowhere else, and no other alias.
+func TestKindAxesGuardEntryPoints(t *testing.T) {
+	const (
+		bootstrapCall = `lc, err := bootstrap(stdout, true, dispatchkind.Work, false)`
+		applyCall     = `rc := applyDispatchKind(lc.config, dispatchkind.Research)`
+		workAlias     = `KindWork     = dispatchkind.Work`
+	)
+	for _, tc := range []struct {
+		path, line string
+		want       bool
+	}{
+		{"main.go", bootstrapCall, false},
+		{"bootstrap.go", applyCall, false},
+		{"internal/daemon/x.go", bootstrapCall, true},
+		{"internal/daemon/x.go", applyCall, true},
+		{pickerFile, workAlias, false},
+		{pickerFile, `KindResearch = dispatchkind.Research`, false},
+		{pickerFile, `KindWork = dispatchkind.Butler`, true},
+		{"internal/console/launcher.go", workAlias, true},
+		{pickerFile, `kind := dispatchkind.Work`, true},
+	} {
+		if got := slices.Contains(kindAxisViolations(tc.path, tc.line), kindNameWhy); got != tc.want {
+			t.Errorf("%s: %s flagged = %v, want %v", tc.path, tc.line, got, tc.want)
 		}
 	}
 }
@@ -424,5 +500,33 @@ func TestKindAxisConstsSpellings(t *testing.T) {
 func TestKindAxisConstsRejectsEmptyAxis(t *testing.T) {
 	if _, err := kindAxisConsts(t.TempDir()); err == nil {
 		t.Fatal("an empty package yielded axes with no constants without error")
+	}
+}
+
+// TestKindVarNamesAreDeclared pins the name derivation the named-kind pattern
+// rests on: each registered kind's derived var name must be declared in
+// kinds_gen.go, and Default must stay out of the pattern.
+func TestKindVarNamesAreDeclared(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dispatchkindDir, "kinds_gen.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]bool{}
+	for _, decl := range f.Decls {
+		if gd, ok := decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+			for _, spec := range gd.Specs {
+				for _, n := range spec.(*ast.ValueSpec).Names {
+					declared[n.Name] = true
+				}
+			}
+		}
+	}
+	for _, d := range dispatchkind.All {
+		if name := kindVarName(d.Name); !declared[name] {
+			t.Errorf("kind %q: derived var %s is not declared in kinds_gen.go", d.Name, name)
+		}
+	}
+	if strings.Contains(kindVarAlternation(), "Default") {
+		t.Error("named-kind pattern must not include Default")
 	}
 }
