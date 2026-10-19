@@ -112,7 +112,8 @@ let
     // (import ./docs-edit-isolation.nix (common // { inherit checksAt baselineChecks; }))
     // (import ./seam-fixtures.nix common)
     // (import ./event-stream-parity.nix common)
-    // (import ./bare-bang-guard.nix common);
+    // (import ./bare-bang-guard.nix common)
+    // (import ./backend-name-guard.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
@@ -185,6 +186,9 @@ let
     # Reads no docs, but scans every *.nix under nix/checks/, which a
     # comment-only edit (issue #5158) can reach.
     "bare-bang-guard"
+    # Reads no docs, but scans core .go/.nix as text; a comment-only edit can
+    # add a trailing-comment comparison it flags.
+    "backend-name-guard"
     "changelog"
     "driver-map"
     "event-stream-parity"
