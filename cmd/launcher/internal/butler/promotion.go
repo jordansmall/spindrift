@@ -169,7 +169,7 @@ func (p promotion) decide(f settle.Finding, room chore.Room) decision {
 // patch allow-list, the diff parses and every file is a plain modification
 // (no add, delete, rename, mode change, or binary content), the file cap,
 // the line cap, every path admitted by patchPaths, every path among the
-// finding's own site-key paths (butlerFiles), reviewer concurrence, then
+// finding's own site-key paths (settle.DedupFiles), reviewer concurrence, then
 // patch room. Returns the first gate's reason, one short line naming it, or
 // "" once every gate clears. Called only from decide, which has already
 // confirmed the rung is on and f.Patch is non-blank -- neither check is
@@ -206,7 +206,7 @@ func (p promotion) patchBlocker(f settle.Finding, room chore.Room) string {
 			return fmt.Sprintf("%s outside patch paths", oneLine(df.Path))
 		}
 	}
-	site := butlerFiles(f.DedupTerms)
+	site := settle.DedupFiles(f.DedupTerms)
 	for _, df := range files {
 		if !slices.Contains(site, df.Path) {
 			return fmt.Sprintf("%s not among the finding's site keys", oneLine(df.Path))
@@ -255,7 +255,7 @@ func (p promotion) decidePromote(f settle.Finding, room int) decision {
 	if !p.allowListed(f) {
 		return decision{kind: skip, reason: "class not allow-listed"}
 	}
-	files := butlerFiles(f.DedupTerms)
+	files := settle.DedupFiles(f.DedupTerms)
 	if !p.withinFileLimit(files) {
 		return decision{kind: skip, reason: "file count outside host limit"}
 	}
@@ -319,7 +319,7 @@ func oneLine(s string) string {
 // butlerBacklink renders the per-intent backlink appended to a filed
 // finding's body: which Chore filed it, the Box-claimed class if any (issue
 // #3870/#3880 -- named here regardless of whether the finding ends up
-// promoted), and which files (per butlerFiles: the path before the first ':'
+// promoted), and which files (per settle.DedupFiles: the path before the first ':'
 // in each usable dedup term, deduped, order kept) it concerns. The Files
 // sentence is omitted entirely when terms yields no paths, rather than
 // printing "Files: ".
@@ -328,7 +328,7 @@ func butlerBacklink(choreName string, f settle.Finding) string {
 	if f.Class != "" {
 		lead += fmt.Sprintf(" Class: `%s`.", f.Class)
 	}
-	files := butlerFiles(f.DedupTerms)
+	files := settle.DedupFiles(f.DedupTerms)
 	if len(files) == 0 {
 		return lead
 	}
@@ -337,24 +337,4 @@ func butlerBacklink(choreName string, f settle.Finding) string {
 		quoted[i] = "`" + path + "`"
 	}
 	return fmt.Sprintf("%s Files: %s.", lead, strings.Join(quoted, ", "))
-}
-
-// butlerFiles extracts the file path from each "path/to/file.go:Symbol" dedup
-// term (the path before the first ':'), deduping while keeping first-seen
-// order. A term with no ':' is taken whole. A term settle's dedup key set
-// would drop, or whose path names no site (e.g. "-:Foo"), contributes no
-// file, so junk terms never satisfy decide's file-count floor (issue #4036).
-// The path stays raw: the normalized key folds case and separators.
-func butlerFiles(dedupTerms []string) []string {
-	seen := make(map[string]bool, len(dedupTerms))
-	var files []string
-	for _, term := range dedupTerms {
-		path, _, hasSymbol := strings.Cut(term, ":")
-		if seen[path] || !settle.UsableDedupTerm(term) || (hasSymbol && !settle.UsableDedupTerm(path)) {
-			continue
-		}
-		seen[path] = true
-		files = append(files, path)
-	}
-	return files
 }

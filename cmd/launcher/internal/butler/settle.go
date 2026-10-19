@@ -135,8 +135,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	var drops []ledger.Drop
 	if s.tuning != nil {
 		err := s.tuning.load()
-		if err == nil {
-			result.IssueIntents, drops, err = s.validateTuning(num, result.IssueIntents)
+		if err == nil && s.tuning.digest.Validate != nil {
+			result.IssueIntents, drops, err = s.validateFindings(num, result.IssueIntents)
 		}
 		if err != nil {
 			s.fail(d, num, err.Error())
@@ -150,13 +150,14 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// gate calls after ledger.Finish below; the Ledger's Patched URLs derive
 	// from it.
 	var landings []patchLanding
-	// A tuning Chore keys on the pattern a finding names and lets a rejected
-	// idea return after the cooldown; a code Chore keeps site keys, forever.
+	// A Digest with a DedupTerms hook (tuning) keys on the pattern a finding
+	// names. A records Chore sets the cooldown cutoff, but only a tuning
+	// finding expires on it; a code Chore keeps site keys, forever.
 	// The cutoff must stay now-cooldown: a zero NotPlannedBefore never
 	// expires, but a zero cooldown would expire every not-planned close.
 	var dedup settle.DedupPolicy
 	if s.tuning != nil {
-		dedup = settle.DedupPolicy{Terms: tuningPatternTerms, NotPlannedBefore: s.now().Add(-s.tuning.policy.TuningCooldown)}
+		dedup = settle.DedupPolicy{Terms: s.tuning.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.tuning.policy.TuningCooldown)}
 	}
 	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
@@ -273,11 +274,12 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		if s.tuning == nil {
 			return decorate
 		}
+		rows := tuning.Rows(s.tuning.rendered)
 		// Appended last, after any promotion note, so the visible body ends
 		// with the host-rendered rows rather than the model's transcription.
 		return func(f settle.Finding) settle.Decoration {
 			dec := decorate(f)
-			if ev := tuning.Evidence(s.tuning.rows, f.Cites); ev != "" {
+			if ev := tuning.Evidence(rows, f.Cites); ev != "" {
 				dec.Backlink += "\n\n" + strings.TrimRight(ev, "\n")
 			}
 			return dec
@@ -529,13 +531,13 @@ func (s *settleRun) extraLabels(more ...string) []string {
 	return append(slices.Clone(s.labels), more...)
 }
 
-// validateTuning drops every tuning finding in raw that fails
-// tuningSnapshot.validate, returning the rest and a Drop for each. A payload
+// validateFindings drops every finding in raw that the Digest's Validate hook
+// refuses, returning the rest and a Drop for each. A payload
 // that filing would reject (settle.ParseIssueIntent) passes through for it to
 // skip, so its unvetted fields never reach a Drop. A tracked-files
 // error fails the settle rather than dropping anything: the claim stands and
 // the next sweep retries.
-func (s *settleRun) validateTuning(num string, raw []string) ([]string, []ledger.Drop, error) {
+func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledger.Drop, error) {
 	var tracked map[string]bool
 	trackedFiles := func() (map[string]bool, error) {
 		if tracked != nil {
@@ -559,7 +561,7 @@ func (s *settleRun) validateTuning(num string, raw []string) ([]string, []ledger
 			kept = append(kept, r)
 			continue
 		}
-		reason, err := s.tuning.validate(in, trackedFiles)
+		reason, err := s.tuning.digest.Validate(in, s.tuning.rendered, s.tuning.policy.digestLimits(), trackedFiles)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -567,7 +569,7 @@ func (s *settleRun) validateTuning(num string, raw []string) ([]string, []ledger
 			kept = append(kept, r)
 			continue
 		}
-		fmt.Printf("    #%s  dropped tuning finding %q: %s\n", num, in.Title, reason)
+		fmt.Printf("    #%s  dropped %s finding %q: %s\n", num, s.chore, in.Title, reason)
 		drops = append(drops, ledger.Drop{Title: in.Title, Reason: reason})
 	}
 	return kept, drops, nil
