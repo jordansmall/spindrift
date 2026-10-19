@@ -4033,15 +4033,17 @@ Setting `MERGE_GUARD_PATHS=""` disables the guard entirely — an explicit
 opt-out; the operator owns the consequences.
 
 **Tuning-provenance hold.** A second, independent check runs after the path
-guard: the launcher reads the issue the PR closes, and if it wears
-`agent-tuning-finding` (ADR 0062), the merge downgrades to manual
-regardless of `MERGE_MODE`, `MERGE_GUARD_PATHS`, and the paths touched,
-immediate and auto alike. The outcome matches a guard hit: the PR is flipped
-ready, the issue lands at `agent-complete`, and a comment on the PR names the
-label and says that removing it is the override. The Record settles with
-reason `tuning-provenance`. On a tracker with no label registry (`local`,
-`jira`) the same fact is the `chore=tuning` term in the issue body's last
-`<!-- spindrift-dedup: ... -->` marker line. Where a registry exists,
+guard: the launcher reads the issue the PR closes, and if it is a finding
+of a Chore whose catalog row sets `mergeByHand` (ADR 0070) — today only
+tuning, whose findings wear `agent-tuning-finding` (ADR 0062) — the merge
+downgrades to manual regardless of `MERGE_MODE`, `MERGE_GUARD_PATHS`, and the
+paths touched, immediate and auto alike. The outcome matches a guard hit: the
+PR is flipped ready, the issue lands at `agent-complete`, and a comment on the
+PR names the label and says that removing it is the override. The Record
+settles with reason `tuning-provenance`. On a tracker with no label registry
+(`local`, `jira`) the same fact is the Chore's `chore=<name>` term
+(`chore=tuning`) in the issue body's last `<!-- spindrift-dedup: ... -->`
+marker line. Where a registry exists,
 removing the label is the deliberate override: the PR then merges normally
 even if the body still carries the marker. If the closing issue cannot be
 read, the merge is held as a precaution (with a comment on the PR) and
