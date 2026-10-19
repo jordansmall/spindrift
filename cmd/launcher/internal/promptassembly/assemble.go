@@ -423,11 +423,15 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	// here, not baked into the fragment file or the substitution result,
 	// because command substitution strips trailing newlines.
 	for _, row := range reg.Rows {
-		fragSource := Source{Kind: SourceFragment, Name: row.Fragment}
+		fragName, err := row.resolvedFragment(e)
+		if err != nil {
+			return promptBodies{}, err
+		}
+		fragSource := Source{Kind: SourceFragment, Name: fragName}
 		// An ungated row (empty Gate) renders unconditionally, so the
 		// orchestrator fragments need no switch gate.
 		if row.Gate == "" || gates[row.Gate] {
-			path := filepath.Join(e.PromptsDir, "fragments", row.Fragment)
+			path := filepath.Join(e.PromptsDir, "fragments", fragName)
 			rendered, err := renderFileSegments(path, fragSource, vars)
 			if err != nil {
 				// A missing fragment file resolves to an empty string rather
@@ -436,7 +440,7 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 				// never tripped `set -e`. Any other read error still fails
 				// hard, since bash would not have swallowed that either.
 				if !errors.Is(err, os.ErrNotExist) {
-					return promptBodies{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
+					return promptBodies{}, fmt.Errorf("read fragment %s: %w", fragName, err)
 				}
 				vars[row.Var] = body{}
 				continue

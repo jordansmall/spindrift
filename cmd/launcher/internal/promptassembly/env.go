@@ -11,7 +11,10 @@ import "spindrift.dev/launcher/internal/dispatchkind"
 // "${VAR:-default}" expansion entrypoint.sh applied before box took over.
 // Issue #2533 moved every other gate-family default upstream into nix,
 // carried pre-resolved on Env.
-const defaultIssueTracker = "github"
+const (
+	defaultIssueTracker = "github"
+	defaultCodeForge    = "github"
+)
 
 // defaultDispatchKind is a var only because a const can't read
 // dispatchkind.Work.Name. Only Env.kind() reads it outside tests.
