@@ -1,21 +1,29 @@
 package main
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // kindAxisForbidden pins one old kind-shaped comparison that the descriptor
-// axes (Contract, FilerRelayGate, Tracker, Keying, FindingLabel) replaced
-// (issue #3989). why names the axis a caller should read instead; a line
-// that also matches unless is a legitimate use of the same spelling.
+// axes replaced (issue #3989, #5673). why names the sanctioned form a caller
+// should use instead; a line that also matches unless is a legitimate use of
+// the same spelling.
 type kindAxisForbidden struct {
 	pattern *regexp.Regexp
 	unless  *regexp.Regexp
@@ -26,18 +34,148 @@ func (fp kindAxisForbidden) matches(line string) bool {
 	return fp.pattern.MatchString(line) && (fp.unless == nil || !fp.unless.MatchString(line))
 }
 
-const settleWhy = "compares the settle strategy -- read Contract, FilerRelayGate, or Tracker instead"
+const dispatchkindDir = "internal/dispatchkind"
 
-var kindAxisForbiddenPatterns = []kindAxisForbidden{
-	{pattern: regexp.MustCompile(`\.Settle\s*[!=]=\s*dispatchkind\.Settle`), why: settleWhy},
-	{pattern: regexp.MustCompile(`dispatchkind\.Settle(Merge|Verdict|Ledger)\s*[!=]=`), why: settleWhy},
-	{pattern: regexp.MustCompile(`SelfContainedBase\s*!=\s*""`), why: "tests prompt-file presence as a kind test -- read Tracker instead"},
-	// == "" is legitimate only as the --self-contained capability check,
-	// which always pairs it with the non-negated selfContained flag.
-	{pattern: regexp.MustCompile(`SelfContainedBase\s*==\s*""`), unless: regexp.MustCompile(`(^|[^!\w.])(\w+\.)*[sS]elfContained\s*&&`), why: "tests prompt-file absence as a kind test -- read Tracker instead"},
-	{pattern: regexp.MustCompile(`\.Labels\s*[!=]=\s*dispatchkind\.`), why: "compares the label family -- read Tracker instead"},
-	{pattern: regexp.MustCompile(`dispatchkind\.Labels(Research|Configured|None)\s*[!=]=`), why: "compares the label family -- read Tracker instead"},
+// kindAxisConsts maps every tag axis of dispatchkind.Descriptor -- each field
+// whose type is an exported, package-declared signed or unsigned integer
+// type -- to the exported constants of that type found in dir's non-test
+// files. A constant counts as typed when its spec names the type
+// (`C Keying = ...`), is a conversion (`C = Keying(3)`), or inherits either
+// from an earlier spec of the block (an iota run). Both halves are derived,
+// so a new axis or value is guarded without editing this file. An axis with
+// no constants is an error: it would leave an empty alternation in the
+// patterns.
+func kindAxisConsts(dir string) (map[string][]string, error) {
+	desc := reflect.TypeOf(dispatchkind.Descriptor{})
+	axes := map[string][]string{}
+	for i := 0; i < desc.NumField(); i++ {
+		ft := desc.Field(i).Type
+		if k := ft.Kind(); k >= reflect.Int && k <= reflect.Uint64 && ft.PkgPath() == desc.PkgPath() && ast.IsExported(ft.Name()) {
+			axes[ft.Name()] = nil
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			// A spec with neither type nor values repeats the previous spec's
+			// type and expression, which is how an iota block is written.
+			typ := ""
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				if vs.Type != nil || len(vs.Values) > 0 {
+					typ = specTypeName(vs)
+				}
+				if _, isAxis := axes[typ]; !isAxis {
+					continue
+				}
+				for _, n := range vs.Names {
+					if n.IsExported() {
+						axes[typ] = append(axes[typ], n.Name)
+					}
+				}
+			}
+		}
+	}
+	for name, consts := range axes {
+		if len(consts) == 0 {
+			return nil, fmt.Errorf("tag axis %s has no exported constants in %s", name, dir)
+		}
+	}
+	return axes, nil
 }
+
+// specTypeName is the type a constant spec declares, either explicitly or
+// through a conversion value; "" when it names neither.
+func specTypeName(vs *ast.ValueSpec) string {
+	if id, ok := vs.Type.(*ast.Ident); ok {
+		return id.Name
+	}
+	if vs.Type == nil && len(vs.Values) == 1 {
+		if call, ok := vs.Values[0].(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); ok {
+				return id.Name
+			}
+		}
+	}
+	return ""
+}
+
+// kindAxes is kindAxisConsts over the real package, read on first use rather
+// than at package init: the seam tests re-exec this test binary as a runtime
+// fake from another working directory, where dispatchkindDir does not resolve.
+var kindAxes = sync.OnceValue(func() map[string][]string {
+	axes, err := kindAxisConsts(dispatchkindDir)
+	if err != nil {
+		panic("kindaxes guard: " + err.Error())
+	}
+	return axes
+})
+
+func allKindAxisConsts() []string {
+	var all []string
+	for _, consts := range kindAxes() {
+		all = append(all, consts...)
+	}
+	slices.Sort(all)
+	return all
+}
+
+const tagWhy = "compares a descriptor tag -- switch on it in the package the tag selects, or add a method on the enum in dispatchkind"
+
+// keyingWireValues is every distinct Keying.String() across the registry, the
+// DISPATCH_KEYING values a hand-spelled literal could duplicate.
+func keyingWireValues() []string {
+	var wire []string
+	for _, d := range dispatchkind.All {
+		if w := regexp.QuoteMeta(d.Keying.String()); !slices.Contains(wire, w) {
+			wire = append(wire, w)
+		}
+	}
+	return wire
+}
+
+// kindAxisForbiddenPatterns read one line at a time, so they catch the
+// spellings the tree has used, not every way to write a comparison: a
+// comparison split across lines, a parenthesised or converted constant, or a
+// wire value copied into a local first all slip past.
+var kindAxisForbiddenPatterns = sync.OnceValue(func() []kindAxisForbidden {
+	consts := "(" + strings.Join(allKindAxisConsts(), "|") + ")"
+	wireRead := `(\bDispatchKeying\b|[gG]etenv\("DISPATCH_KEYING"\)|\.Keying\.String\(\)|\["DISPATCH_KEYING"\])`
+	return []kindAxisForbidden{
+		// The tag on the right also catches dispatchkind.ByChore.String(),
+		// since \b fires before the dot.
+		{pattern: regexp.MustCompile(`[!=]=\s*dispatchkind\.` + consts + `\b`), why: tagWhy},
+		{pattern: regexp.MustCompile(`dispatchkind\.` + consts + `\b(\.String\(\))?\s*[!=]=`), why: tagWhy},
+		// The DISPATCH_KEYING wire value is Keying.String(), so comparing it to
+		// anything but "" is a Keying comparison, however the env is read; the
+		// operand next to the operator may not be a bare "".
+		{pattern: regexp.MustCompile(wireRead + `\s*[!=]=\s*([^"\s]|"[^"])`), why: tagWhy},
+		{pattern: regexp.MustCompile(`([^"\s]|[^"]")\s*[!=]=\s*[\w.()]*` + wireRead), why: tagWhy},
+		// A wire literal in a case clause duplicates a Keying constant's String().
+		// The line cannot show the switch subject, so this also flags the same
+		// literal in a switch on some other string; the message says so.
+		{pattern: regexp.MustCompile(`\bcase\s+("[^"]*",\s*)*"(` + strings.Join(keyingWireValues(), "|") + `)"`), why: "spells a DISPATCH_KEYING wire value -- use dispatchkind.<Const>.String(); in a switch on some other string, name the value as a const instead"},
+		{pattern: regexp.MustCompile(`SelfContainedBase\s*!=\s*""`), why: "tests prompt-file presence as a kind test -- read Tracker instead"},
+		// == "" is legitimate only as the --self-contained capability check,
+		// which always pairs it with the non-negated selfContained flag.
+		{pattern: regexp.MustCompile(`SelfContainedBase\s*==\s*""`), unless: regexp.MustCompile(`(^|[^!\w.])(\w+\.)*[sS]elfContained\s*&&`), why: "tests prompt-file absence as a kind test -- read Tracker instead"},
+	}
+})
 
 // findingLabelPattern is a capturing group alternating every non-empty
 // FindingLabel in the registry, so a new kind's label is guarded without
@@ -58,15 +196,15 @@ var findingLabelLiteral = regexp.MustCompile(`"` + findingLabelPattern + `"`)
 const settleDir = "internal/settle/"
 
 // kindAxisViolations returns why line, read from path, fails the guard: one
-// reason per forbidden spelling it carries.
+// distinct reason per forbidden spelling it carries.
 func kindAxisViolations(path, line string) []string {
 	if strings.HasPrefix(strings.TrimSpace(line), "//") {
 		return nil // prose mentioning an axis's old name isn't a comparison
 	}
 	var whys []string
-	for _, fp := range kindAxisForbiddenPatterns {
-		if fp.matches(line) {
-			whys = append(whys, fp.why)
+	for _, fp := range kindAxisForbiddenPatterns() {
+		if fp.matches(line) && !slices.Contains(whys, fp.why) {
+			whys = append(whys, fp.why) // two patterns can read one comparison
 		}
 	}
 	if strings.Contains(filepath.ToSlash(path), settleDir) && findingLabelLiteral.MatchString(line) {
@@ -117,6 +255,16 @@ func TestKindAxesGuard(t *testing.T) {
 	}
 }
 
+// guardHits reports whether any forbidden pattern flags line.
+func guardHits(line string) bool {
+	for _, fp := range kindAxisForbiddenPatterns() {
+		if fp.matches(line) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestKindAxesGuardPatterns pins which spellings the guard treats as a kind
 // test, so a loosened or over-broad pattern shows up here rather than as a
 // silently passing or spuriously failing walk.
@@ -130,29 +278,56 @@ func TestKindAxesGuardPatterns(t *testing.T) {
 		`if !c.selfContained && d.Prompts.SelfContainedBase == "" {`,
 		`if d.Labels == dispatchkind.LabelsResearch {`,
 		`if dispatchkind.LabelsNone != d.Labels {`,
+		`ResearchDispatch: c.kind().Tracker == dispatchkind.TrackerResearch,`,
+		`if t == dispatchkind.TrackerResearch {`,
+		`if kindPriority(k) == dispatchkind.PriorityReserved {`,
+		`reported: src == dispatchkind.DemandChildReported && probe[k] == 0, upperBound: src == dispatchkind.DemandHostOutbox}`,
+		`if d.Enablement != dispatchkind.EnabledByOutboxRelay {`,
+		`if d.Contract == dispatchkind.ContractLanding {`,
+		`return ok && d.Keying == dispatchkind.ByChore`,
+		`if dispatchkind.ByIssue != d.Keying {`,
+		`if r.env.DispatchKeying == dispatchkind.ByChore.String() {`,
+		`if dispatchkind.ByChore.String() != r.env.DispatchKeying {`,
+		`if getenv("DISPATCH_KEYING") == "chore" {`,
+		`if os.Getenv("DISPATCH_KEYING") != "issue" {`,
+		`if "chore" == getenv("DISPATCH_KEYING") {`,
+		`if d.Keying.String() == "chore" {`,
+		`if c.kind().Keying.String() != x {`,
+		`if x == d.Keying.String() {`,
+		`if x != c.kind().Keying.String() {`,
+		`if "issue" != env["DISPATCH_KEYING"] {`,
+		`if env["DISPATCH_KEYING"] == "chore" {`,
+		`case "chore":`,
+		`case "issue", "chore":`,
 	}
 	allowed := []string{
 		`switch c.kind().Settle {`,
 		`if r.Settle == nil {`,
 		`if c.selfContained && c.kind().Prompts.SelfContainedBase == "" {`,
 		`if e.SelfContained && d.Prompts.Base != "" && d.Prompts.SelfContainedBase == "" {`,
+		// Compares two descriptors' families to skip the kind's own; it never
+		// branches on a tag value, so a new family cannot slip past it.
 		`if d.Labels == ownFamily {`,
-	}
-	hit := func(line string) bool {
-		for _, fp := range kindAxisForbiddenPatterns {
-			if fp.matches(line) {
-				return true
-			}
-		}
-		return false
+		`switch d.Keying {`,
+		`case dispatchkind.ByChore:`,
+		`switch kindPriority(k) {`,
+		`switch r.env.DispatchKeying {`,
+		`switch getenv("DISPATCH_KEYING") {`,
+		`case dispatchkind.ByChore.String():`,
+		`switch d.Keying.String() {`,
+		`switch env["DISPATCH_KEYING"] {`,
+		`if e.DispatchKeying != "" {`,
+		`if getenv("DISPATCH_KEYING") == "" {`,
+		`if "" != env["DISPATCH_KEYING"] {`,
+		`case jiraIssueType:`,
 	}
 	for _, line := range forbidden {
-		if !hit(line) {
+		if !guardHits(line) {
 			t.Errorf("guard misses kind test: %s", line)
 		}
 	}
 	for _, line := range allowed {
-		if hit(line) {
+		if guardHits(line) {
 			t.Errorf("guard flags legitimate use: %s", line)
 		}
 	}
@@ -188,5 +363,66 @@ func TestKindAxesGuardFindingLabels(t *testing.T) {
 	}
 	if got := kindAxisViolations(inSettle, `labels = append(labels, d.FindingLabel)`); len(got) != 0 {
 		t.Errorf("guard flags legitimate use: %q", got)
+	}
+}
+
+// TestKindAxesGuardEveryAxis plants every constant of every derived tag axis
+// on either side of a comparison, so a value the alternation drops is caught.
+func TestKindAxesGuardEveryAxis(t *testing.T) {
+	for _, want := range []string{"Keying", "LabelFamily", "Settle", "PromptContract", "Tracker", "DaemonPriority", "Enablement", "DemandSource"} {
+		if len(kindAxes()[want]) == 0 {
+			t.Errorf("axis %s missing from the derived axes %v: the reflection dropped it", want, kindAxes())
+		}
+	}
+	for axis, consts := range kindAxes() {
+		for _, c := range consts {
+			for _, line := range []string{
+				`if x == dispatchkind.` + c + ` {`,
+				`if dispatchkind.` + c + ` != x {`,
+			} {
+				if !guardHits(line) {
+					t.Errorf("guard misses %s constant %s: %s", axis, c, line)
+				}
+			}
+		}
+	}
+}
+
+// TestKindAxisConstsSpellings plants each real axis in a temp package, in turn
+// as a typed iota block, as conversions, and as a conversion-headed iota run,
+// and expects every name back.
+func TestKindAxisConstsSpellings(t *testing.T) {
+	var src strings.Builder
+	src.WriteString("package x\n")
+	want := map[string][]string{}
+	// Sorted, so each axis gets the same spelling on every run.
+	for i, axis := range slices.Sorted(maps.Keys(kindAxes())) {
+		a, b := fmt.Sprintf("A%d", i), fmt.Sprintf("B%d", i)
+		switch i % 3 {
+		case 0:
+			fmt.Fprintf(&src, "const (\n\t%s %s = iota\n\t%s\n)\n", a, axis, b)
+		case 1:
+			fmt.Fprintf(&src, "const %s = %s(1)\nconst %s = %s(2)\n", a, axis, b, axis)
+		default:
+			fmt.Fprintf(&src, "const (\n\t%s = %s(iota)\n\t%s\n)\n", a, axis, b)
+		}
+		want[axis] = []string{a, b}
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := kindAxisConsts(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("kindAxisConsts = %v, want %v", got, want)
+	}
+}
+
+func TestKindAxisConstsRejectsEmptyAxis(t *testing.T) {
+	if _, err := kindAxisConsts(t.TempDir()); err == nil {
+		t.Fatal("an empty package yielded axes with no constants without error")
 	}
 }

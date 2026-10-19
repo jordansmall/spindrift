@@ -225,6 +225,8 @@ func applyDispatchKind(c config, kind *dispatchkind.Descriptor) config {
 
 	c.otherFamilyInProgressLabels = nil
 	for _, d := range dispatchkind.All {
+		// Compares two descriptors' families, never a tag constant, so the
+		// kind-axis guard allows it (kindaxes_guard_test.go).
 		if d.Labels == ownFamily {
 			continue
 		}
