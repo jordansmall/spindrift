@@ -1,0 +1,16 @@
+{
+  "envExports": [
+    {
+      "Name": "SYNTHETIC_REGISTRY",
+      "Value": "http://127.0.0.1:27182/one-example-test"
+    }
+  ],
+  "homeConfig": {
+    "configPath": "config",
+    "content": "registry = http://127.0.0.1:27182/one-example-test\n",
+    "homeEnvVar": "SYNTHETIC_HOME"
+  },
+  "warnings": [
+    "registry proxy manifest routes one-example-test, two-example-test share upstream host Reg.Example.Test — host-based in-tree rewriting cannot tell them apart, their in-tree registry rewrite is skipped, those ecosystems fall back to the public registry"
+  ]
+}

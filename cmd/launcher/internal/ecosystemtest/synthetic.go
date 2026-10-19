@@ -1,22 +1,49 @@
 package ecosystemtest
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // Synthetic is a test-only row exercising each stage's generic behaviour
 // without naming a real ecosystem. It reads `name = <url>` lines from
-// .synthetic/registries. Real rows migrate onto this kit later (issue #5600).
+// .synthetic/registries, binds through an env export, a home config and an
+// in-tree rewrite of that file, and rewrites the "download" URL of an
+// index.json response. Real rows migrate onto this kit later (issue #5600).
 var Synthetic = ecosystem.Row{
 	Name:             "synthetic",
 	InTreeConfigPath: ".synthetic/registries",
 	ConfigParser:     parseSynthetic,
 	RouteDeclaration: validateSyntheticRouteDeclaration,
 	CredentialStores: []string{"netrc"},
+	EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+		return []ecosystem.EnvExport{{Name: "SYNTHETIC_REGISTRY", Value: ecosystem.RouteLocalURL(prefix, port)}}, nil
+	},
+	HomeConfig: &ecosystem.HomeConfig{
+		HomeEnvVar:          "SYNTHETIC_HOME",
+		HomeRelativeDefault: ".synthetic",
+		ConfigPath:          "config",
+		Render: func(port int, prefix string, _ []registrymanifest.Route) string {
+			return "registry = " + ecosystem.RouteLocalURL(prefix, port) + "\n"
+		},
+	},
+	RewriteRows: []registryvocab.RewriteRow{{
+		Name:      "synthetic index.json",
+		Ecosystem: "synthetic",
+		Method:    http.MethodGet,
+		Matches: func(routeRelativePath, base string) bool {
+			return routeRelativePath == registryvocab.JoinBase(base, "/index.json")
+		},
+		Rewrite: rewriteSyntheticDownload,
+	}},
 }
 
 func parseSynthetic(content string) (decls []ecosystem.Declaration, namedAny bool, err error) {
@@ -47,4 +74,34 @@ func validateSyntheticRouteDeclaration(key string, value any) error {
 		return errors.New("must be an absolute path")
 	}
 	return nil
+}
+
+// rewriteSyntheticDownload repoints a "download" URL naming the route's
+// match-host at the Forwarder, re-inserting the route prefix; a URL naming any
+// other host is left alone.
+func rewriteSyntheticDownload(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
+	unchanged := registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) != nil {
+		return unchanged
+	}
+	download, _ := obj["download"].(string)
+	for _, scheme := range []string{"https://", "http://"} {
+		rest, ok := strings.CutPrefix(download, scheme+rc.MatchHost+"/")
+		if !ok {
+			continue
+		}
+		to := rc.Forwarder.Scheme + "://" + rc.Forwarder.Host + "/" + rc.Prefix + "/" + rest
+		obj["download"] = to
+		rewritten, err := json.Marshal(obj)
+		if err != nil {
+			return unchanged
+		}
+		return registryvocab.RewriteResult{
+			Body:    rewritten,
+			Edits:   []registryvocab.RewriteEdit{{From: download, To: to, LearnedPath: path.Dir("/" + rest)}},
+			Outcome: registryvocab.RewriteApplied,
+		}
+	}
+	return unchanged
 }

@@ -1,0 +1,18 @@
+{
+  "envExports": [
+    {
+      "Name": "SYNTHETIC_REGISTRY",
+      "Value": "http://127.0.0.1:27182/one-example-test"
+    }
+  ],
+  "homeConfig": {
+    "configPath": "config",
+    "content": "registry = http://127.0.0.1:27182/one-example-test\n",
+    "homeEnvVar": "SYNTHETIC_HOME"
+  },
+  "inTree": {
+    "configPath": ".synthetic/registries",
+    "content": "main = http://127.0.0.1:27182/one-example-test/a/\nmirror = http://127.0.0.1:27182/two-mirror-example-test\nbad = ftp://skipped.example.test/x\n",
+    "outcome": "applied"
+  }
+}

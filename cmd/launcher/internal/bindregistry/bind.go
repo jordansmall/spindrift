@@ -366,6 +366,18 @@ func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewrit
 	return filtered
 }
 
+// InTreeRoutes is in-tree apply mode's route handling: the host rewrites
+// ApplyInTreeBinding takes, the routes left once every colliding upstream host
+// is dropped (which the repo-aware home configs render against), and one
+// warning per collision, worded as applyInTree prints it after "==> WARNING: ".
+func InTreeRoutes(routes []registrymanifest.Route, port int) (rewrites []HostRewrite, kept []registrymanifest.Route, collisionWarnings []string) {
+	rewrites, collisions := buildIntreeHostRewrites(routes, port)
+	for _, c := range collisions {
+		collisionWarnings = append(collisionWarnings, "registry proxy manifest routes "+strings.Join(c.Prefixes, ", ")+" share upstream host "+c.Host+" — host-based in-tree rewriting cannot tell them apart, their in-tree registry rewrite is skipped, those ecosystems fall back to the public registry")
+	}
+	return rewrites, dropCollidedRoutes(routes, collisions), collisionWarnings
+}
+
 // ApplyInTree is in-tree apply mode (issue #2932) followed by the repo-aware home
 // configs (issue #3201): it rewrites every tracked in-tree registry config the
 // manifest names, then re-renders each repo-aware home config, handing their env
@@ -396,15 +408,15 @@ func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Row, gate Ga
 	}
 
 	port := gate.port
-	rewrites, collisions := buildIntreeHostRewrites(gate.manifest.Routes, port)
-	for _, c := range collisions {
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest routes "+strings.Join(c.Prefixes, ", ")+" share upstream host "+c.Host+" — host-based in-tree rewriting cannot tell them apart, their in-tree registry rewrite is skipped, those ecosystems fall back to the public registry")
+	rewrites, _, collisionWarnings := InTreeRoutes(gate.manifest.Routes, port)
+	for _, w := range collisionWarnings {
+		fmt.Fprintln(stdout, "==> WARNING: "+w)
 	}
 	if len(rewrites) == 0 {
 		// A collision warning already explained why every candidate was
 		// dropped; the generic "carries no route upstream host" warning would
 		// mislead, since the manifest does carry one, just an unusable one.
-		if len(collisions) == 0 {
+		if len(collisionWarnings) == 0 {
 			fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route upstream host — the in-tree registry rewrite is skipped, ecosystems fall back to the public registry")
 		}
 		return true
@@ -541,8 +553,7 @@ func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosyste
 	}
 	prefix := gate.manifest.Routes[0].Prefix
 
-	_, collisions := buildIntreeHostRewrites(gate.manifest.Routes, port)
-	routes := dropCollidedRoutes(gate.manifest.Routes, collisions)
+	_, routes, _ := InTreeRoutes(gate.manifest.Routes, port)
 
 	var exports []ecosystem.EnvExport
 	failed := false

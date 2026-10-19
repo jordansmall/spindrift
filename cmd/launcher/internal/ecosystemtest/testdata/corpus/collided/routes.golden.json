@@ -1,0 +1,36 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "basic",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SYNTH_TOKEN",
+      "FromFile": "",
+      "MatchHost": "one.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://Reg.Example.Test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "one.example.test",
+    "UpstreamOrigin": "https://Reg.Example.Test"
+  },
+  {
+    "Allow": null,
+    "AuthScheme": "basic",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SYNTH_TOKEN",
+      "FromFile": "",
+      "MatchHost": "two.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://reg.example.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "two.example.test",
+    "UpstreamOrigin": "https://reg.example.test"
+  }
+]

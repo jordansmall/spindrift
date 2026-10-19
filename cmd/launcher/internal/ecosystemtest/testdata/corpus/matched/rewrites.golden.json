@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\"download\":\"http://127.0.0.1:27182/reg-example-test/api/synth/pkgs/{name}.tgz\",\"name\":\"widget\"}",
+    "request": "GET /reg-example-test/api/synth/index.json",
+    "status": 200
+  }
+]
