@@ -1,6 +1,7 @@
 package butler
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -15,12 +16,14 @@ import (
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/recordsdigest"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/tuning"
 )
 
 const (
-	noPriorChore  = "noprior"
-	noPriorAnchor = "row:a"
+	noPriorChore   = "noprior"
+	noPriorAnchor  = "row:a"
+	withPriorChore = "withprior"
 )
 
 // The butler's tests exercise the tuning records path, which the production
@@ -33,6 +36,14 @@ func init() {
 			return recordsdigest.Output{Text: "digest", Latest: "latest"}
 		},
 		Anchors: func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
+	})
+	recordsdigest.Register(recordsdigest.Strategy{
+		Name: withPriorChore,
+		Render: func(in recordsdigest.Input) recordsdigest.Output {
+			return recordsdigest.Output{Text: fmt.Sprint("prior: ", in.Prior), Latest: "latest"}
+		},
+		Anchors:    func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
+		ParsePrior: func(f settle.PriorFinding) any { return f.Issue.Number },
 	})
 }
 
@@ -83,11 +94,77 @@ func TestRecordsSourceWithoutParsePriorSkipsBacklog(t *testing.T) {
 	}
 }
 
+// The adapter, not the Digest, decides a records Chore is due: it counts the
+// settled Records past the tip's cursor against the policy minimum.
+func TestRecordsSourceDueCountsNewRecordsForAnyDigest(t *testing.T) {
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
+	for _, tc := range []struct {
+		name        string
+		seeded, min int
+		cursorAt    int // index into the seeded Record IDs; -1 for no cursor
+		want        chore.NotDue
+	}{
+		{"enough new Records", 3, 3, -1, chore.Due},
+		{"too few new Records", 2, 3, -1, chore.TooFewRecords},
+		{"cursor at the latest Record", 3, 1, 2, chore.TooFewRecords},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			ids := seedRecords(t, root, 1, tc.seeded, tuningNow.Add(-48*time.Hour))
+			p := tuningPolicy(root, tc.min)
+			p.Chores = []chore.Chore{{Name: noPriorChore, Every: time.Hour, Records: true}}
+			r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })
+			src, err := newRecordsSource(r, noPriorChore, "head1", tuningNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tip := ledger.Tip{}
+			if tc.cursorAt >= 0 {
+				tip = ledger.Tip{State: ledger.State{Cursor: ids[tc.cursorAt], Phase: ledger.Done}}
+			}
+			if got := src.Due(tip, nil, tuningNow, chore.Room{}, cfg); got != tc.want {
+				t.Errorf("Due = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Prior findings are found by the Chore's dedup marker, open and closed alike:
+// the issues carry only the generic butler provenance label, no Chore-specific
+// finding label, so only the marker ties them to the Chore.
+func TestRecordsSourcePrepareFindsPriorFindingsByMarker(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
+	p := tuningPolicy(root, 1)
+	p.Chores = []chore.Chore{{Name: withPriorChore, Every: time.Hour, Records: true}}
+	labels := []string{dispatchkind.Butler.FindingLabel}
+	marker := func(name string) string { return "<!-- spindrift-dedup: chore=" + name + ", x -->" }
+	open := []forge.Issue{
+		{Number: "1", Body: marker(withPriorChore), Labels: labels},
+		{Number: "2", Body: marker(noPriorChore), Labels: labels},
+		{Number: "3", Body: "no marker here", Labels: labels},
+	}
+	closed := []forge.Issue{{Number: "4", Body: marker(withPriorChore), Labels: labels}}
+	it := newBacklogTracker(t, forge.NewFake().AsIssueFiler(), open, closed)
+	r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, it, nil, p, func() time.Time { return tuningNow })
+	src, err := newRecordsSource(r, withPriorChore, "head1", tuningNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := src.Prepare(ledger.Tip{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "prior: [1 4]"; got.input != want {
+		t.Errorf("input = %q, want %q", got.input, want)
+	}
+}
+
 // A Digest that registers no Validate or DedupTerms gets neither tuning's
 // settle rules nor its pattern keys: an untracked-target finding files, and
 // findings on one site dedup on their own DedupTerms rather than
 // class:file:metric.
-func TestRecordsChoreWithNilHooksSettlesWithoutTuningRules(t *testing.T) {
+func TestRecordsChoreWithoutValidateOrDedupTermsSettlesWithoutTuningRules(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 	p := tuningPolicy(root, 1)
