@@ -28,10 +28,10 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 			DriverSessionCacheDir: "/home/agent/.claude/projects",
 		},
 	}
-	r := NewOCI(cfg, "/pwd")
+	r := New(cfg, "/pwd")
 	a, ok := r.(*ociAdapter)
 	if !ok {
-		t.Fatalf("NewOCI did not return *ociAdapter")
+		t.Fatalf("New did not return *ociAdapter")
 	}
 	got := ociAdapter{
 		cli:             a.cli,
@@ -66,17 +66,17 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		memoryLimit:     cfg.MemoryLimit,
 	}
 	if got != want {
-		t.Errorf("NewOCI(cfg, pwd) fields = %+v, want %+v", got, want)
+		t.Errorf("New(cfg, pwd) fields = %+v, want %+v", got, want)
 	}
 }
 
 // Issue #1274: "rancher" is the first runtime value that differs from the
 // binary it invokes, "nerdctl".
 func TestNewOCI_RancherAliasesToNerdctl(t *testing.T) {
-	r := NewOCI(runner.Config{Runtime: "rancher"}, "/pwd")
+	r := New(runner.Config{Runtime: "rancher"}, "/pwd")
 	a, ok := r.(*ociAdapter)
 	if !ok {
-		t.Fatalf("NewOCI did not return *ociAdapter")
+		t.Fatalf("New did not return *ociAdapter")
 	}
 	if a.cli != "nerdctl" {
 		t.Errorf("cli = %q, want %q", a.cli, "nerdctl")

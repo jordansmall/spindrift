@@ -26,10 +26,10 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 			DriverSessionCacheDir: "/home/agent/.claude/projects",
 		},
 	}
-	r := NewBwrap(cfg, "/pwd")
+	r := New(cfg, "/pwd")
 	a, ok := r.(*bwrapAdapter)
 	if !ok {
-		t.Fatalf("NewBwrap did not return *bwrapAdapter")
+		t.Fatalf("New did not return *bwrapAdapter")
 	}
 	want := bwrapAdapter{
 		agentFiles:         cfg.AgentFiles,
@@ -48,7 +48,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 	// fields Kill uses (issue #649) are not comparable, and dereferencing
 	// would copy the embedded sync.Mutex.
 	if !reflect.DeepEqual(a, &want) {
-		t.Errorf("NewBwrap(cfg) fields = %+v, want %+v", a, &want)
+		t.Errorf("New(cfg) fields = %+v, want %+v", a, &want)
 	}
 }
 
@@ -61,10 +61,10 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 		GroupFileDrv:     "/group.drv",
 		NixConfigFileDrv: "/nix-config.drv",
 	}
-	r := NewBwrapBuild(cfg, "/pwd")
+	r := NewBuild(cfg, "/pwd")
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
-		t.Fatalf("NewBwrapBuild did not return *bwrapBuildAdapter")
+		t.Fatalf("NewBuild did not return *bwrapBuildAdapter")
 	}
 	want := bwrapBuildAdapter{
 		agentFilesDrv:      cfg.AgentFilesDrv,
@@ -77,7 +77,7 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 		nixVarGeneration:   ClosureGeneration(cfg.ImageTag),
 	}
 	if *a != want {
-		t.Errorf("NewBwrapBuild(cfg) fields = %+v, want %+v", *a, want)
+		t.Errorf("NewBuild(cfg) fields = %+v, want %+v", *a, want)
 	}
 }
 
@@ -86,14 +86,14 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 // after its basename, replacing the flat path every closure collided on.
 func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
-	r := NewBwrap(cfg, "/pwd")
+	r := New(cfg, "/pwd")
 	a, ok := r.(*bwrapAdapter)
 	if !ok {
-		t.Fatalf("NewBwrap did not return *bwrapAdapter")
+		t.Fatalf("New did not return *bwrapAdapter")
 	}
 	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot", "abc123-agent-closure")
 	if a.nixVarSnapshotDir != want {
-		t.Errorf("NewBwrap(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
+		t.Errorf("New(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
 	}
 }
 
@@ -101,13 +101,13 @@ func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 // resolve to the same generation-scoped path for a given ImageTag.
 func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
-	r := NewBwrapBuild(cfg, "/pwd")
+	r := NewBuild(cfg, "/pwd")
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
-		t.Fatalf("NewBwrapBuild did not return *bwrapBuildAdapter")
+		t.Fatalf("NewBuild did not return *bwrapBuildAdapter")
 	}
 	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot", "abc123-agent-closure")
 	if a.nixVarSnapshotDir != want {
-		t.Errorf("NewBwrapBuild(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
+		t.Errorf("NewBuild(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
 	}
 }

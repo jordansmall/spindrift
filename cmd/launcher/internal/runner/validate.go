@@ -7,7 +7,7 @@ import (
 
 // ValidateRuntime checks that runtime ("podman", "docker", "rancher", or
 // "bwrap") names a binary on PATH, guarding the same Config.Runtime field
-// NewOCI and the adapter-selection switch consume.
+// the adapter constructors and the adapter-selection switch consume.
 func ValidateRuntime(runtime string) error {
 	return ValidateRuntimeWithLookup(runtime, exec.LookPath)
 }

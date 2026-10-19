@@ -441,7 +441,7 @@ func TestBwrapArgs_NetworkModeNoHostLoopbackDefaultsToIsolate(t *testing.T) {
 
 // Issue #2666's "by default a Box has its own network namespace and working
 // egress" criterion: the Go zero value for networkMode, which is what most
-// callers of NewBwrap/Config leave it at, isolates and pasta-wraps the same as
+// callers of New/Config leave it at, isolates and pasta-wraps the same as
 // an explicit "open".
 func TestBwrapArgs_NetworkModeUnsetDefaultsToIsolate(t *testing.T) {
 	a := &bwrapAdapter{

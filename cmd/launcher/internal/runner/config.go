@@ -22,7 +22,7 @@ func (m NetworkMode) DeniesHostLoopback() bool {
 }
 
 // Config carries the subset of launcher config the runner constructors need.
-// pwd is a per-invocation runtime dependency, so NewOCI takes it separately.
+// pwd is a per-invocation runtime dependency, so the adapter constructors take it separately.
 type Config struct {
 	// Runtime is one of ValidValues ("podman", "docker", "rancher", or
 	// "bwrap"). For OCI adapters it also names the CLI binary (via BinaryFor).

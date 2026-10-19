@@ -131,12 +131,12 @@ type bwrapAdapter struct {
 	prefetchFallbackLogged map[string]struct{}
 }
 
-// NewBwrap constructs a bwrap adapter for the run command from cfg and pwd (the
-// launcher's own working directory); call NewBwrapBuild for the build command.
+// New constructs a bwrap adapter for the run command from cfg and pwd (the
+// launcher's own working directory); call NewBuild for the build command.
 // By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
 // adapter isolates the sandbox into its own network namespace, with egress
 // restored via a hardened pasta helper (ADR 0042), matching rootless podman.
-func NewBwrap(cfg runner.Config, pwd string) runner.Runner {
+func New(cfg runner.Config, pwd string) runner.Runner {
 	return &bwrapAdapter{
 		agentFiles:         cfg.AgentFiles,
 		agentEnv:           cfg.AgentEnv,
@@ -1046,10 +1046,10 @@ type bwrapBuildAdapter struct {
 	nixVarGeneration   string
 }
 
-// NewBwrapBuild constructs a bwrap adapter for the build command from cfg and
+// NewBuild constructs a bwrap adapter for the build command from cfg and
 // pwd (the launcher's own working directory). EnsureReady realizes the agent
 // store closures and, when nixInBox is on, snapshots the host nix store DB.
-func NewBwrapBuild(cfg runner.Config, pwd string) runner.Runner {
+func NewBuild(cfg runner.Config, pwd string) runner.Runner {
 	generation := ClosureGeneration(cfg.ImageTag)
 	return &bwrapBuildAdapter{
 		agentFilesDrv:      cfg.AgentFilesDrv,
