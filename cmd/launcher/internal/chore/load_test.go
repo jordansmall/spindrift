@@ -439,7 +439,7 @@ func TestRows(t *testing.T) {
 		}
 		byName[r.Name] = r
 	}
-	if want := (Row{Name: "tuning", FindingLabel: "agent-tuning-finding", MergeByHand: true}); byName["tuning"] != want {
+	if want := (Row{Name: "tuning", FindingLabel: "agent-tuning-finding", MergeByHand: true, Records: true}); byName["tuning"] != want {
 		t.Errorf("tuning row = %+v, want %+v", byName["tuning"], want)
 	}
 	if want := (Row{Name: "bugs"}); byName["bugs"] != want {

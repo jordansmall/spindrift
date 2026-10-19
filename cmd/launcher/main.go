@@ -30,6 +30,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
+	_ "spindrift.dev/launcher/internal/hostbundle" // registers the built-in Records digests the butler sweep renders
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
