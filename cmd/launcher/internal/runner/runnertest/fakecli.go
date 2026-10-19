@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -17,6 +18,11 @@ type Call struct {
 	Exit   int
 	Stdout string
 	Stderr string
+	// Shell is a /bin/sh snippet run before the call prints and exits, with
+	// the recording dir as cwd, so a scripted call can create, test or wait on
+	// marker files (never named call-*) and `exit` early to override Exit.
+	// Empty means no prelude.
+	Shell string
 }
 
 // NewFakeCLI writes a stub runtime binary that records each invocation's argv
@@ -33,16 +39,14 @@ func NewFakeCLI(t *testing.T, calls ...Call) (script, dir string) {
 	script = filepath.Join(dir, "fake-cli")
 
 	var b strings.Builder
-	b.WriteString("#!/bin/sh\n")
-	fmt.Fprintf(&b, "n=$(ls %q/call-*.txt 2>/dev/null | wc -l)\n", dir)
-	fmt.Fprintf(&b, "printf '%%s\\n' \"$@\" > %q/call-$(printf '%%02d' $n).txt\n", dir)
+	writeRecordPrelude(&b, dir)
 	b.WriteString("case $n in\n")
 	for i, c := range calls {
 		pattern := fmt.Sprintf("%d", i)
 		if i == len(calls)-1 {
 			pattern += "|*"
 		}
-		fmt.Fprintf(&b, "%s) printf '%%s' %q; printf '%%s' %q >&2; exit %d ;;\n", pattern, c.Stdout, c.Stderr, c.Exit)
+		fmt.Fprintf(&b, "%s) %s ;;\n", pattern, callBody(dir, c))
 	}
 	b.WriteString("esac\n")
 
@@ -50,6 +54,58 @@ func NewFakeCLI(t *testing.T, calls ...Call) (script, dir string) {
 		t.Fatal(err)
 	}
 	return script, dir
+}
+
+// NewFakeCLIBySubcommand is NewFakeCLI keyed on the invocation's first
+// argument (the runtime subcommand: inspect, run, ps, rm, ...) instead of its
+// position, so a test mixing subcommands on one adapter needs no call-order
+// bookkeeping. It records argv to the same call-NN.txt files, so ReadCall and
+// CallCount work unchanged. A subcommand with no scripted Call fails with exit
+// 127 and a stderr message naming it.
+func NewFakeCLIBySubcommand(t *testing.T, calls map[string]Call) (script, dir string) {
+	t.Helper()
+	if len(calls) == 0 {
+		t.Fatal("NewFakeCLIBySubcommand: at least one scripted subcommand required")
+	}
+	dir = t.TempDir()
+	script = filepath.Join(dir, "fake-cli")
+
+	var b strings.Builder
+	writeRecordPrelude(&b, dir)
+	b.WriteString("case $1 in\n")
+	names := make([]string, 0, len(calls))
+	for name := range calls {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(&b, "%q) %s ;;\n", name, callBody(dir, calls[name]))
+	}
+	b.WriteString("*) printf 'fake-cli: unscripted subcommand %s\\n' \"$1\" >&2; exit 127 ;;\n")
+	b.WriteString("esac\n")
+
+	if err := os.WriteFile(script, []byte(b.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script, dir
+}
+
+// writeRecordPrelude emits the shared script head: it sets n to the zero-based
+// invocation index and records argv to call-NN.txt.
+func writeRecordPrelude(b *strings.Builder, dir string) {
+	b.WriteString("#!/bin/sh\n")
+	fmt.Fprintf(b, "n=$(ls %q/call-*.txt 2>/dev/null | wc -l)\n", dir)
+	fmt.Fprintf(b, "printf '%%s\\n' \"$@\" > %q/call-$(printf '%%02d' $n).txt\n", dir)
+}
+
+// callBody renders c as the shell commands of one case arm.
+func callBody(dir string, c Call) string {
+	var b strings.Builder
+	if c.Shell != "" {
+		fmt.Fprintf(&b, "cd %q; %s\n", dir, c.Shell)
+	}
+	fmt.Fprintf(&b, "printf '%%s' %q; printf '%%s' %q >&2; exit %d", c.Stdout, c.Stderr, c.Exit)
+	return b.String()
 }
 
 // ReadCall returns the argv (split on newline) recorded for the n-th
