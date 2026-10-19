@@ -6,6 +6,12 @@
 # Nix boolean, and `fragment` is a basename under prompts/fragments/, from
 # templates/default or a SPINDRIFT_PROMPT_DIR override. A row that omits `gate`
 # is ungated and renders unconditionally; the export normalizes it to "".
+# A row with `axis` ("tracker" | "forge", issue #5646, ADR 0068) names its
+# `fragment` relative to the active backend's own folder instead:
+# `fragments/<backend>/<fragment>`, <backend> being the active ISSUE_TRACKER
+# or CODE_FORGE. A backend with no such file renders empty. An omitted `axis`
+# means a root-level fragment (Go's omitempty reads the absent key as "");
+# lib/fragment-paths.nix expands a row to its on-disk paths.
 
 # `extraSubstVars` (default []) lists allowlist entries a fragment's own body
 # interpolates; every other fragment is static prose once its gate is on,
@@ -478,18 +484,25 @@ let
     # *linked* issue. Each folds the trailing `git log` bullet in: the loop
     # adds a blank line per fragment, so a mid-list `${VAR}` would split it.
     {
+      axis = "tracker";
+      fragment = "issue-read.md";
+      var = "ISSUE_READ_STEP";
+    }
+    # Deprecation-window fill for override prompts that still name the
+    # per-backend vars (issue #5646); shipped prompts use ISSUE_READ_STEP.
+    {
       gate = "ISSUE_TRACKER_GITHUB";
-      fragment = "issue-read-github.md";
+      fragment = "github/issue-read.md";
       var = "ISSUE_READ_GITHUB_STEP";
     }
     {
       gate = "ISSUE_TRACKER_LOCAL";
-      fragment = "issue-read-local.md";
+      fragment = "local/issue-read.md";
       var = "ISSUE_READ_LOCAL_STEP";
     }
     {
       gate = "ISSUE_TRACKER_FORGEJO";
-      fragment = "issue-read-forgejo.md";
+      fragment = "forgejo/issue-read.md";
       var = "ISSUE_READ_FORGEJO_STEP";
     }
     {

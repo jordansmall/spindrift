@@ -313,18 +313,24 @@
     "var": "PR_BODY_LOCAL_NOREF_STEP"
   },
   {
+    "axis": "tracker",
+    "gate": "",
+    "fragment": "issue-read.md",
+    "var": "ISSUE_READ_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_GITHUB",
-    "fragment": "issue-read-github.md",
+    "fragment": "github/issue-read.md",
     "var": "ISSUE_READ_GITHUB_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_LOCAL",
-    "fragment": "issue-read-local.md",
+    "fragment": "local/issue-read.md",
     "var": "ISSUE_READ_LOCAL_STEP"
   },
   {
     "gate": "ISSUE_TRACKER_FORGEJO",
-    "fragment": "issue-read-forgejo.md",
+    "fragment": "forgejo/issue-read.md",
     "var": "ISSUE_READ_FORGEJO_STEP"
   },
   {

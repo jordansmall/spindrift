@@ -11,12 +11,12 @@ file-issues-direct.md
 filer-dedup-search.md
 filer-file-direct.md
 filer-label-direct.md
+github/issue-read.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-git.md
 if-blocked-push-git.md
 if-blocked-triage-git.md
 issue-blocked-comment-github.md
-issue-read-github.md
 land-git-push-git.md
 land-git-stop-read-write.md
 land-pass-order-finish-filer.md

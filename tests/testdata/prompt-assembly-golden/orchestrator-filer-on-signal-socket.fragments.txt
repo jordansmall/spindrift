@@ -11,12 +11,12 @@ file-issues-relay-socket.md
 filer-dedup-search.md
 filer-file-relay-socket.md
 filer-label-relay.md
+github/issue-read.md
 if-blocked-outcome-landing-outbox.md
 if-blocked-pr-outbox-socket.md
 if-blocked-push-outbox.md
 if-blocked-triage-outbox.md
 issue-blocked-comment-github-readonly.md
-issue-read-github.md
 land-git-stop-read-only.md
 land-pass-order-finish-filer.md
 land-pass-order-gate-default-filer.md

@@ -27,7 +27,9 @@ let
   preambles = import ../../lib/preambles.nix;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
   fragmentRows = import ../../lib/fragments.nix;
-  fragmentBasenames = map (row: pkgs.lib.removeSuffix ".md" row.fragment) fragmentRows;
+  fragmentBasenames = map (pkgs.lib.removeSuffix ".md") (
+    builtins.concatMap (import ../../lib/fragment-paths.nix).pathsOf fragmentRows
+  );
   # Read reviewModel's default from the schema so a bump only edits
   # lib/env-schema.nix (issue #2433). Deliberate carve-out from
   # readSchemaDefaults (issue #2506 AC5): this pin needs the raw schema, not

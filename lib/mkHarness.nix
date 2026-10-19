@@ -221,6 +221,7 @@ let
   # one exception that still slices its own source: it needs the
   # RESEARCH_VERDICTS-rendered text, not the registry's unrendered default.
   promptContract = import ./prompt-contract.nix;
+  fragmentPaths = import ./fragment-paths.nix;
   inherit (promptContract) byId;
 
   # An alias for the fragmentsDir param above, kept so this file's existing
@@ -628,10 +629,21 @@ let
   # lib/prompt-contract.nix's buildTimeForbiddenMarkerViolations for the design.
   forbiddenMarkerViolations = promptContract.buildTimeForbiddenMarkerViolations {
     fragmentContentByFile = builtins.listToAttrs (
-      map (row: {
-        name = row.fragment;
-        value = builtins.readFile (fragmentsDir + "/${row.fragment}");
-      }) readOnlyReachableFragmentRows
+      builtins.concatMap (
+        row:
+        map
+          (path: {
+            name = path;
+            value = builtins.readFile (fragmentsDir + "/${path}");
+          })
+          # An axis row's per-backend files may be absent from a Consumer
+          # fragmentsDir; a plain row's absence still aborts eval.
+          (
+            builtins.filter (path: (row.axis or "") == "" || builtins.pathExists (fragmentsDir + "/${path}")) (
+              fragmentPaths.pathsOf row
+            )
+          )
+      ) readOnlyReachableFragmentRows
     );
     # Just these three: issue #2510 scopes the shared-template half of this
     # rule to the issue, review and filer prompts by name. fix-prompt.md and
@@ -684,10 +696,16 @@ let
       fragmentFiles = builtins.listToAttrs (
         # A fragment missing from a Consumer fragmentsDir renders empty, so
         # skip it rather than abort eval on a file-not-found.
-        map (row: {
-          name = row.fragment;
-          value = builtins.readFile (fragmentsDir + "/${row.fragment}");
-        }) (builtins.filter (row: builtins.pathExists (fragmentsDir + "/${row.fragment}")) fragments)
+        map
+          (path: {
+            name = path;
+            value = builtins.readFile (fragmentsDir + "/${path}");
+          })
+          (
+            builtins.filter (path: builtins.pathExists (fragmentsDir + "/${path}")) (
+              builtins.concatMap fragmentPaths.pathsOf fragments
+            )
+          )
       );
       choreFiles = lib.mapAttrs (n: _: builtins.readFile (choresDir + "/${n}")) (
         lib.filterAttrs (n: t: t != "directory" && lib.hasSuffix ".md" n) (builtins.readDir choresDir)

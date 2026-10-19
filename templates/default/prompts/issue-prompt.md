@@ -10,7 +10,7 @@ The issue's body and its last-10-comment snapshot are already in the
 # ISSUE TEXT section after the template body — read there, do not fetch
 it from the tracker. What follows here you still run yourself:
 
-${ISSUE_READ_GITHUB_STEP}${ISSUE_READ_LOCAL_STEP}${ISSUE_READ_FORGEJO_STEP}
+${ISSUE_READ_STEP}
 # ISSUE COHERENCE GATE
 
 Compare the issue's title against its body before scouting or

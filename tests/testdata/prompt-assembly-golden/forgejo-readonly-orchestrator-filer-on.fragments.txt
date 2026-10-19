@@ -11,12 +11,12 @@ file-issues-relay.md
 filer-dedup-search-forgejo.md
 filer-file-relay.md
 filer-label-relay.md
+forgejo/issue-read.md
 if-blocked-outcome-landing-outbox.md
 if-blocked-pr-outbox.md
 if-blocked-push-outbox.md
 if-blocked-triage-outbox.md
 issue-blocked-comment-forgejo-readonly.md
-issue-read-forgejo.md
 land-git-stop-read-only.md
 land-pass-order-finish-filer.md
 land-pass-order-gate-default-filer.md

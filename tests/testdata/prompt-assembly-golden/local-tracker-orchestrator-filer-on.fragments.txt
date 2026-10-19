@@ -16,11 +16,11 @@ if-blocked-pr-outbox.md
 if-blocked-push-outbox.md
 if-blocked-triage-outbox.md
 issue-blocked-comment-local.md
-issue-read-local.md
 land-git-stop-read-only.md
 land-pass-order-finish-filer.md
 land-pass-order-gate-default-filer.md
 land-pass-order-orchestrator.md
+local/issue-read.md
 open-pr-create-outbox.md
 open-pr-push-outbox.md
 outcome-landing-outbox.md
