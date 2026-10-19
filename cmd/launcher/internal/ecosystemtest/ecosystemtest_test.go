@@ -193,3 +193,23 @@ func TestCaseDirsFailsOnEmptyCorpus(t *testing.T) {
 		})
 	}
 }
+
+func TestClassificationGoldenPinsTheLockfileMatch(t *testing.T) {
+	if got := readGolden(t, "matched", "classification.golden.txt"); got != "synthetic\n" {
+		t.Errorf("matched classification golden = %q, want %q", got, "synthetic\n")
+	}
+	if got := readGolden(t, "unmatched", "classification.golden.txt"); got != "\n" {
+		t.Errorf("unmatched classification golden = %q, want a bare newline", got)
+	}
+}
+
+func TestReplayCaseDriftedClassificationGoldenFails(t *testing.T) {
+	dir := copyCase(t, "matched", true)
+	if err := os.WriteFile(filepath.Join(dir, "classification.golden.txt"), []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errs := replayCase(Synthetic, dir, false)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "lockfile classification") {
+		t.Fatalf("errs = %v, want exactly the drifted classification", errs)
+	}
+}

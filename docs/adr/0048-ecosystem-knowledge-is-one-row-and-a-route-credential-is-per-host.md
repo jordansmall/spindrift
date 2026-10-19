@@ -93,8 +93,9 @@ not reach.
 The same review added two things:
 
 - **Ecosystem corpora.** Each row's corpus is replayed by an
-  `ecosystemtest` kit through discovery, route resolution, path-set
-  derivation, binding and proxy rewrites, with a golden at each stage.
+  `ecosystemtest` kit through lockfile classification, discovery, route
+  resolution, path-set derivation, binding and proxy rewrites, with a
+  golden at each stage.
   Consumer packages test their generic behaviour against a synthetic row
   and stop naming real ecosystems.
 - **No per-row literals.** Env-export order derives from table position.
