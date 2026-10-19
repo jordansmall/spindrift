@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -327,21 +328,17 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 }
 
-// swapTable appends stub rows to ecosystem.Table for one test, preserving the
-// load-bearing order of the real rows. The swap is package-level, so no test in
-// this file may call t.Parallel.
-func swapTable(t *testing.T, extra ...ecosystem.Row) {
-	t.Helper()
-	original := ecosystem.Table
-	ecosystem.Table = append(append([]ecosystem.Row{}, original...), extra...)
-	t.Cleanup(func() { ecosystem.Table = original })
+// tableWith returns a copy of ecosystem.Table with the stub rows appended,
+// preserving the load-bearing order of the real rows.
+func tableWith(extra ...ecosystem.Row) []ecosystem.Row {
+	return append(slices.Clone(ecosystem.Table), extra...)
 }
 
 // Issue #3181: bindings mode must collect exports by walking ecosystem.Table,
 // not by naming individual ecosystems' renderers. A stub row's export reaching
 // the written file proves the walk; a by-name call site would never see it.
-func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T) {
-	swapTable(t, ecosystem.Row{
+func TestRunBindRegistryWithRows_ExportsComeFromRowsWalk(t *testing.T) {
+	rows := tableWith(ecosystem.Row{
 		Name: "stub-ecosystem",
 		EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 			return []ecosystem.EnvExport{{Name: "STUB_ECOSYSTEM_URL", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
@@ -368,9 +365,9 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runBindRegistryWithRows([]string{
 		"-bindings-env-output", bindingsOut,
-	}, &stdout,
+	}, rows, &stdout,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
@@ -393,8 +390,8 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 // Issue #3182, the same row-generic contract for home-level config writes: a
 // stub row's rendered file reaching disk proves the table walk, where a call
 // site naming cargo/gradle directly would never write it.
-func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testing.T) {
-	swapTable(t, ecosystem.Row{
+func TestRunBindRegistryWithRows_HomeConfigsComeFromRowsWalk(t *testing.T) {
+	rows := tableWith(ecosystem.Row{
 		Name: "stub-ecosystem",
 		HomeConfig: &ecosystem.HomeConfig{
 			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
@@ -428,9 +425,9 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runBindRegistryWithRows([]string{
 		"-bindings-env-output", bindingsOut,
-	}, &stdout,
+	}, rows, &stdout,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
@@ -453,9 +450,9 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 // Issue #3185, for the success summary's per-ecosystem "bound to it via ..."
 // fragments. Two stub rows, one with a BindingEnvVar and one with only a
 // HomeConfig, prove both halves of the precedence a row-generic walk applies.
-func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWalk(t *testing.T) {
+func TestRunBindRegistryWithRows_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
-	swapTable(t,
+	rows := tableWith(
 		ecosystem.Row{
 			Name: "stub-env-ecosystem",
 			// The summary skips a BindingEnvVar row whose var
@@ -500,9 +497,9 @@ func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWa
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runBindRegistryWithRows([]string{
 		"-bindings-env-output", bindingsOut,
-	}, &stdout,
+	}, rows, &stdout,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
@@ -525,16 +522,16 @@ func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWa
 // Issue #3185, for the gate-unusable fallback warning: the ecosystem list must
 // come from walking ecosystem.Table, not a hand-maintained literal a new row
 // could silently be left out of.
-func TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTableWalk(t *testing.T) {
-	swapTable(t, ecosystem.Row{Name: "stub-ecosystem"})
+func TestRunBindRegistryWithRows_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
+	rows := tableWith(ecosystem.Row{Name: "stub-ecosystem"})
 
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runBindRegistryWithRows([]string{
 		"-bindings-env-output", bindingsOut,
-	}, &stdout,
+	}, rows, &stdout,
 		func(int) bool {
 			t.Fatal("probe should not be called when REGISTRY_PROXY_MANIFEST is malformed")
 			return false
@@ -555,8 +552,8 @@ func TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTable
 }
 
 // Mirrors the above for the sibling no-route-prefix fallback warning.
-func TestRunBindRegistryWithDeps_NoRoutePrefixFallbackNamesComeFromEcosystemTableWalk(t *testing.T) {
-	swapTable(t, ecosystem.Row{Name: "stub-ecosystem"})
+func TestRunBindRegistryWithRows_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *testing.T) {
+	rows := tableWith(ecosystem.Row{Name: "stub-ecosystem"})
 
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
@@ -570,9 +567,9 @@ func TestRunBindRegistryWithDeps_NoRoutePrefixFallbackNamesComeFromEcosystemTabl
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runBindRegistryWithRows([]string{
 		"-bindings-env-output", bindingsOut,
-	}, &stdout,
+	}, rows, &stdout,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
