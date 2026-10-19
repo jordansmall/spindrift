@@ -1848,9 +1848,10 @@ in
 
   # Ties the `agent-closure` package name lib/preambles.nix bakes into
   # FLAKE_IMAGE_ATTR back to the name lib/mkHarness.nix registers under
-  # `packages`: renaming it, or inverting the `isLinux && runtime == "bwrap"`
-  # guard, would leave every other check green while Probe fell back to the
-  # isImageAttrMissing path, restoring the bug #2667 fixes.
+  # `packages`: renaming it, or inverting the `runnerRow.artifact ==
+  # "store-closure"` / `"oci-image"` gate, would leave every other check green
+  # while Probe fell back to the isImageAttrMissing path, restoring the bug
+  # #2667 fixes.
   mkharness-agent-closure-package =
     let
       inherit (pkgs.lib) assertMsg;

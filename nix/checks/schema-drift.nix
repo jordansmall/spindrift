@@ -635,6 +635,73 @@ checkedMerge {
       "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject a row that sets the renderer-supplied passRoles, but it rendered successfully";
     pkgs.runCommand "dispatch-kinds-default-count" { } "touch $out";
 
+  # A runtime listed by two runner rows is ambiguous (ADR 0069), so
+  # lib/runners/index.nix must throw when either attribute is forced. The
+  # control proves the real rows evaluate, and the literals pin the enum order
+  # and family mapping independently of the rows they come from.
+  runners-unique-runtime =
+    let
+      inherit (pkgs.lib) assertMsg;
+      rows = import ../../lib/runners;
+      index = rs: import ../../lib/runners/index.nix { rows = rs; };
+      duplicated = rows ++ [
+        {
+          name = "dup";
+          runtimes = [ "podman" ];
+          artifact = "oci-image";
+        }
+      ];
+      real = import ../../lib/runners/index.nix { };
+      bad = index duplicated;
+      badArtifact = index (map (r: r // { artifact = "oci-imag"; }) rows);
+    in
+    assert assertMsg
+      (
+        real.runtimes == [
+          "podman"
+          "docker"
+          "rancher"
+          "bwrap"
+        ]
+      )
+      "runners-unique-runtime (ADR 0069): the real rows' runtime union must be podman docker rancher bwrap in that order";
+    assert assertMsg
+      (
+        map (rt: (real.forRuntime rt).name) [
+          "podman"
+          "docker"
+          "rancher"
+          "bwrap"
+        ] == [
+          "oci"
+          "oci"
+          "oci"
+          "bwrap"
+        ]
+      )
+      "runners-unique-runtime (ADR 0069): forRuntime must map podman/docker/rancher to oci and bwrap to bwrap";
+    assert assertMsg
+      (
+        (real.forRuntime "podman").artifact == "oci-image"
+        && (real.forRuntime "bwrap").artifact == "store-closure"
+      )
+      "runners-unique-runtime (ADR 0069): the oci row must carry the oci-image artifact and bwrap the store-closure artifact";
+    assert assertMsg (!(builtins.tryEval bad.runtimes).success)
+      "runners-unique-runtime (ADR 0069): two rows listing the same runtime must fail eval of `runtimes`, but it evaluated";
+    assert assertMsg (!(builtins.tryEval (bad.forRuntime "podman")).success)
+      "runners-unique-runtime (ADR 0069): two rows listing the same runtime must fail eval of `forRuntime`, but it evaluated";
+    assert assertMsg (!(builtins.tryEval badArtifact.runtimes).success)
+      "runners-unique-runtime (ADR 0069): a row with an unknown artifact must fail eval of `runtimes`, but it evaluated";
+    assert assertMsg (!(builtins.tryEval (badArtifact.forRuntime "podman")).success)
+      "runners-unique-runtime (ADR 0069): a row with an unknown artifact must fail eval of `forRuntime`, but it evaluated";
+    assert assertMsg (!(builtins.tryEval (builtins.deepSeq badArtifact.rows badArtifact.rows)).success)
+      "runners-unique-runtime (ADR 0069): a row with an unknown artifact must fail eval of `rows`, but it evaluated";
+    assert assertMsg (!(builtins.tryEval (builtins.deepSeq bad.rows bad.rows)).success)
+      "runners-unique-runtime (ADR 0069): two rows listing the same runtime must fail eval of `rows`, but it evaluated";
+    assert assertMsg (!(builtins.tryEval (real.forRuntime "nerdctl")).success)
+      "runners-unique-runtime (ADR 0069): a runtime no row lists must make `forRuntime` throw, but it returned a row";
+    pkgs.runCommand "runners-unique-runtime" { } "touch $out";
+
   # Each kind row's `filerRelayGate` is the env var the Box tests to decide
   # whether to file relayed findings (issue #5669); a typo there silently turns
   # the Filer relay off for that kind. Every row sets one, so an empty or

@@ -16,7 +16,7 @@ let
   removedKnobs = import ./removed-knobs.nix;
   resolveNixPath = import ./nixpath.nix;
   inherit (import ./renderers.nix) flagKind;
-  runtimeValues = import ./runtime-values.nix;
+  runtimeValues = (import ./runners/index.nix { }).runtimes;
   # Doc prose for the structural knobs, kept as plain data (issue #2572) so
   # lib/renderers.nix's pure-builtins renderStructuralOptionsDoc can import it
   # directly instead of reaching it through a full flake-parts eval.

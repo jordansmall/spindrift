@@ -13,11 +13,10 @@
 let
   inherit (pkgs.lib) assertMsg;
 
-  # Single root for the runtime enum's valid values (ADR 0027), shared with
-  # nix/checks/schema-drift.nix's runtime-values-gen check and the runner
-  # module's generated value set. The check below uses the first entry as a
-  # valid, in-enum replacement for the broken golden's out-of-enum value.
-  runtimeValues = import ../../lib/runtime-values.nix;
+  # The runtime enum's valid values (ADR 0027, 0069), the union of the runner
+  # rows. The check below uses the first entry as a valid, in-enum replacement
+  # for the broken golden's out-of-enum value.
+  runtimeValues = (import ../../lib/runners/index.nix { }).runtimes;
 
   # Evaluates a golden flake.nix's own `outputs` function against stubbed
   # inputs, with `spindrift.flakeModules.default` wired to the local
