@@ -965,6 +965,7 @@ let
         "forge/local"
         "forge/rest"
         "gitexec"
+        "gitremote"
         "seambundle"
       ]
   );

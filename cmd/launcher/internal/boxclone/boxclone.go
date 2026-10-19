@@ -8,15 +8,15 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
 )
 
 // Config is what the clone reads from the Box's environment.
 type Config struct {
-	// CodeForge is CODE_FORGE, defaulted to github by the caller; "" is
-	// treated as github too.
+	// CodeForge is CODE_FORGE, already defaulted to github by the caller; an
+	// empty or unregistered value fails the clone closed (see CloneURL).
 	CodeForge string
 	// GHCredentialHelper runs `gh auth setup-git` before cloning. See
 	// backend.Descriptor.InBoxGHCredentialHelper for which forges want it.
@@ -25,46 +25,25 @@ type Config struct {
 	// so the clone trusts the mount and work dir globally (#1720).
 	HostMediatedRemote bool
 	RepoSlug           string
-	RemoteURL          string // CODE_FORGE_REMOTE_URL
-	ForgejoBaseURL     string // FORGEJO_BASE_URL; default https://codeberg.org
-	ForgejoToken       string
-	RepoMountDir       string
-	WorkDir            string
-	GitUserName        string
-	GitUserEmail       string
+	// Lookup serves the knobs the CODE_FORGE backend's Strategy reads.
+	Lookup       backendkit.Lookup
+	RepoMountDir string
+	WorkDir      string
+	GitUserName  string
+	GitUserEmail string
 }
 
-// CloneURL resolves the URL to clone from. The choice is gated on the exact
-// CODE_FORGE value so a stray CODE_FORGE_REMOTE_URL cannot redirect a default
-// github deployment.
+// CloneURL resolves the URL to clone from via the CODE_FORGE backend's
+// Strategy. The choice is gated on the exact CODE_FORGE value, so a stray
+// CODE_FORGE_REMOTE_URL cannot redirect a github deployment (github's
+// Strategy ignores the lookup). An unregistered backend, or one with no clone
+// URL, is an error rather than a silent github fallback.
 func CloneURL(cfg Config) (string, error) {
-	switch cfg.CodeForge {
-	case "git":
-		if cfg.RemoteURL == "" {
-			return "", errors.New("CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git")
-		}
-		return cfg.RemoteURL, nil
-	case "forgejo":
-		if cfg.ForgejoToken == "" {
-			return "", errors.New("FORGEJO_TOKEN is required when CODE_FORGE=forgejo")
-		}
-		base := cfg.ForgejoBaseURL
-		if base == "" {
-			base = "https://codeberg.org"
-		}
-		base = strings.TrimSuffix(base, "/")
-		scheme, rest, ok := strings.Cut(base, "://")
-		if !ok {
-			// Mirrors the shell's ${base%%://*} / ${base#*://}, which yield
-			// the whole string for both when there is no scheme.
-			scheme, rest = base, base
-		}
-		return fmt.Sprintf("%s://%s@%s/%s.git", scheme, cfg.ForgejoToken, rest, cfg.RepoSlug), nil
-	case "local":
-		return cfg.RepoMountDir, nil
-	default:
-		return "https://github.com/" + cfg.RepoSlug + ".git", nil
+	s, ok := backendkit.ByName(cfg.CodeForge)
+	if !ok || s.CloneURL == nil {
+		return "", fmt.Errorf("CODE_FORGE=%q is not a code forge the Box can clone from", cfg.CodeForge)
 	}
+	return s.CloneURL(backendkit.Shared{RepoSlug: cfg.RepoSlug}, cfg.Lookup, cfg.RepoMountDir)
 }
 
 // Clone clones the repo into cfg.WorkDir, sets the repo-local git identity and

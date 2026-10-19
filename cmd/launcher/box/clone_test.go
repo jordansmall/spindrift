@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,13 +20,30 @@ func TestCloneRunsWithTheEnvsConfigAndGithubDefault(t *testing.T) {
 	f.knobs["FORGEJO_TOKEN"] = "fjtok"
 	f.in.RepoMountDir = "/repo"
 	f.run()
+	if len(f.cloneCfgs) != 1 {
+		t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
+	}
+	got := f.cloneCfgs[0]
+	lookup := got.Lookup
+	got.Lookup = nil
 	want := boxclone.Config{
-		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "owner/repo", RemoteURL: "https://git.example/r.git",
-		ForgejoBaseURL: "https://fj.example", ForgejoToken: "fjtok", RepoMountDir: "/repo",
+		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "owner/repo", RepoMountDir: "/repo",
 		WorkDir: f.in.WorkDir, GitUserName: defaultGitUserName, GitUserEmail: "agent@example.com",
 	}
-	if len(f.cloneCfgs) != 1 || f.cloneCfgs[0] != want {
-		t.Fatalf("clone configs = %+v, want [%+v]", f.cloneCfgs, want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("clone config = %+v, want %+v", got, want)
+	}
+	for k, v := range map[string]string{
+		"CODE_FORGE_REMOTE_URL": "https://git.example/r.git",
+		"FORGEJO_BASE_URL":      "https://fj.example",
+		"FORGEJO_TOKEN":         "fjtok",
+	} {
+		if gv, ok := lookup(k); !ok || gv != v {
+			t.Errorf("Lookup(%s) = %q, %v; want %q", k, gv, ok, v)
+		}
+	}
+	if gv, ok := lookup("FORGEJO_NOPE"); ok || gv != "" {
+		t.Errorf("Lookup of an unset knob = %q, %v; want unset", gv, ok)
 	}
 }
 
@@ -113,8 +131,8 @@ func TestCloneConfig_RunsGhCredentialHelperOnlyWhereTheForgeWantsIt(t *testing.T
 		"": true, "github": true, "git": true,
 		"forgejo": false, "local": false,
 		// Unreachable: the host validates CODE_FORGE against its choices.
-		// Pinned so CloneURL's github fallback running without gh's helper
-		// stays deliberate.
+		// An unregistered forge never gets gh's helper, and CloneURL fails
+		// closed on it.
 		"bogus": false,
 	} {
 		t.Run("forge="+forge, func(t *testing.T) {

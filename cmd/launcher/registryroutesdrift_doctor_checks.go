@@ -2,15 +2,12 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"spindrift.dev/launcher/internal/doctor"
-	"spindrift.dev/launcher/internal/forge/github"
-	"spindrift.dev/launcher/internal/gitremote"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
@@ -42,58 +39,15 @@ var registryRouteDriftOriginRemoteFn = func(root string) string {
 // checkoutIsTargetRepo reports whether root is a checkout of the Target repo
 // configured by c, by matching root's origin remote against c's Code Forge
 // identity. Without this guard the check would report a cwd checkout that is
-// really the Consumer flake as the Target repo's drift. codeForge values other
-// than git, github, or forgejo have no remote identity and never match.
+// really the Consumer flake as the Target repo's drift. A Code Forge with no
+// remote identity never matches.
 func checkoutIsTargetRepo(root string, c config) bool {
 	remote := registryRouteDriftOriginRemoteFn(root)
 	if remote == "" {
 		return false
 	}
-	switch c.codeForge {
-	case "git":
-		if c.codeForgeRemoteURL == "" {
-			return false
-		}
-		if normalizeGitRemoteURL(remote) == normalizeGitRemoteURL(c.codeForgeRemoteURL) {
-			return true
-		}
-		// A raw compare misses equivalent spellings (scp-like vs ssh://), so
-		// fall back to host+slug, but only when both sides parse: a form
-		// ParseHostSlug cannot handle must not match on two empty results.
-		remoteHost, remoteSlug := gitremote.ParseHostSlug(remote)
-		wantHost, wantSlug := gitremote.ParseHostSlug(c.codeForgeRemoteURL)
-		return remoteHost != "" && remoteSlug != "" &&
-			strings.EqualFold(remoteHost, wantHost) && strings.EqualFold(remoteSlug, wantSlug)
-	case "github":
-		if c.repoSlug == "" {
-			return false
-		}
-		// ParseHostSlug strips any port, so a GH_HOST carrying one never
-		// matches and the check skips itself.
-		host, slug := gitremote.ParseHostSlug(remote)
-		return strings.EqualFold(host, github.Host()) && strings.EqualFold(slug, c.repoSlug)
-	case "forgejo":
-		if c.repoSlug == "" || c.forgejoBaseURL == "" {
-			return false
-		}
-		base, err := url.Parse(c.forgejoBaseURL)
-		if err != nil || base.Host == "" {
-			return false
-		}
-		host, slug := gitremote.ParseHostSlug(remote)
-		return strings.EqualFold(host, base.Host) && strings.EqualFold(slug, c.repoSlug)
-	default:
-		return false
-	}
-}
-
-// normalizeGitRemoteURL trims whitespace and one trailing ".git" or "/" so
-// equivalent codeForge=git remote spellings compare equal.
-func normalizeGitRemoteURL(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(s, "/")
-	s = strings.TrimSuffix(s, ".git")
-	return s
+	row, ok := backendByName(c.codeForge)
+	return ok && row.remoteMatch != nil && row.remoteMatch(c, remote)
 }
 
 // gitCheckoutRoot walks up from dir to the directory holding a ".git" entry,

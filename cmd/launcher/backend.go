@@ -47,6 +47,11 @@ type backendRow struct {
 	// BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1950); gateRegistry runs it
 	// as read-only-token-<Name>. nil means the backend has no Box token to gate.
 	readOnlyTokenGate func(c config, w io.Writer) error
+
+	// remoteMatch reports whether a checkout's origin remote names c's Target
+	// repo on this backend (doctor's registry-route-drift guard). nil means
+	// the backend has no remote identity and never matches.
+	remoteMatch func(c config, remote string) bool
 }
 
 // remoteLedger builds a Ledger against a hosted forge: a fresh scratch repo
@@ -170,6 +175,11 @@ func rowFromStrategy(s backendkit.Strategy) backendRow {
 	if f := s.NewReadOnlyCodeForge; f != nil {
 		r.newReadOnlyCodeForge = func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
 			return mustBuild(f(backendShared(c), c.knobLookup, parent, it))
+		}
+	}
+	if f := s.RemoteMatch; f != nil {
+		r.remoteMatch = func(c config, remote string) bool {
+			return f(backendShared(c), c.knobLookup, remote)
 		}
 	}
 	if f := s.NewLedger; f != nil {
