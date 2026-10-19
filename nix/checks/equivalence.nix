@@ -17,8 +17,7 @@ let
     nonRustHarness
     leanHarness
     customHarness
-    dockerHarness
-    rancherHarness
+    runtimeHarnesses
     bwrapHarness
     bwrapHarnessArgs
     skillsHarness
@@ -34,6 +33,35 @@ let
     inherit nixpkgs system;
     packages = p: [ p.hello ];
   };
+  # The mkharness-defaults run-document assertion for one runtime (see its
+  # comment): exact jq matches on the `artifacts` section against what the
+  # runtime's row renders, and absence of what only the other rows render.
+  runners = import ../../lib/runners/index.nix { };
+  preambles = import ../../lib/preambles.nix;
+  rowKeys = row: builtins.attrNames (row.runArtifacts preambles.dummyRunArtifactArgs);
+  runArtifactsAssertion =
+    runtime:
+    let
+      row = runners.forRuntime runtime;
+      own = rowKeys row;
+      foreign = pkgs.lib.subtractLists own (
+        pkgs.lib.concatMap rowKeys (builtins.filter (r: r.name != row.name) runners.rows)
+      );
+    in
+    ''
+      ${pkgs.jq}/bin/jq -e \
+        --arg rt ${pkgs.lib.escapeShellArg runtime} \
+        --arg kind ${pkgs.lib.escapeShellArg row.name} \
+        --arg artifact ${pkgs.lib.escapeShellArg row.artifact} \
+        --argjson own ${pkgs.lib.escapeShellArg (builtins.toJSON own)} \
+        --argjson foreign ${pkgs.lib.escapeShellArg (builtins.toJSON foreign)} \
+        '.artifacts as $a
+          | $a | .RUNTIME == $rt and .RUNNER_KIND == $kind and .BOX_ARTIFACT == $artifact
+            and ($own | all(. as $k | $a | has($k)))
+            and ($foreign | all(. as $k | $a | has($k) | not))' \
+        ${runtimeHarnesses.${runtime}.internals.runInputDocumentFile} >/dev/null \
+        || { echo "run document for runtime ${runtime} disagrees with its runner row" >&2; exit 1; }
+    '';
   bakedSettingCheck = ''
     check() {
       got=$(grep -o "\"$2\":\"[^\"]*\"" "$3" | sed -e 's/.*:"//' -e 's/"$//')
@@ -262,47 +290,27 @@ in
     # Default COMPLETE_LABEL baked into a default harness.
     grep -q '"COMPLETE_LABEL":"agent-complete"' ${harness.internals.runInputDocumentFile}
 
-    # Default runtime is podman; the docker/rancher harnesses bake their own
-    # runtime value verbatim (rancher is a knob value, not a binary name —
-    # the nerdctl alias lives in the Go runner package, not here).
-    grep -q '"RUNTIME":"podman"' ${harness.internals.runInputDocumentFile}
-    grep -q '"RUNTIME":"docker"' ${dockerHarness.internals.runInputDocumentFile}
-    grep -q '"RUNTIME":"rancher"' ${rancherHarness.internals.runInputDocumentFile}
-
-    # RUNNER_KIND is forwarded as a document artifact (issue #2538): "oci" for
-    # any OCI runtime (podman, docker, rancher here), "bwrap" for the bwrap
-    # harness below.
-    grep -q '"RUNNER_KIND":"oci"' ${harness.internals.runInputDocumentFile}
-    grep -q '"BOX_ARTIFACT":"oci-image"' ${harness.internals.runInputDocumentFile}
-    grep -q '"RUNNER_KIND":"oci"' ${dockerHarness.internals.runInputDocumentFile}
-    grep -q '"RUNNER_KIND":"oci"' ${rancherHarness.internals.runInputDocumentFile}
-
-    # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
-    grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"BOX_ARTIFACT":"store-closure"' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"AGENT_FILES":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"AGENT_ENV":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"PASSWD_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"GROUP_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"NIX_CONFIG_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"NIX_STORE_WRITABLE":' ${bwrapHarness.internals.runInputDocumentFile}
-    # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
-    ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile} || exit 1
-    # The build-time drv counterparts (issue #2672): `spindrift build` reads
-    # this SAME run document (no doc of its own), so the bwrap branch must
-    # carry these six *_DRV keys itself; a regression dropping them must fail
+    # Every runtime the runner rows list bakes its own RUNTIME verbatim (rancher
+    # is a knob value, not a binary name, issue #1274 — the nerdctl alias lives
+    # in the Go runner package, not here), its row's RUNNER_KIND and BOX_ARTIFACT
+    # (issue #2538), every key its row renders, and none that only another
+    # row renders. Asserted on the document's `artifacts` section, so a
+    # same-named key in `settings` cannot satisfy it. Absence keeps the OCI-only
+    # IMAGE_DRV / IMAGE_ARCHIVE store paths out of a bwrap document; the six
+    # bwrap *_DRV keys (issue #2672) are required because `spindrift build`
+    # reads this SAME run document, so a regression dropping them must fail
     # here, not only in the synthetic fixture check (nix/checks/preambles.nix).
-    grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"PASSWD_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"GROUP_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"NIX_CONFIG_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"SYSCALL_FILTER_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
-    ! grep -q '"IMAGE_DRV":' ${bwrapHarness.internals.runInputDocumentFile} || exit 1
-    # IMAGE_TAG is the agent-closure store path on the bwrap side, never a
-    # name:hash tag (issue #2966).
-    grep -q '"IMAGE_TAG":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
+    ${pkgs.lib.concatMapStrings runArtifactsAssertion runners.runtimes}
+
+    # The default harness bakes the first runtime of the first runner row.
+    ${pkgs.jq}/bin/jq -e --arg rt ${pkgs.lib.escapeShellArg (builtins.head runners.runtimes)} \
+      '.artifacts.RUNTIME == $rt' ${harness.internals.runInputDocumentFile} >/dev/null
+
+    # A store-closure runner's IMAGE_TAG is the agent-closure store path, never
+    # a name:hash tag (issue #2966); the key's value is that row's own, so it
+    # is asserted on the store-closure fixture, not iterated.
+    ${pkgs.jq}/bin/jq -e '.artifacts.IMAGE_TAG | startswith("/nix/store/")' \
+      ${bwrapHarness.internals.runInputDocumentFile} >/dev/null
     touch $out
   '';
 

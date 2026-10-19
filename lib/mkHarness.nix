@@ -101,9 +101,10 @@
   # Non-secret run config baked into the `run` command as its built-in defaults;
   # a matching env var still wins at runtime, so one build can be re-pointed.
   defaults ? { },
-  # Container runtime the launcher commands drive: "podman" (default), "docker",
-  # or "rancher" (Rancher Desktop containerd mode; invokes nerdctl).
-  runtime ? "podman",
+  # Container runtime the launcher commands drive; the accepted values are the
+  # runtimes the rows in lib/runners/default.nix list, and the default is the
+  # first runtime of the first row.
+  runtime ? builtins.head (import ./runners/index.nix { }).runtimes,
   # The flake output attribute the image (OCI) or agent closure (bwrap) is
   # exposed under, and the one the baked freshness probe realizes. A second
   # Harness in one flake needs its own name (ADR 0064, issue #5049).

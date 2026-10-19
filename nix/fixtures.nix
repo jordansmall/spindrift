@@ -116,7 +116,7 @@ let
   dogfoodBwrapHarness = import ../lib/mkHarness.nix (
     dogfoodHarnessArgs
     // {
-      runtime = "bwrap";
+      runtime = bwrapRuntime;
       defaults = dogfoodHarnessArgs.defaults // {
         daemonApp = ".#dogfood-bwrap";
         daemonSelfApp = ".#dogfood-bwrap-daemon";
@@ -452,35 +452,38 @@ let
     packages = p: [ p.hello ];
   };
 
-  dockerHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    overlays = [ ghFakeOverlay ];
-    runtime = "docker";
-    packages = p: [ p.hello ];
-  };
+  # One harness per runtime the runner rows list, so a new row is covered by
+  # nix/checks/equivalence.nix without editing it.
+  runners = import ../lib/runners/index.nix { };
+  # The store-closure runner row and its runtime, read from the row so no check
+  # names either.
+  bwrapRow = import ../lib/runners/bwrap.nix;
+  bwrapRuntime = builtins.head bwrapRow.runtimes;
+  runtimeHarnessArgs =
+    runtime:
+    {
+      inherit nixpkgs system runtime;
+      overlays = [ ghFakeOverlay ];
+      packages = p: [ p.hello ];
+    }
+    # nixInBox = false on a store-closure runner because `bwrap build`'s
+    # EnsureReady (ADR 0042) reads the live /nix/var/nix/db/db.sqlite, which a
+    # sandboxed `nix flake check` build cannot reach (issue #2664).
+    // pkgs.lib.optionalAttrs ((runners.forRuntime runtime).artifact == "store-closure") {
+      nixInBox = false;
+    };
+  runtimeHarnesses = pkgs.lib.genAttrs runners.runtimes (
+    runtime: import ../lib/mkHarness.nix (runtimeHarnessArgs runtime)
+  );
 
-  # Proves the "rancher" runtime knob bakes as its own OCI-family value even
-  # though it invokes nerdctl, not a "rancher" binary (issue #1274).
-  rancherHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    overlays = [ ghFakeOverlay ];
-    runtime = "rancher";
-    packages = p: [ p.hello ];
-  };
-
-  # The daemonless bubblewrap runner fixture (issue #54). nixInBox = false
-  # because `bwrap build`'s EnsureReady (ADR 0042) reads the live
-  # /nix/var/nix/db/db.sqlite, which a sandboxed `nix flake check` build cannot
-  # reach (issue #2664). Named as a set so equivalence.nix can build a twin
-  # that overrides only `prefetch`.
-  bwrapHarnessArgs = {
-    inherit nixpkgs system;
-    overlays = [ ghFakeOverlay ];
-    runtime = "bwrap";
-    nixInBox = false;
-    packages = p: [ p.hello ];
-  };
-  bwrapHarness = import ../lib/mkHarness.nix bwrapHarnessArgs;
+  # Named handles into runtimeHarnesses for the checks and seam fixtures that
+  # test one runtime's own behaviour.
+  # The docker seam golden (nix/seam-fixtures.nix) pins docker specifically.
+  dockerHarness = runtimeHarnesses.docker;
+  # Exposed as args so equivalence.nix can build a twin that overrides only
+  # `prefetch`.
+  bwrapHarnessArgs = runtimeHarnessArgs bwrapRuntime;
+  bwrapHarness = runtimeHarnesses.${bwrapRuntime};
 
   # Proves the `prompt` argument is what gets rendered to the store path and
   # reaches the agent (#4). The per-issue placeholders are escaped so they
@@ -647,8 +650,10 @@ in
     piHarnessWith
     piFullRosterHarness
     customHarness
+    runtimeHarnesses
     dockerHarness
-    rancherHarness
+    bwrapRow
+    bwrapRuntime
     bwrapHarnessArgs
     bwrapHarness
     promptHarness

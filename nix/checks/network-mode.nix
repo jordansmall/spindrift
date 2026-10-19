@@ -31,7 +31,7 @@ let
   pairName = { runtime, mode, ... }: "${runtime}+${mode}";
   rejectedPairs = builtins.filter (p: p.listed && !evaluates p) pairs;
   acceptedPairs = builtins.filter (p: !p.listed && evaluates p) pairs;
-  bwrapRow = runners.forRuntime "bwrap";
+  bwrapRow = import ../../lib/runners/bwrap.nix;
   mkHarnessWith =
     defaults:
     (import ../../lib/mkHarness.nix {
