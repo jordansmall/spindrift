@@ -35,7 +35,7 @@ type ociAdapter struct {
 	nixVolume       string // named volume for /nix (incremental rebuilds)
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
 	pwd             string // $PWD; container-fallback mounts this as /workspace
-	// mountParams passes host-mount facts from Config to buildMountSpecs
+	// mountParams passes host-mount facts from Config to BuildMountSpecs
 	// unmodified. DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local
 	// mount specs are issue #1697.
 	mountParams   MountParams
@@ -136,7 +136,7 @@ func (a *ociAdapter) EnsureReady() error {
 
 	// Tee stderr so a failure is both visible and inspectable below.
 	var hostStderr bytes.Buffer
-	nixBuild := execCommand("nix", "build", a.imageDrv+"^*", "--no-link")
+	nixBuild := ExecCommand("nix", "build", a.imageDrv+"^*", "--no-link")
 	nixBuild.Stdout = os.Stdout
 	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
 	if err := nixBuild.Run(); err == nil {
@@ -414,7 +414,7 @@ func (a *ociAdapter) ListRunning() ([]string, error) {
 // mountSpecs computes the host-to-box mounts for box, shared with the bwrap
 // adapter; only the rendering below differs.
 func (a *ociAdapter) mountSpecs(box Box) []MountSpec {
-	return buildMountSpecs(a.mountParams, box)
+	return BuildMountSpecs(a.mountParams, box)
 }
 
 // networkArg resolves `--network` from the raw podmanNetwork escape hatch and
@@ -447,7 +447,7 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		args = append(args, "--network", network)
 	}
 	for k, v := range box.Env {
-		if offArgvKeys[k] {
+		if OffArgvKeys[k] {
 			// Bare "-e KEY" forwards KEY's value from the CLI process's own
 			// environment, which ociRunEnv sets, so the value never lands in
 			// argv, where ps/proc exposes it to any local user for the
@@ -457,7 +457,7 @@ func (a *ociAdapter) buildRunArgs(box Box) []string {
 		}
 		args = append(args, "-e", k+"="+v)
 	}
-	// Mount decisions are computed once in buildMountSpecs, shared with the
+	// Mount decisions are computed once in BuildMountSpecs, shared with the
 	// bwrap adapter; OCI only renders each spec as a -v flag. The driver-cache
 	// spec is scoped to the Driver's declared session-cache dir, never the
 	// whole .claude, which would shadow the baked .claude/skills the image
@@ -821,13 +821,13 @@ func reapOrphanedRebaseDirs(root string) {
 }
 
 // ociRunEnv returns the environment the docker/podman CLI itself runs with:
-// os.Environ() plus each offArgvKeys value present in boxEnv. The CLI needs its
+// os.Environ() plus each OffArgvKeys value present in boxEnv. The CLI needs its
 // own ambient PATH to run at all, so this extends os.Environ() rather than
 // replacing it as bwrap's allowlist-only resolvedRunEnv does. The appended
 // values exist only for buildRunArgs' bare "-e KEY" entries to forward.
 func ociRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(offArgvKeys))
-	for k := range offArgvKeys {
+	keys := make([]string, 0, len(OffArgvKeys))
+	for k := range OffArgvKeys {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -889,7 +889,7 @@ func (a *ociAdapter) Run(box Box) error {
 	if reapAfterSuccess(err) {
 		a.reap(box.Name)
 	}
-	return asRunError(err)
+	return AsRunError(err)
 }
 
 // collisionHeadLimit bounds headTee's retained prefix: enough to hold the
@@ -918,7 +918,7 @@ func (h *headTee) Write(p []byte) (int, error) {
 }
 
 // String returns the retained head. Only the shape mirrors
-// boundedWriter.String(): that one keeps the tail, because a nix failure
+// BoundedWriter.String(): that one keeps the tail, because a nix failure
 // prints at the end, while this keeps the prefix, because the runtime's
 // refusal prints before anything else.
 func (h *headTee) String() string {

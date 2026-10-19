@@ -8,31 +8,6 @@ import (
 	"path/filepath"
 )
 
-// ValidateRuntime checks that runtime ("podman", "docker", "rancher", or
-// "bwrap") names a binary on PATH, guarding the same Config.Runtime field
-// NewOCI and the adapter-selection switch consume.
-func ValidateRuntime(runtime string) error {
-	return ValidateRuntimeWithLookup(runtime, exec.LookPath)
-}
-
-// ValidateRuntimeWithLookup is ValidateRuntime with the PATH lookup injected,
-// so callers with their own lookPath abstraction (quickstart's
-// Environment.LookPath) reuse this logic and message text instead of
-// hand-rolling a check that drifts from it (issue #2561).
-func ValidateRuntimeWithLookup(runtime string, lookPath func(string) (string, error)) error {
-	if runtime == "" {
-		return fmt.Errorf("RUNTIME is not set")
-	}
-	cli := BinaryFor(runtime)
-	if _, err := lookPath(cli); err != nil {
-		if runtime == "rancher" {
-			return fmt.Errorf("nerdctl not found on PATH — is Rancher Desktop running in containerd mode?")
-		}
-		return fmt.Errorf("%s not found on PATH", cli)
-	}
-	return nil
-}
-
 // ValidatePasta checks that pasta is on PATH, required whenever a bwrap Box
 // isolates its network namespace with working egress (issue #2666). Without
 // it the launcher must refuse to start rather than fall back to the weaker
@@ -55,7 +30,7 @@ func ValidatePastaWithLookup(lookPath func(string) (string, error)) error {
 // issue #2665). Without the check, bwrap's --overlay-src/--tmp-overlay mount
 // fails deep inside sandbox startup and the launcher cannot say why.
 func ValidateOverlay() error {
-	return ValidateOverlayWithExec(execCommand)
+	return ValidateOverlayWithExec(ExecCommand)
 }
 
 // ValidateOverlayWithExec is ValidateOverlay with the exec seam injected for

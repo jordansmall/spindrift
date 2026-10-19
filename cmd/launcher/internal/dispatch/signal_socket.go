@@ -107,7 +107,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		env[signalclient.EndpointEnv] = fmt.Sprintf("http://%s:%d", transport.Host(), tcpAddr.Port)
 		// SIGNAL_SOCKET_SECRET stays its own env var, exactly like
 		// REGISTRY_PROXY_TCP_SECRET (box.go): it is a bearer-token-shaped
-		// credential, so bwrap.go's offArgvKeys keeps it off argv.
+		// credential, so offargv.go's OffArgvKeys keeps it off argv.
 		env[signalclient.SecretEnv] = secret
 		d.signalBuffer = buf
 

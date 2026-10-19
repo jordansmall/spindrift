@@ -1873,7 +1873,7 @@ environment.
 The variables the Bash tool must never inherit live in one baked file,
 `/home/agent/.claude/hooks/credential-vars`: every env var a Driver's
 credential rules name, which `nix run .#regen` renders from the rows in
-`lib/drivers/*.nix` (the bwrap runner's `offArgvKeys` takes its Driver half
+`lib/drivers/*.nix` (the launcher's shared `OffArgvKeys` takes its Driver half
 from the same render), so a new Driver's keys cannot miss either list. It is
 parsed by the sibling `credential-vars-parse`, which both
 `env-credential-scrub.sh` and `bash-output-tee.sh` source so the two `unset`
@@ -2283,7 +2283,9 @@ OPENCODE_AUTH_CONTENT=$(jq -c '{"github-copilot": .["github-copilot"]}' ~/.local
 route — see [Runtime configuration](#runtime-configuration)), or pass
 `--opencode-auth-content-file`; it never belongs on argv, and the launcher
 threads it into the Box the same way it does every other secret
-(`offArgvKeys` on the bwrap runner, `-e`/`--env` on the OCI runners).
+(it is in the launcher's shared `OffArgvKeys`, which keeps it in the process
+environment under bwrap and passes it as a bare `-e`/`--env` under the OCI
+runners).
 
 Point `MODEL` (and any per-tier `*_MODEL`) at a Provider-namespaced model id
 to select `github-copilot`, e.g. `MODEL=github-copilot/<model>`. Copilot
@@ -2849,7 +2851,7 @@ capped at `forge.maxIssueTextBytes` (64KB); a truncated thread ends with an
 explicit `[truncated: ...]` marker line rather than being silently cut.
 `ISSUE_TEXT` travels through the runner process's own environment, never on
 its argv — a bare `-e ISSUE_TEXT` under OCI, no `--setenv` under bwrap at all
-— the same route credentials take (`offArgvKeys`), since a command line is
+— the same route credentials take (`OffArgvKeys`), since a command line is
 world-readable via `ps`/`/proc` for the Box's whole lifetime while a process
 environment is owner-readable only (issue #3470).
 
@@ -8111,7 +8113,7 @@ bwrap adapter needs an image lock: `bwrapAdapter`'s `EnsureReady`
 realizes nothing at all, delegating to `IsReady`, and the one that does
 realize, `bwrapBuildAdapter`'s, runs `nix build` over store closures —
 never a runtime image load or re-tag. That realize takes no lock of its
-own either; the `lockSnapshotShared` it does take covers only the nix-var
+own either; the `LockSnapshotShared` it does take covers only the nix-var
 snapshot write that follows it (`snapshotStoreDB`, and only when a
 `nixConfigFileDrv` is configured), not the closure build. There is no
 image tag here for concurrent children to race over.

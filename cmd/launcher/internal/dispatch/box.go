@@ -548,7 +548,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		// the host-side address, while a Box-side reader can only dial the
 		// mount TARGET, a host path being meaningless inside the Box. The
 		// mount SOURCE is the host socket path listed in boxSockets
-		// (Box.Sockets), which is what buildMountSpecs reads. See
+		// (Box.Sockets), which is what BuildMountSpecs reads. See
 		// runner.RegistryProxySocketTarget.
 		var manifestEndpoint registrymanifest.Endpoint
 
@@ -610,7 +610,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			// The host and port that bind-registry needs travel inside
 			// REGISTRY_PROXY_MANIFEST's endpoint field (ADR 0045), but
 			// REGISTRY_PROXY_TCP_SECRET stays its own env var: it is a
-			// bearer-token-shaped credential, so bwrap.go's offArgvKeys keeps
+			// bearer-token-shaped credential, so offargv.go's OffArgvKeys keeps
 			// it off argv and ADR 0045 keeps it out of the manifest.
 			env["REGISTRY_PROXY_TCP_SECRET"] = secret
 		default:
@@ -712,7 +712,7 @@ const signalSocketFile = "signal.sock"
 const spindriftSignalSocketDirPattern = "spindrift-signal-socket-*"
 
 // registryProxyMkdirTemp and registryProxyRemoveAll are swappable in tests the
-// way statCgroupControllerFile is (runner/validate.go, issue #3103): the
+// way statCgroupControllerFile is (runner/bwrap_validate.go, issue #3103): the
 // RemoveAll failure branch below is reachable only through an
 // EACCES/EROFS/EBUSY-class error no test can provoke deterministically. Both
 // the registry proxy's and the Signal socket's directories are created
@@ -785,7 +785,7 @@ func needsOutbox(cfg Config) bool {
 }
 
 // resetOutboxDir empties dir and recreates it: the writable outbox mount must
-// start empty every dispatch (ADR 0033), and buildMountSpecs only produces the
+// start empty every dispatch (ADR 0033), and BuildMountSpecs only produces the
 // mount when the source directory exists. The 0o777 mode lets the Box's
 // uid-1000 agent write regardless of rootless uid remapping (issue #1723).
 func resetOutboxDir(dir string) error {

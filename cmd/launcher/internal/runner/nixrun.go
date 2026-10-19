@@ -11,9 +11,9 @@ import (
 // re-evaluates the flake from pwd's current tree. It returns output rather than
 // streaming it: a live Bubble Tea alt-screen program owns those fds (issue #765).
 func RunNixBuild(pwd string) (string, error) {
-	cmd := execCommand("nix", "run", ".#", "--", "build")
+	cmd := ExecCommand("nix", "run", ".#", "--", "build")
 	cmd.Dir = pwd
-	var output boundedWriter
+	var output BoundedWriter
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err := cmd.Run()

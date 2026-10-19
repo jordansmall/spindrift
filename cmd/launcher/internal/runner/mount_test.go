@@ -14,11 +14,11 @@ import (
 
 // Both sides of the Target comparison read agentpaths.PromptsDir, so a rename
 // in lib/agent-paths.nix cannot fail this assertion on its own; only
-// agent-paths-gen catches that drift. What this pins is that buildMountSpecs
+// agent-paths-gen catches that drift. What this pins is that BuildMountSpecs
 // targets the generated constant and not a stray literal (issue #2531).
 func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
+	specs := BuildMountSpecs(MountParams{PromptDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
@@ -54,7 +54,7 @@ func promptsSpecs(specs []MountSpec) []MountSpec {
 // The prompt is baked into the image, so an unset PromptDir mounts nothing
 // and says nothing about SPINDRIFT_PROMPT_DIR.
 func TestBuildMountSpecs_PromptDirUnset_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{}, Box{})
+	specs := BuildMountSpecs(MountParams{}, Box{})
 
 	if got := promptsSpecs(specs); len(got) != 0 {
 		t.Errorf("unexpected prompts spec: %+v", got)
@@ -68,7 +68,7 @@ func TestBuildMountSpecs_PromptDirUnset_NoMount(t *testing.T) {
 
 func TestBuildMountSpecs_PromptDirMissing_NoMount(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	specs := buildMountSpecs(MountParams{PromptDir: missing}, Box{})
+	specs := BuildMountSpecs(MountParams{PromptDir: missing}, Box{})
 
 	if got := promptsSpecs(specs); len(got) != 0 {
 		t.Errorf("unexpected prompts spec for missing dir: %+v", got)
@@ -89,7 +89,7 @@ func TestBuildMountSpecs_PromptDirBindsWholeDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
+	specs := BuildMountSpecs(MountParams{PromptDir: dir}, Box{})
 
 	got := promptsSpecs(specs)
 	if len(got) != 1 {
@@ -102,7 +102,7 @@ func TestBuildMountSpecs_PromptDirBindsWholeDirectory(t *testing.T) {
 
 func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
+	specs := BuildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
 
 	var found *MountSpec
 	for i := range specs {
@@ -129,7 +129,7 @@ func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 // #448).
 func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{}, Box{DriverCacheDir: dir})
+	specs := BuildMountSpecs(MountParams{}, Box{DriverCacheDir: dir})
 
 	for _, s := range specs {
 		if s.Source == dir {
@@ -140,7 +140,7 @@ func TestBuildMountSpecs_DriverSessionCacheDirUndeclared_NoMount(t *testing.T) {
 
 func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{SkillsDir: dir}, Box{})
+	specs := BuildMountSpecs(MountParams{SkillsDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
@@ -164,7 +164,7 @@ func TestBuildMountSpecs_SkillsDirMounted(t *testing.T) {
 }
 
 func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{}, Box{})
+	specs := BuildMountSpecs(MountParams{}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/operator-skills" {
@@ -176,7 +176,7 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 // candidateMount requires an existing directory, so a SkillsDir naming a
 // missing path yields no /operator-skills mount.
 func TestBuildMountSpecs_SkillsDirMissing_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{SkillsDir: filepath.Join(t.TempDir(), "absent")}, Box{})
+	specs := BuildMountSpecs(MountParams{SkillsDir: filepath.Join(t.TempDir(), "absent")}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/operator-skills" {
@@ -189,7 +189,7 @@ func TestBuildMountSpecs_SkillsDirMissing_NoMount(t *testing.T) {
 // stays single-writer.
 func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
+	specs := BuildMountSpecs(MountParams{HostMediatedRemote: true, AccumulationRepoDir: dir}, Box{})
 
 	var found *MountSpec
 	for i := range specs {
@@ -213,7 +213,7 @@ func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testi
 // independent of MountParams.
 func TestBuildMountSpecs_OutboxDirSet_MountedWritable(t *testing.T) {
 	dir := t.TempDir()
-	specs := buildMountSpecs(MountParams{}, Box{OutboxDir: dir})
+	specs := BuildMountSpecs(MountParams{}, Box{OutboxDir: dir})
 
 	var found *MountSpec
 	for i := range specs {
@@ -233,7 +233,7 @@ func TestBuildMountSpecs_OutboxDirSet_MountedWritable(t *testing.T) {
 }
 
 func TestBuildMountSpecs_OutboxDirEmpty_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{}, Box{})
+	specs := BuildMountSpecs(MountParams{}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/outbox" {
@@ -246,7 +246,7 @@ func TestBuildMountSpecs_OutboxDirEmpty_NoMount(t *testing.T) {
 // HostMediatedRemote is false, whatever AccumulationRepoDir says.
 func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationRepoMount(t *testing.T) {
 	repoDir := t.TempDir()
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: false, AccumulationRepoDir: repoDir}, Box{})
+	specs := BuildMountSpecs(MountParams{HostMediatedRemote: false, AccumulationRepoDir: repoDir}, Box{})
 	for _, s := range specs {
 		if s.Target == "/repo" {
 			t.Errorf("unexpected /repo spec: %+v", s)
@@ -257,7 +257,7 @@ func TestBuildMountSpecs_NonLocalCodeForge_NoAccumulationRepoMount(t *testing.T)
 // The /repo mount stays gated on candidateMount, not just on the
 // HostMediatedRemote check.
 func TestBuildMountSpecs_LocalCodeForge_AbsentAccumulationRepoDir_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
+	specs := BuildMountSpecs(MountParams{HostMediatedRemote: true}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/repo" {
@@ -295,7 +295,7 @@ func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 	repoDir := t.TempDir()
 	outboxDir := t.TempDir()
 
-	specs := buildMountSpecs(MountParams{
+	specs := BuildMountSpecs(MountParams{
 		PromptDir:             promptDir,
 		SkillsDir:             skillsDir,
 		DriverSessionCacheDir: "/home/agent/.claude/projects",
@@ -331,7 +331,7 @@ func TestBuildMountSpecs_NeverProducesIssuesMount(t *testing.T) {
 }
 
 // The prompt-dir and skills-dir gates and their operator messages must live
-// only in buildMountSpecs, never duplicated in an adapter file. The
+// only in BuildMountSpecs, never duplicated in an adapter file. The
 // driver-cache gate has no unique string to pin, since its rationale comment
 // legitimately differs per adapter, so this pins the two mounts that carry
 // operator messages.
@@ -347,14 +347,14 @@ func TestAdaptersRenderOnly_NoDuplicatedMountDecisions(t *testing.T) {
 		}
 		for _, marker := range markers {
 			if strings.Contains(string(data), marker) {
-				t.Errorf("%s contains mount-decision marker %q; operator messages must come from the shared buildMountSpecs, not be duplicated in the adapter", path, marker)
+				t.Errorf("%s contains mount-decision marker %q; operator messages must come from the shared BuildMountSpecs, not be duplicated in the adapter", path, marker)
 			}
 		}
 	}
 }
 
 // The same mount config reaches both backends by construction: add or remove a
-// spec and both adapters follow, because both render the same buildMountSpecs
+// spec and both adapters follow, because both render the same BuildMountSpecs
 // list.
 func TestMountSpecs_RenderedIdenticallyAcrossBackends(t *testing.T) {
 	promptDir := t.TempDir()
@@ -571,7 +571,7 @@ func TestCandidateSocketMount_EmptyPath_NoMount(t *testing.T) {
 // ADR 0044 fixes the in-box target at /registry-proxy.sock.
 func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 	sock := newTestSocket(t, "registry-proxy.sock")
-	specs := buildMountSpecs(MountParams{}, Box{Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}})
+	specs := BuildMountSpecs(MountParams{}, Box{Sockets: []SocketMount{{Source: sock, Target: RegistryProxySocketTarget}}})
 
 	var found *MountSpec
 	for i := range specs {
@@ -591,7 +591,7 @@ func TestBuildMountSpecs_RegistryProxySocketMounted(t *testing.T) {
 }
 
 func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
-	specs := buildMountSpecs(MountParams{}, Box{})
+	specs := BuildMountSpecs(MountParams{}, Box{})
 
 	for _, s := range specs {
 		if s.Target == "/registry-proxy.sock" {
@@ -600,7 +600,7 @@ func TestBuildMountSpecs_RegistryProxySocketUnset_NoMount(t *testing.T) {
 	}
 }
 
-// issue #3723: buildMountSpecs mounts every entry of Box.Sockets, in order,
+// issue #3723: BuildMountSpecs mounts every entry of Box.Sockets, in order,
 // each at its own fixed target — not just a single hardcoded socket.
 func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
 	sockA := newTestSocket(t, "registry-proxy.sock")
@@ -610,7 +610,7 @@ func TestBuildMountSpecs_MultipleSockets_OneWritableSpecEach(t *testing.T) {
 		{Source: sockB, Target: SignalSocketTarget},
 	}}
 
-	specs := buildMountSpecs(MountParams{}, box)
+	specs := BuildMountSpecs(MountParams{}, box)
 
 	if len(specs) != 2 {
 		t.Fatalf("want 2 specs, got %d: %+v", len(specs), specs)
@@ -637,7 +637,7 @@ func TestBuildMountSpecs_MultipleSockets_SkipsBadEntryKeepsGoodOne(t *testing.T)
 		{Source: sockA, Target: RegistryProxySocketTarget},
 	}}
 
-	specs := buildMountSpecs(MountParams{}, box)
+	specs := BuildMountSpecs(MountParams{}, box)
 
 	if len(specs) != 1 {
 		t.Fatalf("want 1 spec, got %d: %+v", len(specs), specs)

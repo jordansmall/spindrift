@@ -21,15 +21,15 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 )
 
-// Run must go through the package-level execCommand seam, not a hardcoded
+// Run must go through the package-level ExecCommand seam, not a hardcoded
 // exec.Command("bwrap", ...). networkMode="host" keeps the exec target bare
 // bwrap; TestBwrapRun_PastaIsTopLevelProgramByDefault covers the pasta default.
 func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 1})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -38,7 +38,7 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	err := a.Run(Box{Env: map[string]string{}})
 
 	if gotName != "bwrap" {
-		t.Errorf("execCommand called with %q, want %q", gotName, "bwrap")
+		t.Errorf("ExecCommand called with %q, want %q", gotName, "bwrap")
 	}
 	if err == nil {
 		t.Error("expected error from scripted bwrap failure, got nil")
@@ -71,10 +71,10 @@ func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 // (zero-value) networkMode must make pasta the top-level program.
 func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -85,7 +85,7 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	}
 
 	if gotName != "pasta" {
-		t.Errorf("execCommand called with %q, want %q", gotName, "pasta")
+		t.Errorf("ExecCommand called with %q, want %q", gotName, "pasta")
 	}
 }
 
@@ -139,15 +139,15 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 // Nothing else writes a resolv.conf into the bwrap sandbox (unlike the OCI
 // runner, where podman writes its own), so Run must synthesize
 // <etcDir>/resolv.conf pointing at pastaDNSForwardAddr. The content is read
-// inside the execCommand seam, before Start/Wait, because Run's deferred
+// inside the ExecCommand seam, before Start/Wait, because Run's deferred
 // os.RemoveAll(etcDir) has already fired by the time Run returns.
 func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotResolvConf []byte
 	var readErr error
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		for i, arg := range args {
 			if arg == "--ro-bind" && i+2 < len(args) && args[i+2] == "/etc/resolv.conf" {
 				gotResolvConf, readErr = os.ReadFile(args[i+1])
@@ -180,10 +180,10 @@ func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 // pins that this does not widen the ambient-leak guarantee.
 func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -209,9 +209,9 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 // type instead of a raw *exec.ExitError.
 func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 137})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -232,10 +232,10 @@ func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 
 func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 1})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotName string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -244,7 +244,7 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 	err := a.EnsureReady()
 
 	if gotName != "nix" {
-		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
 	}
 	if err == nil {
 		t.Fatal("expected error from scripted nix build failure, got nil")
@@ -258,9 +258,9 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 // (issue #2663).
 func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -284,9 +284,9 @@ func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 // stop before the group-file closure runs (issue #2663).
 func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 1})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -309,9 +309,9 @@ func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T)
 // The group-file realization is the fourth and final closure (issue #2663).
 func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 1})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -333,7 +333,7 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 
 // With nixConfigFileDrv set, EnsureReady realizes a fifth closure and then
 // snapshots the host nix store DB with one "sqlite3 ... VACUUM INTO" call
-// through the same seam, so 6 execCommand invocations in all. The argv
+// through the same seam, so 6 ExecCommand invocations in all. The argv
 // assertion pins the quoted destination, so a dest containing a space would
 // round-trip correctly. VACUUM INTO targets a temp sibling of dest, never dest
 // itself (issue #4817).
@@ -342,13 +342,13 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
 		fakeCall{exit: 0}, fakeCall{exit: 0},
 	)
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
 	var gotNames []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -371,7 +371,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 		t.Errorf("callCount = %d, want 6", got)
 	}
 	if len(gotNames) != 6 {
-		t.Fatalf("execCommand invoked %d times, want 6: %v", len(gotNames), gotNames)
+		t.Fatalf("ExecCommand invoked %d times, want 6: %v", len(gotNames), gotNames)
 	}
 	for i := 0; i < 5; i++ {
 		if gotNames[i] != "nix" {
@@ -412,17 +412,17 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
 		fakeCall{exit: 0}, fakeCall{exit: 0},
 	)
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
 
 	root := filepath.Join(t.TempDir(), ".spindrift", "nix-var-snapshot")
 	snapshotDir := filepath.Join(root, "gen-a")
-	lockPath := snapshotLockPath(snapshotDir)
+	lockPath := SnapshotLockPath(snapshotDir)
 	probed := false
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "sqlite3" {
 			probed = true
 			lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
@@ -453,22 +453,22 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 		t.Fatalf("EnsureReady() = %v, want nil", err)
 	}
 	if !probed {
-		t.Fatal("sqlite3 execCommand fake never invoked; probe never ran")
+		t.Fatal("sqlite3 ExecCommand fake never invoked; probe never ran")
 	}
 }
 
-// fakeVacuumInto stubs execCommand so a sqlite3 call writes content to the temp
+// fakeVacuumInto stubs ExecCommand so a sqlite3 call writes content to the temp
 // path named in its VACUUM INTO statement and exits with code; every other
 // command is the scripted fake. onVacuum, if non-nil, runs before the write
 // with the parsed temp path.
 func fakeVacuumInto(t *testing.T, script, content string, code int, onVacuum func(tmp string)) {
 	t.Helper()
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		if name != "sqlite3" {
 			return exec.Command(script, args...)
 		}
@@ -483,7 +483,7 @@ func fakeVacuumInto(t *testing.T, script, content string, code int, onVacuum fun
 
 // snapshotDest is the db.sqlite SnapshotGeneration writes for closure's generation.
 func snapshotDest(pwd, closure string) string {
-	return filepath.Join(nixVarSnapshotDir(pwd, closureGeneration(closure)), "nix", "db", "db.sqlite")
+	return filepath.Join(NixVarSnapshotDir(pwd, ClosureGeneration(closure)), "nix", "db", "db.sqlite")
 }
 
 // tempSiblings lists leftover vacuum temp files next to db.sqlite.
@@ -524,8 +524,8 @@ func TestVacuumStoreDBInto_SweepsOnlyUnlockedTemps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := vacuumStoreDBInto(dir, installReplace); err != nil {
-		t.Fatalf("vacuumStoreDBInto = %v, want nil", err)
+	if err := VacuumStoreDBInto(dir, InstallReplace); err != nil {
+		t.Fatalf("VacuumStoreDBInto = %v, want nil", err)
 	}
 
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
@@ -556,8 +556,8 @@ func TestVacuumStoreDBInto_SweepLeavesLiveVacuumJournal(t *testing.T) {
 		}
 	})
 
-	if err := vacuumStoreDBInto(dir, installReplace); err != nil {
-		t.Fatalf("vacuumStoreDBInto = %v, want nil", err)
+	if err := VacuumStoreDBInto(dir, InstallReplace); err != nil {
+		t.Fatalf("VacuumStoreDBInto = %v, want nil", err)
 	}
 }
 
@@ -598,7 +598,7 @@ func TestCreateLockedVacuumTemp_RetriesAfterSweep(t *testing.T) {
 	if *calls != 2 {
 		t.Errorf("hook fired %d times, want 2 (one swept attempt, one retry)", *calls)
 	}
-	if !lockedFDMatchesPath(f, f.Name()) {
+	if !LockedFDMatchesPath(f, f.Name()) {
 		t.Errorf("returned fd does not identify %s", f.Name())
 	}
 	matches := tempSiblings(t, dir)
@@ -691,8 +691,8 @@ func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
 		}
 	})
 
-	if err := vacuumStoreDBInto(dir, installReplace); err == nil {
-		t.Fatal("vacuumStoreDBInto = nil, want the sqlite3 failure")
+	if err := VacuumStoreDBInto(dir, InstallReplace); err == nil {
+		t.Fatal("VacuumStoreDBInto = nil, want the sqlite3 failure")
 	}
 	if left := tempSiblings(t, filepath.Join(dir, "nix", "db")); len(left) != 0 {
 		t.Errorf("leftover temp or journal after failure: %v, want none", left)
@@ -756,8 +756,8 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
 	fakeVacuumInto(t, script, "partial", 1, nil)
 	vacuums := 0
-	inner := execCommand
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	inner := ExecCommand
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "sqlite3" {
 			vacuums++
 		}
@@ -819,8 +819,8 @@ func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
 	fakeVacuumInto(t, script, "partial", 1, nil)
 
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
-	if err := vacuumStoreDBInto(snapshotDir, installReplace); err == nil {
-		t.Fatal("vacuumStoreDBInto = nil, want error from scripted sqlite3 failure")
+	if err := VacuumStoreDBInto(snapshotDir, InstallReplace); err == nil {
+		t.Fatal("VacuumStoreDBInto = nil, want error from scripted sqlite3 failure")
 	}
 
 	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: snapshotDir}
@@ -840,8 +840,8 @@ func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
 // that happens to have a real host nix db.
 func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statCalled := false
@@ -850,7 +850,7 @@ func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) 
 		return nil
 	}
 	var gotNames []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -889,12 +889,12 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
 		fakeCall{exit: 0}, fakeCall{exit: 1},
 	)
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -923,13 +923,13 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 // is 5, not 0.
 func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return errors.New("no such file or directory") }
 	var gotNames []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -961,9 +961,9 @@ func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *test
 // sets no cgroup fields and leaves cgroupFSRoot untouched, so IsRunning
 // have no cgroup to query and Kill is the only observable path.
 func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -1004,9 +1004,9 @@ func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
 // so a later reclaim can tell the generation is still in use. Once Run
 // returns the lock must be released so reclaim can proceed.
 func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -1072,9 +1072,9 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 // protect, so Run must not create a lock file at all.
 func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1107,9 +1107,9 @@ func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 // a regression that drops the fmt.Printf (issue #2680 review finding).
 func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1147,9 +1147,9 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 // exec'ing bwrap against a mountpoint that no longer exists.
 func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1190,13 +1190,13 @@ func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing
 }
 
 // Run must release the shared lock when cmd.Start() itself fails, not leak it
-// (issue #2680 review finding). execCommand points at a nonexistent absolute
+// (issue #2680 review finding). ExecCommand points at a nonexistent absolute
 // path so exec.Command skips its own LookPath, which resolves bare names
 // only, and the failure comes from cmd.Start() itself.
 func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(filepath.Join(t.TempDir(), "no-such-binary"), args...)
 	}
 
@@ -1237,9 +1237,9 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 // would fail with "no longer exists".
 func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1293,9 +1293,9 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 // NixConfigFile override, the way AgentFiles/AgentEnv already do.
 func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1339,14 +1339,14 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 // host nix store DB into that generation's own dir.
 func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
 
 	var gotNames []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -1358,7 +1358,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
-		t.Errorf("execCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
+		t.Errorf("ExecCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
 	}
 	if got := callCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1", got)
@@ -1387,12 +1387,12 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 // AgentGeneration.Generation always name the same thing.
 func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0}, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1410,7 +1410,7 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 		bakedPrefetch:      "echo ok",
 		nixConfigFile:      "/fake/nix.conf",
 		nixVarSnapshotDir:  filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "baked-gen-never-created"),
-		nixVarSnapshotRoot: nixVarSnapshotRoot(pwd),
+		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 	}
 
 	err := a.Run(Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen})
@@ -1426,17 +1426,17 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 // The unlocked sibling generation here is exactly what reclaim would sweep.
 func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
 	pwd := t.TempDir()
-	root := nixVarSnapshotRoot(pwd)
+	root := NixVarSnapshotRoot(pwd)
 
 	// A sibling generation from an earlier swap, unrelated to the closure
 	// this test snapshots, with no flock held on it (as would be the case
@@ -1461,17 +1461,17 @@ func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 
 // Issue #2682 review Finding B: generations are immutable once created, and a
 // generation already snapshotted by an earlier swap to the same closure (a
-// revert, say) may be --overlay-src-mounted by a live Box. vacuumStoreDBInto
+// revert, say) may be --overlay-src-mounted by a live Box. VacuumStoreDBInto
 // would replace the existing db.sqlite with a fresh one, which ADR
 // 0043 forbids, so a repeat call must skip the vacuum entirely.
 func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1497,9 +1497,9 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 // launcher already installed dest, which makes SnapshotGeneration skip the vacuum.
 func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1664,16 +1664,16 @@ func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
 
 // The allowlist invariant the denylist version leaked: a name set on the
 // launcher's own ambient environment and absent from box.Env must never reach
-// the bwrap child, while a real offArgvKeys key present in box.Env still
+// the bwrap child, while a real OffArgvKeys key present in box.Env still
 // does. Driving through Run rather than resolvedRunEnv alone pins the real
 // seam, bwrap.go's `cmd.Env = resolvedRunEnv(box.Env)`.
 func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 	t.Setenv("SOME_UNDECLARED_SECRET", "leaked-value")
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1693,12 +1693,12 @@ func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 		}
 	}
 	if !sawGHToken {
-		t.Errorf("Run's cmd.Env dropped a real offArgvKeys key present in box.Env: %v", gotCmd.Env)
+		t.Errorf("Run's cmd.Env dropped a real OffArgvKeys key present in box.Env: %v", gotCmd.Env)
 	}
 }
 
 // Opt-in two-actor separation (ADR 0016, issue #380) under the allowlist:
-// buildArgs's --setenv loop skips GH_TOKEN (offArgvKeys) to keep it off argv
+// buildArgs's --setenv loop skips GH_TOKEN (OffArgvKeys) to keep it off argv
 // and bwrap has no --clearenv, so resolvedRunEnv is the only path left for a
 // box.Env GH_TOKEN to reach the sandbox.
 func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
@@ -1712,7 +1712,7 @@ func TestResolvedRunEnv_ForwardsGHTokenFromBoxEnv(t *testing.T) {
 	}
 }
 
-// offArgvKeys is exactly the non-Driver literal plus the generated Driver
+// OffArgvKeys is exactly the non-Driver literal plus the generated Driver
 // credential env names, so a new Driver credential is off-argv without a hand
 // edit here (issue #5507).
 func TestOffArgvKeys_CoversDriverCredentialEnv(t *testing.T) {
@@ -1723,12 +1723,12 @@ func TestOffArgvKeys_CoversDriverCredentialEnv(t *testing.T) {
 	for _, k := range driverCredentialEnv {
 		want[k] = true
 	}
-	if !reflect.DeepEqual(offArgvKeys, want) {
-		t.Errorf("offArgvKeys = %v, want the non-Driver keys plus the Driver credential env %v", offArgvKeys, want)
+	if !reflect.DeepEqual(OffArgvKeys, want) {
+		t.Errorf("OffArgvKeys = %v, want the non-Driver keys plus the Driver credential env %v", OffArgvKeys, want)
 	}
 }
 
-// buildArgs's --setenv loop excludes every offArgvKeys name from argv
+// buildArgs's --setenv loop excludes every OffArgvKeys name from argv
 // identically, so every one of them must be forwarded through the process
 // environment, not just GH_TOKEN.
 func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
@@ -1745,8 +1745,8 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 
 	// Guards the "All" in this test's name: as the map grows, a fixture left
 	// behind would otherwise keep passing.
-	if len(boxEnv) != len(offArgvKeys) {
-		t.Fatalf("fixture has %d keys, offArgvKeys has %d -- update the fixture to cover every offArgvKeys entry", len(boxEnv), len(offArgvKeys))
+	if len(boxEnv) != len(OffArgvKeys) {
+		t.Fatalf("fixture has %d keys, OffArgvKeys has %d -- update the fixture to cover every OffArgvKeys entry", len(boxEnv), len(OffArgvKeys))
 	}
 
 	got := resolvedRunEnv(boxEnv)
@@ -1768,7 +1768,7 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 	}
 }
 
-// Two legitimate exclusions: BOX_GH_TOKEN is not an offArgvKeys key at all
+// Two legitimate exclusions: BOX_GH_TOKEN is not an OffArgvKeys key at all
 // (lib/env-schema.nix's boxGhToken is boxEnv=false, so it would never be a
 // box.Env key in production either), and ISSUE_NUMBER is a real box.Env key
 // that buildArgs already delivers via --setenv, so forwarding it here would
@@ -1779,7 +1779,7 @@ func TestResolvedRunEnv_ExcludesKeysNotInOffArgvKeys(t *testing.T) {
 		boxEnv    map[string]string
 		absentKey string
 	}{
-		{"BOX_GH_TOKEN is not an offArgvKeys key", map[string]string{"BOX_GH_TOKEN": "box-token"}, "BOX_GH_TOKEN"},
+		{"BOX_GH_TOKEN is not an OffArgvKeys key", map[string]string{"BOX_GH_TOKEN": "box-token"}, "BOX_GH_TOKEN"},
 		{"non-secret box.Env key already delivered via --setenv", map[string]string{"GH_TOKEN": "gh-token-value", "ISSUE_NUMBER": "42"}, "ISSUE_NUMBER"},
 	}
 	for _, tc := range tests {
@@ -1821,10 +1821,10 @@ func TestResolvedRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
 	t.Setenv("GH_TOKEN", "launcher-token")
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1859,10 +1859,10 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 	t.Setenv("OPENCODE_AUTH_CONTENT", sentinel)
 
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1898,10 +1898,10 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "registry-proxy-tcp-secret-sentinel-value"
 
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1937,10 +1937,10 @@ func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "signal-socket-secret-sentinel-value"
 
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1976,10 +1976,10 @@ func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "forgejo-token-sentinel-value"
 
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -2018,10 +2018,10 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 	t.Setenv("ISSUE_TEXT", decoy)
 
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -2058,9 +2058,9 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 // and print a warning saying why containment is unavailable.
 func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -2092,12 +2092,12 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 // With a writable delegated subtree, Run writes pids.max and memory.max into
 // the per-Box cgroup dir before launching and removes that dir once Run
 // returns (ADR 0042's strictly-ephemeral posture). The content is read inside
-// the execCommand seam, before Start/Wait, because Run's cleanup has already
+// the ExecCommand seam, before Start/Wait, because Run's cleanup has already
 // removed the dir by the time Run returns.
 func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -2109,7 +2109,7 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
 	var gotPidsMax, gotMemoryMax []byte
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
 		return exec.Command(script, args...)
@@ -2138,14 +2138,14 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 // the limits at the anchored path means a wrong anchor cannot pass silently.
 func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 
 	userService, scope := systemdUserSessionFixture(t, "memory pids")
 
 	wantDir := filepath.Join(userService, "spindrift-anchored-box")
 	var gotPidsMax, gotMemoryMax []byte
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
 		return exec.Command(script, args...)
@@ -2194,8 +2194,8 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 // (ADR 0042 warn-and-proceed) rather than erroring.
 func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -2215,7 +2215,7 @@ func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 
 	wantDir := filepath.Join(selfDir, "spindrift-fallback-box")
 	var gotPidsMax []byte
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		return exec.Command(script, args...)
 	}
@@ -2274,9 +2274,9 @@ func TestBwrapAnchoredCgroup_StaysDiscoverable(t *testing.T) {
 func runCgroupDelegatedBoxWithFailingLimit(t *testing.T, a *bwrapAdapter, failingLimit string) {
 	t.Helper()
 
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -2980,7 +2980,7 @@ func TestBwrapListRunning_TrueAcrossDifferentLauncherInvocations(t *testing.T) {
 
 // stubCgroupSeams points cgroupFSRoot at a fresh empty dir standing in for
 // the host cgroup v2 tree and returns it. A non-nil self also stubs
-// readSelfCgroup, and a non-nil newCmd stubs execCommand; each is left alone
+// readSelfCgroup, and a non-nil newCmd stubs ExecCommand; each is left alone
 // when nil, so a test only stubs the seams it actually exercises. All swaps
 // are restored on t.Cleanup.
 func stubCgroupSeams(t *testing.T, self func() (string, error), newCmd func(string, ...string) *exec.Cmd) string {
@@ -2996,9 +2996,9 @@ func stubCgroupSeams(t *testing.T, self func() (string, error), newCmd func(stri
 		readSelfCgroup = self
 	}
 	if newCmd != nil {
-		origExec := execCommand
-		t.Cleanup(func() { execCommand = origExec })
-		execCommand = newCmd
+		origExec := ExecCommand
+		t.Cleanup(func() { ExecCommand = origExec })
+		ExecCommand = newCmd
 	}
 	return cgroupFSRoot
 }
@@ -3292,10 +3292,10 @@ func TestMemoryLimitToBytes(t *testing.T) {
 // Run still succeeds and prints a warning rather than failing the launch.
 func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -3334,10 +3334,10 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 // read the compiled BPF filter from.
 func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 	script, _ := newFakeCLI(t, fakeCall{exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
+	origExec := ExecCommand
+	t.Cleanup(func() { ExecCommand = origExec })
 	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -3378,15 +3378,15 @@ func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 // than sharing the one flat path every closure used to collide on.
 func TestNixVarSnapshotDir_DifferentGenerationsProduceDistinctDirs(t *testing.T) {
 	root := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
-	got1 := nixVarSnapshotDir("/pwd", "abc123-agent-closure")
-	got2 := nixVarSnapshotDir("/pwd", "def456-agent-closure")
+	got1 := NixVarSnapshotDir("/pwd", "abc123-agent-closure")
+	got2 := NixVarSnapshotDir("/pwd", "def456-agent-closure")
 
 	if got1 == got2 {
 		t.Fatalf("nixVarSnapshotDir with different generations returned the same dir: %q", got1)
 	}
 	for _, got := range []string{got1, got2} {
 		if !strings.HasPrefix(got, root+string(filepath.Separator)) {
-			t.Errorf("nixVarSnapshotDir(%q) = %q, want it nested under root %q", got, got, root)
+			t.Errorf("NixVarSnapshotDir(%q) = %q, want it nested under root %q", got, got, root)
 		}
 	}
 }
@@ -3395,14 +3395,14 @@ func TestNixVarSnapshotDir_DifferentGenerationsProduceDistinctDirs(t *testing.T)
 // preserves the pre-#2680 flat path exactly, so a run that only ever uses one
 // closure is unchanged.
 func TestNixVarSnapshotDir_EmptyGenerationProducesFlatPath(t *testing.T) {
-	got := nixVarSnapshotDir("/pwd", "")
+	got := NixVarSnapshotDir("/pwd", "")
 	want := filepath.Join("/pwd", ".spindrift", "nix-var-snapshot")
 	if got != want {
-		t.Errorf("nixVarSnapshotDir(%q, \"\") = %q, want %q", "/pwd", got, want)
+		t.Errorf("NixVarSnapshotDir(%q, \"\") = %q, want %q", "/pwd", got, want)
 	}
 }
 
-// closureGeneration must fall back to "" (the pre-#2680 flat path) whenever
+// ClosureGeneration must fall back to "" (the pre-#2680 flat path) whenever
 // filepath.Base(imageTag) is not a safe single path component: imageTag comes
 // from an environment variable an untrusted source can influence, and the
 // generation is threaded into a path reclaimStaleSnapshots os.RemoveAll's
@@ -3426,17 +3426,17 @@ func TestClosureGeneration_RejectsUnsafeGenerationNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var got string
 			out := captureStdoutDuring(t, func() {
-				got = closureGeneration(tc.imageTag)
+				got = ClosureGeneration(tc.imageTag)
 			})
 			if got != tc.want {
-				t.Errorf("closureGeneration(%q) = %q, want %q", tc.imageTag, got, tc.want)
+				t.Errorf("ClosureGeneration(%q) = %q, want %q", tc.imageTag, got, tc.want)
 			}
 			gotWarn := strings.Contains(out, "==> bwrap runner: warning: ")
 			if gotWarn != tc.wantWarn {
-				t.Errorf("closureGeneration(%q) warning printed = %v, want %v (captured: %q)", tc.imageTag, gotWarn, tc.wantWarn, out)
+				t.Errorf("ClosureGeneration(%q) warning printed = %v, want %v (captured: %q)", tc.imageTag, gotWarn, tc.wantWarn, out)
 			}
 			if tc.wantWarn && !strings.Contains(out, fmt.Sprintf("%q", tc.imageTag)) {
-				t.Errorf("closureGeneration(%q) warning %q does not name the rejected imageTag", tc.imageTag, out)
+				t.Errorf("ClosureGeneration(%q) warning %q does not name the rejected imageTag", tc.imageTag, out)
 			}
 		})
 	}
@@ -3448,10 +3448,10 @@ func TestClosureGeneration_TruncatesOverlongRejectedLabel(t *testing.T) {
 	long := strings.Repeat("a", generationLabelWarnLimit*2) + "/.."
 	var got string
 	out := captureStdoutDuring(t, func() {
-		got = closureGeneration(long)
+		got = ClosureGeneration(long)
 	})
 	if got != "" {
-		t.Errorf("closureGeneration(<%d-byte unsafe label>) = %q, want %q", len(long), got, "")
+		t.Errorf("ClosureGeneration(<%d-byte unsafe label>) = %q, want %q", len(long), got, "")
 	}
 	if strings.Contains(out, long) {
 		t.Errorf("warning echoes the full untrusted label; want it truncated (captured %d bytes)", len(out))
@@ -3625,8 +3625,8 @@ func TestLockedFDMatchesPath(t *testing.T) {
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
 			t.Fatalf("Flock: %v", err)
 		}
-		if !lockedFDMatchesPath(lf, path) {
-			t.Errorf("lockedFDMatchesPath(%q) = false, want true", path)
+		if !LockedFDMatchesPath(lf, path) {
+			t.Errorf("LockedFDMatchesPath(%q) = false, want true", path)
 		}
 	})
 
@@ -3646,8 +3646,8 @@ func TestLockedFDMatchesPath(t *testing.T) {
 		if err := os.WriteFile(path, nil, 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
-		if lockedFDMatchesPath(lf, path) {
-			t.Errorf("lockedFDMatchesPath(%q) = true, want false (path now resolves to a different inode)", path)
+		if LockedFDMatchesPath(lf, path) {
+			t.Errorf("LockedFDMatchesPath(%q) = true, want false (path now resolves to a different inode)", path)
 		}
 	})
 
@@ -3664,8 +3664,8 @@ func TestLockedFDMatchesPath(t *testing.T) {
 		if err := os.Remove(path); err != nil {
 			t.Fatalf("Remove: %v", err)
 		}
-		if lockedFDMatchesPath(lf, path) {
-			t.Errorf("lockedFDMatchesPath(%q) = true, want false (os.Stat(path) should fail)", path)
+		if LockedFDMatchesPath(lf, path) {
+			t.Errorf("LockedFDMatchesPath(%q) = true, want false (os.Stat(path) should fail)", path)
 		}
 	})
 }
@@ -3694,7 +3694,7 @@ func runOrphanSweepAdversary(lockPath string, openToFlockDelay time.Duration, st
 			lf.Close()
 			continue // still referenced, sweepOrphanedLock leaves it alone
 		}
-		if lockedFDMatchesPath(lf, lockPath) {
+		if LockedFDMatchesPath(lf, lockPath) {
 			_ = os.Remove(lockPath)
 		}
 		_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
@@ -3704,15 +3704,15 @@ func runOrphanSweepAdversary(lockPath string, openToFlockDelay time.Duration, st
 }
 
 // runLockSnapshotSharedRace races background runOrphanSweepAdversary
-// goroutines against repeated lockSnapshotShared(dir) calls until wins reaches
+// goroutines against repeated LockSnapshotShared(dir) calls until wins reaches
 // 5 or a 2-second deadline passes, checking on every call that the returned
-// *os.File still identifies snapshotLockPath(dir). The adversaries are torn
+// *os.File still identifies SnapshotLockPath(dir). The adversaries are torn
 // down via defer, so a t.Fatalf unwinding this frame still stops them.
 func runLockSnapshotSharedRace(dir string, openToFlockDelay time.Duration) (wins int64, attempts int, err error) {
 	const adversaries = 4
 	const minWins = 5
 	deadline := time.Now().Add(2 * time.Second)
-	lockPath := snapshotLockPath(dir)
+	lockPath := SnapshotLockPath(dir)
 
 	// The adversaries add to winCount, not to the named return wins, which is
 	// assigned only in the deferred cleanup after wg.Wait() proves they have
@@ -3735,9 +3735,9 @@ func runLockSnapshotSharedRace(dir string, openToFlockDelay time.Duration) (wins
 
 	for time.Now().Before(deadline) && atomic.LoadInt64(&winCount) < minWins {
 		attempts++
-		lf, lockErr := lockSnapshotShared(dir)
+		lf, lockErr := LockSnapshotShared(dir)
 		if lockErr != nil {
-			err = fmt.Errorf("lockSnapshotShared(%q) attempt %d: %w", dir, attempts, lockErr)
+			err = fmt.Errorf("LockSnapshotShared(%q) attempt %d: %w", dir, attempts, lockErr)
 			return
 		}
 		fdStat, statErr := lf.Stat()
@@ -3746,26 +3746,26 @@ func runLockSnapshotSharedRace(dir string, openToFlockDelay time.Duration) (wins
 			pathStat, statErr = os.Stat(lockPath)
 		}
 		sameFile := statErr == nil && os.SameFile(fdStat, pathStat)
-		unlockSnapshot(lf)
+		UnlockSnapshot(lf)
 		if !sameFile {
-			err = fmt.Errorf("attempt %d: lockSnapshotShared returned a lock on an inode that no longer identifies %s (statErr=%v) -- the orphan-sweep race won", attempts, lockPath, statErr)
+			err = fmt.Errorf("attempt %d: LockSnapshotShared returned a lock on an inode that no longer identifies %s (statErr=%v) -- the orphan-sweep race won", attempts, lockPath, statErr)
 			return
 		}
 	}
 	return
 }
 
-// installOnceInodeSwapHook installs a once-only lockRaceWindowHook that
+// installOnceInodeSwapHook installs a once-only LockRaceWindowHook that
 // removes lockPath and recreates it, simulating a concurrent actor swapping
 // the inode inside the window between os.OpenFile and syscall.Flock that
-// lockSnapshotShared, reclaimStaleSnapshots and sweepOrphanedLock all call it
+// LockSnapshotShared, reclaimStaleSnapshots and sweepOrphanedLock all call it
 // from. It returns the "did the hook fire" flag; t.Cleanup restores the hook.
 func installOnceInodeSwapHook(t *testing.T, lockPath string) *bool {
 	t.Helper()
-	orig := lockRaceWindowHook
-	t.Cleanup(func() { lockRaceWindowHook = orig })
+	orig := LockRaceWindowHook
+	t.Cleanup(func() { LockRaceWindowHook = orig })
 	swapped := false
-	lockRaceWindowHook = func() {
+	LockRaceWindowHook = func() {
 		if swapped {
 			return
 		}
@@ -3780,18 +3780,18 @@ func installOnceInodeSwapHook(t *testing.T, lockPath string) *bool {
 	return &swapped
 }
 
-// Issue #2680 review finding: EnsureReady calls lockSnapshotShared before the
+// Issue #2680 review finding: EnsureReady calls LockSnapshotShared before the
 // generation dir exists, so a concurrent build's reclaim pass can see the lock
 // file as orphaned and win LOCK_EX in the open-then-lock window. The returned
-// *os.File must always identify whatever sits at snapshotLockPath. A once-only
-// lockRaceWindowHook (issue #3005) forces that swap on every run.
+// *os.File must always identify whatever sits at SnapshotLockPath. A once-only
+// LockRaceWindowHook (issue #3005) forces that swap on every run.
 func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gen-race")
-	lockPath := snapshotLockPath(dir)
+	lockPath := SnapshotLockPath(dir)
 
 	// Simulate a concurrent sweepOrphanedLock winning LOCK_EX and removing
 	// lockPath, then a third party recreating it, in the window between
-	// lockSnapshotShared's own os.OpenFile and its syscall.Flock(LOCK_SH).
+	// LockSnapshotShared's own os.OpenFile and its syscall.Flock(LOCK_SH).
 	swapped := installOnceInodeSwapHook(t, lockPath)
 
 	wins, attempts, err := runLockSnapshotSharedRace(dir, 0)
@@ -3799,10 +3799,10 @@ func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !*swapped {
-		t.Fatalf("lockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
+		t.Fatalf("LockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
 	}
 	if wins == 0 {
-		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
+		t.Fatalf("adversary never won a race against LockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
 	}
 }
 
@@ -3813,11 +3813,11 @@ func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
 // #3005). It is the one place that widening is exercised.
 func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep_WidenedGap(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gen-race")
-	lockPath := snapshotLockPath(dir)
+	lockPath := SnapshotLockPath(dir)
 
 	// Simulate a concurrent sweepOrphanedLock winning LOCK_EX and removing
 	// lockPath, then a third party recreating it, in the window between
-	// lockSnapshotShared's own os.OpenFile and its syscall.Flock(LOCK_SH).
+	// LockSnapshotShared's own os.OpenFile and its syscall.Flock(LOCK_SH).
 	swapped := installOnceInodeSwapHook(t, lockPath)
 
 	const openToFlockDelay = 50 * time.Microsecond
@@ -3826,10 +3826,10 @@ func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep_WidenedGap(t *testing.
 		t.Fatal(err)
 	}
 	if !*swapped {
-		t.Fatalf("lockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
+		t.Fatalf("LockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
 	}
 	if wins == 0 {
-		t.Fatalf("adversary never won a race against lockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
+		t.Fatalf("adversary never won a race against LockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
 	}
 }
 
@@ -3921,7 +3921,7 @@ func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock
 }
 
 // Drives the issue #3005 race through reclaimStaleSnapshots deterministically
-// via lockRaceWindowHook rather than hoping a goroutine lands in the
+// via LockRaceWindowHook rather than hoping a goroutine lands in the
 // nanosecond-scale open-to-flock window. The "identity unchanged" case rules
 // out the swapped case passing vacuously, by proving reclaim does remove a
 // stale generation when nothing races it.
@@ -3929,7 +3929,7 @@ func TestReclaimStaleSnapshots_DoesNotRemoveGenerationWithSwappedLockIdentity(t 
 	t.Run("identity unchanged: stale generation is removed", func(t *testing.T) {
 		root := t.TempDir()
 		genDir := filepath.Join(root, "gen-b")
-		lockPath := snapshotLockPath(genDir)
+		lockPath := SnapshotLockPath(genDir)
 		if err := os.MkdirAll(genDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q): %v", genDir, err)
 		}
@@ -3949,7 +3949,7 @@ func TestReclaimStaleSnapshots_DoesNotRemoveGenerationWithSwappedLockIdentity(t 
 	t.Run("identity swapped mid-flock: generation survives", func(t *testing.T) {
 		root := t.TempDir()
 		genDir := filepath.Join(root, "gen-b")
-		lockPath := snapshotLockPath(genDir)
+		lockPath := SnapshotLockPath(genDir)
 		if err := os.MkdirAll(genDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll(%q): %v", genDir, err)
 		}
@@ -3957,7 +3957,7 @@ func TestReclaimStaleSnapshots_DoesNotRemoveGenerationWithSwappedLockIdentity(t 
 			t.Fatalf("Create(%q): %v", lockPath, err)
 		}
 
-		// Simulate a concurrent lockSnapshotShared O_CREATE'ing a fresh,
+		// Simulate a concurrent LockSnapshotShared O_CREATE'ing a fresh,
 		// live lock at lockPath between reclaimStaleSnapshots' os.OpenFile
 		// and its syscall.Flock, so the fd it is about to flock no longer
 		// identifies whatever now sits there.
@@ -4000,7 +4000,7 @@ func TestSweepOrphanedLock_DoesNotRemoveLockWithSwappedIdentity(t *testing.T) {
 			t.Fatalf("Create(%q): %v", lockPath, err)
 		}
 
-		// Simulate a concurrent lockSnapshotShared O_CREATE'ing a fresh,
+		// Simulate a concurrent LockSnapshotShared O_CREATE'ing a fresh,
 		// live lock at lockPath between sweepOrphanedLock's os.OpenFile and
 		// its syscall.Flock, so the fd it is about to flock no longer
 		// identifies whatever now sits there.
@@ -4016,7 +4016,7 @@ func TestSweepOrphanedLock_DoesNotRemoveLockWithSwappedIdentity(t *testing.T) {
 
 // End-to-end acceptance for "reclaiming never removes a snapshot a running
 // Box holds open" (issue #2680): a stale generation is seeded with its
-// sibling ".lock" held or not, EnsureReady runs end to end with execCommand
+// sibling ".lock" held or not, EnsureReady runs end to end with ExecCommand
 // faked, and a locked stale generation must survive while an unlocked one is
 // reclaimed alongside the newly-snapshotted current generation.
 func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) {
@@ -4044,12 +4044,12 @@ func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) 
 				fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
 				fakeCall{exit: 0}, fakeCall{exit: 0},
 			)
-			orig := execCommand
-			t.Cleanup(func() { execCommand = orig })
+			orig := ExecCommand
+			t.Cleanup(func() { ExecCommand = orig })
 			origStat := statHostNixDB
 			t.Cleanup(func() { statHostNixDB = origStat })
 			statHostNixDB = func() error { return nil }
-			execCommand = func(name string, args ...string) *exec.Cmd {
+			ExecCommand = func(name string, args ...string) *exec.Cmd {
 				return exec.Command(script, args...)
 			}
 
@@ -4106,12 +4106,12 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
 		fakeCall{exit: 0}, fakeCall{exit: 0},
 	)
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -4145,7 +4145,7 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 // store path (res.TipTag under bwrap), not the agentFiles derivation: it
 // derives the "files", "env", "nix-config" and "prefetch" children (issue
 // #2954). Generation comes from the closure path via the same
-// safePathComponent rule closureGeneration uses for a baked Config.ImageTag.
+// SafePathComponent rule ClosureGeneration uses for a baked Config.ImageTag.
 func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -4166,7 +4166,7 @@ func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T)
 		// filepath.Join elides an empty first element rather than preserving
 		// it, so an empty closure still yields relative "files"/"env"/
 		// "nix-config"/"prefetch" (not ""); Generation still comes out ""
-		// since safePathComponent rejects an empty input directly.
+		// since SafePathComponent rejects an empty input directly.
 		{"empty", "", AgentGeneration{AgentFiles: "files", AgentEnv: "env", NixConfigFile: "nix-config", PrefetchFile: "prefetch", Generation: ""}},
 	}
 	for _, tc := range cases {
@@ -4323,7 +4323,7 @@ func setenvValue(t *testing.T, args []string, key string) string {
 
 // reclaimFixture stubs the cgroup seams for a Run of "leftover-box" and
 // pre-creates the leftover per-Box dir a crashed launcher would have left,
-// seeded with procs as its cgroup.procs content. The execCommand seam snapshots
+// seeded with procs as its cgroup.procs content. The ExecCommand seam snapshots
 // pids.max/memory.max into gotPidsMax/gotMemoryMax, since Run's cleanup has
 // removed a reclaimed dir by the time Run returns.
 type reclaimFixture struct {
@@ -4465,7 +4465,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 		t.Fatalf("Run: %v", runErr)
 	}
 	if !probed {
-		t.Fatal("execCommand seam never ran with the cgroup dir provisioned")
+		t.Fatal("ExecCommand seam never ran with the cgroup dir provisioned")
 	}
 	if reclaimed {
 		t.Error("reclaimLeftoverCgroupDir removed a dir inside a live Run's launch window")
@@ -4492,10 +4492,10 @@ func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
 			t.Setenv(name, sentinel)
 
 			script, _ := newFakeCLI(t, fakeCall{exit: 0})
-			orig := execCommand
-			t.Cleanup(func() { execCommand = orig })
+			orig := ExecCommand
+			t.Cleanup(func() { ExecCommand = orig })
 			var gotCmd *exec.Cmd
-			execCommand = func(_ string, args ...string) *exec.Cmd {
+			ExecCommand = func(_ string, args ...string) *exec.Cmd {
 				gotCmd = exec.Command(script, args...)
 				return gotCmd
 			}

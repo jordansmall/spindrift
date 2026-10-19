@@ -13,7 +13,7 @@ import (
 
 // installImageBuildPipe installs a reporter on a fresh pipe and returns a
 // drain that returns the image_build states written since the last call. It
-// reads with a deadline, so it can be called mid-run (from a faked execCommand)
+// reads with a deadline, so it can be called mid-run (from a faked ExecCommand)
 // to observe what has been sent so far.
 func installImageBuildPipe(t *testing.T) func() []string {
 	t.Helper()
@@ -97,10 +97,10 @@ func TestOCIEnsureReady_ColdBuildReportsStartedBeforeNixThenFinished(t *testing.
 	drain := installImageBuildPipe(t)
 	cli, _ := newFakeCLI(t, fakeCall{exit: 1}, fakeCall{exit: 1}, fakeCall{}, fakeCall{})
 	nixScript, _ := newFakeCLI(t, fakeCall{exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
+	orig := ExecCommand
+	t.Cleanup(func() { ExecCommand = orig })
 	var beforeNix []string
-	execCommand = func(name string, args ...string) *exec.Cmd {
+	ExecCommand = func(name string, args ...string) *exec.Cmd {
 		beforeNix = drain()
 		return exec.Command(nixScript, args...)
 	}

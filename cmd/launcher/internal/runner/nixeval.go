@@ -23,7 +23,7 @@ func (NixEvaluator) Eval(pwd, rev, attr string) (string, error) {
 	// nix eval needs the ".outPath" suffix to resolve a derivation's output
 	// path; nix build wants the bare derivation attr instead.
 	ref := hermeticFlakeRef(pwd, rev, attr) + ".outPath"
-	cmd := execCommand("nix", "eval", "--raw", ref)
+	cmd := ExecCommand("nix", "eval", "--raw", ref)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
