@@ -11,15 +11,17 @@ const (
 var (
 	// OCI is the oci runner family, declared in lib/runners/oci.nix.
 	OCI = Descriptor{
-		Name:     KindOCI,
-		Runtimes: []string{"podman", "docker", "rancher"},
-		Artifact: "oci-image",
+		Name:         KindOCI,
+		Runtimes:     []string{"podman", "docker", "rancher"},
+		Artifact:     "oci-image",
+		NetworkModes: []string{"open", "no-host-loopback", "none", "host"},
 	}
 	// Bwrap is the bwrap runner family, declared in lib/runners/bwrap.nix.
 	Bwrap = Descriptor{
-		Name:     KindBwrap,
-		Runtimes: []string{"bwrap"},
-		Artifact: "store-closure",
+		Name:         KindBwrap,
+		Runtimes:     []string{"bwrap"},
+		Artifact:     "store-closure",
+		NetworkModes: []string{"open", "none", "host"},
 	}
 )
 
@@ -29,4 +31,4 @@ var Families = []Descriptor{OCI, Bwrap}
 
 // descriptorRowFields lists the Descriptor fields families_gen.go populates.
 // It feeds the struct-sync test and is not read at runtime.
-var descriptorRowFields = []string{"Name", "Runtimes", "Artifact"}
+var descriptorRowFields = []string{"Name", "Runtimes", "Artifact", "NetworkModes"}
