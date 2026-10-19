@@ -1340,17 +1340,6 @@ func TestLabelMetaFor(t *testing.T) {
 	}
 }
 
-// TuningFindingLabel is the Go handle on the name ButlerLabelNames() lists;
-// the two must agree or settle's merge hold keys on an unregistered label.
-func TestTuningFindingLabel_IsInButlerLabelNames(t *testing.T) {
-	if TuningFindingLabel != "agent-tuning-finding" {
-		t.Fatalf("TuningFindingLabel = %q", TuningFindingLabel)
-	}
-	if !slices.Contains(ButlerLabelNames(), TuningFindingLabel) {
-		t.Fatalf("ButlerLabelNames() = %v, missing %q", ButlerLabelNames(), TuningFindingLabel)
-	}
-}
-
 // A tracker with no label registry (local, jira) can neither list nor create a
 // label ahead of time, so Run skips the label section whole — the work-tier
 // labels included — instead of requiring labels it could never see (issue

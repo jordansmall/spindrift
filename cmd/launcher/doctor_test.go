@@ -762,11 +762,13 @@ func TestDoctorReport_NoLabelRegistryTracker_SkipsLabelCheck(t *testing.T) {
 	}
 }
 
-// doctor requires the catalog's label while settle holds merges on the
-// doctor constant, so the two must name the same label.
-func TestTuningFindingLabel_MatchesChoreCatalog(t *testing.T) {
-	if got := chore.FindingLabel("tuning"); got != doctor.TuningFindingLabel {
-		t.Errorf("chore.FindingLabel(tuning) = %q, doctor.TuningFindingLabel = %q", got, doctor.TuningFindingLabel)
+// doctor registers the butler labels from a fixed list while the catalog row
+// declares the label the host applies and settle holds merges on; the list
+// must carry the row's label.
+func TestTuningChoreLabel_IsInButlerLabelNames(t *testing.T) {
+	label := chore.FindingLabel("tuning")
+	if label == "" || !slices.Contains(doctor.ButlerLabelNames(), label) {
+		t.Errorf("chore.FindingLabel(tuning) = %q, not in ButlerLabelNames() = %v", label, doctor.ButlerLabelNames())
 	}
 }
 

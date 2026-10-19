@@ -93,11 +93,6 @@ func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
 
-// TuningFindingLabel is the provenance label on a tuning Chore finding
-// (ADR 0062); settle holds the merge of a PR closing an issue wearing it.
-// A test pins it to a ButlerLabelNames entry.
-const TuningFindingLabel = "agent-tuning-finding"
-
 // ButlerLabelNames returns the three fixed butler-tier label names, advisory
 // unless --butler promotes them (agent-butler-patch only while the patch rung
 // is on, agent-tuning-finding only while the tuning Chore is enabled): the
