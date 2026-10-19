@@ -132,7 +132,7 @@ index = "sparse+https://cargo.example.com/index/"
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}

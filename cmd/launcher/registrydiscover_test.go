@@ -63,7 +63,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("runRegistryDiscover code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -134,7 +134,7 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_WritesParseableRoutesFile(t *t
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("runRegistryDiscover code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -195,7 +195,7 @@ func TestRunRegistryDiscover_CargoFixtureEndToEnd_RegistryNameCarriesThrough(t *
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("runRegistryDiscover code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -235,7 +235,7 @@ func TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint(t *testing.T) {
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -277,7 +277,7 @@ func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForc
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code == 0 {
 		t.Fatalf("code = 0, want non-zero for an existing file without --force")
 	}
@@ -297,7 +297,7 @@ func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForc
 
 	stdout.Reset()
 	stderr.Reset()
-	code = runRegistryDiscover(&stdout, &stderr, repoDir, outPath, true, stores, lookup, probe)
+	code = runRegistryDiscover(&stdout, &stderr, repoDir, outPath, true, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0 with --force; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -334,7 +334,7 @@ func TestRunRegistryDiscover_NeverWritesCredentialValue(t *testing.T) {
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, registrydiscover.StoreLookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), registrydiscover.StoreLookup, probe)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -371,7 +371,7 @@ func TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared(t 
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -457,7 +457,7 @@ func TestRunRegistryDiscover_ZeroRoutes_RefusesToWriteAndNamesRepoDir(t *testing
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code == 0 {
 		t.Fatalf("code = 0, want non-zero for a repoDir with no registry declarations; stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -488,7 +488,7 @@ func TestRunRegistryDiscover_PortOnlyHost_RefusesToWriteAndReportsSkipped(t *tes
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code == 0 {
 		t.Fatalf("code = 0, want non-zero for a repo declaring only a port-only URL; stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
@@ -518,7 +518,7 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -578,7 +578,7 @@ func TestRunRegistryDiscover_DisambiguationBoundExhausted_StillPrintsReport(t *t
 	probe := func(string) string { return "bearer" }
 
 	var stdout, stderr strings.Builder
-	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, lookup, probe)
+	code := runRegistryDiscover(&stdout, &stderr, repoDir, outPath, false, stores, ecosystem.CredentialStores(), lookup, probe)
 	if code == 0 {
 		t.Fatalf("code = 0, want non-zero on an unresolvable collision")
 	}

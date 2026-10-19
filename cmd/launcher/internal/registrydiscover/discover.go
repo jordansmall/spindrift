@@ -69,7 +69,10 @@ type Report struct {
 
 // Discover extracts registry declarations from repoDir and proposes a route
 // per unique host, searching stores in order for a matching credential.
-func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
+// storesByEcosystem maps an ecosystem row name to the source keys of the stores
+// that row reads (ecosystem.CredentialStores); a store outside a declaration's
+// row is named in StoresSearched but never queried.
+func Discover(repoDir string, stores []Store, storesByEcosystem map[string][]string, lookup Lookup, probe Probe) ([]Route, Report, error) {
 	declared, notes, err := Extract(repoDir)
 	if err != nil {
 		return nil, Report{}, err
@@ -85,7 +88,11 @@ func Discover(repoDir string, stores []Store, lookup Lookup, probe Probe) ([]Rou
 		}
 		seen[host] = true
 
-		matchedStore, searched, found := firstMatch(stores, lookup, d)
+		if _, ok := storesByEcosystem[d.Ecosystem]; !ok {
+			return nil, Report{}, fmt.Errorf("no credential stores declared for ecosystem %q", d.Ecosystem)
+		}
+
+		matchedStore, searched, found := firstMatch(stores, storesByEcosystem, lookup, d)
 
 		route := Route{
 			MatchHost:       host,
@@ -194,7 +201,6 @@ func hostHash(host string) string {
 // different ones: npmrc on the raw host, gradle-properties on the HostKey.
 func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 	return credresolver.StoreFacts{
-		Ecosystem:       d.Ecosystem,
 		Host:            d.Host,
 		HostKey:         registryvocab.HostKey(d.Host),
 		UpstreamBaseURL: d.UpstreamBaseURL,
@@ -203,18 +209,15 @@ func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 }
 
 // firstMatch searches stores in order and returns the first hit plus every
-// configured store name, so StoresSearched names even a store skipped as
-// inapplicable and never comes back empty. A lookup error counts as not-found
-// and the search continues: one unreachable store must never abort discovery
-// of the rest.
-func firstMatch(stores []Store, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {
-	facts := declarationFacts(d)
+// configured store name, so StoresSearched names even a store the declaration's
+// row does not read and never comes back empty. A lookup error counts as
+// not-found and the search continues: one unreachable store must never abort
+// discovery of the rest.
+func firstMatch(stores []Store, storesByEcosystem map[string][]string, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {
+	rowStores := storesByEcosystem[d.Ecosystem]
 	for _, s := range stores {
 		searched = append(searched, s.Name)
-		// StoreApplicable (cargo-credentials only today: its lookup only
-		// applies to a cargo declaration) marks a store with nothing to
-		// search here, named above but never queried.
-		if kind, ok := credresolver.KindBySourceKey(s.Name); ok && kind.StoreApplicable != nil && !kind.StoreApplicable(facts) {
+		if !slices.Contains(rowStores, s.Name) {
 			continue
 		}
 		ok, err := lookup(s, d)

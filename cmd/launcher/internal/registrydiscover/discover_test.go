@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, lookup, probe)
+	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -82,7 +83,7 @@ index = "sparse+https://cargo.example.com/index/"
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, stores, lookup, probe)
+	routes, _, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -94,6 +95,23 @@ index = "sparse+https://cargo.example.com/index/"
 	}
 	if routes[1].MatchHost != "npm.example.com" {
 		t.Errorf("routes[1].MatchHost = %q, want npm.example.com", routes[1].MatchHost)
+	}
+}
+
+func TestDiscover_EcosystemWithoutDeclaredStoresIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".npmrc"), []byte("registry=https://reg.acme.example/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
+	probe := func(upstreamBaseURL string) string { return "bearer" }
+
+	routes, report, err := Discover(dir, nil, map[string][]string{}, lookup, probe)
+	if err == nil || !strings.Contains(err.Error(), `"npm"`) {
+		t.Fatalf("err = %v, want an error naming ecosystem \"npm\"", err)
+	}
+	if routes != nil || !reflect.DeepEqual(report, Report{}) {
+		t.Errorf("routes = %v, report = %+v, want nil routes and empty report", routes, report)
 	}
 }
 
@@ -111,7 +129,7 @@ func TestDiscover_UnmatchedHostEnvPlaceholder(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, lookup, probe)
+	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -153,7 +171,7 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, lookup, probe)
+	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -189,7 +207,7 @@ func TestDiscover_CargoCredentialsSkippedForNonCargoDeclaration(t *testing.T) {
 	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, lookup, probe)
+	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -226,7 +244,7 @@ func TestDiscover_CargoCredentialsOnlyStoreList_NamesStoreForNonCargoDeclaration
 	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	_, report, err := Discover(dir, stores, lookup, probe)
+	_, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -255,12 +273,46 @@ func TestFirstMatch_CargoCredentialsSkippedForNonCargoEcosystemWithRegistryName(
 	}
 	d := ecosystem.Declaration{Ecosystem: "npm", Host: "npm.example.com", RegistryName: "myorg"}
 
-	_, searched, found := firstMatch(stores, lookup, d)
+	_, searched, found := firstMatch(stores, ecosystem.CredentialStores(), lookup, d)
 	if found {
 		t.Errorf("firstMatch found = true, want false")
 	}
 	if want := []string{"cargo-credentials", "netrc"}; !slices.Equal(searched, want) {
 		t.Errorf("firstMatch searched = %v, want %v", searched, want)
+	}
+}
+
+// The gate reads the injected row-to-store map, not a hardcoded rule: a store
+// the row leaves out is named but never queried, and an ecosystem with no row
+// queries nothing.
+func TestFirstMatch_QueriesOnlyStoresInRowSet(t *testing.T) {
+	stores := []Store{
+		{Name: "netrc", Path: "/home/agent/.netrc"},
+		{Name: "npmrc", Path: "/home/agent/.npmrc"},
+	}
+	byEcosystem := map[string][]string{"rowA": {"netrc"}}
+
+	for _, tc := range []struct {
+		ecosystem   string
+		wantQueried []string
+	}{
+		{"rowA", []string{"netrc"}},
+		{"rowB", nil},
+	} {
+		var queried []string
+		lookup := func(store Store, _ ecosystem.Declaration) (bool, error) {
+			queried = append(queried, store.Name)
+			return false, nil
+		}
+		d := ecosystem.Declaration{Ecosystem: tc.ecosystem, Host: "reg.example.com"}
+
+		_, searched, _ := firstMatch(stores, byEcosystem, lookup, d)
+		if want := []string{"netrc", "npmrc"}; !slices.Equal(searched, want) {
+			t.Errorf("%s: searched = %v, want %v", tc.ecosystem, searched, want)
+		}
+		if !slices.Equal(queried, tc.wantQueried) {
+			t.Errorf("%s: queried = %v, want %v", tc.ecosystem, queried, tc.wantQueried)
+		}
 	}
 }
 
@@ -282,7 +334,7 @@ func TestDiscover_NilStores_UnmatchedHostSearchedIsEmpty(t *testing.T) {
 	// a firstMatch bug. The command layer owns the fix for the "empty report
 	// line" symptom: it must never pass empty stores when a home directory is
 	// available (see TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding).
-	_, report, err := Discover(dir, nil, lookup, probe)
+	_, report, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -307,7 +359,7 @@ func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, nil, lookup, probe)
+	routes, report, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -334,7 +386,7 @@ func TestDiscover_PortOnlyHostYieldsNoRouteReportedAsSkipped(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, nil, lookup, probe)
+	routes, report, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -361,7 +413,7 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -395,7 +447,7 @@ func TestDiscover_CollidingEnvPlaceholdersDisambiguated(t *testing.T) {
 	// A second run over the same fixture confirms the names are stable across
 	// runs; it does not by itself show independence from declaration order or
 	// map iteration order, since neither the input nor its order changes here.
-	routes2, _, err := Discover(dir, nil, lookup, probe)
+	routes2, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -437,7 +489,7 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -487,7 +539,7 @@ func TestDiscover_ThreeWayEnvPlaceholderCollisionDisambiguated(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir2, ".npmrc"), []byte(npmrc2), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	routes2, _, err := Discover(dir2, nil, lookup, probe)
+	routes2, _, err := Discover(dir2, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -581,7 +633,7 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 	}
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, report, err := Discover(dir, stores, lookup, probe)
+	routes, report, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err == nil {
 		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
 	}
@@ -624,7 +676,7 @@ func TestDiscover_ProbeGarbageFallsBackToBearer(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "not-a-real-scheme" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -646,7 +698,7 @@ func TestDiscover_ProbeBasicHonored(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "basic" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -668,7 +720,7 @@ func TestDiscover_ProbeHeaderSchemeHonored(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "header:X-JFrog-Art-Api" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -694,7 +746,7 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -727,7 +779,7 @@ index = "sparse+https://cargo.example.com/index/"
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, stores, lookup, probe)
+	routes, _, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -753,7 +805,7 @@ func TestDiscover_GradlePropertiesMatchSetsPropertyKeyToHost(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return true, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, stores, lookup, probe)
+	routes, _, err := Discover(dir, stores, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
@@ -777,7 +829,7 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := Discover(dir, nil, lookup, probe)
+	routes, _, err := Discover(dir, nil, ecosystem.CredentialStores(), lookup, probe)
 	if err != nil {
 		t.Fatalf("Discover: unexpected error: %v", err)
 	}
