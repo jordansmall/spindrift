@@ -38,14 +38,13 @@ let
   # runtime's row renders, and absence of what only the other rows render.
   runners = import ../../lib/runners/index.nix { };
   preambles = import ../../lib/preambles.nix;
-  rowKeys = row: builtins.attrNames (row.runArtifacts preambles.dummyRunArtifactArgs);
   runArtifactsAssertion =
     runtime:
     let
       row = runners.forRuntime runtime;
-      own = rowKeys row;
+      own = preambles.rowArtifactKeys row;
       foreign = pkgs.lib.subtractLists own (
-        pkgs.lib.concatMap rowKeys (builtins.filter (r: r.name != row.name) runners.rows)
+        pkgs.lib.concatMap preambles.rowArtifactKeys (builtins.filter (r: r.name != row.name) runners.rows)
       );
     in
     ''
