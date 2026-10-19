@@ -151,10 +151,16 @@ func ResolveRef(repoDir, ref string) error {
 // than a checkout on disk, so the result reflects what ref has committed and
 // nothing an uncommitted or divergent working tree might contribute.
 func UncoveredHostsFromGitRef(repoDir, ref string, covered []string) ([]string, error) {
-	dir, cleanup, err := MaterializeRef(repoDir, ref)
+	return UncoveredHostsFromGitRefRows(repoDir, ref, covered, ecosystem.Table)
+}
+
+// UncoveredHostsFromGitRefRows is UncoveredHostsFromGitRef over the given rows
+// rather than ecosystem.Table.
+func UncoveredHostsFromGitRefRows(repoDir, ref string, covered []string, rows []ecosystem.Row) ([]string, error) {
+	dir, cleanup, err := MaterializeRefRows(repoDir, ref, rows)
 	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
-	return UncoveredHosts(dir, covered)
+	return UncoveredHostsRows(dir, covered, rows)
 }

@@ -1,6 +1,9 @@
 package registrydiscover
 
-import "spindrift.dev/launcher/internal/registryvocab"
+import (
+	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registryvocab"
+)
 
 // UncoveredHosts returns each host declared under repoDir that matches none of
 // covered, deduped in first-occurrence order. Both sides normalize through
@@ -8,7 +11,13 @@ import "spindrift.dev/launcher/internal/registryvocab"
 // agree (issue #3144 slice 2 AC5). registryproxy routes by the path prefix
 // derived from MatchHost, so comparing declared hosts is the whole of coverage.
 func UncoveredHosts(repoDir string, covered []string) ([]string, error) {
-	declared, _, err := Extract(repoDir)
+	return UncoveredHostsRows(repoDir, covered, ecosystem.Table)
+}
+
+// UncoveredHostsRows is UncoveredHosts over the given rows rather than
+// ecosystem.Table.
+func UncoveredHostsRows(repoDir string, covered []string, rows []ecosystem.Row) ([]string, error) {
+	declared, _, err := ExtractRows(repoDir, rows)
 	if err != nil {
 		return nil, err
 	}
