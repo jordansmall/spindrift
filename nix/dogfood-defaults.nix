@@ -114,6 +114,12 @@ in
       "fragments/**"
       "lib/chore-catalog.nix"
       "lib/env-schema.nix"
+      # Row-owned knobs (ADR 0068) put part of the env schema on registry
+      # rows, folded by lib/row-knobs.nix from the registries
+      # lib/row-knob-registries.nix lists (issue #5634).
+      "lib/backends/**"
+      "lib/row-knobs.nix"
+      "lib/row-knob-registries.nix"
       "flake.nix"
       # Holds the model/effort pins and this guard list itself; the fixture
       # mirrors the pins (issue #4974).

@@ -2557,30 +2557,45 @@ var harnessEnvExampleSentinel = regexp.MustCompile(`^\w+=$`)
 var harnessEnvExampleStartLine = strings.SplitN(harnessEnvSecretLine("X", ""), "\n", 2)[0]
 
 // envSchemaSecretTrueRe matches a whole `secret = true;` entry line in
-// lib/env-schema.nix, tolerating indentation and a trailing `#` comment.
-// Anchored to the full line, so a `#`-prefixed comment line never matches,
-// though a `/* */` block comment containing the token still would.
+// lib/env-schema.nix or a registry row file, tolerating indentation and a
+// trailing `#` comment. Anchored to the full line, so a `#`-prefixed comment
+// line never matches, though a `/* */` block comment containing the token
+// still would.
 var envSchemaSecretTrueRe = regexp.MustCompile(`^\s*secret\s*=\s*true;\s*(#.*)?$`)
 
-// countEnvSchemaSecrets counts `secret = true;` entries in lib/env-schema.nix,
-// the attribute lib/renderers.nix's renderHarnessEnvExample filters on to
-// generate templates/default/harness.env.example. The count is independent and
-// upstream: a stanza dropped whole from the generated fixture leaves it
-// unchanged, so comparing the two catches what scanning the fixture cannot.
+// countEnvSchemaSecrets counts `secret = true;` entries across the folded
+// schema's sources: lib/env-schema.nix plus every row file of each registry
+// lib/row-knobs.nix folds in (today lib/backends/<name>.nix, excluding the
+// registry file default.nix), since row knobs carry their own `secret` flag.
+// It counts the attribute lib/renderers.nix's renderHarnessEnvExample filters
+// on to generate templates/default/harness.env.example. The count is
+// independent and upstream: a stanza dropped whole from the generated fixture
+// leaves it unchanged, so comparing the two catches what scanning the fixture
+// cannot.
 func countEnvSchemaSecrets(t *testing.T) int {
 	t.Helper()
 
-	schemaPath := filepath.Join("..", "..", "..", "lib", "env-schema.nix")
-	content := readRepoFile(t, "lib", "env-schema.nix")
+	rowFiles, err := filepath.Glob(filepath.Join("..", "..", "..", "lib", "backends", "*.nix"))
+	if err != nil {
+		t.Fatalf("globbing registry row files: %v", err)
+	}
+	sources := []string{filepath.Join("lib", "env-schema.nix")}
+	for _, path := range rowFiles {
+		if filepath.Base(path) != "default.nix" {
+			sources = append(sources, filepath.Join("lib", "backends", filepath.Base(path)))
+		}
+	}
 
 	count := 0
-	for _, line := range strings.Split(content, "\n") {
-		if envSchemaSecretTrueRe.MatchString(line) {
-			count++
+	for _, source := range sources {
+		for _, line := range strings.Split(readRepoFile(t, source), "\n") {
+			if envSchemaSecretTrueRe.MatchString(line) {
+				count++
+			}
 		}
 	}
 	if count == 0 {
-		t.Fatalf("expected to find at least one `secret = true;` entry in %s, found none — the regex or the schema's field wording drifted", schemaPath)
+		t.Fatalf("expected to find at least one `secret = true;` entry in %v, found none — the regex or the schema's field wording drifted", sources)
 	}
 	return count
 }
@@ -2657,7 +2672,7 @@ func TestHarnessEnvSecretLine_MatchesTemplateHarnessEnvExample(t *testing.T) {
 	}
 
 	if expectedSecretCount := countEnvSchemaSecrets(t); found != expectedSecretCount {
-		t.Fatalf("expected %d secret stanzas in %s (per lib/env-schema.nix), found %d", expectedSecretCount, templatePath, found)
+		t.Fatalf("expected %d secret stanzas in %s (per the folded schema: lib/env-schema.nix and registry row files), found %d", expectedSecretCount, templatePath, found)
 	}
 }
 
