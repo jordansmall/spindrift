@@ -1,5 +1,7 @@
 package main
 
+import "spindrift.dev/launcher/internal/dispatchkind"
+
 // missingEnvError names the first required Box env var that was unset or empty.
 type missingEnvError struct{ Name, Msg string }
 
@@ -39,7 +41,8 @@ func checkEnvGuards(getenv func(string) string) error {
 	// A chore-keyed Dispatch (the butler) carries one Ledger Chore, never a
 	// tracker issue, so it requires CHORE_NAME in ISSUE_NUMBER's place.
 	keyed := "ISSUE_NUMBER"
-	if getenv("DISPATCH_KEYING") == "chore" {
+	switch getenv("DISPATCH_KEYING") {
+	case dispatchkind.ByChore.String():
 		keyed = "CHORE_NAME"
 	}
 	if err := require(keyed, keyed+" is required"); err != nil {

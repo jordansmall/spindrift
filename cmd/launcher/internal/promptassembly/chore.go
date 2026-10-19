@@ -35,7 +35,9 @@ func ValidChoreName(s string) bool {
 // file is a configuration error, never a legitimately empty case.
 func choreSection(e Env) (string, error) {
 	d := e.descriptor()
-	if d.Keying != dispatchkind.ByChore {
+	switch d.Keying {
+	case dispatchkind.ByChore:
+	default:
 		return "", nil
 	}
 	if !ValidChoreName(e.ChoreName) {

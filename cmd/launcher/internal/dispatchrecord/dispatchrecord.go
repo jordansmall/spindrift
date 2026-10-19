@@ -509,7 +509,13 @@ func soleKind(match func(*dispatchkind.Descriptor) bool) string {
 // choreKeyedKind is the name of the one kind keyed by Ledger Chore, or
 // KindUnknown if the descriptors do not single one out.
 func choreKeyedKind() string {
-	return soleKind(func(d *dispatchkind.Descriptor) bool { return d.Keying == dispatchkind.ByChore })
+	return soleKind(func(d *dispatchkind.Descriptor) bool {
+		switch d.Keying {
+		case dispatchkind.ByChore:
+			return true
+		}
+		return false
+	})
 }
 
 // statusKind is the name of the one kind whose descriptor lists status, or

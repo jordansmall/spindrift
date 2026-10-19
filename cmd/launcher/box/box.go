@@ -533,7 +533,8 @@ func (r *boxRun) firstRun() error {
 		return phaseErr("first-run", err)
 	}
 	subject := "issue #" + r.env.IssueNumber
-	if r.env.DispatchKeying == dispatchkind.ByChore.String() {
+	switch r.env.DispatchKeying {
+	case dispatchkind.ByChore.String():
 		subject = "chore " + r.env.ChoreName
 	}
 	suffix := " on " + r.env.Branch
