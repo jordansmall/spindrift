@@ -446,3 +446,15 @@ func TestRows(t *testing.T) {
 		t.Errorf("bugs row = %+v, want %+v", byName["bugs"], want)
 	}
 }
+
+func TestMinRecordsKnob(t *testing.T) {
+	for name, want := range map[string]string{
+		"tuning":  "BUTLER_TUNING_MIN_RECORDS",
+		"bugs":    "",
+		"unknown": "",
+	} {
+		if got := MinRecordsKnob(name); got != want {
+			t.Errorf("MinRecordsKnob(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

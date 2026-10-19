@@ -158,8 +158,9 @@ dev tooling, not part of the flake-option/env-schema consumer surface. The man
 page rebuilds fresh from the schema on every `nix flake check` (nothing to
 regenerate).
 `lib/env-schema.nix` is the only hand-edit a new knob requires, unless a
-registry row owns it (today `lib/backends/<name>.nix`'s `knobs`, folded in by
-`lib/row-knobs.nix`, ADR 0068 decision 2), in which case edit it on its row;
+registry row owns it (today `knobs` on `lib/backends/<name>.nix` or
+`lib/chores/<name>.nix`, folded in by `lib/row-knobs.nix`, ADR 0068
+decision 2), in which case edit it on its row;
 the launcher's Go wiring (when the binary reads the knob directly) is the only
 other hand-edit. A structural knob's doc/type/default metadata lives instead
 in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in

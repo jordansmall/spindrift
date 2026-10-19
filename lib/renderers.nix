@@ -1032,6 +1032,16 @@ rec {
           choreCatalog.findingLabels.${n}
         }\",\n"
       ) labelNames;
+      minRecordsNames = builtins.sort builtins.lessThan (builtins.attrNames choreCatalog.minRecordsKnobs);
+      minRecordsWidth = builtins.foldl' (
+        a: n: if builtins.stringLength n > a then builtins.stringLength n else a
+      ) 0 minRecordsNames;
+      minRecordsLines = map (
+        n:
+        "\t\"${n}\":${padRight (minRecordsWidth - builtins.stringLength n + 1) ""}\"${
+          choreCatalog.minRecordsKnobs.${n}
+        }\",\n"
+      ) minRecordsNames;
     in
     renderGoStringSliceFile {
       generator = "nix/regen.nix";
@@ -1067,6 +1077,12 @@ rec {
     + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
     + "var builtinFindingLabels = map[string]string{\n"
     + concatStrings labelLines
+    + "}\n"
+    + "\n// builtinMinRecordsKnobs is each records-scoped built-in Chore's minimum new-Record\n"
+    + "// knob, as an env name; a Chore absent here has none.\n"
+    + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
+    + "var builtinMinRecordsKnobs = map[string]string{\n"
+    + concatStrings minRecordsLines
     + "}\n";
 
   # cmd/launcher/internal/promptassembly/skillprobe.go's generated skill-baked
