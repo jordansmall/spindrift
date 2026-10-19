@@ -19,6 +19,11 @@ var builtinClassLists = map[string][]string{
 // Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
 var builtinRecordsScoped = []string{"tuning"}
 
+// builtinMergeByHand names the built-in Chores whose findings' PRs the host never merges;
+// a human merges them by hand (ADR 0070).
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
+var builtinMergeByHand = []string{"tuning"}
+
 // builtinEvery is each built-in Chore's catalog default sweep interval, a Go
 // time.ParseDuration string; a Chore absent here has none.
 // Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.

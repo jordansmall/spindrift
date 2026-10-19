@@ -188,6 +188,27 @@ in
     ) "lib/chore-catalog.nix's tuning row must declare scopeSource = \"records\" (ADR 0062)";
     pkgs.runCommand "chore-catalog-tuning-is-records-scoped" { } "touch $out";
 
+  # ADR 0070: tuning's PRs are merged by hand.
+  chore-catalog-tuning-merges-by-hand =
+    assert assertMsg (builtins.elem "tuning" catalog.mergeByHand)
+      "lib/chore-catalog.nix: the tuning row must set mergeByHand = true (ADR 0070)";
+    pkgs.runCommand "chore-catalog-tuning-merges-by-hand" { } "touch $out";
+
+  # The hold's PR comment names findingLabel, so a mergeByHand row without
+  # one must fail eval rather than render an empty label.
+  chore-catalog-merge-by-hand-needs-finding-label-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          (builtins.removeAttrs tuningRow [ "findingLabel" ])
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when a mergeByHand chore declares no findingLabel";
+    pkgs.runCommand "chore-catalog-merge-by-hand-needs-finding-label-throws" { } "touch $out";
+
   chore-catalog-built-ins-class-lists-ok =
     let
       ok = builtins.tryEval (builtins.deepSeq catalog.classLists "reached");

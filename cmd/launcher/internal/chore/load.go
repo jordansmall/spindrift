@@ -185,6 +185,26 @@ func FindingLabels(chores string) []string {
 	return labels
 }
 
+// Row is one built-in Chore catalog row's host-facing facts.
+type Row struct {
+	Name         string
+	FindingLabel string // "" for a Chore with none
+	MergeByHand  bool   // the host never merges a PR closing one of its findings
+}
+
+// Rows lists the built-in catalog in builtinChores order.
+func Rows() []Row {
+	rows := make([]Row, len(builtinChores))
+	for i, name := range builtinChores {
+		rows[i] = Row{
+			Name:         name,
+			FindingLabel: FindingLabel(name),
+			MergeByHand:  slices.Contains(builtinMergeByHand, name),
+		}
+	}
+	return rows
+}
+
 func choreNames(chores string) []string { return strings.Fields(chores) }
 
 // everyConfig is BUTLER_EVERY parsed: a bare default interval plus

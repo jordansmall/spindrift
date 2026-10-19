@@ -13,13 +13,17 @@
 # repo's tree; "records" sweeps the dispatch record store, ADR 0062),
 # every (a catalog default sweep interval, Go duration string), and
 # findingLabel (a provenance label every finding of the Chore wears, e.g.
-# the tuning Chore's agent-tuning-finding, ADR 0062).
+# the tuning Chore's agent-tuning-finding, ADR 0062), and mergeByHand (a
+# bool, default false: the host never merges a PR closing one of the
+# Chore's findings and a human merges it, ADR 0070).
 let
   # Throws unless every chore's scopeSource is "tree" or "records" (absent
   # means tree), every chore's promotionClasses and patchClasses sit on its
-  # classList, and a records-scoped chore declares neither (it files
-  # findings for a human and never promotes or patches, ADR 0062); exported
-  # so nix/checks/chore-catalog.nix can feed it broken catalogs.
+  # classList, a records-scoped chore declares neither (it files findings
+  # for a human and never promotes or patches, ADR 0062), and a mergeByHand
+  # chore carries a non-empty findingLabel (the hold's comment names it, ADR
+  # 0070); exported so nix/checks/chore-catalog.nix can feed it broken
+  # catalogs.
   checkClassLists =
     cs:
     let
@@ -35,6 +39,7 @@ let
       ) cs;
       recordsBad = builtins.filter (c: isRecords c && (c.promotionClasses ++ c.patchClasses) != [ ]) cs;
       bad = builtins.filter (c: missing c != [ ]) cs;
+      noLabel = builtins.filter (c: (c.mergeByHand or false) && (c.findingLabel or "") == "") cs;
     in
     if badScope != [ ] then
       throw (
@@ -45,6 +50,11 @@ let
       throw (
         "lib/chore-catalog.nix: records-scoped chores must declare no promotionClasses or patchClasses: "
         + builtins.concatStringsSep ", " (map (c: c.name) recordsBad)
+      )
+    else if noLabel != [ ] then
+      throw (
+        "lib/chore-catalog.nix: mergeByHand chores must declare a non-empty findingLabel: "
+        + builtins.concatStringsSep ", " (map (c: c.name) noLabel)
       )
     else if bad == [ ] then
       cs
@@ -114,12 +124,14 @@ let
       scopeSource = "records";
       every = "24h";
       findingLabel = "agent-tuning-finding";
+      mergeByHand = true;
     }
   ];
   names = map (c: c.name) chores;
   recordsScoped = map (c: c.name) (
     builtins.filter (c: (c.scopeSource or "tree") == "records") chores
   );
+  mergeByHand = map (c: c.name) (builtins.filter (c: c.mergeByHand or false) chores);
   everyDefaults = builtins.listToAttrs (
     map (c: {
       inherit (c) name;
@@ -160,6 +172,7 @@ in
     names
     classLists
     recordsScoped
+    mergeByHand
     everyDefaults
     findingLabels
     classesDefault
