@@ -187,6 +187,7 @@ let
     map (p: internalDir + "/${p}") [
       "agentpaths"
       "backend"
+      "backendkit"
       "dispatchkey"
       "dispatchkind"
       "doctor"
