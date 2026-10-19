@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -22,7 +23,6 @@ import (
 	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
-	"spindrift.dev/launcher/internal/forge/rest"
 	"spindrift.dev/launcher/internal/gitremote"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/runner"
@@ -203,44 +203,6 @@ func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bo
 // exist yet at this pre-CLI stage (ADR 0027). Injected so tests substitute a
 // forge.Fake instead of shelling out to gh or Jira.
 type ForgeBuilder func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge)
-
-// tokenAcquireContext bundles everything a TokenAcquirer needs. GitHub audits
-// a token's prefix and scopes locally while Forgejo needs a live Probe
-// against a constructed IssueTracker, so this can't collapse to one field.
-type tokenAcquireContext struct {
-	env          Environment
-	w            io.Writer
-	promptMasked func(string) string
-	prompt       func(string) string
-	forgeBuilder ForgeBuilder
-	repoSlug     string
-	baseURL      string
-	desc         backend.Descriptor
-}
-
-// TokenAcquirer prompts for (or reuses an ambient) bearer token for one
-// backend and validates it however that backend requires.
-type TokenAcquirer func(ctx tokenAcquireContext) (string, error)
-
-// tokenAcquirers dispatches token acquisition by backend name, so a new
-// backend registers an entry here rather than adding a branch to
-// runQuickstart. Unsynchronized, which holds only because quickstart is a
-// single-threaded CLI that never mutates it after init.
-var tokenAcquirers = map[string]TokenAcquirer{
-	"github": func(ctx tokenAcquireContext) (string, error) {
-		token, err := acquireGHToken(ctx.env, ctx.w, ctx.promptMasked, ctx.desc.TokenEnvVar)
-		if err != nil {
-			return "", err
-		}
-		if err := auditGHToken(token, ctx.env, ctx.w, ctx.prompt); err != nil {
-			return "", err
-		}
-		return token, nil
-	},
-	"forgejo": func(ctx tokenAcquireContext) (string, error) {
-		return acquireForgejoToken(ctx.w, ctx.promptMasked, ctx.forgeBuilder, ctx.repoSlug, ctx.baseURL)
-	},
-}
 
 // forgejoProbeTimeout keeps a hung Forgejo host from blocking the wizard
 // forever. Mirrors defaultForgejoHTTPTimeout in the sibling Forgejo adapters.
@@ -428,26 +390,37 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
 	tracker := trackerSettings{issueTracker: backendName, forgejoBaseURL: forgejoBaseURL}
-
 	desc, ok := backend.ByName(backendName)
 	if !ok {
 		return fmt.Errorf("unregistered backend %q", backendName)
 	}
 
-	acquirer, ok := tokenAcquirers[backendName]
-	if !ok {
+	strategy, ok := backendkit.ByName(backendName)
+	if !ok || strategy.AcquireToken == nil {
 		return fmt.Errorf("no token acquirer registered for backend %q", backendName)
 	}
-	token, err := acquirer(tokenAcquireContext{
-		env:          env,
-		w:            w,
-		promptMasked: promptMasked,
-		prompt:       prompt,
-		forgeBuilder: forgeBuilder,
-		repoSlug:     repoSlug,
-		baseURL:      forgejoBaseURL,
-		desc:         desc,
-	})
+	knobs := map[string]string{}
+	if forgejoBaseURL != "" {
+		knobs["FORGEJO_BASE_URL"] = forgejoBaseURL
+	}
+	token, err := strategy.AcquireToken(
+		backendkit.Shared{RepoSlug: repoSlug},
+		func(name string) (string, bool) { v, ok := knobs[name]; return v, ok },
+		backendkit.TokenPrompt{
+			Out:          w,
+			Getenv:       env.Getenv,
+			Prompt:       prompt,
+			PromptMasked: promptMasked,
+			AmbientToken: env.GHAuthToken,
+			TokenScopes:  env.TokenScopes,
+			Probe: func(token string) error {
+				it, _ := forgeBuilder(repoSlug, tracker, token)
+				_, err := it.Probe()
+				return err
+			},
+			RerunCmd:    quickstartRerunCmd,
+			TokenEnvVar: desc.TokenEnvVar,
+		})
 	if err != nil {
 		return err
 	}
@@ -681,127 +654,6 @@ func mergeGitignore(existing string) string {
 		b.WriteString(m + nl)
 	}
 	return b.String()
-}
-
-// acquireGHToken reuses an ambient GH_TOKEN without prompting, otherwise it
-// guides the operator toward a fine-grained single-repo PAT. The `gh auth
-// token` fallback warns, because that token is typically repo-wide.
-func acquireGHToken(env Environment, w io.Writer, promptMasked func(string) string, tokenEnvVar string) (string, error) {
-	if token := env.Getenv(tokenEnvVar); token != "" {
-		return token, nil
-	}
-	fmt.Fprintf(w, "No ambient %s found.\n", tokenEnvVar)
-	fmt.Fprint(w, "Create a fine-grained personal access token scoped to only this repo, with:\n"+requiredGHPermissions)
-	token := promptMasked("GitHub token (paste a fine-grained PAT, or leave blank to fall back to `gh auth token` — broader scope warning)")
-	if token != "" {
-		return token, nil
-	}
-	fmt.Fprintln(w, "WARNING: gh auth token typically returns a repo-wide OAuth token, broader than the single-repo scope quickstart recommends.")
-	token, err := env.GHAuthToken()
-	if err != nil {
-		return "", err
-	}
-	if token == "" {
-		return "", fmt.Errorf("gh auth token returned no token — run `gh auth login` and retry")
-	}
-	return token, nil
-}
-
-// acquireForgejoToken validates the pasted token with a live Probe rather
-// than a prefix audit: Forgejo PATs have no sniffable prefix the way GitHub's
-// do. There is no retry loop, so every failure path here aborts the run and
-// tells the operator to rerun the wizard.
-func acquireForgejoToken(w io.Writer, promptMasked func(string) string, forgeBuilder ForgeBuilder, repoSlug, baseURL string) (string, error) {
-	token := promptMasked("Forgejo token (paste a Forgejo personal access token)")
-	if token == "" {
-		return "", fmt.Errorf("no Forgejo token provided — rerun `%s` and paste a token when prompted", quickstartRerunCmd)
-	}
-	it, _ := forgeBuilder(repoSlug, trackerSettings{issueTracker: "forgejo", forgejoBaseURL: baseURL}, token)
-	if _, err := it.Probe(); err != nil {
-		if errors.Is(err, forge.ErrAuthFailure) {
-			return "", fmt.Errorf("Forgejo token rejected by the API at %s — the instance is derived from the git remote, so if this is the wrong instance, `git remote set-url` to point at the right one before you rerun `%s` and paste a valid token: %w", baseURL, quickstartRerunCmd, err)
-		}
-		if !errors.Is(err, forge.ErrNotFound) {
-			var statusErr rest.StatusError
-			if errors.As(err, &statusErr) {
-				cause := fmt.Sprintf("the instance responded with HTTP status %d", statusErr.Status)
-				return "", forgejoConnectivityError(baseURL, repoSlug, cause, "check the Forgejo instance's health/logs", err)
-			}
-			var decodeErr rest.DecodeError
-			if errors.As(err, &decodeErr) {
-				return "", forgejoConnectivityError(baseURL, repoSlug, "the instance's response could not be parsed", "check the Forgejo instance's version/API compatibility", err)
-			}
-		}
-		return "", forgejoConnectivityError(baseURL, repoSlug, "either the instance is unreachable or the repo slug is wrong", "check both", err)
-	}
-	fmt.Fprintln(w, "ok: Forgejo token validated via live API ping")
-	return token, nil
-}
-
-// forgejoConnectivityError builds the shared error skeleton for
-// acquireForgejoToken's three post-Probe failure branches, which differ only
-// in the cause and remedy clauses.
-func forgejoConnectivityError(baseURL, repoSlug, cause, remedy string, err error) error {
-	return fmt.Errorf("Forgejo connectivity check to %s (repo slug %q) failed — %s; %s, then rerun `%s`: %w", baseURL, repoSlug, cause, remedy, quickstartRerunCmd, err)
-}
-
-// requiredGHPermissions are the permissions a token must carry on the single
-// target repo. GitHub exposes no endpoint to introspect a fine-grained PAT,
-// so quickstart prints these for the operator to check (ADR 0027).
-const requiredGHPermissions = `  Issues: Read and write
-  Contents: Read and write
-  Pull requests: Read and write
-  Metadata: Read
-`
-
-// auditGHToken checks a GitHub token for least privilege, branching on its
-// prefix. A fine-grained PAT cannot be introspected, so it passes ungated.
-func auditGHToken(token string, env Environment, w io.Writer, prompt func(string) string) error {
-	if strings.HasPrefix(token, "github_pat_") {
-		fmt.Fprintln(w, "fine-grained PAT detected — GitHub exposes no endpoint to introspect it.")
-		fmt.Fprint(w, "It should carry only these permissions, on the single target repo:\n"+requiredGHPermissions)
-		return nil
-	}
-	if strings.HasPrefix(token, "ghp_") || strings.HasPrefix(token, "gho_") {
-		scopes, err := env.TokenScopes(token)
-		if err != nil {
-			return fmt.Errorf("read token scopes: %w", err)
-		}
-		fmt.Fprintf(w, "token scopes: %s\n", strings.Join(scopes, ", "))
-		excess := excessGHScopes(scopes)
-		if len(excess) == 0 {
-			fmt.Fprintln(w, "ok: scopes are least-privilege")
-			return nil
-		}
-		fmt.Fprintf(w, "WARNING: token grants broader-than-needed scope(s): %s\n", strings.Join(excess, ", "))
-		fmt.Fprintln(w, "quickstart only needs single-repo Issues/Contents/Pull requests RW + Metadata R — mint a fine-grained PAT instead for least privilege.")
-		answer := prompt("Type ACCEPT to continue with this over-broad token, anything else aborts")
-		if answer != "ACCEPT" {
-			return fmt.Errorf("aborted: GitHub token grants broader access than needed (%s) — mint a fine-grained single-repo PAT instead", strings.Join(excess, ", "))
-		}
-		return nil
-	}
-	// Any other prefix (ghs_ app-installation tokens, for one) is neither a
-	// fine-grained PAT nor a classic token, so there is nothing to audit.
-	return nil
-}
-
-// broadGHScopes are classic scopes wider than the single-repo least privilege
-// quickstart wants. excessGHScopes catches admin:* separately, by prefix.
-var broadGHScopes = map[string]bool{
-	"repo":      true,
-	"write:org": true,
-	"read:org":  true,
-}
-
-func excessGHScopes(scopes []string) []string {
-	var excess []string
-	for _, s := range scopes {
-		if broadGHScopes[s] || strings.HasPrefix(s, "admin:") {
-			excess = append(excess, s)
-		}
-	}
-	return excess
 }
 
 // quickstartGitignore must stay a strict superset of

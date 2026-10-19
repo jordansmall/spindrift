@@ -9,6 +9,7 @@ package backendkit
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -83,6 +84,38 @@ type Strategy struct {
 	CloneURL    func(Shared, Lookup, string) (string, error)
 	WebURL      func(Shared, Lookup) string
 	RemoteMatch func(Shared, Lookup, string) bool
+
+	// Quickstart hooks (ADR 0068 decision 8). KnobsFromRemote returns the
+	// backend's own knob values (env name -> value) implied by a git remote
+	// URL, or nil when the remote implies none. AcquireToken is the
+	// backend's token setup in the wizard: it prompts for (or reuses an
+	// ambient) bearer token and validates it however the backend requires,
+	// reading its knobs from the Lookup and the wizard's seams from the
+	// TokenPrompt.
+	KnobsFromRemote func(remote string) map[string]string
+	AcquireToken    func(Shared, Lookup, TokenPrompt) (string, error)
+}
+
+// TokenPrompt is the wizard's side of AcquireToken: plain seams quickstart
+// fills, so backend packages never import it and tests replace each one.
+type TokenPrompt struct {
+	Out          io.Writer
+	Getenv       func(string) string
+	Prompt       func(string) string
+	PromptMasked func(string) string
+	// AmbientToken is the host gh CLI's own token, the github fallback for an
+	// operator who declines to paste a fine-grained PAT.
+	AmbientToken func() (string, error)
+	// TokenScopes reads the scopes GitHub reports for a classic token.
+	TokenScopes func(token string) ([]string, error)
+	// Probe validates token against the live API by building the backend's
+	// tracker with it.
+	Probe func(token string) error
+	// RerunCmd is the command the error hints tell the operator to rerun.
+	RerunCmd string
+	// TokenEnvVar is the env name the wizard exports the token under, from the
+	// backend's Descriptor.
+	TokenEnvVar string
 }
 
 // AutoMergeForges names, in slice order, every Strategy that offers an

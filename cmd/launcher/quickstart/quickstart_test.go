@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
@@ -3013,7 +3014,7 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 }
 
 // Pins that a QuickstartEligible backend registered only in backend.Registry,
-// with its own TokenAcquirer in tokenAcquirers, acquires its token end-to-end
+// with its own Strategy.AcquireToken, acquires its token end-to-end
 // with no edit to runQuickstart: the fake gitlab acquirer is dispatched, and
 // its token lands in harness.env under the descriptor's own TokenEnvVar with
 // no GH_TOKEN line, so the export is keyed off the descriptor, not the name.
@@ -3028,15 +3029,15 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	})
 	defer func() { backend.Registry = originalRegistry }()
 
-	originalAcquirers := tokenAcquirers
-	tokenAcquirers = make(map[string]TokenAcquirer, len(originalAcquirers)+1)
-	for k, v := range originalAcquirers {
-		tokenAcquirers[k] = v
+	// backendkit has no unregister, so the stub registers once per process.
+	if _, registered := backendkit.ByName("gitlab"); !registered {
+		backendkit.Register(backendkit.Strategy{
+			Descriptor: backend.Descriptor{Name: "gitlab", TokenEnvVar: "GITLAB_TOKEN"},
+			AcquireToken: func(_ backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPrompt) (string, error) {
+				return p.PromptMasked("GitLab token (GITLAB_TOKEN)"), nil
+			},
+		})
 	}
-	tokenAcquirers["gitlab"] = func(ctx tokenAcquireContext) (string, error) {
-		return ctx.promptMasked(fmt.Sprintf("GitLab token (%s)", ctx.desc.TokenEnvVar)), nil
-	}
-	defer func() { tokenAcquirers = originalAcquirers }()
 
 	dir := t.TempDir()
 	var out bytes.Buffer

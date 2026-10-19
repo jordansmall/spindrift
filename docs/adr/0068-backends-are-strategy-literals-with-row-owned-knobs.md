@@ -48,7 +48,8 @@ package, and its Nix row owns its knobs.
    - its build and validate closures;
    - remote identity: clone URL, web URL and remote match;
    - in-box CLI setup (`ConfigureCLI`) and the in-box open-PR query;
-   - optional hooks: `IntrospectToken`, `KnobsFromRemote` and the auto-merge
+   - optional hooks: `IntrospectToken`, `AcquireToken` (quickstart token
+     setup, taking a `TokenPrompt`), `KnobsFromRemote` and the auto-merge
      remedy. A nil hook is an absence, not a stub.
 
    The Bundle registers the Strategies, and the launcher, daemon, quickstart

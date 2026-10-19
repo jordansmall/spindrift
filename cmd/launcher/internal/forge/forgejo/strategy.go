@@ -98,6 +98,14 @@ var Strategy = backendkit.Strategy{
 		host, slug := gitremote.ParseHostSlug(remote)
 		return strings.EqualFold(host, u.Host) && strings.EqualFold(slug, s.RepoSlug)
 	},
+	KnobsFromRemote: func(remote string) map[string]string {
+		host, _ := gitremote.ParseHostSlug(remote)
+		if host == "" {
+			return nil
+		}
+		return map[string]string{"FORGEJO_BASE_URL": "https://" + host}
+	},
+	AcquireToken: acquireToken,
 }
 
 // identityBase is FORGEJO_BASE_URL for the web and remote-match facets. An

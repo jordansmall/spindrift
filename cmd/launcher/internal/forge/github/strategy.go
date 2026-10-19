@@ -22,6 +22,7 @@ var Strategy = backendkit.Strategy{
 	AutoMergeRemedy: func(backendkit.Shared) string {
 		return `enable "Allow auto-merge" in repo Settings → General`
 	},
+	AcquireToken: acquireToken,
 	NewIssueTracker: func(s backendkit.Shared, _ backendkit.Lookup) (forge.IssueTracker, error) {
 		return NewExecClient(s.RepoSlug, s.Labels, s.BranchPrefix, WithVerdictLabels(s.VerdictLabels)), nil
 	},
