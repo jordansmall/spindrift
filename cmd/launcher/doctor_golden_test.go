@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -73,8 +74,8 @@ func TestRunDoctor_ReadOnlyGitHub_Golden(t *testing.T) {
 	t.Setenv("BOX_GH_TOKEN", "box-gh-tok")
 
 	original := ghTokenIntrospector
-	ghTokenIntrospector = func(string, string) (tokenIntrospectionResult, error) {
-		return tokenIntrospectionResult{Introspectable: true, WriteCapable: false}, nil
+	ghTokenIntrospector = func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	}
 	t.Cleanup(func() { ghTokenIntrospector = original })
 

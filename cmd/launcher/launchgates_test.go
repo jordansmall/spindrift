@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -199,8 +200,8 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	defer func() { gateRegistry = originalRegistry }()
 
 	originalIntrospector := ghTokenIntrospector
-	ghTokenIntrospector = func(string, string) (tokenIntrospectionResult, error) {
-		return tokenIntrospectionResult{Introspectable: true, WriteCapable: false}, nil
+	ghTokenIntrospector = func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	}
 	defer func() { ghTokenIntrospector = originalIntrospector }()
 
@@ -372,8 +373,8 @@ func TestGateRegistry_GitHubTokenGateInapplicableOnPureForgejo(t *testing.T) {
 
 func TestGateRegistry_ForgejoTokenGateInapplicableOnPureGitHub(t *testing.T) {
 	originalIntrospector := ghTokenIntrospector
-	ghTokenIntrospector = func(string, string) (tokenIntrospectionResult, error) {
-		return tokenIntrospectionResult{Introspectable: true, WriteCapable: false}, nil
+	ghTokenIntrospector = func(string, string) (backendkit.TokenIntrospection, error) {
+		return backendkit.TokenIntrospection{Introspectable: true, WriteCapable: false}, nil
 	}
 	defer func() { ghTokenIntrospector = originalIntrospector }()
 

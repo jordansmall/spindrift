@@ -105,6 +105,11 @@ type Strategy struct {
 	// TokenPrompt.
 	KnobsFromRemote func(remote string) map[string]string
 	AcquireToken    func(Shared, Lookup, TokenPrompt) (string, error)
+
+	// IntrospectToken probes a Box token for write capability, scoped to repoSlug
+	// where the probe itself is repo-scoped. Nil means the backend cannot
+	// introspect its Box token, and the read-only gate warns.
+	IntrospectToken TokenIntrospector
 }
 
 // TokenPrompt is the wizard's side of AcquireToken: plain seams quickstart
@@ -133,6 +138,21 @@ type BoxCLI struct {
 	Run      func(*exec.Cmd) error
 	Stderr   io.Writer
 }
+
+// TokenIntrospection reports what a Box token probe learned. Introspectable is
+// false when the hook cannot determine the token's grants. WriteCapable is
+// meaningful only when Introspectable is true.
+type TokenIntrospection struct {
+	Introspectable bool
+	WriteCapable   bool
+	// Reason is an optional operator-facing explanation shown when
+	// Introspectable is false.
+	Reason string
+}
+
+// TokenIntrospector probes token for write capability, scoped to repoSlug where
+// the probe itself is repo-scoped.
+type TokenIntrospector func(token, repoSlug string) (TokenIntrospection, error)
 
 // AutoMergeForges names, in slice order, every Strategy that offers an
 // auto-merge remedy, joined with " or ".

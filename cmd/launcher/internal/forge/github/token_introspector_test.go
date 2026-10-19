@@ -1,16 +1,16 @@
-package main
+package github
 
 import (
 	"errors"
 	"testing"
 )
 
-// TestNewGHTokenIntrospector pins the prefix dispatch and write-scope matching
-// in newGHTokenIntrospector (issue #1950). It runs against fake
+// TestNewTokenIntrospector pins the prefix dispatch and write-scope matching
+// in newTokenIntrospector (issue #1950). It runs against fake
 // oauthScopes/repoPush functions instead of a live gh call, so this is the only
-// unit test of the classification decision itself; internal/forge/github's
+// unit test of the classification decision itself; the
 // TokenOAuthScopes/TokenRepoPushPermission tests cover the production wiring.
-func TestNewGHTokenIntrospector(t *testing.T) {
+func TestNewTokenIntrospector(t *testing.T) {
 	errBoom := errors.New("boom")
 
 	cases := []struct {
@@ -95,7 +95,7 @@ func TestNewGHTokenIntrospector(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			scopesCalled, pushCalled := false, false
-			introspect := newGHTokenIntrospector(
+			introspect := newTokenIntrospector(
 				func(token string) ([]string, error) {
 					scopesCalled = true
 					return tc.scopes, tc.scopesErr

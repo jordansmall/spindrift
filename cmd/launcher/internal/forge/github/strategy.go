@@ -60,6 +60,7 @@ var Strategy = backendkit.Strategy{
 		host, slug := gitremote.ParseHostSlug(remote)
 		return strings.EqualFold(host, Host()) && strings.EqualFold(slug, s.RepoSlug)
 	},
+	IntrospectToken: newTokenIntrospector(TokenOAuthScopes, TokenRepoPushPermission),
 }
 
 func codeForgeOpts(s backendkit.Shared) []ExecOption {
