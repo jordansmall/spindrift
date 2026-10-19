@@ -1,4 +1,4 @@
-package registryroutes
+package registryroutes_test
 
 import (
 	"errors"
@@ -10,8 +10,17 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest"
+	"spindrift.dev/launcher/internal/registryroutes"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
+
+// parse is Parse over the synthetic row alone: the generic route grammar is
+// pinned here without naming a real ecosystem, whose own declarations are
+// pinned by the ecosystem corpora.
+func parse(data []byte) ([]registryroutes.Route, error) {
+	return registryroutes.ParseRows(data, []ecosystem.Row{ecosystemtest.Synthetic})
+}
 
 // Pins the minimal valid routes file of ADR 0045 and its mapping onto
 // credresolver's netrc source.
@@ -22,7 +31,7 @@ match-host = "artifactory.example.com"
 auth-scheme = "bearer"
 credential = { netrc = "~/.netrc" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +61,7 @@ func TestParse_AuthSchemeAbsentDefaultsToBearer(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +78,7 @@ match-host = "artifactory.example.com"
 auth-scheme = "digest"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for unknown auth-scheme, got nil")
 	}
@@ -87,7 +96,7 @@ match-host = "artifactory.example.com"
 auth-scheme = "` + scheme + `"
 credential = { netrc = "~/.netrc" }
 `
-			routes, err := Parse([]byte(doc))
+			routes, err := parse([]byte(doc))
 			if err != nil {
 				t.Fatalf("unexpected error for auth-scheme %q: %v", scheme, err)
 			}
@@ -105,7 +114,7 @@ match-host = "artifactory.example.com"
 auth-scheme = "header:"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for header: with an empty name, got nil")
 	}
@@ -121,111 +130,12 @@ match-host = "artifactory.example.com"
 auth-scheme = "header:X-Evil\r\nX-Injected: yes"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a header: auth-scheme with an invalid header name, got nil")
 	}
 	if !strings.Contains(err.Error(), "artifactory.example.com") {
 		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The optional [routes.ecosystems.cargo] registries key (ADR 0048, issue
-// #3405) decodes unchanged, in file order.
-func TestParse_CargoBlockRegistriesValidNamesAreParsed(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "crates.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.cargo]
-registries = ["example-remote", "another_one", "third-3"]
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := []string{"example-remote", "another_one", "third-3"}
-	if !reflect.DeepEqual(routes[0].Ecosystems.Strings("cargo", "registries"), want) {
-		t.Errorf("Ecosystems.Strings(cargo, registries) = %v, want %v", routes[0].Ecosystems.Strings("cargo", "registries"), want)
-	}
-}
-
-// The [routes.ecosystems.cargo] block is optional.
-func TestParse_CargoBlockRegistriesAbsentIsNil(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "artifactory.example.com"
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if routes[0].Ecosystems.Strings("cargo", "registries") != nil {
-		t.Errorf("Ecosystems.Strings(cargo, registries) = %v, want nil", routes[0].Ecosystems.Strings("cargo", "registries"))
-	}
-}
-
-// An empty registry name would flow into a malformed CARGO_REGISTRIES__TOKEN
-// env var name.
-func TestParse_CargoBlockRegistriesEmptyNameIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "crates.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.cargo]
-registries = [""]
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for an empty cargo-registries name, got nil")
-	}
-	if !strings.Contains(err.Error(), "crates.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "ecosystems.cargo.registries") {
-		t.Errorf("expected error to name the offending field, got: %v", err)
-	}
-}
-
-// Names outside cargo's bare-key charset ([A-Za-z0-9_-]) flow into a
-// CARGO_REGISTRIES_<NAME>_TOKEN shell env var name, so a name like "evil; rm"
-// could otherwise smuggle shell metadata into a sourced env file.
-func TestParse_CargoBlockRegistriesInvalidCharsIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "crates.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.cargo]
-registries = ["evil; rm"]
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for an invalid cargo-registries name, got nil")
-	}
-	if !strings.Contains(err.Error(), "evil; rm") {
-		t.Errorf("expected error to name the offending value, got: %v", err)
-	}
-}
-
-func TestParse_CargoBlockRegistriesDuplicateNameIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "crates.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.cargo]
-registries = ["example-remote", "example-remote"]
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a duplicate cargo-registries name, got nil")
-	}
-	if !strings.Contains(err.Error(), "example-remote") {
-		t.Errorf("expected error to name the duplicated value, got: %v", err)
 	}
 }
 
@@ -236,7 +146,7 @@ func TestParse_AllowAbsentIsNil(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,7 +174,7 @@ match-host = "artifactory.example.com"
 ` + tc.toml + `
 credential = { netrc = "~/.netrc" }
 `
-			routes, err := Parse([]byte(doc))
+			routes, err := parse([]byte(doc))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -299,7 +209,7 @@ match-host = "artifactory.example.com"
 allow = ["` + tc.pattern + `"]
 credential = { netrc = "~/.netrc" }
 `
-			_, err := Parse([]byte(doc))
+			_, err := parse([]byte(doc))
 			if err == nil {
 				t.Fatalf("expected error for allow pattern %q, got nil", tc.pattern)
 			}
@@ -316,531 +226,110 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// The [routes.ecosystems.gradle] path key (ADR 0048, issue #3405; the retired
-// gradle-path field it replaces was issue #3259) is stored with a trailing
-// slash stripped, mirroring upstream-origin's own normalization.
-func TestParse_GradleBlockPathValidIsNormalized(t *testing.T) {
-	const doc = `
+// syntheticPathDoc is a host-rooted route whose [routes.ecosystems.synthetic]
+// block declares pathLine verbatim, so each case chooses its own TOML string
+// flavour: a literal (single-quoted) string lets a backslash reach parse
+// unescaped rather than being consumed as a TOML basic-string escape.
+func syntheticPathDoc(pathLine string) string {
+	return `
 [[routes]]
 match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
 
-[routes.ecosystems.gradle]
-path = "/maven/"
+[routes.ecosystems.synthetic]
+` + pathLine + `
 `
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "/maven"; routes[0].Ecosystems.Path("gradle") != want {
-		t.Errorf("Ecosystems.Path(gradle) = %q, want %q (trailing slash stripped)", routes[0].Ecosystems.Path("gradle"), want)
-	}
 }
 
-// The [routes.ecosystems.gradle] block is optional.
-func TestParse_GradleBlockPathAbsentIsEmpty(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if routes[0].Ecosystems.Path("gradle") != "" {
-		t.Errorf("Ecosystems.Path(gradle) = %q, want empty (omitted)", routes[0].Ecosystems.Path("gradle"))
-	}
-}
-
-func TestParse_GradleBlockPathMissingLeadingSlashIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "maven"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a gradle-path missing a leading slash, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-func TestParse_GradleBlockPathWhitespaceIsError(t *testing.T) {
-	for _, path := range []string{" /maven", "/maven ", "/mav en"} {
-		t.Run(path, func(t *testing.T) {
-			doc := `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "` + path + `"
-`
-			_, err := Parse([]byte(doc))
-			if err == nil {
-				t.Fatalf("expected error for gradle-path %q with whitespace, got nil", path)
-			}
-		})
-	}
-}
-
-func TestParse_GradleBlockPathDotDotSegmentIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "/maven/../etc"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a gradle-path with a \"..\" segment, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path.Clean-based consumers downstream can never produce or match a "."
-// segment.
-func TestParse_GradleBlockPathDotSegmentIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "/maven/./release"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a gradle-path with a \".\" segment, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path.Clean-based consumers downstream can never produce or match an
-// interior doubled slash. The trailing-slash case is covered by
-// TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized instead.
-func TestParse_GradleBlockPathEmptySegmentIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "/maven//release"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a gradle-path with an interior doubled slash, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path key is operator-declared but flows into gradleRedirectScript's
-// Groovy double-quoted string literal (ecosystem.GradleInitScript), where an
-// unescaped "$" triggers GString interpolation at init-script load time. Both
-// cases splice tc.path into a TOML basic string, so the "\" case lives in
-// TestParse_GradleBlockPathBackslashIsError, which uses a TOML literal string.
-func TestParse_GradleBlockPathShellMetacharacterIsError(t *testing.T) {
+// A [routes.ecosystems.<name>] block's path key (ADR 0048, issue #3405) is
+// stored with every trailing slash stripped, mirroring upstream-origin's own
+// normalization. TrimSuffix would leave "/foo/" from "/foo//", which renders a
+// double-slash URL strict registries 404 on.
+func TestParse_BlockPathValidIsNormalized(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		path string
+		want string
 	}{
-		{"dollar sign", "/maven/$HOME"},
-		{"backtick", "/maven/`whoami`"},
+		{"no trailing slash", "/mirror", "/mirror"},
+		{"trailing slash", "/mirror/", "/mirror"},
+		{"trailing double slash", "/foo//", "/foo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "` + tc.path + `"
-`
-			_, err := Parse([]byte(doc))
-			if err == nil {
-				t.Fatalf("expected error for gradle-path %q, got nil", tc.path)
+			routes, err := parse([]byte(syntheticPathDoc(`path = "` + tc.path + `"`)))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
-			if !strings.Contains(err.Error(), "repo.example.com") {
-				t.Errorf("expected error to name the route, got: %v", err)
+			if got := routes[0].Ecosystems.Path("synthetic"); got != tc.want {
+				t.Errorf("Ecosystems.Path(synthetic) = %q, want %q (all trailing slashes stripped)", got, tc.want)
 			}
 		})
 	}
 }
 
-// The fixture uses a TOML literal (single-quoted) string so the backslash
-// reaches Parse unescaped rather than being consumed as a TOML basic-string
-// escape sequence.
-func TestParse_GradleBlockPathBackslashIsError(t *testing.T) {
+// The [routes.ecosystems.<name>] block is optional.
+func TestParse_BlockPathAbsentIsEmpty(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = '/maven/\release'
 `
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a gradle-path containing \"\\\", got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path key only adds a subtree on top of an already-resolved host-rooted
-// route, so "the whole host" needs no special field and declaring it is an
-// error naming that limitation.
-func TestParse_GradleBlockPathBareRootIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "/"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for gradle-path = \"/\", got nil")
-	}
-	if !strings.Contains(err.Error(), "whole host") {
-		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
-	}
-}
-
-// TrimSuffix strips only one trailing slash, so a naive normalization would
-// leave "/", a specific-looking path that is really the same rejected
-// whole-host value, rather than collapsing to "" and hitting the bare-root
-// check.
-func TestParse_GradleBlockPathDoubleSlashWholeHostIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "//"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for gradle-path = \"//\", got nil")
-	}
-	if !strings.Contains(err.Error(), "whole host") {
-		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
-	}
-}
-
-// "/foo//" must normalize all the way to "/foo", not the "/foo/" a single
-// TrimSuffix leaves behind, which would render a double-slash init-script URL
-// that strict Maven registries 404 on.
-func TestParse_GradleBlockPathTrailingDoubleSlashIsNormalized(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.gradle]
-path = "/foo//"
-`
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if want := "/foo"; routes[0].Ecosystems.Path("gradle") != want {
-		t.Errorf("Ecosystems.Path(gradle) = %q, want %q (all trailing slashes stripped)", routes[0].Ecosystems.Path("gradle"), want)
+	if got := routes[0].Ecosystems.Path("synthetic"); got != "" {
+		t.Errorf("Ecosystems.Path(synthetic) = %q, want empty (omitted)", got)
 	}
 }
 
-// The [routes.ecosystems.go] path key (ADR 0048, issue #3405; the retired
-// go-path field it replaces was issue #3260) is stored with a trailing slash
-// stripped, mirroring [routes.ecosystems.gradle] path.
-func TestParse_GoBlockPathValidIsNormalized(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "/go/"
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "/go"; routes[0].Ecosystems.Path("go") != want {
-		t.Errorf("Ecosystems.Path(go) = %q, want %q (trailing slash stripped)", routes[0].Ecosystems.Path("go"), want)
-	}
-}
-
-// The [routes.ecosystems.go] block is optional.
-func TestParse_GoBlockPathAbsentIsEmpty(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if routes[0].Ecosystems.Path("go") != "" {
-		t.Errorf("Ecosystems.Path(go) = %q, want empty (omitted)", routes[0].Ecosystems.Path("go"))
-	}
-}
-
-func TestParse_GoBlockPathMissingLeadingSlashIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "go"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a go-path missing a leading slash, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-func TestParse_GoBlockPathWhitespaceIsError(t *testing.T) {
-	for _, path := range []string{" /go", "/go ", "/g o"} {
-		t.Run(path, func(t *testing.T) {
-			doc := `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "` + path + `"
-`
-			_, err := Parse([]byte(doc))
-			if err == nil {
-				t.Fatalf("expected error for go-path %q with whitespace, got nil", path)
-			}
-		})
-	}
-}
-
-func TestParse_GoBlockPathDotDotSegmentIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "/go/../etc"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a go-path with a \"..\" segment, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path.Clean-based consumers downstream can never produce or match a "."
-// segment.
-func TestParse_GoBlockPathDotSegmentIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "/go/./release"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a go-path with a \".\" segment, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path.Clean-based consumers downstream can never produce or match an
-// interior doubled slash. The trailing-slash case is covered by
-// TestParse_GoBlockPathTrailingDoubleSlashIsNormalized instead.
-func TestParse_GoBlockPathEmptySegmentIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "/go//release"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a go-path with an interior doubled slash, got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path key is operator-declared but flows into a shell-sourced
-// "export GOPROXY='<value>'" line (bindregistry_cmd.go, registrymanifest.go).
-// A GOPROXY URL path has no legitimate use for those bytes, and the shared ban
-// keeps this key and [routes.ecosystems.gradle] path from drifting via
-// validateDeclaredPath.
-func TestParse_GoBlockPathShellMetacharacterIsError(t *testing.T) {
+// Every refusal below is the shared validateDeclaredPath ban, so it holds for
+// any row's path key. The rejected shapes are:
+//   - a leading slash is required;
+//   - whitespace, and "$", "`" and "\" which flow into shell-sourced exports
+//     and init-script string literals downstream;
+//   - "?" and "#", which would cut a URL short (issue #3321);
+//   - ".", ".." and an interior doubled slash, which the path.Clean-based
+//     consumers downstream can never produce or match;
+//   - the whole host ("/" or "//"): path only adds a subtree on top of an
+//     already-resolved host-rooted route, and TrimSuffix strips only one
+//     slash, so "//" must collapse to "" and hit the same check.
+func TestParse_BlockPathInvalidIsError(t *testing.T) {
+	const host = "repo.example.com"
+	const wholeHost = "whole host"
+	const urlDelimiter = `must not contain "?" or "#"`
 	for _, tc := range []struct {
-		name string
-		path string
+		name     string
+		pathLine string
+		want     string
 	}{
-		{"dollar sign", "/go/$HOME"},
-		{"backtick", "/go/`whoami`"},
+		{"missing leading slash", `path = "mirror"`, host},
+		{"leading whitespace", `path = " /mirror"`, host},
+		{"trailing whitespace", `path = "/mirror "`, host},
+		{"interior whitespace", `path = "/mir ror"`, host},
+		{"dot-dot segment", `path = "/mirror/../etc"`, host},
+		{"dot segment", `path = "/mirror/./release"`, host},
+		{"empty segment", `path = "/mirror//release"`, host},
+		{"dollar sign", `path = "/mirror/$HOME"`, host},
+		{"backtick", "path = \"/mirror/`whoami`\"", host},
+		{"backslash", `path = '/mirror/\release'`, host},
+		{"bare root", `path = "/"`, wholeHost},
+		{"double slash whole host", `path = "//"`, wholeHost},
+		{"query", `path = "/mirror/?x"`, urlDelimiter},
+		{"fragment", `path = "/mirror/#x"`, urlDelimiter},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "` + tc.path + `"
-`
-			_, err := Parse([]byte(doc))
+			_, err := parse([]byte(syntheticPathDoc(tc.pathLine)))
 			if err == nil {
-				t.Fatalf("expected error for go-path %q, got nil", tc.path)
+				t.Fatalf("expected error for %s, got nil", tc.pathLine)
 			}
-			if !strings.Contains(err.Error(), "repo.example.com") {
-				t.Errorf("expected error to name the route, got: %v", err)
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("expected error to contain %q, got: %v", tc.want, err)
+			}
+			if !strings.Contains(err.Error(), "ecosystems.synthetic.path") {
+				t.Errorf("expected error to name the offending field, got: %v", err)
 			}
 		})
-	}
-}
-
-// Both ecosystems splice the path key into a URL (GOPROXY, the Gradle
-// redirect), where a "?" or "#" would cut it short (issue #3321).
-func TestParse_EcosystemBlockPathURLDelimiterIsError(t *testing.T) {
-	for _, eco := range []string{"go", "gradle"} {
-		for _, p := range []string{"/" + eco + "/?x", "/" + eco + "/#x"} {
-			t.Run(eco+" "+p, func(t *testing.T) {
-				doc := `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.` + eco + `]
-path = "` + p + `"
-`
-				_, err := Parse([]byte(doc))
-				if err == nil {
-					t.Fatalf("expected error for %s path %q, got nil", eco, p)
-				}
-				if !strings.Contains(err.Error(), `must not contain "?" or "#"`) {
-					t.Errorf("expected the URL-delimiter rejection, got: %v", err)
-				}
-			})
-		}
-	}
-}
-
-// The fixture uses a TOML literal (single-quoted) string so the backslash
-// reaches Parse unescaped rather than being consumed as a TOML basic-string
-// escape sequence.
-func TestParse_GoBlockPathBackslashIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = '/go/\release'
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for a go-path containing \"\\\", got nil")
-	}
-	if !strings.Contains(err.Error(), "repo.example.com") {
-		t.Errorf("expected error to name the route, got: %v", err)
-	}
-}
-
-// The path key only adds a subtree on top of an already-resolved host-rooted
-// route, so "the whole host" needs no special field and declaring it is an
-// error naming that limitation.
-func TestParse_GoBlockPathBareRootIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "/"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for go-path = \"/\", got nil")
-	}
-	if !strings.Contains(err.Error(), "whole host") {
-		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
-	}
-}
-
-// TrimSuffix strips only one trailing slash, so a naive normalization would
-// leave "/", a specific-looking path that is really the same rejected
-// whole-host value, rather than collapsing to "" and hitting the bare-root
-// check.
-func TestParse_GoBlockPathDoubleSlashWholeHostIsError(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "//"
-`
-	_, err := Parse([]byte(doc))
-	if err == nil {
-		t.Fatal("expected error for go-path = \"//\", got nil")
-	}
-	if !strings.Contains(err.Error(), "whole host") {
-		t.Errorf("expected error to explain the whole-host limitation, got: %v", err)
-	}
-}
-
-// "/foo//" must normalize all the way to "/foo", not the "/foo/" a single
-// TrimSuffix leaves behind, which would render a double-slash GOPROXY URL that
-// some proxies 404 on.
-func TestParse_GoBlockPathTrailingDoubleSlashIsNormalized(t *testing.T) {
-	const doc = `
-[[routes]]
-match-host = "repo.example.com"
-credential = { netrc = "~/.netrc" }
-
-[routes.ecosystems.go]
-path = "/foo//"
-`
-	routes, err := Parse([]byte(doc))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "/foo"; routes[0].Ecosystems.Path("go") != want {
-		t.Errorf("Ecosystems.Path(go) = %q, want %q (all trailing slashes stripped)", routes[0].Ecosystems.Path("go"), want)
 	}
 }
 
@@ -850,22 +339,22 @@ path = "/foo//"
 func TestParse_NpmrcSourceMapsToCredresolverConfig(t *testing.T) {
 	const doc = `
 [[routes]]
-match-host = "registry.npmjs.org"
-credential = { npmrc = "~/.npmrc" }
+match-host = "registry.example.test"
+credential = { npmrc = "/run/secrets/registry-npmrc" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cred := routes[0].Credential
-	if cred.FromFile != "~/.npmrc" {
-		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "~/.npmrc")
+	if cred.FromFile != "/run/secrets/registry-npmrc" {
+		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "/run/secrets/registry-npmrc")
 	}
 	if cred.FileFormat != "npmrc" {
 		t.Errorf("Credential.FileFormat = %q, want %q", cred.FileFormat, "npmrc")
 	}
-	if cred.MatchHost != "registry.npmjs.org" {
-		t.Errorf("Credential.MatchHost = %q, want %q", cred.MatchHost, "registry.npmjs.org")
+	if cred.MatchHost != "registry.example.test" {
+		t.Errorf("Credential.MatchHost = %q, want %q", cred.MatchHost, "registry.example.test")
 	}
 }
 
@@ -875,21 +364,21 @@ func TestParse_GradlePropertiesWithKeySourceMapsToCredresolverConfig(t *testing.
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-credential = { gradle-properties = "/home/build/.gradle/gradle.properties", key = "mavenToken" }
+credential = { gradle-properties = "/run/secrets/registry.properties", key = "tokenKey" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cred := routes[0].Credential
-	if cred.FromFile != "/home/build/.gradle/gradle.properties" {
-		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "/home/build/.gradle/gradle.properties")
+	if cred.FromFile != "/run/secrets/registry.properties" {
+		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "/run/secrets/registry.properties")
 	}
 	if cred.FileFormat != "gradle-properties" {
 		t.Errorf("Credential.FileFormat = %q, want %q", cred.FileFormat, "gradle-properties")
 	}
-	if cred.PropertyKey != "mavenToken" {
-		t.Errorf("Credential.PropertyKey = %q, want %q", cred.PropertyKey, "mavenToken")
+	if cred.PropertyKey != "tokenKey" {
+		t.Errorf("Credential.PropertyKey = %q, want %q", cred.PropertyKey, "tokenKey")
 	}
 }
 
@@ -898,9 +387,9 @@ func TestParse_GradlePropertiesWithoutKeyIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-credential = { gradle-properties = "/home/build/.gradle/gradle.properties" }
+credential = { gradle-properties = "/run/secrets/registry.properties" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for gradle-properties without key, got nil")
 	}
@@ -915,9 +404,9 @@ func TestParse_KeyWithoutGradlePropertiesIsError(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
-credential = { env = "SOME_ENV", key = "mavenToken" }
+credential = { env = "SOME_ENV", key = "tokenKey" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for key without gradle-properties, got nil")
 	}
@@ -934,7 +423,7 @@ func TestParse_ExecSourceMapsToCredresolverConfig(t *testing.T) {
 match-host = "vault.example.com"
 credential = { exec = ["op", "read", "op://vault/item"] }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -955,7 +444,7 @@ func TestParse_ExecEmptyArrayIsError(t *testing.T) {
 match-host = "vault.example.com"
 credential = { exec = [] }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an empty exec argv, got nil")
 	}
@@ -971,7 +460,7 @@ func TestParse_ExecArrayWithNonStringElementIsError(t *testing.T) {
 match-host = "vault.example.com"
 credential = { exec = ["op", 5] }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an exec argv with a non-string element, got nil")
 	}
@@ -987,7 +476,7 @@ func TestParse_ExecValueNotArrayIsError(t *testing.T) {
 match-host = "vault.example.com"
 credential = { exec = "op read" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an exec value that is not an array, got nil")
 	}
@@ -1005,7 +494,7 @@ func TestParse_ExecArgv0EmptyIsError(t *testing.T) {
 match-host = "vault.example.com"
 credential = { exec = ["", "x"] }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an exec argv with an empty argv[0], got nil")
 	}
@@ -1025,7 +514,7 @@ func TestParse_NonExecSourceWithNonStringValueIsError(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { env = ["not", "a", "string"] }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a non-exec credential key with a non-string value, got nil")
 	}
@@ -1043,7 +532,7 @@ func TestParse_ExistingSourcesAlsoSetMatchHost(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1062,7 +551,7 @@ enforce-allowlist-globally = true
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for unknown top-level key, got nil")
 	}
@@ -1074,7 +563,7 @@ func TestParse_UnknownRouteLevelKeyIsError(t *testing.T) {
 match-hosts = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for unknown route-level key, got nil")
 	}
@@ -1084,7 +573,7 @@ credential = { netrc = "~/.netrc" }
 // top-level table name, and silently disabling the registry proxy that way
 // would surprise the operator.
 func TestParse_ZeroRoutesIsError(t *testing.T) {
-	_, err := Parse([]byte(""))
+	_, err := parse([]byte(""))
 	if err == nil {
 		t.Fatal("expected error for a routes file with no routes, got nil")
 	}
@@ -1097,7 +586,7 @@ func TestParse_EmptyMatchHostIsErrorNamingRouteByIndex(t *testing.T) {
 [[routes]]
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a route with no match-host, got nil")
 	}
@@ -1114,7 +603,7 @@ func TestParse_MatchHostWithWhitespaceIsError(t *testing.T) {
 match-host = " h.example "
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a match-host with leading/trailing whitespace, got nil")
 	}
@@ -1136,7 +625,7 @@ credential = { netrc = "~/.netrc" }
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for duplicate match-host, got nil")
 	}
@@ -1164,7 +653,7 @@ credential = { netrc = "~/.netrc" }
 match-host = "h.example"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for match-hosts that collapse to the same host after normalization, got nil")
 	}
@@ -1185,7 +674,7 @@ credential = { netrc = "~/.netrc" }
 match-host = "[::1]:443"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for match-hosts that collapse to the same bracketed IPv6 host, got nil")
 	}
@@ -1200,7 +689,7 @@ func TestParse_CredentialWithNoSourceIsErrorNamingRoute(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = {}
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a credential with no source, got nil")
 	}
@@ -1217,7 +706,7 @@ func TestParse_CredentialKeyAbsentIsUnauthenticated(t *testing.T) {
 [[routes]]
 match-host = "artifactory.example.com"
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1235,7 +724,7 @@ func TestParse_CredentialWithMultipleSourcesIsErrorNamingThem(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { env = "SOME_ENV", netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a credential naming two sources, got nil")
 	}
@@ -1272,7 +761,7 @@ credential = { cargo-credentials = "" }
 `,
 	} {
 		t.Run("", func(t *testing.T) {
-			_, err := Parse([]byte(doc))
+			_, err := parse([]byte(doc))
 			if err == nil {
 				t.Fatal("expected error for a credential source with an empty value, got nil")
 			}
@@ -1290,10 +779,10 @@ credential = { cargo-credentials = "" }
 func TestParse_CargoCredentialsRegistryNameEmptyIsGenericEmptyValueError(t *testing.T) {
 	const doc = `
 [[routes]]
-match-host = "crates.example.com"
-credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "" }
+match-host = "registry.example.test"
+credential = { cargo-credentials = "/run/secrets/registry-credentials", registry-name = "" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an empty registry-name, got nil")
 	}
@@ -1308,10 +797,10 @@ credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = 
 func TestParse_CargoCredentialsWithoutRegistryNameIsCompanionRequiredError(t *testing.T) {
 	const doc = `
 [[routes]]
-match-host = "crates.example.com"
-credential = { cargo-credentials = "~/.cargo/credentials.toml" }
+match-host = "registry.example.test"
+credential = { cargo-credentials = "/run/secrets/registry-credentials" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for cargo-credentials without registry-name, got nil")
 	}
@@ -1327,17 +816,17 @@ func TestParse_CredentialUnknownKeyIsErrorNamingRouteAndKey(t *testing.T) {
 	const doc = `
 [[routes]]
 match-host = "artifactory.example.com"
-credential = { pypirc = "~/.pypirc" }
+credential = { tokenfile = "/run/secrets/tokenfile" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an unknown credential key, got nil")
 	}
 	if !strings.Contains(err.Error(), "artifactory.example.com") {
 		t.Errorf("expected error to name the route, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "pypirc") {
-		t.Errorf("expected error to name the unknown key %q, got: %v", "pypirc", err)
+	if !strings.Contains(err.Error(), "tokenfile") {
+		t.Errorf("expected error to name the unknown key %q, got: %v", "tokenfile", err)
 	}
 }
 
@@ -1350,7 +839,7 @@ func TestParse_RegistryNameWithoutCargoCredentialsIsError(t *testing.T) {
 match-host = "artifactory.example.com"
 credential = { env = "SOME_ENV", registry-name = "example-remote" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for registry-name without cargo-credentials, got nil")
 	}
@@ -1368,14 +857,14 @@ credential = { env = "SOME_ENV", registry-name = "example-remote" }
 func TestParse_CargoCredentialsWithoutRegistryNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
-match-host = "crates.example.com"
-credential = { cargo-credentials = "~/.cargo/credentials.toml" }
+match-host = "registry.example.test"
+credential = { cargo-credentials = "/run/secrets/registry-credentials" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for cargo-credentials without registry-name, got nil")
 	}
-	if !strings.Contains(err.Error(), "crates.example.com") {
+	if !strings.Contains(err.Error(), "registry.example.test") {
 		t.Errorf("expected error to name the route, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "registry-name") || !strings.Contains(err.Error(), "cargo-credentials") {
@@ -1388,16 +877,16 @@ credential = { cargo-credentials = "~/.cargo/credentials.toml" }
 func TestParse_CargoCredentialsSourceMapsRegistryNameCompanion(t *testing.T) {
 	const doc = `
 [[routes]]
-match-host = "crates.example.com"
-credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "example-remote" }
+match-host = "registry.example.test"
+credential = { cargo-credentials = "/run/secrets/registry-credentials", registry-name = "example-remote" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	cred := routes[0].Credential
-	if cred.FromFile != "~/.cargo/credentials.toml" {
-		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "~/.cargo/credentials.toml")
+	if cred.FromFile != "/run/secrets/registry-credentials" {
+		t.Errorf("Credential.FromFile = %q, want %q", cred.FromFile, "/run/secrets/registry-credentials")
 	}
 	if cred.FileFormat != "cargo-credentials" {
 		t.Errorf("Credential.FileFormat = %q, want %q", cred.FileFormat, "cargo-credentials")
@@ -1423,7 +912,7 @@ credential = { file = "/run/secrets/registry-token" }
 `,
 	} {
 		t.Run(name, func(t *testing.T) {
-			routes, err := Parse([]byte(doc))
+			routes, err := parse([]byte(doc))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1455,7 +944,7 @@ match-host = "artifactory.example.com"
 upstream-base-url = "https://artifactory.example.com/artifactory"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired upstream-base-url, got nil")
 	}
@@ -1490,7 +979,7 @@ match-host = "artifactory.example.com"
 enforce-allowlist = false
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired enforce-allowlist = false, got nil")
 	}
@@ -1512,7 +1001,7 @@ match-host = "artifactory.example.com"
 enforce-allowlist = true
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for both retired keys, got nil")
 	}
@@ -1522,36 +1011,28 @@ credential = { netrc = "~/.netrc" }
 }
 
 // The replacement stanza is built from the offending route's own remaining
-// keys, not a generic template: auth-scheme and allow survive as top-level
-// keys, and the three retired per-ecosystem keys (also retired here, ADR 0048)
-// survive as their equivalent [routes.ecosystems.<name>] blocks.
+// keys, not a generic template: auth-scheme, allow and the credential (with its
+// companion key) survive. The retired per-ecosystem keys that become
+// [routes.ecosystems.<name>] blocks (ADR 0048) are pinned per row by the
+// ecosystem corpora.
 func TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys(t *testing.T) {
 	const doc = `
 [[routes]]
 upstream-base-url = "https://artifactory.example.com/artifactory"
 match-host = "artifactory.example.com"
 auth-scheme = "basic"
-credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "artifactory" }
-cargo-registries = ["artifactory"]
+credential = { cargo-credentials = "/run/secrets/registry-credentials", registry-name = "artifactory" }
 allow = ["/dl"]
-gradle-path = "/maven"
-go-path = "/go"
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired upstream-base-url, got nil")
 	}
 	msg := err.Error()
 	for _, want := range []string{
 		`auth-scheme = "basic"`,
-		`credential = { cargo-credentials = "~/.cargo/credentials.toml", registry-name = "artifactory" }`,
+		`credential = { cargo-credentials = "/run/secrets/registry-credentials", registry-name = "artifactory" }`,
 		`allow = ["/dl"]`,
-		"[routes.ecosystems.cargo]",
-		`registries = ["artifactory"]`,
-		"[routes.ecosystems.gradle]",
-		`path = "/maven"`,
-		"[routes.ecosystems.go]",
-		`path = "/go"`,
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("expected stanza to contain %q, got: %v", want, err)
@@ -1581,7 +1062,7 @@ upstream-base-url = "` + tc.upstream + `"
 match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-			_, err := Parse([]byte(doc))
+			_, err := parse([]byte(doc))
 			if err == nil {
 				t.Fatal("expected error for a retired upstream-base-url, got nil")
 			}
@@ -1611,7 +1092,7 @@ match-host = "artifactory.example.com"
 upstream-base-url = "https://user:s3cr3t@artifactory.example.com:8443/artifactory"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired upstream-base-url, got nil")
 	}
@@ -1640,7 +1121,7 @@ match-host = "artifactory.example.com"
 ` + tc.toml + `
 credential = { netrc = "~/.netrc" }
 `
-			routes, err := Parse([]byte(doc))
+			routes, err := parse([]byte(doc))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1674,7 +1155,7 @@ match-host = "artifactory.example.com"
 upstream-origin = "` + tc.origin + `"
 credential = { netrc = "~/.netrc" }
 `
-			_, err := Parse([]byte(doc))
+			_, err := parse([]byte(doc))
 			if err == nil {
 				t.Fatalf("expected error for upstream-origin %q, got nil", tc.origin)
 			}
@@ -1695,7 +1176,7 @@ match-host = "artifactory.example.com"
 upstream-origin = "https://user:s3cr3t@artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for upstream-origin with userinfo, got nil")
 	}
@@ -1704,10 +1185,10 @@ credential = { netrc = "~/.netrc" }
 	}
 }
 
-// Every route is host-rooted since ADR 0047 (issue #3261), so allow,
-// gradle-path and go-path coexist freely with a minimal route of match-host
-// plus a credential; the legacy-route rejections those three keys used to hit
-// are gone.
+// Every route is host-rooted since ADR 0047 (issue #3261), so allow and a
+// [routes.ecosystems.<name>] block coexist freely with a minimal route of
+// match-host plus a credential; the legacy-route rejections those keys used to
+// hit are gone.
 func TestParse_MinimalHostRootedRouteParses(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1715,13 +1196,11 @@ match-host = "artifactory.example.com"
 credential = { netrc = "~/.netrc" }
 allow = ["/dl"]
 
-[routes.ecosystems.gradle]
-path = "/maven"
-
-[routes.ecosystems.go]
-path = "/go"
+[routes.ecosystems.synthetic]
+path = "/mirror"
+mirror-path = "/other"
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1732,8 +1211,8 @@ path = "/go"
 	if !reflect.DeepEqual(r.Allow, []string{"/dl"}) {
 		t.Errorf("Allow = %v, want [/dl]", r.Allow)
 	}
-	if r.Ecosystems.Path("gradle") != "/maven" || r.Ecosystems.Path("go") != "/go" {
-		t.Errorf("Ecosystems.Path(gradle) = %q, Ecosystems.Path(go) = %q, want /maven and /go", r.Ecosystems.Path("gradle"), r.Ecosystems.Path("go"))
+	if got := r.Ecosystems.Path("synthetic"); got != "/mirror" {
+		t.Errorf("Ecosystems.Path(synthetic) = %q, want /mirror", got)
 	}
 	if want := "https://artifactory.example.com"; r.Credential.UpstreamURL != want {
 		t.Errorf("Credential.UpstreamURL = %q, want %q", r.Credential.UpstreamURL, want)
@@ -1750,7 +1229,7 @@ match-host = "artifactory.example.com"
 upstream-origin = "http://artifactory.example.com:8081"
 credential = { netrc = "~/.netrc" }
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1770,7 +1249,7 @@ func TestUpstreamOriginFor(t *testing.T) {
 		want string
 	}{
 		{"plain https on the default port", "https://artifactory.example.com", ""},
-		{"plain https with a path", "https://artifactory.example.com/artifactory/api/npm/npm-remote", ""},
+		{"plain https with a path", "https://artifactory.example.com/artifactory/api/registry/remote", ""},
 		{"https on an explicit 443", "https://artifactory.example.com:443", "https://artifactory.example.com:443"},
 		{"http scheme", "http://registry.internal", "http://registry.internal"},
 		{"http on an explicit 80", "http://registry.internal:80", "http://registry.internal:80"},
@@ -1786,7 +1265,7 @@ func TestUpstreamOriginFor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := UpstreamOriginFor(tc.raw)
+			got := registryroutes.UpstreamOriginFor(tc.raw)
 			if got != tc.want {
 				t.Fatalf("UpstreamOriginFor(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
@@ -1794,7 +1273,7 @@ func TestUpstreamOriginFor(t *testing.T) {
 				t.Errorf("UpstreamOriginFor(%q) = %q, must never echo userinfo", tc.raw, got)
 			}
 			if got != "" {
-				if err := ValidateUpstreamOrigin(got); err != nil {
+				if err := registryroutes.ValidateUpstreamOrigin(got); err != nil {
 					t.Errorf("UpstreamOriginFor(%q) = %q, which the key's own validator rejects: %v", tc.raw, got, err)
 				}
 			}
@@ -1813,7 +1292,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.gradle]
 path = "/maven/"
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := registryroutes.Parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1832,7 +1311,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.cargo]
 registries = ["internal", "crates-remote"]
 `
-	routes, err := Parse([]byte(doc))
+	routes, err := registryroutes.Parse([]byte(doc))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1853,7 +1332,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.gradle]
 registries = ["internal"]
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for registries under a non-cargo block, got nil")
 	}
@@ -1875,7 +1354,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.maven]
 path = "/maven"
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for an unknown ecosystem name, got nil")
 	}
@@ -1896,7 +1375,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.go]
 path = 5
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a non-string path, got nil")
 	}
@@ -1961,7 +1440,7 @@ registries = ["b"]
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse([]byte(tc.doc))
+			_, err := registryroutes.Parse([]byte(tc.doc))
 			if err == nil {
 				t.Fatalf("expected error for a route declaring both %s and [routes.%s], got nil", tc.retiredKey, tc.block)
 			}
@@ -2003,17 +1482,17 @@ path = "/maven/"
 [routes.ecosystems.go]
 path = "/go/"
 `
-	_, err := Parse([]byte(retiredDoc))
+	_, err := registryroutes.Parse([]byte(retiredDoc))
 	if err == nil {
 		t.Fatal("expected error for a route spelling the retired top-level keys, got nil")
 	}
 	stanza := err.Error()[strings.Index(err.Error(), "[[routes]]"):]
 
-	stanzaRoutes, err := Parse([]byte(stanza))
+	stanzaRoutes, err := registryroutes.Parse([]byte(stanza))
 	if err != nil {
 		t.Fatalf("unexpected error parsing the printed replacement stanza: %v", err)
 	}
-	blockRoutes, err := Parse([]byte(blockDoc))
+	blockRoutes, err := registryroutes.Parse([]byte(blockDoc))
 	if err != nil {
 		t.Fatalf("unexpected error parsing new-style doc: %v", err)
 	}
@@ -2043,7 +1522,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	routes, err := ParseRows([]byte(doc), []ecosystem.Row{row})
+	routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2068,7 +1547,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := ParseRows([]byte(doc), []ecosystem.Row{row})
+	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
 	if err == nil {
 		t.Fatal("expected error for a key a nil-hook row doesn't accept, got nil")
 	}
@@ -2095,7 +1574,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := ParseRows([]byte(doc), []ecosystem.Row{row})
+	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2118,7 +1597,7 @@ match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
 cargo-registries = ["a"]
 `
-	_, err := ParseRows([]byte(doc), []ecosystem.Row{{Name: "fake"}})
+	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{{Name: "fake"}})
 	if err == nil {
 		t.Fatal("expected error for a retired cargo-registries key, got nil")
 	}
@@ -2146,7 +1625,7 @@ path = "/go-modules"
 [routes.ecosystems.cargo]
 registries = ["internal"]
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired upstream-base-url, got nil")
 	}
@@ -2180,7 +1659,7 @@ path = "/go-modules"
 [routes.ecosystems.cargo]
 registries = ["internal", "crates-remote"]
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired upstream-base-url, got nil")
 	}
@@ -2191,7 +1670,7 @@ registries = ["internal", "crates-remote"]
 	}
 	stanza := msg[idx:]
 
-	routes, err := Parse([]byte(stanza))
+	routes, err := registryroutes.Parse([]byte(stanza))
 	if err != nil {
 		t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 	}
@@ -2225,7 +1704,7 @@ gradle-path = "/maven"
 [routes.ecosystems.cargo]
 registries = ["internal"]
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired enforce-allowlist, got nil")
 	}
@@ -2244,7 +1723,7 @@ registries = ["internal"]
 	}
 
 	idx := strings.Index(msg, "[[routes]]")
-	routes, err := Parse([]byte(msg[idx:]))
+	routes, err := registryroutes.Parse([]byte(msg[idx:]))
 	if err != nil {
 		t.Fatalf("expected the replacement stanza to parse, got: %v", err)
 	}
@@ -2270,7 +1749,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems."bad name"]
 "weird key" = "gizmo"
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired upstream-base-url, got nil")
 	}
@@ -2287,7 +1766,7 @@ credential = { netrc = "~/.netrc" }
 		t.Errorf("expected stanza to quote the block key (%s), got:\n%s", want, stanza)
 	}
 
-	_, err = Parse([]byte(stanza))
+	_, err = registryroutes.Parse([]byte(stanza))
 	if err != nil && strings.Contains(err.Error(), "parsing routes file") {
 		t.Errorf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 	}
@@ -2303,7 +1782,7 @@ match-host = "crates.example.com"
 cargo-registries = [""]
 credential = { netrc = "~/.netrc" }
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired cargo-registries key, got nil")
 	}
@@ -2348,7 +1827,7 @@ credential = { netrc = "~/.netrc" }
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			routes, err := Parse([]byte(tc.doc))
+			routes, err := registryroutes.Parse([]byte(tc.doc))
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -2356,44 +1835,6 @@ credential = { netrc = "~/.netrc" }
 				t.Errorf("Ecosystems = %#v, want %#v", routes[0].Ecosystems, tc.want)
 			}
 		})
-	}
-}
-
-// mergeRetiredRouteEcosystems panics on a key that resolves to no
-// ecosystem.Table row, so this test is what keeps that panic unreachable: only
-// a row dropping its RetiredRouteKey out from under retiredRouteKeys could
-// trip it.
-func TestRetiredRouteKeysResolveToRows(t *testing.T) {
-	for _, entry := range retiredRouteKeys {
-		if _, ok := ecosystem.RowByRetiredRouteKey(entry.key); !ok {
-			t.Errorf("retiredRouteKeys key %q does not resolve to any ecosystem.Table row", entry.key)
-		}
-	}
-}
-
-// A Go struct tag cannot reference a const, so this test is the only thing
-// keeping rawRoute's toml tags for the three retired keys and the ecosystem
-// consts that own their spelling from drifting apart.
-func TestRawRouteRetiredKeyTagsMatchEcosystemConsts(t *testing.T) {
-	cases := []struct {
-		field string
-		want  string
-	}{
-		{"CargoRegistries", ecosystem.CargoRetiredRouteKey},
-		{"GradlePath", ecosystem.GradleRetiredRouteKey},
-		{"GoPath", ecosystem.GoRetiredRouteKey},
-	}
-
-	rt := reflect.TypeOf(rawRoute{})
-	for _, tc := range cases {
-		field, ok := rt.FieldByName(tc.field)
-		if !ok {
-			t.Errorf("rawRoute has no field %s", tc.field)
-			continue
-		}
-		if got := field.Tag.Get("toml"); got != tc.want {
-			t.Errorf("rawRoute.%s toml tag = %q, want %q", tc.field, got, tc.want)
-		}
 	}
 }
 
@@ -2447,7 +1888,7 @@ cargo-registries = ["a", "b"]
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse([]byte(tc.doc))
+			_, err := registryroutes.Parse([]byte(tc.doc))
 			if err == nil {
 				t.Fatalf("expected error for a retired %s, got nil", tc.key)
 			}
@@ -2463,7 +1904,7 @@ cargo-registries = ["a", "b"]
 				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
 			}
 			stanza := msg[idx:]
-			routes, err := Parse([]byte(stanza))
+			routes, err := registryroutes.Parse([]byte(stanza))
 			if err != nil {
 				t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 			}
@@ -2495,7 +1936,7 @@ gradle-path = "/legacy"
 [routes.ecosystems.gradle]
 path = "/explicit"
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired gradle-path, got nil")
 	}
@@ -2509,7 +1950,7 @@ path = "/explicit"
 		t.Errorf("expected stanza to drop the legacy value entirely, got:\n%s", stanza)
 	}
 
-	routes, err := Parse([]byte(stanza))
+	routes, err := registryroutes.Parse([]byte(stanza))
 	if err != nil {
 		t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 	}
@@ -2529,7 +1970,7 @@ enforce-allowlist = true
 credential = { netrc = "~/.netrc" }
 go-path = "/go"
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired enforce-allowlist and go-path, got nil")
 	}
@@ -2553,7 +1994,7 @@ upstream-origin = "` + origin + `"
 credential = { netrc = "~/.netrc" }
 go-path = "/go-modules"
 `
-	_, err := Parse([]byte(doc))
+	_, err := registryroutes.Parse([]byte(doc))
 	if err == nil {
 		t.Fatal("expected error for a retired go-path, got nil")
 	}
@@ -2564,7 +2005,7 @@ go-path = "/go-modules"
 	}
 	stanza := msg[idx:]
 
-	routes, err := Parse([]byte(stanza))
+	routes, err := registryroutes.Parse([]byte(stanza))
 	if err != nil {
 		t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 	}
@@ -2598,7 +2039,7 @@ func TestParse_RetiredEcosystemKeyEmptyValueIsStillRefused(t *testing.T) {
 match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
 ` + tc.decl + "\n"
-			_, err := Parse([]byte(doc))
+			_, err := registryroutes.Parse([]byte(doc))
 			if err == nil {
 				t.Fatalf("expected error for an empty %s, got nil", tc.key)
 			}
@@ -2613,7 +2054,7 @@ credential = { netrc = "~/.netrc" }
 				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
 			}
 			stanza := msg[idx:]
-			if _, err := Parse([]byte(stanza)); err != nil {
+			if _, err := registryroutes.Parse([]byte(stanza)); err != nil {
 				t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 			}
 		})
@@ -2660,7 +2101,7 @@ enforce-allowlist = false
 match-host = "repo.example.com"
 credential = { %s }
 `, fx.credentialTOML)
-			_, err := Parse([]byte(doc))
+			_, err := registryroutes.Parse([]byte(doc))
 			if err == nil {
 				t.Fatal("expected error for a retired enforce-allowlist, got nil")
 			}
@@ -2678,7 +2119,7 @@ credential = { %s }
 			}
 			stanza := msg[idx:]
 
-			routes, err := Parse([]byte(stanza))
+			routes, err := registryroutes.Parse([]byte(stanza))
 			if err != nil {
 				t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 			}
@@ -2753,7 +2194,7 @@ match-host = "repo.example.com"
 credential = %s
 %s
 `, cc.credential, rc.decl)
-				_, err := Parse([]byte(doc))
+				_, err := registryroutes.Parse([]byte(doc))
 				if err == nil {
 					t.Fatal("expected error for malformed credential, got nil")
 				}
@@ -2797,7 +2238,7 @@ match-host = "repo.example.com"
 go-path = "/go"
 %s
 `, fc.decl)
-			_, err := Parse([]byte(doc))
+			_, err := registryroutes.Parse([]byte(doc))
 			if err == nil {
 				t.Fatal("expected error for invalid field, got nil")
 			}
@@ -2838,7 +2279,7 @@ func TestParse_MissingCompanionKeyIsErrorForEveryKind(t *testing.T) {
 match-host = "repo.example.com"
 credential = { %s }
 `, credTOML)
-			_, err := Parse([]byte(doc))
+			_, err := registryroutes.Parse([]byte(doc))
 			if err == nil {
 				t.Fatalf("expected error for %s without %s, got nil", kind.SourceKey, kind.CompanionKey)
 			}
