@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -32,12 +33,12 @@ func TestBackendRows_NewLedgerCoverage(t *testing.T) {
 		{"jira", false},
 	}
 	for _, tc := range cases {
-		row, ok := backendByName(tc.name)
+		row, ok := backendkit.ByName(tc.name)
 		if !ok {
-			t.Fatalf("backendByName(%q) ok=false", tc.name)
+			t.Fatalf("backendkit.ByName(%q) ok=false", tc.name)
 		}
-		if got := row.newLedger != nil; got != tc.want {
-			t.Errorf("backendByName(%q).newLedger != nil = %v, want %v", tc.name, got, tc.want)
+		if got := row.NewLedger != nil; got != tc.want {
+			t.Errorf("backendkit.ByName(%q).NewLedger != nil = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

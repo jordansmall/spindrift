@@ -124,7 +124,11 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities
 // rather than bootstrap (issue #2941).
 func cmdReconcile(stdout, stderr io.Writer) int {
 	// reconcile never dispatches, so it carries no dispatch kind (issue #2944).
-	rc := newReadContext(nil, false)
+	rc, err := newReadContext(nil, false)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 
 	pwd, err := os.Getwd()
 	if err != nil {

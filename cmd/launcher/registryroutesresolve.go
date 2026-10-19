@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrypathset"
@@ -75,7 +76,7 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []e
 // baseBranch ref (issue #3310), the one snapshot no in-Box agent can widen, and
 // skips checkoutIsTargetRepo, whose contract is remote-based identity.
 func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosystem.Row) ([]registrypathset.HostPathSet, error) {
-	row, _ := backendByName(c.codeForge)
+	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
 		sets, err := registrypathset.DeriveFromGitRefRows(c.accumulationRepoDir(), c.baseBranch, rows)
 		if err != nil {

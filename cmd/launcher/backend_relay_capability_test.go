@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 )
@@ -16,7 +17,7 @@ import (
 // forge implements.
 func relayCapabilityViolations() []string {
 	var out []string
-	for _, row := range backendRows {
+	for _, row := range backendkit.Strategies() {
 		if !row.ValidAsCodeForge {
 			continue
 		}
@@ -102,8 +103,8 @@ func (relayPRPairForge) CommitSubjects(outboxDir, base, ref string) ([]string, e
 	return nil, nil
 }
 
-// TestRelayCapabilityViolations_ReportsLyingRows swaps one lying row per rule
-// into backendRows, each fixture tripping only the rule it names, so a check
+// TestRelayCapabilityViolations_ReportsLyingRows swaps one lying Strategy per rule
+// into the registry, each fixture tripping only the rule it names, so a check
 // loosened to one direction or dropped outright fails here.
 func TestRelayCapabilityViolations_ReportsLyingRows(t *testing.T) {
 	tests := []struct {
@@ -122,13 +123,13 @@ func TestRelayCapabilityViolations_ReportsLyingRows(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			original := backendRows
-			defer func() { backendRows = original }()
 			row := fakeGitlabRow()
 			row.RelayCapable = tc.relayCapable
 			row.OutboxRelayCapable = tc.outboxRelayCapable
-			row.newCodeForge = func(config, local.SanitizedParent, forge.IssueTracker) forge.CodeForge { return tc.newForge() }
-			backendRows = []backendRow{row}
+			row.NewCodeForge = func(backendkit.Shared, backendkit.Lookup, forge.SanitizedParent, forge.IssueTracker) (forge.CodeForge, error) {
+				return tc.newForge(), nil
+			}
+			t.Cleanup(backendkit.ReplaceRegistryForTest([]backendkit.Strategy{row}))
 
 			got := relayCapabilityViolations()
 			if len(got) != 1 || !strings.Contains(got[0], tc.want) {

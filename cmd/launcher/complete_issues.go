@@ -26,6 +26,9 @@ func printCompletionIssues(w io.Writer, it forge.IssueTracker, timeout time.Dura
 // 0 and never writes to stderr: a diagnostic has nowhere to surface mid-<TAB>.
 func cmdCompleteIssues() int {
 	c := loadConfig()
+	if checkBackendsRegistered(c) != nil {
+		return 0
+	}
 	it := newIssueTracker(c)
 	printCompletionIssues(os.Stdout, it, completeIssuesTimeout)
 	return 0

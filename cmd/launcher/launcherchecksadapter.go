@@ -1,6 +1,7 @@
 package main
 
 import (
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/launcherchecks"
@@ -62,7 +63,7 @@ func launcherCredentials(c config) map[string]string {
 }
 
 // launcherCheckDeps supplies launcherchecks' caller seams. A nil
-// validateTracker or validateCodeForge on a backend row must stay nil here:
+// ValidateTracker or ValidateCodeForge on a backend row must stay nil here:
 // crossKnobCheck's "no extra validation" arm keys off that nilness.
 func launcherCheckDeps(c config) launcherchecks.Deps {
 	return launcherchecks.Deps{
@@ -74,16 +75,16 @@ func launcherCheckDeps(c config) launcherchecks.Deps {
 			}
 		},
 		Backend: func(name string) (launcherchecks.Backend, bool) {
-			row, ok := backendByName(name)
+			row, ok := backendkit.ByName(name)
 			if !ok {
 				return launcherchecks.Backend{}, false
 			}
 			b := launcherchecks.Backend{Descriptor: row.Descriptor}
-			if row.validateTracker != nil {
-				b.ValidateTracker = func() error { return row.validateTracker(c) }
+			if row.ValidateTracker != nil {
+				b.ValidateTracker = func() error { return row.ValidateTracker(backendShared(c), c.knobLookup) }
 			}
-			if row.validateCodeForge != nil {
-				b.ValidateCodeForge = func() error { return row.validateCodeForge(c) }
+			if row.ValidateCodeForge != nil {
+				b.ValidateCodeForge = func() error { return row.ValidateCodeForge(backendShared(c), c.knobLookup) }
 			}
 			return b, true
 		},

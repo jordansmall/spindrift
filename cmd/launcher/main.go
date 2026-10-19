@@ -483,8 +483,8 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 			}
 		}
 	}
-	codeForgeRow, _ := backendByName(codeForge)
-	trackerRow, _ := backendByName(issueTracker)
+	codeForgeRow, _ := backendkit.ByName(codeForge)
+	trackerRow, _ := backendkit.ByName(issueTracker)
 	hostMediatedRemote := codeForgeRow.HostMediatedRemote
 	inBoxUnreachableTracker := trackerRow.InBoxUnreachableTracker
 	return capabilitySignals{
@@ -690,31 +690,31 @@ func researchVerdictLabels(c config) forge.VerdictLabels {
 
 // newIssueTracker returns the IssueTracker adapter selected by ISSUE_TRACKER
 // (default "github"), carrying c.dispatchKind's label and verdict families
-// (ADR 0022). An unregistered name or a row with no constructor is unreachable
-// post-validate and falls back to github.
+// (ADR 0022). An unregistered name or a Strategy with no constructor is
+// unreachable post-validate, and there is no fallback: it panics.
 func newIssueTracker(c config) forge.IssueTracker {
-	row, ok := backendByName(c.issueTracker)
-	if !ok || row.newIssueTracker == nil {
-		gh, _ := backendByName("github")
-		return gh.newIssueTracker(c)
+	s, ok := backendkit.ByName(c.issueTracker)
+	if !ok || s.NewIssueTracker == nil {
+		panic(fmt.Sprintf("newIssueTracker: ISSUE_TRACKER=%q is not a registered tracker (validate should have rejected it)", c.issueTracker))
 	}
-	return row.newIssueTracker(c)
+	return mustBuild(s.NewIssueTracker(backendShared(c), c.knobLookup))
 }
 
 // newCodeForge returns the CodeForge adapter selected by CODE_FORGE: "github"
 // (open PR, watch CI, merge), "git" (push-only, no merge gate), or "local"
 // (host-mediated landing onto the Accumulation repo's Integration branch, ADR
 // 0033). parent is only the local seam's Integration-branch key (issue #1734);
-// every other forge ignores it. An unregistered name falls back to github.
+// every other forge ignores it. An unregistered name is unreachable
+// post-validate, and there is no fallback: it panics.
 func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
-	row, ok := backendByName(c.codeForge)
-	if !ok || row.newCodeForge == nil {
-		row, _ = backendByName("github")
+	s, ok := backendkit.ByName(c.codeForge)
+	if !ok || s.NewCodeForge == nil {
+		panic(fmt.Sprintf("newCodeForge: CODE_FORGE=%q is not a registered code forge (validate should have rejected it)", c.codeForge))
 	}
-	if c.boxForgeAndIssueAccess == "read-only" && row.newReadOnlyCodeForge != nil {
-		return row.newReadOnlyCodeForge(c, parent, it)
+	if c.boxForgeAndIssueAccess == "read-only" && s.NewReadOnlyCodeForge != nil {
+		return mustBuild(s.NewReadOnlyCodeForge(backendShared(c), c.knobLookup, parent, it))
 	}
-	return row.newCodeForge(c, parent, it)
+	return mustBuild(s.NewCodeForge(backendShared(c), c.knobLookup, parent, it))
 }
 
 // dispatchCompletionBanner returns the forge-aware end-of-dispatch line, so
@@ -779,7 +779,7 @@ func delivered(o settle.DispatchOutcome) bool {
 // read-only /repo Box mount and the landing forge's git subprocesses both need
 // the same path, so it is resolved once here. Other forges leave dir alone.
 func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
-	row, _ := backendByName(codeForge)
+	row, _ := backendkit.ByName(codeForge)
 	if !row.HostMediatedRemote {
 		return dir
 	}
@@ -935,7 +935,7 @@ func gitIdentityResolver(c config, next func(num, name string) string) func(num,
 // runs ahead of next's CODE_FORGE fan-out, so it applies under every forge.
 func boxTokenResolver(next func(num, name string) string) func(num, name string) string {
 	return func(num, name string) string {
-		for _, row := range backendRows {
+		for _, row := range backendkit.Strategies() {
 			if row.TokenEnvVar == "" || row.BoxTokenEnvVar == "" || name != row.TokenEnvVar {
 				continue
 			}
@@ -1191,14 +1191,14 @@ func checkReadOnlyCapabilityGate(c config) error {
 	if c.boxForgeAndIssueAccess != "read-only" {
 		return nil
 	}
-	forgeRow, ok := backendByName(c.codeForge)
+	forgeRow, ok := backendkit.ByName(c.codeForge)
 	if !ok {
 		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: CODE_FORGE=%q is not a registered backend", c.codeForge)
 	}
 	if !forgeRow.RelayCapable {
 		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: the selected CODE_FORGE=%q does not implement bundle-relay for the Box's finished branch hand-off", c.codeForge)
 	}
-	trackerRow, ok := backendByName(c.issueTracker)
+	trackerRow, ok := backendkit.ByName(c.issueTracker)
 	if !ok {
 		return newLaunchGateConfigError("BOX_FORGE_AND_ISSUE_ACCESS=read-only: ISSUE_TRACKER=%q is not a registered backend", c.issueTracker)
 	}

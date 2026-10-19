@@ -53,6 +53,7 @@ func baseConfig() config {
 		mergePollTimeout:  100, // large enough for multi-poll tests
 		mergeMode:         "immediate",
 		codeForge:         "github",
+		issueTracker:      "github",
 	}}
 }
 

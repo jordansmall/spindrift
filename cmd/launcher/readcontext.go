@@ -24,18 +24,21 @@ type readContext struct {
 // newReadContext loads config and wires the tracker and forge (issue #2941).
 // It applies kind and selfContained the way bootstrap() does (issue #2944),
 // so a caller needing the research label family or the no-repo sub-mode gets
-// it through the same seam.
-func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) readContext {
+// it through the same seam. It builds the adapters before any validate(), so
+// an unregistered ISSUE_TRACKER or CODE_FORGE is an error here rather than a
+// github fallback.
+func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) (readContext, error) {
 	c := applyDispatchKind(loadConfig(), kind)
 	c.selfContained = selfContained
+	if err := checkBackendsRegistered(c); err != nil {
+		// Carried so doctor can still report the bad name as a config finding.
+		return readContext{config: c}, err
+	}
 	it := newIssueTracker(c)
 	cf := newCodeForge(c, local.SanitizedParent{}, it)
 
 	// CODE_FORGE and ISSUE_TRACKER select their backend.Descriptor rows
-	// independently (ADR 0013). This calls internal/backend's Nix-generated
-	// ByName directly rather than main.go's backendByName, so an
-	// unregistered name misses and falls back to a zero-value Descriptor,
-	// the same shape tolerated elsewhere.
+	// independently (ADR 0013).
 	forgeDesc, _ := backend.ByName(c.codeForge)
 	trackerDesc, _ := backend.ByName(c.issueTracker)
 	caps := forge.ResolveCapabilities(cf, it, forgeDesc, trackerDesc)
@@ -45,7 +48,7 @@ func newReadContext(kind *dispatchkind.Descriptor, selfContained bool) readConte
 		issueTracker: it,
 		codeForge:    cf,
 		capabilities: caps,
-	}
+	}, nil
 }
 
 // reconcileLivenessProbe builds reconcile's LivenessProbe only for an

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -189,7 +190,7 @@ func (lc *launchContext) patchGate() butler.PatchGate {
 // the /repo mount, and host-side landing then fails (issue #1726); research
 // needs the seed too unless it is self-contained (issue #2439).
 func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.AccumulationLock, error) {
-	row, _ := backendByName(c.codeForge)
+	row, _ := backendkit.ByName(c.codeForge)
 	if !row.HostMediatedRemote || c.selfContained {
 		return nil, nil
 	}
