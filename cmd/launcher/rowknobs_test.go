@@ -18,6 +18,7 @@ import (
 // error is unreachable.
 func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 	c := minimalValidConfig()
+	c.schemaConfig = loadSchemaConfig()
 	seen := map[string]bool{}
 	rec := func(env string) (string, bool) {
 		seen[env] = true
@@ -44,7 +45,7 @@ func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 	if _, err := bwrap.ReadKnobs(bwrap.Lookup(rec)); err != nil {
 		t.Errorf("bwrap.ReadKnobs: %v", err)
 	}
-	for key := range rowKnobs {
+	for key := range c.rowKnobs {
 		if !seen[key] {
 			t.Errorf("rowKnobs key %q is not declared by any row", key)
 		}

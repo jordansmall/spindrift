@@ -193,11 +193,11 @@ func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.Accumulati
 	if !row.HostMediatedRemote || c.selfContained {
 		return nil, nil
 	}
-	lock, err := local.AcquireAccumulationLock(c.codeForgeAccumulationRepoDir)
+	lock, err := local.AcquireAccumulationLock(c.accumulationRepoDir())
 	if err != nil {
 		return nil, err
 	}
-	if err := local.SeedAccumulationRepo(c.codeForgeAccumulationRepoDir, pwd, c.baseBranch); err != nil {
+	if err := local.SeedAccumulationRepo(c.accumulationRepoDir(), pwd, c.baseBranch); err != nil {
 		_ = lock.Release()
 		return nil, err
 	}

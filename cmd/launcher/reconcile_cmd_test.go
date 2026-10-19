@@ -292,7 +292,7 @@ func newSurfaceFixture(t *testing.T, parent, codeForge string) surfaceFixture {
 	c := baseConfig()
 	c.codeForge = codeForge
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 	return surfaceFixture{repo: repo, pwd: pwd, c: c, it: it, lw: lw, integrationBranch: integrationBranch}
@@ -341,7 +341,7 @@ func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "local"
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = decoy.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", decoy.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloop.Config{AccumulationRepoDir: real.Bare}, it)
 
@@ -378,7 +378,7 @@ func TestSurfaceAfterDispatch_OpenSeamRemains_PrintsHeldVerdict(t *testing.T) {
 	c := baseConfig()
 	c.codeForge = "local"
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 
@@ -463,7 +463,7 @@ func TestSurfaceAfterDispatch_MixedParentBatch_SurfacesOnlyCompletedTickets(t *t
 	c := baseConfig()
 	c.codeForge = "local"
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 
@@ -502,7 +502,7 @@ func TestSurfaceAfterDispatch_OneParentErrors_StillAttemptsTheOthers(t *testing.
 	c := baseConfig()
 	c.codeForge = "local"
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 
@@ -550,7 +550,7 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 	c := baseConfig()
 	c.issueTracker = "local"
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 
 	var buf bytes.Buffer
@@ -589,7 +589,7 @@ func TestSurfaceAfterDispatch_ManyNeverLandedParents_CollapsesIntoOneSummaryLine
 	c := baseConfig()
 	c.codeForge = "local"
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 
@@ -623,7 +623,7 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	c := baseConfig()
 	c.codeForge = "local"
 	c.issueTracker = "local"
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	it := local.NewLocalTracker(issuesDir, dispatchLabels(c))
 	lw := localloop.Wire(localloopConfig(c), it)
 

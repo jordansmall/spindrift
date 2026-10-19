@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -176,10 +177,12 @@ func TestJiraNewIssueTrackerMalformedStatusMapping(t *testing.T) {
 		t.Fatal("jira row.newIssueTracker is nil")
 	}
 	c := config{schemaConfig: schemaConfig{
-		jiraBaseURL:       "https://example.atlassian.net",
-		jiraProjectKey:    "PROJ",
-		jiraToken:         "tok",
-		jiraStatusMapping: "{not valid json",
+		rowKnobs: map[string]string{
+			"JIRA_BASE_URL":       "https://example.atlassian.net",
+			"JIRA_PROJECT_KEY":    "PROJ",
+			"JIRA_TOKEN":          "tok",
+			"JIRA_STATUS_MAPPING": "{not valid json",
+		},
 	}}
 	defer func() {
 		if r := recover(); r != nil {
@@ -236,10 +239,12 @@ func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
 	}
 	for _, include := range []bool{false, true} {
 		c := config{schemaConfig: schemaConfig{
-			jiraBaseURL:         srv.URL,
-			jiraProjectKey:      "PROJ",
-			jiraToken:           "tok",
-			jiraIncludeComments: include,
+			rowKnobs: map[string]string{
+				"JIRA_BASE_URL":         srv.URL,
+				"JIRA_PROJECT_KEY":      "PROJ",
+				"JIRA_TOKEN":            "tok",
+				"JIRA_INCLUDE_COMMENTS": strconv.FormatBool(include),
+			},
 		}}
 		text, err := forge.IssueText(row.newIssueTracker(c), "PROJ-7", io.Discard)
 		if err != nil {
@@ -336,14 +341,16 @@ func TestJiraStatusMappingAppliesToWorkTrackerOnly(t *testing.T) {
 			defer srv.Close()
 
 			c := applyDispatchKind(config{schemaConfig: schemaConfig{
-				jiraBaseURL:       srv.URL,
-				jiraProjectKey:    "PROJ",
-				jiraToken:         "tok",
-				jiraStatusMapping: mapping,
-				label:             "ready-for-agent",
-				inProgressLabel:   "agent-in-progress",
-				completeLabel:     "agent-complete",
-				failedLabel:       "agent-failed",
+				rowKnobs: map[string]string{
+					"JIRA_BASE_URL":       srv.URL,
+					"JIRA_PROJECT_KEY":    "PROJ",
+					"JIRA_TOKEN":          "tok",
+					"JIRA_STATUS_MAPPING": mapping,
+				},
+				label:           "ready-for-agent",
+				inProgressLabel: "agent-in-progress",
+				completeLabel:   "agent-complete",
+				failedLabel:     "agent-failed",
 			}}, tc.kind)
 			tracker := row.newIssueTracker(c)
 
@@ -390,9 +397,11 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 	}}
 	c := minimalValidConfig()
 	c.schemaConfig = loadSchemaConfig()
-	c.forgejoToken = "tok"
-	if c.forgejoBaseURL != "" || c.localIssuesDir != "" {
-		t.Fatalf("document blanks not resolved: %q %q", c.forgejoBaseURL, c.localIssuesDir)
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
+	fjBase, _ := c.knobLookup("FORGEJO_BASE_URL")
+	localDir, _ := c.knobLookup("LOCAL_ISSUES_DIR")
+	if fjBase != "" || localDir != "" {
+		t.Fatalf("document blanks not resolved: %q %q", fjBase, localDir)
 	}
 
 	fj, ok := backendByName("forgejo")

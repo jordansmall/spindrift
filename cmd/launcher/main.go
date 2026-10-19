@@ -401,7 +401,7 @@ func loadConfig() config {
 	sc := loadSchemaConfig()
 	sc.gitUserName = gitIdentityField("GIT_USER_NAME")
 	sc.gitUserEmail = gitIdentityField("GIT_USER_EMAIL")
-	sc.codeForgeAccumulationRepoDir = absCodeForgeAccumulationRepoDir(sc.codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR"))
+	sc.setRowKnob(accumulationRepoDirEnv, absCodeForgeAccumulationRepoDir(sc.codeForge, sc.rowKnobs[accumulationRepoDirEnv]))
 
 	runtime := getenvArtifact("RUNTIME", "")
 	// No runtime-name fallback: the nix pipeline always renders RUNNER_KIND
@@ -830,7 +830,7 @@ func runnerConfig(c config) runner.Config {
 			SkillsDir:             c.spindriftSkillsDir,
 			DriverSessionCacheDir: c.driverSessionCacheDir,
 			HostMediatedRemote:    sig.hostMediatedRemote,
-			AccumulationRepoDir:   c.codeForgeAccumulationRepoDir,
+			AccumulationRepoDir:   c.accumulationRepoDir(),
 		},
 	}
 }
@@ -1060,7 +1060,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 // which Accumulation repo, base branch, or git identity a seam lands through.
 func localloopConfig(c config) localloop.Config {
 	return localloop.Config{
-		AccumulationRepoDir: c.codeForgeAccumulationRepoDir,
+		AccumulationRepoDir: c.accumulationRepoDir(),
 		BaseBranch:          c.baseBranch,
 		GitUserName:         c.gitUserName,
 		GitUserEmail:        c.gitUserEmail,
@@ -1225,12 +1225,14 @@ func checkNetworkModeRuntimeGate(c config) error {
 	}
 	// Only the detectable subset: Go sees the resolved value alone, so an
 	// explicit NETWORK_MODE=open beside a raw knob is left to raw-wins.
-	if c.runnerNetworkMode() != runner.NetworkModeOpen && c.runnerNetworkMode() != "" && (c.podmanNetwork != "" || c.bwrapUnshareNet) {
+	podmanNetwork, _ := c.knobLookup("PODMAN_NETWORK")
+	unshareNet := c.knobBool("BWRAP_UNSHARE_NET")
+	if c.runnerNetworkMode() != runner.NetworkModeOpen && c.runnerNetworkMode() != "" && (podmanNetwork != "" || unshareNet) {
 		var rawKnobs []string
-		if c.podmanNetwork != "" {
+		if podmanNetwork != "" {
 			rawKnobs = append(rawKnobs, "PODMAN_NETWORK")
 		}
-		if c.bwrapUnshareNet {
+		if unshareNet {
 			rawKnobs = append(rawKnobs, "BWRAP_UNSHARE_NET")
 		}
 		return newLaunchGateConfigError("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))

@@ -987,8 +987,8 @@ func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := filepath.Join(wd, ".spindrift", "accum.git")
-	if c.codeForgeAccumulationRepoDir != want {
-		t.Errorf("loadConfig().codeForgeAccumulationRepoDir = %q, want %q", c.codeForgeAccumulationRepoDir, want)
+	if c.accumulationRepoDir() != want {
+		t.Errorf("loadConfig().accumulationRepoDir() = %q, want %q", c.accumulationRepoDir(), want)
 	}
 }
 
@@ -1000,8 +1000,8 @@ func TestLoadConfig_CodeForgeGithub_AccumulationRepoDirStaysEmpty(t *testing.T) 
 
 	c := loadConfig()
 
-	if c.codeForgeAccumulationRepoDir != "" {
-		t.Errorf("loadConfig().codeForgeAccumulationRepoDir = %q, want empty for CODE_FORGE=github", c.codeForgeAccumulationRepoDir)
+	if c.accumulationRepoDir() != "" {
+		t.Errorf("loadConfig().accumulationRepoDir() = %q, want empty for CODE_FORGE=github", c.accumulationRepoDir())
 	}
 }
 
@@ -1021,8 +1021,8 @@ func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *t
 	if !filepath.IsAbs(rc.AccumulationRepoDir) {
 		t.Fatalf("runnerConfig().AccumulationRepoDir = %q, want an absolute path", rc.AccumulationRepoDir)
 	}
-	if rc.AccumulationRepoDir != c.codeForgeAccumulationRepoDir {
-		t.Errorf("runnerConfig().AccumulationRepoDir = %q, want %q (loadConfig's resolved value)", rc.AccumulationRepoDir, c.codeForgeAccumulationRepoDir)
+	if rc.AccumulationRepoDir != c.accumulationRepoDir() {
+		t.Errorf("runnerConfig().AccumulationRepoDir = %q, want %q (loadConfig's resolved value)", rc.AccumulationRepoDir, c.accumulationRepoDir())
 	}
 }
 
@@ -1081,9 +1081,9 @@ func TestNewIssueTracker_Jira(t *testing.T) {
 
 	c := minimalValidConfig()
 	c.issueTracker = "jira"
-	c.jiraBaseURL = srv.URL
-	c.jiraProjectKey = "PROJ"
-	c.jiraToken = "tok"
+	c.setRowKnob("JIRA_BASE_URL", srv.URL)
+	c.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
+	c.setRowKnob("JIRA_TOKEN", "tok")
 
 	it := newIssueTracker(c)
 	slug, err := it.Probe()
@@ -1106,8 +1106,8 @@ func TestNewIssueTracker_Forgejo(t *testing.T) {
 
 	c := minimalValidConfig()
 	c.issueTracker = "forgejo"
-	c.forgejoBaseURL = srv.URL
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_BASE_URL", srv.URL)
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.repoSlug = "owner/repo"
 
 	it := newIssueTracker(c)
@@ -1218,7 +1218,7 @@ body
 
 	c := minimalValidConfig()
 	c.issueTracker = "local"
-	c.localIssuesDir = dir
+	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c = applyDispatchKind(c, dispatchkind.Research)
 
 	it := newIssueTracker(c)
@@ -1254,7 +1254,7 @@ body
 
 	c := minimalValidConfig()
 	c.issueTracker = "local"
-	c.localIssuesDir = dir
+	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c = applyDispatchKind(c, dispatchkind.Research)
 	c.researchVerdicts = `[{"verdict":"approve","label":"agent-research-approve","description":"looks good"}]`
 
@@ -2489,9 +2489,9 @@ func TestValidateMergeMode_RejectsUnknown(t *testing.T) {
 func TestValidate_JiraRequiresBaseURLProjectKeyToken(t *testing.T) {
 	base := minimalValidConfig()
 	base.issueTracker = "jira"
-	base.jiraBaseURL = "https://example.atlassian.net"
-	base.jiraProjectKey = "PROJ"
-	base.jiraToken = "tok"
+	base.setRowKnob("JIRA_BASE_URL", "https://example.atlassian.net")
+	base.setRowKnob("JIRA_PROJECT_KEY", "PROJ")
+	base.setRowKnob("JIRA_TOKEN", "tok")
 
 	if err := validate(base); err != nil {
 		t.Fatalf("fully configured jira config should validate: %v", err)
@@ -2501,11 +2501,11 @@ func TestValidate_JiraRequiresBaseURLProjectKeyToken(t *testing.T) {
 		c := base
 		switch field {
 		case "jiraBaseURL":
-			c.jiraBaseURL = ""
+			c.setRowKnob("JIRA_BASE_URL", "")
 		case "jiraProjectKey":
-			c.jiraProjectKey = ""
+			c.setRowKnob("JIRA_PROJECT_KEY", "")
 		case "jiraToken":
-			c.jiraToken = ""
+			c.setRowKnob("JIRA_TOKEN", "")
 		}
 		if err := validate(c); err == nil {
 			t.Errorf("validate() must require %s when ISSUE_TRACKER=jira", field)
@@ -2527,15 +2527,15 @@ func TestValidate_JiraFieldsOptionalForGitHub(t *testing.T) {
 func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	base := minimalValidConfig()
 	base.issueTracker = "forgejo"
-	base.forgejoBaseURL = "https://codeberg.org"
-	base.forgejoToken = "tok"
+	base.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	base.setRowKnob("FORGEJO_TOKEN", "tok")
 
 	if err := validate(base); err != nil {
 		t.Fatalf("fully configured forgejo config should validate: %v", err)
 	}
 
 	c := base
-	c.forgejoToken = ""
+	c.setRowKnob("FORGEJO_TOKEN", "")
 	err := validate(c)
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_TOKEN when ISSUE_TRACKER=forgejo")
@@ -2545,7 +2545,7 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 	}
 
 	c = base
-	c.forgejoBaseURL = ""
+	c.setRowKnob("FORGEJO_BASE_URL", "")
 	err = validate(c)
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_BASE_URL when ISSUE_TRACKER=forgejo")
@@ -2560,14 +2560,14 @@ func TestValidate_ForgejoRequiresBaseURLAndToken(t *testing.T) {
 func TestValidate_ForgejoCodeForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 
 	if err := validate(c); err != nil {
 		t.Fatalf("fully configured forgejo code-forge config should validate: %v", err)
 	}
 
-	c.forgejoToken = ""
+	c.setRowKnob("FORGEJO_TOKEN", "")
 	err := validate(c)
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_TOKEN when CODE_FORGE=forgejo")
@@ -2577,8 +2577,8 @@ func TestValidate_ForgejoCodeForge(t *testing.T) {
 		t.Errorf("validate() error = %q, want it to name FORGEJO_TOKEN and CODE_FORGE=forgejo, not ISSUE_TRACKER", err.Error())
 	}
 
-	c.forgejoToken = "tok"
-	c.forgejoBaseURL = ""
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
+	c.setRowKnob("FORGEJO_BASE_URL", "")
 	err = validate(c)
 	if err == nil {
 		t.Fatalf("validate() must require FORGEJO_BASE_URL when CODE_FORGE=forgejo")
@@ -2595,8 +2595,8 @@ func TestValidate_PureForgejoNeedsNoGHToken(t *testing.T) {
 	c := minimalValidConfig()
 	c.issueTracker = "forgejo"
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.ghToken = ""
 
 	if err := validate(c); err != nil {
@@ -2765,7 +2765,7 @@ body
 
 	c := minimalValidConfig()
 	c.issueTracker = "local"
-	c.localIssuesDir = dir
+	c.setRowKnob("LOCAL_ISSUES_DIR", dir)
 	c.label = "ready-for-agent"
 
 	it := newIssueTracker(c)
@@ -2864,7 +2864,7 @@ func TestValidate_RegistryProxyRoutesFailure_IncludesRemedy(t *testing.T) {
 func TestValidateCodeForge_Git_RequiresRemoteURL(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = ""
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "")
 	err := validate(c)
 	if err == nil {
 		t.Fatal("validate() should require CODE_FORGE_REMOTE_URL when CODE_FORGE=git")
@@ -2883,7 +2883,7 @@ func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 
 	c = minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 	if err := validate(c); err != nil {
 		t.Errorf("validate() rejected valid CODE_FORGE=git config: %v", err)
 	}
@@ -2899,7 +2899,7 @@ func TestValidateCodeForge_AcceptsKnown(t *testing.T) {
 // .spindrift/accum.git, so an empty value here must not fail fast.
 func TestValidateCodeForge_Local_AcceptsUnsetAccumulationRepoDir(t *testing.T) {
 	c := minimalValidLocalConfig()
-	c.codeForgeAccumulationRepoDir = ""
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 	if err := validate(c); err != nil {
 		t.Errorf("validate() rejected CODE_FORGE=local with CODE_FORGE_ACCUMULATION_REPO_DIR unset: %v", err)
 	}
@@ -2946,7 +2946,7 @@ func TestValidateBoxForgeAndIssueAccess_AcceptsKnown(t *testing.T) {
 func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -2962,8 +2962,8 @@ func TestNewCodeForge_Git_ReturnsPushOnlyAdapter(t *testing.T) {
 func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 
@@ -2981,7 +2981,7 @@ func TestNewCodeForge_Forgejo_IsPRForge(t *testing.T) {
 func TestNewCodeForge_Local_ReturnsBundleRelayAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
 
 	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
 
@@ -3066,8 +3066,8 @@ func TestNewCodeForge_GithubReadOnly_SatisfiesCapabilityGate(t *testing.T) {
 func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.boxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -3087,8 +3087,8 @@ func TestNewCodeForge_ForgejoReadOnly_SatisfiesBundleRelayAndDraftPRCreator(t *t
 func TestNewCodeForge_ForgejoReadWrite_HostPRButNoBundleRelay(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "tok")
 	c.boxForgeAndIssueAccess = "read-write"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -3123,10 +3123,10 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 			c := minimalValidConfig()
 			c.codeForge = tc.forge
 			c.boxForgeAndIssueAccess = tc.access
-			c.forgejoBaseURL = "https://codeberg.org"
-			c.forgejoToken = "tok"
-			c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
-			c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+			c.setRowKnob("FORGEJO_TOKEN", "tok")
+			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
+			c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
 			cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
 			if cf == nil {
 				t.Fatalf("newCodeForge(CODE_FORGE=%s) = nil", tc.forge)
@@ -3146,7 +3146,7 @@ func TestResolveCapabilities_HostCanOpenPR(t *testing.T) {
 func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = filepath.Join(t.TempDir(), "repo.git")
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "repo.git"))
 	c.boxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.ResolveParent("1694", ""), nil)
@@ -3168,7 +3168,7 @@ func TestNewCodeForge_LocalReadOnly_ReturnsPlainAdapter(t *testing.T) {
 func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 	c.boxForgeAndIssueAccess = "read-only"
 
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -3224,7 +3224,7 @@ func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 			c := minimalValidConfig()
 			c.codeForge = tc.codeForge
 			c.repoSlug = "owner/repo"
-			c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 			c.mergeMode = "immediate"
 
 			if got := dispatchCompletionBanner(c, tc.outcomes); got != tc.want {
@@ -3333,7 +3333,7 @@ func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T)
 			c := minimalValidConfig()
 			c.codeForge = codeForge
 			c.repoSlug = "owner/repo"
-			c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+			c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://git.example.com/owner/repo.git")
 			c.mergeMode = "immediate"
 
 			got := dispatchCompletionBanner(c, mixedOutcomes())
@@ -3545,8 +3545,8 @@ func TestDispatchConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T
 			caps := githubCaps
 			if tc.forgejo {
 				c.codeForge = "forgejo"
-				c.forgejoBaseURL = "https://codeberg.org"
-				c.forgejoToken = "tok"
+				c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+				c.setRowKnob("FORGEJO_TOKEN", "tok")
 				caps = forgejoCaps
 			}
 
@@ -3634,7 +3634,7 @@ func TestDispatchConfig_PRForge_WiresOpenPRForIssue(t *testing.T) {
 func TestDispatchConfig_NonPRForge_OpenPRForIssueAlwaysReportsNotFound(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "git"
-	c.codeForgeRemoteURL = "https://example.com/repo.git"
+	c.setRowKnob("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
 	if _, ok := cf.(forge.PRForge); ok {
 		t.Fatal("test setup: expected a non-PRForge Code Forge")
@@ -3982,8 +3982,8 @@ func TestDispatchConfig_ResolveEnv_GHTokenPassthroughWhenBoxGHTokenUnset(t *test
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "launcher-fj-tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -4000,8 +4000,8 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenOverridesForgejoToken(t *testi
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "launcher-fj-tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -4018,8 +4018,8 @@ func TestDispatchConfig_ResolveEnv_BoxForgejoTokenUnsetFallsThrough(t *testing.T
 func TestDispatchConfig_ResolveEnv_BoxForgejoTokenDoesNotAffectOtherNames(t *testing.T) {
 	c := minimalValidConfig()
 	c.codeForge = "forgejo"
-	c.forgejoBaseURL = "https://codeberg.org"
-	c.forgejoToken = "launcher-fj-tok"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-fj-tok")
 	t.Setenv("GH_TOKEN", "launcher-gh-tok")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-fj-tok")
 	cf := newCodeForge(c, local.SanitizedParent{}, nil)
@@ -4334,7 +4334,7 @@ func TestSettleConfig_Local_CodeForgeForIssueResolvesEachIssuesOwnParent(t *test
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	c := minimalValidLocalConfig()
-	c.codeForgeAccumulationRepoDir = repo.Bare
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", repo.Bare)
 	c.baseBranch = "main"
 
 	fc := forge.NewFake()
@@ -4406,7 +4406,7 @@ func TestSettleConfig_CapabilitiesThreadsFromReadContext(t *testing.T) {
 func minimalValidLocalConfig() config {
 	c := minimalValidConfig()
 	c.codeForge = "local"
-	c.codeForgeAccumulationRepoDir = ".spindrift/accum.git"
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", ".spindrift/accum.git")
 	c.mergeMode = "immediate"
 	return c
 }
@@ -6448,7 +6448,7 @@ func TestDoctor_ReadOnlyForgejoTokenGate_MissingBoxTokenFails(t *testing.T) {
 	c.codeForge = "forgejo"
 	c.issueTracker = "forgejo"
 	c.boxForgeAndIssueAccess = "read-only"
-	c.forgejoToken = "launcher-token"
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "")
 
 	var buf bytes.Buffer
@@ -6471,7 +6471,7 @@ func TestDoctor_ReadOnlyForgejoTokenGate_DistinctTokenWarns(t *testing.T) {
 	c.codeForge = "forgejo"
 	c.issueTracker = "forgejo"
 	c.boxForgeAndIssueAccess = "read-only"
-	c.forgejoToken = "launcher-token"
+	c.setRowKnob("FORGEJO_TOKEN", "launcher-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-token")
 
 	var buf bytes.Buffer
@@ -6506,7 +6506,7 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 	c.boxForgeAndIssueAccess = "read-only"
 	c.ghToken = "launcher-token"
 	c.repoSlug = "owner/repo"
-	c.forgejoToken = "forgejo-launcher-token"
+	c.setRowKnob("FORGEJO_TOKEN", "forgejo-launcher-token")
 	t.Setenv("BOX_GH_TOKEN", "box-gh-token")
 	t.Setenv("BOX_FORGEJO_TOKEN", "box-forgejo-token")
 

@@ -77,9 +77,9 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []e
 func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosystem.Row) ([]registrypathset.HostPathSet, error) {
 	row, _ := backendByName(c.codeForge)
 	if row.HostMediatedRemote {
-		sets, err := registrypathset.DeriveFromGitRefRows(c.codeForgeAccumulationRepoDir, c.baseBranch, rows)
+		sets, err := registrypathset.DeriveFromGitRefRows(c.accumulationRepoDir(), c.baseBranch, rows)
 		if err != nil {
-			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.baseBranch, c.codeForgeAccumulationRepoDir, err)
+			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.baseBranch, c.accumulationRepoDir(), err)
 		}
 		return sets, nil
 	}

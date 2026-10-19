@@ -8,7 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/ledger"
 )
@@ -85,16 +84,6 @@ func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butl
 // initialiser, so the registry is populated by then.
 var backendRows = strategyRows()
 
-// rejectBlankForgejoKnobs validates the forgejo knobs from c's resolved
-// fields. forgejo.ReadKnobs re-defaults a blank FORGEJO_BASE_URL to
-// codeberg, and an input document can set it to "", which would send a
-// self-hosted FORGEJO_TOKEN there; this fails closed instead until ADR 0068
-// decision 3 drops the config's backend fields. A blank LOCAL_ISSUES_DIR
-// is not checked: it re-defaults to .spindrift/issues (issue #5638).
-func rejectBlankForgejoKnobs(c config, axis string) error {
-	return forgejo.ValidateForgejoEnv(axis, c.forgejoBaseURL, c.forgejoToken)
-}
-
 // strategyRows builds one backendRow per registered Strategy, in the Bundle's
 // registration order. TestBackendRowsCoverRegistry reports a Strategy missing
 // from backend.Registry, and the reverse.
@@ -111,27 +100,13 @@ func rowFromStrategy(s backendkit.Strategy) backendRow {
 		Descriptor:      s.Descriptor,
 		introspectToken: s.IntrospectToken,
 	}
-	var blank func(config, string) error
-	if s.Name == backend.Forgejo.Name {
-		blank = rejectBlankForgejoKnobs
-	}
 	if f := s.ValidateTracker; f != nil {
 		r.validateTracker = func(c config) error {
-			if blank != nil {
-				if err := blank(c, "ISSUE_TRACKER"); err != nil {
-					return err
-				}
-			}
 			return f(backendShared(c), c.knobLookup)
 		}
 	}
 	if f := s.ValidateCodeForge; f != nil {
 		r.validateCodeForge = func(c config) error {
-			if blank != nil {
-				if err := blank(c, "CODE_FORGE"); err != nil {
-					return err
-				}
-			}
 			return f(backendShared(c), c.knobLookup)
 		}
 	}
@@ -171,8 +146,8 @@ func rowFromStrategy(s backendkit.Strategy) backendRow {
 }
 
 // mustBuild unwraps a Strategy constructor. They fail only when ReadKnobs
-// rejects a malformed knob, and knobLookup renders already-typed config
-// fields, so the error is unreachable.
+// rejects a malformed knob, and the loader hands ReadKnobs only strings it
+// already normalised (a bool is "true"/"false"), so the error is unreachable.
 func mustBuild[T any](v T, err error) T {
 	if err != nil {
 		panic(err)
@@ -194,6 +169,45 @@ func backendShared(c config) backendkit.Shared {
 		SyncMethod:    c.syncMethod,
 		Tracker:       c.kind().Tracker,
 	}
+}
+
+// knobLookup serves the row-owned knobs (backend, runner, and chore) from the
+// values the launcher resolved into c.rowKnobs, so a Strategy's ReadKnobs sees
+// what the launcher resolved, not the process environment. A knob present with
+// an empty value is set; ReadKnobs decides what a blank means.
+func (c config) knobLookup(env string) (string, bool) {
+	v, ok := c.rowKnobs[env]
+	return v, ok
+}
+
+// knobBool reports whether the row knob env resolved to "true"; the launcher
+// normalises boolean knobs with strconv.FormatBool.
+func (c config) knobBool(env string) bool {
+	v, _ := c.knobLookup(env)
+	return v == "true"
+}
+
+// setRowKnob stores a row knob's resolved value. It copies the map first so a
+// config copied by value never shares writes with the original.
+func (c *schemaConfig) setRowKnob(env, value string) {
+	m := make(map[string]string, len(c.rowKnobs)+1)
+	for k, v := range c.rowKnobs {
+		m[k] = v
+	}
+	m[env] = value
+	c.rowKnobs = m
+}
+
+// accumulationRepoDirEnv names the local-only knob core code reads by name.
+const accumulationRepoDirEnv = "CODE_FORGE_ACCUMULATION_REPO_DIR"
+
+// accumulationRepoDir is the resolved CODE_FORGE_ACCUMULATION_REPO_DIR: the
+// absolute Accumulation repo path under CODE_FORGE=local, "" elsewhere unless
+// the knob is set. Core code reads it here rather than from the local
+// Strategy, which sees the same value through knobLookup.
+func (c config) accumulationRepoDir() string {
+	v, _ := c.knobLookup(accumulationRepoDirEnv)
+	return v
 }
 
 // backendByName looks up the registry row for an ISSUE_TRACKER or CODE_FORGE
