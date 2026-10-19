@@ -129,7 +129,10 @@ that rewrote the reviewer prompt would merge itself once green.
    model and effort pins live in `nix/dogfood-defaults.nix`, which
    `flake.nix` only imports, and `lib/default-model-fixture.nix` mirrors
    them, so the list also names both files. That file holds the guard list
-   too, so a PR that shrinks the guard now trips it.)
+   too, so a PR that shrinks the guard now trips it.) (Amended by issue
+   #5634: row-owned knobs (ADR 0068) move part of the env schema onto
+   registry rows, so the list also names `lib/backends/**`,
+   `lib/row-knobs.nix` and `lib/row-knob-registries.nix`.)
 
 ## Considered Options
 

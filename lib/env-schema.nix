@@ -404,16 +404,6 @@ withRowKnobs {
     nixSubPath = "jira.includeComments";
     boxEnv = false;
   };
-  forgejoBaseURL = {
-    env = "FORGEJO_BASE_URL";
-    group = "issues";
-    default = "https://codeberg.org";
-    doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
-    flakeOption = true;
-    legacySettingsExempt = true;
-    nixSubPath = "forgejo.baseURL";
-    boxEnv = true;
-  };
   researchVerdicts = {
     env = "RESEARCH_VERDICTS";
     group = "issues";
@@ -740,19 +730,6 @@ withRowKnobs {
     secret = true;
     hostConfig = true;
     doc = "Jira API token (Cloud: paired with JIRA_EMAIL for Basic auth; Server/Data Center: used alone as a Bearer PAT); required when ISSUE_TRACKER=jira";
-    boxEnv = false;
-  };
-  forgejoToken = {
-    env = "FORGEJO_TOKEN";
-    secret = true;
-    hostConfig = true;
-    doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
-    boxEnv = true;
-  };
-  boxForgejoToken = {
-    env = "BOX_FORGEJO_TOKEN";
-    secret = true;
-    doc = "opt-in two-actor separation (ADR 0016 analog): a second machine user's Forgejo PAT for the Box only — the launcher keeps using its own FORGEJO_TOKEN for merges, labels, and all host-side forge calls, while the Box receives this value as its FORGEJO_TOKEN instead; empty (default) leaves the single-token flow unchanged. Pair with a Forgejo branch-protection rule that bars this user from updating the base branch and whitelists only the launcher's user for push and merge — see docs/reference.md's Forgejo two-actor separation recipe";
     boxEnv = false;
   };
   gitUserName = {
