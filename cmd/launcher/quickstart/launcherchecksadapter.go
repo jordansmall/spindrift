@@ -2,7 +2,7 @@ package main
 
 import (
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/forge/forgejo"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
@@ -50,17 +50,18 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 				return launcherchecks.Backend{}, false
 			}
 			b := launcherchecks.Backend{Descriptor: row}
-			// forgejo is the only backend the wizard can validate: its validators
-			// read FORGEJO_BASE_URL (derived from the git remote) and
-			// FORGEJO_TOKEN (the credential the wizard acquires). Every other
-			// backend declares no validator or reads a knob the wizard never
-			// collects, so its row checks axis membership only.
-			if name == backend.Forgejo.Name {
-				b.ValidateTracker = func() error {
-					return forgejo.ValidateForgejoEnv("ISSUE_TRACKER", a.choice.knobs["FORGEJO_BASE_URL"], a.token)
+			// Each backend's own validators run against the wizard's answers; a
+			// knob the wizard never collected reads as unset, so the row reports
+			// it as `spindrift doctor` would. Only quickstart rows are ever the
+			// scaffold's tracker or forge, so those are the rows probed.
+			if s, ok := backendkit.ByName(name); ok {
+				shared := quickstartShared(a.repoSlug, a.gitUserName, a.gitUserEmail)
+				lookup := knobLookup(a.choice.knobs, s.TokenEnvVar, a.token)
+				if s.ValidateTracker != nil {
+					b.ValidateTracker = func() error { return s.ValidateTracker(shared, lookup) }
 				}
-				b.ValidateCodeForge = func() error {
-					return forgejo.ValidateForgejoEnv("CODE_FORGE", a.choice.knobs["FORGEJO_BASE_URL"], a.token)
+				if s.ValidateCodeForge != nil {
+					b.ValidateCodeForge = func() error { return s.ValidateCodeForge(shared, lookup) }
 				}
 			}
 			return b, true

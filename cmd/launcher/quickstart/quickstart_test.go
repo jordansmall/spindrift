@@ -1996,7 +1996,7 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
-	files := render(a)
+	files := mustRender(t, a)
 
 	byPath := make(map[string]scaffoldFile, len(files))
 	for _, f := range files {
@@ -2052,7 +2052,7 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
-	files := render(a)
+	files := mustRender(t, a)
 
 	byPath := make(map[string]scaffoldFile, len(files))
 	for _, f := range files {
@@ -2103,7 +2103,7 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
-	files := render(a)
+	files := mustRender(t, a)
 	flakeNix := flakeNixFor(t, files)
 
 	if !strings.Contains(flakeNix, `issues.forgejo.baseURL = "https://git.example.com"`) {
@@ -2127,7 +2127,7 @@ func TestRender_Github_Golden(t *testing.T) {
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
-	files := render(a)
+	files := mustRender(t, a)
 	flakeNix := flakeNixFor(t, files)
 
 	want, err := os.ReadFile("testdata/golden/github/flake.nix")
@@ -2154,7 +2154,7 @@ func TestRender_Forgejo_Golden(t *testing.T) {
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
-	files := render(a)
+	files := mustRender(t, a)
 	flakeNix := flakeNixFor(t, files)
 
 	want, err := os.ReadFile("testdata/golden/forgejo/flake.nix")
@@ -2285,7 +2285,7 @@ func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 	}
 
 	var harnessEnv string
-	for _, f := range render(a) {
+	for _, f := range mustRender(t, a) {
 		if f.path == "harness.env" {
 			harnessEnv = f.content
 		}
@@ -2336,7 +2336,7 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			files := render(tc.mutate(base))
+			files := mustRender(t, tc.mutate(base))
 			flakeNix := flakeNixFor(t, files)
 			if strings.Contains(flakeNix, tc.wantRaw) {
 				t.Errorf("expected flake.nix not to contain unescaped %q, got:\n%s", tc.wantRaw, flakeNix)
@@ -2365,7 +2365,7 @@ func stubRow(name, host string) backendkit.Strategy {
 			ValidAsTracker:   true,
 			ValidAsCodeForge: true,
 			TokenEnvVar:      strings.ToUpper(name) + "_TOKEN",
-			Quickstart:       &backend.QuickstartBlock{Hosts: []string{host}, Axes: []string{"tracker", "forge"}},
+			Quickstart:       &backend.QuickstartBlock{Hosts: []string{host}, Axes: []string{axisTracker, axisForge}},
 		},
 		RemoteMatch: func(s backendkit.Shared, _ backendkit.Lookup, remote string) bool {
 			h, slug := gitremote.ParseHostSlug(remote)
@@ -2416,7 +2416,7 @@ func TestDoctorHints_RegistryDriven(t *testing.T) {
 		Name:             "gitlab",
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
-		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
+		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{axisTracker, axisForge}},
 		DoctorTokenHint:  "GITLAB_TOKEN",
 		DoctorSlugHint:   "GITLAB_BASE_URL",
 	})
@@ -2437,7 +2437,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 		Name:             "gitlab",
 		ValidAsTracker:   true,
 		ValidAsCodeForge: true,
-		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
+		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{axisTracker, axisForge}},
 		TokenEnvVar:      "GITLAB_TOKEN",
 	})
 	defer func() { backend.Registry = original }()
@@ -3526,5 +3526,70 @@ func TestGatherCredentials_BlankFallbacksLeaveLastVariablePlaceholder(t *testing
 	}
 	if !strings.Contains(out.String(), "run synth login") {
 		t.Errorf("expected the rule's Remedy when nothing was supplied, got:\n%s", out.String())
+	}
+}
+
+// A knob a Strategy derives from the remote but quickstartKnobs omits would
+// silently never reach the rendered flake.
+func TestQuickstartKnobs_CoverEveryKnobsFromRemoteEnv(t *testing.T) {
+	for _, s := range quickstartStrategies() {
+		if s.KnobsFromRemote == nil {
+			continue
+		}
+		for env := range s.KnobsFromRemote("https://example.com/owner/repo.git") {
+			if _, ok := quickstartKnobs[env]; !ok {
+				t.Errorf("%s: KnobsFromRemote env %s has no quickstartKnobs entry", s.Name, env)
+			}
+		}
+	}
+}
+
+// The forge line follows the row's declared axes, not its name.
+func TestRender_ForgeLineFollowsRowAxes(t *testing.T) {
+	for _, tc := range []struct {
+		axes      []string
+		wantForge bool
+	}{
+		{[]string{axisTracker, axisForge}, true},
+		{[]string{axisTracker}, false},
+	} {
+		t.Run(strings.Join(tc.axes, "+"), func(t *testing.T) {
+			s := stubRow("stubby", "stubby.example")
+			s.Quickstart.Axes = tc.axes
+			withQuickstartRow(t, s)
+			a := validAnswers()
+			a.choice = backendChoice{name: "stubby"}
+			flakeNix := flakeNixFor(t, mustRender(t, a))
+			if !strings.Contains(flakeNix, pathIssueTracker+` = "stubby"`) {
+				t.Errorf("want tracker line, got:\n%s", flakeNix)
+			}
+			if got := strings.Contains(flakeNix, pathCodeForge+` = "stubby"`); got != tc.wantForge {
+				t.Errorf("forge line present = %v, want %v", got, tc.wantForge)
+			}
+		})
+	}
+}
+
+func mustRender(t *testing.T, a answers) []scaffoldFile {
+	t.Helper()
+	files, err := render(a)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	return files
+}
+
+// A remote-derived knob missing from quickstartKnobs must fail the render
+// rather than silently drop out of the flake.
+func TestRenderFlakeNix_KnobWithoutQuickstartKnobsEntry_Errors(t *testing.T) {
+	choice := backendChoice{name: "github", knobs: map[string]string{"STUB_KNOB_NOT_IN_TABLE": "v"}}
+	_, err := renderFlakeNix("o/r", "podman", "Ada", "ada@example.com", choice)
+	if err == nil {
+		t.Fatal("expected an error for a knob with no quickstartKnobs entry")
+	}
+	for _, want := range []string{"STUB_KNOB_NOT_IN_TABLE", `"github"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should name %s", err, want)
+		}
 	}
 }

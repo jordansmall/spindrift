@@ -87,10 +87,10 @@ func TestBuildForge_CodeForgeStrategy_FollowsForgeAxis(t *testing.T) {
 	}
 	sh := backendkit.Shared{RepoSlug: "owner/repo", Labels: defaultDispatchLabels, BranchPrefix: defaultBranchPrefix}
 
-	if _, _, err := buildForge(stub("tracker-only", "tracker"), sh, knobLookup(nil, "", "")); err != nil {
+	if _, _, err := buildForge(stub("tracker-only", axisTracker), sh, knobLookup(nil, "", "")); err != nil {
 		t.Fatalf("buildForge: %v", err)
 	}
-	if _, _, err := buildForge(stub("both", "tracker", "forge"), sh, knobLookup(nil, "", "")); err != nil {
+	if _, _, err := buildForge(stub("both", axisTracker, axisForge), sh, knobLookup(nil, "", "")); err != nil {
 		t.Fatalf("buildForge: %v", err)
 	}
 	if got := strings.Join(trackerBuilt, ","); got != "tracker-only,both" {
@@ -104,7 +104,7 @@ func TestBuildForge_CodeForgeStrategy_FollowsForgeAxis(t *testing.T) {
 func TestBuildForge_ConstructorError_IsReturnedNotPanicked(t *testing.T) {
 	boom := errors.New("bad knob")
 	s := backendkit.Strategy{
-		Descriptor: backend.Descriptor{Name: "boom", Quickstart: &backend.QuickstartBlock{Axes: []string{"tracker", "forge"}}},
+		Descriptor: backend.Descriptor{Name: "boom", Quickstart: &backend.QuickstartBlock{Axes: []string{axisTracker, axisForge}}},
 		NewIssueTracker: func(backendkit.Shared, backendkit.Lookup) (forge.IssueTracker, error) {
 			return nil, boom
 		},
