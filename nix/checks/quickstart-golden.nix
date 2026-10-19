@@ -17,6 +17,9 @@ let
   # rows. The check below uses the first entry as a valid, in-enum replacement
   # for the broken golden's out-of-enum value.
   runtimeValues = (import ../../lib/runners/index.nix { }).runtimes;
+  # The first row's first runtime is the quickstart's detected default, which
+  # the github golden records.
+  defaultRuntime = builtins.head runtimeValues;
 
   # Evaluates a golden flake.nix's own `outputs` function against stubbed
   # inputs, with `spindrift.flakeModules.default` wired to the local
@@ -139,7 +142,7 @@ let
   githubGoldenRenamedRuntime =
     let
       text = builtins.readFile githubGolden;
-      needle = ''infra.runtime = "podman";'';
+      needle = ''infra.runtime = "${defaultRuntime}";'';
     in
     assert assertMsg (pkgs.lib.hasInfix needle text)
       "cmd/launcher/quickstart/testdata/golden/github/flake.nix no longer contains the expected ${needle} — quickstart-golden-github-with-renamed-runtime-option-evaluates' replaceStrings needle is stale";
@@ -147,7 +150,7 @@ let
       builtins.replaceStrings
         [ needle ]
         [
-          ''infra.${renamedRuntimeOption} = "podman";''
+          ''infra.${renamedRuntimeOption} = "${defaultRuntime}";''
         ]
         text
     );
