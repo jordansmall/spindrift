@@ -7,11 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	// ecosystem is test-only here: it supplies the real rewrite rows so the
-	// round-trip tests exercise the rows registryproxy actually runs in
-	// production, not a stand-in -- production code never imports ecosystem
-	// (see the import-graph check).
-	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -30,12 +26,18 @@ func newProxy(t *testing.T, rows []registryvocab.RewriteRow, routes []Route) (ht
 	return handler, assigned
 }
 
-// newWithEcosystemRows builds a handler with every ecosystem's real rewrite
-// rows -- cargo's is the only one today -- so its callers exercise the rows
-// a production run uses.
-func newWithEcosystemRows(t *testing.T, routes ...Route) (http.Handler, []Route) {
+// newWithSyntheticRow builds a handler with the synthetic ecosystem's rewrite
+// row, so its callers exercise the proxy's generic rewrite machinery without
+// naming a real ecosystem.
+func newWithSyntheticRow(t *testing.T, routes ...Route) (http.Handler, []Route) {
 	t.Helper()
-	return newProxy(t, ecosystem.ResponseRewriteRows(), routes)
+	return newProxy(t, synthetic.Row.RewriteRows, routes)
+}
+
+// syntheticRoute builds the registry.example.com Route that the synthetic row
+// rewrites for: a download URL naming that host is repointed at the proxy.
+func syntheticRoute(upstream, credential string) Route {
+	return Route{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/"}}, Upstream: upstream, Credential: credential}
 }
 
 // newUpstream starts a test upstream and registers its Close on cleanup, so
@@ -58,8 +60,8 @@ func newPlainProxy(t *testing.T, routes ...Route) (http.Handler, []Route) {
 
 // plainRoute builds the single-path, no-credential Route shape most tests
 // route through -- everything else on Route left at its zero value. A shape
-// only one ecosystem's tests repeat gets its constructor beside those tests
-// instead, the way npmRoute sits in npmpackument_test.go.
+// only some tests repeat gets its constructor beside them, the way
+// syntheticRoute does.
 func plainRoute(upstream string) Route {
 	return Route{EnforcedPaths: []string{"/"}, Upstream: upstream}
 }

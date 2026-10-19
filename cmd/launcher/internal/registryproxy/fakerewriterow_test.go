@@ -20,10 +20,10 @@ import (
 // (learnRewriteBase/learnedAdmits) with a registryvocab.RewriteRow for an
 // invented ecosystem tag ("widget") that names no real ecosystem.Table row,
 // so these tests pin the matching and learning mechanism itself rather than
-// anything cargo-specific (issue #3400).
+// anything specific to one real ecosystem (issue #3400).
 
 // fakeAssetBody has the same "one field names a URL to rewrite" shape as
-// cargo's dl, but under field names no real row uses.
+// the synthetic row's download, but under field names no real row uses.
 type fakeAssetBody struct {
 	Asset     string `json:"asset,omitempty"`
 	Primary   string `json:"primary,omitempty"`
@@ -46,8 +46,8 @@ func rewriteFakeAssetField(raw string, rc registryvocab.RewriteContext) (registr
 	return registryvocab.RewriteEdit{From: u.String(), To: newURL.String(), LearnedPath: u.Path}, registryvocab.RewriteApplied
 }
 
-// rewriteFakeSingleAsset rewrites doc.Asset the same way cargo's
-// rewriteCargoDL rewrites dl.
+// rewriteFakeSingleAsset rewrites doc.Asset the same way the synthetic row's
+// rewriteSyntheticDownload rewrites download.
 func rewriteFakeSingleAsset(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	var doc fakeAssetBody
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -99,7 +99,7 @@ func rewriteFakeDualAssets(body []byte, rc registryvocab.RewriteContext) registr
 	return registryvocab.RewriteResult{Body: newBody, Edits: edits, Outcome: registryvocab.RewriteApplied}
 }
 
-// rewriteFakeMixedAssets pins that one packument-shaped body can carry both
+// rewriteFakeMixedAssets pins that one metadata-shaped JSON body can carry both
 // an applied edit and a declined one side by side (issue #3401).
 // rewriteFakeAssetField already returns a From-only edit for
 // RewriteSkippedForeignHost, which is the empty-To shape a declined edit
@@ -135,7 +135,7 @@ func rewriteFakeSkipNoEdits(body []byte, rc registryvocab.RewriteContext) regist
 	return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteSkippedForeignHost}
 }
 
-// fakeManifestRow matches the same request shape cargo's config.json row
+// fakeManifestRow matches the same request shape as an index.json row
 // matches, but tagged for an ecosystem no ecosystem.Table row declares.
 func fakeManifestRow(rewrite func([]byte, registryvocab.RewriteContext) registryvocab.RewriteResult) registryvocab.RewriteRow {
 	return registryvocab.RewriteRow{
@@ -151,7 +151,7 @@ func fakeManifestRow(rewrite func([]byte, registryvocab.RewriteContext) registry
 
 // The edit's LearnedPath must be admitted on a follow-up request that the
 // route's static EnforcedPaths alone would refuse: the "learning" half of
-// ADR 0047, pinned here independent of cargo.
+// ADR 0047, pinned here independent of any real ecosystem.
 func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 	const assetBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 
@@ -327,7 +327,7 @@ func TestFakeRewriteRow_SkipWithNoEditsLogsAsASkip(t *testing.T) {
 	}
 }
 
-// Issue #3401's mixed-packument gap: when one result carries both an applied
+// Issue #3401's mixed-host metadata body gap: when one result carries both an applied
 // edit and a declined (foreign-host) edit, nothing may be learned from the
 // declined one. An empty-To edit's LearnedPath must never be normalized to
 // "/" and admit the whole host.
