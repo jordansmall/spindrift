@@ -220,8 +220,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 	prefix := gate.manifest.Routes[0].Prefix
 
 	// Row-generic, so a future row with an EnvExports renderer needs no change
-	// here. EnvExportRows hands them over in export-file order, which is not
-	// Table's own classification-precedence order.
+	// here.
 	var exports []ecosystem.EnvExport
 	var warnings []string
 	for _, row := range ecosystem.EnvExportRowsOf(rows) {

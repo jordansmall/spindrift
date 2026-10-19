@@ -585,7 +585,7 @@ func TestRunBindRegistryWithRows_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *t
 
 // exportNamesInFileOrder parses a rendered bindings env file into its export
 // names in line order, the property
-// TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily pins and a
+// TestRunBindRegistryWithDeps_ExportOrderFollowsTable pins and a
 // strings.Contains assertion cannot see.
 func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	t.Helper()
@@ -603,12 +603,9 @@ func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	return names
 }
 
-// The rendered file's line order (go first, then the npm family) predates the
-// ecosystem table and is independent of the table's own
-// classification-precedence order, where npm precedes go, so a walk over Table
-// itself would silently reverse it. Issue #3181's acceptance criterion is a
-// byte-identical file: same names, same values, same order.
-func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
+// The rendered file's line order is ecosystem.Table's order; wantNames spells
+// out today's Table so a deliberate reorder fails here loudly.
+func TestRunBindRegistryWithDeps_ExportOrderFollowsTable(t *testing.T) {
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -621,8 +618,7 @@ func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
 	t.Setenv("CARGO_HOME", t.TempDir())
 	t.Setenv("GRADLE_USER_HOME", t.TempDir())
 	// An empty GO* snapshot is the no-exemption case, so GOSUMDB=off is exported
-	// too: the widest go export set, and the one the pre-table call site rendered
-	// first.
+	// too: the widest go export set.
 	t.Setenv("GOTOOLCHAIN", "")
 	t.Setenv("GONOPROXY", "")
 	t.Setenv("GOPRIVATE", "")
@@ -650,8 +646,8 @@ func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
 	}
 	gotNames := exportNamesInFileOrder(t, string(got))
 	wantNames := []string{
-		"GOPROXY", "GOTOOLCHAIN", "GONOPROXY", "GOSUMDB",
 		"npm_config_registry", "pnpm_config_registry", "YARN_NPM_REGISTRY_SERVER",
+		"GOPROXY", "GOTOOLCHAIN", "GONOPROXY", "GOSUMDB",
 	}
 	if len(gotNames) != len(wantNames) {
 		t.Fatalf("bindings env exports = %v, want %v", gotNames, wantNames)

@@ -15,9 +15,6 @@ const nameGo = "go"
 // which still translates the retired spelling, never spells the key itself.
 const GoRetiredRouteKey = "go-path"
 
-// goRow is the go ecosystem's Table entry. envExportOrderGo pins GOPROXY ahead
-// of the npm-family vars in the rendered export file, independent of goRow's
-// position in Table's own precedence order.
 var goRow = Row{
 	Name:             nameGo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
@@ -34,8 +31,7 @@ var goRow = Row{
 		})
 		return result.Exports, result.Warnings
 	},
-	EnvExportOrder: envExportOrderGo,
-	BindingEnvVar:  "GOPROXY",
+	BindingEnvVar: "GOPROXY",
 }
 
 // GoBindingInput is the environment subset ComputeGoBindings reads. The caller

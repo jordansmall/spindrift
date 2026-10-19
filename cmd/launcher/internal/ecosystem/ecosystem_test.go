@@ -193,20 +193,17 @@ func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 	}
 }
 
-// The stub table puts its export-carrying rows in the exact reverse of their
-// EnvExportOrder, so passing proves the sort rather than the literal order.
-// The two tied rows pin that a tie keeps table order, which is what makes
-// the ordering deterministic for rows that never set the field.
-func TestEnvExportRows_SortsByEnvExportOrderNotTableOrder(t *testing.T) {
+// Table order is the export-file order, so the stub's export-less row must be
+// skipped without disturbing the rest.
+func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
 	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
 		return nil, nil
 	}
 	rows := []Row{
-		{Name: "third", EnvExports: renderer, EnvExportOrder: 9},
-		{Name: "no-exports", EnvExportOrder: 1},
-		{Name: "second", EnvExports: renderer, EnvExportOrder: 5},
-		{Name: "tie-a", EnvExports: renderer},
-		{Name: "tie-b", EnvExports: renderer},
+		{Name: "first", EnvExports: renderer},
+		{Name: "no-exports"},
+		{Name: "second", EnvExports: renderer},
+		{Name: "third", EnvExports: renderer},
 	}
 
 	var got []string
@@ -214,7 +211,7 @@ func TestEnvExportRows_SortsByEnvExportOrderNotTableOrder(t *testing.T) {
 		got = append(got, row.Name)
 	}
 
-	want := []string{"tie-a", "tie-b", "second", "third"}
+	want := []string{"first", "second", "third"}
 	if len(got) != len(want) {
 		t.Fatalf("EnvExportRowsOf() = %v, want %v", got, want)
 	}
@@ -239,32 +236,6 @@ func TestHomeConfigRowsOf_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
 
 	if len(got) != 2 || got[0] != "b" || got[1] != "a" {
 		t.Errorf("HomeConfigRowsOf() = %v, want [b a]", got)
-	}
-}
-
-// The rendered export file must lead with go's exports even though npm
-// precedes go in Table (issue #3181).
-func TestEnvExportRows_GoBeforeNpm(t *testing.T) {
-	indexIn := func(rows []Row, name string) int {
-		for i, row := range rows {
-			if row.Name == name {
-				return i
-			}
-		}
-		return -1
-	}
-
-	if goIdx, npmIdx := indexIn(Table, "go"), indexIn(Table, "npm"); goIdx < npmIdx {
-		t.Fatalf("Table has go (%d) before npm (%d); this test only proves something while Table's order is the opposite", goIdx, npmIdx)
-	}
-
-	rows := EnvExportRows()
-	goIdx, npmIdx := indexIn(rows, "go"), indexIn(rows, "npm")
-	if goIdx < 0 || npmIdx < 0 {
-		t.Fatalf("EnvExportRows() missing go (%d) or npm (%d)", goIdx, npmIdx)
-	}
-	if goIdx > npmIdx {
-		t.Errorf("EnvExportRows() has go at %d, npm at %d, want go first", goIdx, npmIdx)
 	}
 }
 
