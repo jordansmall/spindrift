@@ -35,21 +35,6 @@ func parseButlerClaimTimeout(value string) (time.Duration, error) {
 	return d, nil
 }
 
-// parseButlerTuningCooldown parses BUTLER_TUNING_COOLDOWN (schema key
-// butlerTuningCooldown, ADR 0062): a Go duration. Unlike the claim timeout,
-// zero is legal -- a not-planned close then never suppresses a refile -- and
-// only a negative value is rejected.
-func parseButlerTuningCooldown(value string) (time.Duration, error) {
-	d, err := time.ParseDuration(value)
-	if err != nil {
-		return 0, fmt.Errorf("butler: BUTLER_TUNING_COOLDOWN: invalid duration %q: %w", value, err)
-	}
-	if d < 0 {
-		return 0, fmt.Errorf("butler: BUTLER_TUNING_COOLDOWN: must be >= 0, got %q", value)
-	}
-	return d, nil
-}
-
 // parseButlerArgs parses `butler`'s own args: an optional "--chore <name>",
 // given at most once and with a non-empty name, plus the --no-build flag
 // every dispatch-family verb shares. Unlike parseIssuePositionals's callers,
@@ -230,10 +215,9 @@ func butlerBudgets(cfg config) chore.Budgets {
 
 // butlerSettings is resolveButlerSettings's parsed result.
 type butlerSettings struct {
-	chores         []chore.Chore
-	claimTimeout   time.Duration
-	tuningCooldown time.Duration
-	window         *daemon.Window
+	chores       []chore.Chore
+	claimTimeout time.Duration
+	window       *daemon.Window
 }
 
 // resolveButlerSettings runs every butler config check -- butlerPreflight's
@@ -250,15 +234,18 @@ func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error)
 	if err != nil {
 		return butlerSettings{}, err
 	}
-	tuningCooldown, err := parseButlerTuningCooldown(cfg.butlerTuningCooldown)
-	if err != nil {
-		return butlerSettings{}, err
+	// A sweep reads only the enabled records Chores' row-owned knobs, but every
+	// registered Digest's are validated here, before any Ledger claim.
+	for _, s := range recordsdigest.All() {
+		if _, err := s.Knobs(cfg.knobLookup); err != nil {
+			return butlerSettings{}, fmt.Errorf("butler: %w", err)
+		}
 	}
 	window, err := daemon.ParseWindow(cfg.daemonAwakeWindow)
 	if err != nil {
 		return butlerSettings{}, err
 	}
-	return butlerSettings{chores: chores, claimTimeout: claimTimeout, tuningCooldown: tuningCooldown, window: window}, nil
+	return butlerSettings{chores: chores, claimTimeout: claimTimeout, window: window}, nil
 }
 
 // hostPatchForge adapts an already-resolved CodeForge and Capabilities into
@@ -371,10 +358,7 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		PatchMaxFiles:     lc.config.butlerPatchMaxFiles,
 		PatchMaxLines:     lc.config.butlerPatchMaxLines,
 		RecordsRoot:       lc.pwd,
-		TuningMinRecords:  lc.config.butlerTuningMinRecords,
-		TuningMinSample:   lc.config.butlerTuningMinSample,
-		TuningDigestBytes: lc.config.butlerTuningDigestBytes,
-		TuningCooldown:    settings.tuningCooldown,
+		Knobs:             lc.config.knobLookup,
 	}
 
 	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.patchGate()).WithMergeReader(butlerMergeReader(lc.capabilities))

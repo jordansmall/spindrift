@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,9 +22,11 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
@@ -862,43 +865,6 @@ func TestParseButlerClaimTimeout(t *testing.T) {
 	}
 }
 
-func TestParseButlerTuningCooldown(t *testing.T) {
-	cases := []struct {
-		name    string
-		value   string
-		want    time.Duration
-		wantErr bool
-	}{
-		{"schema default", "720h", 720 * time.Hour, false},
-		{"short valid duration", "36h", 36 * time.Hour, false},
-		{"zero seconds disables the cooldown", "0s", 0, false},
-		{"bare zero disables the cooldown", "0", 0, false},
-		{"negative is rejected", "-1h", 0, true},
-		{"unparseable is rejected", "30d", 0, true},
-		{"empty is rejected", "", 0, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseButlerTuningCooldown(tc.value)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("parseButlerTuningCooldown(%q): got nil error, want one", tc.value)
-				}
-				if !strings.Contains(err.Error(), "BUTLER_TUNING_COOLDOWN") {
-					t.Errorf("error %q does not name BUTLER_TUNING_COOLDOWN", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parseButlerTuningCooldown(%q): %v", tc.value, err)
-			}
-			if got != tc.want {
-				t.Errorf("parseButlerTuningCooldown(%q) = %v, want %v", tc.value, got, tc.want)
-			}
-		})
-	}
-}
-
 // promotableRunFunc builds a runner.Fake.RunFunc that reports one finding
 // clearing every promotion gate (allow-listed class, one file, non-blank
 // concurrence) -- the real-Dispatch, log-carrier equivalent of internal/
@@ -1002,5 +968,23 @@ func TestButlerPreflight_RecordsDigest(t *testing.T) {
 	cfg := config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "tuning"}}
 	if _, err := butlerPreflight(cfg, "tuning", true, choreCatalog{}); err != nil {
 		t.Fatalf("butlerPreflight with the stock tuning Chore: %v", err)
+	}
+}
+
+// The launcher serves the tuning row's knobs from its resolved config, so a
+// value set on the config reaches the Digest's own reader unchanged.
+func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
+	c := minimalValidConfig()
+	c.butlerTuningMinSample, c.butlerTuningDigestBytes, c.butlerTuningCooldown = 3, 1000, "36h"
+	got, err := tuning.Strategy.Knobs(c.knobLookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := recordsdigest.Knobs{Limits: recordsdigest.Limits{MinSample: 3, MaxBytes: 1000}, Cooldown: 36 * time.Hour}
+	if got != want {
+		t.Errorf("Knobs = %+v, want %+v", got, want)
+	}
+	if v, ok := c.knobLookup(chore.MinRecordsKnob("tuning")); !ok || v != strconv.Itoa(c.butlerTuningMinRecords) {
+		t.Errorf("min-records knob = %q, %v, want the config's", v, ok)
 	}
 }

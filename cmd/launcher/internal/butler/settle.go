@@ -151,13 +151,13 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// from it.
 	var landings []patchLanding
 	// A Digest with a DedupTerms hook keys on the pattern a finding names. A
-	// records Chore sets the cooldown cutoff, but only its own findings expire
-	// on it; a code Chore keeps site keys, forever.
+	// records Chore sets the cutoff from its Digest's cooldown knob, but only
+	// its own findings expire on it; a code Chore keeps site keys, forever.
 	// The cutoff must stay now-cooldown: a zero NotPlannedBefore never
 	// expires, but a zero cooldown would expire every not-planned close.
 	var dedup settle.DedupPolicy
 	if s.tuning != nil {
-		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.tuning.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.tuning.policy.TuningCooldown)}
+		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.tuning.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.tuning.knobs.Cooldown)}
 	}
 	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
@@ -584,7 +584,7 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 		reason := citeDrop(in.Cites, anchors)
 		if reason == "" && s.tuning.digest.Validate != nil {
 			var err error
-			reason, err = s.tuning.digest.Validate(in, s.tuning.rendered, s.tuning.policy.digestLimits(), trackedFiles)
+			reason, err = s.tuning.digest.Validate(in, s.tuning.rendered, s.tuning.knobs.Limits, trackedFiles)
 			if err != nil {
 				return nil, nil, err
 			}

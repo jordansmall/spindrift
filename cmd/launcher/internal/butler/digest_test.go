@@ -32,6 +32,10 @@ func init() {
 	recordsdigest.Register(tuning.Strategy)
 	recordsdigest.Register(recordsdigest.Strategy{
 		Name: noPriorChore,
+		// The cooldown is the Digest's own knob, so the cooldown test reads it here.
+		ReadKnobs: func(recordsdigest.Lookup) (recordsdigest.Knobs, error) {
+			return recordsdigest.Knobs{Cooldown: 720 * time.Hour}, nil
+		},
 		Render: func(in recordsdigest.Input) recordsdigest.Output {
 			return recordsdigest.Output{Text: "digest", Latest: "latest"}
 		},
@@ -95,23 +99,24 @@ func TestRecordsSourceWithoutParsePriorSkipsBacklog(t *testing.T) {
 }
 
 // The adapter, not the Digest, decides a records Chore is due: it counts the
-// settled Records past the tip's cursor against the policy minimum.
+// settled Records past the tip's cursor. A Chore with no catalog row names no
+// min-records knob, so one new Record is enough.
 func TestRecordsSourceDueCountsNewRecordsForAnyDigest(t *testing.T) {
 	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
 	for _, tc := range []struct {
-		name        string
-		seeded, min int
-		cursorAt    int // index into the seeded Record IDs; -1 for no cursor
-		want        chore.NotDue
+		name     string
+		seeded   int
+		cursorAt int // index into the seeded Record IDs; -1 for no cursor
+		want     chore.NotDue
 	}{
-		{"enough new Records", 3, 3, -1, chore.Due},
-		{"too few new Records", 2, 3, -1, chore.TooFewRecords},
-		{"cursor at the latest Record", 3, 1, 2, chore.TooFewRecords},
+		{"enough new Records", 3, -1, chore.Due},
+		{"one new Record, no row floor", 1, -1, chore.Due},
+		{"cursor at the latest Record", 3, 2, chore.TooFewRecords},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			ids := seedRecords(t, root, 1, tc.seeded, tuningNow.Add(-48*time.Hour))
-			p := tuningPolicy(root, tc.min)
+			p := tuningPolicy(root, 1)
 			p.Chores = []chore.Chore{{Name: noPriorChore, Every: time.Hour, Records: true}}
 			r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })
 			src, err := newRecordsSource(r, noPriorChore, "head1", tuningNow)

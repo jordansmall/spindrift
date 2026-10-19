@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
+	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/tuning"
 )
 
@@ -242,6 +243,29 @@ func TestRecordsSourceSnapshotsKeyedByChore(t *testing.T) {
 	}
 }
 
+// The due check reads the knob the Chore's row names, not a field of the
+// Policy: the same three new Records are due at a floor of 3 and not at 4.
+func TestRecordsSourceDueReadsTheRowNamedKnob(t *testing.T) {
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
+	for _, tc := range []struct {
+		min  string
+		want chore.NotDue
+	}{{"3", chore.Due}, {"4", chore.TooFewRecords}} {
+		root := t.TempDir()
+		seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
+		p := tuningPolicy(root, 1)
+		p.Knobs = mapKnobs(map[string]string{chore.MinRecordsKnob("tuning"): tc.min})
+		r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })
+		src, err := newRecordsSource(r, "tuning", "head1", tuningNow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := src.Due(ledger.Tip{}, nil, tuningNow, chore.Room{}, cfg); got != tc.want {
+			t.Errorf("3 new settled Records, min %s: got %v, want %v", tc.min, got, tc.want)
+		}
+	}
+}
+
 func openRecordsDB(t *testing.T, root string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", hostpaths.DispatchRecordsDB(root))
@@ -291,5 +315,25 @@ func TestTuningSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 	snap := &tuningSnapshot{chore: tuning.Strategy.Name, ref: ref, policy: tuningPolicy(root, 1)}
 	if err := snap.load(); err != nil || snap.rendered != digest {
 		t.Fatalf("load: rendered %q, err %v; want %q", snap.rendered, err, digest)
+	}
+}
+
+func TestNewRecordsSourceErrorsOnAnUnresolvableKnob(t *testing.T) {
+	env := chore.MinRecordsKnob("tuning")
+	for name, knobs := range map[string]recordsdigest.Lookup{
+		"no lookup":       nil,
+		"unset":           mapKnobs(nil),
+		"not an int":      mapKnobs(map[string]string{env: "many"}),
+		"bad digest knob": mapKnobs(map[string]string{env: "1", "BUTLER_TUNING_COOLDOWN": "-1h"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := tuningPolicy(t.TempDir(), 1)
+			p.Knobs = knobs
+			r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })
+			_, err := newRecordsSource(r, "tuning", "head1", tuningNow)
+			if err == nil || !strings.Contains(err.Error(), "tuning") || !strings.Contains(err.Error(), "BUTLER_TUNING_") {
+				t.Fatalf("err = %v, want one naming the Chore and the knob", err)
+			}
+		})
 	}
 }
