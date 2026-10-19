@@ -2,7 +2,8 @@ package recordsdigest
 
 import "testing"
 
-func render(Input) Output { return Output{} }
+func render(Input) Output            { return Output{} }
+func anchors(string) map[string]bool { return nil }
 
 func reset(t *testing.T) {
 	saved := registry
@@ -12,7 +13,7 @@ func reset(t *testing.T) {
 
 func TestRegisterAndByName(t *testing.T) {
 	reset(t)
-	Register(Strategy{Name: "a", Render: func(in Input) Output { return Output{Text: "t", Latest: in.Cursor} }})
+	Register(Strategy{Name: "a", Anchors: anchors, Render: func(in Input) Output { return Output{Text: "t", Latest: in.Cursor} }})
 	s, ok := ByName("a")
 	if !ok {
 		t.Fatal("registered strategy not found")
@@ -27,8 +28,9 @@ func TestRegisterAndByName(t *testing.T) {
 
 func TestRegisterPanics(t *testing.T) {
 	for name, s := range map[string]Strategy{
-		"empty name": {Render: render},
-		"nil render": {Name: "x"},
+		"empty name":  {Render: render, Anchors: anchors},
+		"nil render":  {Name: "x", Anchors: anchors},
+		"nil anchors": {Name: "x", Render: render},
 	} {
 		t.Run(name, func(t *testing.T) {
 			reset(t)
@@ -42,12 +44,12 @@ func TestRegisterPanics(t *testing.T) {
 	}
 	t.Run("duplicate", func(t *testing.T) {
 		reset(t)
-		Register(Strategy{Name: "d", Render: render})
+		Register(Strategy{Name: "d", Render: render, Anchors: anchors})
 		defer func() {
 			if recover() == nil {
 				t.Error("no panic")
 			}
 		}()
-		Register(Strategy{Name: "d", Render: render})
+		Register(Strategy{Name: "d", Render: render, Anchors: anchors})
 	})
 }

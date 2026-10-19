@@ -64,19 +64,24 @@ type Output struct {
 }
 
 // Strategy is a records-scoped Chore's Records digest, registered under the
-// Chore's name. The hooks other than Render are optional: a nil hook means
+// Chore's name. Render and Anchors are required; a nil optional hook means
 // the Chore does without that feature.
 type Strategy struct {
 	// Name is the Chore name.
 	Name string
-	// Render builds the digest; required.
+	// Render builds the digest.
 	Render func(Input) Output
+	// Anchors lists what a finding may cite in a digest Render produced. The
+	// anchor syntax is the Chore's own, so the adapter cannot parse it; it drops
+	// any finding with no cites or one citing an anchor outside this set.
+	Anchors func(digest string) map[string]bool
 	// ParsePrior reads a prior finding into the Chore's own form. Nil means
 	// the Chore takes no prior findings, and the adapter does not query the
 	// backlog.
 	ParsePrior func(settle.PriorFinding) any
-	// Validate applies the Chore's own settle rules to a filed intent against
-	// the stored digest the Box was served, under the same Limits Render got.
+	// Validate applies the Chore's own settle rules, beyond the adapter's cite
+	// check, to a filed intent against the stored digest the Box was served,
+	// under the same Limits Render got.
 	// tracked lists the scanned HEAD's tracked files, lazily. A non-empty
 	// reason drops the finding with that reason; "" keeps it; an error fails
 	// the settle and leaves the claim standing.
@@ -89,13 +94,16 @@ type Strategy struct {
 var registry []Strategy
 
 // Register adds s to the registry, keyed on s.Name. It panics on a duplicate
-// or empty name or a nil Render, which are programming errors.
+// or empty name or a nil Render or Anchors, which are programming errors.
 func Register(s Strategy) {
 	if s.Name == "" {
 		panic("recordsdigest: registration with empty name")
 	}
 	if s.Render == nil {
 		panic("recordsdigest: nil Render for " + s.Name)
+	}
+	if s.Anchors == nil {
+		panic("recordsdigest: nil Anchors for " + s.Name)
 	}
 	if _, exists := ByName(s.Name); exists {
 		panic("recordsdigest: duplicate registration for " + s.Name)
