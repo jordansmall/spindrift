@@ -1,4 +1,7 @@
-package ecosystemtest
+// Package synthetic is the ecosystemtest kit's test-only row. It is a leaf
+// package so tests inside registrydiscover and registrypathset, which the kit
+// itself imports, can use the row without an import cycle.
+package synthetic
 
 import (
 	"encoding/json"
@@ -13,12 +16,12 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// Synthetic is a test-only row exercising each stage's generic behaviour
+// Row is a test-only row exercising each stage's generic behaviour
 // without naming a real ecosystem. It reads `name = <url>` lines from
 // .synthetic/registries, binds through an env export, a home config and an
 // in-tree rewrite of that file, and rewrites the "download" URL of an
-// index.json response. Real rows migrate onto this kit later (issue #5600).
-var Synthetic = ecosystem.Row{
+// index.json response.
+var Row = ecosystem.Row{
 	Name:             "synthetic",
 	LockfileNames:    []string{"synthetic.lock"},
 	Classification:   "synthetic",
@@ -46,6 +49,15 @@ var Synthetic = ecosystem.Row{
 		},
 		Rewrite: rewriteSyntheticDownload,
 	}},
+}
+
+// Twin is Row under another name and config path, for tests that need a second
+// row to declare beside the first.
+func Twin(name string) ecosystem.Row {
+	r := Row
+	r.Name = name
+	r.InTreeConfigPath = "." + name + "/registries"
+	return r
 }
 
 func parseSynthetic(content string) (decls []ecosystem.Declaration, namedAny bool, err error) {

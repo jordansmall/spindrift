@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
 func TestCorpus(t *testing.T) {
-	Run(t, Synthetic, filepath.Join("testdata", "corpus"))
+	Run(t, synthetic.Row, filepath.Join("testdata", "corpus"))
 }
 
 // copyCase copies a corpus case into a temp dir so a test can mutate it,
@@ -50,7 +51,7 @@ func copyCase(t *testing.T, name string, keepGoldens bool) string {
 }
 
 func TestReplayCaseMissingGoldenFails(t *testing.T) {
-	if errs := replayCase(Synthetic, copyCase(t, "matched", true), false); len(errs) != 0 {
+	if errs := replayCase(synthetic.Row, copyCase(t, "matched", true), false); len(errs) != 0 {
 		t.Fatalf("intact case failed: %v", errs)
 	}
 	for _, s := range stages {
@@ -59,7 +60,7 @@ func TestReplayCaseMissingGoldenFails(t *testing.T) {
 			if err := os.Remove(filepath.Join(dir, s.golden)); err != nil {
 				t.Fatal(err)
 			}
-			errs := replayCase(Synthetic, dir, false)
+			errs := replayCase(synthetic.Row, dir, false)
 			if len(errs) != 1 || !strings.Contains(errs[0].Error(), s.name) {
 				t.Fatalf("errs = %v, want exactly one naming %q", errs, s.name)
 			}
@@ -72,14 +73,14 @@ func TestReplayCaseDriftedGoldenFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pathset.golden.json"), []byte("[]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if errs := replayCase(Synthetic, dir, false); len(errs) != 1 {
+	if errs := replayCase(synthetic.Row, dir, false); len(errs) != 1 {
 		t.Fatalf("errs = %v, want exactly the drifted path-set", errs)
 	}
 }
 
 func TestReplayCaseUpdateWritesEveryGolden(t *testing.T) {
 	dir := copyCase(t, "matched", false)
-	if errs := replayCase(Synthetic, dir, true); len(errs) != 0 {
+	if errs := replayCase(synthetic.Row, dir, true); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	for _, s := range stages {
@@ -126,8 +127,8 @@ func TestReplayCaseSkipsStageRowDoesNotTakePartIn(t *testing.T) {
 
 func TestSyntheticTakesPartInEveryStage(t *testing.T) {
 	for _, s := range stages {
-		if !s.takesPart(Synthetic) {
-			t.Errorf("Synthetic skips %s", s.name)
+		if !s.takesPart(synthetic.Row) {
+			t.Errorf("synthetic row skips %s", s.name)
 		}
 	}
 }
@@ -190,7 +191,7 @@ func TestPathSetGoldenHoldsDerivedAndEnforced(t *testing.T) {
 
 func TestRefusedRoutesFileSkipsLaterRouteStages(t *testing.T) {
 	dir := copyCase(t, "refused", true)
-	if errs := replayCase(Synthetic, dir, false); len(errs) != 0 {
+	if errs := replayCase(synthetic.Row, dir, false); len(errs) != 0 {
 		t.Fatalf("intact refused case failed: %v", errs)
 	}
 	if got := readGolden(t, "refused", "routes.golden.json"); !strings.Contains(got, `"refused"`) || !strings.Contains(got, "mirror-path") || !strings.Contains(got, "must be an absolute path") {
@@ -206,10 +207,10 @@ func TestRefusedRoutesFileSkipsLaterRouteStages(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if errs := replayCase(Synthetic, dir, false); len(errs) != 1 {
+	if errs := replayCase(synthetic.Row, dir, false); len(errs) != 1 {
 		t.Fatalf("errs = %v, want one stale-golden failure", errs)
 	}
-	if errs := replayCase(Synthetic, dir, true); len(errs) != 0 {
+	if errs := replayCase(synthetic.Row, dir, true); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
@@ -221,7 +222,7 @@ func TestDiscoveryFedParseErrorStaysAStageFailure(t *testing.T) {
 	// Discovery's own output is never an operator's mistake: its refusal is a
 	// stage failure, not a golden.
 	dir := copyCase(t, "matched", false)
-	row := Synthetic
+	row := synthetic.Row
 	row.ConfigParser = func(string) ([]ecosystem.Declaration, bool, error) {
 		return nil, false, errors.New("unparseable")
 	}
@@ -237,10 +238,10 @@ func TestDiscoveryFedParseErrorStaysAStageFailure(t *testing.T) {
 	}
 }
 
-// echoingSynthetic is Synthetic with an EnvExports that echoes a prior
+// echoingSynthetic is synthetic.Row with an EnvExports that echoes a prior
 // environment value, so a case's env.json is observable in its binding stage.
 func echoingSynthetic() ecosystem.Row {
-	row := Synthetic
+	row := synthetic.Row
 	base := row.EnvExports
 	row.EnvExports = func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		exports, warnings := base(port, prefix, getenv, routes)
@@ -309,14 +310,14 @@ func TestReplayCaseDriftedClassificationGoldenFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "classification.golden.txt"), []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	errs := replayCase(Synthetic, dir, false)
+	errs := replayCase(synthetic.Row, dir, false)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "lockfile classification") {
 		t.Fatalf("errs = %v, want exactly the drifted classification", errs)
 	}
 }
 
 func TestEnvJSONWithoutEnvExportsFails(t *testing.T) {
-	row := Synthetic
+	row := synthetic.Row
 	row.EnvExports = nil
 	errs := replayCase(row, copyCase(t, "env", false), true)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "env.json") || !strings.Contains(errs[0].Error(), "EnvExports") {
@@ -325,7 +326,7 @@ func TestEnvJSONWithoutEnvExportsFails(t *testing.T) {
 }
 
 func TestNullEnvJSONWithoutEnvExportsFails(t *testing.T) {
-	row := Synthetic
+	row := synthetic.Row
 	row.EnvExports = nil
 	dir := copyCase(t, "env", false)
 	if err := os.WriteFile(filepath.Join(dir, "env.json"), []byte("null"), 0o644); err != nil {
