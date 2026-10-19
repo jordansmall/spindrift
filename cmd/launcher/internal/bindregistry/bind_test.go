@@ -95,15 +95,14 @@ func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 // the rendered exports carry its var, while a HomeConfig row is named
 // unconditionally because its file is always written.
 func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
-	original := ecosystem.Table
-	ecosystem.Table = []ecosystem.Row{
+	rows := []ecosystem.Row{
 		{Name: "stub-bound", BindingEnvVar: "STUB_BOUND_REGISTRY"},
 		{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"},
 		{Name: "stub-file", HomeConfig: &ecosystem.HomeConfig{}},
 	}
-	t.Cleanup(func() { ecosystem.Table = original })
 
 	got := bindingSummaryProse(
+		rows,
 		[]ecosystem.EnvExport{{Name: "STUB_BOUND_REGISTRY", Value: "http://127.0.0.1:1/r0"}},
 		map[string]string{"stub-file": "/tmp/stub.conf"},
 	)
@@ -116,11 +115,9 @@ func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
 // The degenerate case the skip rule newly makes reachable: empty prose is what
 // lets the caller drop the separator rather than print a dangling one.
 func TestBindingSummaryProse_EmptyWhenNothingBound(t *testing.T) {
-	original := ecosystem.Table
-	ecosystem.Table = []ecosystem.Row{{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"}}
-	t.Cleanup(func() { ecosystem.Table = original })
+	rows := []ecosystem.Row{{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"}}
 
-	if got := bindingSummaryProse(nil, nil); got != "" {
+	if got := bindingSummaryProse(rows, nil, nil); got != "" {
 		t.Errorf("bindingSummaryProse(nothing bound) = %q, want %q", got, "")
 	}
 }
