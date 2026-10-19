@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -65,17 +66,29 @@ const (
 	dedupMarkerSuffix = " -->"
 )
 
-// tuningChoreTerm is the dedup-marker term a tuning Chore finding carries
-// (ADR 0062). Trackers without a label registry (local, jira) cannot wear
-// agent-tuning-finding, so the merge hold of a PR closing such a finding
-// recognises it by this term instead. "=" is not a dedupPunctRun separator,
-// so the term survives normalizeDedupKey unchanged. It is excluded from dedup
-// matching because every tuning finding carries it.
-const tuningChoreTerm = "chore=tuning"
+// choreTermPrefix opens the dedup-marker term a Chore finding carries, naming
+// the Chore that filed it (ADR 0062). Trackers without a label registry
+// (local, jira) cannot wear the Chore's finding label, so the merge hold of a
+// PR closing such a finding recognises it by this term instead. "=" is not a
+// dedupPunctRun separator, so the term survives normalizeDedupKey unchanged.
+// It is excluded from dedup matching because every finding of a Chore carries
+// it.
+const choreTermPrefix = "chore="
+
+// choreTerm is the marker term naming Chore name.
+func choreTerm(name string) string { return choreTermPrefix + name }
 
 // isProvenanceTerm reports whether k records where a finding came from rather
 // than a site to dedup on, so the index and the overlap match both skip it.
-func isProvenanceTerm(k string) bool { return k == tuningChoreTerm }
+// Only a catalog Chore's term counts: a Box-supplied "chore=foo" is a site.
+func isProvenanceTerm(k string) bool {
+	name, ok := strings.CutPrefix(k, choreTermPrefix)
+	return ok && slices.ContainsFunc(catalogRows(), func(r chore.Row) bool { return r.Name == name })
+}
+
+// tuningChore names the tuning Chore for its own expiry and digest features,
+// not the merge hold, which reads the catalog row instead.
+const tuningChore = "tuning"
 
 // dedupPunctRun matches a run of site-key separators plus any touching space,
 // so "Type.Field", "Type:Field", "type#field", "type_field", and
@@ -199,11 +212,11 @@ func parseDedupMarker(body string) []string {
 	return nil
 }
 
-// carriesTuningMarker reports whether body's last dedup marker line carries
-// tuningChoreTerm. Like parseDedupMarker it ignores earlier marker lines, so
-// a finding quoting the marker format cannot claim the term.
-func carriesTuningMarker(body string) bool {
-	return slices.Contains(parseDedupMarker(body), tuningChoreTerm)
+// carriesChoreMarker reports whether body's last dedup marker line carries
+// the term naming Chore name. Like parseDedupMarker it ignores earlier marker
+// lines, so a finding quoting the marker format cannot claim the term.
+func carriesChoreMarker(body, name string) bool {
+	return slices.Contains(parseDedupMarker(body), choreTerm(name))
 }
 
 // isFindingIssue reports whether labels carries one of findingLabels, the
@@ -248,7 +261,7 @@ func indexFindingIssues(index map[string]string, issues []forge.Issue, notPlanne
 // expires one, and a code finding, carrying no tuning marker, never does.
 func notPlannedExpired(iss forge.Issue, cutoff time.Time) bool {
 	return !cutoff.IsZero() && iss.ClosedNotPlanned && !iss.ClosedAt.IsZero() &&
-		!iss.ClosedAt.After(cutoff) && carriesTuningMarker(iss.Body)
+		!iss.ClosedAt.After(cutoff) && carriesChoreMarker(iss.Body, tuningChore)
 }
 
 // backlogDedupIndex maps every dedup key already covered to a
@@ -470,7 +483,7 @@ func TuningFindings(it forge.IssueTracker) ([]TuningFinding, error) {
 	var out []TuningFinding
 	collect := func(issues []forge.Issue, open bool) {
 		for _, iss := range issues {
-			if !isFindingIssue(iss.Labels) || !carriesTuningMarker(iss.Body) {
+			if !isFindingIssue(iss.Labels) || !carriesChoreMarker(iss.Body, tuningChore) {
 				continue
 			}
 			f := TuningFinding{Issue: iss, Open: open}

@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -78,7 +78,7 @@ func TestFileButlerFindings_ReportsFailedCount(t *testing.T) {
 	}
 }
 
-// A finding filed with the tuning label carries tuningChoreTerm in its hidden
+// A finding filed with the tuning label carries tuningTerm in its hidden
 // marker, beside the Box's own terms and also when the Box gave none -- the
 // term is derived from the label, so the two cannot diverge.
 func TestFileButlerFindings_TuningLabelWritesMarkerTerm(t *testing.T) {
@@ -87,14 +87,14 @@ func TestFileButlerFindings_TuningLabelWritesMarkerTerm(t *testing.T) {
 		intent string
 		want   []string
 	}{
-		{"with box terms", `{"title":"t","body":"b","dedupTerms":["Role:Implement"]}`, []string{"role:implement", tuningChoreTerm}},
-		{"no box terms", `{"title":"t","body":"b"}`, []string{tuningChoreTerm}},
+		{"with box terms", `{"title":"t","body":"b","dedupTerms":["Role:Implement"]}`, []string{"role:implement", tuningTerm}},
+		{"no box terms", `{"title":"t","body":"b"}`, []string{tuningTerm}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fc := forge.NewFake()
 			result := dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{tc.intent}}
 			plan := func([]Finding) func(Finding) Decoration {
-				return func(Finding) Decoration { return Decoration{ExtraLabels: []string{doctor.TuningFindingLabel}} }
+				return func(Finding) Decoration { return Decoration{ExtraLabels: []string{chore.FindingLabel("tuning")}} }
 			}
 			FileButlerFindings(fc.AsIssueFiler(), "1", result, 0, DedupPolicy{}, plan)
 			if len(fc.PostIssueCalls) != 1 {
@@ -104,9 +104,36 @@ func TestFileButlerFindings_TuningLabelWritesMarkerTerm(t *testing.T) {
 			if got := parseDedupMarker(call.Body); !slices.Equal(got, tc.want) {
 				t.Errorf("marker terms = %v, want %v", got, tc.want)
 			}
-			if !slices.Contains(call.Labels, doctor.TuningFindingLabel) {
-				t.Errorf("labels = %v, want %q", call.Labels, doctor.TuningFindingLabel)
+			if !slices.Contains(call.Labels, chore.FindingLabel("tuning")) {
+				t.Errorf("labels = %v, want %q", call.Labels, chore.FindingLabel("tuning"))
 			}
 		})
+	}
+}
+
+// The marker term follows the catalog row of whichever Chore label a finding
+// wears: a synthetic row writes chore=synthetic, and a label no row owns
+// writes none.
+func TestFileButlerFindings_CatalogRowWritesItsChoreTerm(t *testing.T) {
+	withCatalogRows(t, syntheticHold)
+	for _, tc := range []struct {
+		label string
+		want  []string
+	}{
+		{syntheticHold.FindingLabel, []string{"chore=synthetic"}},
+		{"agent-unrelated-finding", nil},
+	} {
+		fc := forge.NewFake()
+		result := dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{`{"title":"t","body":"b"}`}}
+		plan := func([]Finding) func(Finding) Decoration {
+			return func(Finding) Decoration { return Decoration{ExtraLabels: []string{tc.label}} }
+		}
+		FileButlerFindings(fc.AsIssueFiler(), "1", result, 0, DedupPolicy{}, plan)
+		if len(fc.PostIssueCalls) != 1 {
+			t.Fatalf("%s: PostIssueCalls = %+v, want 1", tc.label, fc.PostIssueCalls)
+		}
+		if got := parseDedupMarker(fc.PostIssueCalls[0].Body); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: marker terms = %v, want %v", tc.label, got, tc.want)
+		}
 	}
 }

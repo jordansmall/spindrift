@@ -264,12 +264,15 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		// already-covered term too: both issues are then valid "already
 		// tracked" answers, and the next run sees full coverage and skips.
 		//
-		// A finding wearing the tuning label also carries tuningChoreTerm, so
-		// a tracker with no label registry (local, jira) can still recognise
-		// it; deriving the term from the label keeps the two from diverging.
+		// A finding wearing a Chore's finding label also carries that Chore's
+		// choreTerm, so a tracker with no label registry (local, jira) can
+		// still recognise it; deriving the term from the label keeps the two
+		// from diverging.
 		markerTerms := terms
-		if slices.Contains(extraLabels, doctor.TuningFindingLabel) {
-			markerTerms = append(slices.Clone(terms), tuningChoreTerm)
+		for _, row := range catalogRows() {
+			if wearsFindingLabel(row, extraLabels) {
+				markerTerms = append(slices.Clone(markerTerms), choreTerm(row.Name))
+			}
 		}
 		marker := buildDedupMarker(markerTerms)
 		if marker == "" {

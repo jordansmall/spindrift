@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
@@ -1151,6 +1152,115 @@ func TestSelfHeal_TuningHold_CommentPRErrorStillHolds(t *testing.T) {
 	}
 }
 
+// Every MERGE_MODE holds a tuning PR, by label on a registry tracker and by
+// the chore=tuning marker on a tracker without one: the issue ends
+// agent-complete and the PR is flipped ready, never merged.
+func TestSelfHeal_TuningHeldUnderEveryMergeMode(t *testing.T) {
+	cases := []struct {
+		name     string
+		registry bool
+		labels   []string
+		body     string
+	}{
+		{"label on registry tracker", true, []string{"agent-in-progress", "agent-tuning-finding"}, ""},
+		{"marker on registry-less tracker", false, []string{"agent-in-progress"}, tuningBody},
+	}
+	for _, mode := range []string{"immediate", "auto", "manual"} {
+		for _, tc := range cases {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				s, fc := tuningTestSettle(mode, tc.registry, tc.labels, tc.body)
+				landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+				assertTuningHeld(t, s, fc, landing)
+				iss, _ := fc.Issue("1")
+				if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
+					t.Errorf("held issue must be agent-complete, not agent-failed; labels=%v", iss.Labels)
+				}
+			})
+		}
+	}
+}
+
+// The hold and precaution comments for tuning are pinned byte for byte: the
+// wording is documented and reviewers key off it.
+func TestTuningHoldComments_ExactWording(t *testing.T) {
+	tuning := chore.Row{Name: "tuning", FindingLabel: "agent-tuning-finding", MergeByHand: true}
+	wantHold := "merge held for tuning provenance: this PR closes a tuning finding (agent-tuning-finding) — not merging regardless of MERGE_MODE; review and merge by hand. Removing the agent-tuning-finding label from the issue is the override and lets a PR merge normally"
+	if got := holdComment(tuning); got != wantHold {
+		t.Errorf("holdComment = %q, want %q", got, wantHold)
+	}
+	wantErr := "tuning provenance: could not read the closing issue (boom) — downgrading to manual as a precaution; review and merge by hand"
+	if got := holdCheckErrorComment([]chore.Row{tuning}, errors.New("boom")); got != wantErr {
+		t.Errorf("holdCheckErrorComment = %q, want %q", got, wantErr)
+	}
+}
+
+// withCatalogRows swaps the catalog settle consults for the test's duration.
+func withCatalogRows(t *testing.T, rows ...chore.Row) {
+	t.Helper()
+	orig := catalogRows
+	catalogRows = func() []chore.Row { return rows }
+	t.Cleanup(func() { catalogRows = orig })
+}
+
+var (
+	syntheticHold = chore.Row{Name: "synthetic", FindingLabel: "agent-synthetic-finding", MergeByHand: true}
+	syntheticFree = chore.Row{Name: "freebie", FindingLabel: "agent-freebie-finding"}
+)
+
+// The hold is a Chore row fact, not a tuning special case: any row marked
+// MergeByHand holds the PR closing its finding, naming that row's label.
+func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
+	withCatalogRows(t, syntheticHold, syntheticFree)
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-synthetic-finding"}, "")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	if landing != landingManual {
+		t.Fatalf("selfHeal = %v, want landingManual", landing)
+	}
+	s.settledMu.Lock()
+	reason := s.settledLatch["1"].reason
+	s.settledMu.Unlock()
+	if reason != ReasonTuningProvenance {
+		t.Errorf("latched reason = %q, want %q", reason, ReasonTuningProvenance)
+	}
+	if fc.Merged != "" {
+		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
+	}
+	assertTuningPRComment(t, fc, "hold comment")
+	if body := fc.CommentPRCalls[0].Body; !strings.Contains(body, "agent-synthetic-finding") {
+		t.Errorf("hold comment must name the row's label; body=%q", body)
+	}
+}
+
+func TestSelfHeal_SyntheticMergeByHandRow_HoldsByMarkerOnLabelessTracker(t *testing.T) {
+	withCatalogRows(t, syntheticHold)
+	body := "finding\n<!-- spindrift-dedup: foo, chore=synthetic -->"
+	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress"}, body)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	if landing != landingManual || fc.Merged != "" {
+		t.Errorf("selfHeal = %v, Merged=%q; want landingManual and no merge", landing, fc.Merged)
+	}
+	// The tuning marker is no longer special once tuning is off the catalog.
+	s, fc = tuningTestSettle("immediate", false, []string{"agent-in-progress"}, tuningBody)
+	if landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil); landing != landingMerged || fc.Merged != testPR {
+		t.Errorf("selfHeal = %v, Merged=%q; want landingMerged for a marker no MergeByHand row owns", landing, fc.Merged)
+	}
+}
+
+// A Chore whose finding label does not set MergeByHand merges normally, and
+// with no MergeByHand row at all the closing issue is never even read.
+func TestSelfHeal_NonMergeByHandRow_DoesNotHold(t *testing.T) {
+	withCatalogRows(t, syntheticFree)
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-freebie-finding"}, "")
+	fc.IssueErr = errors.New("gh issue view: 502")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	if landing != landingMerged || fc.Merged != testPR {
+		t.Errorf("selfHeal = %v, Merged=%q; want landingMerged", landing, fc.Merged)
+	}
+	if len(fc.CommentPRCalls) != 0 {
+		t.Errorf("no hold comment expected; got %+v", fc.CommentPRCalls)
+	}
+}
+
 // Each force-pushed head that goes red gets its own count in the failure
 // comment: a first head fixed to green and merged-retried must not leak its
 // pass into the second head's "K on the force-pushed head" (issue #5095).
@@ -1227,5 +1337,15 @@ func TestSelfHeal_StaleBasePreflightRed_DispatchesFixPassThenMerges(t *testing.T
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must carry agent-complete only; labels=%v", iss.Labels)
+	}
+}
+
+// With several merge-by-hand rows the unreadable issue's Chore is unknown, so
+// the precaution comment names them all.
+func TestHoldCheckErrorComment_JoinsEveryRow(t *testing.T) {
+	other := chore.Row{Name: "other", FindingLabel: "agent-other-finding", MergeByHand: true}
+	want := "synthetic/other provenance: could not read the closing issue (boom) — downgrading to manual as a precaution; review and merge by hand"
+	if got := holdCheckErrorComment([]chore.Row{syntheticHold, other}, errors.New("boom")); got != want {
+		t.Errorf("holdCheckErrorComment = %q, want %q", got, want)
 	}
 }
