@@ -113,3 +113,12 @@ The cite check needs the Digest's anchor syntax, which only the Chore
 knows, so the Strategy gains a required `Anchors` function. The adapter
 then drops an uncited or unknown-anchor finding for every records Chore,
 whether or not its Digest has a `Validate`.
+
+## Amendment (issue #5701): a guard keeps tuning out of the core
+
+Only the tuning package, the Host bundle and generated code (the catalog,
+the row's knob reader and the row-knob table) may name tuning.
+`cmd/launcher/tuning_guard_test.go` fails on a tuning identifier or import
+anywhere else in non-test code, and on a `chore=tuning` literal in settle.
+Strings and comments are out of its scope, so env names, the finding
+label and the persisted `tuning-provenance` reason may still spell it.
