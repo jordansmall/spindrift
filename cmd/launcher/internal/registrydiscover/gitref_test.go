@@ -5,12 +5,22 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/testutil"
 )
+
+var (
+	syntheticRows = []ecosystem.Row{synthetic.Row}
+	cfgPath       = synthetic.Row.InTreeConfigPath
+)
+
+const hostDecl = "main = https://host.example.com/registry\n"
 
 // Pins ResolveRef's fail-closed contract directly, not only through its
 // MaterializeRef and UncoveredHostsFromGitRef callers.
@@ -27,7 +37,7 @@ func TestResolveRef_MissingRepoDirFails(t *testing.T) {
 // wrong repo. The t.Chdir into the fixture is what makes that failure visible.
 func TestResolveRef_EmptyRepoDirFails(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		cfgPath: hostDecl,
 	}, nil)
 	t.Chdir(bare)
 
@@ -40,7 +50,7 @@ func TestResolveRef_EmptyRepoDirFails(t *testing.T) {
 // through MaterializeRef.
 func TestResolveRef_MissingRefFails(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		cfgPath: hostDecl,
 	}, nil)
 
 	err := ResolveRef(bare, "does-not-exist")
@@ -56,7 +66,7 @@ func TestResolveRef_MissingRefFails(t *testing.T) {
 // success path.
 func TestResolveRef_ResolvableRefSucceeds(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		cfgPath: hostDecl,
 	}, nil)
 
 	if err := ResolveRef(bare, "main"); err != nil {
@@ -66,10 +76,10 @@ func TestResolveRef_ResolvableRefSucceeds(t *testing.T) {
 
 func TestUncoveredHostsFromGitRef_UncoveredHostReported(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		cfgPath: hostDecl,
 	}, nil)
 
-	got, err := UncoveredHostsFromGitRef(bare, "main", nil)
+	got, err := UncoveredHostsFromGitRefRows(bare, "main", nil, syntheticRows)
 	if err != nil {
 		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
@@ -81,10 +91,10 @@ func TestUncoveredHostsFromGitRef_UncoveredHostReported(t *testing.T) {
 
 func TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		cfgPath: hostDecl,
 	}, nil)
 
-	got, err := UncoveredHostsFromGitRef(bare, "main", []string{"host.example.com"})
+	got, err := UncoveredHostsFromGitRefRows(bare, "main", []string{"host.example.com"}, syntheticRows)
 	if err != nil {
 		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
@@ -95,7 +105,7 @@ func TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone(t *testing.T) {
 
 func TestUncoveredHostsFromGitRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := UncoveredHostsFromGitRef(missing, "main", nil)
+	_, err := UncoveredHostsFromGitRefRows(missing, "main", nil, syntheticRows)
 	if err == nil {
 		t.Fatal("UncoveredHostsFromGitRef: want error for a missing repo dir, got nil")
 	}
@@ -103,10 +113,10 @@ func TestUncoveredHostsFromGitRef_MissingRepoDirFails(t *testing.T) {
 
 func TestUncoveredHostsFromGitRef_MissingRefFails(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc": "registry=https://host.example.com/npm\n",
+		cfgPath: hostDecl,
 	}, nil)
 
-	_, err := UncoveredHostsFromGitRef(bare, "does-not-exist", nil)
+	_, err := UncoveredHostsFromGitRefRows(bare, "does-not-exist", nil, syntheticRows)
 	if err == nil {
 		t.Fatal("UncoveredHostsFromGitRef: want error for a ref that does not exist, got nil")
 	}
@@ -120,7 +130,7 @@ func TestUncoveredHostsFromGitRef_MissingRefFails(t *testing.T) {
 func TestUncoveredHostsFromGitRef_NoConfigFilesReturnsNone(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, nil)
 
-	got, err := UncoveredHostsFromGitRef(bare, "main", nil)
+	got, err := UncoveredHostsFromGitRefRows(bare, "main", nil, syntheticRows)
 	if err != nil {
 		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
@@ -131,10 +141,10 @@ func TestUncoveredHostsFromGitRef_NoConfigFilesReturnsNone(t *testing.T) {
 
 func mustMaterializeRef(t *testing.T, bare, ref string) string {
 	t.Helper()
-	dir, cleanup, err := MaterializeRef(bare, ref)
+	dir, cleanup, err := MaterializeRefRows(bare, ref, syntheticRows)
 	t.Cleanup(cleanup)
 	if err != nil {
-		t.Fatalf("MaterializeRef: unexpected error: %v", err)
+		t.Fatalf("MaterializeRefRows: unexpected error: %v", err)
 	}
 	return dir
 }
@@ -152,38 +162,38 @@ func mustNotExist(t *testing.T, path string) {
 // slices would pass slices.Equal without either side having followed a link.
 func assertRefCheckoutHostsAgree(t *testing.T, bare, ref, src string) {
 	t.Helper()
-	refHosts, err := UncoveredHostsFromGitRef(bare, ref, nil)
+	refHosts, err := UncoveredHostsFromGitRefRows(bare, ref, nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
 	}
-	checkoutHosts, err := UncoveredHosts(src, nil)
+	checkoutHosts, err := UncoveredHostsRows(src, nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
 	}
 	if len(refHosts) == 0 {
-		t.Fatalf("UncoveredHostsFromGitRef = %v, want at least one host", refHosts)
+		t.Fatalf("UncoveredHostsFromGitRefRows = %v, want at least one host", refHosts)
 	}
 	if !slices.Equal(refHosts, checkoutHosts) {
-		t.Errorf("UncoveredHostsFromGitRef = %v, UncoveredHosts = %v, want them equal", refHosts, checkoutHosts)
+		t.Errorf("UncoveredHostsFromGitRefRows = %v, UncoveredHostsRows = %v, want them equal", refHosts, checkoutHosts)
 	}
 }
 
 // A leaf in-tree symlink (the config path itself is a symlink) must resolve
 // to its target's content, matching what os.ReadFile gives a real checkout.
 func TestMaterializeRef_LeafSymlinkResolvesToTargetContent(t *testing.T) {
-	const content = "registry=https://leaf.example.com/npm\n"
+	const content = "leaf = https://leaf.example.com/registry\n"
 	bare, src := testutil.BareRepoWithConfigs(t, "main",
-		map[string]string{"sub/npmrc": content},
-		map[string]string{".npmrc": "sub/npmrc"},
+		map[string]string{filepath.Join(filepath.Dir(cfgPath), "real"): content},
+		map[string]string{cfgPath: "real"},
 	)
 
 	dir := mustMaterializeRef(t, bare, "main")
-	got, err := os.ReadFile(filepath.Join(dir, ".npmrc"))
+	got, err := os.ReadFile(filepath.Join(dir, cfgPath))
 	if err != nil {
-		t.Fatalf("read materialized .npmrc: %v", err)
+		t.Fatalf("read materialized config: %v", err)
 	}
 	if string(got) != content {
-		t.Errorf("materialized .npmrc = %q, want %q", got, content)
+		t.Errorf("materialized config = %q, want %q", got, content)
 	}
 
 	// The ref snapshot and a real checkout of the same tree must agree:
@@ -191,23 +201,23 @@ func TestMaterializeRef_LeafSymlinkResolvesToTargetContent(t *testing.T) {
 	assertRefCheckoutHostsAgree(t, bare, "main", src)
 }
 
-// A symlinked parent directory (cargo's ".cargo" row path, when the Target
-// repo keeps ".cargo" itself as a symlink) must resolve the same way: the
-// leaf path under the symlinked directory materializes with its real content.
+// A symlinked parent directory (the Target repo keeping the config path's
+// directory itself as a symlink) must resolve the same way: the leaf path
+// under the symlinked directory materializes with its real content.
 func TestMaterializeRef_ParentDirSymlinkResolvesToTargetContent(t *testing.T) {
-	const content = "[registries.othercorp]\nindex = \"sparse+https://cargo.example.test/index/\"\n"
+	const content = "parent = https://parent.example.com/registry\n"
 	bare, src := testutil.BareRepoWithConfigs(t, "main",
-		map[string]string{"real/config.toml": content},
-		map[string]string{".cargo": "real"},
+		map[string]string{"real/registries": content},
+		map[string]string{filepath.Dir(cfgPath): "real"},
 	)
 
 	dir := mustMaterializeRef(t, bare, "main")
-	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(dir, cfgPath))
 	if err != nil {
-		t.Fatalf("read materialized .cargo/config.toml: %v", err)
+		t.Fatalf("read materialized config: %v", err)
 	}
 	if string(got) != content {
-		t.Errorf("materialized .cargo/config.toml = %q, want %q", got, content)
+		t.Errorf("materialized config = %q, want %q", got, content)
 	}
 
 	assertRefCheckoutHostsAgree(t, bare, "main", src)
@@ -217,11 +227,11 @@ func TestMaterializeRef_ParentDirSymlinkResolvesToTargetContent(t *testing.T) {
 // ExtractRows hard-errors reading one in a checkout.
 func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc/inner": "anything",
+		cfgPath + "/inner": "anything",
 	}, nil)
 
 	dir := mustMaterializeRef(t, bare, "main")
-	mustNotExist(t, filepath.Join(dir, ".npmrc"))
+	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
 // The checkout side of the parity above: ExtractRows does hard-error reading
@@ -229,12 +239,12 @@ func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 // against.
 func TestUncoveredHosts_DirectoryAtConfigPathErrors(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".npmrc"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := UncoveredHosts(dir, nil); !errors.Is(err, syscall.EISDIR) {
-		t.Fatalf("UncoveredHosts: err = %v, want EISDIR for a directory at the config path", err)
+	if _, err := UncoveredHostsRows(dir, nil, syntheticRows); !errors.Is(err, syscall.EISDIR) {
+		t.Fatalf("UncoveredHostsRows: err = %v, want EISDIR for a directory at the config path", err)
 	}
 }
 
@@ -242,67 +252,75 @@ func TestUncoveredHosts_DirectoryAtConfigPathErrors(t *testing.T) {
 // out-of-tree symlink names (ADR 0033).
 func TestMaterializeRef_OutOfTreeSymlinkSkips(t *testing.T) {
 	outside := t.TempDir()
-	target := filepath.Join(outside, "external.npmrc")
-	if err := os.WriteFile(target, []byte("registry=https://outside.example.com/npm\n"), 0o644); err != nil {
+	target := filepath.Join(outside, "external")
+	if err := os.WriteFile(target, []byte("out = https://outside.example.com/registry\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, map[string]string{".npmrc": target})
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, map[string]string{cfgPath: target})
 
 	dir := mustMaterializeRef(t, bare, "main")
-	mustNotExist(t, filepath.Join(dir, ".npmrc"))
+	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
 func TestMaterializeRef_DanglingSymlinkSkips(t *testing.T) {
-	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, map[string]string{".npmrc": "nope"})
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, map[string]string{cfgPath: "nope"})
 
 	dir := mustMaterializeRef(t, bare, "main")
-	mustNotExist(t, filepath.Join(dir, ".npmrc"))
+	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
-// A self-referential symlink (.npmrc -> .npmrc) is the "loop" reply shape,
-// confirmed against real git with `printf 'HEAD:.npmrc\n' | git cat-file
-// --batch --follow-symlinks`.
+// A self-referential symlink (the config path pointing at itself) is the
+// "loop" reply shape, confirmed against real git with `printf
+// 'HEAD:<path>\n' | git cat-file --batch --follow-symlinks`.
 func TestMaterializeRef_SelfLoopSymlinkSkips(t *testing.T) {
-	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, map[string]string{".npmrc": ".npmrc"})
+	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, map[string]string{cfgPath: filepath.Base(cfgPath)})
 
 	dir := mustMaterializeRef(t, bare, "main")
-	mustNotExist(t, filepath.Join(dir, ".npmrc"))
+	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
-// ".cargo" committed as a symlink to a regular file makes ".cargo/config.toml"
-// the "notdir" reply shape: a path component that resolves to a non-directory.
+// The config path's directory committed as a symlink to a regular file makes
+// the config path the "notdir" reply shape: a path component that resolves to
+// a non-directory.
 func TestMaterializeRef_NotDirComponentSkips(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main",
 		map[string]string{"realfile": "anything"},
-		map[string]string{".cargo": "realfile"},
+		map[string]string{filepath.Dir(cfgPath): "realfile"},
 	)
 
 	dir := mustMaterializeRef(t, bare, "main")
-	mustNotExist(t, filepath.Join(dir, ".cargo", "config.toml"))
+	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
-// One batch reply per row: mis-consuming the .npmrc tree reply's payload
-// would desync the .yarnrc.yml blob reply after it.
+// One batch reply per row: mis-consuming the first row's tree reply payload
+// would desync the blob reply after it. The third row stays absent so the
+// "missing" reply is parsed in the same batch.
 func TestMaterializeRef_MultiRowBatchParsing(t *testing.T) {
-	const yarnContent = "some yarn yml content\n"
+	const twinContent = "twin = https://twin.example.com/registry\n"
+	twin := synthetic.Twin("synthetic-twin")
+	missing := synthetic.Twin("synthetic-missing")
+	rows := []ecosystem.Row{synthetic.Row, twin, missing}
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		".npmrc/inner": "anything",
-		".yarnrc.yml":  yarnContent,
+		cfgPath + "/inner":    "anything",
+		twin.InTreeConfigPath: twinContent,
 	}, nil)
 
-	dir := mustMaterializeRef(t, bare, "main")
-
-	mustNotExist(t, filepath.Join(dir, ".cargo", "config.toml"))
-	mustNotExist(t, filepath.Join(dir, ".npmrc"))
-	mustNotExist(t, filepath.Join(dir, "pnpm-workspace.yaml"))
-
-	got, err := os.ReadFile(filepath.Join(dir, ".yarnrc.yml"))
+	dir, cleanup, err := MaterializeRefRows(bare, "main", rows)
+	t.Cleanup(cleanup)
 	if err != nil {
-		t.Fatalf("read materialized .yarnrc.yml: %v", err)
+		t.Fatalf("MaterializeRefRows: unexpected error: %v", err)
 	}
-	if string(got) != yarnContent {
-		t.Errorf("materialized .yarnrc.yml = %q, want %q", got, yarnContent)
+
+	mustNotExist(t, filepath.Join(dir, cfgPath))
+	mustNotExist(t, filepath.Join(dir, missing.InTreeConfigPath))
+
+	got, err := os.ReadFile(filepath.Join(dir, twin.InTreeConfigPath))
+	if err != nil {
+		t.Fatalf("read materialized twin config: %v", err)
+	}
+	if string(got) != twinContent {
+		t.Errorf("materialized twin config = %q, want %q", got, twinContent)
 	}
 }
 
@@ -310,7 +328,7 @@ func TestMaterializeRef_MultiRowBatchParsing(t *testing.T) {
 // puts a space inside the header line too, so splitting the whole header on
 // whitespace misreads a two-field "missing" reply as an unrecognized header.
 func TestParseCatFileBatch_RefWithSpaceMissingHeader(t *testing.T) {
-	out := []byte("HEAD@{1 day ago}:.npmrc missing\n")
+	out := []byte("HEAD@{1 day ago}:" + cfgPath + " missing\n")
 
 	blobs, err := parseCatFileBatch(out, 1)
 	if err != nil {
@@ -325,7 +343,8 @@ func TestParseCatFileBatch_RefWithSpaceMissingHeader(t *testing.T) {
 // consume to stay in step with the blob reply after it. The self-loop fixture
 // test only shows the file is absent, which a "missing" reply would show too.
 func TestParseCatFileBatch_LoopPayloadThenBlob(t *testing.T) {
-	out := []byte("loop 11\nHEAD:.npmrc\n" +
+	loopPath := "HEAD:" + cfgPath
+	out := []byte("loop " + strconv.Itoa(len(loopPath)) + "\n" + loopPath + "\n" +
 		"0123456789012345678901234567890123456789 blob 5\nhello\n")
 
 	blobs, err := parseCatFileBatch(out, 2)
