@@ -11,8 +11,10 @@ type OCINetwork struct {
 
 // OCINetwork resolves c's network knobs for an OCI runtime (issue #2562, #2666).
 // podmanNetwork is the raw PODMAN_NETWORK escape hatch, a row knob the oci
-// family reads itself rather than carrying on Config.
-func (c Config) OCINetwork(podmanNetwork string) OCINetwork {
+// family reads itself rather than carrying on Config. noHostLoopbackArg is the
+// runtime's own `--network` spelling for NETWORK_MODE=no-host-loopback; that
+// dialect is the OCI adapter's, so core never compares a runtime value.
+func (c Config) OCINetwork(podmanNetwork, noHostLoopbackArg string) OCINetwork {
 	n := OCINetwork{Mode: c.NetworkMode}
 	// Raw wins: mkHarness and main.go's checkNetworkModeRuntimeGate already
 	// reject pairing it with a non-open mode.
@@ -22,13 +24,7 @@ func (c Config) OCINetwork(podmanNetwork string) OCINetwork {
 	}
 	switch c.NetworkMode {
 	case NetworkModeNoHostLoopback:
-		// docker/nerdctl render "bridge", their own default, so only podman's
-		// pasta without --map-gw denies the host-loopback route.
-		if c.Runtime == "podman" {
-			n.Arg = "pasta"
-		} else {
-			n.Arg = "bridge"
-		}
+		n.Arg = noHostLoopbackArg
 	case NetworkModeNone:
 		n.Arg = string(NetworkModeNone)
 	}

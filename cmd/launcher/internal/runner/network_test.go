@@ -6,47 +6,28 @@ func TestConfig_OCINetwork(t *testing.T) {
 	modes := []struct {
 		name string
 		mode NetworkMode
+		want string
 	}{
-		{"open", NetworkModeOpen},
-		{"no-host-loopback", NetworkModeNoHostLoopback},
-		{"none", NetworkModeNone},
-		{"host", NetworkModeHost},
-		{"empty", ""},
+		{"open", NetworkModeOpen, ""},
+		{"no-host-loopback", NetworkModeNoHostLoopback, "dialect-arg"},
+		{"none", NetworkModeNone, "none"},
+		{"host", NetworkModeHost, ""},
+		{"empty", "", ""},
 	}
-	// "" is what runner.Lookup routes to OCI when RUNNER_KIND is unset.
-	runtimes := []struct {
-		runtime       string
-		noHostLoopArg string
-	}{
-		{"podman", "pasta"},
-		{"docker", "bridge"},
-		{"rancher", "bridge"},
-		{"", "bridge"},
-	}
-	for _, rt := range runtimes {
-		for _, m := range modes {
-			want := OCINetwork{Mode: m.mode}
-			switch m.mode {
-			case NetworkModeNoHostLoopback:
-				want.Arg = rt.noHostLoopArg
-			case NetworkModeNone:
-				want.Arg = "none"
+	for _, m := range modes {
+		t.Run(m.name, func(t *testing.T) {
+			got := Config{NetworkMode: m.mode}.OCINetwork("", "dialect-arg")
+			if want := (OCINetwork{Mode: m.mode, Arg: m.want}); got != want {
+				t.Errorf("OCINetwork() = %+v, want %+v", got, want)
 			}
-			name := rt.runtime + "/" + m.name
-			t.Run(name, func(t *testing.T) {
-				got := Config{Runtime: rt.runtime, NetworkMode: m.mode}.OCINetwork("")
-				if got != want {
-					t.Errorf("OCINetwork() = %+v, want %+v", got, want)
-				}
-			})
-			// A raw PODMAN_NETWORK wins beside every mode on every runtime.
-			t.Run(name+"/raw", func(t *testing.T) {
-				got := Config{Runtime: rt.runtime, NetworkMode: m.mode}.OCINetwork("slirp4netns")
-				if want := (OCINetwork{Mode: m.mode, Arg: "slirp4netns"}); got != want {
-					t.Errorf("OCINetwork() = %+v, want %+v", got, want)
-				}
-			})
-		}
+		})
+		// A raw PODMAN_NETWORK wins beside every mode.
+		t.Run(m.name+"/raw", func(t *testing.T) {
+			got := Config{NetworkMode: m.mode}.OCINetwork("slirp4netns", "dialect-arg")
+			if want := (OCINetwork{Mode: m.mode, Arg: "slirp4netns"}); got != want {
+				t.Errorf("OCINetwork() = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
 
