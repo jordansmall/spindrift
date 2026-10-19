@@ -729,3 +729,21 @@ func TestRegistryRouteDriftRow_RemedyDerivesDiscoverSynopsis(t *testing.T) {
 		t.Errorf("drift Remedy %q must say --force is required", drift.Remedy)
 	}
 }
+
+// writeTwoRegistryCargoFixture writes a .cargo/config.toml declaring two
+// [registries.NAME] entries on the same host with Artifactory-shaped index
+// paths (ADR 0047 / spec #3253's field shape: one Artifactory host fronting
+// both an internal repo and a proxied crates.io remote).
+func writeTwoRegistryCargoFixture(t *testing.T, dir, host string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	content := "[registries.internal]\n" +
+		"index = \"https://" + host + "/artifactory/api/cargo/internal-crates/index\"\n" +
+		"[registries.crates-io-remote]\n" +
+		"index = \"https://" + host + "/artifactory/api/cargo/crates-io-remote/index\"\n"
+	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
