@@ -124,30 +124,6 @@ func TestKinds_StoreConfigMatchesStoreLookupConfig(t *testing.T) {
 	}
 }
 
-// Only cargo-credentials gates on a fact: the ecosystem, not RegistryName,
-// which npm scopes or uv index names may also fill. Every other store kind's
-// StoreApplicable is nil or always true.
-func TestKinds_StoreApplicable(t *testing.T) {
-	for _, k := range StoreKinds() {
-		switch k.SourceKey {
-		case "cargo-credentials":
-			if k.StoreApplicable == nil {
-				t.Fatalf("cargo-credentials.StoreApplicable is nil, want a non-nil gate")
-			}
-			if !k.StoreApplicable(StoreFacts{Ecosystem: "cargo", RegistryName: "myreg"}) {
-				t.Errorf("cargo-credentials.StoreApplicable(cargo, RegistryName=myreg) = false, want true")
-			}
-			if k.StoreApplicable(StoreFacts{Ecosystem: "npm", RegistryName: "myorg"}) {
-				t.Errorf("cargo-credentials.StoreApplicable(npm, RegistryName=myorg) = true, want false")
-			}
-		default:
-			if k.StoreApplicable != nil && !k.StoreApplicable(StoreFacts{}) {
-				t.Errorf("%s.StoreApplicable(zero StoreFacts) = false, want nil or true", k.SourceKey)
-			}
-		}
-	}
-}
-
 func TestIsCompanionKey(t *testing.T) {
 	for _, key := range []string{"registry-name", "key"} {
 		if !IsCompanionKey(key) {

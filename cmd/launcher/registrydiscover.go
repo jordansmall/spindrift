@@ -18,8 +18,8 @@ import (
 // too, so an operator still sees which hosts matched; only the `route ...`
 // lines mean a file was written. Zero routes is a failure: a header-only file
 // would fail registryroutes.Parse.
-func runRegistryDiscover(stdout, stderr io.Writer, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
-	routes, report, err := registrydiscover.Discover(repoDir, stores, lookup, probe)
+func runRegistryDiscover(stdout, stderr io.Writer, repoDir, outPath string, force bool, stores []registrydiscover.Store, storesByEcosystem map[string][]string, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
+	routes, report, err := registrydiscover.Discover(repoDir, stores, storesByEcosystem, lookup, probe)
 	if err != nil {
 		// An Extract error carries a zero Report, which prints nothing:
 		// every printRegistryDiscoverReport section is guarded by len > 0.
@@ -129,7 +129,7 @@ func cmdRegistryDiscover(args []string, stdout, stderr io.Writer) int {
 		return registrydiscover.HTTPProbe(registrydiscover.DefaultProbeClient(), u)
 	}
 
-	return runRegistryDiscover(stdout, stderr, positional[0], positional[1], force, stores, registrydiscover.StoreLookup, probe)
+	return runRegistryDiscover(stdout, stderr, positional[0], positional[1], force, stores, ecosystem.CredentialStores(), registrydiscover.StoreLookup, probe)
 }
 
 // defaultRegistryDiscoverStores names the operator credential stores discovery

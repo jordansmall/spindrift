@@ -9,7 +9,6 @@ import "slices"
 // Host and HostKey hold different values: npmrc's store keys on the raw
 // host, gradle-properties' on registryvocab.HostKey(host).
 type StoreFacts struct {
-	Ecosystem       string
 	Host            string
 	HostKey         string
 	UpstreamBaseURL string
@@ -45,10 +44,6 @@ type Kind struct {
 	// given the store's resolved path and the route's facts. nil when the
 	// kind is not a store.
 	StoreConfig func(path string, f StoreFacts) Config
-	// StoreApplicable reports whether this store kind applies given f; nil
-	// means always applicable. Only cargo-credentials sets it, restricting
-	// that store to cargo declarations.
-	StoreApplicable func(f StoreFacts) bool
 
 	// newFileResolver is non-nil only for the five file-backed kinds. New
 	// walks the table matching FileFormat rather than switching on it.
@@ -101,7 +96,6 @@ var kindTable = []Kind{
 		StoreConfig: func(path string, f StoreFacts) Config {
 			return Config{FromFile: path, FileFormat: "cargo-credentials", RegistryName: f.RegistryName}
 		},
-		StoreApplicable: func(f StoreFacts) bool { return f.Ecosystem == "cargo" },
 		newFileResolver: func(c Config) Resolver {
 			return peekOnly{cargoFileResolver{path: c.FromFile, registryName: c.RegistryName}}
 		},
