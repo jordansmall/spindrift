@@ -657,6 +657,8 @@ driverGoTests
         "forge"
         "settle"
         "runner"
+        "runner/oci"
+        "runner/bwrap"
         "driver"
         "freshness"
       ];
@@ -693,6 +695,57 @@ driverGoTests
             echo "internal/$pkg imports internal/console — violates ADR 0023's one-way dependency (engine packages never import console)" >&2
             exit 1
           fi
+        done
+        touch $out
+      '';
+
+  # ADR 0069 decision 2 (issue #5677): the core runner package holds no
+  # family-specific code, and the two family packages never see each other.
+  # go list -deps catches an import that arrives through a third package too;
+  # -test makes a family import from only a _test.go file count as well.
+  launcher-runner-family-isolation =
+    let
+      families = [
+        "oci"
+        "bwrap"
+      ];
+    in
+    pkgs.runCommand "launcher-runner-family-isolation"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        families = pkgs.lib.concatStringsSep " " families;
+      }
+      ''
+        cp -r ${../../cmd/launcher} src
+        chmod -R +w src
+        cp -r ${launcherGoModules} src/vendor
+        ${goCheckEnv}
+        cd src
+        runnerPkg=spindrift.dev/launcher/internal/runner
+        # reaches PKG FAMILY WHY: fail naming both when FAMILY is in PKG's deps.
+        reaches() {
+          if ! deps=$(go list -deps -test "./internal/$1" 2>&1); then
+            # core importing a family forms a cycle, since each family imports
+            # core; blame ADR 0069 only when the toolchain reports one.
+            if echo "$deps" | grep -q 'import cycle'; then
+              echo "go list failed for internal/$1 — likely an import cycle, which violates ADR 0069 decision 2 ($3):" >&2
+            else
+              echo "go list failed for internal/$1 for a reason unrelated to a family import (see below) — not necessarily an ADR 0069 violation:" >&2
+            fi
+            echo "$deps" >&2
+            exit 1
+          fi
+          # -test lists variants as "PKG [PKG.test]", so match the path as a word.
+          if echo "$deps" | grep -qE "^$runnerPkg/$2( |\$)"; then
+            echo "internal/$1 imports internal/runner/$2 — violates ADR 0069 decision 2 ($3)" >&2
+            exit 1
+          fi
+        }
+        for fam in $families; do
+          reaches runner "$fam" "the core runner package must not import a family package"
+          for other in $families; do
+            [ "$fam" = "$other" ] || reaches "runner/$fam" "$other" "a family package must not import another family"
+          done
         done
         touch $out
       '';
