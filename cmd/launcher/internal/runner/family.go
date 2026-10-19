@@ -12,6 +12,9 @@ type Descriptor struct {
 	Runtimes []string
 	// Artifact is the flake package the family exposes under imageAttrName.
 	Artifact string
+	// NetworkModes are the NETWORK_MODE values the family can render; the
+	// mkHarness assert and the launch gate both reject any other.
+	NetworkModes []string
 }
 
 // ValidValues are the operator-facing runtime values, the same list

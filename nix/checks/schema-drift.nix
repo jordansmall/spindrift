@@ -1025,11 +1025,12 @@ checkedMerge {
       rows = import ../../lib/runners;
       render = rs: builtins.tryEval (renderers.renderRunnerFamiliesGo rs);
       tweakFirst = f: imap0 (i: r: if i == 0 then f r else r) rows;
-      unknownField = tweakFirst (r: r // { networkModes = [ ]; });
+      unknownField = tweakFirst (r: r // { bogusField = [ ]; });
       noGoName = tweakFirst (r: removeAttrs r [ "goName" ]);
       noArtifact = tweakFirst (r: removeAttrs r [ "artifact" ]);
       noName = tweakFirst (r: removeAttrs r [ "name" ]);
       noRuntimes = tweakFirst (r: removeAttrs r [ "runtimes" ]);
+      noNetworkModes = tweakFirst (r: removeAttrs r [ "networkModes" ]);
     in
     assert assertMsg (render rows).success
       "runners-gen-row-guard (ADR 0069): the real lib/runners rows must render successfully, but they failed -- the guard would be vacuous";
@@ -1043,6 +1044,8 @@ checkedMerge {
       "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing name, but it rendered successfully";
     assert assertMsg (!(render noRuntimes).success)
       "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing runtimes, but it rendered successfully";
+    assert assertMsg (!(render noNetworkModes).success)
+      "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing networkModes, but it rendered successfully";
     pkgs.runCommand "runners-gen-row-guard" { } "touch $out";
 
   # Regenerate with `nix run .#regen` when a Driver's credential rules change

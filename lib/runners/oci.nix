@@ -8,4 +8,10 @@
     "rancher"
   ];
   artifact = "oci-image";
+  networkModes = [
+    "open"
+    "no-host-loopback"
+    "none"
+    "host"
+  ];
 }

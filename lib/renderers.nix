@@ -1346,6 +1346,11 @@ rec {
           go = "Artifact";
           render = row: "\"${row.artifact}\"";
         }
+        {
+          attr = "networkModes";
+          go = "NetworkModes";
+          render = row: "[]string{${renderGoStringSlice row.networkModes}}";
+        }
       ];
       # goName names the exported Go var and the Kind constant; it is not a
       # Descriptor field.
