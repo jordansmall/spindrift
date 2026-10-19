@@ -997,8 +997,8 @@ func assertTuningHeld(t *testing.T, s *Settle, fc *forge.Fake, landing landingRe
 	s.settledMu.Lock()
 	reason := s.settledLatch["1"].reason
 	s.settledMu.Unlock()
-	if reason != ReasonTuningProvenance {
-		t.Errorf("latched reason = %q, want %q", reason, ReasonTuningProvenance)
+	if reason != ReasonMergeByHand {
+		t.Errorf("latched reason = %q, want %q", reason, ReasonMergeByHand)
 	}
 	assertLatchedLeftOpen(t, s, "1")
 	if fc.Merged != "" {
@@ -1219,8 +1219,8 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 	s.settledMu.Lock()
 	reason := s.settledLatch["1"].reason
 	s.settledMu.Unlock()
-	if reason != ReasonTuningProvenance {
-		t.Errorf("latched reason = %q, want %q", reason, ReasonTuningProvenance)
+	if reason != ReasonMergeByHand {
+		t.Errorf("latched reason = %q, want %q", reason, ReasonMergeByHand)
 	}
 	if fc.Merged != "" {
 		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)

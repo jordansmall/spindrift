@@ -15,7 +15,7 @@ import (
 // Ledger slots before any PostIssue call.
 type Finding struct {
 	Class, Concurrence string
-	// Cites are the Tuning digest anchors a tuning finding argues from (issue
+	// Cites are the digest anchors a records finding argues from (issue
 	// #4952); internal/butler checks them against the stored digest snapshot.
 	Cites      []string
 	DedupTerms []string
