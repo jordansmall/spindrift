@@ -7,7 +7,7 @@ import "spindrift.dev/launcher/internal/driver/driverkit"
 // markers are phrase-anchored so a digit run such as a token count or timestamp
 // does not match (issue #4423). opencode supplies its own list to keep 429
 // precedence over "overloaded_error"/"Overloaded". Exported only for
-// driver/opencode.go to hand to driverkit.Classify; treat it as read-only.
+// Strategy; treat it as read-only.
 var TransientPatterns = []driverkit.Pattern{
 	{Substr: "rate_limit_error", Reason: driverkit.RateLimit},
 	{Substr: "status 429", Reason: driverkit.RateLimit},
