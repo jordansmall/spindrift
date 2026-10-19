@@ -26,6 +26,7 @@ let
     "lib/chore-catalog.nix"
     "lib/env-schema.nix"
     "lib/backends/**"
+    "lib/chores/**"
     "lib/row-knobs.nix"
     "lib/row-knob-registries.nix"
     "flake.nix"

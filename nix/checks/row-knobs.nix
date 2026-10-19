@@ -125,7 +125,7 @@ let
         }) registry.rows
       ) registries
     )).${name} or { };
-  # Pinned regression list of the knobs issue #5635 (and the forgejo move)
+  # Pinned regression list of the knobs issues #5635 and #5700 (and the forgejo move)
   # placed on rows, not a general rule. Three GitHub-named knobs stay shared
   # because the core launcher reads them ungated: GH_TOKEN (Box env guard,
   # bootstrap, and git's gh credential helper), GH_TOKEN_REFRESH_FILE (token
@@ -145,6 +145,12 @@ let
       jiraStatusMapping = "JIRA_STATUS_MAPPING";
       jiraIncludeComments = "JIRA_INCLUDE_COMMENTS";
       jiraToken = "JIRA_TOKEN";
+    };
+    tuning = {
+      butlerTuningMinRecords = "BUTLER_TUNING_MIN_RECORDS";
+      butlerTuningMinSample = "BUTLER_TUNING_MIN_SAMPLE";
+      butlerTuningCooldown = "BUTLER_TUNING_COOLDOWN";
+      butlerTuningDigestBytes = "BUTLER_TUNING_DIGEST_BYTES";
     };
     local = {
       localIssuesDir = "LOCAL_ISSUES_DIR";
@@ -201,7 +207,7 @@ in
       hasInfix "lib/stubs/one.nix" (messages keyDupe) && hasInfix "lib/stubs/two.nix" (messages keyDupe)
     ) "row-knobs: the duplicate-key collision message must name both rows' sources";
     assert assertMsg (unowned == [ ])
-      "row-knobs: a pinned knob is missing from its backend row or has the wrong env name (or is absent from the folded schema); offenders: ${builtins.concatStringsSep ", " unowned}";
+      "row-knobs: a pinned knob is missing from its row or has the wrong env name (or is absent from the folded schema); offenders: ${builtins.concatStringsSep ", " unowned}";
     assert assertMsg (rowsMissingFile == [ ])
       "row-knobs: a registry row carrying knobs must have a file at <source>/<name>.nix; missing: ${builtins.concatStringsSep ", " rowsMissingFile}";
     assert assertMsg (

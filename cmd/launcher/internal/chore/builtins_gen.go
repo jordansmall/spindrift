@@ -37,3 +37,10 @@ var builtinEvery = map[string]string{
 var builtinFindingLabels = map[string]string{
 	"tuning": "agent-tuning-finding",
 }
+
+// builtinMinRecordsKnobs is each records-scoped built-in Chore's minimum new-Record
+// knob, as an env name; a Chore absent here has none.
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
+var builtinMinRecordsKnobs = map[string]string{
+	"tuning": "BUTLER_TUNING_MIN_RECORDS",
+}

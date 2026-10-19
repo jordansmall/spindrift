@@ -118,6 +118,7 @@ in
       # rows, folded by lib/row-knobs.nix from the registries
       # lib/row-knob-registries.nix lists (issue #5634).
       "lib/backends/**"
+      "lib/chores/**"
       "lib/row-knobs.nix"
       "lib/row-knob-registries.nix"
       "flake.nix"

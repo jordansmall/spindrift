@@ -209,6 +209,44 @@ in
     ) "checkClassLists must throw when a mergeByHand chore declares no findingLabel";
     pkgs.runCommand "chore-catalog-merge-by-hand-needs-finding-label-throws" { } "touch $out";
 
+  # A records-scoped Chore's due test reads its minimum new-Record count from
+  # a knob, so the row must name one of its own knobs (issue #5700).
+  chore-catalog-records-scoped-needs-min-records-knob-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          (builtins.removeAttrs tuningRow [ "minRecordsKnob" ])
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when a records-scoped chore declares no minRecordsKnob";
+    pkgs.runCommand "chore-catalog-records-scoped-needs-min-records-knob-throws" { } "touch $out";
+
+  chore-catalog-min-records-knob-must-be-own-knob-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          (tuningRow // { minRecordsKnob = "butlerTuningNoSuchKnob"; })
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when minRecordsKnob names a key outside the chore's own knobs";
+    pkgs.runCommand "chore-catalog-min-records-knob-must-be-own-knob-throws" { } "touch $out";
+
+  chore-catalog-tuning-min-records-knob =
+    assert assertMsg
+      (
+        catalog.minRecordsKnobs == {
+          tuning = "BUTLER_TUNING_MIN_RECORDS";
+        }
+      )
+      "lib/chore-catalog.nix: minRecordsKnobs must map tuning to BUTLER_TUNING_MIN_RECORDS (issue #5700)";
+    pkgs.runCommand "chore-catalog-tuning-min-records-knob" { } "touch $out";
+
   chore-catalog-built-ins-class-lists-ok =
     let
       ok = builtins.tryEval (builtins.deepSeq catalog.classLists "reached");

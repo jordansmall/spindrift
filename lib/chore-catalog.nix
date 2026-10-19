@@ -15,14 +15,20 @@
 # findingLabel (a provenance label every finding of the Chore wears, e.g.
 # the tuning Chore's agent-tuning-finding, ADR 0062), and mergeByHand (a
 # bool, default false: the host never merges a PR closing one of the
-# Chore's findings and a human merges it, ADR 0070).
+# Chore's findings and a human merges it, ADR 0070), knobs (env-schema
+# entries keyed by env-schema key that the row owns, folded in by
+# lib/row-knobs.nix; nix/checks/row-knobs.nix requires a row with knobs to
+# live in lib/chores/<name>.nix), and
+# minRecordsKnob (required of a records-scoped row: the key of one of its
+# own knobs holding its minimum new-Record count, issue #5700).
 let
   # Throws unless every chore's scopeSource is "tree" or "records" (absent
   # means tree), every chore's promotionClasses and patchClasses sit on its
   # classList, a records-scoped chore declares neither (it files findings
   # for a human and never promotes or patches, ADR 0062), and a mergeByHand
   # chore carries a non-empty findingLabel (the hold's comment names it, ADR
-  # 0070); exported so nix/checks/chore-catalog.nix can feed it broken
+  # 0070), and a records-scoped chore's minRecordsKnob names a key in its own
+  # knobs; exported so nix/checks/chore-catalog.nix can feed it broken
   # catalogs.
   checkClassLists =
     cs:
@@ -40,6 +46,9 @@ let
       recordsBad = builtins.filter (c: isRecords c && (c.promotionClasses ++ c.patchClasses) != [ ]) cs;
       bad = builtins.filter (c: missing c != [ ]) cs;
       noLabel = builtins.filter (c: (c.mergeByHand or false) && (c.findingLabel or "") == "") cs;
+      noMinRecords = builtins.filter (
+        c: isRecords c && !(c ? minRecordsKnob && builtins.hasAttr c.minRecordsKnob (c.knobs or { }))
+      ) cs;
     in
     if badScope != [ ] then
       throw (
@@ -55,6 +64,11 @@ let
       throw (
         "lib/chore-catalog.nix: mergeByHand chores must declare a non-empty findingLabel: "
         + builtins.concatStringsSep ", " (map (c: c.name) noLabel)
+      )
+    else if noMinRecords != [ ] then
+      throw (
+        "lib/chore-catalog.nix: records-scoped chores must declare a minRecordsKnob naming one of their own knobs: "
+        + builtins.concatStringsSep ", " (map (c: c.name) noMinRecords)
       )
     else if bad == [ ] then
       cs
@@ -109,23 +123,7 @@ let
       promotionClasses = [ "stale-reference" ];
       patchClasses = [ "stale-reference" ];
     }
-    {
-      name = "tuning";
-      classList = [
-        "cost-waste"
-        "quality-regression"
-        "prompt-gap"
-        "model-fit"
-        "knob-tuning"
-        "evidence-gap"
-      ];
-      promotionClasses = [ ];
-      patchClasses = [ ];
-      scopeSource = "records";
-      every = "24h";
-      findingLabel = "agent-tuning-finding";
-      mergeByHand = true;
-    }
+    (import ./chores/tuning.nix)
   ];
   names = map (c: c.name) chores;
   recordsScoped = map (c: c.name) (
@@ -143,6 +141,14 @@ let
       inherit (c) name;
       value = c.findingLabel;
     }) (builtins.filter (c: c ? findingLabel) chores)
+  );
+  # Chore name -> env name of its minimum new-Record knob (records-scoped
+  # chores only); checkClassLists guarantees the key names an own knob.
+  minRecordsKnobs = builtins.listToAttrs (
+    map (c: {
+      inherit (c) name;
+      value = c.knobs.${c.minRecordsKnob}.env;
+    }) (builtins.filter (c: c ? minRecordsKnob) chores)
   );
   classLists = builtins.listToAttrs (
     map (c: {
@@ -175,6 +181,7 @@ in
     mergeByHand
     everyDefaults
     findingLabels
+    minRecordsKnobs
     classesDefault
     patchClassesDefault
     checkClassLists

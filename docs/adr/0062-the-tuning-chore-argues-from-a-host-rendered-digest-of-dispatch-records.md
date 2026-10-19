@@ -132,7 +132,9 @@ that rewrote the reviewer prompt would merge itself once green.
    too, so a PR that shrinks the guard now trips it.) (Amended by issue
    #5634: row-owned knobs (ADR 0068) move part of the env schema onto
    registry rows, so the list also names `lib/backends/**`,
-   `lib/row-knobs.nix` and `lib/row-knob-registries.nix`.)
+   `lib/row-knobs.nix` and `lib/row-knob-registries.nix`. Amended by issue
+   #5700: the tuning row and its `BUTLER_TUNING_*` knobs live in
+   `lib/chores/tuning.nix`, so the list also names `lib/chores/**`.)
 
 ## Considered Options
 

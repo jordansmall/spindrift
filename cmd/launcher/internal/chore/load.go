@@ -173,6 +173,10 @@ func Load(k Knobs) ([]Chore, error) {
 // caller that must not lose the label to an unrelated knob fault can use it.
 func FindingLabel(name string) string { return builtinFindingLabels[name] }
 
+// MinRecordsKnob is the env name of the knob holding a records-scoped built-in
+// Chore's minimum new-Record count, or "" for a Chore with none.
+func MinRecordsKnob(name string) string { return builtinMinRecordsKnobs[name] }
+
 // FindingLabels is the deduplicated FindingLabel of each BUTLER_CHORES entry,
 // tokenised the way Load tokenises it, so a caller never re-parses the list.
 func FindingLabels(chores string) []string {
