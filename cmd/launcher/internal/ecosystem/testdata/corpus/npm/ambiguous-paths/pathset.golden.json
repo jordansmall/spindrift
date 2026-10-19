@@ -1,0 +1,16 @@
+[
+  {
+    "Host": "acme.jfrog.test",
+    "Origin": "https://acme.jfrog.test",
+    "Subtrees": [
+      {
+        "ecosystem": "npm",
+        "path": "/artifactory/api/npm/npm-remote"
+      },
+      {
+        "ecosystem": "npm",
+        "path": "/artifactory/api/npm/npm-local"
+      }
+    ]
+  }
+]

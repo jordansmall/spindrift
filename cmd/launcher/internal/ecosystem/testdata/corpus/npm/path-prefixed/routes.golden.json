@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "npmrc",
+      "FromEnv": "",
+      "FromFile": "stores/npmrc",
+      "MatchHost": "acme.jfrog.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://acme.jfrog.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "acme.jfrog.test",
+    "UpstreamOrigin": ""
+  }
+]

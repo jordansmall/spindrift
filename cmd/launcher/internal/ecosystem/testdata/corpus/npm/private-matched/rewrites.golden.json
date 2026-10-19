@@ -1,0 +1,17 @@
+[
+  {
+    "body": "{\n  \"name\": \"@acme/gadget\",\n  \"dist-tags\": {\"latest\": \"1.0.0\"},\n  \"versions\": {\n    \"1.0.0\": {\n      \"name\": \"@acme/gadget\",\n      \"version\": \"1.0.0\",\n      \"dist\": {\n        \"tarball\": \"http://127.0.0.1:27182/registry-acme-test/@acme/gadget/-/gadget-1.0.0.tgz\",\n        \"integrity\": \"sha512-Y29ycHVzLXRlc3QtZmFrZS1pbnRlZ3JpdHktbm90LXJlYWw=\"\n      }\n    }\n  }\n}\n",
+    "request": "GET /registry-acme-test/@acme/gadget",
+    "status": 200
+  },
+  {
+    "body": "{\n  \"name\": \"widget\",\n  \"dist-tags\": {\"latest\": \"1.0.0\"},\n  \"versions\": {\n    \"1.0.0\": {\n      \"name\": \"widget\",\n      \"version\": \"1.0.0\",\n      \"dist\": {\n        \"tarball\": \"http://127.0.0.1:27182/registry-acme-test/widget/-/widget-1.0.0.tgz\",\n        \"integrity\": \"sha512-Y29ycHVzLXRlc3QtZmFrZS1pbnRlZ3JpdHktbm90LXJlYWw=\"\n      }\n    }\n  }\n}\n",
+    "request": "GET /registry-acme-test/widget",
+    "status": 200
+  },
+  {
+    "body": "not a real tarball\n",
+    "request": "GET /registry-acme-test/widget-tools/-/widget-tools-1.0.0.tgz",
+    "status": 200
+  }
+]
