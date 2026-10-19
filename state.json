@@ -1,21 +1,21 @@
 {
-  "lastSwept": "7fabea977b9dbe3d559a32d1abcb7d285321a56e",
-  "cursor": "cmd/launcher/internal/driver/driverkit/roles.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-19T11:12:06.596921038-04:00"
-  },
+  "lastSwept": "8eb585545ade2b54093d761d879b52d69cb5b11c",
+  "cursor": "cmd/launcher/internal/driver/opencode/testdata/corpus/rate-limit-reset/transcript.golden.txt",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/5781"
+  ],
+  "promoted": [
+    "https://github.com/jordansmall/spindrift/issues/5781"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
-  },
-  "reserved": 1
+    "input_tokens": 36,
+    "output_tokens": 6738,
+    "cache_read_input_tokens": 717399,
+    "cache_creation_input_tokens": 45240,
+    "total_cost_usd": 0.78658055,
+    "duration_ms": 85877,
+    "duration_api_ms": 83383,
+    "num_turns": 20
+  }
 }
