@@ -21,14 +21,15 @@
   # (issue #597).
   agents,
   # The contract files sliced from issue-prompt.md / research-prompt.md
-  # (issues #419, #455, #640) and their injectors, plus the fragment,
-  # prompt-contract and forbidden-markers registries baked as JSON for the Go
-  # `driver-exec` verbs (issues #2354, #2356, #2464). Also lib/agent-paths.nix's
-  # attrset, the single source for the baked /agent/* paths (issue #2531).
+  # (issues #419, #455, #640), plus the fragment, prompt-contract and
+  # forbidden-markers registries baked as JSON for the Go `driver-exec` verbs
+  # (issues #2354, #2356, #2464). Also lib/agent-paths.nix's attrset, the
+  # single source for the baked /agent/* paths (issue #2531).
   contracts,
-  # The prompt tree: the agent prompt template and subagent system prompts, the
-  # research prompts (ADR 0022, issues #640, #2202), the conditional fragments
-  # source dir (issue #463), and the fragment registry's preamble (issue #622).
+  # The prompt tree: the subagent system prompts, the already-injected kind
+  # prompts (kindPrompts, one { file; baked } per dispatch kind row prompt),
+  # the conditional fragments source dir (issue #463), and the fragment
+  # registry's preamble (issue #622).
   prompts,
   # The knob subset the image consumes: nix-in-box / writable-store wiring
   # (ADR 0018), the forgejo-backend selector (issue #1963), the prefetch
@@ -289,7 +290,9 @@ let
     cp ${pkgs.writeText "fragments-registry.json" contracts.fragmentsRegistryJson} $out${contracts.agentPaths.PROMPTASSEMBLY_REGISTRY_FILE}
     cp ${pkgs.writeText "prompt-contract-registry.json" contracts.promptContractRegistryJson} $out${contracts.agentPaths.PROMPT_CONTRACT_REGISTRY_FILE}
     cp ${pkgs.writeText "forbidden-markers-registry.json" contracts.forbiddenMarkersRegistryJson} $out${contracts.agentPaths.FORBIDDEN_MARKERS_REGISTRY_FILE}
-    cp ${pkgs.writeText "issue-prompt.md" (contracts.injectOutcomeContract prompts.prompt)} $out${contracts.agentPaths.PROMPTS_DIR}/issue-prompt.md
+    ${lib.concatMapStrings (
+      e: "cp ${pkgs.writeText e.file e.baked} $out${contracts.agentPaths.PROMPTS_DIR}/${e.file}\n"
+    ) prompts.kindPrompts}
     cp ${pkgs.writeText "scout-prompt.md" prompts.scoutPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/scout-prompt.md
     cp ${pkgs.writeText "review-prompt.md" prompts.reviewPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/review-prompt.md
     cp ${pkgs.writeText "review-axis-prompt.md" prompts.reviewAxisPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/review-axis-prompt.md
@@ -303,11 +306,6 @@ let
       "cp ${pkgs.writeText pf e.prompt} $out${contracts.agentPaths.PROMPTS_DIR}/${pf}\n"
     ) agents.customRosterPromptFiles}
     cp ${pkgs.writeText "conflict-resolve-prompt.md" prompts.conflictResolvePrompt} $out${contracts.agentPaths.PROMPTS_DIR}/conflict-resolve-prompt.md
-    cp ${pkgs.writeText "fix-prompt.md" (contracts.injectFixSharedBlocks prompts.fixPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/fix-prompt.md
-    cp ${pkgs.writeText "research-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/research-prompt.md
-    cp ${pkgs.writeText "research-self-contained-prompt.md" (contracts.injectResearchOutcomeContract prompts.researchSelfContainedPrompt)} $out${contracts.agentPaths.PROMPTS_DIR}/research-self-contained-prompt.md
-    cp ${pkgs.writeText "butler-prompt.md" prompts.butlerPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/butler-prompt.md
-    cp ${pkgs.writeText "butler-review-prompt.md" prompts.butlerReviewPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/butler-review-prompt.md
     cp -r ${prompts.fragmentsSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/fragments
     cp -r ${prompts.choresSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/chores
   '';
