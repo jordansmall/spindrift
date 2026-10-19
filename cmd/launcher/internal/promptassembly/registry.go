@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"spindrift.dev/launcher/internal/backend"
 )
 
 // FragmentRow is the Go mirror of one row in lib/fragments.nix's conditional
@@ -103,10 +105,7 @@ func forgeSignal(e Env) string {
 	if e.ForgeBackend != "" {
 		return e.ForgeBackend
 	}
-	if e.CodeForge == "forgejo" {
-		return "FORGEJO"
-	}
-	return "GH"
+	return backend.ForgeBackendSignal(e.CodeForge)
 }
 
 // trackerReadFilerSignals is Env's tracker read and filer axis signals,

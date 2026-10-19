@@ -53,8 +53,8 @@ type Env struct {
 	ScoutProvisioned  bool
 
 	// IssueTracker selects the per-axis issue-tracker gate family, defaulting to
-	// "github" when empty. The PR-body ticket-reference gates switch on the raw
-	// "local" comparison rather than an axis; the per-axis suffixes arrive
+	// "github" when empty. The PR-body ticket-reference gates switch on the tracker
+	// row's slug-issue-reference fact rather than the name; the per-axis suffixes arrive
 	// pre-resolved below (issue #2533).
 	IssueTracker string // $ISSUE_TRACKER
 
