@@ -20,7 +20,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
@@ -109,7 +108,7 @@ func seedRecordsSettled(t *testing.T, root string, keyBase, n int, first time.Ti
 
 func tuningPolicy(root string, minRecords int) Policy {
 	p := testRunPolicy(0, "tuning")
-	p.Chores = []chore.Chore{{Name: "tuning", Every: 24 * time.Hour, Records: true, FindingLabel: doctor.TuningFindingLabel}}
+	p.Chores = []chore.Chore{{Name: "tuning", Every: 24 * time.Hour, Records: true, FindingLabel: chore.FindingLabel("tuning")}}
 	p.RecordsRoot = root
 	p.TuningMinRecords = minRecords
 	p.TuningMinSample = 15
@@ -462,7 +461,7 @@ func TestSweep_Tuning_DueFilesWithBothLabels(t *testing.T) {
 		t.Fatalf("PostIssueCalls = %+v, want 1", tr.fc.PostIssueCalls)
 	}
 	call := tr.fc.PostIssueCalls[0]
-	for _, l := range []string{"agent-butler-finding", doctor.TuningFindingLabel} {
+	for _, l := range []string{"agent-butler-finding", chore.FindingLabel("tuning")} {
 		if !slices.Contains(call.Labels, l) {
 			t.Errorf("labels = %v, want %q", call.Labels, l)
 		}
@@ -472,10 +471,10 @@ func TestSweep_Tuning_DueFilesWithBothLabels(t *testing.T) {
 	}
 	created := false
 	for _, c := range tr.fc.CreateLabelCalls {
-		created = created || c.Name == doctor.TuningFindingLabel
+		created = created || c.Name == chore.FindingLabel("tuning")
 	}
 	if !created {
-		t.Errorf("CreateLabelCalls = %+v, want %q created when missing", tr.fc.CreateLabelCalls, doctor.TuningFindingLabel)
+		t.Errorf("CreateLabelCalls = %+v, want %q created when missing", tr.fc.CreateLabelCalls, chore.FindingLabel("tuning"))
 	}
 }
 
@@ -604,15 +603,11 @@ func TestSweep_Tuning_NoSplitsWhenEveryDimensionHasOneValue(t *testing.T) {
 	}
 }
 
-// settle (merge hold, dedup marker) keys off doctor.TuningFindingLabel while
-// the catalog row declares the label the host applies; they must agree.
-func TestCatalogTuningFindingLabelMatchesDoctorConst(t *testing.T) {
+// The catalog's tuning row must be records-scoped.
+func TestCatalogTuningRowIsRecordsScoped(t *testing.T) {
 	cs, err := chore.Load(chore.Knobs{Chores: "tuning"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := cs[0].FindingLabel; got != doctor.TuningFindingLabel {
-		t.Errorf("catalog tuning FindingLabel = %q, want doctor.TuningFindingLabel %q", got, doctor.TuningFindingLabel)
 	}
 	if !cs[0].Records {
 		t.Error("catalog tuning row must be records-scoped")
@@ -1341,7 +1336,7 @@ func refiledAfter(t *testing.T, second string, backlog func(filed forge.Issue) (
 	if out, err := tr.sweepTuning(t, tuningPolicy(root, 3), tuningNow.Add(-48*time.Hour)); err != nil || out.Filed != 1 {
 		t.Fatalf("first Sweep = %+v, %v, want 1 filed", out, err)
 	}
-	filed := forge.Issue{Number: "77", Body: tr.fc.PostIssueCalls[0].Body, Labels: []string{"agent-butler-finding", doctor.TuningFindingLabel}}
+	filed := forge.Issue{Number: "77", Body: tr.fc.PostIssueCalls[0].Body, Labels: []string{"agent-butler-finding", chore.FindingLabel("tuning")}}
 	open, closed := backlog(filed)
 	tr.backlog = newBacklogTracker(t, tr.fc.AsIssueFiler(), open, closed)
 	if second != "" {
@@ -1430,7 +1425,7 @@ func tuningFinding(number, metric string, cites ...string) forge.Issue {
 		body += "\n" + ev
 	}
 	body += "\n<!-- spindrift-dedup: chore=tuning, evidence-gap:a:go:" + metric + " -->"
-	return forge.Issue{Number: number, Title: "finding " + number, Body: body, Labels: []string{doctor.TuningFindingLabel}}
+	return forge.Issue{Number: number, Title: "finding " + number, Body: body, Labels: []string{chore.FindingLabel("tuning")}}
 }
 
 // priorRows returns the digest's "| finding:" table lines.
