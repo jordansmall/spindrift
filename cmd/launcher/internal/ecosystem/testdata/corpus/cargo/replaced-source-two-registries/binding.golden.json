@@ -1,0 +1,17 @@
+{
+  "envExports": [
+    {
+      "Name": "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_ARTIFACTS_ACME_TEST_INTERNAL_TOKEN",
+      "Value": "spindrift-registry-proxy-placeholder-not-a-secret"
+    },
+    {
+      "Name": "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_ARTIFACTS_ACME_TEST_REMOTE_TOKEN",
+      "Value": "spindrift-registry-proxy-placeholder-not-a-secret"
+    }
+  ],
+  "homeConfig": {
+    "configPath": "config.toml",
+    "content": "[source.crates-io]\nreplace-with = \"spindrift-registry-proxy\"\n\n[source.spindrift-registry-proxy]\nregistry = \"sparse+http://127.0.0.1:27182/artifacts-acme-test/\"\n\n[registry]\nglobal-credential-providers = [\"cargo:token\"]\n\n[source.spindrift-upstream-internal]\nregistry = \"sparse+https://artifacts.acme.test/api/cargo/internal/index/\"\nreplace-with = \"spindrift-registry-proxy-artifacts-acme-test-internal\"\n\n[source.spindrift-registry-proxy-artifacts-acme-test-internal]\nregistry = \"sparse+http://127.0.0.1:27182/artifacts-acme-test/api/cargo/internal/index/\"\n\n[registries.spindrift-registry-proxy-artifacts-acme-test-internal]\nindex = \"sparse+http://127.0.0.1:27182/artifacts-acme-test/api/cargo/internal/index/\"\n\n[source.remote]\nregistry = \"sparse+https://artifacts.acme.test/api/cargo/remote/index/\"\nreplace-with = \"spindrift-registry-proxy-artifacts-acme-test-remote\"\n\n[source.spindrift-registry-proxy-artifacts-acme-test-remote]\nregistry = \"sparse+http://127.0.0.1:27182/artifacts-acme-test/api/cargo/remote/index/\"\n\n[registries.spindrift-registry-proxy-artifacts-acme-test-remote]\nindex = \"sparse+http://127.0.0.1:27182/artifacts-acme-test/api/cargo/remote/index/\"\n",
+    "homeEnvVar": "CARGO_HOME"
+  }
+}

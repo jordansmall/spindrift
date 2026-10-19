@@ -1,0 +1,38 @@
+{
+  "derived": [
+    {
+      "Host": "artifacts.acme.test",
+      "Origin": "https://artifacts.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/api/cargo/internal/index"
+        },
+        {
+          "ecosystem": "cargo",
+          "path": "/api/cargo/remote/index"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/api/cargo/internal/index",
+        "/api/cargo/remote/index"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/api/cargo/internal/index"
+        },
+        {
+          "ecosystem": "cargo",
+          "path": "/api/cargo/remote/index"
+        }
+      ],
+      "matchHost": "artifacts.acme.test",
+      "upstream": "https://artifacts.acme.test"
+    }
+  ]
+}
