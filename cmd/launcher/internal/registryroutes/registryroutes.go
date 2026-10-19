@@ -98,14 +98,13 @@ type rawRoute struct {
 
 // Parse decodes, validates, and normalizes a routes file (ADR 0045) from data.
 // Every returned error names the offending route (by its match-host, or "route
-// N" when match-host itself is the problem) and field. It wraps parseRoutes,
-// fixing rows to ecosystem.Table, so a test wanting a fake row can drive
-// parseRoutes directly with one.
+// N" when match-host itself is the problem) and field.
 func Parse(data []byte) ([]Route, error) {
-	return parseRoutes(data, ecosystem.Table)
+	return ParseRows(data, ecosystem.Table)
 }
 
-func parseRoutes(data []byte, rows []ecosystem.Row) ([]Route, error) {
+// ParseRows is Parse over the given rows rather than ecosystem.Table.
+func ParseRows(data []byte, rows []ecosystem.Row) ([]Route, error) {
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 
@@ -476,7 +475,7 @@ func retiredRouteEcosystemBlocks(ecosystems map[string]map[string]any) string {
 // retiredRouteCredentialInline renders a route's credential map back as the
 // TOML inline table it was written as, in a fixed order (the source key in
 // credresolver.Kinds() order, then its companion), since go randomizes map
-// iteration and an operator is told to copy-paste this text. parseRoutes
+// iteration and an operator is told to copy-paste this text. ParseRows
 // validates the credential before reporting a retired key, so m is always a
 // map parseCredential accepted and every key in it is a known source or
 // companion. Returns "" for a route with no credential.
@@ -520,7 +519,7 @@ func tomlKey(key string) string {
 // Anything else renders as a quoted Go rendering rather than being dropped
 // silently, since the row's own RouteDeclaration hook names it precisely once
 // the operator has migrated off the retired key; a credential value never gets
-// here, as parseRoutes validates the credential before any stanza renders.
+// here, as ParseRows validates the credential before any stanza renders.
 func tomlValue(v any) string {
 	switch t := v.(type) {
 	case string:

@@ -2022,7 +2022,7 @@ path = "/go/"
 	}
 }
 
-// Drives parseRoutes, the internal seam Parse wraps, with a fake row rather
+// Drives ParseRows, the seam Parse wraps, with a fake row rather
 // than a real ecosystem, so the hook contract is tested without depending on
 // any shipped ecosystem's rules.
 func TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey(t *testing.T) {
@@ -2043,7 +2043,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	routes, err := parseRoutes([]byte(doc), []ecosystem.Row{row})
+	routes, err := ParseRows([]byte(doc), []ecosystem.Row{row})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2068,7 +2068,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := parseRoutes([]byte(doc), []ecosystem.Row{row})
+	_, err := ParseRows([]byte(doc), []ecosystem.Row{row})
 	if err == nil {
 		t.Fatal("expected error for a key a nil-hook row doesn't accept, got nil")
 	}
@@ -2095,7 +2095,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := parseRoutes([]byte(doc), []ecosystem.Row{row})
+	_, err := ParseRows([]byte(doc), []ecosystem.Row{row})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2107,7 +2107,7 @@ widget = "gizmo"
 	}
 }
 
-// The retirement gate (ADR 0048, issue #3405) runs before parseRoutes looks at
+// The retirement gate (ADR 0048, issue #3405) runs before ParseRows looks at
 // rows: a legacy cargo-registries key is refused even when rows omits cargo
 // entirely, rather than reaching the row-lookup rejection buildRouteEcosystems
 // would otherwise produce.
@@ -2118,7 +2118,7 @@ match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
 cargo-registries = ["a"]
 `
-	_, err := parseRoutes([]byte(doc), []ecosystem.Row{{Name: "fake"}})
+	_, err := ParseRows([]byte(doc), []ecosystem.Row{{Name: "fake"}})
 	if err == nil {
 		t.Fatal("expected error for a retired cargo-registries key, got nil")
 	}
@@ -2710,7 +2710,7 @@ credential = { %s }
 
 // Issue #3436: a route carrying a retired key must still validate its
 // credential first. A malformed credential fails on parseCredential's own
-// error before parseRoutes ever reaches the retired-key check, so no
+// error before ParseRows ever reaches the retired-key check, so no
 // replacement stanza is printed for it -- the stanza-echo path only ever
 // sees a credential parseCredential already accepted.
 func TestParse_RetiredKeyRouteWithMalformedCredentialFailsOnCredential(t *testing.T) {
