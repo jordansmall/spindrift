@@ -779,20 +779,28 @@ overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
 the filer is configured — box reads the fragment unconditionally once its gate
 is on, with no baked-in fallback.
 
-A row may carry an `axis` (`"tracker"` or `"forge"`, issue #5646): its
-`fragment` is then read from `fragments/<backend>/` for the active
-`ISSUE_TRACKER` or `CODE_FORGE`, so one slot serves every backend without a
-gate row and a variable each. A backend with no file there renders an empty
-step. `${ISSUE_READ_STEP}` is the first such row
-(`fragments/<backend>/issue-read.md`); the per-backend
-`${ISSUE_READ_GITHUB_STEP}`, `${ISSUE_READ_LOCAL_STEP}` and
-`${ISSUE_READ_FORGEJO_STEP}` it replaces are deprecated. A fragment variable
-retired from the registry is listed in `lib/removed-fragment-vars.nix`, with a
+A row may carry an `axis` (`"tracker"`, `"filer"` or `"forge"`, issues #5646
+and #5647, [ADR 0068](adr/0068-backends-are-strategy-literals-with-row-owned-knobs.md)):
+its `fragment` is then read from `fragments/<folder>/`, so one slot variable
+serves every backend without a gate row and a variable each. The folder is
+chosen by the signal the axis's gates test, not by the backend's name: the
+tracker read arm for `"tracker"`, the tracker Filer arm for `"filer"`, and the
+`CODE_FORGE` arm for `"forge"`, with `GH` mapping to `github` and a backend
+that rides another's arm (`jira` on github's read arm, a local tracker's Filer
+on github's) reading that folder. A folder with no such file renders an empty
+step, unless the row is `shared`, in which case the root-level
+`fragments/<fragment>` is read next: one body for every backend, naming the
+active one through `${FORGE_DISPLAY_NAME}`, which is the `displayName` of the
+backend's row in `lib/backends/`. A backend folder's own file still wins over
+the shared one. A fragment variable retired from the registry is listed in
+`lib/removed-fragment-vars.nix`, with a
 `severity` of `removed` (the default; a prompt still using it fails the build
 and prompt assembly) or `deprecated` (it still renders, and warns naming its
-`replacement`, at eval time and again at run time). See
-[`MIGRATING.md`](../MIGRATING.md) for the current deprecations and their
-removal window.
+`replacement`, at eval time and again at run time). The per-backend variables
+the slots replaced, `${ISSUE_READ_GITHUB_STEP}` among them, are deprecated
+rows, each read from its old root file (the row's `legacyFragment`) only when
+the new path is missing. See [`MIGRATING.md`](../MIGRATING.md) for
+the full list, the file moves and the removal window.
 
 The comment-discipline rule is no longer a fragment anchor: `worker-prompt.md`
 (issue #3419), and now `issue-prompt.md`, `fix-prompt.md`, and
@@ -810,8 +818,9 @@ row are gone; there is nothing left in the Conditional fragment registry for
 comment discipline to opt into.
 
 The `OPEN A PULL REQUEST` ticket-reference line is the one row with three
-mutually exclusive fragments (`pr-body-closes.md` / `pr-body-local-ref.md` /
-`pr-body-local-noref.md`) instead of one on/off pair: `ISSUE_TRACKER` and
+mutually exclusive fragments (`pr-body-closes.md` /
+`local/pr-body-issue-ref.md` / `local/pr-body-no-issue-ref.md`) instead of one
+on/off pair: `ISSUE_TRACKER` and
 `LOCAL_ISSUE_REFERENCE` together pick exactly one gate, so issue-prompt.md
 concatenates all three substitution variables and only the active one ever
 renders — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)
@@ -864,8 +873,8 @@ read-write Box (ADR 0041) — the box posts nothing itself and relays the
 comment through a single `SPINDRIFT_COMMENT` host-relay stdout line under
 the log carrier (the socket carrier relays it through the signal socket
 instead), making it the sole carrier of the verdict on that path (the
-`fragments/research-verdict-*-readonly*.md` and
-`fragments/research-verdict-local*.md` fragments). A Consumer that never bakes the skill gets a prompt with zero
+`fragments/research-verdict-relay.md`, `research-verdict-relay-socket.md` and
+`fragments/local/research-verdict-relay*.md` fragments). A Consumer that never bakes the skill gets a prompt with zero
 mention of it.
 
 A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
@@ -3940,10 +3949,10 @@ pinned by the prompt eval-checks the same way the `gh` family is:
   (the forgejo PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
 
 For the REST surface `fj` lacks — attaching a label at issue-create time —
-the filer fragments (`filer-file-direct-forgejo.md`,
-`filer-label-direct-forgejo.md`) fall back to a `curl` call against the
+the filer fragments (`forgejo/filer-direct-file.md`,
+`forgejo/filer-direct-label.md`) fall back to a `curl` call against the
 Forgejo REST API directly rather than an `fj` porcelain command.
-`filer-dedup-search-forgejo.md` likewise searches over REST
+`forgejo/filer-dedup.md` likewise searches over REST
 (`GET .../issues`), since `fj` has no confirmed issue-search verb.
 
 #### Forgejo integration harness

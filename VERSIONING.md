@@ -57,10 +57,11 @@ own backend or gate, and prompt assembly warns at build time (`mkHarness`
 eval) and at run time, naming the replacement and pointing at MIGRATING.md.
 A deprecated variable is removed no earlier than the minor release after the
 one that deprecated it, and its MIGRATING.md entry says which releases those
-are. Currently deprecated: `${ISSUE_READ_GITHUB_STEP}`,
-`${ISSUE_READ_LOCAL_STEP}` and `${ISSUE_READ_FORGEJO_STEP}`, in favour of
-`${ISSUE_READ_STEP}` (issue #5646). They are deprecated from 0.29.0 and may be
-removed from 0.30.0.
+are. Currently deprecated: the per-backend fragment variables that slot
+variables replaced, such as `${ISSUE_READ_GITHUB_STEP}` in favour of
+`${ISSUE_READ_STEP}` (issues #5646, #5647); `lib/removed-fragment-vars.nix`
+lists each with its replacement, and MIGRATING.md has the table. They are
+deprecated from 0.29.0 and may be removed from 0.30.0.
 
 ## Pre-1.0 policy
 
