@@ -8,21 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
-	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/forge/github"
-	"spindrift.dev/launcher/internal/forge/jira"
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/gitremote"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/runner"
@@ -46,11 +41,10 @@ type Environment interface {
 	GHAuthToken() (string, error)
 
 	GitConfig(key string) string
-	GitRemoteRepoSlug() string
 
 	// GitRemoteURL returns the raw "origin" remote URL, or "" when there is
-	// no origin. Callers parse it with gitremote.ParseHostSlug to detect a
-	// Forgejo host; the github-only GitRemoteRepoSlug seeds the slug default.
+	// no origin. Callers parse it with gitremote.ParseHostSlug to detect the
+	// backend and seed the slug default.
 	GitRemoteURL() string
 
 	// InsideGitWorkTree reports whether dir sits inside a git work tree. An
@@ -78,16 +72,53 @@ func validateRuntimeChoice(runtime string) error {
 	return fmt.Errorf("expected one of %s, got %q", strings.Join(runner.ValidValues, ", "), runtime)
 }
 
-// quickstartBackendNames returns the backend names the wizard accepts when
-// the git remote host is neither github.com nor codeberg.org. It reads the
-// shared registry so a newly registered backend appears here unedited.
+// quickstartStrategies is the source the wizard detects and offers backends
+// from: every registered Strategy carrying a Quickstart block, in registration
+// order. A var so tests can add a row without leaking it into the global
+// registry, which has no unregister.
+var quickstartStrategies = func() []backendkit.Strategy {
+	var rows []backendkit.Strategy
+	for _, s := range backendkit.Strategies() {
+		if s.Quickstart != nil {
+			rows = append(rows, s)
+		}
+	}
+	return rows
+}
+
+// quickstartBackendNames returns the backend names the wizard accepts when no
+// quickstart row claims the git remote host. A newly registered row appears
+// here unedited.
 func quickstartBackendNames() []string {
-	descriptors := backend.QuickstartEligible()
-	names := make([]string, len(descriptors))
-	for i, d := range descriptors {
-		names[i] = d.Name
+	rows := quickstartStrategies()
+	names := make([]string, len(rows))
+	for i, s := range rows {
+		names[i] = s.Name
 	}
 	return names
+}
+
+// detectBackend returns the quickstart row that claims the remote's host and
+// the knobs its remote implies. A row claims a remote when it lists the host
+// and its RemoteMatch accepts the remote under those knobs.
+func detectBackend(rows []backendkit.Strategy, host, slug, remote string) (backendkit.Strategy, map[string]string, bool) {
+	for _, s := range rows {
+		if !slices.Contains(s.Quickstart.Hosts, host) || s.RemoteMatch == nil {
+			continue
+		}
+		knobs := remoteKnobs(s, remote)
+		if s.RemoteMatch(backendkit.Shared{RepoSlug: slug}, knobLookup(knobs, "", ""), remote) {
+			return s, knobs, true
+		}
+	}
+	return backendkit.Strategy{}, nil, false
+}
+
+func remoteKnobs(s backendkit.Strategy, remote string) map[string]string {
+	if s.KnobsFromRemote == nil {
+		return nil
+	}
+	return s.KnobsFromRemote(remote)
 }
 
 func validateBackendChoice(b string) error {
@@ -198,51 +229,49 @@ func postWriteFailure(step postWriteStep, written []string, insideGitWorkTree bo
 	return fmt.Errorf("%s (cause: %w)", msg, err)
 }
 
-// ForgeBuilder constructs the real IssueTracker and CodeForge so the finish
-// line's doctor validation runs in-process: the `spindrift` binary doesn't
-// exist yet at this pre-CLI stage (ADR 0027). Injected so tests substitute a
-// forge.Fake instead of shelling out to gh or Jira.
-type ForgeBuilder func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge)
+// ForgeBuilder constructs the real IssueTracker and CodeForge from the chosen
+// backend's Strategy so the finish line's doctor validation runs in-process:
+// the `spindrift` binary doesn't exist yet at this pre-CLI stage (ADR 0027).
+// Injected so tests substitute a forge.Fake instead of reaching a live API.
+type ForgeBuilder func(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error)
 
-// forgejoProbeTimeout keeps a hung Forgejo host from blocking the wizard
-// forever. Mirrors defaultForgejoHTTPTimeout in the sibling Forgejo adapters.
-const forgejoProbeTimeout = 30 * time.Second
+// buildForge is the production ForgeBuilder. The Code Forge is the chosen
+// backend itself when it declares the forge axis, else defaultCodeForge (ADR
+// 0027: Quickstart never prompts for it).
+func buildForge(s backendkit.Strategy, sh backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+	if s.NewIssueTracker == nil {
+		return nil, nil, fmt.Errorf("backend %q cannot build an issue tracker", s.Name)
+	}
+	it, err := s.NewIssueTracker(sh, l)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build %s issue tracker: %w", s.Name, err)
+	}
+	cs := s
+	if s.Quickstart == nil || !slices.Contains(s.Quickstart.Axes, "forge") {
+		var ok bool
+		if cs, ok = backendkit.ByName(defaultCodeForge); !ok {
+			return nil, nil, fmt.Errorf("default code forge %q is not registered", defaultCodeForge)
+		}
+	}
+	if cs.NewCodeForge == nil {
+		return nil, nil, fmt.Errorf("backend %q cannot build a code forge", cs.Name)
+	}
+	cf, err := cs.NewCodeForge(sh, l, forge.SanitizedParent{}, it)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build %s code forge: %w", cs.Name, err)
+	}
+	return it, cf, nil
+}
 
-// buildForge is the production ForgeBuilder. The Code Forge is github (ADR
-// 0027: Quickstart never prompts for it) except in the forgejo case, which
-// builds both seams from the Forgejo adapters so doctor validates against
-// that instance. token is empty for github and local, where the credential is
-// ambient in the process environment or not needed at all.
-func buildForge(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
-	cf := github.NewExecClient(repoSlug, defaultDispatchLabels, defaultBranchPrefix)
-	switch tracker.issueTracker {
-	case "jira":
-		return jira.NewJiraClient(jira.JiraConfig{
-			BaseURL:    tracker.jiraBaseURL,
-			ProjectKey: tracker.jiraProjectKey,
-			Email:      tracker.jiraEmail,
-			Token:      token,
-			Labels:     defaultDispatchLabels,
-		}), cf
-	case "local":
-		return local.NewLocalTracker(tracker.localIssuesDir, defaultDispatchLabels), cf
-	case "forgejo":
-		it := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
-			BaseURL:    tracker.forgejoBaseURL,
-			Repo:       repoSlug,
-			Token:      token,
-			Labels:     defaultDispatchLabels,
-			HTTPClient: &http.Client{Timeout: forgejoProbeTimeout},
-		})
-		cf := forgejo.NewForgejoCodeForge(forgejo.ForgejoCodeForgeConfig{
-			BaseURL:      tracker.forgejoBaseURL,
-			Repo:         repoSlug,
-			Token:        token,
-			BranchPrefix: defaultBranchPrefix,
-		}, it)
-		return it, cf
-	default:
-		return cf, cf
+// knobLookup resolves the backend's remote-derived knobs plus, once acquired,
+// its token under the Descriptor's TokenEnvVar.
+func knobLookup(knobs map[string]string, tokenEnv, token string) backendkit.Lookup {
+	return func(name string) (string, bool) {
+		if token != "" && name == tokenEnv {
+			return token, true
+		}
+		v, ok := knobs[name]
+		return v, ok
 	}
 }
 
@@ -349,28 +378,29 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	}
 
 	remoteURL := env.GitRemoteURL()
-	host, remoteSlug := gitremote.ParseHostSlug(remoteURL)
-	backendName := "github"
-	forgejoBaseURL := ""
-	repoSlugDefault := env.GitRemoteRepoSlug()
-	// The backend is github for a github.com remote or none, forgejo for
-	// codeberg.org, and asked directly for any other host. There are no Jira
-	// or local sub-prompts: those adapters stay in place for an operator who
-	// hand-edits the generated flake.
-	switch {
-	case host == "codeberg.org":
-		backendName, forgejoBaseURL, repoSlugDefault = "forgejo", codebergBaseURL, remoteSlug
-		fmt.Fprintln(w, "detected a codeberg.org remote — using the forgejo backend")
-	case host != "" && host != "github.com":
-		b, err := promptValidated(fmt.Sprintf("Backend (%s)", strings.Join(quickstartBackendNames(), "/")), "github", validateBackendChoice)
-		if err != nil {
-			return err
-		}
-		backendName = b
-		if b == "forgejo" {
-			forgejoBaseURL, repoSlugDefault = "https://"+host, remoteSlug
+	host, repoSlugDefault := gitremote.ParseHostSlug(remoteURL)
+	rows := quickstartStrategies()
+	if len(rows) == 0 {
+		return errors.New("no backend declares a quickstart block")
+	}
+	// No remote means the first row, silently. A host a row claims is
+	// announced; any other host is asked. Only rows with a quickstart block
+	// take part, so Jira and local are never offered or detected.
+	strategy, knobs := rows[0], map[string]string(nil)
+	if host != "" {
+		if s, k, ok := detectBackend(rows, host, repoSlugDefault, remoteURL); ok {
+			strategy, knobs = s, k
+			fmt.Fprintf(w, "detected a %s remote — using the %s backend\n", host, s.Name)
+		} else {
+			name, err := promptValidated(fmt.Sprintf("Backend (%s)", strings.Join(quickstartBackendNames(), "/")), rows[0].Name, validateBackendChoice)
+			if err != nil {
+				return err
+			}
+			strategy = rows[slices.IndexFunc(rows, func(s backendkit.Strategy) bool { return s.Name == name })]
+			knobs = remoteKnobs(strategy, remoteURL)
 		}
 	}
+	choice := backendChoice{name: strategy.Name, knobs: knobs}
 
 	repoSlug, err := promptValidated("Repo slug (owner/repo)", repoSlugDefault, validateRepoSlug)
 	if err != nil {
@@ -389,23 +419,19 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
-	tracker := trackerSettings{issueTracker: backendName, forgejoBaseURL: forgejoBaseURL}
-	desc, ok := backend.ByName(backendName)
-	if !ok {
-		return fmt.Errorf("unregistered backend %q", backendName)
+	if strategy.AcquireToken == nil {
+		return fmt.Errorf("backend %q declares no AcquireToken hook, so quickstart cannot set up its token", strategy.Name)
 	}
-
-	strategy, ok := backendkit.ByName(backendName)
-	if !ok || strategy.AcquireToken == nil {
-		return fmt.Errorf("no token acquirer registered for backend %q", backendName)
-	}
-	knobs := map[string]string{}
-	if forgejoBaseURL != "" {
-		knobs["FORGEJO_BASE_URL"] = forgejoBaseURL
+	shared := backendkit.Shared{
+		RepoSlug:     repoSlug,
+		Labels:       defaultDispatchLabels,
+		BranchPrefix: defaultBranchPrefix,
+		GitUserName:  gitUserName,
+		GitUserEmail: gitUserEmail,
 	}
 	token, err := strategy.AcquireToken(
-		backendkit.Shared{RepoSlug: repoSlug},
-		func(name string) (string, bool) { v, ok := knobs[name]; return v, ok },
+		shared,
+		knobLookup(knobs, "", ""),
 		backendkit.TokenPrompt{
 			Out:          w,
 			Getenv:       env.Getenv,
@@ -414,12 +440,14 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 			AmbientToken: env.GHAuthToken,
 			TokenScopes:  env.TokenScopes,
 			Probe: func(token string) error {
-				it, _ := forgeBuilder(repoSlug, tracker, token)
-				_, err := it.Probe()
+				it, _, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+				if err != nil {
+					return err
+				}
+				_, err = it.Probe()
 				return err
 			},
-			RerunCmd:    quickstartRerunCmd,
-			TokenEnvVar: desc.TokenEnvVar,
+			RerunCmd: quickstartRerunCmd,
 		})
 	if err != nil {
 		return err
@@ -436,7 +464,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		runtime:      runtime,
 		gitUserName:  gitUserName,
 		gitUserEmail: gitUserEmail,
-		tracker:      tracker,
+		choice:       choice,
 		token:        token,
 		driver:       driverName,
 		credentials:  credentials,
@@ -495,7 +523,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	// The gh CLI reads auth from GH_TOKEN in the process environment. Keyed
 	// off the descriptor rather than the backend name so a third backend's
 	// credential is never exported under GitHub's env var name.
-	if desc.TokenEnvVar == "GH_TOKEN" {
+	if strategy.TokenEnvVar == "GH_TOKEN" {
 		if err := os.Setenv("GH_TOKEN", token); err != nil {
 			return fmt.Errorf("set GH_TOKEN: %w", err)
 		}
@@ -505,16 +533,19 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		fmt.Fprintln(w, gitAddReminder)
 	}
 
-	it, cf := forgeBuilder(repoSlug, tracker, a.token)
-	tokenHint, slugHint, noLabelRegistry := doctorHints(tracker.issueTracker)
+	it, cf, err := forgeBuilder(strategy, shared, knobLookup(knobs, strategy.TokenEnvVar, token))
+	if err != nil {
+		return postWriteFailure(doctorPostWriteStep, written, insideGitWorkTree, err)
+	}
+	tokenHint, slugHint, noLabelRegistry := doctorHints(choice.name)
 	// doctor.Config.Runtime below already reports runtime validity, so the
 	// extraChecks rows must be runtime-stripped or the row reports twice.
-	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, backendName), quickstartCheckDeps(a)))
+	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, choice.name), quickstartCheckDeps(a)))
 	// Verbose: quickstart's finish line always reports in full, whatever
 	// `spindrift doctor`'s own quiet default does (issue #3777).
 	rep := doctor.NewReporter(w, true)
 	if err := doctor.Run(it, cf, doctor.Config{
-		IssueTracker:    tracker.issueTracker,
+		IssueTracker:    choice.name,
 		TokenHint:       tokenHint,
 		SlugHint:        slugHint,
 		NoLabelRegistry: noLabelRegistry,
@@ -698,18 +729,11 @@ func doctorHints(issueTracker string) (tokenHint, slugHint string, noLabelRegist
 	return row.DoctorTokenHint, row.DoctorSlugHint, !row.LabelRegistry
 }
 
-// trackerSettings holds the fields buildForge needs to construct an Issue
-// Tracker adapter (ADR 0013). The wizard sets issueTracker to only "github"
-// or "forgejo" (issue #1559); the jira and local fields exist for tests.
-type trackerSettings struct {
-	issueTracker   string
-	jiraBaseURL    string
-	jiraProjectKey string
-	jiraEmail      string
-	localIssuesDir string
-	// forgejoBaseURL is read only when issueTracker is "forgejo"; empty falls
-	// back to the adapter's own codeberg.org default.
-	forgejoBaseURL string
+// backendChoice is the backend the wizard settled on and the knob values
+// (env name -> value) its Strategy derived from the git remote.
+type backendChoice struct {
+	name  string
+	knobs map[string]string
 }
 
 // answers holds every operator decision, detected defaults folded in, so
@@ -719,7 +743,7 @@ type answers struct {
 	runtime      string
 	gitUserName  string
 	gitUserEmail string
-	tracker      trackerSettings
+	choice       backendChoice
 	token        string
 	driver       string
 	credentials  []credential
@@ -742,8 +766,8 @@ type scaffoldFile struct {
 // runQuickstart writes to disk.
 func render(a answers) []scaffoldFile {
 	return []scaffoldFile{
-		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.tracker), mode: 0o644},
-		{path: "harness.env", content: renderHarnessEnv(a.tracker.issueTracker, a.token, a.credentials), mode: 0o600},
+		{path: "flake.nix", content: renderFlakeNix(a.repoSlug, a.runtime, a.gitUserName, a.gitUserEmail, a.choice), mode: 0o644},
+		{path: "harness.env", content: renderHarnessEnv(a.choice.name, a.token, a.credentials), mode: 0o600},
 		{path: ".gitignore", content: quickstartGitignore, mode: 0o644},
 		{path: ".envrc", content: quickstartEnvrc, mode: 0o644},
 	}
@@ -752,16 +776,16 @@ func render(a answers) []scaffoldFile {
 // renderFlakeNix generates a minimal Consumer flake.nix carrying only the
 // options the wizard collected (ADR 0027). No prompts/ directory is
 // scaffolded, because the harness defaults every prompt.
-func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, tracker trackerSettings) string {
-	trackerLine := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(tracker.issueTracker))
+func renderFlakeNix(repoSlug, runtime, gitUserName, gitUserEmail string, choice backendChoice) string {
+	trackerLine := fmt.Sprintf("            %s = \"%s\";\n", pathIssueTracker, nixEscape(choice.name))
 
 	settingsLines := trackerLine
-	if tracker.issueTracker == "forgejo" {
+	if choice.name == "forgejo" {
 		// forgejo drives both axes, ISSUE_TRACKER and CODE_FORGE, so the
 		// generated flake lands code on the same instance doctor validated.
 		settingsLines += fmt.Sprintf("            %s = \"forgejo\";\n", pathCodeForge)
-		if tracker.forgejoBaseURL != "" && tracker.forgejoBaseURL != codebergBaseURL {
-			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", quickstartKnobs["FORGEJO_BASE_URL"].path, nixEscape(tracker.forgejoBaseURL))
+		if base := choice.knobs["FORGEJO_BASE_URL"]; base != "" && base != codebergBaseURL {
+			settingsLines += fmt.Sprintf("            %s = \"%s\";\n", quickstartKnobs["FORGEJO_BASE_URL"].path, nixEscape(base))
 		}
 	}
 

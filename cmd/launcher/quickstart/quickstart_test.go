@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
+	"spindrift.dev/launcher/internal/gitremote"
 )
 
 type fakeEnvironment struct {
@@ -28,7 +29,6 @@ type fakeEnvironment struct {
 	ghAuthTokenErr    error
 	runtimes          map[string]bool
 	gitConfig         map[string]string
-	repoSlug          string
 	remoteURL         string
 	insideGitWorkTree bool
 	// insideGitWorkTreeDir, if non-nil, records the dir InsideGitWorkTree was
@@ -54,8 +54,6 @@ func (f fakeEnvironment) GHAuthToken() (string, error) { return f.ghAuthToken, f
 
 func (f fakeEnvironment) GitConfig(key string) string { return f.gitConfig[key] }
 
-func (f fakeEnvironment) GitRemoteRepoSlug() string { return f.repoSlug }
-
 func (f fakeEnvironment) GitRemoteURL() string { return f.remoteURL }
 
 func (f fakeEnvironment) InsideGitWorkTree(dir string) bool {
@@ -72,7 +70,7 @@ func withPodman() fakeEnvironment {
 func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, repoSlug: "jordansmall/spindrift"}
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, remoteURL: "git@github.com:jordansmall/spindrift.git"}
 	stdin := strings.NewReader(strings.Join([]string{
 		"",
 		"",
@@ -101,7 +99,7 @@ func TestRunQuickstart_RepoSlugDetected_ShownAsDefault_AcceptedWithEnter(t *test
 func TestRunQuickstart_RepoSlugDetected_CanBeOverridden(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, repoSlug: "jordansmall/spindrift"}
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, remoteURL: "git@github.com:jordansmall/spindrift.git"}
 	stdin := strings.NewReader(strings.Join([]string{
 		"someoneelse/other-repo",
 		"",
@@ -313,26 +311,6 @@ func TestValidateRepoSlug_RejectsWhitespace(t *testing.T) {
 	for _, slug := range []string{" owner/repo", "owner/repo ", "own er/repo", "owner/re po"} {
 		if err := validateRepoSlug(slug); err == nil {
 			t.Errorf("validateRepoSlug(%q) = nil, want error", slug)
-		}
-	}
-}
-
-func TestParseGitHubRepoSlug(t *testing.T) {
-	cases := map[string]string{
-		"git@github.com:jordansmall/spindrift.git":       "jordansmall/spindrift",
-		"ssh://git@github.com/jordansmall/spindrift.git": "jordansmall/spindrift",
-		"https://github.com/jordansmall/spindrift.git":   "jordansmall/spindrift",
-		"https://github.com/jordansmall/spindrift":       "jordansmall/spindrift",
-		"git@gitlab.com:jordansmall/spindrift.git":       "",
-		"git@github.com-work:jordansmall/spindrift.git":  "",
-		"git@notgithub.com:jordansmall/spindrift.git":    "",
-		"https://mygithub.com/jordansmall/spindrift.git": "",
-		"https://github.com/jordansmall/spindrift/":      "jordansmall/spindrift",
-		"": "",
-	}
-	for remote, want := range cases {
-		if got := parseGitHubRepoSlug(remote); got != want {
-			t.Errorf("parseGitHubRepoSlug(%q) = %q, want %q", remote, got, want)
 		}
 	}
 }
@@ -891,57 +869,6 @@ func TestRunQuickstart_AmbientGHToken_SkipsPrompt(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "GitHub token") {
 		t.Errorf("expected no GitHub token prompt when GH_TOKEN is ambient, got transcript:\n%s", out.String())
-	}
-}
-
-// Pins the github token-acquisition path to backend.GitHub.TokenEnvVar rather
-// than a hardcoded "GH_TOKEN" literal: it swaps in a registry with a
-// differently named TokenEnvVar and asserts the ambient lookup follows the
-// descriptor, not the literal.
-func TestRunQuickstart_GithubTokenEnvVar_ReadFromDescriptor(t *testing.T) {
-	original := backend.Registry
-	replaced := append([]backend.Descriptor{}, original...)
-	for i, d := range replaced {
-		if d.Name == "github" {
-			replaced[i].TokenEnvVar = "CUSTOM_GH_TOKEN"
-		}
-	}
-	backend.Registry = replaced
-	defer func() { backend.Registry = original }()
-
-	dir := t.TempDir()
-	var out bytes.Buffer
-	stdin := strings.NewReader(strings.Join([]string{
-		"jordansmall/spindrift", // repoSlug
-		"podman",                // runtime
-		"Ada Lovelace",          // git user name
-		"ada@example.com",       // git user email
-		// no GitHub token line, the ambient CUSTOM_GH_TOKEN must be reused without a prompt
-	}, "\n") + "\n")
-
-	env := fakeEnvironment{
-		env: map[string]string{
-			"GH_TOKEN":                "ghp_wrongtoken",
-			"CUSTOM_GH_TOKEN":         "ghp_righttoken",
-			"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken",
-		},
-		runtimes: map[string]bool{"podman": true},
-	}
-
-	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
-		t.Fatalf("runQuickstart: %v", err)
-	}
-
-	if strings.Contains(out.String(), "No ambient") {
-		t.Errorf("expected the descriptor-named token env var to be picked up ambiently without a prompt, got transcript:\n%s", out.String())
-	}
-
-	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
-	if err != nil {
-		t.Fatalf("read harness.env: %v", err)
-	}
-	if !strings.Contains(string(harnessEnv), "CUSTOM_GH_TOKEN=ghp_righttoken") {
-		t.Errorf("expected harness.env to carry the token under the descriptor-named CUSTOM_GH_TOKEN key, got:\n%s", harnessEnv)
 	}
 }
 
@@ -1870,8 +1797,8 @@ func passingForge() *forge.Fake {
 // IssueTracker and CodeForge seams regardless of the collected settings, so
 // tests can inject a forge.Fake instead of shelling out to gh/Jira.
 func fakeForgeBuilder(f *forge.Fake) ForgeBuilder {
-	return func(repoSlug string, tracker trackerSettings, token string) (forge.IssueTracker, forge.CodeForge) {
-		return f, f
+	return func(backendkit.Strategy, backendkit.Shared, backendkit.Lookup) (forge.IssueTracker, forge.CodeForge, error) {
+		return f, f, nil
 	}
 }
 
@@ -2064,7 +1991,7 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "github"},
+		choice:       backendChoice{name: "github"},
 		token:        "ghp_faketoken",
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
@@ -2120,7 +2047,7 @@ func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testin
 		runtime:      "podman",
 		gitUserName:  "Ada",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"},
+		choice:       backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}},
 		token:        "forgejo-faketoken",
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
@@ -2171,7 +2098,7 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
+		choice:       backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
 		token:        "forgejo-faketoken",
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
@@ -2195,7 +2122,7 @@ func TestRender_Github_Golden(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "github"},
+		choice:       backendChoice{name: "github"},
 		token:        "ghp_faketoken",
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
@@ -2222,7 +2149,7 @@ func TestRender_Forgejo_Golden(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
+		choice:       backendChoice{name: "forgejo", knobs: map[string]string{"FORGEJO_BASE_URL": "https://git.example.com"}},
 		token:        "forgejo-faketoken",
 		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
@@ -2352,7 +2279,7 @@ func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "github"},
+		choice:       backendChoice{name: "github"},
 		token:        "ghp_faketoken",
 		credentials:  []credential{{env: "ANTHROPIC_API_KEY", value: "sk-ant-faketoken"}},
 	}
@@ -2377,7 +2304,7 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 		runtime:      "podman",
 		gitUserName:  "Ada Lovelace",
 		gitUserEmail: "ada@example.com",
-		tracker:      trackerSettings{issueTracker: "github"},
+		choice:       backendChoice{name: "github"},
 		token:        "ghp_faketoken",
 	}
 
@@ -2421,22 +2348,48 @@ func TestRender_NixSpecialChars_AreEscaped(t *testing.T) {
 	}
 }
 
-// Pins that validateBackendChoice is registry-driven: appending a fake
-// eligible "gitlab" descriptor to backend.Registry makes
-// validateBackendChoice("gitlab") pass with no quickstart-side change, proving
-// the choice list derives from backend.QuickstartEligible().
+// withQuickstartRow adds s to the rows the wizard detects and offers for the
+// test's duration. backendkit has no unregister, so a stub registered there
+// would leak into every later test's backend prompt.
+func withQuickstartRow(t *testing.T, s backendkit.Strategy) {
+	t.Helper()
+	original := quickstartStrategies
+	quickstartStrategies = func() []backendkit.Strategy { return append(original(), s) }
+	t.Cleanup(func() { quickstartStrategies = original })
+}
+
+func stubRow(name, host string) backendkit.Strategy {
+	return backendkit.Strategy{
+		Descriptor: backend.Descriptor{
+			Name:             name,
+			ValidAsTracker:   true,
+			ValidAsCodeForge: true,
+			TokenEnvVar:      strings.ToUpper(name) + "_TOKEN",
+			Quickstart:       &backend.QuickstartBlock{Hosts: []string{host}, Axes: []string{"tracker", "forge"}},
+		},
+		RemoteMatch: func(s backendkit.Shared, _ backendkit.Lookup, remote string) bool {
+			h, slug := gitremote.ParseHostSlug(remote)
+			return h == host && slug == s.RepoSlug
+		},
+		AcquireToken: func(_ backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPrompt) (string, error) {
+			return p.PromptMasked(name + " token"), nil
+		},
+	}
+}
+
+// Pins that validateBackendChoice is registry-driven: a quickstart row added
+// to the strategy source passes with no quickstart-side change, while the
+// block-less jira and local rows are rejected.
 func TestValidateBackendChoice_NewRegistryEntryNeedsNoQuickstartEdit(t *testing.T) {
-	original := backend.Registry
-	backend.Registry = append(append([]backend.Descriptor{}, original...), backend.Descriptor{
-		Name:             "gitlab",
-		ValidAsTracker:   true,
-		ValidAsCodeForge: true,
-		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
-	})
-	defer func() { backend.Registry = original }()
+	withQuickstartRow(t, stubRow("gitlab", "gitlab.example.com"))
 
 	if err := validateBackendChoice("gitlab"); err != nil {
 		t.Errorf("validateBackendChoice(\"gitlab\") = %v, want nil", err)
+	}
+	for _, name := range []string{"jira", "local", "git"} {
+		if err := validateBackendChoice(name); err == nil {
+			t.Errorf("validateBackendChoice(%q) = nil, want a rejection: no quickstart block", name)
+		}
 	}
 }
 
@@ -3013,31 +2966,17 @@ func TestRunQuickstart_FlakeNix_NoDeprecatedPathSpellings(t *testing.T) {
 	})
 }
 
-// Pins that a QuickstartEligible backend registered only in backend.Registry,
-// with its own Strategy.AcquireToken, acquires its token end-to-end
-// with no edit to runQuickstart: the fake gitlab acquirer is dispatched, and
-// its token lands in harness.env under the descriptor's own TokenEnvVar with
-// no GH_TOKEN line, so the export is keyed off the descriptor, not the name.
+// Pins that a quickstart row added to the strategy source, with its own
+// Strategy.AcquireToken, acquires its token end-to-end with no edit to
+// runQuickstart: the stub acquirer is dispatched, and its token lands in
+// harness.env under the descriptor's own TokenEnvVar with no GH_TOKEN line.
 func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *testing.T) {
+	stub := stubRow("gitlab", "gitlab.example.com")
+	withQuickstartRow(t, stub)
+	// renderHarnessEnv still resolves the token name through backend.Registry.
 	originalRegistry := backend.Registry
-	backend.Registry = append(append([]backend.Descriptor{}, originalRegistry...), backend.Descriptor{
-		Name:             "gitlab",
-		ValidAsTracker:   true,
-		ValidAsCodeForge: true,
-		Quickstart:       &backend.QuickstartBlock{Hosts: []string{"gitlab.example.com"}, Axes: []string{"tracker", "forge"}},
-		TokenEnvVar:      "GITLAB_TOKEN",
-	})
+	backend.Registry = append(append([]backend.Descriptor{}, originalRegistry...), stub.Descriptor)
 	defer func() { backend.Registry = originalRegistry }()
-
-	// backendkit has no unregister, so the stub registers once per process.
-	if _, registered := backendkit.ByName("gitlab"); !registered {
-		backendkit.Register(backendkit.Strategy{
-			Descriptor: backend.Descriptor{Name: "gitlab", TokenEnvVar: "GITLAB_TOKEN"},
-			AcquireToken: func(_ backendkit.Shared, _ backendkit.Lookup, p backendkit.TokenPrompt) (string, error) {
-				return p.PromptMasked("GitLab token (GITLAB_TOKEN)"), nil
-			},
-		})
-	}
 
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -3047,8 +2986,7 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 		runtimes:  map[string]bool{"podman": true},
 	}
 	stdin := strings.NewReader(strings.Join([]string{
-		"gitlab",           // backend
-		"team/proj",        // repoSlug (no ambient default for gitlab)
+		"",                 // repoSlug default team/proj
 		"",                 // runtime default podman
 		"Ada Lovelace",     // git user name
 		"ada@example.com",  // git user email
@@ -3059,6 +2997,13 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 		t.Fatalf("runQuickstart: %v", err)
 	}
 
+	transcript := out.String()
+	if !strings.Contains(transcript, "detected a gitlab.example.com remote — using the gitlab backend") {
+		t.Errorf("expected the stub row to be detected from its host, got:\n%s", transcript)
+	}
+	if strings.Contains(transcript, "Backend (") {
+		t.Errorf("expected no backend prompt for a host a row claims, got:\n%s", transcript)
+	}
 	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
 	if err != nil {
 		t.Fatalf("read harness.env: %v", err)
@@ -3068,6 +3013,113 @@ func TestRunQuickstart_NewBackend_TokenAcquisitionNeedsNoRunQuickstartEdit(t *te
 	}
 	if strings.Contains(string(harnessEnv), "GH_TOKEN=") {
 		t.Errorf("expected harness.env NOT to carry a GH_TOKEN line for a non-github backend, got:\n%s", harnessEnv)
+	}
+}
+
+// A host no row lists is asked, offering exactly the rows with a quickstart
+// block, with the first row as the default answer.
+func TestRunQuickstart_UnclaimedHost_PromptsOverQuickstartRowsOnly(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "https://git.nowhere.test/team/proj.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader(strings.Join([]string{
+		"",                // backend default
+		"",                // repoSlug default team/proj
+		"",                // runtime default podman
+		"Ada Lovelace",    // git user name
+		"ada@example.com", // git user email
+	}, "\n") + "\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	transcript := out.String()
+	if !strings.Contains(transcript, "Backend (github/forgejo) [github]: ") {
+		t.Errorf("expected the backend prompt over the quickstart rows defaulting to the first, got:\n%s", transcript)
+	}
+}
+
+// A github.com remote is claimed by the github row, which carries no knobs.
+func TestRunQuickstart_GithubRemote_DetectedWithoutBackendPrompt(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "git@github.com:jordansmall/spindrift.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader("\n\nAda Lovelace\nada@example.com\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	transcript := out.String()
+	if !strings.Contains(transcript, "detected a github.com remote — using the github backend") {
+		t.Errorf("expected github.com to be detected, got:\n%s", transcript)
+	}
+	if strings.Contains(transcript, "Backend (") {
+		t.Errorf("expected no backend prompt, got:\n%s", transcript)
+	}
+}
+
+// github's RemoteMatch compares against github.Host(), which reads GH_HOST, so
+// a GHES operator's github.com remote is no longer claimed by the github row.
+func TestRunQuickstart_GHHostOverride_GithubComRemoteFallsToBackendPrompt(t *testing.T) {
+	t.Setenv("GH_HOST", "ghe.corp")
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "git@github.com:o/r.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader("\n\n\nAda Lovelace\nada@example.com\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	transcript := out.String()
+	if strings.Contains(transcript, "detected a github.com remote") {
+		t.Errorf("expected github.com not to be detected under GH_HOST=ghe.corp, got:\n%s", transcript)
+	}
+	if !strings.Contains(transcript, "Backend (github/forgejo) [github]: ") {
+		t.Errorf("expected the backend prompt, got:\n%s", transcript)
+	}
+}
+
+// An unclaimed host still yields the owner/repo slug from the remote, whichever
+// backend the operator picks at the prompt.
+func TestRunQuickstart_UnclaimedHost_SlugDefaultParsedFromRemote(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{
+		remoteURL: "git@git.example.org:o/r.git",
+		env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken", "GH_TOKEN": "ghp_faketoken"},
+		runtimes:  map[string]bool{"podman": true},
+	}
+	stdin := strings.NewReader("github\n\n\nAda Lovelace\nada@example.com\n")
+
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "Repo slug (owner/repo) [o/r]: ") {
+		t.Errorf("expected the repo slug prompt to default to o/r, got:\n%s", out.String())
+	}
+}
+
+// Jira and local carry no quickstart block, so no host detects them.
+func TestQuickstartStrategies_ExcludeBlocklessBackends(t *testing.T) {
+	names := quickstartBackendNames()
+	if got := strings.Join(names, ","); got != "github,forgejo" {
+		t.Errorf("quickstartBackendNames() = %q, want github,forgejo", got)
 	}
 }
 

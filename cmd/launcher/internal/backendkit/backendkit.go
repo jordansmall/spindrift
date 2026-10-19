@@ -113,9 +113,6 @@ type TokenPrompt struct {
 	Probe func(token string) error
 	// RerunCmd is the command the error hints tell the operator to rerun.
 	RerunCmd string
-	// TokenEnvVar is the env name the wizard exports the token under, from the
-	// backend's Descriptor.
-	TokenEnvVar string
 }
 
 // AutoMergeForges names, in slice order, every Strategy that offers an
