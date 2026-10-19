@@ -85,6 +85,8 @@ rec {
   runArtifacts =
     {
       runnerKind,
+      # The runner row's artifact (lib/runners): which Box artifact the family boots.
+      boxArtifact,
       driverEntry,
       agentFilesPath,
       agentEnvPath,
@@ -203,6 +205,7 @@ rec {
     )
     // {
       RUNNER_KIND = runnerKind;
+      BOX_ARTIFACT = boxArtifact;
       DRIVER_SKILLS_DIR = "/home/agent/${driverEntry.skillsDirRelative}";
       DRIVER_SESSION_CACHE_DIR =
         if driverEntry ? sessionCacheDirRelative then
@@ -248,6 +251,7 @@ rec {
         runnerKind:
         runArtifacts {
           inherit runnerKind;
+          boxArtifact = "dummy";
           driverEntry = dummyDriverEntry;
           agentFilesPath = "dummy";
           agentEnvPath = "dummy";

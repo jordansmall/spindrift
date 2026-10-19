@@ -1518,6 +1518,7 @@ let
   # package below.
   runnerRow = (import ./runners/index.nix { }).forRuntime runtime;
   runnerKind = runnerRow.name;
+  boxArtifact = runnerRow.artifact;
 
   # One renderer over the flakeOption schema entries, used by the entrypoint's
   # Box-side preamble and the document's `settings` section below. Box env is
@@ -1537,6 +1538,7 @@ let
   runArtifacts = preambles.runArtifacts {
     inherit
       runnerKind
+      boxArtifact
       agentFilesPath
       agentEnvPath
       passwdFilePath

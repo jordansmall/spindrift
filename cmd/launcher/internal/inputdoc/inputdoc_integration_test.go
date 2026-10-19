@@ -26,6 +26,7 @@ func TestSeamLoadRenderedRunInput(t *testing.T) {
 		{doc.Settings, "settings", "COMPLETE_LABEL", "agent-complete"},
 		{doc.Artifacts, "artifacts", "RUNTIME", "podman"},
 		{doc.Artifacts, "artifacts", "RUNNER_KIND", "oci"},
+		{doc.Artifacts, "artifacts", "BOX_ARTIFACT", "oci-image"},
 	} {
 		if got := c.section[c.key]; got != c.want {
 			t.Errorf("%s[%q] = %q, want %q", c.name, c.key, got, c.want)
