@@ -11,6 +11,7 @@
   hostMediatedRemote = true;
   # ADR 0032: local is not reachable from inside the Box at all.
   inBoxUnreachableTracker = true;
+  slugIssueRefTracker = true;
   relayCapable = true;
   hostPostingCapable = true;
   trackerAxisRead = "LOCAL";

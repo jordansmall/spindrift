@@ -110,7 +110,7 @@ func trackerGates(e Env) map[string]bool {
 	prBodyLocalRef := false
 	prBodyLocalNoref := false
 	prBodyCloses := false
-	if trackerName == "local" {
+	if row.SlugIssueRefTracker {
 		if e.LocalIssueReference {
 			prBodyLocalRef = true
 		} else {
@@ -139,14 +139,7 @@ func issueTrackerAxisFallback(issueTracker string) (itRead, itWrite, itFiler str
 	if tracker == "" {
 		tracker = defaultIssueTracker
 	}
-	switch tracker {
-	case "local":
-		return "LOCAL", "", "GH"
-	case "forgejo":
-		return "FORGEJO", "FORGEJO", "FORGEJO"
-	default:
-		return "GITHUB", "GITHUB", "GH"
-	}
+	return backend.TrackerAxisSignals(tracker)
 }
 
 // verdictContract reports whether d posts a research verdict comment. The

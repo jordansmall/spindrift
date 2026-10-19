@@ -1210,6 +1210,7 @@ rec {
         (optional "hostMediatedRemote" "HostMediatedRemote" false)
         (optional "inBoxUnreachableTracker" "InBoxUnreachableTracker" false)
         (optional "inBoxUnwritableTracker" "InBoxUnwritableTracker" false)
+        (optional "slugIssueRefTracker" "SlugIssueRefTracker" false)
         (optional "outboxRelayCapable" "OutboxRelayCapable" false)
         (optional "inBoxGHCredentialHelper" "InBoxGHCredentialHelper" false)
         (optional "relayCapable" "RelayCapable" false)

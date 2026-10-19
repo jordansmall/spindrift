@@ -257,3 +257,12 @@ func TestQuickstartBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestSlugIssueRefTrackerIsLocalOnly(t *testing.T) {
+	for _, d := range Registry {
+		want := d.Name == "local"
+		if d.SlugIssueRefTracker != want {
+			t.Errorf("%s.SlugIssueRefTracker = %v, want %v", d.Name, d.SlugIssueRefTracker, want)
+		}
+	}
+}

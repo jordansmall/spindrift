@@ -69,6 +69,11 @@ type Descriptor struct {
 	// comment (#5263), which both relay through the host.
 	InBoxUnwritableTracker bool
 
+	// SlugIssueRefTracker is true for a tracker whose issues carry no number a
+	// PR body can auto-close ("local"): the body names the issue by slug, and
+	// only when LOCAL_ISSUE_REFERENCE opts in, instead of `Closes #N`.
+	SlugIssueRefTracker bool
+
 	// RelayCapable is true for a CODE_FORGE backend with every host-mediation
 	// seam needed under BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay
 	// always, plus draft-PR-create and commit-subjects when the backend has a
