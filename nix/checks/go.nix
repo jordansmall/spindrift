@@ -198,6 +198,7 @@ let
       "forge/gitplumbing"
       "forge/rest"
       "gitexec"
+      "gitremote"
       "hostop"
       "landdelta"
       "ledger"

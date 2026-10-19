@@ -61,3 +61,73 @@ func TestStrategyValidateCodeForgeIgnoresSlug(t *testing.T) {
 		t.Errorf("err = %v, want nil: the slug is a tracker-axis requirement", err)
 	}
 }
+
+func TestStrategyCloneURL(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"default base", map[string]string{"FORGEJO_TOKEN": "t"}, "https://t@codeberg.org/o/r.git"},
+		{"trims slash", map[string]string{"FORGEJO_TOKEN": "t", "FORGEJO_BASE_URL": "http://f.test:3000/"}, "http://t@f.test:3000/o/r.git"},
+		{"schemeless base", map[string]string{"FORGEJO_TOKEN": "t", "FORGEJO_BASE_URL": "f.test"}, "f.test://t@f.test/o/r.git"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := forgejo.Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, mapLookup(tc.env), "")
+			if err != nil || got != tc.want {
+				t.Errorf("CloneURL = %q, %v, want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestStrategyCloneURLRequiresToken(t *testing.T) {
+	_, err := forgejo.Strategy.CloneURL(backendkit.Shared{RepoSlug: "o/r"}, mapLookup(nil), "")
+	if err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN is required when CODE_FORGE=forgejo") {
+		t.Errorf("err = %v, want one naming FORGEJO_TOKEN", err)
+	}
+}
+
+func TestStrategyWebURL(t *testing.T) {
+	for _, tc := range []struct {
+		name, slug, want string
+		env              map[string]string
+	}{
+		{"default base", "o/r", "https://codeberg.org/o/r", nil},
+		{"trailing slash", "o/r", "https://git.example.com/o/r", map[string]string{"FORGEJO_BASE_URL": "https://git.example.com/"}},
+		{"empty slug", "", "", nil},
+		// The launcher rejects an explicitly blank base, so the link is
+		// withheld rather than guessed; unset (above) takes the default.
+		{"explicit blank base", "o/r", "", map[string]string{"FORGEJO_BASE_URL": ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := forgejo.Strategy.WebURL(backendkit.Shared{RepoSlug: tc.slug}, mapLookup(tc.env)); got != tc.want {
+				t.Errorf("WebURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStrategyRemoteMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, slug, remote string
+		env                map[string]string
+		want               bool
+	}{
+		{"default base", "owner/repo", "git@codeberg.org:owner/repo.git", nil, true},
+		{"explicit base", "owner/repo", "git@codeberg.org:owner/repo.git", map[string]string{"FORGEJO_BASE_URL": "https://codeberg.org"}, true},
+		{"case-insensitive", "owner/repo", "git@CODEBERG.ORG:Owner/Repo.git", nil, true},
+		{"host mismatch", "owner/repo", "git@git.example.com:owner/repo.git", nil, false},
+		{"slug mismatch", "owner/repo", "git@codeberg.org:owner/other.git", nil, false},
+		{"custom base", "owner/repo", "https://git.example.com/owner/repo.git", map[string]string{"FORGEJO_BASE_URL": "https://git.example.com/"}, true},
+		{"empty slug", "", "git@codeberg.org:owner/repo.git", nil, false},
+		{"explicit blank base", "owner/repo", "git@codeberg.org:owner/repo.git", map[string]string{"FORGEJO_BASE_URL": ""}, false},
+		{"hostless base", "owner/repo", "git@codeberg.org:owner/repo.git", map[string]string{"FORGEJO_BASE_URL": "not a url"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := forgejo.Strategy.RemoteMatch(backendkit.Shared{RepoSlug: tc.slug}, mapLookup(tc.env), tc.remote); got != tc.want {
+				t.Errorf("RemoteMatch(%q) = %v, want %v", tc.remote, got, tc.want)
+			}
+		})
+	}
+}

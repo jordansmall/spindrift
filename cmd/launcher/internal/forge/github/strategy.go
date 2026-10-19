@@ -1,9 +1,12 @@
 package github
 
 import (
+	"strings"
+
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitremote"
 )
 
 // Strategy is the github backend's Go half (ADR 0068). It has no knobs, so
@@ -31,6 +34,26 @@ var Strategy = backendkit.Strategy{
 	NewLedger: func(s backendkit.Shared, _ backendkit.Lookup) (backendkit.LedgerSite, error) {
 		url, gitArgs := GitRemote(s.RepoSlug)
 		return backendkit.LedgerSite{URL: url, GitArgs: gitArgs}, nil
+	},
+	// The Box clones from literal github.com, not Host(): GH_HOST is the
+	// host's gh setting and never reached the Box's clone.
+	CloneURL: func(s backendkit.Shared, _ backendkit.Lookup, _ string) (string, error) {
+		return "https://github.com/" + s.RepoSlug + ".git", nil
+	},
+	WebURL: func(s backendkit.Shared, _ backendkit.Lookup) string {
+		if s.RepoSlug == "" {
+			return ""
+		}
+		return "https://" + Host() + "/" + s.RepoSlug
+	},
+	RemoteMatch: func(s backendkit.Shared, _ backendkit.Lookup, remote string) bool {
+		if s.RepoSlug == "" {
+			return false
+		}
+		// ParseHostSlug strips any port, so a GH_HOST carrying one never
+		// matches and the check skips itself.
+		host, slug := gitremote.ParseHostSlug(remote)
+		return strings.EqualFold(host, Host()) && strings.EqualFold(slug, s.RepoSlug)
 	},
 }
 

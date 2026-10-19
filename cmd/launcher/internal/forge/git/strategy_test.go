@@ -36,3 +36,44 @@ func TestStrategyValidateCodeForge(t *testing.T) {
 		t.Errorf("err = %v, want nil", err)
 	}
 }
+
+func TestStrategyCloneURL(t *testing.T) {
+	got, err := Strategy.CloneURL(backendkit.Shared{}, mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": "ssh://h/x.git"}), "")
+	if err != nil || got != "ssh://h/x.git" {
+		t.Errorf("CloneURL = %q, %v, want ssh://h/x.git", got, err)
+	}
+	for _, l := range []backendkit.Lookup{mapLookup(nil), mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": ""})} {
+		_, err := Strategy.CloneURL(backendkit.Shared{}, l, "")
+		if err == nil || !strings.Contains(err.Error(), "CODE_FORGE_REMOTE_URL is required when CODE_FORGE=git") {
+			t.Errorf("err = %v, want one naming CODE_FORGE_REMOTE_URL", err)
+		}
+	}
+}
+
+func TestStrategyHasNoWebURL(t *testing.T) {
+	if Strategy.WebURL != nil {
+		t.Error("git has no web URL")
+	}
+}
+
+func TestStrategyRemoteMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, want, remote string
+		match              bool
+	}{
+		{"raw", "https://git.example.com/team/proj.git", "https://git.example.com/team/proj.git", true},
+		{"no trailing .git", "https://git.example.com/team/proj.git", "https://git.example.com/team/proj", true},
+		{"mismatch", "https://git.example.com/team/proj.git", "https://git.example.com/team/other.git", false},
+		{"scp vs ssh://", "ssh://git@host/owner/repo.git", "git@host:owner/repo.git", true},
+		// Both parse to ("", ""); without the non-empty guard they would match.
+		{"unparseable local paths", "/srv/git/target.git", "/srv/git/consumer.git", false},
+		{"blank remote url", "", "https://git.example.com/team/proj.git", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := mapLookup(map[string]string{"CODE_FORGE_REMOTE_URL": tc.want})
+			if got := Strategy.RemoteMatch(backendkit.Shared{}, l, tc.remote); got != tc.match {
+				t.Errorf("RemoteMatch(%q) = %v, want %v", tc.remote, got, tc.match)
+			}
+		})
+	}
+}
