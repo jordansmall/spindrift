@@ -5,11 +5,11 @@ code-review-baked.md
 commit-baked.md
 commit-push-git.md
 commit-rework-orchestrator.md
+github/issue-blocked-comment.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-git.md
 if-blocked-push-git.md
 if-blocked-triage-git.md
-issue-blocked-comment-github.md
 issue-read.md
 land-git-push-git.md
 land-git-stop-read-write.md

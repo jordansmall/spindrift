@@ -1,5 +1,5 @@
 caveman-default-research.md
 check-hygiene-default.md
 local/research-issue-read.md
+local/research-verdict-relay-socket.md
 research-outcome-landing-relayed-socket.md
-research-verdict-local-socket.md

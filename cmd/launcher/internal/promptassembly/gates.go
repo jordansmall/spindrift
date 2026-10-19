@@ -77,6 +77,7 @@ func Gates(e Env) map[string]bool {
 	// false whenever the base gate is off, so this is a plain conjunction
 	// rather than the exactly-one-on inverseOf mechanic (lib/fragment-pairs.nix).
 	for _, base := range []string{
+		"ISSUE_TRACKER_RELAYED",
 		"ISSUE_TRACKER_GITHUB_READONLY",
 		"ISSUE_TRACKER_LOCAL",
 		"ISSUE_TRACKER_FORGEJO_READONLY",

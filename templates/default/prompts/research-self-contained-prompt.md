@@ -25,7 +25,7 @@ Render exactly one of these verdicts:
 
 # POST THE VERDICT
 
-${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP}${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_LOCAL_SOCKET_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP}
+${RESEARCH_VERDICT_STEP}${RESEARCH_VERDICT_RELAY_STEP}${RESEARCH_VERDICT_RELAY_SOCKET_STEP}
 Structure the verdict in this order:
 
 1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a one-line rationale.
@@ -52,7 +52,7 @@ other markdown formatting:
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing> status=<${RESEARCH_STATUS_ENUM}> note=<one-line rationale>
 
 This must be the literal final message — nothing after it, no prose summary.
-${RESEARCH_OUTCOME_LANDING_GITHUB_STEP}${RESEARCH_OUTCOME_LANDING_FORGEJO_STEP}${RESEARCH_OUTCOME_LANDING_RELAYED_STEP}${RESEARCH_OUTCOME_LANDING_RELAYED_SOCKET_STEP}`status` carries the verdict, not a work-style ready/blocked.
+${RESEARCH_OUTCOME_LANDING_STEP}${RESEARCH_OUTCOME_LANDING_RELAYED_STEP}${RESEARCH_OUTCOME_LANDING_RELAYED_SOCKET_STEP}`status` carries the verdict, not a work-style ready/blocked.
 
 If you cannot reach a verdict, or the verdict was never delivered, use
 `blocked` as the escape hatch instead — same raw plain text requirement:

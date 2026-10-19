@@ -7,7 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// TestResearchVerdictSocketFragmentContract pins the prose of the three
+// TestResearchVerdictSocketFragmentContract pins the prose of the two
 // research-verdict socket fragments (issue #3726, fixing a blocking review
 // finding): the socket has a hard signalwire.MaxBodyBytes-per-field ceiling
 // (enforced by signalwire.CheckFields), and an oversize body is refused
@@ -16,9 +16,8 @@ import (
 // flag set, a bare/unpiped send, and the exit code as the acceptance.
 func TestResearchVerdictSocketFragmentContract(t *testing.T) {
 	fragments := []string{
-		"fragments/research-verdict-github-readonly-socket.md",
-		"fragments/research-verdict-forgejo-readonly-socket.md",
-		"fragments/research-verdict-local-socket.md",
+		"fragments/research-verdict-relay-socket.md",
+		"fragments/local/research-verdict-relay-socket.md",
 	}
 
 	cases := []promptClause{
@@ -58,22 +57,18 @@ func TestResearchVerdictSocketFragmentContract(t *testing.T) {
 	}
 }
 
-// TestResearchVerdictSocketFragmentsSharedClosingSpanParity pins the three
+// TestResearchVerdictSocketFragmentsSharedClosingSpanParity pins the two
 // research-verdict socket fragments' shared closing span byte-for-byte
-// (issue #3866): all three intentionally duplicate everything from "The
-// closing SPINDRIFT_SIGNAL_EOF" onward, so a wording fix applied to fewer
-// than all three drifts silently unless this test catches it.
+// (issue #3866): the shared root file and the local one intentionally
+// duplicate everything from "The closing SPINDRIFT_SIGNAL_EOF" onward, so a
+// wording fix applied to only one drifts silently unless this test catches it.
 func TestResearchVerdictSocketFragmentsSharedClosingSpanParity(t *testing.T) {
 	marker := "The closing `SPINDRIFT_SIGNAL_EOF`"
 
-	github := sharedSpanFrom(t, readPromptFile(t, repoRoot, "fragments/research-verdict-github-readonly-socket.md"), marker)
-	forgejo := sharedSpanFrom(t, readPromptFile(t, repoRoot, "fragments/research-verdict-forgejo-readonly-socket.md"), marker)
-	local := sharedSpanFrom(t, readPromptFile(t, repoRoot, "fragments/research-verdict-local-socket.md"), marker)
+	shared := sharedSpanFrom(t, readPromptFile(t, repoRoot, "fragments/research-verdict-relay-socket.md"), marker)
+	local := sharedSpanFrom(t, readPromptFile(t, repoRoot, "fragments/local/research-verdict-relay-socket.md"), marker)
 
-	if github != forgejo {
-		t.Errorf("research-verdict-github-readonly-socket.md and research-verdict-forgejo-readonly-socket.md diverge in their shared span (from %q to end of file):\ngithub:\n%s\n\nforgejo:\n%s", marker, github, forgejo)
-	}
-	if github != local {
-		t.Errorf("research-verdict-github-readonly-socket.md and research-verdict-local-socket.md diverge in their shared span (from %q to end of file):\ngithub:\n%s\n\nlocal:\n%s", marker, github, local)
+	if shared != local {
+		t.Errorf("research-verdict-relay-socket.md and local/research-verdict-relay-socket.md diverge in their shared span (from %q to end of file):\nshared:\n%s\n\nlocal:\n%s", marker, shared, local)
 	}
 }

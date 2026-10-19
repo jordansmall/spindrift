@@ -6,6 +6,6 @@ github/filer-dedup.md
 research-file-issues-relay.md
 research-issue-read.md
 research-outcome-landing-relayed.md
-research-verdict-github-readonly.md
+research-verdict-relay.md
 scout-issue-read.md
 skill-preamble.md

@@ -3,6 +3,8 @@ package promptassembly
 import (
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
 // TestGatesIssueTrackerReadAxis covers the issue-read step gate: exactly one of
@@ -832,6 +834,45 @@ func TestGatesIssueTrackerReachable(t *testing.T) {
 		got := Gates(Env{IssueTracker: tracker, TrackerAxisRead: "GITHUB"})["ISSUE_TRACKER_REACHABLE"]
 		if got != want {
 			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_REACHABLE] = %v, want %v", tracker, got, want)
+		}
+	}
+}
+
+// TestGatesBackendAgnosticReadWriteAndRelayed pins ISSUE_TRACKER_READWRITE and
+// ISSUE_TRACKER_RELAYED as the exact unions of the backend-named gates they
+// replace on the slot rows, across every tracker, access mode, dispatch kind
+// and Filer setting. Each gate keeps its own backend-named siblings, which
+// the deprecated rows still read.
+func TestGatesBackendAgnosticReadWriteAndRelayed(t *testing.T) {
+	for _, tracker := range []string{"github", "forgejo", "local", "jira"} {
+		for _, boxWrite := range []bool{true, false} {
+			for _, kd := range dispatchkind.All {
+				for _, filer := range []bool{true, false} {
+					for _, carrier := range []string{"log", "socket"} {
+						env := Env{
+							IssueTracker:    tracker,
+							BoxWriteEnabled: boxWrite,
+							DispatchKind:    kd.Name,
+							FilerEnabled:    filer,
+							SignalCarrier:   carrier,
+						}
+						g := Gates(env)
+						wantRW := g["ISSUE_TRACKER_GITHUB_READWRITE"] || g["ISSUE_TRACKER_FORGEJO_READWRITE"]
+						wantRelayed := g["ISSUE_TRACKER_GITHUB_READONLY"] || g["ISSUE_TRACKER_LOCAL"] || g["ISSUE_TRACKER_FORGEJO_READONLY"]
+						if g["ISSUE_TRACKER_READWRITE"] != wantRW {
+							t.Errorf("Gates(%+v)[ISSUE_TRACKER_READWRITE] = %v, want %v", env, g["ISSUE_TRACKER_READWRITE"], wantRW)
+						}
+						if g["ISSUE_TRACKER_RELAYED"] != wantRelayed {
+							t.Errorf("Gates(%+v)[ISSUE_TRACKER_RELAYED] = %v, want %v", env, g["ISSUE_TRACKER_RELAYED"], wantRelayed)
+						}
+						if g["ISSUE_TRACKER_RELAYED_LOG"] != (wantRelayed && carrier == "log") ||
+							g["ISSUE_TRACKER_RELAYED_SOCKET"] != (wantRelayed && carrier == "socket") {
+							t.Errorf("Gates(%+v) ISSUE_TRACKER_RELAYED _LOG/_SOCKET = %v/%v for relayed=%v",
+								env, g["ISSUE_TRACKER_RELAYED_LOG"], g["ISSUE_TRACKER_RELAYED_SOCKET"], wantRelayed)
+						}
+					}
+				}
+			}
 		}
 	}
 }
