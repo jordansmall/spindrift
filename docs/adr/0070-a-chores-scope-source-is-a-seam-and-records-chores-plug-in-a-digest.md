@@ -27,7 +27,9 @@ Chore is planned, so the hook is built now rather than on a trigger.
    commit cursor, the head-keyed due check and the tracked-file slice.
    `records` covers the Record ID cursor and the Records store. The butler
    calls `Due`, `NextDue` and `Prepare(claim)`, which returns the scope, the
-   input and a settle hook. It no longer branches on the scope.
+   input and a settle hook. Between the due check and the claim it calls
+   `Stage`, so a failure there (the `tree` file listing) leaves the Ledger
+   unclaimed. It no longer branches on the scope.
 2. **A records Chore plugs in a Records digest.** Each built-in records
    Chore registers a Digest Strategy in the Bundle under its own name. The
    Strategy has a `Render` function, which returns the digest text and the
