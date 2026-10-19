@@ -3,10 +3,12 @@
 # lib/runners/index.nix derives the runtime enum and the runtime-to-family
 # lookup from them, so a runtime value is named in exactly one place.
 
-# Attributes: `name` is the family string the launcher receives as RUNNER_KIND;
-# `runtimes` lists the operator-facing runtime values the family serves (a
-# runtime may appear in only one row); `artifact` is the flake package the
-# family exposes under imageAttrName ("oci-image" or "store-closure").
+# Field meanings live on the Descriptor in
+# cmd/launcher/internal/runner/family.go, except `goName`, which names the
+# exported Go var and its Kind constant (OCI, KindOCI). Adding a field is one
+# entry in rowFields (lib/renderers.nix) plus the struct field, guarded by
+# TestDescriptorFieldsMatchNixRows. `nix run .#regen` renders the rows into
+# families_gen.go.
 
 # A plain list with no `{ lib }:` wrapper, matching lib/dispatch-kinds/default.nix.
 # Order is load-bearing: the concatenated `runtimes` are the runtime option's
