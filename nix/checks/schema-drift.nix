@@ -634,6 +634,36 @@ checkedMerge {
       "dispatch-kinds-default-count (issue #5668): renderDispatchKindsGo must reject a row that sets the renderer-supplied passRoles, but it rendered successfully";
     pkgs.runCommand "dispatch-kinds-default-count" { } "touch $out";
 
+  # Each kind row's `filerRelayGate` is the env var the Box tests to decide
+  # whether to file relayed findings (issue #5669); a typo there silently turns
+  # the Filer relay off for that kind. Every row sets one, so an empty or
+  # absent gate is rejected too. The control proves the real rows pass, so the
+  # negatives are not vacuous.
+  dispatch-kinds-filer-relay-gate =
+    let
+      inherit (pkgs.lib) assertMsg imap0;
+      rows = import ../../lib/dispatch-kinds;
+      registryGates = map (r: r.gate) (import ../../lib/fragments.nix);
+      valid = builtins.all (
+        r:
+        (r.filerRelayGate or "" != "" && builtins.elem r.filerRelayGate registryGates)
+        || throw "dispatch-kinds-filer-relay-gate (issue #5669): kind ${r.name} names filerRelayGate `${r.filerRelayGate or ""}`, which is no gate in lib/fragments.nix"
+      );
+      rejects = rs: !(builtins.tryEval (valid rs)).success;
+      tweakFirst = f: imap0 (i: r: if i == 0 then f r else r) rows;
+      bogusGate = tweakFirst (r: r // { filerRelayGate = "FILER_FILE_RELAY_BOGUS"; });
+      emptyGate = tweakFirst (r: r // { filerRelayGate = ""; });
+      absentGate = tweakFirst (r: removeAttrs r [ "filerRelayGate" ]);
+    in
+    assert valid rows;
+    assert assertMsg (rejects bogusGate)
+      "dispatch-kinds-filer-relay-gate (issue #5669): a row naming a filerRelayGate absent from lib/fragments.nix must be rejected, but it passed";
+    assert assertMsg (rejects emptyGate)
+      "dispatch-kinds-filer-relay-gate (issue #5669): a row with an empty filerRelayGate must be rejected, but it passed";
+    assert assertMsg (rejects absentGate)
+      "dispatch-kinds-filer-relay-gate (issue #5669): a row with no filerRelayGate must be rejected, but it passed";
+    pkgs.runCommand "dispatch-kinds-filer-relay-gate" { } "touch $out";
+
   # Regenerate with `nix run .#regen` when lib/chore-catalog.nix changes
   # (issue #3991).
   chore-builtins-gen =
