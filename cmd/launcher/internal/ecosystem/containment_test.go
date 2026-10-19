@@ -24,7 +24,8 @@ type ecosystemLiteral struct {
 }
 
 // scanForEcosystemLiterals returns one finding per string literal in dir's
-// non-test .go files whose entire unquoted value equals a Table row Name.
+// .go files, test files included, whose entire unquoted value equals a Table
+// row Name.
 // Equality is whole-literal, so the scan skips "cargo config.json" and prose,
 // and walking the AST skips comments. It reads dir's own files only;
 // deriveEcosystemImporters lists every package directory separately.
@@ -41,7 +42,7 @@ func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 	var files []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if e.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
 		files = append(files, filepath.Join(dir, name))
@@ -96,10 +97,10 @@ func lineOf(t *testing.T, src, needle string) int {
 }
 
 // TestScanForEcosystemLiterals_FixtureDetectsViolation pins that exactly the
-// top-level violator is reported. The compliant file proves whole-literal
-// equality does not over-fire on containment or comments, the _test.go file
-// proves test files are out of scope, and the subpackage and the unparseable
-// testdata file prove the scan never descends into either.
+// top-level violator and the violating _test.go file are reported. The
+// compliant file proves whole-literal equality does not over-fire on
+// containment or comments, and the subpackage and the unparseable testdata
+// file prove the scan never descends into either.
 func TestScanForEcosystemLiterals_FixtureDetectsViolation(t *testing.T) {
 	// The fixture draws its names from Table, so deleting a row cannot fail
 	// this test for a reason unrelated to the scanner.
@@ -133,15 +134,16 @@ func configFile() string {
 }
 `, containedName, containedName, containedName+" config.json"))
 
-	testutil.WriteFixture(t, dir, "fixture_test.go", fmt.Sprintf(`package fixture
+	testSrc := fmt.Sprintf(`package fixture
 
 import "testing"
 
-func TestBareLiteralOutOfScope(t *testing.T) {
+func TestBareLiteralInTestFile(t *testing.T) {
 	name := %q
 	_ = name
 }
-`, testFileName))
+`, testFileName)
+	testutil.WriteFixture(t, dir, "fixture_test.go", testSrc)
 
 	subDir := filepath.Join(dir, "subpkg")
 	nestedSrc := fmt.Sprintf(`package subpkg
@@ -153,9 +155,14 @@ var routed = %q
 	testutil.WriteFixture(t, filepath.Join(dir, "testdata"), "broken.go", "this is not go source {{")
 
 	findings := scanForEcosystemLiterals(t, dir)
-	want := ecosystemLiteral{File: filepath.Join(dir, "violating.go"), Line: lineOf(t, violatingSrc, violatingName), Value: violatingName}
-	if len(findings) != 1 || findings[0] != want {
-		t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want exactly [%+v]", dir, findings, want)
+	want := []ecosystemLiteral{
+		{File: filepath.Join(dir, "fixture_test.go"), Line: lineOf(t, testSrc, testFileName), Value: testFileName},
+		{File: filepath.Join(dir, "violating.go"), Line: lineOf(t, violatingSrc, violatingName), Value: violatingName},
+	}
+	// Order-sensitive: os.ReadDir returns entries sorted by filename, so
+	// fixture_test.go precedes violating.go.
+	if !slices.Equal(findings, want) {
+		t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want exactly %+v", dir, findings, want)
 	}
 }
 
@@ -247,7 +254,9 @@ func packageDirs(t *testing.T, root string) []string {
 // intermediary package still leaves main covered, and internal/credresolver,
 // which must never import this package yet must not re-name an ecosystem
 // either. Direct imports only: the criterion is reaching Table, not being
-// handed a row's Name as string data.
+// handed a row's Name as string data. The ecosystem package itself is exempt
+// because it never imports itself, and its testdata corpora because
+// packageDirs prunes testdata; both are deliberate.
 func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []string {
 	t.Helper()
 	ecosystemImport := moduleName + "/internal/ecosystem"
