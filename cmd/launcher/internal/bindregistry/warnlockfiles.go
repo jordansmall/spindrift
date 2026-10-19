@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -17,6 +18,12 @@ import (
 // must never do that. An absent manifest (registry proxy off) is silent, and
 // every failure path only warns.
 func WarnStaleLockfiles(w io.Writer, workDir string) {
+	WarnStaleLockfilesRows(w, workDir, ecosystem.Table)
+}
+
+// WarnStaleLockfilesRows is WarnStaleLockfiles over the given rows, so a
+// synthetic row can prove the scan without ecosystem.Table.
+func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Row) {
 	if _, err := registrymanifest.Parse(os.Getenv(registrymanifest.EnvVar)); err != nil {
 		if errors.Is(err, registrymanifest.ErrAbsent) {
 			return
@@ -25,7 +32,7 @@ func WarnStaleLockfiles(w io.Writer, workDir string) {
 		return
 	}
 
-	hits, err := ScanLockfilesForForwarder(workDir, ForwarderPort)
+	hits, err := ScanLockfilesForForwarderRows(workDir, ForwarderPort, rows)
 	if err != nil {
 		fmt.Fprintln(w, "==> WARNING: lockfile Forwarder-URL scan failed, skipping: "+err.Error())
 		return
