@@ -62,7 +62,7 @@ func TestNewOCI_UsesConfigFields(t *testing.T) {
 		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             "/pwd",
 		mountParams:     cfg.MountParams,
-		network:         cfg.OCINetwork("none"),
+		network:         cfg.OCINetwork("none", noHostLoopbackNetwork(runner.BinaryFor(cfg.Runtime))),
 		pidsLimit:       cfg.PidsLimit,
 		memoryLimit:     cfg.MemoryLimit,
 	}

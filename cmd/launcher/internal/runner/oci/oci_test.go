@@ -421,7 +421,7 @@ func TestBuildRunArgs_NetworkArgRendersNetworkFlag(t *testing.T) {
 
 // A raw PODMAN_NETWORK value resolved by the plan renders verbatim.
 func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
-	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.Config{Runtime: "podman"}.OCINetwork("pasta")}
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", network: runner.Config{Runtime: "podman"}.OCINetwork("pasta", "")}
 	args := a.buildRunArgs(runner.Box{Name: "agent-issue-1", Env: map[string]string{}})
 	for i, arg := range args {
 		if arg == "--network" {
@@ -3023,5 +3023,27 @@ func TestOCIRemoveHostTree(t *testing.T) {
 				t.Errorf("tree gone = %v, want %v", os.IsNotExist(statErr), tc.wantGone)
 			}
 		})
+	}
+}
+
+func TestNoHostLoopbackNetwork(t *testing.T) {
+	for cli, want := range map[string]string{"podman": "pasta", "docker": "bridge", "nerdctl": "bridge"} {
+		if got := noHostLoopbackNetwork(cli); got != want {
+			t.Errorf("noHostLoopbackNetwork(%q) = %q, want %q", cli, got, want)
+		}
+	}
+}
+
+// New resolves the dialect from the runtime: podman renders pasta, docker and
+// rancher (nerdctl) render bridge, through the real constructor.
+func TestNew_NoHostLoopbackRendersRuntimeDialect(t *testing.T) {
+	for runtime, want := range map[string]string{"podman": "pasta", "docker": "bridge", "rancher": "bridge"} {
+		r, err := New(runner.Config{Runtime: runtime, NetworkMode: runner.NetworkModeNoHostLoopback}, runnertest.Lookup(map[string]string{}), "/pwd")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := r.(*ociAdapter).network.Arg; got != want {
+			t.Errorf("RUNTIME=%s network arg = %q, want %q", runtime, got, want)
+		}
 	}
 }

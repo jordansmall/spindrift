@@ -70,7 +70,7 @@ func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, err
 		flakeImageAttr:  cfg.FlakeImageAttr,
 		pwd:             pwd,
 		mountParams:     cfg.MountParams,
-		network:         cfg.OCINetwork(k.PodmanNetwork),
+		network:         cfg.OCINetwork(k.PodmanNetwork, noHostLoopbackNetwork(runner.BinaryFor(cfg.Runtime))),
 		pidsLimit:       cfg.PidsLimit,
 		memoryLimit:     cfg.MemoryLimit,
 	}, nil
@@ -504,6 +504,17 @@ func hostGatewayHostname(cli string) string {
 		return "host.containers.internal"
 	}
 	return "host.docker.internal"
+}
+
+// noHostLoopbackNetwork returns the `--network` value that denies a Box the
+// host-loopback route under NETWORK_MODE=no-host-loopback. docker/nerdctl
+// render "bridge", their own default, so only podman's pasta without --map-gw
+// denies it.
+func noHostLoopbackNetwork(cli string) string {
+	if cli == cliPodman {
+		return "pasta"
+	}
+	return "bridge"
 }
 
 // probeArgsFromRunArgs strips buildRunArgs' trailing "<image> <entrypoint>"

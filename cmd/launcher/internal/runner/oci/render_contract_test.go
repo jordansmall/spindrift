@@ -43,7 +43,7 @@ func (ociRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	a := &ociAdapter{
 		cli:         "podman",
 		image:       contractImage,
-		network:     runner.Config{Runtime: "podman", NetworkMode: l.Network}.OCINetwork(""),
+		network:     runner.Config{Runtime: "podman", NetworkMode: l.Network}.OCINetwork("", "pasta"),
 		mountParams: runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
 	}
 	if err := a.Run(l.Box); err != nil {
