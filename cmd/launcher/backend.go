@@ -4,17 +4,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/forge/git"
-	"spindrift.dev/launcher/internal/forge/github"
-	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/ledger"
-	"spindrift.dev/launcher/internal/trackerbuild"
 )
 
 // backendRow is one registry entry for a named backend: axis validity and
@@ -81,143 +79,164 @@ func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butl
 	return r, tree, cleanup, nil
 }
 
-// trackerSettings projects the launcher config onto the values every Issue
-// Tracker adapter is built from (issue #4592).
-func trackerSettings(c config) trackerbuild.Settings {
-	return trackerbuild.Settings{
-		RepoSlug:          c.repoSlug,
-		BranchPrefix:      c.branchPrefix,
-		LocalIssuesDir:    c.localIssuesDir,
-		ForgejoBaseURL:    c.forgejoBaseURL,
-		ForgejoToken:      c.forgejoToken,
-		JiraBaseURL:       c.jiraBaseURL,
-		JiraProjectKey:    c.jiraProjectKey,
-		JiraEmail:         c.jiraEmail,
-		JiraToken:         c.jiraToken,
-		JiraStatusMapping: trackerbuild.JiraStatusMappingFor(c.kind().Tracker, c.jiraStatusMapping),
-		Labels:            dispatchLabels(c),
-		VerdictLabels:     researchVerdictLabels(c),
+// backendRows is a view over the Backend Strategies the Bundle registers (ADR
+// 0068 decision 1), in the Bundle's registration order, kept so its callers don't
+// change yet; callers resolve per-backend behavior through backendByName
+// instead of a name switch. The imported Bundle's init runs before this
+// initialiser, so the registry is populated by then.
+var backendRows = strategyRows()
+
+// Until ADR 0068 decision 6 moves them onto the rows, the Box token override
+// name and the read-only token gate stay launcher-side, keyed on backend name.
+var (
+	backendBoxTokenEnvVars = map[string]string{
+		backend.GitHub.Name:  "BOX_GH_TOKEN",
+		backend.Forgejo.Name: "BOX_FORGEJO_TOKEN",
 	}
-}
-
-func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
-	return forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      c.forgejoBaseURL,
-		Repo:         c.repoSlug,
-		Token:        c.forgejoToken,
-		BaseBranch:   c.baseBranch,
-		UserName:     c.gitUserName,
-		UserEmail:    c.gitUserEmail,
-		BranchPrefix: c.branchPrefix,
-		MergeMethod:  c.mergeMethod,
-	}
-}
-
-// backendRows is the registry of every named backend the ISSUE_TRACKER and
-// CODE_FORGE knobs select among; callers resolve per-backend behavior through
-// backendByName instead of a name switch.
-var backendRows = []backendRow{
-	{
-		Descriptor: backend.GitHub,
-
-		newIssueTracker: func(c config) forge.IssueTracker {
-			return trackerbuild.GitHub.New(trackerSettings(c))
-		},
-		newCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
-			return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod), github.WithCommitIdentity(c.gitUserName, c.gitUserEmail))
-		},
-		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
-			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod), github.WithCommitIdentity(c.gitUserName, c.gitUserEmail))
-		},
-		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
-			url, gitArgs := github.GitRemote(c.repoSlug)
-			return remoteLedger(c, url, gitArgs...)
-		},
-
-		boxTokenEnvVar: "BOX_GH_TOKEN",
-		readOnlyTokenGate: func(c config, w io.Writer) error {
+	backendTokenGates = map[string]func(c config, w io.Writer) error{
+		backend.GitHub.Name: func(c config, w io.Writer) error {
 			// ghTokenIntrospector is a var tests swap, so read it at call time.
 			_, err := checkReadOnlyTokenGate(c, ghTokenIntrospector, w)
 			return err
 		},
-	},
-	{
-		Descriptor: backend.Forgejo,
-
-		validateTracker: func(c config) error {
-			return forgejo.ValidateForgejoEnv("ISSUE_TRACKER", c.forgejoBaseURL, c.forgejoToken)
-		},
-		validateCodeForge: func(c config) error {
-			return forgejo.ValidateForgejoEnv("CODE_FORGE", c.forgejoBaseURL, c.forgejoToken)
-		},
-
-		newIssueTracker: func(c config) forge.IssueTracker {
-			return trackerbuild.Forgejo.New(trackerSettings(c))
-		},
-		newCodeForge: func(c config, _ local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
-			return forgejo.NewForgejoCodeForge(forgejoCodeForgeConfig(c), it)
-		},
-		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
-			return forgejo.NewReadOnlyForgejoCodeForge(forgejoCodeForgeConfig(c), it)
-		},
-		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
-			return remoteLedger(c, forgejo.GitRemoteURL(c.forgejoBaseURL, c.repoSlug, c.forgejoToken))
-		},
-
-		boxTokenEnvVar: "BOX_FORGEJO_TOKEN",
-		readOnlyTokenGate: func(c config, w io.Writer) error {
+		backend.Forgejo.Name: func(c config, w io.Writer) error {
 			_, err := checkReadOnlyForgejoTokenGate(c, w)
 			return err
 		},
-	},
-	{
-		Descriptor: backend.Jira,
+	}
+)
 
-		validateTracker: func(c config) error {
-			return jira.ValidateJiraEnv(c.jiraBaseURL, c.jiraProjectKey, c.jiraToken, c.jiraStatusMapping)
-		},
+// rejectBlankForgejoKnobs validates the forgejo knobs from c's resolved
+// fields. forgejo.ReadKnobs re-defaults a blank FORGEJO_BASE_URL to
+// codeberg, and an input document can set it to "", which would send a
+// self-hosted FORGEJO_TOKEN there; this fails closed instead until ADR 0068
+// decision 3 drops the config's backend fields. A blank LOCAL_ISSUES_DIR
+// is not checked: it re-defaults to .spindrift/issues (issue #5638).
+func rejectBlankForgejoKnobs(c config, axis string) error {
+	return forgejo.ValidateForgejoEnv(axis, c.forgejoBaseURL, c.forgejoToken)
+}
 
-		newIssueTracker: func(c config) forge.IssueTracker {
-			return trackerbuild.Jira.New(trackerSettings(c))
-		},
-	},
-	{
-		Descriptor: backend.Local,
+// strategyRows builds one backendRow per registered Strategy, in the Bundle's
+// registration order. TestBackendRowsCoverRegistry reports a Strategy missing
+// from backend.Registry, and the reverse.
+func strategyRows() []backendRow {
+	var rows []backendRow
+	for _, s := range backendkit.Strategies() {
+		rows = append(rows, rowFromStrategy(s))
+	}
+	return rows
+}
 
-		validateCodeForge: func(c config) error {
-			if c.mergeMode != "immediate" {
-				return fmt.Errorf(
-					"CODE_FORGE=local requires MERGE_MODE=immediate (got %q) — "+
-						"only immediate relays the seam bundle into the Accumulation "+
-						"repo; manual/auto strand it in the outbox", c.mergeMode)
+func rowFromStrategy(s backendkit.Strategy) backendRow {
+	r := backendRow{
+		Descriptor:        s.Descriptor,
+		boxTokenEnvVar:    backendBoxTokenEnvVars[s.Name],
+		readOnlyTokenGate: backendTokenGates[s.Name],
+	}
+	var blank func(config, string) error
+	if s.Name == backend.Forgejo.Name {
+		blank = rejectBlankForgejoKnobs
+	}
+	if f := s.ValidateTracker; f != nil {
+		r.validateTracker = func(c config) error {
+			if blank != nil {
+				if err := blank(c, "ISSUE_TRACKER"); err != nil {
+					return err
+				}
 			}
-			return nil
-		},
-
-		newIssueTracker: func(c config) forge.IssueTracker {
-			return trackerbuild.Local.New(trackerSettings(c))
-		},
-		newCodeForge: func(c config, parent local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
-			return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
-		},
-		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
-			return ledger.Local{Repo: c.codeForgeAccumulationRepoDir}, butler.GitTree{Repo: c.codeForgeAccumulationRepoDir}, func() {}, nil
-		},
-	},
-	{
-		Descriptor: backend.Git,
-
-		validateCodeForge: func(c config) error {
-			if c.codeForgeRemoteURL == "" {
-				return fmt.Errorf("set CODE_FORGE_REMOTE_URL (the plain git remote to clone from and push to) when CODE_FORGE=git")
+			return f(backendShared(c), c.knobLookup)
+		}
+	}
+	if f := s.ValidateCodeForge; f != nil {
+		r.validateCodeForge = func(c config) error {
+			if blank != nil {
+				if err := blank(c, "CODE_FORGE"); err != nil {
+					return err
+				}
 			}
-			return nil
-		},
+			return f(backendShared(c), c.knobLookup)
+		}
+	}
+	if f := s.NewIssueTracker; f != nil {
+		r.newIssueTracker = func(c config) forge.IssueTracker {
+			return mustBuild(f(backendShared(c), c.knobLookup))
+		}
+	}
+	if f := s.NewCodeForge; f != nil {
+		r.newCodeForge = func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
+			return mustBuild(f(backendShared(c), c.knobLookup, parent, it))
+		}
+	}
+	if f := s.NewReadOnlyCodeForge; f != nil {
+		r.newReadOnlyCodeForge = func(c config, parent local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
+			return mustBuild(f(backendShared(c), c.knobLookup, parent, it))
+		}
+	}
+	if f := s.NewLedger; f != nil {
+		r.newLedger = func(c config) (ledger.Backend, butler.Tree, func(), error) {
+			site, err := f(backendShared(c), c.knobLookup)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if site.URL != "" {
+				return remoteLedger(c, site.URL, site.GitArgs...)
+			}
+			return ledger.Local{Repo: site.Repo}, butler.GitTree{Repo: site.Repo}, func() {}, nil
+		}
+	}
+	return r
+}
 
-		newCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
-			return git.NewGitClient(c.codeForgeRemoteURL, c.baseBranch, c.gitUserName, c.gitUserEmail, c.branchPrefix)
-		},
-	},
+// mustBuild unwraps a Strategy constructor. They fail only when ReadKnobs
+// rejects a malformed knob, and knobLookup renders already-typed config
+// fields, so the error is unreachable.
+func mustBuild[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func backendShared(c config) backendkit.Shared {
+	return backendkit.Shared{
+		RepoSlug:      c.repoSlug,
+		BaseBranch:    c.baseBranch,
+		BranchPrefix:  c.branchPrefix,
+		GitUserName:   c.gitUserName,
+		GitUserEmail:  c.gitUserEmail,
+		Labels:        dispatchLabels(c),
+		VerdictLabels: researchVerdictLabels(c),
+		MergeMode:     c.mergeMode,
+		MergeMethod:   c.mergeMethod,
+		SyncMethod:    c.syncMethod,
+		Tracker:       c.kind().Tracker,
+	}
+}
+
+// backendKnobs maps each knob a backend's ReadKnobs reads to the launcher
+// config field that resolves it.
+var backendKnobs = map[string]func(c config) string{
+	"FORGEJO_BASE_URL":                 func(c config) string { return c.forgejoBaseURL },
+	"FORGEJO_TOKEN":                    func(c config) string { return c.forgejoToken },
+	"JIRA_BASE_URL":                    func(c config) string { return c.jiraBaseURL },
+	"JIRA_PROJECT_KEY":                 func(c config) string { return c.jiraProjectKey },
+	"JIRA_EMAIL":                       func(c config) string { return c.jiraEmail },
+	"JIRA_TOKEN":                       func(c config) string { return c.jiraToken },
+	"JIRA_STATUS_MAPPING":              func(c config) string { return c.jiraStatusMapping },
+	"JIRA_INCLUDE_COMMENTS":            func(c config) string { return strconv.FormatBool(c.jiraIncludeComments) },
+	"LOCAL_ISSUES_DIR":                 func(c config) string { return c.localIssuesDir },
+	"CODE_FORGE_ACCUMULATION_REPO_DIR": func(c config) string { return c.codeForgeAccumulationRepoDir },
+	"CODE_FORGE_REMOTE_URL":            func(c config) string { return c.codeForgeRemoteURL },
+}
+
+// knobLookup serves the backend row knobs from c's already-resolved fields,
+// so a Strategy's ReadKnobs sees what the launcher resolved, not the process
+// environment.
+func (c config) knobLookup(env string) (string, bool) {
+	if field, ok := backendKnobs[env]; ok {
+		return field(c), true
+	}
+	return "", false
 }
 
 // backendByName looks up the registry row for an ISSUE_TRACKER or CODE_FORGE
