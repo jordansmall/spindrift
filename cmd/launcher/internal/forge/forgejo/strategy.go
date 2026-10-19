@@ -124,9 +124,15 @@ func identityBase(l backendkit.Lookup) string {
 }
 
 // validate checks the forgejo knobs for one axis (ISSUE_TRACKER or
-// CODE_FORGE); the axes differ only in the error text.
+// CODE_FORGE); the axes differ only in the error text. An explicitly blank
+// FORGEJO_BASE_URL (an input document can set it) is rejected before ReadKnobs
+// re-defaults it to codeberg, which would send a self-hosted FORGEJO_TOKEN
+// there.
 func validate(axis string) func(backendkit.Shared, backendkit.Lookup) error {
 	return func(_ backendkit.Shared, l backendkit.Lookup) error {
+		if v, ok := l("FORGEJO_BASE_URL"); ok && v == "" {
+			return errBaseURLRequired(axis)
+		}
 		k, err := ReadKnobs(Lookup(l))
 		if err != nil {
 			return err

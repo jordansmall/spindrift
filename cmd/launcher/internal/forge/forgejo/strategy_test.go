@@ -132,3 +132,19 @@ func TestStrategyRemoteMatch(t *testing.T) {
 		})
 	}
 }
+
+// ReadKnobs re-defaults a blank FORGEJO_BASE_URL to codeberg, which would send
+// a self-hosted FORGEJO_TOKEN there; validation reads the raw lookup value and
+// fails closed instead, on both axes.
+func TestStrategyValidateRejectsBlankBaseURL(t *testing.T) {
+	l := mapLookup(map[string]string{"FORGEJO_BASE_URL": "", "FORGEJO_TOKEN": "tok"})
+	for axis, validate := range map[string]func(backendkit.Shared, backendkit.Lookup) error{
+		"ISSUE_TRACKER": forgejo.Strategy.ValidateTracker,
+		"CODE_FORGE":    forgejo.Strategy.ValidateCodeForge,
+	} {
+		err := validate(backendkit.Shared{RepoSlug: "o/r"}, l)
+		if err == nil || !strings.Contains(err.Error(), "FORGEJO_BASE_URL") || !strings.Contains(err.Error(), axis+"=forgejo") {
+			t.Errorf("%s: err = %v, want one naming FORGEJO_BASE_URL and %s=forgejo", axis, err, axis)
+		}
+	}
+}

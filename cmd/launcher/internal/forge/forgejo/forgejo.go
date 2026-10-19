@@ -48,12 +48,17 @@ type ForgejoConfig struct {
 // selecting env var and is quoted in the error.
 func ValidateForgejoEnv(knob, baseURL, token string) error {
 	if baseURL == "" {
-		return fmt.Errorf("set FORGEJO_BASE_URL (Forgejo instance base URL) when %s=forgejo", knob)
+		return errBaseURLRequired(knob)
 	}
 	if token == "" {
 		return fmt.Errorf("set FORGEJO_TOKEN when %s=forgejo", knob)
 	}
 	return nil
+}
+
+// errBaseURLRequired is the missing-FORGEJO_BASE_URL error for the axis knob.
+func errBaseURLRequired(knob string) error {
+	return fmt.Errorf("set FORGEJO_BASE_URL (Forgejo instance base URL) when %s=forgejo", knob)
 }
 
 const defaultForgejoBaseURL = "https://codeberg.org"
