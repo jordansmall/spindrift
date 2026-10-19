@@ -272,7 +272,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `cmd/launcher/internal/ecosystem`) to rewrite its two spans in
   `docs/reference.md`, and the Driver
   Pass-log corpus test (each Driver's `TestCorpus`) to overwrite the goldens
-  under `cmd/launcher/internal/driver/<driver>/testdata/corpus/` —
+  under `cmd/launcher/internal/driver/<driver>/testdata/corpus/`, and the
+  Digest corpus tests (each records Chore's `TestDigestCorpus` and the
+  digestkit's `TestRunReplaysCorpusIntoGoldens`) to overwrite the goldens under
+  `cmd/launcher/internal/*/testdata/digest/` and
+  `cmd/launcher/internal/digestkit/testdata/corpus/` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a
   check when you add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
