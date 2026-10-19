@@ -26,12 +26,12 @@ var podmanMachineInspectTimeout = 5 * time.Second
 // Lives here, not in cmd/launcher, because TestNoRunnerExecOutsidePackage
 // forbids `exec.Command("podman"` outside this package.
 func PodmanMachineMemoryMiB() (mib int, found bool) {
-	if _, err := exec.LookPath("podman"); err != nil {
+	if _, err := exec.LookPath(cliPodman); err != nil {
 		return 0, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), podmanMachineInspectTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "podman", "machine", "inspect").Output()
+	out, err := exec.CommandContext(ctx, cliPodman, "machine", "inspect").Output()
 	if err != nil || len(out) == 0 {
 		return 0, false
 	}

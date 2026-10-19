@@ -48,7 +48,7 @@ type ociAdapter struct {
 
 // Strategy is the oci family's entry in the runner registry; its build
 // command constructs the same adapter as its run command.
-var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New}
+var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Prerequisites: Prerequisites}
 
 // New constructs an OCI adapter from cfg. pwd is the working directory the
 // container-fallback build mounts as /workspace, a per-invocation dependency
@@ -495,7 +495,7 @@ func probeSocketDir() (string, error) {
 // launcher's loopback interface over TCP (issue #3111). podman has its own
 // convention; nerdctl follows docker's host.docker.internal.
 func hostGatewayHostname(cli string) string {
-	if cli == "podman" {
+	if cli == cliPodman {
 		return "host.containers.internal"
 	}
 	return "host.docker.internal"
@@ -934,7 +934,7 @@ const removeHostTreeTimeout = 2 * time.Minute
 // Docker has no equivalent, so its RemoveAll error is returned unchanged.
 func (a *ociAdapter) RemoveHostTree(path string) error {
 	err := os.RemoveAll(path)
-	if err == nil || a.cli != "podman" {
+	if err == nil || a.cli != cliPodman {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), removeHostTreeTimeout)
