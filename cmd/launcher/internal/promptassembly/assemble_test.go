@@ -4307,6 +4307,87 @@ func TestAssembleUngatedRowRendersUnconditionally(t *testing.T) {
 	}
 }
 
+// An axis row reads fragments/<backend>/<fragment> for the active tracker or
+// forge; a backend without the file renders empty rather than failing, a gate
+// still applies, and an unset backend takes the default.
+func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"issue-prompt.md":             "[${STEP}]\n",
+		"review-prompt.md":            "review\n",
+		"fragments/github/step.md":    "github-step\n",
+		"fragments/forgejo/step.md":   "forgejo-step\n",
+		"fragments/forgejo/other.md":  "forgejo-other\n",
+		"fragments/github/forge-s.md": "github-forge\n",
+		"fragments/git/forge-s.md":    "git-forge\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	cases := []struct {
+		name         string
+		row          FragmentRow
+		mutate       func(*Env)
+		want         string
+		wantFragment string
+	}{
+		{"tracker axis picks the tracker folder", FragmentRow{Axis: "tracker", Fragment: "step.md", Var: "STEP"},
+			func(e *Env) { e.IssueTracker = "forgejo" }, "[forgejo-step\n\n]", "forgejo/step.md"},
+		{"tracker axis defaults an empty tracker", FragmentRow{Axis: "tracker", Fragment: "step.md", Var: "STEP"},
+			func(e *Env) { e.IssueTracker = "" }, "[github-step\n\n]", "github/step.md"},
+		{"forge axis picks the forge folder", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},
+			func(e *Env) { e.ForgeBackend, e.CodeForge = "", "git" }, "[git-forge\n\n]", "git/forge-s.md"},
+		{"forge axis prefers the pre-resolved backend", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},
+			func(e *Env) { e.ForgeBackend, e.CodeForge = "GH", "git" }, "[github-forge\n\n]", "github/forge-s.md"},
+		{"forge axis defaults an empty forge", FragmentRow{Axis: "forge", Fragment: "forge-s.md", Var: "STEP"},
+			func(e *Env) { e.ForgeBackend, e.CodeForge = "", "" }, "[github-forge\n\n]", "github/forge-s.md"},
+		{"backend with no file renders empty", FragmentRow{Axis: "tracker", Fragment: "other.md", Var: "STEP"},
+			func(e *Env) {}, "[]", ""},
+		{"gate off renders empty", FragmentRow{Gate: "NO_SUCH_GATE", Axis: "tracker", Fragment: "step.md", Var: "STEP"},
+			func(e *Env) {}, "[]", ""},
+		{"gate on renders the axis file", FragmentRow{Gate: "BOX_ACCESS_READ_WRITE", Axis: "tracker", Fragment: "step.md", Var: "STEP"},
+			func(e *Env) {}, "[github-step\n\n]", "github/step.md"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.PromptsDir = dir
+			tc.mutate(&env)
+
+			result, err := Assemble(env, Registry{Rows: []FragmentRow{tc.row}})
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if result.Prompt != tc.want {
+				t.Errorf("Prompt = %q, want %q", result.Prompt, tc.want)
+			}
+			var wantFrags []string
+			if tc.wantFragment != "" {
+				wantFrags = []string{tc.wantFragment}
+			}
+			if !slices.Equal(result.Fragments, wantFrags) {
+				t.Errorf("Fragments = %v, want %v", result.Fragments, wantFrags)
+			}
+		})
+	}
+
+	t.Run("unknown axis is an error", func(t *testing.T) {
+		env := coveredEnv()
+		env.PromptsDir = dir
+		_, err := Assemble(env, Registry{Rows: []FragmentRow{{Axis: "bogus", Fragment: "step.md", Var: "STEP"}}})
+		if err == nil || !strings.Contains(err.Error(), `unknown axis "bogus"`) {
+			t.Fatalf("Assemble error = %v, want an unknown-axis error", err)
+		}
+	})
+}
+
 // The rewrite is generic over the roster (issue #264): every baked file whose
 // name the prompt map carries is rewritten from its own prompt file, with no
 // per-name branch, so a custom Nth agent is rewritten like scout and worker.

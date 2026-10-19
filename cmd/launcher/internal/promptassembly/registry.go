@@ -17,7 +17,13 @@ type FragmentRow struct {
 	// fragment renders unconditionally.
 	Gate string `json:"gate"`
 	// Fragment is the basename under prompts/fragments/ rendered when Gate is on.
+	// On an axis row it is a basename under prompts/fragments/<backend>/ instead.
 	Fragment string `json:"fragment"`
+	// Axis is "" for a plain row, or "tracker" / "forge" for a row whose
+	// fragment comes from the active backend's own folder: <backend> is the
+	// active ISSUE_TRACKER (tracker) or CODE_FORGE (forge) backend name. A
+	// backend with no such file renders an empty step, not an error.
+	Axis string `json:"axis,omitempty"`
 	// Var is the variable the fragment text is assigned to. The assignment
 	// still happens when the gate is off, with empty text.
 	Var string `json:"var"`
@@ -65,4 +71,36 @@ func LoadRegistryFile(path string) (Registry, error) {
 		return Registry{}, fmt.Errorf("parse fragment registry %s: %w", path, err)
 	}
 	return reg, nil
+}
+
+// resolvedFragment returns the fragment's path under prompts/fragments/. An
+// axis row resolves into the active backend's folder; an empty Env value takes
+// the same default the gates do.
+func (r FragmentRow) resolvedFragment(e Env) (string, error) {
+	var backend string
+	switch r.Axis {
+	case "":
+		return r.Fragment, nil
+	case "tracker":
+		if backend = e.IssueTracker; backend == "" {
+			backend = defaultIssueTracker
+		}
+	case "forge":
+		// Prefer the pre-resolved ForgeBackend the forge gates read, so a
+		// forge-axis row lands in the folder its gates assume (git and local
+		// ride the "GH" arm).
+		switch e.ForgeBackend {
+		case "GH":
+			backend = "github"
+		case "FORGEJO":
+			backend = "forgejo"
+		default:
+			if backend = e.CodeForge; backend == "" {
+				backend = defaultCodeForge
+			}
+		}
+	default:
+		return "", fmt.Errorf("fragment %s (var %s): unknown axis %q", r.Fragment, r.Var, r.Axis)
+	}
+	return backend + "/" + r.Fragment, nil
 }

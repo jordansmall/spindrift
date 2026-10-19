@@ -129,3 +129,28 @@ func TestLoadRegistryEmptyReader(t *testing.T) {
 		t.Fatal("LoadRegistry(empty reader) = nil error, want non-nil")
 	}
 }
+
+func TestResolvedFragmentForgeAxis(t *testing.T) {
+	row := FragmentRow{Axis: "forge", Fragment: "x.md", Var: "X"}
+	cases := []struct {
+		name string
+		env  Env
+		want string
+	}{
+		{"pre-resolved GH wins over CodeForge", Env{ForgeBackend: "GH", CodeForge: "git"}, "github/x.md"},
+		{"pre-resolved FORGEJO wins over CodeForge", Env{ForgeBackend: "FORGEJO", CodeForge: "github"}, "forgejo/x.md"},
+		{"empty backend falls back to CodeForge", Env{CodeForge: "forgejo"}, "forgejo/x.md"},
+		{"both empty takes the default", Env{}, "github/x.md"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := row.resolvedFragment(tc.env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("resolvedFragment = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
