@@ -82,6 +82,7 @@ let
     // (import ./chore-catalog.nix common)
     // (import ./read-only-capability.nix common)
     // (import ./network-mode.nix common)
+    // (import ./row-knobs.nix common)
     // (import ./merge-guard-paths.nix common)
     // (import ./prompts.nix common)
     // (import ./schema-drift.nix common)

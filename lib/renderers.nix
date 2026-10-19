@@ -1012,8 +1012,13 @@ rec {
       ];
       # A row attribute outside this set is a misspelling, not a new fact, and
       # must fail the build rather than render as if the field were never set.
-      # goVar names the generated var and is not a Descriptor field.
-      knownFields = [ "goVar" ] ++ map (f: f.attr) rowFields;
+      # goVar names the generated var and is not a Descriptor field; knobs are
+      # folded into the env schema by lib/row-knobs.nix, not rendered here.
+      knownFields = [
+        "goVar"
+        "knobs"
+      ]
+      ++ map (f: f.attr) rowFields;
       checkRow =
         row:
         let

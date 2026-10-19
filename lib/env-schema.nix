@@ -3,7 +3,9 @@
 # entry reaches the preambles, flake options, entrypoint defaults, BOX_ENV_VARS,
 # and harness.env.example with no further edit. Field semantics live with their
 # consumers: lib/renderers.nix, lib/nixpath.nix, lib/preambles.nix,
-# nix/checks/schema-drift.nix.
+# nix/checks/schema-drift.nix. A registry row may also carry its own `knobs`
+# (entries in this shape), which lib/row-knobs.nix folds in; two declarations
+# of one env name, or of one key, fail at eval time (ADR 0068 decision 2).
 let
   backends = import ./backends/default.nix;
   # Shared by the three butler daily budget knobs below (ADR 0056).
@@ -19,8 +21,15 @@ let
     "Image-time only: ${imageTimeRosterClause "${name} subagent"}, though on an image with no loaded input document it still steers which subagent prompt fragments render, so the two can disagree.";
   # Single source of the built-in Chore catalog (issue #3991).
   choreCatalog = import ./chore-catalog.nix;
+  withRowKnobs =
+    shared:
+    (import ./row-knobs.nix).fold {
+      inherit shared;
+      registries = import ./row-knob-registries.nix;
+      sharedSource = "lib/env-schema.nix";
+    };
 in
-{
+withRowKnobs {
   label = {
     env = "LABEL";
     group = "issues";
