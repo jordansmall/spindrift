@@ -1,5 +1,5 @@
-# Eval-level parse of the JIRA_STATUS_MAPPING knob (lib/env-schema.nix's
-# jiraStatusMapping, issue #2539). cmd/launcher/internal/forge/jira/jira.go's
+# Eval-level parse of the JIRA_STATUS_MAPPING knob (the jira row's
+# jiraStatusMapping in lib/backends/jira.nix, issue #2539). cmd/launcher/internal/forge/jira/jira.go's
 # ParseStatusMapping parses the same knob at runtime, so the accepted keys and
 # error wording here must not diverge from it. The one exception is a
 # non-string value: Go's text there comes from encoding/json, so only its
