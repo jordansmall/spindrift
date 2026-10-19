@@ -189,7 +189,7 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 // an image-only-stale verdict under bwrap now hot-swaps in place instead of
 // draining, so with no open issue the run falls through to the ordinary
 // empty-queue exit (2, errQueueEmpty) once the swap succeeds.
-func TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosure_StaleClosure_HotSwapsThenReachesEmptyQueue(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct, so it never matches loadedHash
 

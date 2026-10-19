@@ -32,9 +32,9 @@ type Factory struct {
 	cache     *cache
 	newCalled atomic.Bool
 
-	// genMu guards agentGeneration: a bwrap staleness hot-swap (issue #2682)
-	// can land at any time, including concurrently with New() and with an
-	// already-launched Box's own in-flight Run(), so a mutex is required
+	// genMu guards agentGeneration: a store-closure staleness hot-swap (issue
+	// #2682) can land at any time, including concurrently with New() and with
+	// an already-launched Box's own in-flight Run(), so a mutex is required
 	// where cfg gets by with the coarse newCalled panic guard.
 	genMu           sync.RWMutex
 	agentGeneration *runner.AgentGeneration
@@ -156,10 +156,11 @@ func (f *Factory) HeartbeatOut() io.Writer {
 }
 
 // SetAgentGeneration overrides the agent-closure generation every Box launched
-// afterward binds (issue #2682, the bwrap Box-only staleness hot-swap). It
-// carries no before-any-New() panic guard because a hot-swap must be able to
-// land mid-run, so the mutex is what keeps a concurrent set and read safe. A
-// nil gen restores the runner adapter's own startup-baked default.
+// afterward binds (issue #2682, the store-closure Box-only staleness
+// hot-swap). It carries no before-any-New() panic guard because a hot-swap
+// must be able to land mid-run, so the mutex is what keeps a concurrent set
+// and read safe. A nil gen restores the runner adapter's own startup-baked
+// default.
 func (f *Factory) SetAgentGeneration(gen *runner.AgentGeneration) {
 	f.genMu.Lock()
 	defer f.genMu.Unlock()

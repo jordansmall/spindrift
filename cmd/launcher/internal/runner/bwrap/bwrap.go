@@ -282,7 +282,7 @@ func (a *bwrapAdapter) prefetchFor(box runner.Box) string {
 		a.prefetchFallbackLogged[file] = struct{}{}
 		a.mu.Unlock()
 		if !seen {
-			fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: prefetch file %q unreadable, falling back to baked value: %v\n", file, err)
+			fmt.Fprintf(os.Stderr, "==> store-closure hot-swap: prefetch file %q unreadable, falling back to baked value: %v\n", file, err)
 		}
 		return a.bakedPrefetch
 	}

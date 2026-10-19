@@ -58,7 +58,7 @@ func startRealize(r Realizer, pwd string, res Result, flakeImageAttr string) (wa
 }
 
 // RealizeSync blocks on the realize and returns its outcome, for a caller that
-// must know the build succeeded before it acts on the result: the bwrap
+// must know the build succeeded before it acts on the result: the store-closure
 // Box-only staleness hot-swap (issue #2682) binds the new closure for
 // subsequent Box launches. Its caller handles the error, so unlike RealizeTip
 // it never writes to stderr.

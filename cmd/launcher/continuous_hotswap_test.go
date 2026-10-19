@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -39,12 +41,12 @@ func (e *sequencedEval) Eval(pwd, rev, attr string) (string, error) {
 	return e.outPaths[i], nil
 }
 
-// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling is
+// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling is
 // the core regression test for issue #2682 / ADR 0043: under bwrap, a
 // stale-image/fresh-launcher verdict must hot-swap the agent-closure
 // generation in place and keep refilling, rather than draining and exiting
 // with waves.ErrImageStale (exit 4) the way the OCI path does.
-func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
@@ -82,9 +84,13 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	staleEval := &freshness.Fake{OutPath: staleOutPath}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	var stdout bytes.Buffer
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, &stdout, io.Discard)
 	if err != nil {
 		t.Fatalf("runContinuousDispatch = %v, want nil -- a bwrap image-only-stale verdict must hot-swap and keep refilling, never drain-exit", err)
+	}
+	if want := "==> store-closure hot-swap: swapped in agent closure to main tip"; !strings.Contains(stdout.String(), want) {
+		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), want)
 	}
 
 	calls := realizeFake.CallsCopy()
@@ -114,12 +120,12 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	}
 }
 
-// TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale proves "when
+// TestRunContinuousDispatch_StoreClosureBothStale_DrainsAsLauncherStale proves "when
 // both moved, the launcher wins" (ADR 0043): a bwrap verdict where both
 // dimensions are stale must drain and exit with waves.ErrImageStale (exit 4),
 // never swap. It asserts no swap rather than zero Realizer calls, because the
 // unrelated background realize (issue #2679) still fires on the drain path.
-func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureBothStale_DrainsAsLauncherStale(t *testing.T) {
 	const loadedImageHash = "11111111111111111111111111111111"    // 32 chars, the loaded closure
 	const staleImageHash = "22222222222222222222222222222222"     // 32 chars, distinct
 	const loadedLauncherHash = "33333333333333333333333333333333" // 32 chars, the loaded launcher
@@ -217,12 +223,61 @@ func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	}
 }
 
-// TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain proves the
+// TestRunContinuousDispatch_BwrapRunnerOCIArtifact_StillDrains proves the
+// hot-swap gate reads the Box artifact, never the runner family: the same
+// image-only-stale, launcher-fresh shape that swaps under a store-closure
+// artifact drains and exits 4 when the artifact is an OCI image, even with
+// runnerKind bwrap.
+func TestRunContinuousDispatch_BwrapRunnerOCIArtifact_StillDrains(t *testing.T) {
+	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
+	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
+
+	c := baseConfig()
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runnerKind = runner.KindBwrap
+	c.boxArtifact = "oci-image"
+	c.baseBranch = "main"
+	c.label = "ready-for-agent"
+	c.issueTracker = "local"
+	c.codeForge = "local"
+	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
+	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
+	c.flakeLauncherAttr = ".#launcher-currency"
+	c.loadedLauncherHash = staleHash
+
+	dir, _ := newStaleProbeRepo(t)
+
+	it := forge.NewFake(testDispatchLabels)
+	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	cf := it
+
+	fr := runner.NewFake()
+	f := testFactory(t, dir, fr)
+	s := settle.NewFake()
+	lp := fakeLiveness{}
+
+	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
+	realizeFake := freshness.NewRealizerFake()
+
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	if got := exitCodeFor(err); got != 4 {
+		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the runner family must not enable the swap", got)
+	}
+	if got := f.AgentGeneration(); got != nil {
+		t.Errorf("f.AgentGeneration() = %+v, want nil -- an OCI artifact must never bind a swapped generation", got)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("fr.RunCalls = %v, want 0 (no Box launches once the probe is stale)", fr.RunCalls)
+	}
+}
+
+// TestRunContinuousDispatch_StoreClosureRealizeFails_FallsBackToDrain proves the
 // hot-swap branch's own failure path: when the synchronous RealizeSync call
 // fails, the run must fall back to the ordinary drain (exit 4) instead of
 // crashing or hanging, and must never bind a swapped generation onto the
 // Factory.
-func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureRealizeFails_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
@@ -238,7 +293,7 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	// flakeLauncherAttr is configured and genuinely fresh. See
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+	// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling
 	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
@@ -261,7 +316,11 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	realizeFake := freshness.NewRealizerFake()
 	realizeFake.Err = errors.New("boom: nix build failed")
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	var stderr bytes.Buffer
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, &stderr)
+	if want := "==> store-closure hot-swap: realize failed, draining instead"; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed synchronous realize must fall back to the ordinary drain, not crash or hang", got)
 	}
@@ -273,12 +332,12 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	}
 }
 
-// TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted proves a
-// bwrap hot-swap reaches errImageHostTainted (exit 5) through the same
+// TestRunContinuousDispatch_StoreClosureNonConvergingSwap_HaltsHostTainted proves a
+// store-closure hot-swap reaches errImageHostTainted (exit 5) through the same
 // guard.Classify mechanism the OCI drain path uses (issue #2113, ADR 0043).
 // Two issues with maxParallel=1 force two fresh() calls inside one run,
 // because a swap's new tag lives only in that one process's own closure.
-func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureNonConvergingSwap_HaltsHostTainted(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111"         // 32 chars, the loaded closure
 	const staleHash1 = "22222222222222222222222222222222"         // 32 chars, call 1's stale outpath
 	const staleHash2 = "33333333333333333333333333333333"         // 32 chars, call 2's different stale outpath
@@ -335,12 +394,12 @@ func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testin
 	}
 }
 
-// TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBinding
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotsGenerationBeforeBinding
 // pins slice 2's fix for issue #2682's blocking bug: under a nixInBox Consumer
 // (c.nixConfigFile set), a successful hot-swap must call snapshotGeneration
 // with the swap's own pwd and closure before binding the generation, or every
 // later Box launch fails bwrapAdapter.Run's "no longer exists" stat guard.
-func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBinding(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotsGenerationBeforeBinding(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
@@ -357,7 +416,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
 	// flakeLauncherAttr is configured and genuinely fresh. See
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+	// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling
 	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
@@ -412,12 +471,12 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 	}
 }
 
-// TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain
 // proves the snapshotGeneration seam's failure path mirrors RealizeSync's: a
 // failed snapshot must drain (exit 4) rather than bind a generation whose
 // snapshot dir does not exist, which would otherwise appear only as every
 // later Box launch's "no longer exists" stat-guard failure (issue #2682).
-func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
@@ -434,7 +493,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
 	// flakeLauncherAttr is configured and genuinely fresh. See
-	// TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling
+	// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling
 	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
@@ -474,12 +533,12 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 	}
 }
 
-// TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain pins the
+// TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain pins the
 // swap branch's launcher-dimension prerequisite (issue #2682 review finding):
 // Probe hard-codes LauncherFresh true when flakeLauncherAttr is unconfigured,
 // so without an explicit gate an otherwise textbook Box-only-stale shape would
 // hot-swap forever and never catch a launcher-side change (ADR 0043).
-func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
 
@@ -525,12 +584,12 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 	}
 }
 
-// TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain pins the
+// TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain pins the
 // strings.HasPrefix(res.TipTag, "/nix/store/") guard in fresh()'s swap branch
 // (issue #2682 review finding): an empty image out-path makes RealizeSync a
 // no-op rather than a failure, so without the guard the swap would bind an
 // empty TipTag as a live generation with no store path instead of draining.
-func TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain(t *testing.T) {
+func TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain(t *testing.T) {
 	const loadedHash = "11111111111111111111111111111111"         // 32 chars, the loaded closure
 	const loadedLauncherHash = "44444444444444444444444444444444" // 32 chars, the loaded launcher
 
@@ -577,5 +636,29 @@ func TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain(t *testing.T) {
 	}
 	if calls := realizeFake.CallsCopy(); len(calls) != 0 {
 		t.Errorf("realizeFake.CallsCopy() = %v, want none -- startRealize's own res.TipTag == \"\" guard makes RealizeSync a no-op", calls)
+	}
+}
+
+// An unknown BOX_ARTIFACT must stop continuous dispatch before any Box
+// launches, rather than fall back to the OCI comparison.
+func TestRunContinuousDispatch_UnknownBoxArtifactIsAnError(t *testing.T) {
+	c := baseConfig()
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.boxArtifact = "bogus"
+	c.issueTracker = "local"
+	c.codeForge = "local"
+
+	dir, _ := newStaleProbeRepo(t)
+	it := forge.NewFake(testDispatchLabels)
+	fr := runner.NewFake()
+	f := testFactory(t, dir, fr)
+
+	err := runContinuousDispatch(c, it, it, dir, f, settle.NewFake(), &freshness.Fake{}, freshness.NewRealizerFake(), fakeLiveness{}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "bogus") {
+		t.Fatalf("runContinuousDispatch err = %v, want an error naming the unknown artifact", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("fr.RunCalls = %v, want 0 (no Box launches on a bad artifact)", fr.RunCalls)
 	}
 }

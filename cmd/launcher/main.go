@@ -1946,12 +1946,13 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			LoadedLauncherHash: c.loadedLauncherHash,
 		}, eval)
 
-		// Box-only staleness under bwrap hot-swaps instead of draining (ADR
-		// 0043, issue #2682). These conditions admit exactly that case:
-		// LauncherFresh keeps a both-moved verdict out (the launcher wins
-		// then), KindBwrap keeps OCI out, and flakeLauncherAttr keeps an
-		// unconfigured launcher out, since Probe hard-codes its freshness.
-		if c.runnerKind == runner.KindBwrap && res.Applicable && !res.ImageFresh && res.LauncherFresh && c.flakeLauncherAttr != "" {
+		// Box-only staleness under a hot-swappable artifact swaps instead of
+		// draining (ADR 0043, issue #2682). These conditions admit exactly that
+		// case: LauncherFresh keeps a both-moved verdict out (the launcher wins
+		// then), HotSwappable keeps the OCI image out, and flakeLauncherAttr
+		// keeps an unconfigured launcher out, since Probe hard-codes its
+		// freshness.
+		if art.HotSwappable && res.Applicable && !res.ImageFresh && res.LauncherFresh && c.flakeLauncherAttr != "" {
 			// drain is the shared fallback exit for every failure branch below.
 			drain := func() (bool, bool, string) {
 				staleResult = res
@@ -1969,7 +1970,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 				return drain()
 			}
 			if err := freshness.RealizeSync(realize, pwd, res, c.flakeImageAttr); err != nil {
-				fmt.Fprintf(stderr, "==> bwrap hot-swap: realize failed, draining instead: %v\n", err)
+				fmt.Fprintf(stderr, "==> %s hot-swap: realize failed, draining instead: %v\n", art.Name, err)
 				return drain()
 			}
 			// res.TipTag becomes both a bind-mount source and a path component
@@ -1977,7 +1978,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			// not a genuine store path rather than trust a Probe-side
 			// regression never to hand back a foreign host directory (#2682).
 			if !strings.HasPrefix(res.TipTag, "/nix/store/") {
-				fmt.Fprintf(stderr, "==> bwrap hot-swap: realized tip tag %q is not a nix store path, draining instead\n", res.TipTag)
+				fmt.Fprintf(stderr, "==> %s hot-swap: realized tip tag %q is not a nix store path, draining instead\n", art.Name, res.TipTag)
 				return drain()
 			}
 			// nixInBox Consumers need a real nix-var store-DB snapshot
@@ -1987,14 +1988,14 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			// would otherwise surface as every later Box launch failing to stat.
 			if c.nixConfigFile != "" {
 				if err := snapshotGeneration(pwd, res.TipTag); err != nil {
-					fmt.Fprintf(stderr, "==> bwrap hot-swap: snapshot generation failed, draining instead: %v\n", err)
+					fmt.Fprintf(stderr, "==> %s hot-swap: snapshot generation failed, draining instead: %v\n", art.Name, err)
 					return drain()
 				}
 			}
 			gen := runner.NewAgentGeneration(res.TipTag)
 			f.SetAgentGeneration(&gen)
 			currentImageTag = res.TipTag
-			fmt.Fprintf(stdout, "==> hot-swapped bwrap agent closure to %s tip %s (%s)\n", c.baseBranch, res.Rev, res.TipTag)
+			fmt.Fprintf(stdout, "==> %s hot-swap: swapped in agent %s to %s tip %s (%s)\n", art.Name, art.Noun, c.baseBranch, res.Rev, res.TipTag)
 			return res.Applicable, true, res.Message
 		}
 
