@@ -993,25 +993,55 @@ checkedMerge {
         touch $out
       '';
 
-  # Regenerate with `nix run .#regen` when lib/runtime-values.nix's enum
-  # changes (issue #2561).
-  runtime-values-gen =
+  # Regenerate with `nix run .#regen` when lib/runners/*.nix changes (ADR 0069).
+  # Same gofmt normalization as dispatch-kinds-gen.
+  runners-gen =
     let
-      runtimeValues = import ../../lib/runtime-values.nix;
-      generated = pkgs.writeText "runtimevalues_gen.go.generated" (
-        renderers.renderRuntimeValuesGo runtimeValues
+      raw = pkgs.writeText "families_gen.go.raw" (
+        renderers.renderRunnerFamiliesGo (import ../../lib/runners/index.nix { }).rows
       );
     in
-    pkgs.runCommand "runtime-values-gen"
+    pkgs.runCommand "runners-gen"
       {
-        inherit generated;
-        committed = ../../cmd/launcher/internal/runner/runtimevalues_gen.go;
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/runner/families_gen.go;
       }
       ''
-        diff "$generated" "$committed" \
-          || { echo "cmd/launcher/internal/runner/runtimevalues_gen.go is out of sync with lib/runtime-values.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/runner/families_gen.go is out of sync with lib/runners/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
+
+  # renderRunnerFamiliesGo throws on a row with an unknown or missing field, so
+  # a new row attr cannot be silently dropped from the Go Descriptor. The
+  # control proves the real rows render, so the negatives are not vacuous.
+  runners-gen-row-guard =
+    let
+      inherit (pkgs.lib) assertMsg imap0;
+      rows = import ../../lib/runners;
+      render = rs: builtins.tryEval (renderers.renderRunnerFamiliesGo rs);
+      tweakFirst = f: imap0 (i: r: if i == 0 then f r else r) rows;
+      unknownField = tweakFirst (r: r // { networkModes = [ ]; });
+      noGoName = tweakFirst (r: removeAttrs r [ "goName" ]);
+      noArtifact = tweakFirst (r: removeAttrs r [ "artifact" ]);
+      noName = tweakFirst (r: removeAttrs r [ "name" ]);
+      noRuntimes = tweakFirst (r: removeAttrs r [ "runtimes" ]);
+    in
+    assert assertMsg (render rows).success
+      "runners-gen-row-guard (ADR 0069): the real lib/runners rows must render successfully, but they failed -- the guard would be vacuous";
+    assert assertMsg (!(render unknownField).success)
+      "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row with an unknown field, but it rendered successfully";
+    assert assertMsg (!(render noGoName).success)
+      "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing goName, but it rendered successfully";
+    assert assertMsg (!(render noArtifact).success)
+      "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing artifact, but it rendered successfully";
+    assert assertMsg (!(render noName).success)
+      "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing name, but it rendered successfully";
+    assert assertMsg (!(render noRuntimes).success)
+      "runners-gen-row-guard (ADR 0069): renderRunnerFamiliesGo must reject a row missing runtimes, but it rendered successfully";
+    pkgs.runCommand "runners-gen-row-guard" { } "touch $out";
 
   # Regenerate with `nix run .#regen` when a Driver's credential rules change
   # (ADR 0066 decision 7). One check per output: the scrub list is read only

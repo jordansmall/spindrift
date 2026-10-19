@@ -63,7 +63,7 @@ func TestProbe_NerdctlAliasedToRancher(t *testing.T) {
 	}
 }
 
-// A runtime added to lib/runtime-values.nix must resolve through BinaryFor
+// A runtime added to a lib/runners row must resolve through BinaryFor
 // to a binary that Precedence probes, or the prompt offers a runtime Probe
 // never detects.
 func TestPrecedence_CoversValidValues(t *testing.T) {
