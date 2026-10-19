@@ -1,0 +1,11 @@
+[[routes]]
+match-host = "one.example.test"
+upstream-origin = "https://Reg.Example.Test"
+auth-scheme = "basic"
+credential = { env = "SYNTH_TOKEN" }
+
+[[routes]]
+match-host = "two.example.test"
+upstream-origin = "https://reg.example.test"
+auth-scheme = "basic"
+credential = { env = "SYNTH_TOKEN" }

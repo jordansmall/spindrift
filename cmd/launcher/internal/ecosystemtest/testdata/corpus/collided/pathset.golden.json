@@ -1,0 +1,12 @@
+[
+  {
+    "Host": "reg.example.test",
+    "Origin": "https://Reg.Example.Test",
+    "Subtrees": [
+      {
+        "ecosystem": "synthetic",
+        "path": "/api/synth"
+      }
+    ]
+  }
+]

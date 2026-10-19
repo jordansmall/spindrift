@@ -116,8 +116,49 @@ func TestReplayCaseSkipsStageRowDoesNotTakePartIn(t *testing.T) {
 	}
 }
 
+func TestSyntheticTakesPartInEveryStage(t *testing.T) {
+	for _, s := range stages {
+		if !s.takesPart(Synthetic) {
+			t.Errorf("Synthetic skips %s", s.name)
+		}
+	}
+}
+
+func readGolden(t *testing.T, c, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "corpus", c, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestBindingGoldenCarriesTheRowsRenderings(t *testing.T) {
+	got := readGolden(t, "matched", "binding.golden.json")
+	for _, want := range []string{
+		"SYNTHETIC_REGISTRY",
+		"SYNTHETIC_HOME",
+		// the in-tree config is rewritten to the Forwarder, not left on the upstream
+		"http://127.0.0.1:27182/reg-example-test/api/synth",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("binding golden lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRewritesGoldenShowsTheRewriteAndTheDeclinedForeignHost(t *testing.T) {
+	if got := readGolden(t, "matched", "rewrites.golden.json"); !strings.Contains(got, "127.0.0.1:27182/reg-example-test/api/synth/pkgs/") {
+		t.Errorf("matched rewrites golden does not repoint the download at the Forwarder:\n%s", got)
+	}
+	if got := readGolden(t, "declared", "rewrites.golden.json"); !strings.Contains(got, "https://cdn.example.test/") {
+		t.Errorf("declared rewrites golden does not leave the foreign host alone:\n%s", got)
+	}
+}
+
 func TestStagesSkippedPerRow(t *testing.T) {
-	// A route-declaration-only row takes part in route resolution alone.
+	// A route-declaration-only row, with no bindings and no rewrite rows, takes
+	// part in route resolution alone.
 	row := ecosystem.Row{Name: "decl-only", RouteDeclaration: Synthetic.RouteDeclaration}
 	var took []string
 	for _, s := range stages {

@@ -6,13 +6,16 @@
 //
 // A corpus directory holds one subdirectory per case:
 //
-//	repo/                      the Target-repo tree, with its committed registry config
-//	stores/<credresolver key>  optional operator credential store files (e.g. stores/netrc)
-//	routes.toml                optional operator routes file; route resolution reads it
-//	                           instead of discovery's rendered output
-//	discovery.golden.toml      stage 1: the routes file discovery proposes
-//	routes.golden.json         stage 2: the resolved routes
-//	pathset.golden.json        stage 3: the derived enforced path-sets
+//	repo/                         the Target-repo tree, with its committed registry config
+//	stores/<credresolver key>     optional operator credential store files (e.g. stores/netrc)
+//	routes.toml                   optional operator routes file; route resolution reads it
+//	                              instead of discovery's rendered output
+//	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 5)
+//	discovery.golden.toml         stage 1: the routes file discovery proposes
+//	routes.golden.json            stage 2: the resolved routes
+//	pathset.golden.json           stage 3: the derived enforced path-sets
+//	binding.golden.json           stage 4: the env exports, home config and in-tree rewrite
+//	rewrites.golden.json          stage 5: the proxy's responses for the upstream bodies
 //
 // A stage the row does not take part in has no golden and is skipped; a stale
 // golden for one fails. Importing this package from non-test code pulls in
@@ -20,20 +23,28 @@
 package ecosystemtest
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/golden"
 	"spindrift.dev/launcher/internal/registrydiscover"
+	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registrypathset"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryroutes"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 // probedAuthScheme stands in for discovery's network probe, which has no
@@ -71,6 +82,22 @@ var stages = []stage{
 		asJSON:    true,
 		takesPart: func(row ecosystem.Row) bool { return row.ConfigParser != nil },
 		replay:    (*replay).pathSet,
+	},
+	{
+		name:   "binding",
+		golden: "binding.golden.json",
+		asJSON: true,
+		takesPart: func(row ecosystem.Row) bool {
+			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindingsOf([]ecosystem.Row{row})) > 0
+		},
+		replay: (*replay).binding,
+	},
+	{
+		name:      "proxy rewrites",
+		golden:    "rewrites.golden.json",
+		asJSON:    true,
+		takesPart: func(row ecosystem.Row) bool { return len(row.RewriteRows) > 0 },
+		replay:    (*replay).rewrites,
 	},
 }
 
@@ -136,14 +163,31 @@ func replayCase(row ecosystem.Row, dir string, update bool) []error {
 	return errs
 }
 
-// replay is one case's state across stages: stage 2 consumes stage 1's output.
+// memo caches one stage computation shared by later stages.
+type memo[T any] struct {
+	v    T
+	err  error
+	done bool
+}
+
+func (m *memo[T]) get(f func() (T, error)) (T, error) {
+	if !m.done {
+		m.v, m.err = f()
+		m.done = true
+	}
+	return m.v, m.err
+}
+
+// replay is one case's state across stages: later stages consume earlier
+// stages' output.
 type replay struct {
 	row ecosystem.Row
 	dir string
 
-	rendered []byte
-	rendErr  error
-	ran      bool
+	rendered memo[[]byte]
+	parsed   memo[[]registryroutes.Route]
+	sets     memo[[]registrypathset.HostPathSet]
+	proxied  memo[[]registryproxy.Route]
 }
 
 func (c *replay) rows() []ecosystem.Row { return []ecosystem.Row{c.row} }
@@ -154,51 +198,143 @@ func (c *replay) repo() string { return filepath.Join(c.dir, "repo") }
 // the golden carries no absolute temp path, and maps it back to the real file
 // for the lookup.
 func (c *replay) discovery() ([]byte, error) {
-	if c.ran {
-		return c.rendered, c.rendErr
-	}
-	c.ran = true
-	var stores []registrydiscover.Store
-	for _, k := range credresolver.StoreKinds() {
-		display := filepath.ToSlash(filepath.Join("stores", k.SourceKey))
-		if _, err := os.Stat(filepath.Join(c.dir, display)); err == nil {
+	return c.rendered.get(func() ([]byte, error) {
+		var stores []registrydiscover.Store
+		for _, k := range credresolver.StoreKinds() {
+			display := filepath.ToSlash(filepath.Join("stores", k.SourceKey))
+			if _, err := os.Stat(filepath.Join(c.dir, display)); errors.Is(err, fs.ErrNotExist) {
+				continue
+			} else if err != nil {
+				return nil, err
+			}
 			stores = append(stores, registrydiscover.Store{Name: k.SourceKey, Path: display})
 		}
-	}
-	lookup := func(s registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
-		return registrydiscover.StoreLookup(registrydiscover.Store{Name: s.Name, Path: filepath.Join(c.dir, s.Path)}, d)
-	}
-	routes, _, err := registrydiscover.DiscoverRows(
-		c.repo(), c.rows(), stores,
-		map[string][]string{c.row.Name: c.row.CredentialStores},
-		lookup, func(string) string { return probedAuthScheme })
-	if err != nil {
-		c.rendErr = err
-		return nil, err
-	}
-	c.rendered = registrydiscover.Render(routes)
-	return c.rendered, nil
+		lookup := func(s registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
+			return registrydiscover.StoreLookup(registrydiscover.Store{Name: s.Name, Path: filepath.Join(c.dir, s.Path)}, d)
+		}
+		routes, _, err := registrydiscover.DiscoverRows(
+			c.repo(), c.rows(), stores,
+			map[string][]string{c.row.Name: c.row.CredentialStores},
+			lookup, func(string) string { return probedAuthScheme })
+		if err != nil {
+			return nil, err
+		}
+		return registrydiscover.Render(routes), nil
+	})
+}
+
+func (c *replay) parsedRoutes() ([]registryroutes.Route, error) {
+	return c.parsed.get(func() ([]registryroutes.Route, error) {
+		input, err := os.ReadFile(filepath.Join(c.dir, "routes.toml"))
+		if errors.Is(err, fs.ErrNotExist) {
+			input, err = c.discovery()
+		}
+		if err != nil {
+			return nil, err
+		}
+		return registryroutes.ParseRows(input, c.rows())
+	})
 }
 
 func (c *replay) routes() ([]byte, error) {
-	input, err := os.ReadFile(filepath.Join(c.dir, "routes.toml"))
-	if errors.Is(err, fs.ErrNotExist) {
-		input, err = c.discovery()
-	}
-	if err != nil {
-		return nil, err
-	}
-	routes, err := registryroutes.ParseRows(input, c.rows())
+	routes, err := c.parsedRoutes()
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(routes)
 }
 
+func (c *replay) pathSets() ([]registrypathset.HostPathSet, error) {
+	return c.sets.get(func() ([]registrypathset.HostPathSet, error) {
+		return registrypathset.DeriveRows(c.repo(), c.rows())
+	})
+}
+
 func (c *replay) pathSet() ([]byte, error) {
-	sets, err := registrypathset.DeriveRows(c.repo(), c.rows())
+	sets, err := c.pathSets()
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(sets)
+}
+
+// proxyRoutes is the proxy route table stages 4 and 5 run against. It mirrors
+// package main's resolveRegistryRoutesFromFile, applyHostPathSet and
+// registryproxy.AssignPrefixes, which the kit cannot import. Credentials stay
+// empty: no secret is resolved.
+func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
+	return c.proxied.get(func() ([]registryproxy.Route, error) {
+		parsed, err := c.parsedRoutes()
+		if err != nil {
+			return nil, err
+		}
+		sets, err := c.pathSets()
+		if err != nil {
+			return nil, err
+		}
+		byHost := make(map[string]registrypathset.HostPathSet, len(sets))
+		for _, s := range sets {
+			byHost[registryvocab.HostKey(s.Host)] = s
+		}
+		routes := make([]registryproxy.Route, len(parsed))
+		for i, r := range parsed {
+			hp, ok := byHost[registryvocab.HostKey(r.MatchHost)]
+			if !ok && r.UpstreamOrigin == "" {
+				return nil, fmt.Errorf("route %q is host-rooted but the Target repo declares no registry on that host; set the route's upstream-origin", r.MatchHost)
+			}
+			route := registryproxy.Route{
+				MatchHost:      r.MatchHost,
+				AuthScheme:     r.AuthScheme,
+				Ecosystems:     r.Ecosystems,
+				UpstreamOrigin: r.UpstreamOrigin,
+				Allow:          r.Allow,
+				Upstream:       cmp.Or(r.UpstreamOrigin, strings.TrimSuffix(hp.Origin, "/")),
+			}
+			seen := map[string]bool{}
+			addPath := func(p string) {
+				if !seen[p] {
+					seen[p] = true
+					route.EnforcedPaths = append(route.EnforcedPaths, p)
+				}
+			}
+			for _, sub := range hp.Subtrees {
+				addPath(sub.Path)
+				route.EnforcedSubtrees = append(route.EnforcedSubtrees, registryvocab.Subtree{Ecosystem: sub.Ecosystem, Path: sub.Path})
+			}
+			for _, p := range r.Allow {
+				addPath(p)
+			}
+			// The Forwarder keys a rewrite row's bases off the tag, so a declared
+			// path keeps its own tagged subtree even when a derived path equals it.
+			if p := r.Ecosystems.Path(c.row.Name); p != "" {
+				addPath(p)
+				route.EnforcedSubtrees = append(route.EnforcedSubtrees, registryvocab.Subtree{Ecosystem: c.row.Name, Path: p})
+			}
+			routes[i] = route
+		}
+		return registryproxy.AssignPrefixes(routes), nil
+	})
+}
+
+// manifestRoutes projects proxyRoutes the way the dispatch package's
+// registryManifestRoutes does.
+func (c *replay) manifestRoutes() ([]registrymanifest.Route, error) {
+	routes, err := c.proxyRoutes()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]registrymanifest.Route, len(routes))
+	for i, r := range routes {
+		var host string
+		if u, err := url.Parse(r.Upstream); err == nil {
+			host = u.Host
+		}
+		out[i] = registrymanifest.Route{
+			Prefix:        r.Prefix,
+			UpstreamHost:  host,
+			EnforcedPaths: slices.Clone(r.EnforcedSubtrees),
+			Ecosystems:    r.Ecosystems,
+		}
+	}
+	return out, nil
 }

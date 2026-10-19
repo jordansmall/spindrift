@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\"download\":\"https://cdn.example.test/pkgs/{name}.tgz\",\"name\":\"widget\"}\n",
+    "request": "GET /reg-example-test/api/synth/index.json",
+    "status": 200
+  }
+]
