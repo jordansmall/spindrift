@@ -1,0 +1,36 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SPINDRIFT_REGISTRY_CREDENTIAL_ONE_EXAMPLE_TEST",
+      "FromFile": "",
+      "MatchHost": "one.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://one.example.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "one.example.test",
+    "UpstreamOrigin": ""
+  },
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SPINDRIFT_REGISTRY_CREDENTIAL_TWO_MIRROR_EXAMPLE_TEST",
+      "FromFile": "",
+      "MatchHost": "two-mirror.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "http://two-mirror.example.test:8080"
+    },
+    "Ecosystems": null,
+    "MatchHost": "two-mirror.example.test",
+    "UpstreamOrigin": "http://two-mirror.example.test:8080"
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "Host": "one.example.test",
+    "Origin": "https://one.example.test",
+    "Subtrees": [
+      {
+        "ecosystem": "synthetic",
+        "path": "/a"
+      }
+    ]
+  },
+  {
+    "Host": "two-mirror.example.test",
+    "Origin": "http://two-mirror.example.test:8080",
+    "Subtrees": [
+      {
+        "ecosystem": "synthetic",
+        "path": "/"
+      }
+    ]
+  }
+]
