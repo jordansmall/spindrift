@@ -17,8 +17,8 @@ const (
 )
 
 // defaultDispatchKind is a var only because a const can't read
-// dispatchkind.Work.Name. Only Env.kind() reads it outside tests.
-var defaultDispatchKind = dispatchkind.Work.Name
+// dispatchkind.Default.Name. Only Env.kind() reads it outside tests.
+var defaultDispatchKind = dispatchkind.Default.Name
 
 // Env is the full set of raw inputs box (cmd/launcher/box) reads. Only a
 // subset feeds Gates's computed booleans; the rest are passthrough values
@@ -239,10 +239,10 @@ func (e Env) kind() string {
 // descriptor resolves e.kind() against dispatchkind.ByName, so call sites
 // read a property off the descriptor instead of comparing kind strings.
 // checkCoveredCell already rejects an unknown name before any other reader
-// runs, so the Work fallback here only guards a caller that skips that gate.
+// runs, so the Default fallback here only guards a caller that skips that gate.
 func (e Env) descriptor() *dispatchkind.Descriptor {
 	if d, ok := dispatchkind.ByName(e.kind()); ok {
 		return d
 	}
-	return dispatchkind.Work
+	return dispatchkind.Default
 }

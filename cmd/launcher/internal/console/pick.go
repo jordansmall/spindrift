@@ -17,10 +17,11 @@ var (
 	KindResearch = dispatchkind.Research
 )
 
-// effectiveKind defaults an unset Kind to KindWork: every Pick literal built
-// before #1708 (test fixtures included) leaves Kind nil, so a zero value
-// must dispatch as work rather than as an undispatchable third kind.
-func (p Pick) effectiveKind() Kind { return orWork(p.Kind) }
+// effectiveKind defaults an unset Kind to dispatchkind.Default: every Pick
+// literal built before #1708 (test fixtures included) leaves Kind nil, so a
+// zero value must dispatch as the default kind rather than as an
+// undispatchable third kind.
+func (p Pick) effectiveKind() Kind { return orDefault(p.Kind) }
 
 // pickKey mirrors the row identity Queue.newestIndex matches on: Number
 // plus effective kind.
@@ -31,9 +32,9 @@ type pickKey struct {
 
 func (p Pick) pickKey() pickKey { return pickKey{p.Number, p.effectiveKind()} }
 
-func orWork(k Kind) Kind {
+func orDefault(k Kind) Kind {
 	if k == nil {
-		return KindWork
+		return dispatchkind.Default
 	}
 	return k
 }
@@ -42,7 +43,7 @@ func orWork(k Kind) Kind {
 // brackets, e.g. "[research]". It stays unstyled: View clips a row's extras
 // as one plain string, so ANSI escape bytes would count as display columns.
 func kindMarker(k Kind) string {
-	if k == KindWork {
+	if k == dispatchkind.Default {
 		return ""
 	}
 	return "[" + k.Name + "]"

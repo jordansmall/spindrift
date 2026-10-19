@@ -386,7 +386,7 @@ func (r Resolved) IsGenuineOrSynthetic() bool {
 // self-report fills only Outcome.Status, so a caller must not assume the rest.
 func Resolve(logs []PassLog, kind string) (Resolved, error) {
 	if kind == "" {
-		kind = dispatchkind.Work.Name
+		kind = dispatchkind.Default.Name
 	}
 
 	var (

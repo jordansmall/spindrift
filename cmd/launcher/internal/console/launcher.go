@@ -290,7 +290,7 @@ func (l *Launcher) registry() *terminate.Registry {
 // row of the other kind (issue #4230). A kind whose stack is unwired falls back
 // to trackerFor, the route Pick claimed through, and the work Factory.
 func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
-	kind := KindWork
+	kind := orDefault(nil)
 	if p, ok := l.queueRef().liveRow(num); ok {
 		kind = p.effectiveKind()
 	}

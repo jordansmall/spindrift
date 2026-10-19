@@ -200,7 +200,7 @@ type Descriptor struct {
 }
 
 // ByName looks up a kind by its Name. "" is not special here — callers that
-// default "" to Default do so explicitly (today spelled Work.Name).
+// default "" to Default do so explicitly (Default.Name).
 func ByName(name string) (*Descriptor, bool) {
 	for _, d := range All {
 		if d.Name == name {

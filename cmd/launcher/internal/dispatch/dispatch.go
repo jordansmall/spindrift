@@ -227,10 +227,10 @@ func (c Config) signalCarrierSocket() bool {
 	return c.SignalCarrier == "socket"
 }
 
-// kindName is Config.Kind, defaulting to work.
+// kindName is Config.Kind, defaulting to the default kind.
 func (c Config) kindName() string {
 	if c.Kind == "" {
-		return dispatchkind.Work.Name
+		return dispatchkind.Default.Name
 	}
 	return c.Kind
 }
@@ -321,11 +321,11 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	env["DISPATCH_KIND"] = kind
 	// The Box rejects an unrecognized DISPATCH_KIND (see Kind), but its env
 	// guard first requires DISPATCH_KEY, DISPATCH_KEYING and
-	// DISPATCH_ANNOUNCE_VERB. This host-side Work fallback keeps the latter
+	// DISPATCH_ANNOUNCE_VERB. This host-side Default fallback keeps the latter
 	// two set, so an unknown kind reaches that clearer error (issue #3996).
 	d, ok := dispatchkind.ByName(kind)
 	if !ok {
-		d = dispatchkind.Work
+		d = dispatchkind.Default
 	}
 	env["DISPATCH_KEY"] = key
 	env["DISPATCH_KEYING"] = d.Keying.String()

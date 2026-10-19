@@ -136,7 +136,7 @@ type config struct {
 	boxEnvVars string
 
 	// dispatchKind is nil (doctor, reconcile, preview, none of which dispatch)
-	// or dispatchkind.Work/dispatchkind.Research (ADR 0022, issue #3872). Set
+	// or a dispatch kind descriptor (ADR 0022, issue #3872). Set
 	// via applyDispatchKind, never read from the environment directly: it is
 	// operator intent carried by which subcommand launched, not a config knob.
 	dispatchKind *dispatchkind.Descriptor
@@ -165,10 +165,10 @@ type config struct {
 }
 
 // kind is c.dispatchKind, reading a nil one (doctor, reconcile, preview,
-// none of which dispatch) as work.
+// none of which dispatch) as the default kind.
 func (c config) kind() *dispatchkind.Descriptor {
 	if c.dispatchKind == nil {
-		return dispatchkind.Work
+		return dispatchkind.Default
 	}
 	return c.dispatchKind
 }
