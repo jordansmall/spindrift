@@ -1208,17 +1208,19 @@ func checkReadOnlyCapabilityGate(c config) error {
 }
 
 // checkNetworkModeRuntimeGate backstops two NETWORK_MODE combinations
-// mkHarness's networkModeCoherenceOk assert cannot see, since NETWORK_MODE,
-// PODMAN_NETWORK and BWRAP_UNSHARE_NET are all runtime-overridable: bwrap
-// renders no-host-loopback no differently from open (issue #2562), and a
-// non-open mode beside a raw knob hits runner.Config.OCINetwork's raw-wins
-// full egress.
+// mkHarness's asserts cannot see, since NETWORK_MODE, PODMAN_NETWORK and
+// BWRAP_UNSHARE_NET are all runtime-overridable: a mode the runner family's
+// row does not list (issue #2562), and a non-open mode beside a raw knob,
+// which hits runner.Config.OCINetwork's raw-wins full egress.
 func checkNetworkModeRuntimeGate(c config) error {
 	// Keys on runnerKind, never runtime: RUNNER_KIND=bwrap/RUNTIME=podman is a
 	// supported pairing, and keying on runtime would miss that pairing and let
-	// no-host-loopback reach the bwrap adapter (issue #2538).
-	if c.runnerNetworkMode() == runner.NetworkModeNoHostLoopback && c.runnerKind == runner.KindBwrap {
-		return newLaunchGateConfigError("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
+	// an unsupported mode reach the bwrap adapter (issue #2538). An unknown
+	// RUNNER_KIND is left to runner.Lookup, which rejects it.
+	if family, err := runner.DescriptorFor(c.runnerKind); err == nil {
+		if err := family.CheckNetworkMode(c.runnerNetworkMode()); err != nil {
+			return newLaunchGateConfigError("%s", err)
+		}
 	}
 	// Only the detectable subset: Go sees the resolved value alone, so an
 	// explicit NETWORK_MODE=open beside a raw knob is left to raw-wins.

@@ -48,3 +48,50 @@ func TestFamilyNamesAreTheKindConstants(t *testing.T) {
 		t.Errorf("Families = %v, want oci then bwrap", Families)
 	}
 }
+
+func TestCheckNetworkMode_ListedModesAndEmptyPass(t *testing.T) {
+	for _, f := range Families {
+		for _, mode := range append([]string{""}, f.NetworkModes...) {
+			if err := f.CheckNetworkMode(NetworkMode(mode)); err != nil {
+				t.Errorf("%s.CheckNetworkMode(%q) = %v, want nil", f.Name, mode, err)
+			}
+		}
+	}
+}
+
+func TestCheckNetworkMode_UnlistedModeRejected(t *testing.T) {
+	cases := []struct {
+		family Descriptor
+		mode   NetworkMode
+		want   string
+	}{
+		// nix/checks/network-mode.nix pins the same literal for mkHarness's assert.
+		{Bwrap, NetworkModeNoHostLoopback, "NETWORK_MODE=no-host-loopback is unsupported on runner family bwrap, which supports: open, none, host"},
+		{OCI, NetworkMode("bogus"), "NETWORK_MODE=bogus is unsupported on runner family oci, which supports: open, no-host-loopback, none, host"},
+	}
+	for _, tc := range cases {
+		err := tc.family.CheckNetworkMode(tc.mode)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s.CheckNetworkMode(%q) = %v, want %q", tc.family.Name, tc.mode, err, tc.want)
+		}
+	}
+}
+
+func TestDescriptorFor(t *testing.T) {
+	cases := []struct {
+		kind   string
+		want   Descriptor
+		wantOK bool
+	}{
+		{"", OCI, true},
+		{KindOCI, OCI, true},
+		{KindBwrap, Bwrap, true},
+		{"nope", Descriptor{}, false},
+	}
+	for _, tc := range cases {
+		got, err := DescriptorFor(tc.kind)
+		if ok := err == nil; ok != tc.wantOK || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("DescriptorFor(%q) = (%v, %v), want ok=%v, %v", tc.kind, got, err, tc.wantOK, tc.want)
+		}
+	}
+}
