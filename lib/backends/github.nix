@@ -13,6 +13,7 @@
   relayCapable = true;
   hostPostingCapable = true;
   labelRegistry = true;
+  goTestRepoFiles = [ ".github/workflows/agent-dispatch.yml" ];
   quickstart = {
     hosts = [ "github.com" ];
     axes = [

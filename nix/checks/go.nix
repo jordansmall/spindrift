@@ -226,16 +226,17 @@ let
     ]
     ++ rootGoFiles (internalDir + "/forge")
     ++ rootGoFiles (internalDir + "/driver");
-  # `local` and forgejo build on the git backend's package as a library, not
-  # on the adapter: no other backend's fileset holds a sibling backend.
-  gitBackedBackends = [
-    "local"
-    "forgejo"
-  ];
+  # A row's goTestBuildsOn names a sibling it uses as a library, not as an
+  # adapter: no other backend's fileset holds a sibling backend.
+  backendRowList = import ../../lib/backends/default.nix;
+  rowFor = name: pkgs.lib.findFirst (row: row.name == name) null backendRowList;
+  buildsOnFor = name: (rowFor name).goTestBuildsOn or null;
   backendGoTestSharedFor =
     name:
-    backendGoTestShared
-    ++ pkgs.lib.optional (builtins.elem name gitBackedBackends) (internalDir + "/forge/git");
+    let
+      buildsOn = buildsOnFor name;
+    in
+    backendGoTestShared ++ pkgs.lib.optional (buildsOn != null) (internalDir + "/forge/${buildsOn}");
   backendGoTestsFor =
     { files, names }:
     adapterGoTests {
@@ -243,13 +244,12 @@ let
       prefix = "backends";
       pkgFor = name: "internal/forge/${name}";
       sharedFor = backendGoTestSharedFor;
-      # forge/github's tests read the dispatch workflow beside cmd/launcher.
       setupFor =
         name:
-        pkgs.lib.optionalString (name == "github") ''
-          mkdir -p src/.github/workflows
-          cp ${../../.github/workflows/agent-dispatch.yml} src/.github/workflows/agent-dispatch.yml
-        '';
+        pkgs.lib.concatMapStrings (f: ''
+          mkdir -p src/${builtins.dirOf f}
+          cp ${../.. + "/${f}"} src/${f}
+        '') ((rowFor name).goTestRepoFiles or [ ]);
       nativeBuildInputs = goTestInputs;
     };
   backendGoTests = backendGoTestsFor {
@@ -692,7 +692,8 @@ driverGoTests
         fs.toList (
           fs.intersection (fs.unions (backendGoTestSharedFor name)) (internalDir + "/forge/${other}")
         );
-      allowed = name: other: other == "git" && builtins.elem name gitBackedBackends;
+      allowed = name: other: buildsOnFor name == other;
+      sensitivityRows = builtins.filter (row: row ? goTestBuildsOn) backendRowList;
       leaks = concatStringsSep ", " (
         builtins.concatMap (
           name:
@@ -705,9 +706,10 @@ driverGoTests
         ) backendNames
       );
     in
-    assert assertMsg (
-      held "local" "git" != [ ]
-    ) "local's go test source no longer holds the git backend; the check is inert";
+    assert assertMsg (sensitivityRows != [ ]) "no backend row sets goTestBuildsOn; the check is inert";
+    assert assertMsg (builtins.all (row: held row.name row.goTestBuildsOn != [ ])
+      sensitivityRows
+    ) "a goTestBuildsOn backend's go test source no longer holds its base; the check is inert";
     assert assertMsg (leaks == "") "backend go test sources hold sibling backends: ${leaks}";
     pkgs.runCommand "backends-go-test-independent" { } "touch $out";
 

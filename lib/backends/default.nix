@@ -90,6 +90,19 @@
 # is Harness plumbing, baked unconditionally. Like `knobs`, the generated
 # Descriptor ignores it.
 
+# validateKnobs (optional) is a function from the merged defaults to true,
+# throwing on an invalid value of a knob the row owns; lib/mkHarness.nix runs
+# it for the selected tracker and forge rows only, so a knob stays dead config
+# when its backend is not selected. Like `knobs`, the generated Descriptor
+# ignores it.
+
+# goTestRepoFiles (optional) lists repo-root-relative files the backend's own go
+# tests read beside cmd/launcher; nix/checks/go.nix copies them into that
+# backend's test source. goTestBuildsOn (optional) names the backend whose
+# package this one uses as a library, so its go test source may hold that
+# sibling's directory (issue #5637). Like `knobs`, the generated Descriptor
+# ignores both.
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [
