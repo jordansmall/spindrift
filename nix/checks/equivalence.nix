@@ -273,12 +273,14 @@ in
     # any OCI runtime (podman, docker, rancher here), "bwrap" for the bwrap
     # harness below.
     grep -q '"RUNNER_KIND":"oci"' ${harness.internals.runInputDocumentFile}
+    grep -q '"BOX_ARTIFACT":"oci-image"' ${harness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"oci"' ${dockerHarness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"oci"' ${rancherHarness.internals.runInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
     grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
+    grep -q '"BOX_ARTIFACT":"store-closure"' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_FILES":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_ENV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"PASSWD_FILE":' ${bwrapHarness.internals.runInputDocumentFile}

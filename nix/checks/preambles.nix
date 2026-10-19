@@ -11,6 +11,7 @@ let
   # (issue #2664).
   bwrapRunArtifactsBase = {
     runnerKind = "bwrap";
+    boxArtifact = "store-closure";
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
@@ -61,6 +62,7 @@ let
   # preambles-run-artifacts-image-attr-name below.
   ociRunArtifactsBase = {
     runnerKind = "oci";
+    boxArtifact = "oci-image";
     driverEntry = {
       name = "claude";
       skillsDirRelative = ".claude/skills";
@@ -393,6 +395,9 @@ in
       out.RUNTIME == "bwrap"
     ) "runArtifacts (bwrap) must set RUNTIME=bwrap, got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.BOX_ARTIFACT == "store-closure"
+    ) "runArtifacts (bwrap) must set BOX_ARTIFACT=store-closure, got: ${builtins.toJSON out}";
+    assert assertMsg (
       out.DRIVER == "claude"
     ) "runArtifacts (bwrap) must set DRIVER, got: ${builtins.toJSON out}";
     assert assertMsg (
@@ -547,6 +552,9 @@ in
       out.RUNTIME == "podman"
     ) "runArtifacts (oci) must set the configured RUNTIME, got: ${builtins.toJSON out}";
     assert assertMsg (
+      out.BOX_ARTIFACT == "oci-image"
+    ) "runArtifacts (oci) must set BOX_ARTIFACT=oci-image, got: ${builtins.toJSON out}";
+    assert assertMsg (
       out.IMAGE_DRV == "/nix/store/ddd-image.drv"
     ) "runArtifacts (oci) must set IMAGE_DRV, got: ${builtins.toJSON out}";
     assert assertMsg (
@@ -619,6 +627,7 @@ in
     let
       out = preambles.runArtifacts {
         runnerKind = "oci";
+        boxArtifact = "oci-image";
         driverEntry = {
           name = "opencode";
           skillsDirRelative = ".claude/skills";
@@ -710,6 +719,7 @@ in
         "AGENT_FILES"
         "AGENT_FILES_DRV"
         "BAKED_PREFETCH"
+        "BOX_ARTIFACT"
         "BOX_ENV_VARS"
         "CHORE_CATALOG"
         "DRIVER"

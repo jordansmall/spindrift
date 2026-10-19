@@ -112,6 +112,12 @@ type config struct {
 	// rancher) that aren't "oci" literally.
 	runnerKind string
 
+	// boxArtifact is the Box artifact the runner family boots ("oci-image" or
+	// "store-closure"), BOX_ARTIFACT from the run document (ADR 0069
+	// decision 3). Empty resolves to oci-image, like an empty RUNNER_KIND
+	// resolves to OCI.
+	boxArtifact string
+
 	// driver selects the Go Driver strategy (ADR 0009). Empty defaults to
 	// "claude", matching the nix side's default.
 	driver string
@@ -416,6 +422,7 @@ func loadConfig() config {
 		nixStoreWritable:   getenvArtifact("NIX_STORE_WRITABLE", "") == "true",
 		runtime:            runtime,
 		runnerKind:         runnerKind,
+		boxArtifact:        getenvArtifact("BOX_ARTIFACT", ""),
 		driver:             driver,
 		image:              image,
 
