@@ -52,6 +52,16 @@ template variable or a fragment file adds a "What breaks in an override prompt
 directory" entry to MIGRATING.md naming the replacement. Issues #3219 and #3222
 set that precedent; this makes it the rule.
 
+A variable may be deprecated before it is removed: it keeps rendering for its
+own backend or gate, and prompt assembly warns at build time (`mkHarness`
+eval) and at run time, naming the replacement and pointing at MIGRATING.md.
+A deprecated variable is removed no earlier than the minor release after the
+one that deprecated it, and its MIGRATING.md entry says which releases those
+are. Currently deprecated: `${ISSUE_READ_GITHUB_STEP}`,
+`${ISSUE_READ_LOCAL_STEP}` and `${ISSUE_READ_FORGEJO_STEP}`, in favour of
+`${ISSUE_READ_STEP}` (issue #5646). They are deprecated from 0.29.0 and may be
+removed from 0.30.0.
+
 ## Pre-1.0 policy
 
 spindrift is pre-1.0. While the major version is `0`:

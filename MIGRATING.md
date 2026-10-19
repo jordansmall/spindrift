@@ -1,5 +1,47 @@
 # Migration Guide
 
+## The issue-read prompt step is one backend-keyed variable (issue #5646)
+
+The prompt's "read the issue" step is now a single slot, `${ISSUE_READ_STEP}`,
+filled from the active `ISSUE_TRACKER` backend's own fragment folder:
+`fragments/<backend>/issue-read.md`. A backend with no such file renders an
+empty step. The shipped `issue-prompt.md` already uses it, so nothing breaks
+for the default prompt; this only matters to a Consumer whose prompt
+directory (`--prompt-dir`, `SPINDRIFT_PROMPT_DIR`, or
+`perSystem.spindrift.agents.promptDir`) overrides it.
+
+What breaks in an override prompt directory:
+
+- `${ISSUE_READ_GITHUB_STEP}`, `${ISSUE_READ_LOCAL_STEP}` and
+  `${ISSUE_READ_FORGEJO_STEP}` are deprecated. They still render, each for its
+  own backend, but warn. Replace the three with one `${ISSUE_READ_STEP}`.
+  The `RESEARCH_` and `SCOUT_` issue-read variables are unchanged.
+- The fragment files moved: `fragments/issue-read-github.md`,
+  `issue-read-local.md` and `issue-read-forgejo.md` are now
+  `fragments/github/issue-read.md`, `fragments/local/issue-read.md` and
+  `fragments/forgejo/issue-read.md`, and `fragments/jira/issue-read.md` is
+  new. If your override copies the old files, move them to the new paths.
+  While the variables are deprecated, an override directory still on the old
+  layout keeps working: each deprecated variable falls back to its old root
+  file when the new path is missing. `${ISSUE_READ_STEP}` has no such
+  fallback, so a directory on the old layout renders that step empty. A
+  runtime `--prompt-dir` replaces the whole prompts directory, so it never
+  falls back to the shipped files.
+
+A leftover deprecated variable warns at `nix build` (`mkHarness` eval) and
+again when the launcher assembles the prompt, with text like:
+
+```text
+issue-prompt.md still references ${ISSUE_READ_GITHUB_STEP}, a fragment
+variable deprecated in issue #5646 that still renders; use
+${ISSUE_READ_STEP} instead (see MIGRATING.md)
+```
+
+The three variables are deprecated from 0.29.0 and may be removed from 0.30.0,
+the minor release after it. Once removed, a leftover reference fails the
+build and prompt assembly like any other removed fragment variable (issue
+#4401).
+
 ## Adding the pi Driver to an existing Consumer flake (issue #5486)
 
 This is an opt-in addition, not a breaking change: a Consumer that does not

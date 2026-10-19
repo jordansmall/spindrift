@@ -779,6 +779,21 @@ overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
 the filer is configured — box reads the fragment unconditionally once its gate
 is on, with no baked-in fallback.
 
+A row may carry an `axis` (`"tracker"` or `"forge"`, issue #5646): its
+`fragment` is then read from `fragments/<backend>/` for the active
+`ISSUE_TRACKER` or `CODE_FORGE`, so one slot serves every backend without a
+gate row and a variable each. A backend with no file there renders an empty
+step. `${ISSUE_READ_STEP}` is the first such row
+(`fragments/<backend>/issue-read.md`); the per-backend
+`${ISSUE_READ_GITHUB_STEP}`, `${ISSUE_READ_LOCAL_STEP}` and
+`${ISSUE_READ_FORGEJO_STEP}` it replaces are deprecated. A fragment variable
+retired from the registry is listed in `lib/removed-fragment-vars.nix`, with a
+`severity` of `removed` (the default; a prompt still using it fails the build
+and prompt assembly) or `deprecated` (it still renders, and warns naming its
+`replacement`, at eval time and again at run time). See
+[`MIGRATING.md`](../MIGRATING.md) for the current deprecations and their
+removal window.
+
 The comment-discipline rule is no longer a fragment anchor: `worker-prompt.md`
 (issue #3419), and now `issue-prompt.md`, `fix-prompt.md`, and
 `conflict-resolve-prompt.md` too (issue #3505), each carry the
