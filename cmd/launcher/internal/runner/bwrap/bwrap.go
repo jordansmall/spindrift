@@ -131,6 +131,9 @@ type bwrapAdapter struct {
 	prefetchFallbackLogged map[string]struct{}
 }
 
+// Strategy is the bwrap family's entry in the runner registry.
+var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild}
+
 // New constructs a bwrap adapter for the run command from cfg and pwd (the
 // launcher's own working directory); call NewBuild for the build command.
 // By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
