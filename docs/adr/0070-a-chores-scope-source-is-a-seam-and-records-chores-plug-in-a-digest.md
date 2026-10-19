@@ -35,8 +35,9 @@ Chore is planned, so the hook is built now rather than on a trigger.
    (see the amendment below). The Strategy has a `Render` function, which
    takes the Records, the prior cursor, the claim time, the parsed prior
    findings and a merge lookup, and returns the digest text and the latest
-   Record ID it covers. Its other functions are optional, and a nil one
-   means the Chore does without it:
+   Record ID it covers. `Anchors`, also required, lists what a finding may
+   cite in a digest it rendered. Its other functions are optional, and a
+   nil one means the Chore does without it:
    - `ParsePrior`, which reads a prior finding;
    - `Validate`, which applies the Chore's own settle rules, such as tuning's
      sample floor and its `evidence-gap` exemption;
@@ -44,11 +45,14 @@ Chore is planned, so the hook is built now rather than on a trigger.
 
    The `records` adapter owns everything else:
    - the check that a Chore is due once enough new settled Records exist;
-   - the prior findings, as issues wearing the Chore's `findingLabel`;
+   - the prior findings, as finding issues whose dedup marker carries the
+     Chore's `chore=<name>` term (see the amendment below);
    - the host-private snapshot keyed by Record ID, failing closed when it
      cannot be stored;
-   - dropping any finding whose cites are absent from the snapshot (ADR
-     0062 decision 4).
+   - dropping any finding with no cites or one citing an anchor absent
+     from the snapshot (ADR 0062 decision 4);
+   - the dedup policy, from the Digest's `DedupTerms` and the Chore's
+     cooldown.
 3. **Settings live on the catalog row.** A records row declares its minimum
    number of new Records, and its own settings are row-owned knobs (ADR
    0068). `BUTLER_TUNING_*` move onto the tuning row with their names
@@ -91,3 +95,18 @@ there would link settle, tuning and the Records store into both. Built-in
 Digests register instead from a separate Host bundle
 (`internal/hostbundle`), which only the binaries that run the butler sweep
 import. The bundle guard pins that list the way it pins the Bundle's.
+
+## Amendment (issue #5697): prior findings match the Chore's marker
+
+Decision 2 first said the adapter finds prior findings as issues wearing
+the Chore's `findingLabel`. It matches the `chore=<name>` term in a
+finding issue's dedup marker instead. Every finding of a Chore with a
+`findingLabel` carries that term, and the marker also works on trackers
+with no label registry (`local`, `jira`), where a label query cannot.
+The not-planned cooldown is keyed on the same term, so it applies to
+the settling Chore's own findings rather than to tuning by name.
+
+The cite check needs the Digest's anchor syntax, which only the Chore
+knows, so the Strategy gains a required `Anchors` function. The adapter
+then drops an uncited or unknown-anchor finding for every records Chore,
+whether or not its Digest has a `Validate`.
