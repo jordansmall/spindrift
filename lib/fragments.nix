@@ -302,14 +302,26 @@ let
       var = "FILE_ISSUES_RELAY_SOCKET_STEP";
       signalChannel = "issue-intent";
     }
+    # One slot per direct step (issue #5647, ADR 0068): fj has no label verb,
+    # so each Filer folder carries its own file, and the gate is the combined
+    # one because the folder already picks the arm.
+    {
+      axis = "filer";
+      gate = "FILER_FILE_DIRECT_ANY";
+      fragment = "filer-direct-label.md";
+      var = "FILER_DIRECT_LABEL_STEP";
+    }
+    # Deprecation-window fills for override prompts still naming the old vars.
     {
       gate = "FILER_FILE_DIRECT_GH";
-      fragment = "filer-label-direct.md";
+      fragment = "github/filer-direct-label.md";
+      legacyFragment = "filer-label-direct.md";
       var = "FILER_LABEL_DIRECT_STEP";
     }
     {
       gate = "FILER_FILE_DIRECT_FORGEJO";
-      fragment = "filer-label-direct-forgejo.md";
+      fragment = "forgejo/filer-direct-label.md";
+      legacyFragment = "filer-label-direct-forgejo.md";
       var = "FILER_LABEL_DIRECT_FORGEJO_STEP";
     }
     # filer-label-relay.md splits by dispatch kind (issue #2593): the relay
@@ -376,13 +388,21 @@ let
       var = "FILER_DEDUP_SEARCH_LOCAL_STEP";
     }
     {
+      axis = "filer";
+      gate = "FILER_FILE_DIRECT_ANY";
+      fragment = "filer-direct-file.md";
+      var = "FILER_DIRECT_FILE_STEP";
+    }
+    {
       gate = "FILER_FILE_DIRECT_GH";
-      fragment = "filer-file-direct.md";
+      fragment = "github/filer-direct-file.md";
+      legacyFragment = "filer-file-direct.md";
       var = "FILER_FILE_DIRECT_STEP";
     }
     {
       gate = "FILER_FILE_DIRECT_FORGEJO";
-      fragment = "filer-file-direct-forgejo.md";
+      fragment = "forgejo/filer-direct-file.md";
+      legacyFragment = "filer-file-direct-forgejo.md";
       var = "FILER_FILE_DIRECT_FORGEJO_STEP";
     }
     {
@@ -468,14 +488,22 @@ let
     # `gh run list` family does not exist against a Forgejo remote, so a
     # forgejo fix pass reads CI via `fj pr status`. Exactly one gate is on, so
     # fix-prompt.md concatenates both vars and only the active one renders.
+    # One slot (issue #5647, ADR 0068): the forge's folder carries the file.
+    {
+      axis = "forge";
+      fragment = "fix-ci-read.md";
+      var = "FIX_CI_READ_STEP";
+    }
     {
       gate = "FIX_CI_READ_GH";
-      fragment = "fix-ci-read-github.md";
+      fragment = "github/fix-ci-read.md";
+      legacyFragment = "fix-ci-read-github.md";
       var = "FIX_CI_READ_GITHUB_STEP";
     }
     {
       gate = "FIX_CI_READ_FORGEJO";
-      fragment = "fix-ci-read-forgejo.md";
+      fragment = "forgejo/fix-ci-read.md";
+      legacyFragment = "fix-ci-read-forgejo.md";
       var = "FIX_CI_READ_FORGEJO_STEP";
     }
     # The PR-body ticket-reference step (issue #1429, ADR 0029): exactly one
@@ -488,14 +516,31 @@ let
       fragment = "pr-body-closes.md";
       var = "PR_BODY_CLOSES_STEP";
     }
+    # The local pair is two slots keyed on LOCAL_ISSUE_REFERENCE, not on the
+    # backend's name (issue #5647): only local/ carries their files, so every
+    # other tracker renders them empty.
+    {
+      axis = "tracker";
+      gate = "PR_BODY_ISSUE_REF";
+      fragment = "pr-body-issue-ref.md";
+      var = "PR_BODY_ISSUE_REF_STEP";
+    }
+    {
+      axis = "tracker";
+      gate = "PR_BODY_NO_ISSUE_REF";
+      fragment = "pr-body-no-issue-ref.md";
+      var = "PR_BODY_NO_ISSUE_REF_STEP";
+    }
     {
       gate = "PR_BODY_LOCAL_REF";
-      fragment = "pr-body-local-ref.md";
+      fragment = "local/pr-body-issue-ref.md";
+      legacyFragment = "pr-body-local-ref.md";
       var = "PR_BODY_LOCAL_REF_STEP";
     }
     {
       gate = "PR_BODY_LOCAL_NOREF";
-      fragment = "pr-body-local-noref.md";
+      fragment = "local/pr-body-no-issue-ref.md";
+      legacyFragment = "pr-body-local-noref.md";
       var = "PR_BODY_LOCAL_NOREF_STEP";
     }
     # The issue-read step (issues #1691, #1963, ADR 0032): the subject issue's
@@ -821,14 +866,23 @@ let
     # The read-write case forks on CODE_FORGE (issue #1963): `gh pr create`
     # for github, `fj pr create` for forgejo. Read-only never forks, because
     # SPINDRIFT_PR_INTENT is opened host-side whichever forge backend answers.
+    # One slot (issue #5647, ADR 0068): the forge's folder carries the file.
+    {
+      axis = "forge";
+      gate = "BOX_ACCESS_READ_WRITE";
+      fragment = "open-pr-create.md";
+      var = "OPEN_PR_CREATE_DIRECT_STEP";
+    }
     {
       gate = "OPEN_PR_CREATE_RW_GH";
-      fragment = "open-pr-create-git.md";
+      fragment = "github/open-pr-create.md";
+      legacyFragment = "open-pr-create-git.md";
       var = "OPEN_PR_CREATE_READ_WRITE_STEP";
     }
     {
       gate = "OPEN_PR_CREATE_RW_FORGEJO";
-      fragment = "open-pr-create-forgejo.md";
+      fragment = "forgejo/open-pr-create.md";
+      legacyFragment = "open-pr-create-forgejo.md";
       var = "OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP";
     }
     # The carrier (issue #3726) forks the PR-intent send itself: a read-only
@@ -883,7 +937,13 @@ let
     # Host-mediated read-write (issue #5251): the clone source is read-only.
     {
       gate = "HOST_MEDIATED_READ_WRITE";
-      fragment = "commit-push-local.md";
+      fragment = "commit-push-host-mediated.md";
+      var = "COMMIT_PUSH_HOST_MEDIATED_STEP";
+    }
+    {
+      gate = "HOST_MEDIATED_READ_WRITE";
+      fragment = "commit-push-host-mediated.md";
+      legacyFragment = "commit-push-local.md";
       var = "COMMIT_PUSH_LOCAL_STEP";
     }
     {
@@ -904,7 +964,13 @@ let
     # Host-mediated read-write (issue #5251): no push exists to triage.
     {
       gate = "HOST_MEDIATED_READ_WRITE";
-      fragment = "if-blocked-triage-local.md";
+      fragment = "if-blocked-triage-host-mediated.md";
+      var = "IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP";
+    }
+    {
+      gate = "HOST_MEDIATED_READ_WRITE";
+      fragment = "if-blocked-triage-host-mediated.md";
+      legacyFragment = "if-blocked-triage-local.md";
       var = "IF_BLOCKED_TRIAGE_LOCAL_STEP";
     }
     {
@@ -923,7 +989,13 @@ let
     # Host-mediated read-write (issue #5251): hand the branch to the harness.
     {
       gate = "HOST_MEDIATED_READ_WRITE";
-      fragment = "if-blocked-push-local.md";
+      fragment = "if-blocked-push-host-mediated.md";
+      var = "IF_BLOCKED_PUSH_HOST_MEDIATED_STEP";
+    }
+    {
+      gate = "HOST_MEDIATED_READ_WRITE";
+      fragment = "if-blocked-push-host-mediated.md";
+      legacyFragment = "if-blocked-push-local.md";
       var = "IF_BLOCKED_PUSH_LOCAL_STEP";
     }
     {
@@ -939,13 +1011,21 @@ let
     # git or local Box has no PR at all (issue #5233), so it gets a no-PR step
     # in the same slot.
     {
+      axis = "forge";
+      gate = "PR_FORGE_READ_WRITE";
+      fragment = "if-blocked-pr.md";
+      var = "IF_BLOCKED_PR_DIRECT_STEP";
+    }
+    {
       gate = "IF_BLOCKED_PR_RW_GH";
-      fragment = "if-blocked-pr-git.md";
+      fragment = "github/if-blocked-pr.md";
+      legacyFragment = "if-blocked-pr-git.md";
       var = "IF_BLOCKED_PR_READ_WRITE_STEP";
     }
     {
       gate = "IF_BLOCKED_PR_RW_FORGEJO";
-      fragment = "if-blocked-pr-forgejo.md";
+      fragment = "forgejo/if-blocked-pr.md";
+      legacyFragment = "if-blocked-pr-forgejo.md";
       var = "IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP";
     }
     {

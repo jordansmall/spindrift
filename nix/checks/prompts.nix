@@ -1127,7 +1127,7 @@ in
 
   # The after-rebase block (fetch / merge-base / rebase plus the After-rebase
   # rule paragraph) is duplicated in commit-push-git.md,
-  # commit-push-outbox.md and commit-push-local.md; only the git copy's
+  # commit-push-outbox.md and commit-push-host-mediated.md; only the git copy's
   # trailing " Then push:" and the local copy's missing CI clause (a local
   # forge has no CI) differ. Nothing structural ties the copies together, so
   # diff them (issue #4412, found during #4408; local copy issue #5251).
@@ -1141,7 +1141,7 @@ in
     }
     slice ${../../templates/default/prompts/fragments/commit-push-git.md} git-block.txt 'let CI be the final gate\.'
     slice ${../../templates/default/prompts/fragments/commit-push-outbox.md} outbox-block.txt 'let CI be the final gate\.'
-    slice ${../../templates/default/prompts/fragments/commit-push-local.md} local-block.txt 'Otherwise skip it\.$'
+    slice ${../../templates/default/prompts/fragments/commit-push-host-mediated.md} local-block.txt 'Otherwise skip it\.$'
     sed -i '$ s/ Then push:$//' git-block.txt
     diff git-block.txt outbox-block.txt || {
       echo "commit-push-git.md and commit-push-outbox.md after-rebase blocks have drifted; keep them byte-identical (bar the git copy's trailing ' Then push:')" >&2
@@ -1149,7 +1149,7 @@ in
     }
     sed '$ s/ and let CI be the final gate\.$/./' outbox-block.txt > outbox-sans-ci.txt
     diff outbox-sans-ci.txt local-block.txt || {
-      echo "commit-push-local.md's after-rebase block has drifted from commit-push-outbox.md's; keep them byte-identical (bar the CI clause)" >&2
+      echo "commit-push-host-mediated.md's after-rebase block has drifted from commit-push-outbox.md's; keep them byte-identical (bar the CI clause)" >&2
       exit 1
     }
     touch $out
@@ -1200,7 +1200,7 @@ in
   # Grep pin (issue #1653): the launcher gates on CI green itself before
   # flipping the PR ready and merging (issue #1651), so the WATCH CI GraphQL
   # query must not appear in any prompt source file.
-  # fragments/fix-ci-read-github.md legitimately references the unrelated
+  # fragments/github/fix-ci-read.md legitimately references the unrelated
   # `statusCheckRollup` JSON field, so the query body, not the field name, is
   # the pin.
   prompt-source-statusCheckRollup-query-absent =
@@ -1473,8 +1473,8 @@ in
     pkgs.runCommand "pr-body-reference-local-off-has-no-reference" { }
       ''
         ! grep -qi 'closes\|fixes\|local-issue\|''${ISSUE_NUMBER}' \
-          ${../../templates/default/prompts/fragments/pr-body-local-noref.md} || {
-            echo "pr-body-local-noref.md references the ticket (closing keyword, local-issue, or ISSUE_NUMBER) with the toggle off (issue #1429)" >&2
+          ${../../templates/default/prompts/fragments/local/pr-body-no-issue-ref.md} || {
+            echo "local/pr-body-no-issue-ref.md references the ticket (closing keyword, local-issue, or ISSUE_NUMBER) with the toggle off (issue #1429)" >&2
             exit 1
           }
         touch $out
@@ -1483,9 +1483,9 @@ in
   pr-body-reference-local-on-has-breadcrumb-not-closing-keyword =
     pkgs.runCommand "pr-body-reference-local-on-has-breadcrumb-not-closing-keyword" { }
       ''
-        grep -qF 'Local-issue: ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-local-ref.md}
-        ! grep -qi 'closes\|fixes' ${../../templates/default/prompts/fragments/pr-body-local-ref.md} || {
-          echo "pr-body-local-ref.md contains a closing keyword (closes/fixes); the local-issue reference must be a breadcrumb only (issue #1429)" >&2
+        grep -qF 'Local-issue: ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/local/pr-body-issue-ref.md}
+        ! grep -qi 'closes\|fixes' ${../../templates/default/prompts/fragments/local/pr-body-issue-ref.md} || {
+          echo "local/pr-body-issue-ref.md contains a closing keyword (closes/fixes); the local-issue reference must be a breadcrumb only (issue #1429)" >&2
           exit 1
         }
         touch $out
@@ -1753,8 +1753,8 @@ in
   filer-direct-fragments-keep-gh-write-unchanged =
     pkgs.runCommand "filer-direct-fragments-keep-gh-write-unchanged" { }
       ''
-        grep -q 'gh label create agent-review-finding' ${../../templates/default/prompts/fragments/filer-label-direct.md}
-        grep -q 'gh issue create' ${../../templates/default/prompts/fragments/filer-file-direct.md}
+        grep -q 'gh label create agent-review-finding' ${../../templates/default/prompts/fragments/github/filer-direct-label.md}
+        grep -q 'gh issue create' ${../../templates/default/prompts/fragments/github/filer-direct-file.md}
         touch $out
       '';
 
@@ -1784,15 +1784,15 @@ in
   filer-direct-forgejo-fragments-speak-fj-and-curl =
     pkgs.runCommand "filer-direct-forgejo-fragments-speak-fj-and-curl" { }
       ''
-        grep -q 'fj issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}
-        ! grep -q 'gh issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md} || {
-          echo "filer-file-direct-forgejo.md invokes gh issue create (issue #1963)" >&2
+        grep -q 'fj issue create' ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md}
+        ! grep -q 'gh issue create' ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md} || {
+          echo "forgejo/filer-direct-file.md invokes gh issue create (issue #1963)" >&2
           exit 1
         }
-        grep -q '/api/v1/repos' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
-        grep -q 'agent-review-finding' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
-        ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md} || {
-          echo "filer-label-direct-forgejo.md invokes gh label create (issue #1963)" >&2
+        grep -q '/api/v1/repos' ${../../templates/default/prompts/fragments/forgejo/filer-direct-label.md}
+        grep -q 'agent-review-finding' ${../../templates/default/prompts/fragments/forgejo/filer-direct-label.md}
+        ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/forgejo/filer-direct-label.md} || {
+          echo "forgejo/filer-direct-label.md invokes gh label create (issue #1963)" >&2
           exit 1
         }
         touch $out
@@ -1808,7 +1808,7 @@ in
     pkgs.runCommand "filer-direct-fragments-dedup-marker-matches-go" { }
       ''
         ${normalizedGrep}
-        for f in ${../../templates/default/prompts/fragments/filer-file-direct.md} ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}; do
+        for f in ${../../templates/default/prompts/fragments/github/filer-direct-file.md} ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md}; do
           normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerPrefixInGo} || {
             echo "$f: expected the dedup marker prefix '${dedupMarkerPrefixInGo}' (dedup.go's dedupMarkerPrefix const) verbatim" >&2
             exit 1
@@ -1830,18 +1830,18 @@ in
   open-pr-create-fragments-fork-forge-on-read-write =
     pkgs.runCommand "open-pr-create-fragments-fork-forge-on-read-write" { }
       ''
-        grep -q 'gh pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md}
-        ! grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md} || {
-          echo "open-pr-create-git.md invokes fj pr create (issue #1963)" >&2
+        grep -q 'gh pr create' ${../../templates/default/prompts/fragments/github/open-pr-create.md}
+        ! grep -q 'fj pr create' ${../../templates/default/prompts/fragments/github/open-pr-create.md} || {
+          echo "github/open-pr-create.md invokes fj pr create (issue #1963)" >&2
           exit 1
         }
-        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
-        ! grep -qE -e 'fj pr create[^`]*--title' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md} || {
-          echo "open-pr-create-forgejo.md passes --title to fj pr create, which takes the title positionally (issue #5098)" >&2
+        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/forgejo/open-pr-create.md}
+        ! grep -qE -e 'fj pr create[^`]*--title' ${../../templates/default/prompts/fragments/forgejo/open-pr-create.md} || {
+          echo "forgejo/open-pr-create.md passes --title to fj pr create, which takes the title positionally (issue #5098)" >&2
           exit 1
         }
-        ! grep -q 'gh pr create --' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md} || {
-          echo "open-pr-create-forgejo.md invokes gh pr create (issues #1963, #5066)" >&2
+        ! grep -q 'gh pr create --' ${../../templates/default/prompts/fragments/forgejo/open-pr-create.md} || {
+          echo "forgejo/open-pr-create.md invokes gh pr create (issues #1963, #5066)" >&2
           exit 1
         }
         touch $out
@@ -1882,19 +1882,19 @@ in
   if-blocked-pr-fragments-fork-forge-on-read-write =
     pkgs.runCommand "if-blocked-pr-fragments-fork-forge-on-read-write" { }
       ''
-        grep -q 'gh pr view' ${../../templates/default/prompts/fragments/if-blocked-pr-git.md}
-        ! grep -q 'fj pr' ${../../templates/default/prompts/fragments/if-blocked-pr-git.md} || {
-          echo "if-blocked-pr-git.md invokes fj pr (issue #5099)" >&2
+        grep -q 'gh pr view' ${../../templates/default/prompts/fragments/github/if-blocked-pr.md}
+        ! grep -q 'fj pr' ${../../templates/default/prompts/fragments/github/if-blocked-pr.md} || {
+          echo "github/if-blocked-pr.md invokes fj pr (issue #5099)" >&2
           exit 1
         }
-        ! grep -q 'gh pr' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md} || {
-          echo "if-blocked-pr-forgejo.md invokes gh pr (issue #5099)" >&2
+        ! grep -q 'gh pr' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md} || {
+          echo "forgejo/if-blocked-pr.md invokes gh pr (issue #5099)" >&2
           exit 1
         }
-        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md}
-        grep -q 'WIP: ' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md}
-        ! grep -q -e '--title' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md} || {
-          echo "if-blocked-pr-forgejo.md uses --title; fj takes the title positionally (issue #5098)" >&2
+        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md}
+        grep -q 'WIP: ' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md}
+        ! grep -q -e '--title' ${../../templates/default/prompts/fragments/forgejo/if-blocked-pr.md} || {
+          echo "forgejo/if-blocked-pr.md uses --title; fj takes the title positionally (issue #5098)" >&2
           exit 1
         }
         touch $out
@@ -1905,14 +1905,14 @@ in
   # fragment keeps `gh pr view` and never invokes `fj pr status`, and the
   # forgejo fragment the reverse.
   fix-ci-read-fragments-fork-forge = pkgs.runCommand "fix-ci-read-fragments-fork-forge" { } ''
-    grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
-    ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-github.md} || {
-      echo "fix-ci-read-github.md invokes fj pr status (issue #1963)" >&2
+    grep -q 'gh pr view' ${../../templates/default/prompts/fragments/github/fix-ci-read.md}
+    ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/github/fix-ci-read.md} || {
+      echo "github/fix-ci-read.md invokes fj pr status (issue #1963)" >&2
       exit 1
     }
-    grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md}
-    ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md} || {
-      echo "fix-ci-read-forgejo.md invokes gh pr view (issue #1963)" >&2
+    grep -q 'fj pr status' ${../../templates/default/prompts/fragments/forgejo/fix-ci-read.md}
+    ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/forgejo/fix-ci-read.md} || {
+      echo "forgejo/fix-ci-read.md invokes gh pr view (issue #1963)" >&2
       exit 1
     }
     touch $out

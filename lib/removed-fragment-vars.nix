@@ -165,4 +165,79 @@
     severity = "deprecated";
     replacement = "ISSUE_BLOCKED_COMMENT_RELAY_STEP";
   };
+  FILER_FILE_DIRECT_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DIRECT_FILE_STEP";
+  };
+  FILER_FILE_DIRECT_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DIRECT_FILE_STEP";
+  };
+  FILER_LABEL_DIRECT_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DIRECT_LABEL_STEP";
+  };
+  FILER_LABEL_DIRECT_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FILER_DIRECT_LABEL_STEP";
+  };
+  FIX_CI_READ_GITHUB_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FIX_CI_READ_STEP";
+  };
+  FIX_CI_READ_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "FIX_CI_READ_STEP";
+  };
+  OPEN_PR_CREATE_READ_WRITE_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "OPEN_PR_CREATE_DIRECT_STEP";
+  };
+  OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "OPEN_PR_CREATE_DIRECT_STEP";
+  };
+  IF_BLOCKED_PR_READ_WRITE_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "IF_BLOCKED_PR_DIRECT_STEP";
+  };
+  IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "IF_BLOCKED_PR_DIRECT_STEP";
+  };
+  COMMIT_PUSH_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "COMMIT_PUSH_HOST_MEDIATED_STEP";
+  };
+  IF_BLOCKED_TRIAGE_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP";
+  };
+  IF_BLOCKED_PUSH_LOCAL_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "IF_BLOCKED_PUSH_HOST_MEDIATED_STEP";
+  };
+  PR_BODY_LOCAL_REF_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "PR_BODY_ISSUE_REF_STEP";
+  };
+  PR_BODY_LOCAL_NOREF_STEP = {
+    issue = 5647;
+    severity = "deprecated";
+    replacement = "PR_BODY_NO_ISSUE_REF_STEP";
+  };
 }

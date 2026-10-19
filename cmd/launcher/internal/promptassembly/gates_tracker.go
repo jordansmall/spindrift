@@ -123,6 +123,11 @@ func trackerGates(e Env) map[string]bool {
 	g["PR_BODY_LOCAL_REF"] = prBodyLocalRef
 	g["PR_BODY_LOCAL_NOREF"] = prBodyLocalNoref
 
+	// The slot rows key on the opt-in knob alone: which tracker has a file
+	// for each is the folder's business, not a gate's.
+	g["PR_BODY_ISSUE_REF"] = e.LocalIssueReference
+	g["PR_BODY_NO_ISSUE_REF"] = !e.LocalIssueReference
+
 	return g
 }
 
