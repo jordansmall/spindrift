@@ -15,6 +15,9 @@ const nameGo = "go"
 // which still translates the retired spelling, never spells the key itself.
 const GoRetiredRouteKey = "go-path"
 
+// goToolchainLocal pins GOTOOLCHAIN to the one baked toolchain.
+const goToolchainLocal = "local"
+
 var goRow = Row{
 	Name:             nameGo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
@@ -75,13 +78,13 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 	// so a repo naming a newer toolchain dies on what looks like tampering.
 	// Pinning local produces Go's own "go.mod requires go >= X.Y.Z" error
 	// instead, and holds whether or not a GOPROXY export was rendered.
-	if env.GOTOOLCHAIN != "" && env.GOTOOLCHAIN != "local" {
+	if env.GOTOOLCHAIN != "" && env.GOTOOLCHAIN != goToolchainLocal {
 		result.Warnings = append(result.Warnings, fmt.Sprintf(
-			"==> WARNING: overriding GOTOOLCHAIN=%s with GOTOOLCHAIN=local — this Box only offers one baked Go toolchain through the Forwarder",
-			env.GOTOOLCHAIN,
+			"==> WARNING: overriding GOTOOLCHAIN=%s with GOTOOLCHAIN=%s — this Box only offers one baked Go toolchain through the Forwarder",
+			env.GOTOOLCHAIN, goToolchainLocal,
 		))
 	}
-	result.Exports = append(result.Exports, EnvExport{Name: "GOTOOLCHAIN", Value: "local"})
+	result.Exports = append(result.Exports, EnvExport{Name: "GOTOOLCHAIN", Value: goToolchainLocal})
 
 	// A repo-set GOPRIVATE defaults GONOPROXY to itself, bypassing GOPROXY, and
 	// Go treats an empty GONOPROXY as unset, so "" does not close that bypass.
