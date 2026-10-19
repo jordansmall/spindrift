@@ -3926,7 +3926,8 @@ the PR through `fj` porcelain rather than hand-assembled REST calls.
 `box` configures `fj` non-interactively before anything else it does:
 it feeds `FORGEJO_TOKEN` on stdin (never argv) to
 `fj auth add-key`, which writes `~/.local/share/forgejo-cli/keys.json` keyed
-by the instance host — an offline write, no network call. It is inert on a
+by the instance host — an offline write, no network call. It runs only when
+`ISSUE_TRACKER` or `CODE_FORGE` selects forgejo, and is inert on a
 non-forgejo image (no `fj`) or a read-only Box (no token), so the token
 plumbing follows exactly where `fj` is baked and permitted to write. The
 same `FORGEJO_TOKEN` also authenticates git pushes, carried as the origin

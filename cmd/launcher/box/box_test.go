@@ -54,6 +54,8 @@ type orchCall struct {
 
 const firstPrompt = "the assembled prompt"
 
+const fixtureGitUserName = "spindrift-agent"
+
 type fixture struct {
 	t   *testing.T
 	dir string
@@ -133,7 +135,7 @@ func newFixture(t *testing.T) *fixture {
 		// What checkEnvGuards requires of a work dispatch.
 		"GH_TOKEN": "tok", "DISPATCH_KEY": "42", "DISPATCH_KEYING": "issue",
 		"DISPATCH_ANNOUNCE_VERB": "implementing", "ISSUE_NUMBER": "42",
-		"GIT_USER_NAME": defaultGitUserName, "GIT_USER_EMAIL": "agent@example.com",
+		"GIT_USER_NAME": fixtureGitUserName, "GIT_USER_EMAIL": "agent@example.com",
 	}
 	f.handoffFile = filepath.Join(dir, "handoff.json")
 	f.in = inputs{
