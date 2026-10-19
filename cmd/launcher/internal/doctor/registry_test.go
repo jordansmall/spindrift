@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 func TestRunChecks_RunsEveryCheckEvenAfterAFailure(t *testing.T) {
@@ -624,5 +626,29 @@ func TestBlocking(t *testing.T) {
 				t.Errorf("Blocking(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPrerequisiteCheckMapsTierAndFields(t *testing.T) {
+	probe := func() (any, error) { return "out", nil }
+	msg := func(output any) string { return "got " + output.(string) }
+	for _, required := range []bool{true, false} {
+		got := PrerequisiteCheck(runner.Prerequisite{
+			Name: "n", Required: required, Remedy: "r", Probe: probe, SuccessMsg: msg,
+			Launch: runner.LaunchGate,
+		})
+		want := Advisory
+		if required {
+			want = Required
+		}
+		if got.Name != "n" || got.Remedy != "r" || got.Tier != want {
+			t.Errorf("required=%v: got %+v, want tier %v", required, got, want)
+		}
+		if out, err := got.Probe(); err != nil || out != "out" {
+			t.Errorf("Probe() = %v, %v", out, err)
+		}
+		if got.SuccessMsg("x") != "got x" {
+			t.Errorf("SuccessMsg not copied")
+		}
 	}
 }

@@ -3,14 +3,17 @@ package doctor
 import (
 	"errors"
 	"fmt"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
 // ErrDegraded marks a Probe error as indeterminate: the probe could not
 // determine the condition it checks, as distinct from affirmatively detecting
 // it. Wrapping it makes FirstRequiredError and RunChecksFailFast treat the
 // failure as non-blocking even at Required tier. Reporter.Results still
-// prints the failure and its Remedy, as an advisory line.
-var ErrDegraded = errors.New("check degraded: probe could not determine result")
+// prints the failure and its Remedy, as an advisory line. It is the runner
+// package's value so a Prerequisite Probe can wrap it without importing doctor.
+var ErrDegraded = runner.ErrDegraded
 
 // Tier classifies a Check as blocking (Required) or non-blocking (Advisory).
 // A Required-tier failure wrapping ErrDegraded is the exception.
@@ -185,4 +188,15 @@ func RunRequiredFailFast(checks []Check) error {
 		return nil
 	}
 	return WithRemedy(*r)
+}
+
+// PrerequisiteCheck adapts a Runner prerequisite to a doctor Check: Required
+// maps to the Required tier, anything else to Advisory. The Strategy cannot
+// hold a Check itself because this package imports runner.
+func PrerequisiteCheck(p runner.Prerequisite) Check {
+	tier := Advisory
+	if p.Required {
+		tier = Required
+	}
+	return Check{Name: p.Name, Tier: tier, Remedy: p.Remedy, Probe: p.Probe, SuccessMsg: p.SuccessMsg}
 }

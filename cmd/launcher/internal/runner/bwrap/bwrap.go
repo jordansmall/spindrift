@@ -131,7 +131,7 @@ type bwrapAdapter struct {
 }
 
 // Strategy is the bwrap family's entry in the runner registry.
-var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild}
+var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild, Prerequisites: Prerequisites}
 
 // New constructs a bwrap adapter for the run command from cfg and pwd (the
 // launcher's own working directory); call NewBuild for the build command.

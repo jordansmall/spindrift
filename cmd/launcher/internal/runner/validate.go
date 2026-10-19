@@ -29,3 +29,24 @@ func ValidateRuntimeWithLookup(runtime string, lookPath func(string) (string, er
 	}
 	return nil
 }
+
+// RuntimePrerequisiteName is the Name of the RuntimePrerequisite row.
+const RuntimePrerequisiteName = "runtime"
+
+// RuntimePrerequisite declares that runtime's CLI is on PATH. Every family
+// declares it first; the launcher enforces it with its config checks, ahead of
+// the launch gates.
+func RuntimePrerequisite(runtime string) Prerequisite {
+	return Prerequisite{
+		Name:     RuntimePrerequisiteName,
+		Launch:   LaunchWithConfig,
+		Required: true,
+		Remedy:   "set RUNTIME to podman, docker, rancher, or bwrap, and ensure the matching CLI is on PATH",
+		Probe: func() (any, error) {
+			return nil, ValidateRuntime(runtime)
+		},
+		SuccessMsg: func(output any) string {
+			return fmt.Sprintf("runtime %q found on PATH", runtime)
+		},
+	}
+}
