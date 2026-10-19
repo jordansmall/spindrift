@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.go.path \"/go/`whoami`\" must not contain \"$\", \"`\", or \"\\\\\""
+}

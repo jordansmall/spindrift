@@ -1,0 +1,9 @@
+[[routes]]
+match-host = "repo.acme.test"
+upstream-origin = "https://repo.acme.test"
+auth-scheme = "bearer"
+credential = { env = "GO_TOKEN" }
+allow = ["/dl"]
+
+[routes.ecosystems.go]
+path = "/go"

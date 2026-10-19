@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.go.path \"/go/./release\" must not contain a \".\" segment"
+}
