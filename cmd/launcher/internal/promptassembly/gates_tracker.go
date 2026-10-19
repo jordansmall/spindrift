@@ -51,6 +51,9 @@ func trackerGates(e Env) map[string]bool {
 	// BLOCKED comment relays through the host's note= field (issue #5263).
 	row, _ := backend.ByName(trackerName)
 	unwritable := row.InBoxUnwritableTracker
+	// The backend-agnostic form of "the Box can read the tracker": gates a
+	// slot whose shared fragment serves every reachable tracker.
+	g["ISSUE_TRACKER_REACHABLE"] = !row.InBoxUnreachableTracker
 	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
 	g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] = unwritable && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && (!e.BoxWriteEnabled || researchForceRelay)

@@ -8,15 +8,15 @@ commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
 file-issues-direct.md
-filer-dedup-search-forgejo.md
 filer-file-direct-forgejo.md
 filer-label-direct-forgejo.md
-forgejo/issue-read.md
+forgejo/filer-dedup.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-forgejo.md
 if-blocked-push-git.md
 if-blocked-triage-git.md
 issue-blocked-comment-forgejo.md
+issue-read.md
 land-git-push-git.md
 land-git-stop-read-write.md
 land-pass-order-finish-filer.md
@@ -30,7 +30,7 @@ pr-body-closes.md
 review-loop-orchestrator-filer.md
 review-loop-orchestrator.md
 scout-delegate.md
-scout-issue-read-forgejo.md
+scout-issue-read.md
 skill-preamble.md
 tdd-baked.md
 worker-scout-brief.md

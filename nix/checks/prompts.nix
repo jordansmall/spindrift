@@ -1245,14 +1245,14 @@ in
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
-        grep -q -- '--state open' ${../../templates/default/prompts/fragments/filer-dedup-search.md}
+        grep -q -- '--state open' ${../../templates/default/prompts/fragments/github/filer-dedup.md}
         old=$(grep -c -- '--label agent-review-finding --state all' \
-          ${../../templates/default/prompts/fragments/filer-dedup-search.md} || true)
+          ${../../templates/default/prompts/fragments/github/filer-dedup.md} || true)
         [ "$old" -eq 0 ] || {
           echo "expected the old --label agent-review-finding --state all query gone, found $old occurrence(s)" >&2
           exit 1
         }
-        bad=$(grep -- '--state open' ${../../templates/default/prompts/fragments/filer-dedup-search.md} \
+        bad=$(grep -- '--state open' ${../../templates/default/prompts/fragments/github/filer-dedup.md} \
           | grep -c -- '--label' || true)
         [ "$bad" -eq 0 ] || {
           echo "expected the --state open dedup search to carry no --label flag, $bad line(s) did" >&2
@@ -1314,17 +1314,17 @@ in
   filer-prompt-dedup-names-research-reject =
     pkgs.runCommand "filer-prompt-dedup-names-research-reject" { }
       ''
-        grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/fragments/filer-dedup-search.md}
+        grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/fragments/github/filer-dedup.md}
         touch $out
       '';
 
   # Grep pins for the Forgejo sibling of the filer dedup step (issue #5127):
-  # same bullet structure as filer-dedup-search.md, over the REST issue
+  # same bullet structure as github/filer-dedup.md, over the REST issue
   # search. The all-open search must carry no `labels=` (it covers
   # human-filed issues), all four provenance labels must be searched closed,
   # and `gh` must never appear (it would query the wrong tracker).
   filer-prompt-dedup-forgejo-searches = pkgs.runCommand "filer-prompt-dedup-forgejo-searches" { } ''
-    f=${../../templates/default/prompts/fragments/filer-dedup-search-forgejo.md}
+    f=${../../templates/default/prompts/fragments/forgejo/filer-dedup.md}
     # Each search spans several lines, so judge it as one curl..jq block: emit
     # one "<state> <labels> <jq>" record per curl, flushed at its jq line (or
     # at the next curl / EOF when the jq pipe is missing).
@@ -1500,8 +1500,8 @@ in
     pkgs.runCommand "issue-read-fragments-never-fetch-the-subject-issue" { }
       ''
         shopt -s nullglob
-        for f in ${../../templates/default/prompts/fragments}/*issue-read-*.md \
-          ${../../templates/default/prompts/fragments}/*/issue-read.md; do
+        for f in ${../../templates/default/prompts/fragments}/*issue-read.md \
+          ${../../templates/default/prompts/fragments}/*/*issue-read.md; do
           ! grep -q 'gh issue view' "$f" || {
             echo "$f: expected no 'gh issue view' (subject-issue fetch), found one" >&2
             exit 1

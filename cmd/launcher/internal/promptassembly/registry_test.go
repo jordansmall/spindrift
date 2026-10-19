@@ -22,7 +22,7 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 116
+	const wantRows = 119
 	if len(reg.Rows) != wantRows {
 		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
 	}
@@ -86,15 +86,16 @@ func TestLoadRegistryParsesAllRows(t *testing.T) {
 		t.Errorf("code-review-baked.md row ExtraSubstVars = %v, want [REVIEW_FANOUT_AGENT]", codeReviewBaked.ExtraSubstVars)
 	}
 
-	// fragments.nix's header comment fixes the count at three.
+	// Three rows interpolate their own vars, plus the FORGE_DISPLAY_NAME
+	// slots (issue #5647) and each one's deprecated per-backend fills.
 	withExtra := 0
 	for _, r := range reg.Rows {
 		if len(r.ExtraSubstVars) > 0 {
 			withExtra++
 		}
 	}
-	if withExtra != 3 {
-		t.Errorf("rows with ExtraSubstVars = %d, want 3", withExtra)
+	if withExtra != 12 {
+		t.Errorf("rows with ExtraSubstVars = %d, want 12", withExtra)
 	}
 }
 

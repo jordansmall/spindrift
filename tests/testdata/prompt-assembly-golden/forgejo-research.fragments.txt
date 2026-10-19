@@ -1,5 +1,5 @@
 caveman-default-research.md
 check-hygiene-default.md
-research-issue-read-forgejo.md
+research-issue-read.md
 research-outcome-landing-forgejo.md
 research-verdict-forgejo.md

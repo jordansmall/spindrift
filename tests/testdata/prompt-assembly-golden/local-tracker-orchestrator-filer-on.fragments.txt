@@ -8,7 +8,6 @@ commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
 file-issues-relay.md
-filer-dedup-search-local.md
 filer-file-relay.md
 filer-label-relay.md
 if-blocked-outcome-landing-outbox.md
@@ -20,6 +19,7 @@ land-git-stop-read-only.md
 land-pass-order-finish-filer.md
 land-pass-order-gate-default-filer.md
 land-pass-order-orchestrator.md
+local/filer-dedup.md
 local/issue-read.md
 open-pr-create-outbox.md
 open-pr-push-outbox.md

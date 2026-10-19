@@ -335,8 +335,8 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 			env.IssueTracker = tc.tracker
 			env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tc.axis, tc.axis, tc.axis
 			env.PromptsDir = stagePromptsCopy(t)
-			for _, b := range []string{"github", "local", "forgejo", "jira"} {
-				if err := os.Remove(filepath.Join(env.PromptsDir, "fragments", b, "issue-read.md")); err != nil {
+			for _, p := range []string{"issue-read.md", "local/issue-read.md"} {
+				if err := os.Remove(filepath.Join(env.PromptsDir, "fragments", p)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -361,5 +361,53 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 				t.Errorf("warnings = %q, want one naming ${%s}", warnings, tc.v)
 			}
 		})
+	}
+}
+
+// An override still naming the per-backend vars the slot-collapse (issue
+// #5647) deprecated renders exactly what the shipped slot prompt does, on
+// every tracker.
+func TestAssembleDeprecatedSlotVarsRenderAsBefore(t *testing.T) {
+	envFor := func(tracker, axis string) Env {
+		e := coveredEnv()
+		e.IssueTracker = tracker
+		e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler = axis, axis, axis
+		e.FilerEnabled = true
+		e.AgentsJSONTemplate = `{"scout":{"model":"x"},"filer":{"model":"x"}}`
+		e.AgentsPromptFiles = `{"scout":"scout-prompt.md","filer":"filer-prompt.md"}`
+		return e
+	}
+	slots := []struct {
+		name, kind, file, slot, old string
+	}{
+		{"research", "research", "research-prompt.md", "${RESEARCH_ISSUE_READ_STEP}",
+			"${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_ISSUE_READ_FORGEJO_STEP}"},
+		{"scout", "work", "scout-prompt.md", "${SCOUT_ISSUE_READ_STEP}",
+			"${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_FORGEJO_STEP}"},
+		{"filer", "work", "filer-prompt.md", "${FILER_DEDUP_STEP}",
+			"${FILER_DEDUP_SEARCH_STEP}${FILER_DEDUP_SEARCH_FORGEJO_STEP}${FILER_DEDUP_SEARCH_LOCAL_STEP}"},
+	}
+	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"forgejo", "FORGEJO"}, {"local", "LOCAL"}, {"jira", "GITHUB"}}
+	rendered := func(t *testing.T, env Env, kind string) string {
+		t.Helper()
+		env.DispatchKind = kind
+		res, err := Assemble(env, loadTestRegistry(t))
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+		return res.Prompt + "\n" + res.AgentsJSON
+	}
+	for _, s := range slots {
+		for _, tr := range trackers {
+			t.Run(s.name+"/"+tr.tracker, func(t *testing.T) {
+				env := envFor(tr.tracker, tr.axis)
+				want := rendered(t, env, s.kind)
+				env.PromptsDir = stagePromptsCopy(t)
+				replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, s.old)
+				if got := rendered(t, env, s.kind); got != want {
+					t.Errorf("override with the deprecated %s vars renders differently from %s", s.name, s.slot)
+				}
+			})
+		}
 	}
 }

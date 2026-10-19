@@ -133,7 +133,7 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "via GitHub") {
-		t.Errorf("Prompt missing ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md)")
+		t.Errorf("Prompt missing ISSUE_TRACKER_GITHUB fragment text (issue-read.md)")
 	}
 }
 
@@ -2406,7 +2406,7 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 }
 
 // The local-tracker cell (issue #2352). Issue #3469 moved the local link
-// chain host-side into # ISSUE TEXT, so issue-read-local.md keeps only the
+// chain host-side into # ISSUE TEXT, so local/issue-read.md keeps only the
 // trailing `git log` bullet, which is what this asserts on.
 func TestAssembleLocalTracker(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -2418,10 +2418,10 @@ func TestAssembleLocalTracker(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "git log -n 10 --oneline") {
-		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (issue-read-local.md):\n%s", result.Prompt)
+		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (local/issue-read.md):\n%s", result.Prompt)
 	}
 	if strings.Contains(result.Prompt, "via GitHub") {
-		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want local tracker's fragment only")
+		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read.md), want local tracker's fragment only")
 	}
 }
 
@@ -2481,10 +2481,10 @@ func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "via Forgejo") {
-		t.Errorf("Prompt missing ISSUE_TRACKER_FORGEJO fragment text (issue-read-forgejo.md):\n%s", result.Prompt)
+		t.Errorf("Prompt missing ISSUE_TRACKER_FORGEJO fragment text (issue-read.md):\n%s", result.Prompt)
 	}
 	if strings.Contains(result.Prompt, "via GitHub") {
-		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read-github.md), want forgejo tracker's fragment only")
+		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read.md), want forgejo tracker's fragment only")
 	}
 }
 

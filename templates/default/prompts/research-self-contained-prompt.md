@@ -15,7 +15,7 @@ The issue's body and its last-10-comment snapshot are already in the
 # ISSUE TEXT section after the template body — read there, do not fetch
 it from the tracker. What follows here you still run yourself:
 
-${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_ISSUE_READ_FORGEJO_STEP}
+${RESEARCH_ISSUE_READ_STEP}
 # VERDICT
 
 Judge relevance from the issue content alone — there is no repo to explore.

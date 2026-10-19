@@ -38,7 +38,7 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      differently, so only the site is stable across them — never key on
      wording. One key per finding; add a second only when a finding
      genuinely spans two sites.
-${FILER_DEDUP_SEARCH_STEP}${FILER_DEDUP_SEARCH_FORGEJO_STEP}${FILER_DEDUP_SEARCH_LOCAL_STEP}${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
+${FILER_DEDUP_STEP}${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".

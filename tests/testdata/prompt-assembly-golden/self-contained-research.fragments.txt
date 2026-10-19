@@ -1,4 +1,4 @@
 caveman-default-research.md
-research-issue-read-github.md
+research-issue-read.md
 research-outcome-landing-github.md
 research-verdict-github.md

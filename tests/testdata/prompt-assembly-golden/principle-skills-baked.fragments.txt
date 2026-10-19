@@ -7,12 +7,12 @@ commit-push-git.md
 commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
-github/issue-read.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-git.md
 if-blocked-push-git.md
 if-blocked-triage-git.md
 issue-blocked-comment-github.md
+issue-read.md
 land-git-push-git.md
 land-git-stop-read-write.md
 land-pass-order-finish-no-filer.md
@@ -29,7 +29,7 @@ principle-redesign-from-first-principles-default.md
 review-loop-orchestrator-no-filer.md
 review-loop-orchestrator.md
 scout-delegate.md
-scout-issue-read-github.md
+scout-issue-read.md
 skill-preamble.md
 tdd-baked.md
 worker-scout-brief.md

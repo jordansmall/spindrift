@@ -1,4 +1,4 @@
-- Pull any parent/linked issue or PRD it references too via GitHub — the
+- Pull any parent/linked issue or PRD it references too via ${FORGE_DISPLAY_NAME} — the
   subject issue's own body and its last-10-comment snapshot are already in
   the # ISSUE TEXT section below.
 - Any prior research comment (look for the `<!-- spindrift-research -->`
