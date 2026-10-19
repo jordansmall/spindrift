@@ -1,11 +1,14 @@
 # Update-mode regenerator for the Go-test goldens (issue #2951): prompt
-# assembly, `spindrift stats`, and the per-Driver Pass-log corpus. It runs
+# assembly, `spindrift stats`, the per-Driver Pass-log corpus, and the Digest
+# corpora (the digestkit's own and each Chore's). It runs
 # the Go golden tests
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
 # cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
 # cmd/launcher/internal/driver/<driver>/corpus_test.go,
-# cmd/launcher/internal/ecosystem/referencedocs_test.go) with
+# cmd/launcher/internal/ecosystem/referencedocs_test.go,
+# cmd/launcher/internal/digestkit/digestkit_test.go,
+# cmd/launcher/internal/<chore>/digest_corpus_test.go) with
 # UPDATE_GOLDENS=1, which flips their compare helpers from fail to
 # overwrite. Separate from nix/regen.nix's regen verb because these
 # goldens are the output of running the test, not a pure render of a
@@ -45,9 +48,10 @@ pkgs.writeShellApplication {
     # has none, so run the test from a copy of the module. The tests read
     # ../../tests, ../../templates, and ../../docs relative to the module, so
     # those three are symlinks back into the checkout. So are the module's own
-    # testdata/golden and each Driver's corpus
-    # (internal/driver/<driver>/testdata/corpus), so goldens written through
-    # them land in the repo.
+    # testdata/golden, each Driver's corpus
+    # (internal/driver/<driver>/testdata/corpus), and each Digest corpus
+    # (internal/*/testdata/digest, plus the digestkit's own testdata/corpus),
+    # so goldens written through them land in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
     chmod -R +w "$scratch/src"
@@ -72,6 +76,25 @@ pkgs.writeShellApplication {
       exit 1
     fi
 
+    # Likewise for the Digest corpora: any package with a testdata/digest
+    # directory is a Chore's corpus, so a new records Chore is picked up
+    # without touching this file.
+    digest_pkgs=()
+    for corpus in "$root"/cmd/launcher/internal/*/testdata/digest; do
+      [ -d "$corpus" ] || continue
+      rel="''${corpus#"$root"/cmd/launcher/}"
+      rm -rf "$scratch/src/cmd/launcher/$rel"
+      ln -s "$corpus" "$scratch/src/cmd/launcher/$rel"
+      digest_pkgs+=("./''${rel%/testdata/digest}")
+    done
+    if [ "''${#digest_pkgs[@]}" -eq 0 ]; then
+      echo "regen-goldens: no Digest corpus found under cmd/launcher/internal/*/testdata/digest" >&2
+      exit 1
+    fi
+    kit_corpus=cmd/launcher/internal/digestkit/testdata/corpus
+    rm -rf "$scratch/src/$kit_corpus"
+    ln -s "$root/$kit_corpus" "$scratch/src/$kit_corpus"
+
     ${import ./checks/go-check-env.nix}
     export SPINDRIFT_SEAM_FIXTURES_DIR=${fixtures.seamFixtures}
     export UPDATE_GOLDENS=1
@@ -84,6 +107,8 @@ pkgs.writeShellApplication {
     # hence the docs link above (issue #5248).
     go test -count=1 -run '^TestStats_(.*Golden|By.*)$' .
     go test -count=1 -run '^TestCorpus$' "''${driver_pkgs[@]}"
+    go test -count=1 -run '^TestDigestCorpus$' "''${digest_pkgs[@]}"
+    go test -count=1 -run '^TestRunReplaysCorpusIntoGoldens$' ./internal/digestkit
     # Rewrites the generated spans in docs/reference.md (the docs link above).
     go test -count=1 -run '^TestReferenceDocs_GeneratedSpans$' ./internal/ecosystem
   '';
