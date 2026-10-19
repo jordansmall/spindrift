@@ -1,0 +1,8 @@
+[source.crates-io]
+replace-with = "acme-src"
+
+[source.acme-src]
+registry = "sparse+https://crates.acme.test/index/"
+
+[registries.acme]
+index = "sparse+https://crates.acme.test/index/"

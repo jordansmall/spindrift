@@ -1,0 +1,12 @@
+[
+  {
+    "Host": "crates.acme.test",
+    "Origin": "https://crates.acme.test",
+    "Subtrees": [
+      {
+        "ecosystem": "cargo",
+        "path": "/index"
+      }
+    ]
+  }
+]

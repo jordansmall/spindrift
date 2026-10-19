@@ -1,0 +1,36 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "CARGO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "one.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://Crates.Acme.Test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "one.acme.test",
+    "UpstreamOrigin": "https://Crates.Acme.Test"
+  },
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "CARGO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "two.acme.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://crates.acme.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "two.acme.test",
+    "UpstreamOrigin": "https://crates.acme.test"
+  }
+]
