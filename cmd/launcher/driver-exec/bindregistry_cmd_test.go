@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,22 +15,25 @@ import (
 
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// A hermetic $HOME with $CARGO_HOME left unset (issue #3201): since cargo
-// binds via RepoAwareHomeConfig, any -intree-action=apply run with a ready
-// gate writes $CARGO_HOME/config.toml (or $HOME/.cargo/config.toml), which
-// would otherwise land in the real ambient one. Tests that t.Setenv their own
-// HOME/CARGO_HOME scope back to this default at teardown.
+// A hermetic $HOME with every row's home-directory env var left unset (issue
+// #3201): a run reaching a home-config write would otherwise land in the real
+// ambient one. Tests that t.Setenv their own HOME or home-directory var scope
+// back to this default at teardown.
 func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "bindregistry-cmd-test-home")
 	if err != nil {
 		panic(err)
 	}
 	os.Setenv("HOME", home)
-	os.Unsetenv("CARGO_HOME")
+	for _, row := range ecosystem.HomeConfigRows() {
+		os.Unsetenv(row.HomeConfig.HomeEnvVar)
+	}
+	os.Unsetenv(synthetic.Row.HomeConfig.HomeEnvVar)
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
@@ -38,7 +41,7 @@ func TestMain(m *testing.M) {
 
 // lookPathFound stubs bindregistry.ResolveGate's LookPath dep to report
 // socat found without touching the real PATH (issue #3141's CI fix): the Nix
-// go-test sandbox has no socat, which let this shared-gate test pass locally
+// test sandbox has no socat, which let this shared-gate test pass locally
 // and fail in-box. Callers always inject a fake SpawnFunc too, so the returned
 // path is never executed, only "found".
 func lookPathFound(string) (string, error) { return "/fake/bin/socat", nil }
@@ -100,6 +103,96 @@ func clearManifestEnv(t *testing.T) {
 // declaration) rendered once for the exact-wording assertions below.
 var forwarderPortStr = strconv.Itoa(bindregistry.ForwarderPort)
 
+// runSyntheticBind is runBindRegistryWithRows over the kit's synthetic row
+// alone: the generic behaviour of the verb, with no real ecosystem's rendering
+// in the way.
+func runSyntheticBind(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
+	return runBindRegistryWithRows(args, []ecosystem.Row{synthetic.Row}, stdout, probe, spawn, lookPath, timeout, pollInterval)
+}
+
+// rowsWith returns the synthetic row followed by the stub rows, in that order.
+func rowsWith(extra ...ecosystem.Row) []ecosystem.Row {
+	return append([]ecosystem.Row{synthetic.Row}, extra...)
+}
+
+// exportStubRow is a row exporting each named var, valued at the route's local
+// URL.
+func exportStubRow(name string, vars ...string) ecosystem.Row {
+	return ecosystem.Row{
+		Name: name,
+		EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+			exports := make([]ecosystem.EnvExport, len(vars))
+			for i, v := range vars {
+				exports[i] = ecosystem.EnvExport{Name: v, Value: ecosystem.RouteLocalURL(prefix, port)}
+			}
+			return exports, nil
+		},
+	}
+}
+
+// syntheticHome points the synthetic row's home-directory var at a fresh
+// directory and returns it.
+func syntheticHome(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, dir)
+	return dir
+}
+
+// syntheticHomeConfigPath is where the synthetic row's home config lands under home.
+func syntheticHomeConfigPath(home string) string {
+	return filepath.Join(home, synthetic.Row.HomeConfig.ConfigPath)
+}
+
+// syntheticHomeConfig is the synthetic row's home config for a route prefix at
+// the Forwarder's port, from the row's own renderer.
+func syntheticHomeConfig(prefix string) string {
+	return synthetic.Row.HomeConfig.Render(bindregistry.ForwarderPort, prefix, nil)
+}
+
+// syntheticExport is the line the synthetic row's env export renders to.
+func syntheticExport(prefix string) string {
+	return "export SYNTHETIC_REGISTRY='" + ecosystem.RouteLocalURL(prefix, bindregistry.ForwarderPort) + "'"
+}
+
+// mountSocketManifest mounts a fake unix socket and points the manifest at it,
+// returning the socket path.
+func mountSocketManifest(t *testing.T, routes ...registrymanifest.Route) string {
+	t.Helper()
+	socketPath := shortUnixSocketPath(t)
+	listenOnFakeSocket(t, socketPath)
+	setUnixManifestEnv(t, socketPath, routes...)
+	return socketPath
+}
+
+// bindReady runs bindings mode over rows against a mounted socket whose probe
+// reports ready, returning the exit code, stdout and the env file's path.
+func bindReady(t *testing.T, rows []ecosystem.Row, routes ...registrymanifest.Route) (rc int, stdout, bindingsOut string) {
+	t.Helper()
+	mountSocketManifest(t, routes...)
+	bindingsOut = filepath.Join(t.TempDir(), "bindings.env")
+	var out bytes.Buffer
+	rc = runBindRegistryWithRows([]string{
+		"-bindings-env-output", bindingsOut,
+	}, rows, &out,
+		func(int) bool { return true },
+		func(string, int) (int, error) { return 0, nil },
+		lookPathFound,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
+	)
+	return rc, out.String(), bindingsOut
+}
+
+// forwarderLineOf returns the success summary's "Forwarder up" line, or "".
+func forwarderLineOf(stdout string) string {
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "==> registry proxy Forwarder up on ") {
+			return line
+		}
+	}
+	return ""
+}
+
 func TestIsBindRegistryInvocation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -151,7 +244,7 @@ func TestRunBindRegistryWithDeps_ManifestAbsentIsNoOp(t *testing.T) {
 	spawnCalled := false
 	probeCalled := false
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return true },
@@ -160,7 +253,7 @@ func TestRunBindRegistryWithDeps_ManifestAbsentIsNoOp(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if stdout.String() != "" {
 		t.Errorf("stdout = %q, want empty", stdout.String())
@@ -184,7 +277,7 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool {
@@ -199,12 +292,12 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	// The parse error text is reproduced rather than hardcoded, since err.Error()
 	// is registrymanifest's own to define.
 	_, parseErr := registrymanifest.Parse("{not valid json")
-	wantWarning := "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed: " + parseErr.Error() + " — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed: " + parseErr.Error() + " — synthetic will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -213,27 +306,18 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 	}
 }
 
-// Issue #2931's blocking finding: this early-return branch had zero Go coverage,
+// Issue #2931's blocking finding: this early-return branch had zero coverage,
 // since every other test here injects lookPathFound. The lookPath check only
 // gates the spawn path, so it must run after probe, not before.
 func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	socketPath := mountSocketManifest(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	probeCalled := false
 	spawnCalled := false
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return false },
@@ -242,9 +326,9 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint unix://" + socketPath + " is mounted but socat is not on PATH — synthetic will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -261,33 +345,16 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 
 // The double-spawn-prevention path at the CLI-integration level: with probe
 // reporting "already listening", spawn is never called and the ready path still
-// writes bindings-env-output and the cargo config.toml.
+// writes bindings-env-output and the home config.
 func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, boundRoute("r0"))
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
+	mountSocketManifest(t, registrymanifest.Route{Prefix: "r0"})
+	home := syntheticHome(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	spawnCalled := false
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return true },
@@ -296,7 +363,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if spawnCalled {
 		t.Error("spawn was called, want it never called when probe already reports ready")
@@ -306,92 +373,50 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bindings env output: %v", err)
 	}
-	gotStr := string(got)
-	for _, want := range []string{
-		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0/go'`,
-		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/r0/'`,
-	} {
-		if !strings.Contains(gotStr, want) {
-			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
-		}
+	if want := syntheticExport("r0"); !strings.Contains(string(got), want) {
+		t.Errorf("bindings env output = %q, want it to contain %q", got, want)
 	}
-	if strings.Contains(gotStr, "FORWARDER_READY") {
-		t.Errorf("bindings env output = %q, want it to not contain FORWARDER_READY (dead sentinel, nothing reads it)", gotStr)
+	if strings.Contains(string(got), "FORWARDER_READY") {
+		t.Errorf("bindings env output = %q, want it to not contain FORWARDER_READY (dead sentinel, nothing reads it)", got)
 	}
 
-	cargoConfig, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	homeConfig, err := os.ReadFile(syntheticHomeConfigPath(home))
 	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
+		t.Fatalf("read home config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0", nil); string(cargoConfig) != want {
-		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
+	if want := syntheticHomeConfig("r0"); string(homeConfig) != want {
+		t.Errorf("home config = %q, want %q", homeConfig, want)
 	}
 }
 
-// tableWith returns a copy of ecosystem.Table with the stub rows appended,
-// preserving the load-bearing order of the real rows.
-func tableWith(extra ...ecosystem.Row) []ecosystem.Row {
-	return append(slices.Clone(ecosystem.Table), extra...)
-}
-
-// Issue #3181: bindings mode must collect exports by walking ecosystem.Table,
-// not by naming individual ecosystems' renderers. A stub row's export reaching
-// the written file proves the walk; a by-name call site would never see it.
+// Issue #3181: bindings mode must collect exports by walking the rows, not by
+// naming individual ecosystems' renderers. A stub row's export reaching the
+// written file proves the walk; a by-name call site would never see it.
 func TestRunBindRegistryWithRows_ExportsComeFromRowsWalk(t *testing.T) {
-	rows := tableWith(ecosystem.Row{
-		Name: "stub-ecosystem",
-		EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
-			return []ecosystem.EnvExport{{Name: "STUB_ECOSYSTEM_URL", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
-		},
-	})
-
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithRows([]string{
-		"-bindings-env-output", bindingsOut,
-	}, rows, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	syntheticHome(t)
+	rc, stdout, bindingsOut := bindReady(t, rowsWith(exportStubRow("stub-ecosystem", "STUB_ECOSYSTEM_URL")), registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
 	got, err := os.ReadFile(bindingsOut)
 	if err != nil {
 		t.Fatalf("read bindings env output: %v", err)
 	}
-	want := `export STUB_ECOSYSTEM_URL='http://127.0.0.1:` + forwarderPortStr + `/r0'`
+	want := `export STUB_ECOSYSTEM_URL='` + ecosystem.RouteLocalURL("r0", bindregistry.ForwarderPort) + `'`
 	if !strings.Contains(string(got), want) {
 		t.Errorf("bindings env output = %q, want it to contain %q (a stub row's export reaching the file proves a table walk, not by-name calls)", got, want)
 	}
 }
 
 // Issue #3182, the same row-generic contract for home-level config writes: a
-// stub row's rendered file reaching disk proves the table walk, where a call
-// site naming cargo/gradle directly would never write it.
+// stub row's rendered file reaching disk proves the walk, where a call site
+// naming one ecosystem directly would never write it.
 func TestRunBindRegistryWithRows_HomeConfigsComeFromRowsWalk(t *testing.T) {
-	rows := tableWith(ecosystem.Row{
+	stubHome := t.TempDir()
+	t.Setenv("STUB_ECOSYSTEM_HOME", stubHome)
+	syntheticHome(t)
+	rows := rowsWith(ecosystem.Row{
 		Name: "stub-ecosystem",
 		HomeConfig: &ecosystem.HomeConfig{
 			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
@@ -403,38 +428,9 @@ func TestRunBindRegistryWithRows_HomeConfigsComeFromRowsWalk(t *testing.T) {
 		},
 	})
 
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	stubHome := t.TempDir()
-	t.Setenv("STUB_ECOSYSTEM_HOME", stubHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithRows([]string{
-		"-bindings-env-output", bindingsOut,
-	}, rows, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, _ := bindReady(t, rows, registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
 	got, err := os.ReadFile(filepath.Join(stubHome, "stub.conf"))
@@ -452,17 +448,14 @@ func TestRunBindRegistryWithRows_HomeConfigsComeFromRowsWalk(t *testing.T) {
 // HomeConfig, prove both halves of the precedence a row-generic walk applies.
 func TestRunBindRegistryWithRows_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
-	rows := tableWith(
-		ecosystem.Row{
-			Name: "stub-env-ecosystem",
-			// The summary skips a BindingEnvVar row whose var
-			// went unexported, so the stub needs a renderer or it
-			// proves nothing about the walk.
-			EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
-				return []ecosystem.EnvExport{{Name: "STUB_ENV_REGISTRY", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix}}, nil
-			},
-			BindingEnvVar: "STUB_ENV_REGISTRY",
-		},
+	t.Setenv("STUB_HOME_ECOSYSTEM_HOME", stubHome)
+	syntheticHome(t)
+	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
+	// The summary skips a BindingEnvVar row whose var went unexported, so the
+	// stub needs a renderer or it proves nothing about the walk.
+	envStub.BindingEnvVar = "STUB_ENV_REGISTRY"
+	rows := rowsWith(
+		envStub,
 		ecosystem.Row{
 			Name: "stub-home-ecosystem",
 			HomeConfig: &ecosystem.HomeConfig{
@@ -476,54 +469,26 @@ func TestRunBindRegistryWithRows_SuccessSummaryFragmentsComeFromRowsWalk(t *test
 		},
 	)
 
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("STUB_HOME_ECOSYSTEM_HOME", stubHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithRows([]string{
-		"-bindings-env-output", bindingsOut,
-	}, rows, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, _ := bindReady(t, rows, registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
 	wantEnvFragment := "stub-env-ecosystem bound to it via STUB_ENV_REGISTRY"
-	if !strings.Contains(stdout.String(), wantEnvFragment) {
-		t.Errorf("stdout = %q, want it to contain %q (a stub row's BindingEnvVar reaching the summary proves a table walk)", stdout.String(), wantEnvFragment)
+	if !strings.Contains(stdout, wantEnvFragment) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's BindingEnvVar reaching the summary proves a table walk)", stdout, wantEnvFragment)
 	}
 	wantHomeFragment := "stub-home-ecosystem bound to it via " + filepath.Join(stubHome, "stub.conf")
-	if !strings.Contains(stdout.String(), wantHomeFragment) {
-		t.Errorf("stdout = %q, want it to contain %q (a stub row's resolved HomeConfig path reaching the summary proves the fallback branch of the walk)", stdout.String(), wantHomeFragment)
+	if !strings.Contains(stdout, wantHomeFragment) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's resolved HomeConfig path reaching the summary proves the fallback branch of the walk)", stdout, wantHomeFragment)
 	}
 }
 
 // Issue #3185, for the gate-unusable fallback warning: the ecosystem list must
-// come from walking ecosystem.Table, not a hand-maintained literal a new row
-// could silently be left out of.
+// come from walking the rows, not a hand-maintained literal a new row could
+// silently be left out of.
 func TestRunBindRegistryWithRows_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
-	rows := tableWith(ecosystem.Row{Name: "stub-ecosystem"})
+	rows := rowsWith(ecosystem.Row{Name: "stub-ecosystem"})
 
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -544,48 +509,29 @@ func TestRunBindRegistryWithRows_UnusableGateFallbackNamesComeFromRowsWalk(t *te
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	if want := "stub-ecosystem will fall back to the public registry"; !strings.Contains(stdout.String(), want) {
+	if want := "synthetic and stub-ecosystem will fall back to the public registry"; !strings.Contains(stdout.String(), want) {
 		t.Errorf("stdout = %q, want it to contain %q (a stub row's name reaching the fallback warning proves a table walk)", stdout.String(), want)
 	}
 }
 
 // Mirrors the above for the sibling no-route-prefix fallback warning.
 func TestRunBindRegistryWithRows_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *testing.T) {
-	rows := tableWith(ecosystem.Row{Name: "stub-ecosystem"})
+	rows := rowsWith(ecosystem.Row{Name: "stub-ecosystem"})
 
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath) // no routes at all
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithRows([]string{
-		"-bindings-env-output", bindingsOut,
-	}, rows, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, _ := bindReady(t, rows) // no routes at all
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
-	if want := "stub-ecosystem will fall back to the public registry"; !strings.Contains(stdout.String(), want) {
-		t.Errorf("stdout = %q, want it to contain %q (a stub row's name reaching the fallback warning proves a table walk)", stdout.String(), want)
+	if want := "synthetic and stub-ecosystem will fall back to the public registry"; !strings.Contains(stdout, want) {
+		t.Errorf("stdout = %q, want it to contain %q (a stub row's name reaching the fallback warning proves a table walk)", stdout, want)
 	}
 }
 
 // exportNamesInFileOrder parses a rendered bindings env file into its export
 // names in line order, the property
-// TestRunBindRegistryWithDeps_ExportOrderFollowsTable pins and a
+// TestRunBindRegistryWithRows_ExportOrderFollowsRows pins and a
 // strings.Contains assertion cannot see.
 func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	t.Helper()
@@ -603,41 +549,20 @@ func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	return names
 }
 
-// The rendered file's line order is ecosystem.Table's order; wantNames spells
-// out today's Table so a deliberate reorder fails here loudly.
-func TestRunBindRegistryWithDeps_ExportOrderFollowsTable(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
+// The rendered file's line order is the rows' order, each row's exports staying
+// contiguous; the stub names sort opposite to their position so a sorted file
+// fails here.
+func TestRunBindRegistryWithRows_ExportOrderFollowsRows(t *testing.T) {
+	syntheticHome(t)
+	rows := []ecosystem.Row{
+		exportStubRow("stub-z", "STUB_Z_FIRST", "STUB_Z_SECOND"),
+		synthetic.Row,
+		exportStubRow("stub-a", "STUB_A_ONLY"),
 	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, boundRoute("r0"))
 
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	// An empty GO* snapshot is the no-exemption case, so GOSUMDB=off is exported
-	// too: the widest go export set.
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, bindingsOut := bindReady(t, rows, registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
 	got, err := os.ReadFile(bindingsOut)
@@ -645,10 +570,7 @@ func TestRunBindRegistryWithDeps_ExportOrderFollowsTable(t *testing.T) {
 		t.Fatalf("read bindings env output: %v", err)
 	}
 	gotNames := exportNamesInFileOrder(t, string(got))
-	wantNames := []string{
-		"npm_config_registry", "YARN_NPM_REGISTRY_SERVER", "pnpm_config_registry",
-		"GOPROXY", "GOTOOLCHAIN", "GONOPROXY", "GOSUMDB",
-	}
+	wantNames := []string{"STUB_Z_FIRST", "STUB_Z_SECOND", "SYNTHETIC_REGISTRY", "STUB_A_ONLY"}
 	if len(gotNames) != len(wantNames) {
 		t.Fatalf("bindings env exports = %v, want %v", gotNames, wantNames)
 	}
@@ -664,74 +586,33 @@ func TestRunBindRegistryWithDeps_ExportOrderFollowsTable(t *testing.T) {
 // fallback semantics. The distinctive non-"r0" prefix proves real propagation
 // from the manifest rather than a coincidental match on a hardcoded default.
 func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath,
-		boundRoute("artifactory-go"),
-		boundRoute("artifactory-npm"),
-	)
+	home := syntheticHome(t)
 
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	gradleUserHome := t.TempDir()
-	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
+	rc, stdout, bindingsOut := bindReady(t, rowsWith(),
+		registrymanifest.Route{Prefix: "first-route"},
+		registrymanifest.Route{Prefix: "second-route"},
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
 	got, err := os.ReadFile(bindingsOut)
 	if err != nil {
 		t.Fatalf("read bindings env output: %v", err)
 	}
-	gotStr := string(got)
-	for _, want := range []string{
-		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/go'`,
-		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/artifactory-go/'`,
-	} {
-		if !strings.Contains(gotStr, want) {
-			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
-		}
+	if want := syntheticExport("first-route"); !strings.Contains(string(got), want) {
+		t.Errorf("bindings env output = %q, want it to contain %q", got, want)
 	}
-	if strings.Contains(gotStr, "artifactory-npm") {
-		t.Errorf("bindings env output = %q, want it to never mention the second route's prefix", gotStr)
+	if strings.Contains(string(got), "second-route") {
+		t.Errorf("bindings env output = %q, want it to never mention the second route's prefix", got)
 	}
 
-	cargoConfig, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	homeConfig, err := os.ReadFile(syntheticHomeConfigPath(home))
 	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
+		t.Fatalf("read home config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "artifactory-go", nil); string(cargoConfig) != want {
-		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
-	}
-
-	gradleScript, err := os.ReadFile(filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle"))
-	if err != nil {
-		t.Fatalf("read gradle init script: %v", err)
-	}
-	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "artifactory-go", nil); string(gradleScript) != want {
-		t.Errorf("gradle init script = %q, want %q", gradleScript, want)
+	if want := syntheticHomeConfig("first-route"); string(homeConfig) != want {
+		t.Errorf("home config = %q, want %q", homeConfig, want)
 	}
 }
 
@@ -741,32 +622,13 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 // path: the launcher always mints at least one route whenever it sets
 // REGISTRY_PROXY_MANIFEST at all.
 func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath) // no routes at all
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, bindingsOut := bindReady(t, rowsWith()) // no routes at all
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
-	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
-	if stdout.String() != wantWarning {
-		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — synthetic will fall back to the public registry\n"
+	if stdout != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout, wantWarning)
 	}
 	if _, err := os.Stat(bindingsOut); err == nil {
 		t.Error("bindings-env-output exists, want it untouched when the manifest carries no route prefix")
@@ -777,358 +639,96 @@ func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 // other defensive shape named in the same guard: a route present but its own
 // Prefix field left empty.
 func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{UpstreamHost: "upstream.example"})
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, bindingsOut := bindReady(t, rowsWith(), registrymanifest.Route{UpstreamHost: "upstream.example"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
-	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
-	if stdout.String() != wantWarning {
-		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
+	wantWarning := "==> WARNING: registry proxy manifest carries no route prefix — synthetic will fall back to the public registry\n"
+	if stdout != wantWarning {
+		t.Errorf("stdout = %q, want %q", stdout, wantWarning)
 	}
 	if _, err := os.Stat(bindingsOut); err == nil {
 		t.Error("bindings-env-output exists, want it untouched when routes[0].Prefix is empty")
 	}
 }
 
-// Issue #2931's blocking finding: the Go port silently dropped the two success
-// log lines agent/entrypoint.sh's
-// phase_go_binding/phase_registry_proxy_forwarder printed, leaving the success
-// path printing nothing to stdout.
+// Issue #2931's blocking finding: the port silently dropped the success log
+// line agent/entrypoint.sh printed, leaving the success path printing nothing
+// to stdout.
 func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, boundRoute("r0"))
+	home := syntheticHome(t)
+	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
+	envStub.BindingEnvVar = "STUB_ENV_REGISTRY"
 
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	gradleUserHome := t.TempDir()
-	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, _ := bindReady(t, rowsWith(envStub), registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	wantGoLine := "==> go bound to it via GOPROXY=http://127.0.0.1:" + forwarderPortStr
-	if !strings.Contains(stdout.String(), wantGoLine) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantGoLine)
-	}
-	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — cargo bound to it via " + cargoHome + "/config.toml, npm bound to it via npm_config_registry, yarn bound to it via YARN_NPM_REGISTRY_SERVER, pnpm bound to it via pnpm_config_registry, go bound to it via GOPROXY, and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
-	found := false
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		if line == wantForwarderLine {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("stdout = %q, want a line equal to %q", stdout.String(), wantForwarderLine)
+	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — synthetic bound to it via " + syntheticHomeConfigPath(home) + " and stub-env-ecosystem bound to it via STUB_ENV_REGISTRY"
+	if got := forwarderLineOf(stdout); got != wantForwarderLine {
+		t.Errorf("Forwarder line = %q, want %q (stdout=%q)", got, wantForwarderLine, stdout)
 	}
 }
 
-// Issue #3260: under a host-rooted route declaring a go path in its ecosystems
-// block, the "==> go bound to it via GOPROXY=<url>" line must carry the
-// full-path URL, not the bare-prefix guess the line used to hardcode.
-func TestRunBindRegistryWithDeps_HostRootedDeclaredGoPathPrintsFullPathGoLine(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
+// The summary half of issues #3259 and #3260: a BindingEnvVar row whose var the
+// route leaves unexported must not appear in the summary, which would otherwise
+// claim a binding that does not exist.
+func TestRunBindRegistryWithDeps_SummaryOmitsUnexportedBindingVars(t *testing.T) {
+	home := syntheticHome(t)
+	unexported := ecosystem.Row{
+		Name:          "stub-unexported",
+		BindingEnvVar: "STUB_UNEXPORTED_REGISTRY",
+		EnvExports: func(int, string, func(string) string, []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+			return nil, nil
+		},
 	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{
-		Prefix:     "r0",
-		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/artifactory/api/go/go-local"}},
-	})
 
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, _ := bindReady(t, rowsWith(unexported), registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	wantGoLine := "==> go bound to it via GOPROXY=http://127.0.0.1:" + forwarderPortStr + "/r0/artifactory/api/go/go-local"
-	if !strings.Contains(stdout.String(), wantGoLine) {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), wantGoLine)
+	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — synthetic bound to it via " + syntheticHomeConfigPath(home)
+	if got := forwarderLineOf(stdout); got != wantForwarderLine {
+		t.Errorf("Forwarder line = %q, want %q (stdout=%q)", got, wantForwarderLine, stdout)
 	}
 }
 
-// The other half of issue #3260: with no go path declared, GOPROXY renders no
-// export at all, so the line claiming a binding must not print either.
-func TestRunBindRegistryWithDeps_HostRootedNoDeclaredGoPathOmitsGoLine(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	if strings.Contains(stdout.String(), "go bound to it via GOPROXY=") {
-		t.Errorf("stdout = %q, want it NOT to contain a go-bound-via-GOPROXY line (no go path declared)", stdout.String())
-	}
-}
-
-// The summary half of the same rule. Under a host-rooted route declaring no
-// paths, go's GOPROXY (issue #3260) and the npm family's three vars (issue
-// #3259) all go unexported, so a summary still naming those rows would claim
-// four bindings that do not exist.
-func TestRunBindRegistryWithDeps_HostRootedSummaryOmitsUnexportedBindingVars(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	gradleUserHome := t.TempDir()
-	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	wantForwarderLine := "==> registry proxy Forwarder up on 127.0.0.1:" + forwarderPortStr + " — cargo bound to it via " + cargoHome + "/config.toml and gradle bound to it via " + gradleUserHome + "/init.d/spindrift-registry-proxy.init.gradle"
-	found := false
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		if line == wantForwarderLine {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("stdout = %q, want a line equal to %q", stdout.String(), wantForwarderLine)
-	}
-}
-
-// The Gradle init script write under $GRADLE_USER_HOME/init.d/ mirrors the
-// deleted entrypoint.sh phase_gradle_binding, gated the same all-or-nothing way
-// the cargo config.toml write is.
-func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	gradleUserHome := t.TempDir()
-	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle"))
-	if err != nil {
-		t.Fatalf("read gradle init script: %v", err)
-	}
-	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0", nil); string(got) != want {
-		t.Errorf("gradle init script = %q, want %q", got, want)
-	}
-}
-
-// Covers the $HOME/.gradle fallback branch itself, not just the both-unset guard
-// around it: every other gradle test here either pins $GRADLE_USER_HOME or
-// empties both, so none runs the one branch every real deployment takes, since
-// $GRADLE_USER_HOME is never set outside this file.
-func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	t.Setenv("GRADLE_USER_HOME", "")
+// Covers the $HOME/<HomeRelativeDefault> fallback branch itself, not just the
+// both-unset guard around it: every other home-config test here either pins the
+// row's home var or empties both, so none runs the one branch every real
+// deployment takes.
+func TestRunBindRegistryWithDeps_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T) {
+	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
 
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	rc, stdout, _ := bindReady(t, rowsWith(), registrymanifest.Route{Prefix: "r0"})
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	got, err := os.ReadFile(filepath.Join(home, ".gradle", "init.d", "spindrift-registry-proxy.init.gradle"))
+	got, err := os.ReadFile(syntheticHomeConfigPath(filepath.Join(home, synthetic.Row.HomeConfig.HomeRelativeDefault)))
 	if err != nil {
-		t.Fatalf("read gradle init script: %v", err)
+		t.Fatalf("read home config: %v", err)
 	}
-	if want := ecosystem.GradleInitScript(bindregistry.ForwarderPort, "r0", nil); string(got) != want {
-		t.Errorf("gradle init script = %q, want %q", got, want)
+	if want := syntheticHomeConfig("r0"); string(got) != want {
+		t.Errorf("home config = %q, want %q", got, want)
 	}
 }
 
-// The gradle init script write shares the cargo config.toml write's
-// all-or-nothing readiness gate: a Forwarder that never becomes ready must leave
-// $GRADLE_USER_HOME/init.d/ untouched, not just bindings-env-output.
-func TestRunBindRegistryWithDeps_TimeoutSkipsGradleInitScript(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath)
-
-	gradleUserHome := t.TempDir()
-	t.Setenv("GRADLE_USER_HOME", gradleUserHome)
-	// Pinned so a regressed readiness gate falling through to the cargo home
-	// resolve writes into a temp dir, not the real $HOME/.cargo/config.toml.
-	t.Setenv("CARGO_HOME", t.TempDir())
+// The home config write shares the env export write's all-or-nothing readiness
+// gate: a Forwarder that never becomes ready must leave the row's home
+// directory untouched, not just bindings-env-output.
+func TestRunBindRegistryWithDeps_TimeoutSkipsHomeConfig(t *testing.T) {
+	mountSocketManifest(t)
+	home := syntheticHome(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false },
@@ -1137,107 +737,60 @@ func TestRunBindRegistryWithDeps_TimeoutSkipsGradleInitScript(t *testing.T) {
 		20*time.Millisecond, 5*time.Millisecond,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 
-	gotPath := filepath.Join(gradleUserHome, "init.d", "spindrift-registry-proxy.init.gradle")
-	if _, err := os.Stat(gotPath); !os.IsNotExist(err) {
-		t.Errorf("os.Stat(gradle init script) err = %v, want a not-exist error when the Forwarder never becomes ready", err)
+	if _, err := os.Stat(syntheticHomeConfigPath(home)); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(home config) err = %v, want a not-exist error when the Forwarder never becomes ready", err)
 	}
 }
 
-// With $GRADLE_USER_HOME and $HOME both unset, bindings mode must fail loud
-// rather than resolve gradleUserHome to the literal "/.gradle", which
+// With a row's home var and $HOME both unset, bindings mode must fail loud
+// rather than resolve the home to a path under the cwd or "/", which
 // MkdirAll/WriteFile happily create as root, claiming success while binding
-// nothing anyone will read. Mirrors cargo's own both-unset guard; the bash this
-// replaced ran under `set -u` and would have died on the unset $HOME expansion.
-func TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	t.Setenv("GRADLE_USER_HOME", "")
+// nothing anyone will read. The bash this replaced ran under `set -u` and would
+// have died on the unset $HOME expansion. It must also not print a line
+// claiming a binding or a live Forwarder when that later write failed (issue
+// #2931).
+func TestRunBindRegistryWithDeps_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
+	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
 
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
+	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
+	envStub.BindingEnvVar = "STUB_ENV_REGISTRY"
+	rc, stdout, _ := bindReady(t, rowsWith(envStub), registrymanifest.Route{Prefix: "r0"})
 	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when GRADLE_USER_HOME and HOME are both empty (stdout=%q)", stdout.String())
+		t.Fatalf("bind-registry exit = 0, want non-zero when the home var and HOME are both empty (stdout=%q)", stdout)
 	}
-	if !strings.Contains(stdout.String(), "GRADLE_USER_HOME") {
-		t.Errorf("stdout = %q, want it to mention GRADLE_USER_HOME", stdout.String())
+	if !strings.Contains(stdout, synthetic.Row.HomeConfig.HomeEnvVar) {
+		t.Errorf("stdout = %q, want it to mention %s", stdout, synthetic.Row.HomeConfig.HomeEnvVar)
 	}
-	if strings.Contains(stdout.String(), "go bound to it via GOPROXY=") {
-		t.Errorf("stdout = %q, want it NOT to claim go was bound to the registry proxy when a later write (gradle home resolve) failed", stdout.String())
+	if strings.Contains(stdout, "bound to it via") {
+		t.Errorf("stdout = %q, want it NOT to claim a binding when a later write (home resolve) failed", stdout)
 	}
-	if strings.Contains(stdout.String(), "registry proxy Forwarder up on") {
-		t.Errorf("stdout = %q, want it NOT to claim the registry proxy Forwarder is up when a later write (gradle home resolve) failed", stdout.String())
+	if strings.Contains(stdout, "registry proxy Forwarder up on") {
+		t.Errorf("stdout = %q, want it NOT to claim the registry proxy Forwarder is up when a later write (home resolve) failed", stdout)
 	}
 }
 
-// With both $CARGO_HOME and $HOME unset, bindings mode must fail loud rather
-// than silently resolve cargo's config.toml to a relative ".cargo" path under
-// the process cwd. The bash this replaced ran under `set -u` and would have died
-// on the unset $HOME expansion instead.
-func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", "")
+// Issue #2931 finding: a row's EnvExports warnings used to print before the
+// fallible writes, so stdout could claim an override that was never applied.
+func TestRunBindRegistryWithDeps_HomeResolveFailureOmitsRowWarnings(t *testing.T) {
+	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when CARGO_HOME and HOME are both empty (stdout=%q)", stdout.String())
+	warnStub := exportStubRow("stub-warn-ecosystem", "STUB_WARN_REGISTRY")
+	inner := warnStub.EnvExports
+	warnStub.EnvExports = func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+		exports, _ := inner(port, prefix, getenv, routes)
+		return exports, []string{"==> WARNING: overriding STUB_WARN_SETTING"}
 	}
-	if !strings.Contains(stdout.String(), "CARGO_HOME") {
-		t.Errorf("stdout = %q, want it to mention CARGO_HOME", stdout.String())
+
+	rc, stdout, _ := bindReady(t, rowsWith(warnStub), registrymanifest.Route{Prefix: "r0"})
+	if rc == 0 {
+		t.Fatalf("bind-registry exit = 0, want non-zero when the home var and HOME are both empty (stdout=%q)", stdout)
+	}
+	if strings.Contains(stdout, "WARNING: overriding") {
+		t.Errorf("stdout = %q, want it NOT to claim an override was applied when a later write (home resolve) failed", stdout)
 	}
 }
 
@@ -1246,22 +799,13 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 // instead of eating the real 5s; production callers still use the real
 // bindregistry.ForwarderReadyTimeout/PollInterval constants unchanged.
 func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	socketPath := mountSocketManifest(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	spawnCalled := false
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false },
@@ -1270,7 +814,7 @@ func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 		20*time.Millisecond, 5*time.Millisecond,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if !spawnCalled {
 		t.Error("spawn was never called, want it called once probe reports not-yet-ready")
@@ -1288,19 +832,12 @@ func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 // than a readiness timeout, also warns naming both the endpoint and the error
 // (issue #3141's "manifest present but unusable" branch).
 func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath)
+	socketPath := mountSocketManifest(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { return false },
@@ -1309,9 +846,9 @@ func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testi
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy Forwarder for endpoint unix://" + socketPath + " failed to start: boom — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy Forwarder for endpoint unix://" + socketPath + " failed to start: boom — synthetic will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1320,125 +857,20 @@ func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testi
 	}
 }
 
-// Issue #2931 finding: the "==> go bound to it via GOPROXY=" line used to print
-// before the bindings-env-output write and the cargo home
-// resolve/mkdir/config.toml write, so a failure in any of those left stdout
-// falsely claiming Go was bound while the caller saw the nonzero exit and
-// skipped sourcing entirely.
-func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoBoundLine(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", "")
-	t.Setenv("HOME", "")
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when CARGO_HOME and HOME are both empty (stdout=%q)", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "go bound to it via GOPROXY=") {
-		t.Errorf("stdout = %q, want it NOT to claim go was bound to the registry proxy when a later write (cargo home resolve) failed", stdout.String())
-	}
-}
-
-// Issue #2931 finding: ComputeGoBindings' warning loop used to run before the
-// fallible writes, so stdout could claim an override that was never applied.
-// Unlike the sibling test above, this one sets GOSUMDB to a value
-// ComputeGoBindings actually warns about, since blanking all five Go env vars
-// never produces a warning to begin with.
-func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoWarningLine(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", "")
-	t.Setenv("HOME", "")
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "sum.golang.org")
-	t.Setenv("GONOSUMDB", "")
-
-	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
-		"-bindings-env-output", bindingsOut,
-	}, &stdout,
-		func(int) bool { return true },
-		func(string, int) (int, error) { return 0, nil },
-		lookPathFound,
-		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
-	)
-	if rc == 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when CARGO_HOME and HOME are both empty (stdout=%q)", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "WARNING: overriding") {
-		t.Errorf("stdout = %q, want it NOT to claim a Go env var was overridden when a later write (cargo home resolve) failed", stdout.String())
-	}
-}
-
 // Issue #2931 finding: the LookPath check used to run unconditionally before the
 // readiness probe, so an already-ready Forwarder still failed bindings mode
 // entirely if socat had since left PATH. lookPath is wired to t.Fatal here to
 // prove it is never reached.
 func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
-	socketPath := shortUnixSocketPath(t)
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("net.Listen(unix): %v", err)
-	}
-	// Close unlinks the socket file by default, which would delete the ModeSocket
-	// fixture this test needs to still exist on disk.
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
-	ln.Close()
-	setUnixManifestEnv(t, socketPath, registrymanifest.Route{Prefix: "r0"})
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
+	mountSocketManifest(t, registrymanifest.Route{Prefix: "r0"})
+	syntheticHome(t)
 
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	probeCalled := false
 	spawnCalled := false
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { probeCalled = true; return true },
@@ -1450,7 +882,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if !probeCalled {
 		t.Error("probe was never called")
@@ -1468,21 +900,13 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 
 // Bindings mode's TCP-fallback transport (issue #3111 slice 8, manifest-driven
 // since #3141) must spawn via spawnHTTPForwarder, never the injected
-// socket-shaped spawn, and write the same bindings and cargo config the
+// socket-shaped spawn, and write the same bindings and home config the
 // socket-mode success test asserts, proving the downstream computation really is
 // transport-blind.
 func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
-	setTCPManifestEnv(t, "registry.example", "9443", boundRoute("r0"))
-
-	cargoHome := t.TempDir()
-	t.Setenv("CARGO_HOME", cargoHome)
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
+	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
+	home := syntheticHome(t)
 
 	origSpawnHTTPForwarder := spawnHTTPForwarder
 	var gotHost, gotSecret string
@@ -1504,7 +928,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		probe,
@@ -1516,7 +940,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 
 	if gotHost != "registry.example" || gotUpstreamPort != 9443 || gotSecret != "s3cr3t" || gotListenPort != bindregistry.ForwarderPort {
@@ -1534,22 +958,16 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read bindings env output: %v", err)
 	}
-	gotStr := string(got)
-	for _, want := range []string{
-		`export GOPROXY='http://127.0.0.1:` + forwarderPortStr + `/r0/go'`,
-		`export npm_config_registry='http://127.0.0.1:` + forwarderPortStr + `/r0/'`,
-	} {
-		if !strings.Contains(gotStr, want) {
-			t.Errorf("bindings env output = %q, want it to contain %q", gotStr, want)
-		}
+	if want := syntheticExport("r0"); !strings.Contains(string(got), want) {
+		t.Errorf("bindings env output = %q, want it to contain %q", got, want)
 	}
 
-	cargoConfig, err := os.ReadFile(filepath.Join(cargoHome, "config.toml"))
+	homeConfig, err := os.ReadFile(syntheticHomeConfigPath(home))
 	if err != nil {
-		t.Fatalf("read cargo config: %v", err)
+		t.Fatalf("read home config: %v", err)
 	}
-	if want := ecosystem.CargoConfigTOML(bindregistry.ForwarderPort, "r0", nil); string(cargoConfig) != want {
-		t.Errorf("cargo config.toml = %q, want %q", cargoConfig, want)
+	if want := syntheticHomeConfig("r0"); string(homeConfig) != want {
+		t.Errorf("home config = %q, want %q", homeConfig, want)
 	}
 }
 
@@ -1563,7 +981,7 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool {
@@ -1578,9 +996,9 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:9443 requires REGISTRY_PROXY_TCP_SECRET, which is not set — synthetic will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1594,14 +1012,7 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "9443", registrymanifest.Route{Prefix: "r0"})
-
-	t.Setenv("CARGO_HOME", t.TempDir())
-	t.Setenv("GRADLE_USER_HOME", t.TempDir())
-	t.Setenv("GOTOOLCHAIN", "")
-	t.Setenv("GONOPROXY", "")
-	t.Setenv("GOPRIVATE", "")
-	t.Setenv("GOSUMDB", "")
-	t.Setenv("GONOSUMDB", "")
+	syntheticHome(t)
 
 	origSpawnHTTPForwarder := spawnHTTPForwarder
 	spawnHTTPForwarder = func(string, int, string, int) (int, error) { return 0, nil }
@@ -1616,7 +1027,7 @@ func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		probe,
@@ -1631,7 +1042,7 @@ func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if strings.Contains(stdout.String(), "socat") {
 		t.Errorf("stdout = %q, want no socat-related warning on the TCP transport branch", stdout.String())
@@ -1651,7 +1062,7 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runSyntheticBind([]string{
 		"-bindings-env-output", bindingsOut,
 	}, &stdout,
 		func(int) bool { t.Fatal("probe should not be called with a non-numeric manifest port"); return false },
@@ -1663,9 +1074,9 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:https has a non-numeric port — cargo, npm, yarn, pnpm, go, and gradle will fall back to the public registry\n"
+	wantWarning := "==> WARNING: registry proxy endpoint tcp://registry.example:https has a non-numeric port — synthetic will fall back to the public registry\n"
 	if stdout.String() != wantWarning {
 		t.Errorf("stdout = %q, want %q", stdout.String(), wantWarning)
 	}
@@ -1675,10 +1086,27 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 // apply modes and must probe/spawn the Forwarder exactly once across both. probe
 // always reports "not ready", so a gate resolved once per mode (the pre-#3141
 // shape) would call spawn twice. Issue #3201 split bindings mode out of this
-// invocation, so it is no longer folded in here.
+// invocation, so it is no longer folded in here. The repo-aware row is a stub:
+// the synthetic row has no repo-aware home config, and a row carrying one is
+// excluded from the in-tree rewrite.
 func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *testing.T) {
+	const registriesContent = "main = https://upstream.example/\n"
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, ".cargo/config.toml", intreeCargoConfigContent)
+	writeTrackedIntreeFile(t, dir, synthetic.Row.InTreeConfigPath, registriesContent)
+
+	repoAware := ecosystem.Row{
+		Name:             "stub-repo-aware",
+		InTreeConfigPath: ".stub-repo-aware/registries",
+		HomeConfig: &ecosystem.HomeConfig{
+			HomeEnvVar:          "STUB_REPO_AWARE_HOME",
+			HomeRelativeDefault: ".stub-repo-aware",
+			ConfigPath:          "config",
+			Render:              func(int, string, []registrymanifest.Route) string { return "" },
+		},
+		RepoAwareHomeConfig: func(int, string, []registrymanifest.Route, string) (string, []ecosystem.EnvExport, []string) {
+			return "", nil, nil
+		},
+	}
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -1686,17 +1114,17 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 
 	spawnCalls := 0
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithDeps([]string{
+	rc := runBindRegistryWithRows([]string{
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
-	}, &stdout,
+	}, rowsWith(repoAware), &stdout,
 		func(int) bool { return false }, // never ready
 		func(string, int) (int, error) { spawnCalls++; return 0, nil },
 		lookPathFound,
 		20*time.Millisecond, 5*time.Millisecond,
 	)
 	if rc != 0 {
-		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
 	if spawnCalls != 1 {
 		t.Errorf("spawn called %d times across one invocation running both in-tree apply modes, want exactly 1 (issue #3141's shared gate)", spawnCalls)
@@ -1705,12 +1133,12 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 		t.Errorf("stdout = %q, want the timeout warning exactly twice (once per mode -- in-tree rewrite, repo-aware home config -- from the one shared gate result), got %d", stdout.String(), got)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, ".cargo", "config.toml"))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != intreeCargoConfigContent {
-		t.Errorf("cargo config.toml changed, want byte-for-byte unchanged when the Forwarder never becomes ready")
+	if string(got) != registriesContent {
+		t.Errorf("in-tree config changed, want byte-for-byte unchanged when the Forwarder never becomes ready")
 	}
 }
 
@@ -3220,22 +2648,5 @@ func TestRenderEnvExports_ShellMetacharactersDoNotExecute(t *testing.T) {
 				t.Errorf("sourced npm_config_registry = %q, want unexpanded %q (rendered=%q)", got, tc.value, rendered)
 			}
 		})
-	}
-}
-
-// boundRoute is the manifest route the bindings-mode tests share: one route
-// declaring a path per ecosystem, the shape that renders every binding var (see
-// the npm-family rows' EnvExports and ecosystem.ComputeGoBindings). An ecosystem the
-// route declares nothing for binds nothing.
-func boundRoute(prefix string) registrymanifest.Route {
-	return registrymanifest.Route{
-		Prefix:     prefix,
-		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go"}},
-		EnforcedPaths: []registryvocab.Subtree{
-			{Ecosystem: "go", Path: "/go"},
-			{Ecosystem: "npm", Path: "/"},
-			{Ecosystem: "pnpm", Path: "/"},
-			{Ecosystem: "yarn", Path: "/"},
-		},
 	}
 }
