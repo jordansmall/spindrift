@@ -107,7 +107,12 @@
   # The flake output attribute the image (OCI) or agent closure (bwrap) is
   # exposed under, and the one the baked freshness probe realizes. A second
   # Harness in one flake needs its own name (ADR 0064, issue #5049).
-  imageAttrName ? (if runtime == "bwrap" then "agent-closure" else "agent-image"),
+  imageAttrName ? (
+    if ((import ./runners/index.nix { }).forRuntime runtime).artifact == "store-closure" then
+      "agent-closure"
+    else
+      "agent-image"
+  ),
   # The agent CLI Driver (ADR 0009, issues #261/#262): selects one entry from
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
   # to the Go launcher as DRIVER (host-side half). "claude", "opencode" and "pi".
@@ -1470,9 +1475,11 @@ let
   ];
   agentClosurePath = builtins.unsafeDiscardStringContext (toString agentClosure);
 
-  # runnerKind collapses the runtime knob to the two adapter families the
-  # launcher knows: "bwrap" (daemonless) or "oci" (podman/docker).
-  runnerKind = if runtime == "bwrap" then "bwrap" else "oci";
+  # The runner row (lib/runners) that lists the runtime knob; runnerKind is the
+  # adapter family the launcher knows, and the row's artifact picks the flake
+  # package below.
+  runnerRow = (import ./runners/index.nix { }).forRuntime runtime;
+  runnerKind = runnerRow.name;
 
   # One renderer over the flakeOption schema entries, used by the entrypoint's
   # Box-side preamble and the document's `settings` section below. Box env is
@@ -2093,10 +2100,12 @@ else
     packages =
       basePackages
       # The OCI image is not relevant for the bwrap runner (no image build/load).
-      // lib.optionalAttrs (isLinux && runtime != "bwrap") { ${imageAttrName} = image; }
+      // lib.optionalAttrs (isLinux && runnerRow.artifact == "oci-image") { ${imageAttrName} = image; }
       # The bwrap counterpart: one flake package standing in for the whole
       # agent closure, so freshness (issue #2667) has a single attr to realize.
-      // lib.optionalAttrs (isLinux && runtime == "bwrap") { ${imageAttrName} = agentClosure; };
+      // lib.optionalAttrs (isLinux && runnerRow.artifact == "store-closure") {
+        ${imageAttrName} = agentClosure;
+      };
 
     apps.default = {
       type = "app";
