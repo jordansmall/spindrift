@@ -840,3 +840,29 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 		t.Errorf("routes[0].MatchHost = %q, want shared.example.com", routes[0].MatchHost)
 	}
 }
+
+// The stub row's config path is in no Table row, so a route can only appear if
+// DiscoverRows walked the supplied rows rather than ecosystem.Table.
+func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	row := ecosystem.Row{
+		Name:             "fake",
+		InTreeConfigPath: "fake.cfg",
+		ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
+			return []ecosystem.Declaration{{Host: "reg.fake.example", UpstreamBaseURL: "https://reg.fake.example"}}, true, nil
+		},
+	}
+	lookup := func(Store, ecosystem.Declaration) (bool, error) { return false, nil }
+	probe := func(string) string { return "bearer" }
+
+	routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, nil, map[string][]string{"fake": nil}, lookup, probe)
+	if err != nil {
+		t.Fatalf("DiscoverRows: %v", err)
+	}
+	if len(routes) != 1 || routes[0].MatchHost != "reg.fake.example" {
+		t.Errorf("routes = %+v, want one route for reg.fake.example", routes)
+	}
+}
