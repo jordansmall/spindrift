@@ -19,10 +19,11 @@ const GoRetiredRouteKey = "go-path"
 // of the npm-family vars in the rendered export file, independent of goRow's
 // position in Table's own precedence order.
 var goRow = Row{
-	Name:            nameGo,
-	RetiredRouteKey: GoRetiredRouteKey,
-	LockfileNames:   []string{"go.sum"},
-	Classification:  "go mod",
+	Name:             nameGo,
+	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
+	RetiredRouteKey:  GoRetiredRouteKey,
+	LockfileNames:    []string{"go.sum"},
+	Classification:   "go mod",
 	EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
 		result := ComputeGoBindings(port, prefix, routes, GoBindingInput{
 			GOTOOLCHAIN: getenv("GOTOOLCHAIN"),

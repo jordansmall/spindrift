@@ -11,6 +11,7 @@ const nameYarn = "yarn"
 // renders all three npm-family vars, yarn's included, in one call.
 var yarnRow = Row{
 	Name:             nameYarn,
+	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"yarn.lock"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".yarnrc.yml",

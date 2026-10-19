@@ -30,6 +30,7 @@ const CargoRetiredRouteKey = "cargo-registries"
 
 var cargoRow = Row{
 	Name:             nameCargo,
+	CredentialStores: []string{"netrc", "npmrc", "gradle-properties", "cargo-credentials"},
 	RetiredRouteKey:  CargoRetiredRouteKey,
 	LockfileNames:    []string{"Cargo.lock"},
 	Classification:   "cargo",

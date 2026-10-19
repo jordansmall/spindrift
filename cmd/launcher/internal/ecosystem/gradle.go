@@ -18,8 +18,9 @@ const GradleRetiredRouteKey = "gradle-path"
 // rendered init-script rather than reading an env var, so this row needs
 // neither EnvExports nor BindingEnvVar.
 var gradleRow = Row{
-	Name:            nameGradle,
-	RetiredRouteKey: GradleRetiredRouteKey,
+	Name:             nameGradle,
+	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
+	RetiredRouteKey:  GradleRetiredRouteKey,
 	LockfileNames: []string{
 		"build.gradle",
 		"build.gradle.kts",

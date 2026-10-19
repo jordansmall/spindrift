@@ -114,6 +114,12 @@ type Row struct {
 	// existed (ADR 0047, issues #3261 and #3403), e.g. cargo's
 	// "cargo-registries". Empty for npm, yarn and pnpm, which never had one.
 	RetiredRouteKey string
+
+	// CredentialStores names, by credresolver source key, the stores this row's
+	// declarations are looked up in. It is a set, not an order: search order
+	// comes from credresolver's StoreKinds. A store missing here is still named
+	// in an unmatched host's StoresSearched but never queried for this row.
+	CredentialStores []string
 }
 
 // The rendered export file's line order. Consecutive by construction: a row
@@ -165,6 +171,17 @@ func ResponseRewriteRows() []registryvocab.RewriteRow {
 		rows = append(rows, row.RewriteRows...)
 	}
 	return rows
+}
+
+// CredentialStores returns each row's CredentialStores keyed by row Name, so
+// registrydiscover never has to know which row reads which store. The slices
+// are copies; callers may write through them.
+func CredentialStores() map[string][]string {
+	stores := make(map[string][]string, len(Table))
+	for _, row := range Table {
+		stores[row.Name] = append([]string(nil), row.CredentialStores...)
+	}
+	return stores
 }
 
 // Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle

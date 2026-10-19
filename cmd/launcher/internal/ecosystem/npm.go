@@ -15,6 +15,7 @@ const nameNpm = "npm"
 
 var npmRow = Row{
 	Name:             nameNpm,
+	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"package-lock.json"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".npmrc",
