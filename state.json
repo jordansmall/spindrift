@@ -1,15 +1,20 @@
 {
   "lastSwept": "71088b4658ff1fc4956460023cdf2c80db0b08b8",
   "cursor": "cmd/launcher/internal/ecosystem/testdata/corpus/cargo/retired-route-key-empty-value/discovery.golden.toml",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-20T05:42:44.027640185-04:00"
+  },
   "usage": {
-    "input_tokens": 38,
-    "output_tokens": 4587,
-    "cache_read_input_tokens": 766557,
-    "cache_creation_input_tokens": 46160,
-    "total_cost_usd": 0.6144834000000002,
-    "duration_ms": 51466,
-    "duration_api_ms": 49964,
-    "num_turns": 20
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
