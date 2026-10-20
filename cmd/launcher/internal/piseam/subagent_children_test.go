@@ -204,6 +204,62 @@ func TestPiSubagentModes(t *testing.T) {
 	}
 }
 
+// TestPiSubagentMultiRole runs a parallel call across two roster roles with
+// different models and distinct usage, one of them making a tool call, so a
+// per-role usage mix-up or a dropped child toolResult is visible; with
+// SPINDRIFT_PI_CAPTURE_DIR set the parent's event stream is the corpus log.
+func TestPiSubagentMultiRole(t *testing.T) {
+	s := subagentStub(t,
+		`{"tasks":[{"agent":"scout","task":"read the file"},{"agent":"auditor","task":"audit beta"}]}`,
+		map[string][]reply{
+			"read the file": {toolCallReply("call_read", "read", `{"path":"plain.txt"}`), usageReply("scout done", 41, 5)},
+			"audit beta":    {usageReply("auditor done", 53, 7)},
+		})
+	dirs := newPiDirs(t)
+	writeAgentFile(t, dirs.agentDir, "scout", "stub/stub-model:high", "read", "You are the scout.")
+	writeAgentFile(t, dirs.agentDir, "auditor", "stub/stub-model:low", "read", "You are the auditor.")
+	r := runSubagentPi(t, s, dirs, piOpts{}, seedFiles(t, map[string]string{"plain.txt": "plain contents"}))
+
+	details, results := subagentResults(t, r)
+	if details["mode"] != "parallel" {
+		t.Errorf("details.mode = %v, want parallel", details["mode"])
+	}
+	if len(results) != 2 {
+		t.Fatalf("details.results has %d entries, want 2", len(results))
+	}
+	for i, want := range []struct {
+		agent, model, task string
+		input, output      float64
+	}{
+		// Two turns: the tool-call turn carries the stub's default usage
+		// (input 80, output 30, cacheRead 40).
+		{"scout", "stub/stub-model:high", "read the file", 121, 35},
+		{"auditor", "stub/stub-model:low", "audit beta", 53, 7},
+	} {
+		res := results[i]
+		if res["agent"] != want.agent || res["model"] != want.model || res["exitCode"] != float64(0) {
+			t.Errorf("results[%d] agent/model/exitCode = %v/%v/%v, want %s/%s/0", i, res["agent"], res["model"], res["exitCode"], want.agent, want.model)
+		}
+		if res["task"] != want.task {
+			t.Errorf("results[%d].task = %v, want %q", i, res["task"], want.task)
+		}
+		u, _ := res["usage"].(map[string]any)
+		if u["input"] != want.input || u["output"] != want.output {
+			t.Errorf("results[%d].usage = %v, want input/output %v/%v", i, u, want.input, want.output)
+		}
+	}
+	var toolResults int
+	msgs, _ := results[0]["messages"].([]any)
+	for _, m := range msgs {
+		if mm, _ := m.(map[string]any); mm["role"] == "toolResult" && mm["isError"] != true {
+			toolResults++
+		}
+	}
+	if toolResults != 1 {
+		t.Errorf("scout has %d clean toolResult messages, want 1: %v", toolResults, msgs)
+	}
+}
+
 // TestPiSubagentChildLoadsHookBridge has a child read a planted credential: the
 // bridge, installed in the agent dir the child inherits, must block the read
 // inside the child's own process.
