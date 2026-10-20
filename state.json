@@ -1,21 +1,20 @@
 {
   "lastSwept": "6d57d777f5e8092b1e9a3d78fa3215780b722154",
   "cursor": "cmd/launcher/internal/driver/pi/testdata/corpus/tool-call-bash/classification.golden.json",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/5807"
-  ],
-  "patched": [
-    "https://github.com/jordansmall/spindrift/pull/5808"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-19T23:32:52.700394619-04:00"
+  },
   "usage": {
-    "input_tokens": 66,
-    "output_tokens": 8467,
-    "cache_read_input_tokens": 1735835,
-    "cache_creation_input_tokens": 66968,
-    "total_cost_usd": 1.18848523,
-    "duration_ms": 122555,
-    "duration_api_ms": 117787,
-    "num_turns": 35
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
