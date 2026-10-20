@@ -4,8 +4,8 @@ spindrift uses [Semantic Versioning 2.0.0](https://semver.org/). Releases are
 managed by [release-please](https://github.com/googleapis/release-please) in
 manifest mode, driven by the [Conventional Commits](https://www.conventionalcommits.org/)
 already in use on this repository. The authoritative version is the root entry in
-`.release-please-manifest.json`; Nix reads that value to stamp the two
-`buildGoModule` derivations in `lib/mkHarness.nix`.
+`.release-please-manifest.json`; Nix reads that value to stamp the
+`buildGoModule` derivations in `lib/harness-core.nix` and `lib/mkHarness.nix`.
 
 ## Public contract
 

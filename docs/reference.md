@@ -9149,7 +9149,7 @@ opt-in rather than the default. The documented unit takes the other route,
 `--restart-in-place` (above), which needs neither edit.
 
 What moves the daemon's build: any change under `cmd/launcher`'s Go
-module (`daemonBin`, `lib/mkHarness.nix`). Its source is the whole module
+module (`daemonBin`, `lib/harness-core.nix`). Its source is the whole module
 tree, so a test file or one of the sibling `driver-exec`, `orchestrator`
 and `quickstart` packages moves it just as `cmd/launcher/daemon` and
 `cmd/launcher/internal/daemon` do. So does a

@@ -1,8 +1,8 @@
 # The read-only Dashboard (ADR 0060), built standalone: its own Go module with
 # no dependencies, so there is no vendorHash to keep in sync. src is scoped to
 # ../dashboard so a launcher commit never moves this derivation and a Dashboard
-# commit never moves the Daemon's store path (lib/mkHarness.nix launcherModuleSrc is
-# rooted at cmd/launcher).
+# commit never moves the Daemon's store path (lib/harness-core.nix
+# launcherModuleSrc is rooted at cmd/launcher).
 { pkgs }:
 let
   unwrapped = pkgs.buildGoModule {
