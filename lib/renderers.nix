@@ -105,6 +105,46 @@ let
   # optionSurfaceDomainPathMismatches so the two cannot spell it differently.
   optionSurfacePath =
     key: registry: "perSystem.spindrift.${builtins.concatStringsSep "." registry.${key}}";
+  # A row-field table entry for renderRowFields: it names the row attribute and
+  # its Go Descriptor field, and `optional` adds what an omitted attribute
+  # renders as (`required` has none).
+  # Go names stay explicit: pure builtins has no title-casing.
+  required = attr: go: { inherit attr go; };
+  optional = attr: go: default: { inherit attr go default; };
+
+  # One Go field line per table entry. `overrides` maps a row attribute to
+  # `goName: value: <string>` for values the generic rendering cannot express
+  # (a struct literal); it sees only non-null values. Without an override, a
+  # null, "" or false value is omitted as Go's zero value, true and strings
+  # render as scalars, and a list or attrset throws instead of silently
+  # dropping the field.
+  renderRowFields =
+    {
+      renderer,
+      overrides ? { },
+    }:
+    fields: row:
+    let
+      fieldLine =
+        attr: goName: value:
+        if value == null then
+          ""
+        else if overrides ? ${attr} then
+          overrides.${attr} goName value
+        else if builtins.isList value || builtins.isAttrs value then
+          throw "lib/renderers.nix: ${renderer} has no Go rendering for ${
+            if builtins.isList value then "list" else "attrset"
+          }-valued field '${attr}'"
+        else if builtins.isBool value then
+          (if value then "\t${goName}: true,\n" else "")
+        else if value == "" then
+          ""
+        else
+          "\t${goName}: ${builtins.toJSON value},\n";
+      rowFieldLine =
+        f: fieldLine f.attr f.go (if f ? default then row.${f.attr} or f.default else row.${f.attr});
+    in
+    concatStrings (map rowFieldLine fields);
 in
 rec {
   inherit hasShort;
@@ -733,10 +773,8 @@ rec {
   renderDriverDescriptorsGo =
     driverEntries:
     let
-      # Same table shape as renderBackendRegistryGo's rowFields;
-      # TestDescriptorFieldsMatchNixRows pins the hand-written struct to it.
-      required = attr: go: { inherit attr go; };
-      optional = attr: go: default: { inherit attr go default; };
+      # The row-field table; TestDescriptorFieldsMatchNixRows pins the
+      # hand-written struct to it.
       rowFields = [
         (required "name" "Name")
         (optional "providerNamespacedModels" "ProviderNamespacedModels" false)
@@ -765,35 +803,23 @@ rec {
             map (k: "${builtins.toJSON k}: ${builtins.toJSON m.${k}}") (builtins.attrNames m)
           )
           + "}";
-      fieldLine =
-        attr: goName: value:
-        if attr == "authContent" then
-          (
-            if value == null then
-              ""
-            else
-              "\t${goName}: &AuthContent{Env: ${builtins.toJSON value.env}, OAuthProviders: ${goStrings value.oauthProviders}${
-                authAPIKeyProviders (value.apiKeyProviders or { })
-              }},\n"
-          )
-        else if attr == "credentials" then
-          (
+      renderFields = renderRowFields {
+        renderer = "renderDriverDescriptorsGo";
+        overrides = {
+          authContent =
+            goName: value:
+            "\t${goName}: &AuthContent{Env: ${builtins.toJSON value.env}, OAuthProviders: ${goStrings value.oauthProviders}${
+              authAPIKeyProviders (value.apiKeyProviders or { })
+            }},\n";
+          credentials =
+            goName: value:
             if value == [ ] then
               ""
             else
-              "\t${goName}: []CredentialRule{\n" + concatStrings (map credentialRuleLiteral value) + "\t},\n"
-          )
-        else if builtins.isList value then
-          throw "lib/renderers.nix: renderDriverDescriptorsGo has no Go rendering for list-valued field '${attr}'"
-        else if builtins.isBool value then
-          (if value then "\t${goName}: true,\n" else "")
-        else if value == "" then
-          ""
-        else
-          "\t${goName}: ${builtins.toJSON value},\n";
-      rowFieldLine =
-        row: f: fieldLine f.attr f.go (if f ? default then row.${f.attr} or f.default else row.${f.attr});
-      renderRow = row: "{\n" + concatStrings (map (rowFieldLine row) rowFields) + "},\n";
+              "\t${goName}: []CredentialRule{\n" + concatStrings (map credentialRuleLiteral value) + "\t},\n";
+        };
+      };
+      renderRow = row: "{\n" + renderFields rowFields row + "},\n";
       # Go looks a Driver up by its rendered Name and Nix by its registry key,
       # so a row whose name disagrees with its key must fail, not render.
       rows = map (
@@ -1190,14 +1216,9 @@ rec {
   renderBackendRegistryGo =
     backends:
     let
-      # The one table of Descriptor fields, in render order: the row attribute,
-      # its Descriptor field, and what an omitted attribute renders as (`required`
-      # has none). knownFields, the field lines, and the emitted
-      # descriptorRowFields all derive from it, and TestDescriptorFieldsMatchNixRows
-      # pins the hand-written struct to it. Go names stay explicit: pure builtins
-      # has no title-casing.
-      required = attr: go: { inherit attr go; };
-      optional = attr: go: default: { inherit attr go default; };
+      # The one table of Descriptor fields, in render order. knownFields, the
+      # field lines, and the emitted descriptorRowFields all derive from it, and
+      # TestDescriptorFieldsMatchNixRows pins the hand-written struct to it.
       rowFields = [
         (required "name" "Name")
         (required "displayName" "DisplayName")
@@ -1289,25 +1310,17 @@ rec {
           throw (checkQuickstart row)
         else
           row;
-      fieldLine =
-        goName: value:
-        if value == null then
-          ""
-        else if builtins.isAttrs value then
-          "\t${goName}: &QuickstartBlock{Hosts: []string{${renderGoStringSlice value.hosts}}, Axes: []string{${renderGoStringSlice value.axes}}},\n"
-        else if builtins.isBool value then
-          (if value then "\t${goName}: true,\n" else "")
-        else if value == "" then
-          ""
-        else
-          "\t${goName}: ${builtins.toJSON value},\n";
-      rowFieldLine =
-        row: f: fieldLine f.go (if f ? default then row.${f.attr} or f.default else row.${f.attr});
+      renderFields = renderRowFields {
+        renderer = "renderBackendRegistryGo";
+        overrides.quickstart =
+          goName: value:
+          "\t${goName}: &QuickstartBlock{Hosts: []string{${renderGoStringSlice value.hosts}}, Axes: []string{${renderGoStringSlice value.axes}}},\n";
+      };
       renderRow =
         row:
         "// ${row.goVar} is the descriptor for the \"${row.name}\" backend.\n"
         + "var ${row.goVar} = Descriptor{\n"
-        + concatStrings (map (rowFieldLine row) rowFields)
+        + renderFields rowFields row
         + "}\n";
       checkedBackends = map checkRow backends;
       rows = concatStrings (map renderRow checkedBackends);
