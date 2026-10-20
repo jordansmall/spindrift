@@ -1,7 +1,6 @@
 package pi
 
 import (
-	"bytes"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -177,7 +176,7 @@ func childEvents(r childResult, i int, parentPrefix string, from int) []driverki
 				InSubagent: true,
 				ToolID:     m.ToolCallID,
 				ToolName:   m.ToolName,
-				ToolOutput: contentText(m.Content, compact(m.Content)),
+				ToolOutput: contentText(m.Content, driverkit.CompactJSON(m.Content)),
 				IsError:    m.IsError,
 			}
 			if m.ToolName == subagentTool {
@@ -298,12 +297,12 @@ func decodeAssistant(m message, sc scope) []driverkit.Event {
 				ToolID:     b.ID,
 				ToolName:   b.Name,
 				ToolInput:  b.Arguments,
-				ToolTarget: toolTarget(b.Name, b.Arguments),
+				ToolTarget: driverkit.ToolTarget(toolTargetField, b.Name, b.Arguments),
 			})
 		}
 	}
 	if m.StopReason == "error" {
-		events = append(events, driverkit.Event{Kind: driverkit.KindError, Timestamp: ts, MessageID: id, Text: errorText(m.ErrorMessage)})
+		events = append(events, driverkit.Event{Kind: driverkit.KindError, Timestamp: ts, MessageID: id, Text: driverkit.ErrorText(m.ErrorMessage)})
 	}
 	if u := m.Usage; u != nil {
 		// A failed attempt still reports (zero-token) usage, so it counts as an
@@ -369,33 +368,16 @@ var toolTargetField = map[string]string{
 	"find":  "pattern",
 }
 
-// toolTarget returns the string value of the tool's identifying input field,
-// "" for an unknown tool, a missing field or a non-string one.
-func toolTarget(tool string, input json.RawMessage) string {
-	field, ok := toolTargetField[tool]
-	if !ok {
-		return ""
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(input, &fields) != nil {
-		return ""
-	}
-	var target string
-	_ = json.Unmarshal(fields[field], &target)
-	return target
-}
-
 // resultText joins a tool result's text blocks, falling back to the result's
-// compact JSON when it holds none (a structured-only result), as the opencode
-// Driver's transcript does.
+// compact JSON when it holds none (a structured-only result).
 func resultText(raw json.RawMessage) string {
 	var r struct {
 		Content json.RawMessage `json:"content"`
 	}
 	if json.Unmarshal(raw, &r) == nil {
-		return contentText(r.Content, compact(raw))
+		return contentText(r.Content, driverkit.CompactJSON(raw))
 	}
-	return compact(raw)
+	return driverkit.CompactJSON(raw)
 }
 
 // contentText joins a content array's text blocks, or returns fallback when it
@@ -414,23 +396,4 @@ func contentText(content json.RawMessage, fallback string) string {
 		}
 	}
 	return fallback
-}
-
-// errorText returns the string payload unquoted, or any other payload in
-// compact JSON. A missing or invalid payload yields "", which matches no
-// marker.
-func errorText(raw json.RawMessage) string {
-	var str string
-	if json.Unmarshal(raw, &str) == nil {
-		return str
-	}
-	return compact(raw)
-}
-
-func compact(raw json.RawMessage) string {
-	var buf bytes.Buffer
-	if len(raw) == 0 || string(raw) == "null" || json.Compact(&buf, raw) != nil {
-		return ""
-	}
-	return buf.String()
 }

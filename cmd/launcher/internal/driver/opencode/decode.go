@@ -1,7 +1,6 @@
 package opencode
 
 import (
-	"bytes"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -70,7 +69,7 @@ func Decode(line string) []driverkit.Event {
 		return []driverkit.Event{{
 			Kind:      driverkit.KindError,
 			Timestamp: ts,
-			Text:      errorText(l.Error),
+			Text:      driverkit.ErrorText(l.Error),
 			ResetAt:   resetFrom(l.Error, ts),
 		}}
 	case "spindrift_op":
@@ -133,22 +132,6 @@ var toolTargetField = map[string]string{
 	subagentSpawnTool: "subagent_type",
 }
 
-// toolTarget returns the string value of the tool's identifying input field,
-// "" for an unknown tool, a missing field or a non-string one.
-func toolTarget(tool string, input json.RawMessage) string {
-	field, ok := toolTargetField[tool]
-	if !ok {
-		return ""
-	}
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(input, &fields) != nil {
-		return ""
-	}
-	var target string
-	_ = json.Unmarshal(fields[field], &target)
-	return target
-}
-
 func decodeToolUse(part logPart, ts int64) []driverkit.Event {
 	var state struct {
 		Status string          `json:"status"`
@@ -167,7 +150,7 @@ func decodeToolUse(part logPart, ts int64) []driverkit.Event {
 		ToolID:     callID,
 		ToolName:   tool,
 		ToolInput:  state.Input,
-		ToolTarget: toolTarget(tool, state.Input),
+		ToolTarget: driverkit.ToolTarget(toolTargetField, tool, state.Input),
 	}
 	switch state.Status {
 	case "completed", "error":
@@ -266,19 +249,4 @@ func resetFrom(raw json.RawMessage, timestampMs int64) *time.Time {
 		return &t
 	}
 	return nil
-}
-
-// errorText returns the string payload unquoted, or any other payload in
-// compact JSON so a marker like `"statusCode":429` has no stray whitespace. A
-// missing or invalid payload yields "", which matches no marker.
-func errorText(raw json.RawMessage) string {
-	var str string
-	if json.Unmarshal(raw, &str) == nil {
-		return str
-	}
-	var buf bytes.Buffer
-	if json.Compact(&buf, raw) != nil {
-		return ""
-	}
-	return buf.String()
 }
