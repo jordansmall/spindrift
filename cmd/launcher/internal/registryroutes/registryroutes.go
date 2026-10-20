@@ -202,8 +202,9 @@ const (
 // retiredRouteKeys pairs each retired top-level key (ADR 0048, issue #3405)
 // with two readers: declared reports whether the route spells the key at all,
 // and block renders it as the [routes.ecosystems.<name>] block it stands for.
-// block returns nil for a declared-but-empty value, since a stanza printing
-// path = "" would not re-parse. The fixed order keeps reporting deterministic.
+// block returns nil for a declared-but-empty value, which binds as absent;
+// any other value is passed through for mergeRetiredRouteEcosystems to
+// validate. The fixed order keeps reporting deterministic.
 var retiredRouteKeys = []struct {
 	key      string
 	declared func(rawRoute) bool
@@ -358,11 +359,31 @@ func retiredRouteKeysError(label string, rr rawRoute) error {
 		))
 	}
 
+	merged, refused := mergeRetiredRouteEcosystems(label, rr)
+	lead := "equivalent"
+	for _, r := range refused {
+		// The validator's error carries this label's prefix; the clause is
+		// already inside an error that names the route.
+		msg := strings.TrimPrefix(r.err.Error(), "registryroutes: "+label+": ")
+		clauses = append(clauses, fmt.Sprintf("%s cannot carry over, so the stanza omits it: %s", r.key, msg))
+		lead = "replacement"
+	}
+
 	return fmt.Errorf(
-		"registryroutes: %s: %s; equivalent routes-file stanza:\n\n%s",
-		label, strings.Join(clauses, "; "),
-		retiredRouteStanza(rr),
+		"registryroutes: %s: %s; %s %s%s",
+		label, strings.Join(clauses, "; "), lead, retiredStanzaSuffix,
+		retiredRouteStanza(rr, merged),
 	)
+}
+
+// retiredStanzaSuffix ends the error's lead-in and opens the stanza, whichever
+// adjective ("equivalent", "replacement") precedes it.
+const retiredStanzaSuffix = "routes-file stanza:\n\n"
+
+// refusedRetiredValue is a retired key whose value the replacement key refuses.
+type refusedRetiredValue struct {
+	key string
+	err error
 }
 
 func retiredKeysVerb(keys []string) string {
@@ -376,8 +397,9 @@ func retiredKeysVerb(keys []string) string {
 // still declares a retired key, so migrating is paste-this-back rather than
 // re-deriving the route from ADR 0047 or ADR 0048. A retired upstream-base-url
 // supplies upstream-origin only when it says something match-host cannot, and
-// its path is dropped: a host-rooted route derives the paths it serves.
-func retiredRouteStanza(rr rawRoute) string {
+// its path is dropped: a host-rooted route derives the paths it serves. merged
+// is mergeRetiredRouteEcosystems' result for rr.
+func retiredRouteStanza(rr rawRoute, merged map[string]map[string]any) string {
 	var b strings.Builder
 	b.WriteString("[[routes]]\n")
 	fmt.Fprintf(&b, "match-host = %q\n", rr.MatchHost)
@@ -397,16 +419,19 @@ func retiredRouteStanza(rr rawRoute) string {
 	if len(rr.Allow) > 0 {
 		fmt.Fprintf(&b, "allow = %s\n", tomlStringArray(rr.Allow))
 	}
-	b.WriteString(retiredRouteEcosystemBlocks(mergeRetiredRouteEcosystems(rr)))
+	b.WriteString(retiredRouteEcosystemBlocks(merged))
 	return b.String()
 }
 
-// mergeRetiredRouteEcosystems folds each retired top-level key's equivalent
-// block into rr's own [routes.ecosystems.<name>] blocks, so retiredRouteStanza
-// renders one block per ecosystem whichever spelling the route used, and never
-// echoes a retired key that would fail to parse. A name declared both ways
-// keeps the explicit block's keys and gains only what that block omits.
-func mergeRetiredRouteEcosystems(rr rawRoute) map[string]map[string]any {
+// mergeRetiredRouteEcosystems folds each retired top-level key's block into
+// rr's own [routes.ecosystems.<name>] blocks, so retiredRouteStanza renders one
+// block per ecosystem whichever spelling the route used. A name declared both
+// ways keeps the explicit block's keys and gains only what that block omits.
+// A retired value the new key refuses is left out of the result and returned
+// with its validation error, in retiredRouteKeys order. An explicit block
+// already declaring every key wins unvalidated: the retired value is never
+// echoed.
+func mergeRetiredRouteEcosystems(label string, rr rawRoute) (map[string]map[string]any, []refusedRetiredValue) {
 	merged := make(map[string]map[string]any, len(rr.Ecosystems))
 	for name, block := range rr.Ecosystems {
 		copied := make(map[string]any, len(block))
@@ -416,6 +441,7 @@ func mergeRetiredRouteEcosystems(rr rawRoute) map[string]map[string]any {
 		merged[name] = copied
 	}
 
+	var refused []refusedRetiredValue
 	for _, entry := range retiredRouteKeys {
 		raw := entry.block(rr)
 		if raw == nil {
@@ -429,6 +455,13 @@ func mergeRetiredRouteEcosystems(rr rawRoute) map[string]map[string]any {
 			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no ecosystem.Table row", entry.key))
 		}
 		block, ok := merged[row.Name]
+		if ok && declaresAll(block, raw) {
+			continue
+		}
+		if _, err := buildRouteDeclarationBlock(label, row, raw); err != nil {
+			refused = append(refused, refusedRetiredValue{key: entry.key, err: err})
+			continue
+		}
 		if !ok {
 			block = make(map[string]any, len(raw))
 			merged[row.Name] = block
@@ -440,7 +473,17 @@ func mergeRetiredRouteEcosystems(rr rawRoute) map[string]map[string]any {
 		}
 	}
 
-	return merged
+	return merged, refused
+}
+
+// declaresAll reports whether block spells every key of raw.
+func declaresAll(block, raw map[string]any) bool {
+	for key := range raw {
+		if _, ok := block[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // retiredRouteEcosystemBlocks renders a route's [routes.ecosystems.<name>]

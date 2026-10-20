@@ -228,3 +228,119 @@ func TestRetiredRouteKeyWithMalformedCredentialFailsOnCredential(t *testing.T) {
 		}
 	}
 }
+
+// A retired key carrying a value its replacement key refuses must not reach the
+// printed stanza: the error names the key, gives the new key's own wording, and
+// the stanza it prints still parses.
+func TestRetiredRouteInvalidValueIsOmittedFromStanzaAndNamed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		decl    string
+		invalid string
+		clause  string
+	}{
+		{"go-relative", `go-path = "mirror"`, "mirror", `go-path cannot carry over, so the stanza omits it: ecosystems.go.path "mirror" must start with "/"`},
+		{"gradle-dotdot", `gradle-path = "/a/../b"`, "/a/../b", `gradle-path cannot carry over, so the stanza omits it: ecosystems.gradle.path "/a/../b" must not contain a ".." segment`},
+		{"cargo-bad-name", `cargo-registries = ["evil; rm"]`, "evil; rm", `cargo-registries cannot carry over, so the stanza omits it: ecosystems.cargo.registries name "evil; rm" must match ^[A-Za-z0-9_-]+$`},
+		{"cargo-empty-name", `cargo-registries = [""]`, `""`, `cargo-registries cannot carry over, so the stanza omits it: ecosystems.cargo.registries names an empty string`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n"), nil)
+			if err == nil {
+				t.Fatal("expected a retirement error, got nil")
+			}
+			msg := err.Error()
+			for _, want := range []string{"ADR 0048, issue #3405", tc.clause, "; replacement " + retiredStanzaSuffix} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error lacks %q, got: %v", want, err)
+				}
+			}
+			if n := strings.Count(msg, "registryroutes:"); n != 1 {
+				t.Errorf("error carries %d \"registryroutes:\" prefixes, want 1, got: %v", n, err)
+			}
+			_, stanza, ok := strings.Cut(msg, retiredStanzaSuffix)
+			if !ok {
+				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+			}
+			if strings.Contains(stanza, tc.invalid) {
+				t.Errorf("stanza echoes the invalid value %q:\n%s", tc.invalid, stanza)
+			}
+			if _, err := Parse([]byte(stanza)); err != nil {
+				t.Errorf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+			}
+		})
+	}
+}
+
+// An explicit block already declaring the retired key's block key wins, so the
+// retired value is never echoed and is not validated.
+func TestRetiredRouteInvalidValueBesideExplicitBlockIsNotValidated(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		decl     string
+		explicit string
+		invalid  string
+	}{
+		{"go-path", `go-path = "mirror"`, "[routes.ecosystems.go]\npath = \"/ok\"\n", "mirror"},
+		{"gradle-path", `gradle-path = "/a/../b"`, "[routes.ecosystems.gradle]\npath = \"/ok\"\n", "/a/../b"},
+		{"cargo-registries", `cargo-registries = ["evil; rm"]`, "[routes.ecosystems.cargo]\nregistries = [\"ok\"]\n", "evil; rm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+tc.explicit), nil)
+			if err == nil {
+				t.Fatal("expected a retirement error, got nil")
+			}
+			if strings.Contains(err.Error(), "cannot carry over") {
+				t.Errorf("expected no carry-over clause when the explicit block wins, got: %v", err)
+			}
+			_, stanza, ok := strings.Cut(err.Error(), retiredStanzaSuffix)
+			if !ok {
+				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+			}
+			if strings.Contains(stanza, tc.invalid) {
+				t.Errorf("stanza echoes the retired value %q:\n%s", tc.invalid, stanza)
+			}
+		})
+	}
+}
+
+// An explicit block for the ecosystem that lacks the retired key's block key
+// does not shield the retired value: it is validated, refused, and the block is
+// echoed as written.
+func TestRetiredRouteInvalidValueBesideBlockLackingTheKeyIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		decl     string
+		explicit string
+		header   string
+		invalid  string
+		clause   string
+	}{
+		{"go-path", `go-path = "mirror"`, "[routes.ecosystems.go]\n", "[routes.ecosystems.go]", "mirror", `go-path cannot carry over, so the stanza omits it: ecosystems.go.path "mirror" must start with "/"`},
+		{"gradle-path", `gradle-path = "/a/../b"`, "[routes.ecosystems.gradle]\n", "[routes.ecosystems.gradle]", "/a/../b", `gradle-path cannot carry over, so the stanza omits it: ecosystems.gradle.path "/a/../b" must not contain a ".." segment`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+tc.explicit), nil)
+			if err == nil {
+				t.Fatal("expected a retirement error, got nil")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, tc.clause) {
+				t.Errorf("error lacks %q, got: %v", tc.clause, err)
+			}
+			_, stanza, ok := strings.Cut(msg, "replacement "+retiredStanzaSuffix)
+			if !ok {
+				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
+			}
+			if !strings.Contains(stanza, tc.header) {
+				t.Errorf("stanza lacks the explicit block %s:\n%s", tc.header, stanza)
+			}
+			if strings.Contains(stanza, tc.invalid) {
+				t.Errorf("stanza echoes the invalid value %q:\n%s", tc.invalid, stanza)
+			}
+			if _, err := Parse([]byte(stanza)); err != nil {
+				t.Errorf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
+			}
+		})
+	}
+}
