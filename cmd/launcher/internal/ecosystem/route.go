@@ -4,8 +4,9 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// firstRoute returns routes[0], or the zero Route when routes is empty. Bindings
-// always resolve against the first manifest route's prefix.
+// firstRoute returns routes[0], or the zero Route when routes is empty. The go,
+// cargo and gradle renderers and declaredPath resolve against the first manifest
+// route's prefix.
 func firstRoute(routes []registrymanifest.Route) registrymanifest.Route {
 	if len(routes) > 0 {
 		return routes[0]

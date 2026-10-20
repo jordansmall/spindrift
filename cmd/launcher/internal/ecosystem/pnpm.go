@@ -21,8 +21,8 @@ var pnpmRow = Row{
 	LockfileNames:    []string{"pnpm-lock.yaml"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: "pnpm-workspace.yaml",
-	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
-		return npmFamilyBinding(port, prefix, routes, pnpmBindingEnvVar, namePnpm)
+	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		return npmFamilyBinding(port, routes, pnpmBindingEnvVar, namePnpm)
 	},
 	BindingEnvVar: pnpmBindingEnvVar,
 	ConfigParser:  parsePnpmRegistryConfig,

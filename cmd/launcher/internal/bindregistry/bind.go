@@ -206,10 +206,9 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 	}
 	port := gate.port
 
-	// A GOPROXY value, an npm registry URL, a cargo config.toml and a gradle
-	// init script can each name only ONE upstream, so all bind to the first
-	// route's prefix (issue #3142), preserving the pre-prefix routes[0]
-	// fallback. A missing route or empty prefix is defensive only, but warn
+	// A GOPROXY value, a cargo config.toml and a gradle init script can each
+	// name only ONE upstream, so all bind to the first route's prefix (issue
+	// #3142), preserving the pre-prefix routes[0] fallback. A missing route or empty prefix is defensive only, but warn
 	// and skip rather than bind everything to a URL that 404s every request.
 	if len(gate.manifest.Routes) == 0 || gate.manifest.Routes[0].Prefix == "" {
 		// Leaves any already-spawned Forwarder running idle and never calls
