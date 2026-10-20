@@ -150,6 +150,12 @@ let
       clause = "overrides any acceptance criteria";
     }
     {
+      name = "eval-heavy-check-skipped";
+      # Pinned because a surface that loses it leaves an agent unaware that
+      # checks-inbox skips docs-edit-isolation (issue #5849).
+      clause = "re-evaluating the whole checkset twice";
+    }
+    {
       name = "list-check-attrs";
       # How an agent finds the single check attr the narrow tier builds
       # (issue #4408).

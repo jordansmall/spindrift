@@ -54,7 +54,8 @@ full flake check (issue #581):
 ```sh
 nix build .#checks-inbox -L   # source-level checks only: go, shellcheck,
                                # nil-clean, marker/parity — no bats shards
-                               # (CI runs them), no image build
+                               # (CI runs them), no image build,
+                               # no docs-edit-isolation
 ```
 
 `checks-inbox` excludes the checks that build/inspect the OCI image
@@ -63,7 +64,9 @@ the box's own baked toolchain — the box working the issue is already built
 from that image, so re-baking it in-box is redundant and the nested build is
 heavy/unreliable in a Box (issue #565 saw one killed with `EXIT:137`). Those
 checks still run in CI's full `nix flake check` below, so coverage isn't
-lost — just moved out of the box.
+lost — just moved out of the box. `checks-inbox` likewise skips
+`docs-edit-isolation`, too costly to evaluate in a Box; CLAUDE.md's "Nix
+edits" section says why (issue #5849).
 
 For faster, store-free per-file iteration (or as a fallback on a Box built
 without the self-test knobs), use `nil diagnostics path/to/file.nix` for

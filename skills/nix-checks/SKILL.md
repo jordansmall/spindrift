@@ -19,6 +19,12 @@ itself. This is a firm rule, and it **overrides** any acceptance criteria in
 the issue that ask for `nix flake check` more loosely. Fall back to `nix
 flake check` only if no scoped target exists.
 
+That scoped target also skips `docs-edit-isolation`, which proves a docs-only
+edit leaves the non-docs checks alone by re-evaluating the whole checkset
+twice — a large share of a cold `checks-inbox` evaluation — and which guards
+CI's docs-lane membership, something a Box rarely changes; CI's full `nix flake
+check` still runs it.
+
 Always pass `-L` (`--print-build-logs`) and redirect to a file. Without it a
 failure prints only the failing derivation's store path and a
 `[build failed]` line, so the compile or test error costs a second turn
