@@ -2,6 +2,7 @@ package butler
 
 import (
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strconv"
@@ -56,6 +57,10 @@ type settleRun struct {
 	room   chore.Room
 	policy promotion
 
+	// out receives the host-side status lines settle prints; Runner hands it
+	// its own writer so a test can read them without swapping os.Stdout.
+	out io.Writer
+
 	// labels are extra provenance labels every finding of this Chore wears
 	// beside agent-butler-finding; settle's filing derives the matching
 	// hidden-marker term from them.
@@ -101,9 +106,9 @@ type patchLanding struct {
 // and handed down, never re-walked here (issue #3994). policy is the
 // host-side auto-promotion gate (issue #3880); its zero value never
 // promotes anything. patch backs the patch rung (ADR 0057); see Runner.run
-// for how patch.forge's presence gates it.
-func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung) *settleRun {
-	return &settleRun{it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
+// for how patch.forge's presence gates it. out receives the status lines.
+func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung, out io.Writer) *settleRun {
+	return &settleRun{out: out, it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
@@ -203,7 +208,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		if n > 0 || p > 0 {
 			reserved, err := ledger.Reserve(s.ledger, s.chore, s.claim, ledger.Reservation{Promotions: n, Patches: p}, s.now())
 			if err != nil {
-				fmt.Printf("    #%s  status=reserve-failed  !! %v\n", num, err)
+				fmt.Fprintf(s.out, "    #%s  status=reserve-failed  !! %v\n", num, err)
 				remaining, patchesLeft = 0, 0
 			} else {
 				finishParent = reserved
@@ -214,7 +219,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			backlink := butlerBacklink(s.chore, f)
 			dec := s.policy.decide(f, chore.Room{Promotions: remaining, Patches: patchesLeft})
 			if dec.patchSkip != "" {
-				fmt.Printf("    #%s  status=patch-skipped  note=%s\n", num, dec.patchSkip)
+				fmt.Fprintf(s.out, "    #%s  status=patch-skipped  note=%s\n", num, dec.patchSkip)
 			}
 			if dec.kind == patch {
 				subject := patchCommitSubject(f.Title)
@@ -223,7 +228,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 					// A stale/rebased diff: file exactly as if it had no
 					// Patch at all, re-deciding with patch room zeroed so
 					// decide can only promote or skip from here (issue #4074).
-					fmt.Printf("    #%s  status=patch-apply-failed  !! %v\n", num, err)
+					fmt.Fprintf(s.out, "    #%s  status=patch-apply-failed  !! %v\n", num, err)
 					dec = s.policy.decide(f, promoteOnlyRoom(remaining))
 				} else {
 					return settle.Decoration{
@@ -238,13 +243,13 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 							if err != nil {
 								// No issue number to label or close: the
 								// finding stays filed as-is.
-								fmt.Printf("    #%s  status=patch-failed  !! %v\n", num, err)
+								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! %v\n", num, err)
 								return
 							}
 							head := s.patch.forge.AgentBranch(issueNum)
 							prURL, err := s.landPatch(num, pc, subject, head, f, url, issueNum)
 							if err != nil {
-								fmt.Printf("    #%s  status=patch-failed  !! %v\n", num, err)
+								fmt.Fprintf(s.out, "    #%s  status=patch-failed  !! %v\n", num, err)
 								if s.fallBackToPromote(num, issueNum, f, remaining) {
 									remaining--
 									promoted = append(promoted, url)
@@ -289,7 +294,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// would otherwise repeat the same reason. Gated on a finding actually
 	// filing, so a sweep whose findings were all deduped or failed stays quiet.
 	if !s.policy.enabled && len(filing.Filed) > 0 {
-		fmt.Printf("    #%s  status=promotion-off  note=%s\n", num, promotionOffNote)
+		fmt.Fprintf(s.out, "    #%s  status=promotion-off  note=%s\n", num, promotionOffNote)
 	}
 
 	// Every finding failing to file (a missing provenance label, a network or
@@ -323,7 +328,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		state.Snapshot = &s.records.ref
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
-		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
+		fmt.Fprintf(s.out, "    #%s  status=ledger-finish-failed  !! %v\n", num, err)
 		s.settled(d, forge.Failed, settle.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
 		// Still gate the already-open draft PRs, or they orphan (issue
 		// #4118). #4076's ordering has nothing left to protect: a lost CAS
@@ -344,7 +349,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
 	s.settled(d, forge.Complete, settle.ReasonFindingsFiled, note)
-	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
+	fmt.Fprintf(s.out, "    #%s  status=%s  note=%s\n", num, o.Status, note)
 
 	// On the success path, hand each patch to the work merge gate only after
 	// the Done commit above has actually landed: a crash while polling CI
@@ -381,20 +386,20 @@ func (s *settleRun) landPatch(chorenum string, pc PatchCommit, subject, head str
 	if lookupErr != nil {
 		// Branch kept: a PR this lookup could not see may be live, and
 		// deleting its head branch would close it.
-		fmt.Printf("    #%s  status=patch-pr-lookup-failed  !! %v\n", chorenum, lookupErr)
+		fmt.Fprintf(s.out, "    #%s  status=patch-pr-lookup-failed  !! %v\n", chorenum, lookupErr)
 		return "", createErr
 	}
 	if found {
 		// head is agent/issue-N for the issue just filed, so no earlier run
 		// can own a PR on it -- adopting whatever is open there is safe.
-		fmt.Printf("    #%s  status=patch-pr-adopted  !! %v\n", chorenum, createErr)
+		fmt.Fprintf(s.out, "    #%s  status=patch-pr-adopted  !! %v\n", chorenum, createErr)
 		return pr.URL, nil
 	}
 	// Residual race: if the timed-out create lands on the server only after
 	// this lookup said "not found", the delete below closes it and the
 	// finding still gets promoted -- the same outcome as before #4112.
 	if delErr := s.patch.forge.DeleteBranch(head, s.patch.base); delErr != nil {
-		fmt.Printf("    #%s  status=patch-branch-cleanup-failed  !! %v\n", chorenum, delErr)
+		fmt.Fprintf(s.out, "    #%s  status=patch-branch-cleanup-failed  !! %v\n", chorenum, delErr)
 	}
 	return "", createErr
 }
@@ -417,11 +422,11 @@ func (s *settleRun) fallBackToPromote(chorenum, issueNum string, f settle.Findin
 		return false
 	}
 	if err := s.patch.forge.AddLabels(issueNum, fb.labels); err != nil {
-		fmt.Printf("    #%s  status=patch-fallback-label-failed  !! %v\n", chorenum, err)
+		fmt.Fprintf(s.out, "    #%s  status=patch-fallback-label-failed  !! %v\n", chorenum, err)
 		return false
 	}
 	if err := s.it.Comment(issueNum, promotionNote(s.chore, f, s.policy, fb.files)); err != nil {
-		fmt.Printf("    #%s  status=patch-fallback-comment-failed  !! %v\n", chorenum, err)
+		fmt.Fprintf(s.out, "    #%s  status=patch-fallback-comment-failed  !! %v\n", chorenum, err)
 	}
 	return true
 }
@@ -433,7 +438,7 @@ func (s *settleRun) logPromoteSkip(num string, dec decision) {
 	if !s.policy.enabled {
 		return
 	}
-	fmt.Printf("    #%s  status=promote-skipped  note=%s\n", num, dec.reason)
+	fmt.Fprintf(s.out, "    #%s  status=promote-skipped  note=%s\n", num, dec.reason)
 }
 
 // promoteOnlyRoom zeroes the patch half of a chore.Room so a re-decide call
@@ -515,7 +520,7 @@ func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string
 // from.
 func (s *settleRun) fail(d dispatch.Dispatcher, num, note string) {
 	s.settled(d, forge.Failed, settle.ReasonChoreFailed, note)
-	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
+	fmt.Fprintf(s.out, "    #%s  status=failed  note=%s\n", num, note)
 }
 
 // settled is the Chore Dispatch's one terminal settle: it appends
@@ -592,7 +597,7 @@ func (s *settleRun) validateFindings(num string, raw []string) ([]string, []ledg
 			kept = append(kept, r)
 			continue
 		}
-		fmt.Printf("    #%s  dropped %s finding %q: %s\n", num, s.chore, in.Title, reason)
+		fmt.Fprintf(s.out, "    #%s  dropped %s finding %q: %s\n", num, s.chore, in.Title, reason)
 		drops = append(drops, ledger.Drop{Title: in.Title, Reason: reason})
 	}
 	return kept, drops, nil

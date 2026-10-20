@@ -275,7 +275,7 @@ func (tr *tuningRun) sweepTuning(t *testing.T, policy Policy, now time.Time) (Ou
 	r := New(tr.backend, tree, it, newBox, policy, func() time.Time { return now }).WithMergeReader(tr.fc, tr.fc)
 	var out Outcome
 	var err error
-	tr.stdout = captureStdout(t, func() { out, err = r.Sweep([]string{"tuning"}) })
+	tr.stdout = captureSweepOutput(t, r, func() { out, err = r.Sweep([]string{"tuning"}) })
 	return out, err
 }
 
@@ -363,7 +363,7 @@ func TestSweep_Tuning_NoRecordIDLeavesClaim(t *testing.T) {
 	newBox := func(dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
 	r := New(tr.backend, fakeTree{head: "headsha"}, tr.fc.AsIssueFiler(), newBox, tuningPolicy(root, 1), func() time.Time { return tuningNow })
 	var err error
-	captureStdout(t, func() { _, err = r.Sweep([]string{"tuning"}) })
+	captureSweepOutput(t, r, func() { _, err = r.Sweep([]string{"tuning"}) })
 	if err == nil {
 		t.Fatal("Sweep succeeded without a Record ID to key the snapshot")
 	}

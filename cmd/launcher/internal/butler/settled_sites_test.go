@@ -3,6 +3,7 @@ package butler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +65,7 @@ func newSettledRun(t *testing.T, backend ledger.Backend, fc *forge.Fake) *settle
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
 	now := start.Add(time.Minute)
-	return newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, chore.Scope{Head: "h", NextCursor: "c"}, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
+	return newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, chore.Scope{Head: "h", NextCursor: "c"}, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{}, io.Discard)
 }
 
 func TestSettleRun_CompleteAppendsSettled(t *testing.T) {

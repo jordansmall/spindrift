@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -300,7 +298,7 @@ func TestSweep_AlreadyInFlightSkipsSettle(t *testing.T) {
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
 	var out Outcome
 	var err error
-	stdout := captureStdout(t, func() {
+	stdout := captureSweepOutput(t, r, func() {
 		out, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {
@@ -1755,7 +1753,7 @@ func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	var out Outcome
 	var err error
-	stdout := captureStdout(t, func() {
+	stdout := captureSweepOutput(t, r, func() {
 		out, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {
@@ -2069,7 +2067,7 @@ func TestSweep_PatchPRLookupErrorsFallsBackToPromoteKeepsBranch(t *testing.T) {
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	var out Outcome
 	var err error
-	stdout := captureStdout(t, func() {
+	stdout := captureSweepOutput(t, r, func() {
 		out, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {
@@ -2112,7 +2110,7 @@ func TestSweep_PatchBranchCleanupFailsStillFallsBackToPromote(t *testing.T) {
 	r := New(backend, tree, fc.AsIssueFiler(), newBox, patchTestPolicy(), func() time.Time { return now }).WithPatchForge(pf, &fakePatchGate{})
 	var out Outcome
 	var err error
-	stdout := captureStdout(t, func() {
+	stdout := captureSweepOutput(t, r, func() {
 		out, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {
@@ -2574,36 +2572,15 @@ func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
 	}
 }
 
-// captureStdout runs fn with os.Stdout redirected to a pipe and returns
-// everything it printed -- settle's status lines are fmt.Printf'd straight
-// to os.Stdout, so this is the only way a test can see one (issue #4075).
-func captureStdout(t *testing.T, fn func()) string {
+// captureSweepOutput points r's status-line writer at a buffer, runs fn, and
+// returns everything r printed -- settle's status lines go
+// to the Runner's out writer, so this is how a test sees one (issue #4075)
+// without swapping the os.Stdout global.
+func captureSweepOutput(t *testing.T, r *Runner, fn func()) string {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	orig := os.Stdout
-	os.Stdout = w
-	defer func() { os.Stdout = orig }()
-
-	// Drained concurrently: a write past the pipe buffer would otherwise block
-	// fn forever, hanging a regression until the go test timeout.
 	var buf bytes.Buffer
-	done := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(&buf, r)
-		done <- err
-	}()
-
+	r.out = &buf
 	fn()
-
-	if err := w.Close(); err != nil {
-		t.Fatalf("close stdout pipe writer: %v", err)
-	}
-	if err := <-done; err != nil {
-		t.Fatalf("read stdout pipe: %v", err)
-	}
 	return buf.String()
 }
 
@@ -2641,7 +2618,7 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 
 	var out Outcome
 	var err error
-	stdout := captureStdout(t, func() {
+	stdout := captureSweepOutput(t, r, func() {
 		out, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {
@@ -2719,7 +2696,7 @@ func TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough(t *testing.T) {
 
 	var out Outcome
 	var err error
-	logs := captureStdout(t, func() {
+	logs := captureSweepOutput(t, r, func() {
 		out, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {

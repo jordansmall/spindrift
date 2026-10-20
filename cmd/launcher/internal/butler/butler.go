@@ -147,13 +147,14 @@ type Runner struct {
 	mergeRead   MergeReader
 	mergeCommit forge.MergeCommitReader
 	warn        io.Writer
+	out         io.Writer
 }
 
 // New constructs a Runner. newBox builds the Dispatcher for one Chore run (a
 // real *dispatch.Factory.NewChore in production, dispatch.Fake in tests).
 // The patch rung stays off until a caller opts in with WithPatchForge.
 func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(dispatch.Chore) dispatch.Dispatcher, policy Policy, now func() time.Time) *Runner {
-	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now, warn: os.Stderr}
+	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now, warn: os.Stderr, out: os.Stdout}
 }
 
 // WithPatchForge opts r into the patch rung (ADR 0057, issue #4074): f backs
@@ -392,7 +393,7 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: p.scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: p.input, ClaimTime: p.claimTime})
 	defer d.Close()
-	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
+	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate}, r.out)
 	if p.arm != nil {
 		if err := p.arm(d, step); err != nil {
 			return Outcome{}, err
@@ -407,7 +408,7 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 			// A live run already holds this Chore's Box (#562): settling would
 			// read the empty result as a crash (#3705). Leave its claim
 			// standing and don't retry.
-			fmt.Printf("    #%s  status=already-in-flight  note=live run continues\n", dispatchkey.Chore(choreName))
+			fmt.Fprintf(r.out, "    #%s  status=already-in-flight  note=live run continues\n", dispatchkey.Chore(choreName))
 			return settled{}
 		},
 		settle, settle)

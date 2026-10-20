@@ -49,7 +49,7 @@ func sweepLog(t *testing.T, policy Policy, tree fakeTree, d *dispatch.Fake, pf *
 		r = r.WithPatchForge(pf, &fakePatchGate{})
 	}
 	var err error
-	logs := captureStdout(t, func() {
+	logs := captureSweepOutput(t, r, func() {
 		_, err = r.Sweep([]string{"bugs"})
 	})
 	if err != nil {
