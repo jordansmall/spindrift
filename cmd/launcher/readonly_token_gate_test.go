@@ -340,9 +340,9 @@ func TestCheckReadOnlyTokenGate_StubBackendWithoutHookWarns(t *testing.T) {
 	}
 }
 
-// A stub backend's token is no launcher knob, so hostToken falls back to the
-// environment; without that the identical-token check would compare against ""
-// and never fire.
+// A stub backend's token is no launcher knob, so hostTokenValue falls back to
+// the environment; without that the identical-token check would compare
+// against "" and never fire.
 func TestCheckReadOnlyTokenGate_StubBackendIdenticalTokenFails(t *testing.T) {
 	stub := backendkit.Strategy{Descriptor: backend.Descriptor{
 		Name:           "stub",

@@ -59,9 +59,9 @@ func TestRegisteredStrategiesShape(t *testing.T) {
 			name:               "forgejo",
 			validAsTracker:     true,
 			validAsCodeForge:   true,
-			tokenEnvVar:        "FORGEJO_TOKEN",
+			tokenEnvVar:        backend.Forgejo.TokenEnvVar,
 			boxTokenEnvVar:     "BOX_FORGEJO_TOKEN",
-			doctorTokenHint:    "FORGEJO_TOKEN",
+			doctorTokenHint:    backend.Forgejo.TokenEnvVar,
 			doctorSlugHint:     "FORGEJO_BASE_URL",
 			outboxRelayCapable: true,
 
@@ -398,7 +398,7 @@ func TestBlankInputDocumentKnobs_ForgejoRejectedLocalRedefaults(t *testing.T) {
 	}}
 	c := minimalValidConfig()
 	c.schemaConfig = loadSchemaConfig()
-	c.setRowKnob("FORGEJO_TOKEN", "tok")
+	c.setRowKnob(backend.Forgejo.TokenEnvVar, "tok")
 	fjBase, _ := c.knobLookup("FORGEJO_BASE_URL")
 	localDir, _ := c.knobLookup("LOCAL_ISSUES_DIR")
 	if fjBase != "" || localDir != "" {
@@ -490,5 +490,27 @@ func TestNewReadContext_UnregisteredBackendIsAnError(t *testing.T) {
 
 	if _, err := newReadContext(dispatchkind.Work, false); err == nil || !strings.Contains(err.Error(), `CODE_FORGE="nope" is not valid`) {
 		t.Errorf("newReadContext err = %v, want the unregistered CODE_FORGE rejected", err)
+	}
+}
+
+// TestHostTokenValue pins the precedence: a resolved row knob wins, the core
+// GitHub token is served from the config field (not the environment), and any
+// other name falls back to the environment.
+func TestHostTokenValue(t *testing.T) {
+	c := minimalValidConfig()
+	c.ghToken = "ghp_core"
+	c.setRowKnob(backend.Forgejo.TokenEnvVar, "fj_knob")
+	t.Setenv(backend.GitHub.TokenEnvVar, "env_gh")
+	t.Setenv(backend.Forgejo.TokenEnvVar, "env_fj")
+	t.Setenv("STUB_TOKEN", "env_stub")
+
+	for env, want := range map[string]string{
+		backend.GitHub.TokenEnvVar:  "ghp_core",
+		backend.Forgejo.TokenEnvVar: "fj_knob",
+		"STUB_TOKEN":                "env_stub",
+	} {
+		if got := c.hostTokenValue(env); got != want {
+			t.Errorf("hostTokenValue(%q) = %q, want %q", env, got, want)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/launcherchecks"
@@ -88,6 +89,20 @@ func backendShared(c config) backendkit.Shared {
 func (c config) knobLookup(env string) (string, bool) {
 	v, ok := c.rowKnobs[env]
 	return v, ok
+}
+
+// hostTokenValue returns the Launcher's own value of the token env var a row
+// names. The GitHub token is a core config field rather than a row knob, so
+// knobLookup does not serve it. Any other unserved name falls back to the
+// environment, which is empty when the host token came from a _FILE/_CMD form.
+func (c config) hostTokenValue(env string) string {
+	if v, ok := c.knobLookup(env); ok {
+		return v
+	}
+	if env == backend.GitHub.TokenEnvVar {
+		return c.ghToken
+	}
+	return os.Getenv(env)
 }
 
 // knobBool reports whether the row knob env resolved to a non-empty value;
