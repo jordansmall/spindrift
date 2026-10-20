@@ -183,6 +183,7 @@ in
           ${../../.github/scripts/eval-stats-render.sh} \
           ${../../.github/scripts/eval-probe.sh} \
           ${../../nix/gate.sh} \
+          ${../../.github/scripts/eval-profile-top.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/helper.bash}
