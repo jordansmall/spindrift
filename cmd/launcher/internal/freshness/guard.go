@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/hostpaths"
 )
 
 // Disposition classifies a stale Probe Result under continuous dispatch.
@@ -34,7 +34,7 @@ type Guard struct {
 
 // NewGuard returns a Guard backed by <pwd>/.spindrift/logs/freshness-stale-rev.
 func NewGuard(pwd string) Guard {
-	return Guard{path: filepath.Join(dispatch.HostLogDirFor(pwd), "freshness-stale-rev")}
+	return Guard{path: filepath.Join(hostpaths.LogDir(pwd), "freshness-stale-rev")}
 }
 
 // Classify decides whether a stale Result is content staleness (Rebuild) or a
