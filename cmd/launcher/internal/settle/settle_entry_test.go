@@ -202,6 +202,45 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	}
 }
 
+// The forgejo adapter's shape (MergeCloser, no IssueCloser) ends the issue
+// closed through the same post-merge backstop, with the usage comment posted
+// once (issue #2259).
+func TestSettle_ImmediateMergeClosesForgejoShapedIssue(t *testing.T) {
+	const issNum = "55"
+	const prURL = "https://github.com/owner/repo/pull/55"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
+	}
+
+	s := newTestSettle(baseConfig(), fc.AsForgejoShaped(), fc)
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if iss, _ := fc.Issue(issNum); iss.State != forge.IssueClosed {
+		t.Errorf("issue state = %q, want %q (settle's post-merge backstop must close it)", iss.State, forge.IssueClosed)
+	}
+	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
+		t.Errorf("CloseMergedIssueCalls = %v, want [%s]", fc.CloseMergedIssueCalls, issNum)
+	}
+	if len(fc.CommentCalls) != 1 {
+		t.Errorf("usage comment posts = %d, want 1", len(fc.CommentCalls))
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("merged outcome must add agent-complete; got labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("merged outcome must remove agent-in-progress; got labels=%v", iss.Labels)
+	}
+}
+
 // ISSUE_TRACKER=local paired with a PRForge Code Forge is a valid
 // combination, and settle's post-merge backstop is scoped to
 // forge.MergeCloser, which the local adapter (AsLocalShaped) does not
