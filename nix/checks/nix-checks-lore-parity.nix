@@ -103,6 +103,13 @@ let
       clause = "--print-build-logs";
     }
     {
+      name = "gate-app";
+      # The in-Box gate itself. A surface that loses it would teach the other
+      # gate, so an agent following it would pay the single-threaded
+      # checks-inbox eval the gate exists to avoid (issue #5862).
+      clause = "nix run .#gate";
+    }
+    {
       name = "build-failed";
       # The bare line a failed check prints without `-L`, which costs a second
       # turn on `nix log`. Bracketed so unrelated "the build failed" prose
