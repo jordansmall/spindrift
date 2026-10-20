@@ -815,3 +815,47 @@ func TestLauncherChecks_DriverCredentials_AdapterFeedsPerTierModels(t *testing.T
 		t.Error("driver-credentials Probe() = nil, want an error for the copilot REVIEW_MODEL")
 	}
 }
+
+// A blank REPO_SLUG on a slug-keyed tracker is one root cause, so exactly one
+// row reports it: repo-slug (issue #5759).
+func TestLauncherChecks_BlankRepoSlugFailsOnlyRepoSlugRow(t *testing.T) {
+	for _, name := range []string{"github", "forgejo"} {
+		t.Run(name, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.issueTracker = name
+			c.codeForge = name
+			c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+			c.setRowKnob("FORGEJO_TOKEN", "tok")
+			c.repoSlug = ""
+			var failed []string
+			for _, ch := range launcherChecks(c) {
+				if _, err := ch.Probe(); err != nil {
+					failed = append(failed, ch.Name)
+				}
+			}
+			if len(failed) != 1 || failed[0] != "repo-slug" {
+				t.Errorf("failing rows = %v, want [repo-slug]", failed)
+			}
+		})
+	}
+}
+
+// Only the slug failure moves to repo-slug: forgejo's own knob errors still
+// fail issue-tracker-config alongside a blank slug.
+func TestLauncherChecks_BlankRepoSlugKeepsForgejoTokenError(t *testing.T) {
+	c := minimalValidConfig()
+	c.issueTracker = "forgejo"
+	c.codeForge = "forgejo"
+	c.setRowKnob("FORGEJO_BASE_URL", "https://codeberg.org")
+	c.repoSlug = ""
+	for _, ch := range launcherChecks(c) {
+		if ch.Name != "issue-tracker-config" {
+			continue
+		}
+		if _, err := ch.Probe(); err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN") {
+			t.Errorf("issue-tracker-config Probe() = %v, want an error naming FORGEJO_TOKEN", err)
+		}
+		return
+	}
+	t.Fatal("no issue-tracker-config row")
+}

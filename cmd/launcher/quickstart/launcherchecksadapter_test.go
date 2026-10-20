@@ -217,13 +217,33 @@ func TestQuickstartCheckDeps_BindsEachStrategyValidators(t *testing.T) {
 }
 
 func TestQuickstartCheckDeps_GithubValidatorPassesWizardAnswers(t *testing.T) {
-	a := validAnswers()
-	if _, err := launcherRow(t, a, "github", "issue-tracker-config").Probe(); err != nil {
+	if _, err := launcherRow(t, validAnswers(), "github", "issue-tracker-config").Probe(); err != nil {
 		t.Errorf("issue-tracker-config Probe() = %v, want nil", err)
 	}
-	a.repoSlug = ""
-	if _, err := launcherRow(t, a, "github", "issue-tracker-config").Probe(); err == nil || !strings.Contains(err.Error(), "REPO_SLUG") {
-		t.Errorf("issue-tracker-config Probe() = %v, want an error naming REPO_SLUG", err)
+}
+
+// A blank slug is reported by repo-slug alone, not twice (issue #5759).
+func TestQuickstartCheckDeps_BlankSlugFailsOnlyRepoSlugRow(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a    answers
+	}{
+		{"github", validAnswers()},
+		{"forgejo", forgejoAnswers()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := tc.a
+			a.repoSlug = ""
+			var failed []string
+			for _, ch := range launcherchecks.All(quickstartCheckConfig(a, tc.name), quickstartCheckDeps(a)) {
+				if _, err := ch.Probe(); err != nil {
+					failed = append(failed, ch.Name)
+				}
+			}
+			if len(failed) != 1 || failed[0] != "repo-slug" {
+				t.Errorf("failing rows = %v, want [repo-slug]", failed)
+			}
+		})
 	}
 }
 

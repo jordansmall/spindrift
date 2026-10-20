@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 )
@@ -204,7 +205,7 @@ func CrossKnobChecks(c Config, d Deps) []doctor.Check {
 			remedy:     "set ISSUE_TRACKER to a supported value and fill in any tracker-specific fields it requires",
 			validAs:    func(r Backend) bool { return r.ValidAsTracker },
 			validNames: d.TrackerNames,
-			validate:   func(r Backend) func() error { return r.ValidateTracker },
+			validate:   func(r Backend) func() error { return withoutRepoSlugError(r.ValidateTracker) },
 		}, d),
 		crossKnobCheck(crossKnobSpec{
 			rowName:    "code-forge-config",
@@ -244,5 +245,22 @@ func JoinOxford(words []string) string {
 		return words[0] + " or " + words[1]
 	default:
 		return strings.Join(words[:len(words)-1], ", ") + ", or " + words[len(words)-1]
+	}
+}
+
+// withoutRepoSlugError drops a blank-REPO_SLUG failure from fn: the repo-slug
+// row owns it, so one root cause shows on one row. It matches only the error
+// RequireRepoSlug returns, not errors.Is, so a joined error never hides a
+// non-slug failure. A nil fn must stay nil: crossKnobCheck reads nil as "no
+// validation".
+func withoutRepoSlugError(fn func() error) func() error {
+	if fn == nil {
+		return nil
+	}
+	return func() error {
+		if err := fn(); errors.Unwrap(err) != backendkit.ErrRepoSlugRequired {
+			return err
+		}
+		return nil
 	}
 }
