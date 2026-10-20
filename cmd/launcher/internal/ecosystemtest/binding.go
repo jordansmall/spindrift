@@ -110,19 +110,21 @@ func (c *replay) binding() ([]byte, error) {
 // its cleanup: bindregistry reads git-tracked paths only, and a corpus repo/
 // inside spindrift's own checkout would otherwise answer from the outer repo. A
 // case with no repo/ yields an empty repository.
-func (c *replay) gitCopy() (work string, cleanup func(), err error) {
-	work, err = os.MkdirTemp("", "ecosystemtest-repo-")
+func (c *replay) gitCopy() (_ string, _ func(), err error) {
+	dir, err := os.MkdirTemp("", "ecosystemtest-repo-")
 	if err != nil {
 		return "", nil, err
 	}
-	cleanup = func() { os.RemoveAll(work) }
+	remove := func() { os.RemoveAll(dir) }
+	// Remove the local dir, not a named result: a failure return zeroes those
+	// before this defer runs.
 	defer func() {
 		if err != nil {
-			cleanup()
+			remove()
 		}
 	}()
 	if _, serr := os.Stat(c.repo()); serr == nil {
-		if err = os.CopyFS(work, os.DirFS(c.repo())); err != nil {
+		if err = os.CopyFS(dir, os.DirFS(c.repo())); err != nil {
 			return "", nil, err
 		}
 	} else if !errors.Is(serr, fs.ErrNotExist) {
@@ -135,12 +137,12 @@ func (c *replay) gitCopy() (work string, cleanup func(), err error) {
 		{"add", "-A"},
 		{"-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "corpus"},
 	} {
-		cmd := exec.Command("git", append([]string{"-C", work, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
 		if out, cerr := cmd.CombinedOutput(); cerr != nil {
 			return "", nil, fmt.Errorf("git %v: %w: %s", args, cerr, out)
 		}
 	}
-	return work, cleanup, nil
+	return dir, remove, nil
 }
 
 // inTreeRewrite runs ApplyInTreeBinding, the in-tree rewrite's only exported
