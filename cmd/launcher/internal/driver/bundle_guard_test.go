@@ -167,16 +167,32 @@ func TestOnlyButlerBinariesReachTheHostBundle(t *testing.T) {
 	}
 }
 
+// hostSidePackages are the packages the in-Box binaries' closures must not
+// link: the butler sweep's (hostbundle through butler), dispatch, and the
+// Records store, dispatchrecord (issue #5822). chore needs no entry: it
+// imports dispatchrecord, so any reach to it is already caught.
+var hostSidePackages = []string{
+	"hostbundle", "recordsdigest", "tuning", "settle", "butler", "dispatch", "dispatchrecord",
+}
+
+// hostSideProblems names each hostSidePackages entry in deps, the -deps
+// closure of the module's bin binary.
+func hostSideProblems(bin string, deps []string) []string {
+	var problems []string
+	for _, f := range hostSidePackages {
+		if slices.Contains(deps, module+"/internal/"+f) {
+			problems = append(problems, fmt.Sprintf("%s's closure reaches internal/%s", bin, f))
+		}
+	}
+	return problems
+}
+
 // TestBoxAndDriverExecLinkNoHostSide pins that the in-Box binaries' closures
-// do not grow the butler sweep's packages.
+// do not grow the butler sweep's packages, dispatch or the Records store.
 func TestBoxAndDriverExecLinkNoHostSide(t *testing.T) {
-	forbidden := []string{"hostbundle", "recordsdigest", "tuning", "settle", "butler"}
-	for _, main := range []string{"/box", "/driver-exec"} {
-		deps := strings.Fields(goList(t, "-deps", module+main))
-		for _, f := range forbidden {
-			if slices.Contains(deps, module+"/internal/"+f) {
-				t.Errorf("%s's closure reaches internal/%s", main[1:], f)
-			}
+	for _, bin := range []string{"box", "driver-exec"} {
+		for _, p := range hostSideProblems(bin, strings.Fields(goList(t, "-deps", module+"/"+bin))) {
+			t.Error(p)
 		}
 	}
 }
@@ -220,5 +236,17 @@ func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
 	}
 	if !slices.Equal(gotHost, wantHost) {
 		t.Errorf("host bundleProblems = %q, want %q", gotHost, wantHost)
+	}
+}
+
+func TestHostSideProblemsClassifiesPlantedReach(t *testing.T) {
+	m := module
+	planted := []string{
+		"fmt", m + "/internal/dispatch", m + "/internal/dispatchrecord",
+		m + "/internal/dispatchkey", m + "/internal/dispatchkind", m + "/internal/hostpaths",
+	}
+	want := []string{"box's closure reaches internal/dispatch", "box's closure reaches internal/dispatchrecord"}
+	if got := hostSideProblems("box", planted); !slices.Equal(got, want) {
+		t.Errorf("hostSideProblems = %q, want %q", got, want)
 	}
 }
