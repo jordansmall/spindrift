@@ -28,33 +28,40 @@ var yarnRow = Row{
 	ConfigParser:  parseYarnRegistryConfig,
 }
 
-// parseYarnRegistryConfig ignores .yarnrc.yml indentation and nesting, taking
-// every "npmRegistryServer: <url>" line, top-level default or under npmScopes.
+// parseYarnRegistryConfig takes every "npmRegistryServer: <url>" line,
+// top-level default or under npmScopes, marking the latter Scoped. The only
+// indentation it tracks is whether a column-0 key opened the npmScopes block.
 // That covers the shapes yarn berry emits without a YAML library for one key;
 // adding one is an ADR 0048 promotion trigger, not a prohibition.
 func parseYarnRegistryConfig(content string) ([]Declaration, bool, error) {
-	seenURL := make(map[string]bool)
+	indexByURL := make(map[string]int)
 	var out []Declaration
 	sawDeclaration := false
+	inScopes := false
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") {
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		key, value, ok := splitYAMLKeyValue(trimmed)
+		if line[0] != ' ' && line[0] != '\t' {
+			// A column-0 key opens or closes the npmScopes block; any other
+			// column-0 line (e.g. a "---" document marker) closes it too.
+			inScopes = ok && key == "npmScopes"
+		}
 		if !ok || key != "npmRegistryServer" {
 			continue
 		}
 		sawDeclaration = true
 		value = unquoteYAMLScalar(stripYAMLTrailingComment(value))
 		host, upstreamBaseURL, ok := httpAbsoluteURL(value)
-		if !ok || seenURL[upstreamBaseURL] {
+		if !ok {
 			continue
 		}
-		seenURL[upstreamBaseURL] = true
-		out = append(out, Declaration{
+		out = addNpmFamilyDeclaration(out, indexByURL, Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
+			Scoped:          inScopes,
 		})
 	}
 

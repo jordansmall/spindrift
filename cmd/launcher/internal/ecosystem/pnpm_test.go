@@ -19,7 +19,7 @@ catalog:
 	}
 	want := []Declaration{
 		{Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"},
-		{Host: "scoped-pnpm.example.com", UpstreamBaseURL: "https://scoped-pnpm.example.com/registry"},
+		{Host: "scoped-pnpm.example.com", UpstreamBaseURL: "https://scoped-pnpm.example.com/registry", Scoped: true},
 	}
 	if len(decls) != len(want) {
 		t.Fatalf("decls = %+v, want %+v", decls, want)
