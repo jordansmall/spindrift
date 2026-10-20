@@ -20,8 +20,8 @@ import (
 // naming individual *_gen.go files.
 var generatedHeader = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)
 
-// bundleFile is the one core file that wires every backend by name (ADR 0068).
-const bundleFile = "internal/driver/bundle/bundle.go"
+// bundleFile is the one core file that wires every backend (ADR 0068).
+const bundleFile = "internal/driver/bundle/backends.go"
 
 type backendNameHit struct {
 	Pos   string

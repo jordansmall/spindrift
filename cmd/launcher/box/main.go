@@ -41,7 +41,7 @@ import (
 	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
-	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers and backends
 	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
