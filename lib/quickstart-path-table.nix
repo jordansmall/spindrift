@@ -65,6 +65,14 @@ in
 {
   paths = schemaRootedPaths // structuralRootedPaths;
   knobs = quickstartKnobs;
+  # The host `git config` keys the wizard reads to pre-fill the git identity
+  # prompts: every schema member carrying a hostGitConfigKey.
+  hostGitConfigKeys = builtins.listToAttrs (
+    map (name: {
+      inherit name;
+      value = schema.${name}.hostGitConfigKey;
+    }) (builtins.filter (name: schema.${name} ? hostGitConfigKey) (builtins.attrNames schema))
+  );
   # Quickstart omits the codeForge line when the chosen row equals this.
   defaultCodeForge = schema.codeForge.default;
 }

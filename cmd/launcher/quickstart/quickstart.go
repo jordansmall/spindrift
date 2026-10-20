@@ -449,8 +449,8 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 			return fmt.Errorf("%w — install it, or rerun quickstart and choose a different runtime", rerr)
 		}
 	}
-	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
-	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
+	gitUserName := promptDefault("Git user name", env.GitConfig(hostGitConfigKeyGitUserName))
+	gitUserEmail := promptDefault("Git user email", env.GitConfig(hostGitConfigKeyGitUserEmail))
 
 	if strategy.AcquireToken == nil {
 		return fmt.Errorf("backend %q declares no AcquireToken hook, so quickstart cannot set up its token", strategy.Name)

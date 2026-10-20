@@ -31,6 +31,14 @@ const pathRuntime = "infra.runtime"
 // codeForge line when the chosen backend equals it.
 const defaultCodeForge = "github"
 
+// hostGitConfigKeyGitUserEmail is the host git config key the wizard reads
+// to pre-fill the gitUserEmail prompt.
+const hostGitConfigKeyGitUserEmail = "user.email"
+
+// hostGitConfigKeyGitUserName is the host git config key the wizard reads
+// to pre-fill the gitUserName prompt.
+const hostGitConfigKeyGitUserName = "user.name"
+
 // quickstartKnob is one flakeOption knob of a quickstart-capable backend row:
 // its nix option path and schema default.
 type quickstartKnob struct{ path, dflt string }
