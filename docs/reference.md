@@ -1406,11 +1406,14 @@ Driver and the missing attribute, before an image is ever produced.
 `sessionCacheDirRelative` and, within `argvShape`, `promptFlag`/`agentsFlag`
 are the fields this check treats as optional (`argvShape` itself is still a
 required top-level attribute); `providerNamespacedModels` is optional too,
-and `assertShape` does not check it. When `sessionCacheDirRelative` is
-present, the same check also validates its shape (above). Cross-half parity
-with the Go registry (`cmd/launcher/internal/driver`) stays name-only
-by design (ADR 0009) — each half enforces its own entries'
-completeness independently.
+and `assertShape` does not check its value. An attribute outside
+`requiredAttrs` and `optionalAttrs` (both in `lib/drivers/default.nix`) is
+refused, so a misspelt name fails the build; a new Driver attribute is added
+to one of those lists. When
+`sessionCacheDirRelative` is present, the same check also validates its
+shape (above). Cross-half parity with the Go registry
+(`cmd/launcher/internal/driver`) stays name-only by design (ADR 0009) —
+each half enforces its own entries' completeness independently.
 
 A separate validator, `assertArgvShape`, checks `argvShape`'s internal
 structure — `assertShape` above only confirms the attribute is present, not

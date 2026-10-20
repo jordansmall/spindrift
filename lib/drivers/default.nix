@@ -30,6 +30,7 @@ let
   # `packageLinks` (home-relative path -> path inside the Driver's package):
   # lib/image.nix symlinks each into the home layout, failing the build when the
   # package has no such path.
+  # Every optional attribute is listed in optionalAttrs below.
   requiredAttrs = [
     "name"
     "package"
@@ -41,6 +42,25 @@ let
     "argvShape"
     "credentials"
   ];
+
+  # Together with requiredAttrs this is the closed set of Driver row
+  # attributes: assertShape refuses any other, so a misspelt optional attribute
+  # cannot silently read as absent (e.g. lib/mkHarness.nix's
+  # `providerNamespacedModels or false`). Add a new attribute here.
+  optionalAttrs = [
+    "agentFilesDirRelative"
+    "authContent"
+    "bashTimeoutEnv"
+    "configFiles"
+    "effortOnModelLevels"
+    "envCommon"
+    "envFiles"
+    "packageLinks"
+    "providerNamespacedModels"
+    "sessionCacheDirRelative"
+    "subagents"
+  ];
+  knownAttrs = requiredAttrs ++ optionalAttrs;
 
   # A credential rule is plain data (ADR 0066 decision 7) so it can travel in
   # the launcher input document (ADR 0020). Unknown keys are refused so a
@@ -156,6 +176,7 @@ let
     driverName: entry:
     let
       missing = lib.filter (attr: !(entry ? ${attr})) requiredAttrs;
+      unknown = lib.filter (attr: !(lib.elem attr knownAttrs)) (builtins.attrNames entry);
       # isString is checked first so a non-string value short-circuits the
       # segment check rather than throwing a type error out of splitString.
       # Keep the path canonical: homelayout.PopulateHome cleans it before its
@@ -217,6 +238,9 @@ let
         lib.optional (
           missing != [ ]
         ) "Driver '${driverName}' is missing required attribute(s): ${lib.concatStringsSep ", " missing}"
+        ++
+          lib.optional (unknown != [ ])
+            "Driver '${driverName}' has unknown attribute(s): ${lib.concatStringsSep ", " unknown} (lib/drivers/${driverName}.nix; the closed set is requiredAttrs ++ optionalAttrs in lib/drivers/default.nix)"
         ++ lib.optional sessionCacheDirRelativeBad "Driver '${driverName}' has an invalid sessionCacheDirRelative (must be a non-empty relative path with no empty, \".\" or \"..\" segment -- i.e. no leading/trailing or doubled slash), got: ${
           if builtins.isString entry.sessionCacheDirRelative then
             lib.generators.toPretty { } entry.sessionCacheDirRelative
