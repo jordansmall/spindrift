@@ -1,10 +1,10 @@
 {
   "inTree": {
     "configPath": ".npmrc",
-    "content": "registry=http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-remote/\n@acme:registry=http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-local/\n",
+    "content": "registry=http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-remote/\nregistry=http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-other/\n",
     "outcome": "applied"
   },
   "warnings": [
-    "==> WARNING: route \"acme-jfrog-test\" has 2 npm-tagged paths (/artifactory/api/npm/npm-remote, /artifactory/api/npm/npm-local); npm_config_registry is ambiguous and will not be bound"
+    "==> WARNING: route \"acme-jfrog-test\" has 2 unscoped npm-tagged paths (/artifactory/api/npm/npm-remote, /artifactory/api/npm/npm-other); npm_config_registry is ambiguous and will not be bound"
   ]
 }

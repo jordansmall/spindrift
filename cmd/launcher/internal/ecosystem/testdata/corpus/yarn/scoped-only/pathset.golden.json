@@ -1,0 +1,31 @@
+{
+  "derived": [
+    {
+      "Host": "npm.acme.test",
+      "Origin": "https://npm.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/",
+          "scoped": true
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/",
+          "scoped": true
+        }
+      ],
+      "matchHost": "npm.acme.test",
+      "upstream": "https://npm.acme.test"
+    }
+  ]
+}

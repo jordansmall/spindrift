@@ -1,0 +1,13 @@
+{
+  "envExports": [
+    {
+      "Name": "npm_config_registry",
+      "Value": "http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-remote/"
+    }
+  ],
+  "inTree": {
+    "configPath": ".npmrc",
+    "content": "registry=http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-remote/\n@acme:registry=http://127.0.0.1:27182/acme-jfrog-test/artifactory/api/npm/npm-local/\n",
+    "outcome": "applied"
+  }
+}
