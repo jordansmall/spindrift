@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -817,14 +818,18 @@ func validateAllowPatterns(label string, patterns []string) error {
 // validateDeclaredPath validates the path key of one [routes.ecosystems.<name>]
 // block. It bans "$", "`", and "\" because a declared path can land in a
 // Groovy double-quoted literal, where "$" interpolates at load time, or in a
-// shell-sourced export line; it also bans whitespace, "?", and "#".
+// shell-sourced export line; it also bans whitespace (any Unicode space),
+// control characters, "?", and "#".
 // It strips every trailing "/", so "//" cannot pass the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
 	if err := rejectURLDelimiters(label, field, value); err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(value) != value || strings.ContainsAny(value, " \t\r\n") {
+	if strings.IndexFunc(value, unicode.IsSpace) >= 0 {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain whitespace", label, field, value)
+	}
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain a control character", label, field, value)
 	}
 	if strings.ContainsAny(value, "$`\\") {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain %q, %q, or %q", label, field, value, "$", "`", "\\")
