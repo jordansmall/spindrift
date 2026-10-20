@@ -253,6 +253,8 @@ let
   # RESEARCH_VERDICTS-rendered text, not the registry's unrendered default.
   promptContract = import ./prompt-contract.nix;
   fragmentPaths = import ./fragment-paths.nix;
+  # Shared per-file scan of the default prompt corpus (issue #5858).
+  corpusScan = import ./prompt-corpus-scan.nix;
   inherit (promptContract) byId;
 
   # An alias for the fragmentsDir param above, kept so this file's existing
@@ -817,17 +819,24 @@ let
   # on. Registry and rationale: lib/removed-fragment-vars.nix.
   removedFragmentVarHits =
     let
+      # A source left at its default resolves to the shared per-file scan in
+      # lib/prompt-corpus-scan.nix; an override is scanned here. A prompt arg
+      # defaults to a readFile string, so "left at default" is string equality.
+      scanOf =
+        file: text:
+        let
+          cached = corpusScan.prompts.${file} or null;
+        in
+        if cached != null && cached.text == text then cached else corpusScan.scan text;
       promptArgs = {
-        inherit
-          scoutPrompt
-          reviewPrompt
-          reviewAxisPrompt
-          filerPrompt
-          workerPrompt
-          conflictResolvePrompt
-          ;
+        scoutPrompt = scanOf "scout-prompt.md" scoutPrompt;
+        reviewPrompt = scanOf "review-prompt.md" reviewPrompt;
+        reviewAxisPrompt = scanOf "review-axis-prompt.md" reviewAxisPrompt;
+        filerPrompt = scanOf "filer-prompt.md" filerPrompt;
+        workerPrompt = scanOf "worker-prompt.md" workerPrompt;
+        conflictResolvePrompt = scanOf "conflict-resolve-prompt.md" conflictResolvePrompt;
       }
-      // lib.listToAttrs (map (e: lib.nameValuePair e.source e.raw) kindPrompts);
+      // lib.listToAttrs (map (e: lib.nameValuePair e.source (scanOf e.file e.raw)) kindPrompts);
       labelled = label: attrs: lib.mapAttrs' (n: v: lib.nameValuePair "${label} ${n}" v) attrs;
       fragmentFiles = builtins.listToAttrs (
         # A fragment missing from a Consumer fragmentsDir renders empty, so
@@ -835,7 +844,11 @@ let
         map
           (path: {
             name = path;
-            value = builtins.readFile (fragmentsDir + "/${path}");
+            value =
+              if fragmentsDir == corpusScan.fragmentsDir then
+                corpusScan.fragments.${path} or (corpusScan.scan (builtins.readFile (fragmentsDir + "/${path}")))
+              else
+                corpusScan.scan (builtins.readFile (fragmentsDir + "/${path}"));
           })
           (
             builtins.filter (path: builtins.pathExists (fragmentsDir + "/${path}")) (
@@ -843,27 +856,12 @@ let
             )
           )
       );
-      choreFiles = lib.mapAttrs (n: _: builtins.readFile (choresDir + "/${n}")) (
-        lib.filterAttrs (n: t: t != "directory" && lib.hasSuffix ".md" n) (builtins.readDir choresDir)
-      );
+      choreFiles =
+        if choresDir == corpusScan.choresDir then corpusScan.chores else corpusScan.scanDir choresDir;
       sources =
         labelled "prompt arg" promptArgs
         // labelled "fragment file" fragmentFiles
         // labelled "chore file" choreFiles;
-      # Not lib.hasInfix: its `.*X.*` regex recurses per character under a
-      # std::regex Nix (CI's) and overflows the evaluator's stack on a whole
-      # prompt. Same split idiom as lib/prompt-contract.nix's
-      # hasDirectPlaceholder, braces in a character class. One split per
-      # source keeps eval cost flat in the registry's size. The name class
-      # excludes `$`, `{` and `}` so `${${TDD_STEP}}` still captures TDD_STEP;
-      # a registry key outside the class is never matched, so keys must fit it.
-      mentioned =
-        text:
-        builtins.listToAttrs (
-          map (m: lib.nameValuePair (builtins.head m) true) (
-            builtins.filter builtins.isList (builtins.split "\\$[{]([A-Za-z0-9_]+)[}]" text)
-          )
-        );
     in
     lib.concatMap (
       source:
@@ -872,7 +870,7 @@ let
         inherit (removedFragmentVars.${name}) issue;
         severity = removedFragmentVars.${name}.severity or "removed";
         replacement = removedFragmentVars.${name}.replacement or null;
-      }) (lib.attrNames (builtins.intersectAttrs (mentioned sources.${source}) removedFragmentVars))
+      }) (lib.attrNames (builtins.intersectAttrs sources.${source}.vars removedFragmentVars))
     ) (lib.attrNames sources);
 
   removedFragmentVarViolations = builtins.filter (v: v.severity == "removed") removedFragmentVarHits;
