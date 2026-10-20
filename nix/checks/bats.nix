@@ -83,9 +83,11 @@ let
     # classifier reads its Go helper and reader list beside it (issue #5158).
     CI_CHANGES_SH = "${../../.github/scripts}/ci-changes.sh";
     CI_OK_SH = ../../.github/scripts/ci-ok.sh;
-    # Eval-cost table renderer and marginal-cost probe runner (issue #5860).
+    # Eval-cost table renderer and marginal-cost probe runner (issue #5860),
+    # and the eval-profile top-N renderer (issue #5861).
     EVAL_STATS_RENDER_SH = ../../.github/scripts/eval-stats-render.sh;
     EVAL_PROBE_SH = ../../.github/scripts/eval-probe.sh;
+    EVAL_PROFILE_TOP_SH = ../../.github/scripts/eval-profile-top.sh;
     # tests/gate.bats (issue #5862) runs the parallel-eval gate script against
     # stubbed nix-eval-jobs/nix.
     GATE_SH = ../../nix/gate.sh;
