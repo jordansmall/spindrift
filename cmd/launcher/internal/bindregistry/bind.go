@@ -169,11 +169,11 @@ func resolveGate(deps GateDeps) Gate {
 // so the two writes cannot drift (issue #3201). It returns ok == false, having
 // printed why, when both the row's home var and $HOME are unset: concatenation would
 // otherwise resolve under the cwd, or to "/.gradle", which MkdirAll creates as root.
-func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Row) (string, bool) {
+func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Row, getenv func(string) string) (string, bool) {
 	hc := row.HomeConfig
-	home := os.Getenv(hc.HomeEnvVar)
+	home := getenv(hc.HomeEnvVar)
 	if home == "" {
-		home = os.Getenv("HOME")
+		home = getenv("HOME")
 		if home == "" {
 			fmt.Fprintf(stdout, "driver-exec bind-registry: %s and HOME are both unset, cannot resolve a %s home\n", hc.HomeEnvVar, row.Name)
 			return "", false
@@ -188,6 +188,12 @@ func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Row) (string, bool) {
 	return path, true
 }
 
+// ReadyGate is the ready gate a replay drives BindHomes through without probing
+// or spawning a Forwarder (the ecosystemtest kit).
+func ReadyGate(manifest registrymanifest.Manifest) Gate {
+	return Gate{outcome: gateReady, manifest: manifest, port: ForwarderPort}
+}
+
 // BindHomes is bindings mode: it computes the Go, npm, cargo and gradle env exports
 // from gate.port, hands them to publish, then writes each HomeConfig row's home config.
 // publish runs before the home writes because the verb's env file was always written
@@ -195,8 +201,9 @@ func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Row) (string, bool) {
 // gate is closed or the manifest carries no route prefix. It returns false on a failed
 // publish or write. Everything downstream of a gateReady gate is transport-blind,
 // since ecosystem tooling never needs to know which transport the manifest named
-// (issue #3141).
-func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish PublishFunc) bool {
+// (issue #3141). getenv is the environment the renderers and home-path
+// resolution read, so a replay supplies its own rather than the process's.
+func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish PublishFunc, getenv func(string) string) bool {
 	switch gate.outcome {
 	case gateAbsent:
 		return true
@@ -223,7 +230,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 	var exports []ecosystem.EnvExport
 	var warnings []string
 	for _, row := range ecosystem.EnvExportRowsOf(rows) {
-		rowExports, rowWarnings := row.EnvExports(port, prefix, os.Getenv, gate.manifest.Routes)
+		rowExports, rowWarnings := row.EnvExports(port, prefix, getenv, gate.manifest.Routes)
 		exports = append(exports, rowExports...)
 		warnings = append(warnings, rowWarnings...)
 	}
@@ -237,7 +244,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 	// is exactly the set that summary looks up, so its lookup never misses.
 	homeConfigPaths := make(map[string]string)
 	for _, row := range ecosystem.HomeConfigRowsOf(rows) {
-		path, ok := resolveHomeConfigPath(stdout, row)
+		path, ok := resolveHomeConfigPath(stdout, row, getenv)
 		if !ok {
 			return false
 		}
@@ -250,9 +257,10 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 
 	// These lines print only after every fallible write above has succeeded:
 	// printing earlier (issue #2931) would claim a binding even when a later
-	// write fails and the caller treats the run as "nothing applied". The "go
-	// bound" line reads the computed GOPROXY export rather than re-deriving the
-	// URL, which a host-rooted route (issue #3260) makes wrong or absent.
+	// write fails and the caller treats the run as "nothing applied". A row's
+	// AnnounceBindingValue line reads its computed BindingEnvVar export rather
+	// than re-deriving the URL, which a host-rooted route (issue #3260) makes
+	// wrong or absent.
 	for _, w := range warnings {
 		fmt.Fprintln(stdout, w)
 	}
@@ -261,8 +269,13 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 		forwarderLine += " — " + summary
 	}
 	fmt.Fprintln(stdout, forwarderLine)
-	if goProxy, ok := ecosystem.ExportValue(exports, "GOPROXY"); ok {
-		fmt.Fprintln(stdout, "==> go bound to it via GOPROXY="+goProxy)
+	for _, row := range rows {
+		if !row.AnnounceBindingValue {
+			continue
+		}
+		if value, ok := ecosystem.ExportValue(exports, row.BindingEnvVar); ok {
+			fmt.Fprintln(stdout, "==> "+row.Name+" bound to it via "+row.BindingEnvVar+"="+value)
+		}
 	}
 
 	return true
@@ -576,7 +589,7 @@ func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosyste
 			fmt.Fprintln(stdout, w)
 		}
 
-		path, ok := resolveHomeConfigPath(stdout, row)
+		path, ok := resolveHomeConfigPath(stdout, row, os.Getenv)
 		if !ok {
 			failed = true
 			continue

@@ -99,7 +99,7 @@ func runBindRegistryWithRows(args []string, rows []ecosystem.Row, stdout io.Writ
 	}
 
 	if *lockfileScanWorkDir != "" {
-		bindregistry.WarnStaleLockfilesRows(stdout, *lockfileScanWorkDir, rows)
+		bindregistry.WarnStaleLockfilesRows(stdout, *lockfileScanWorkDir, rows, os.Getenv)
 	}
 
 	// Resolved only when a mode that needs a live Forwarder will run (issue
@@ -135,7 +135,7 @@ func runBindRegistryWithRows(args []string, rows []ecosystem.Row, stdout io.Writ
 	}
 
 	if *bindingsEnvOutput != "" {
-		if !bindregistry.BindHomes(stdout, rows, gate, writeEnvFile(stdout, *bindingsEnvOutput, "write bindings env output:")) {
+		if !bindregistry.BindHomes(stdout, rows, gate, writeEnvFile(stdout, *bindingsEnvOutput, "write bindings env output:"), os.Getenv) {
 			return 1
 		}
 	}

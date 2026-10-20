@@ -93,6 +93,11 @@ type Row struct {
 	// the exports (see ExportValue).
 	BindingEnvVar string
 
+	// AnnounceBindingValue makes BindHomes print a dedicated "==> <Name> bound
+	// to it via <BindingEnvVar>=<value>" line after the Forwarder line when the
+	// export exists. It requires BindingEnvVar.
+	AnnounceBindingValue bool
+
 	// RewriteRows is empty for a row declaring no response rewrite. The two
 	// today are cargo's sparse-index config.json "dl" row (ADR 0045) and npm's
 	// packument dist.tarball row (issue #3401).

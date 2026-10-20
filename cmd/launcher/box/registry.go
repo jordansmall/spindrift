@@ -46,7 +46,7 @@ func realRegistryDeps() registryDeps {
 			})
 		},
 		BindHomes: func(w io.Writer, gate bindregistry.Gate, publish bindregistry.PublishFunc) bool {
-			return bindregistry.BindHomes(w, ecosystem.Table, gate, publish)
+			return bindregistry.BindHomes(w, ecosystem.Table, gate, publish, os.Getenv)
 		},
 		ApplyInTree: func(w io.Writer, workDir string, gate bindregistry.Gate, publish bindregistry.PublishFunc) bool {
 			return bindregistry.ApplyInTree(w, workDir, ecosystem.Table, gate, publish)
