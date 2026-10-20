@@ -23,6 +23,7 @@ let
     promptFile = "fixture-prompt.md";
     prompt = null;
   };
+  effortLib = import ../../../lib/effort-on-model.nix { inherit (pkgs) lib; };
 in
 {
   drivers-pi-attributes-pinned =
@@ -384,7 +385,6 @@ in
   # opt-out drops it first), so the resolution is exercised directly.
   drivers-pi-effort-resolves-model-or-fails =
     let
-      effortLib = import ../../../lib/effort-on-model.nix { inherit (pkgs) lib; };
       resolve =
         coordinatorModel: effort:
         effortLib.resolve {
@@ -422,4 +422,54 @@ in
       && hasInfix "high" (effortLib.message.noModel "fixture" "high")
     ) "the no-model message must name the role and the effort";
     pkgs.runCommand "drivers-pi-effort-resolves-model-or-fails" { } "touch $out";
+
+  # Issue #5811: a model already ending in a known `:<level>` keeps that
+  # suffix and the role's effort is dropped, so no `:low:high` doubling.
+  drivers-pi-effort-suffixed-model-wins =
+    let
+      render =
+        coordinatorModel: model: effort:
+        let
+          resolved = effortLib.resolve {
+            roster = [ (piFixtureEntry // { inherit model effort; }) ];
+            levels = entry.effortOnModelLevels;
+            inherit coordinatorModel;
+          };
+        in
+        (entry.agentFilesTemplate { roster = resolved; }).".pi/agent/agents/fixture.md";
+      own = render "" "github-copilot/some-model:low" "high";
+      inherited = render "anthropic/x:low" "" "high";
+      tag = render "" "ollama/llama:8b" "high";
+      noEffort = render "" "github-copilot/some-model:low" "";
+      rejectsBad =
+        !(builtins.tryEval (builtins.deepSeq (render "" "github-copilot/some-model:low" "bogus") true))
+        .success;
+      harness = fixtures.piHarnessWith (
+        fixtures.opencodeNamespacedDefaults // { reviewModel = "anthropic/claude-opus-5:low"; }
+      );
+      reviewer =
+        (harness.internals.driverEntry.agentFilesTemplate { inherit (harness.internals) roster; })
+        .".pi/agent/agents/reviewer.md";
+    in
+    assert assertMsg (
+      hasInfix ''model: "github-copilot/some-model:low"'' own
+      && hasInfix ''reasoningEffort: "low"'' own
+      && !(hasInfix ":low:high" own)
+    ) "the model's own suffix must win over the role effort, got: ${own}";
+    assert assertMsg (
+      hasInfix ''model: "anthropic/x:low"'' inherited && hasInfix ''reasoningEffort: "low"'' inherited
+    ) "an inherited suffixed model must keep its single suffix, got: ${inherited}";
+    assert assertMsg (hasInfix ''model: "ollama/llama:8b:high"'' tag)
+      "a colon tag that is not a level is part of the model id, got: ${tag}";
+    assert assertMsg (
+      hasInfix ''model: "github-copilot/some-model:low"'' noEffort
+      && !(hasInfix "reasoningEffort" noEffort)
+    ) "a suffixed model with no effort renders as-is, got: ${noEffort}";
+    assert assertMsg rejectsBad "an invalid role effort must fail even when the model carries a suffix";
+    assert assertMsg (
+      hasInfix ''model: "anthropic/claude-opus-5:low"'' reviewer
+      && hasInfix ''reasoningEffort: "low"'' reviewer
+      && !(hasInfix ":low:high" reviewer)
+    ) "a suffixed reviewModel must render once through mkHarness, got: ${reviewer}";
+    pkgs.runCommand "drivers-pi-effort-suffixed-model-wins" { } "touch $out";
 }

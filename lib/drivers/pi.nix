@@ -217,7 +217,9 @@ in
   # Effort rides on the model (`<model>:<level>`, see agentFilesTemplate), so
   # mkHarness requires a role effort to have a model, falling back to the
   # default model, and one of these levels: pi sends an unknown level as part
-  # of the model id (ADR 0009 amendment).
+  # of the model id (ADR 0009 amendment). A model already ending in one of
+  # these levels keeps its own suffix and the role effort is dropped (issue
+  # #5811).
   effortOnModelLevels = [
     "off"
     "minimal"
