@@ -173,8 +173,9 @@ _Avoid_: runner (that is the adapter that drives a Box, not the Box), worker.
 
 **Runner Strategy**:
 A Box flavor's Go half as one literal exported by its family's package
-(ADR 0069): how it runs, stops and lists Boxes, and the Runner prerequisites
-it brings. Keyed by family (`oci`, `bwrap`), never by `runtime` value: the
+(ADR 0069): how it runs, stops and lists Boxes, the Runner prerequisites it
+brings, and an optional hook that prepares a hot-swapped closure before a Box
+binds it. Keyed by family (`oci`, `bwrap`), never by `runtime` value: the
 container CLIs one family drives are its own concern. _Avoid_: runtime
 adapter, runner kind switch.
 
