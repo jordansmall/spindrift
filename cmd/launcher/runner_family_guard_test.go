@@ -21,12 +21,17 @@ const (
 	kitDir      = runnerDir + "/runnertest"
 	familiesGen = runnerDir + "/families_gen.go"
 
+	// runnerImport is the import path of internal/runner; a family package is
+	// <runnerImport>/<family name>.
+	runnerImport = "spindrift.dev/launcher/" + runnerDir
+
 	// familyGuardMarker opens an exemption comment; the text after it is the
 	// reason, and a marker without one exempts nothing.
 	familyGuardMarker = "runner-family-guard:"
 
 	runtimeNameMsg = "runtime-name comparison outside the OCI/bwrap family packages: move it into the family's dialect"
 	familyConstMsg = "runner family constant outside the family packages: read the Descriptor row or the Strategy instead"
+	importMsg      = "runner family package imported outside the Bundle: reach a family through the Strategy registry, which the Bundle fills"
 	emptyReasonMsg = "runner-family-guard marker without a reason exempts nothing: say why the exemption is needed"
 )
 
@@ -121,14 +126,16 @@ func outOfScopeDir(dir string, famDirs []string) bool {
 
 // runnerFamilyViolations parses src as the file at path (slash-separated) and
 // returns one "path:line: why\n\t<source line>" per comparison that spells a
-// runtime/family name or reference to a family constant. A marker with a
-// reason exempts its own line, and the following line only when the marker
-// comment stands alone on its line. Generated files yield nothing.
+// runtime/family name, reference to a family constant, or import of a family
+// package. A marker with a reason exempts its own line, and the following line
+// only when the marker comment stands alone on its line. Generated files yield
+// nothing.
 //
 // Known limits: only ==, != and case against a string literal are seen, so
 // strings.EqualFold(rt, "podman"), slices.Contains(xs, "docker") and a named
 // constant compared to rt pass; family constants are matched through the
-// literal identifier runner, so an aliased or dot import passes.
+// literal identifier runner, so an aliased or dot import of package runner
+// passes. Family imports are matched by path, so any alias is seen.
 func runnerFamilyViolations(t testing.TB, path string, src []byte, names, idents map[string]bool) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -193,6 +200,18 @@ func runnerFamilyViolations(t testing.TB, path string, src []byte, names, idents
 	})
 	inRunner := file.Name.Name == "runner"
 
+	for _, imp := range file.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		if rest, ok := strings.CutPrefix(p, runnerImport+"/"); ok {
+			if fam, _, _ := strings.Cut(rest, "/"); names[fam] {
+				flag(imp.Pos(), importMsg)
+			}
+		}
+	}
+
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.BinaryExpr:
@@ -220,9 +239,10 @@ func runnerFamilyViolations(t testing.TB, path string, src []byte, names, idents
 }
 
 // TestRunnerFamilyGuard walks the launcher module and fails on a runtime or
-// family name compared, or a family constant referenced, outside the family
-// packages and the Bundle: core reads the Descriptor row or the Strategy
-// instead of re-deriving a family fact from its name.
+// family name compared, a family constant referenced, or a family package
+// imported, outside the family packages and the Bundle: core reads the
+// Descriptor row or the Strategy instead of re-deriving a family fact from its
+// name, and only the Bundle links a family in. Test files are not scanned.
 func TestRunnerFamilyGuard(t *testing.T) {
 	names := familyNames()
 	idents := familyIdents(t, familiesGen)
@@ -317,6 +337,32 @@ func TestRunnerFamilyGuardPlanted(t *testing.T) {
 	}
 	if n := check("internal/x/x.go", wrap("// runner-family-guard: far above\n\nif rt == \"podman\" {}")); n == 0 {
 		t.Error("marker two lines above exempted a comparison")
+	}
+
+	for name, imp := range map[string]string{
+		"plain family import":   `"` + runnerImport + `/bwrap"`,
+		"blank family import":   `_ "` + runnerImport + `/oci"`,
+		"aliased family import": `fam "` + runnerImport + `/oci"`,
+		"dot family import":     `. "` + runnerImport + `/bwrap"`,
+		"nested family import":  `"` + runnerImport + `/bwrap/sub"`,
+	} {
+		if check("x.go", "package main\n\nimport "+imp+"\n") == 0 {
+			t.Errorf("%s: %s not flagged", name, imp)
+		}
+	}
+	for name, imp := range map[string]string{
+		"runner core":      `"` + runnerImport + `"`,
+		"contract kit":     `"` + runnerImport + `/runnertest"`,
+		"similar prefix":   `"` + runnerImport + `/ocipath"`,
+		"other module":     `"example.com/other/internal/runner/bwrap"`,
+		"exempt by marker": `"` + runnerImport + "/bwrap\" // runner-family-guard: pinned for a spike",
+	} {
+		if n := check("x.go", "package main\n\nimport "+imp+"\n"); n != 0 {
+			t.Errorf("%s: %s flagged %d time(s)", name, imp, n)
+		}
+	}
+	if n := check("x.go", "package main\n\nimport (\n\t\""+runnerImport+"/oci\"\n\t_ \""+runnerImport+"/bwrap\"\n)\n"); n != 2 {
+		t.Errorf("grouped family imports: got %d reports, want 2", n)
 	}
 
 	bare := "package runner\n\nconst defaultKind = KindOCI\n"
