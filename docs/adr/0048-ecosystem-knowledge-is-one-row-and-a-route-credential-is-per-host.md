@@ -102,3 +102,26 @@ The same review added two things:
   The reference prose about each ecosystem renders from the rows.
 
 File-per-ecosystem stands. None of the promotion triggers above has fired.
+
+*Amended by issue #5741:* the remaining launcher main-package and Box
+tests fall in or out of the synthetic-row move as follows.
+
+- **Registry-route drift check.** The doctor check takes its rows as a
+  parameter, and production passes `ecosystem.Table`. Its tests run on
+  the synthetic row. A real row's multi-registry parsing, such as cargo
+  declaring two registries on one host, stays pinned by its corpus
+  (`cargo/replaced-source-two-registries`).
+- **Route resolution.** `registryroutesresolve_test.go` had already
+  moved (commit 48825cae).
+- **Credential-source tests.** `checks_test.go` and `bootstrap_test.go`
+  stay as they are. They name real stores only as credential-source
+  keys, which are the routes file's own grammar (above), not row
+  knowledge, so a synthetic row has nothing to replace them with.
+  Neither writes an in-tree registry config or a lockfile.
+- **Box seam golden.** `box/box_seam_test.go` keeps asserting over
+  `ecosystem.Table`. It builds and runs the shipped `box` binary, which
+  binds the real table. A row seam there would need a test-only switch
+  compiled into that binary. The Box's generic registry behaviour is
+  already tested in-process on the synthetic row
+  (`box/registry_test.go`), so the golden stays the one integration
+  smoke over the production table.
