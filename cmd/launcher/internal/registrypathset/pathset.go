@@ -51,7 +51,7 @@ func DeriveRows(repoDir string, rows []ecosystem.Row) ([]HostPathSet, error) {
 
 	var out []HostPathSet
 	index := make(map[string]int, len(declared))
-	seen := make(map[dedupeKey]bool, len(declared))
+	seen := make(map[dedupeKey]int, len(declared)) // key -> index in its host's Subtrees
 	for _, d := range declared {
 		u, err := url.Parse(d.UpstreamBaseURL)
 		if err != nil {
@@ -65,13 +65,19 @@ func DeriveRows(repoDir string, rows []ecosystem.Row) ([]HostPathSet, error) {
 			Ecosystem:    d.Ecosystem,
 			Path:         normalizePath(u.Path),
 			RegistryName: d.RegistryName,
+			Scoped:       d.Scoped,
 		}
 
 		key := dedupeKey{Host: host, Ecosystem: subtree.Ecosystem, Path: subtree.Path}
-		if seen[key] {
+		if j, ok := seen[key]; ok {
+			// An unscoped twin outweighs a scoped one: the path is bound
+			// unless every declaration of it is scoped. Same rule as
+			// ecosystem.addNpmFamilyDeclaration (per URL); change both.
+			if !subtree.Scoped {
+				out[index[host]].Subtrees[j].Scoped = false
+			}
 			continue
 		}
-		seen[key] = true
 
 		// A later declaration disagreeing on scheme or port joins this same host
 		// entry rather than splitting it: the path-set is enforced against the
@@ -83,6 +89,7 @@ func DeriveRows(repoDir string, rows []ecosystem.Row) ([]HostPathSet, error) {
 			i = len(out) - 1
 			index[host] = i
 		}
+		seen[key] = len(out[i].Subtrees)
 		out[i].Subtrees = append(out[i].Subtrees, subtree)
 	}
 

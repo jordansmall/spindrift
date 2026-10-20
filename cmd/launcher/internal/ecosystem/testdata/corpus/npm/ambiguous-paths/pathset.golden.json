@@ -10,7 +10,8 @@
         },
         {
           "ecosystem": "npm",
-          "path": "/artifactory/api/npm/npm-local"
+          "path": "/artifactory/api/npm/npm-local",
+          "scoped": true
         }
       ]
     }
@@ -28,7 +29,8 @@
         },
         {
           "ecosystem": "npm",
-          "path": "/artifactory/api/npm/npm-local"
+          "path": "/artifactory/api/npm/npm-local",
+          "scoped": true
         }
       ],
       "matchHost": "acme.jfrog.test",

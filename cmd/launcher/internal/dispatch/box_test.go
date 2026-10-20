@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1375,7 +1376,7 @@ func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testi
 			Prefix:   "host-example-com",
 			EnforcedSubtrees: []registryvocab.Subtree{
 				{Ecosystem: "synthetic", Path: "/synthetic"},
-				{Ecosystem: "twin", Path: "/twin"},
+				{Ecosystem: "twin", Path: "/twin", Scoped: true},
 			},
 		},
 	}
@@ -1387,10 +1388,17 @@ func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testi
 	}
 	want := []registryvocab.Subtree{
 		{Ecosystem: "synthetic", Path: "/synthetic"},
-		{Ecosystem: "twin", Path: "/twin"},
+		{Ecosystem: "twin", Path: "/twin", Scoped: true},
 	}
 	if !reflect.DeepEqual(got[0].EnforcedPaths, want) {
 		t.Errorf("got[0].EnforcedPaths = %+v, want %+v", got[0].EnforcedPaths, want)
+	}
+	raw, err := json.Marshal(got[0])
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"path":"/twin","scoped":true`) {
+		t.Errorf("manifest route JSON = %s, want the scoped flag carried", raw)
 	}
 }
 

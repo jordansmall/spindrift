@@ -541,6 +541,38 @@ func TestApplyHostPathSet_TrimsTrailingSlashFromOrigin(t *testing.T) {
 	}
 }
 
+// Scoped rides the derived subtree into the route's EnforcedSubtrees (the
+// manifest's enforcedPaths) while EnforcedPaths stays flat, so enforcement is
+// unchanged.
+func TestApplyHostPathSet_CarriesScopedIntoEnforcedSubtrees(t *testing.T) {
+	route := registryproxy.Route{MatchHost: "host.example.com"}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:   "host.example.com",
+			Origin: "https://host.example.com",
+			Subtrees: []registryvocab.Subtree{
+				{Ecosystem: synthetic.Row.Name, Path: "/scoped", Scoped: true},
+				{Ecosystem: synthetic.Row.Name, Path: "/plain"},
+			},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets, resolveRows)
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	want := []registryvocab.Subtree{
+		{Ecosystem: synthetic.Row.Name, Path: "/scoped", Scoped: true},
+		{Ecosystem: synthetic.Row.Name, Path: "/plain"},
+	}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, want) {
+		t.Errorf("EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, want)
+	}
+	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/scoped", "/plain"}) {
+		t.Errorf("EnforcedPaths = %v, want [/scoped /plain]", got.EnforcedPaths)
+	}
+}
+
 func TestApplyHostPathSet_NoMatchingHost_NamesRoute(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "unknown.example.com"}
 
@@ -1482,5 +1514,44 @@ match-host = "host.example.com"
 	}
 	if strings.Contains(err.Error(), "upstream-base-url") {
 		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to never name the retired upstream-base-url knob", err.Error())
+	}
+}
+
+// An operator-declared [routes.ecosystems.<name>] path is never scoped, even
+// when it duplicates a derived scoped path: EnforcedPaths dedupes it, but
+// EnforcedSubtrees keeps a separate unscoped entry, so the npm-family binding
+// still counts the declared path.
+func TestApplyHostPathSet_DeclaredPathLandsUnscopedEvenBesideDerivedScopedDuplicate(t *testing.T) {
+	route := registryproxy.Route{
+		MatchHost: "host.example.com",
+		Ecosystems: registryvocab.RouteEcosystems{
+			twinRow.Name:  registryvocab.RouteDeclaration{"path": "/dup"},
+			otherRow.Name: registryvocab.RouteDeclaration{"path": "/only"},
+		},
+	}
+	sets := map[string]registrypathset.HostPathSet{
+		"host.example.com": {
+			Host:   "host.example.com",
+			Origin: "https://host.example.com",
+			Subtrees: []registryvocab.Subtree{
+				{Ecosystem: twinRow.Name, Path: "/dup", Scoped: true},
+			},
+		},
+	}
+
+	got, err := applyHostPathSet(route, sets, []ecosystem.Row{synthetic.Row, twinRow, otherRow})
+	if err != nil {
+		t.Fatalf("applyHostPathSet() error = %v, want nil", err)
+	}
+	want := []registryvocab.Subtree{
+		{Ecosystem: twinRow.Name, Path: "/dup", Scoped: true},
+		{Ecosystem: twinRow.Name, Path: "/dup"},
+		{Ecosystem: otherRow.Name, Path: "/only"},
+	}
+	if !reflect.DeepEqual(got.EnforcedSubtrees, want) {
+		t.Errorf("EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, want)
+	}
+	if wantPaths := []string{"/dup", "/only"}; !reflect.DeepEqual(got.EnforcedPaths, wantPaths) {
+		t.Errorf("EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
 }

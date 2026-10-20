@@ -379,7 +379,8 @@ func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 			}
 			for _, sub := range hp.Subtrees {
 				addPath(sub.Path)
-				route.EnforcedSubtrees = append(route.EnforcedSubtrees, registryvocab.Subtree{Ecosystem: sub.Ecosystem, Path: sub.Path})
+				sub.RegistryName = "" // host-only, as in applyHostPathSet
+				route.EnforcedSubtrees = append(route.EnforcedSubtrees, sub)
 			}
 			for _, p := range r.Allow {
 				addPath(p)
