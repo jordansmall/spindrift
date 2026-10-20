@@ -133,6 +133,10 @@ let
     "drivers-claude-cli-knows-disable-background-tasks-env"
   ];
 
+  # Checks too costly to evaluate in a Box (issue #5849); CI's
+  # `nix flake check` still runs them.
+  evalHeavyCheckNames = [ "docs-edit-isolation" ];
+
   # This starts from portableSourceChecks, not sourceChecks, so a darwin eval
   # also drops linuxOnlyCheckNames. Otherwise checks-inbox forces
   # mkharness-agent-closure-package's build on darwin, where
@@ -143,7 +147,9 @@ let
   # it to 30 minutes, issue #4409, but whether the suite fits that is
   # unmeasured). CI's `nix flake check` still runs them; fold them back in
   # once the Box Go port (issue #4275) has shrunk the suite.
-  checksInboxSet = removeAttrs portableSourceChecks (imageOnlyCheckNames ++ batsShardNames);
+  checksInboxSet = removeAttrs portableSourceChecks (
+    imageOnlyCheckNames ++ evalHeavyCheckNames ++ batsShardNames
+  );
 
   # A narrower axis than imageOnlyCheckNames: source checks that depend on the
   # bats harness internals, e.g. the Linux-twin driverExecBin build
@@ -151,7 +157,8 @@ let
   # Linux twin of the host system, so a darwin eval still demands a Linux
   # builder and fails with "Required system: aarch64-linux".
   linuxOnlyCheckNames = batsShardNames ++ [
-    # Evaluates the bats shards, which are Linux-only (issue #5154).
+    # Evaluates the bats shards, which are Linux-only (issue #5154). Also in
+    # evalHeavyCheckNames, which only checks-inbox drops.
     "docs-edit-isolation"
     # flake.nix only exposes apps.regen-goldens under isLinux, because it pulls
     # in fixtures.seamFixtures, rendered off the Linux-only batsHarness. On darwin it is absent
@@ -436,22 +443,42 @@ let
     ) "linuxOnlyCheckNames names a check absent from sourceChecks: ${concatStringsSep ", " stale}";
     pkgs.runCommand "linux-only-check-names-exist" { } "touch $out";
 
-  # Regression guard (issue #581): imageOnlyCheckNames must name checks that
-  # exist, or a renamed entry silently does nothing, and none of them may leak
-  # into checksInboxSet, or the exclusion itself has regressed.
-  checks-inbox-excludes-image-checks =
+  # Regression guard (issues #581, #5849): each excluded name must name a check
+  # that exists, or a renamed entry silently does nothing, and none of them may
+  # leak into checksInboxSet, or the exclusion itself has regressed.
+  mkInboxExclusionGuard =
+    {
+      drvName,
+      listName,
+      names,
+      kind,
+    }:
     let
       inherit (pkgs.lib) assertMsg concatStringsSep filter;
-      stale = filter (n: !(builtins.hasAttr n sourceChecks)) imageOnlyCheckNames;
-      leaked = filter (n: builtins.hasAttr n checksInboxSet) imageOnlyCheckNames;
+      stale = filter (n: !(builtins.hasAttr n sourceChecks)) names;
+      leaked = filter (n: builtins.hasAttr n checksInboxSet) names;
     in
     assert assertMsg (
       stale == [ ]
-    ) "imageOnlyCheckNames names a check absent from sourceChecks: ${concatStringsSep ", " stale}";
+    ) "${listName} names a check absent from sourceChecks: ${concatStringsSep ", " stale}";
     assert assertMsg (
       leaked == [ ]
-    ) "checks-inbox must not contain image-realizing checks: ${concatStringsSep ", " leaked}";
-    pkgs.runCommand "checks-inbox-excludes-image-checks" { } "touch $out";
+    ) "checks-inbox must not contain ${kind} checks: ${concatStringsSep ", " leaked}";
+    pkgs.runCommand drvName { } "touch $out";
+
+  checks-inbox-excludes-image-checks = mkInboxExclusionGuard {
+    drvName = "checks-inbox-excludes-image-checks";
+    listName = "imageOnlyCheckNames";
+    names = imageOnlyCheckNames;
+    kind = "image-realizing";
+  };
+
+  checks-inbox-excludes-eval-heavy-checks = mkInboxExclusionGuard {
+    drvName = "checks-inbox-excludes-eval-heavy-checks";
+    listName = "evalHeavyCheckNames";
+    names = evalHeavyCheckNames;
+    kind = "eval-heavy";
+  };
 in
 {
   checks =
@@ -460,6 +487,7 @@ in
     // {
       inherit
         checks-inbox-excludes-image-checks
+        checks-inbox-excludes-eval-heavy-checks
         linux-only-check-names-exist
         checks-docs-covers-docs-readers
         ci-comment-readers-cover-checks
