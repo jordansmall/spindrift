@@ -1578,8 +1578,30 @@ func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
 	unsetEnvForTest(t, "GIT_USER_NAME")
 	fakeHostGitConfig(t, map[string]string{"user.name": "Host Git User"})
 
-	if got := gitIdentityField("GIT_USER_NAME"); got != "Host Git User" {
-		t.Errorf("gitIdentityField = %q, want Host Git User", got)
+	if got := hostGitConfigField("GIT_USER_NAME"); got != "Host Git User" {
+		t.Errorf("hostGitConfigField = %q, want Host Git User", got)
+	}
+}
+
+// loadSchemaConfig fills every hostGitConfigKey member from the host git
+// config, and hostGitConfigValue answers exactly those members' env names from
+// the loaded fields (issue #5372).
+func TestLoadSchemaConfig_HostGitConfigMembersLoadFromHostGitConfig(t *testing.T) {
+	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
+	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
+	sc := loadSchemaConfig()
+
+	if sc.gitUserName != "Host Name" || sc.gitUserEmail != "host@example.com" {
+		t.Errorf("loadSchemaConfig identity = %q/%q, want the host git config values", sc.gitUserName, sc.gitUserEmail)
+	}
+	for _, e := range schemaFlags {
+		got, ok := sc.hostGitConfigValue(e.env)
+		if ok != (e.hostGitConfigKey != "") {
+			t.Errorf("%s: hostGitConfigValue ok = %v, hostGitConfigKey = %q", e.env, ok, e.hostGitConfigKey)
+		}
+		if ok && got != hostGitConfigField(e.env) {
+			t.Errorf("%s: hostGitConfigValue = %q, want %q", e.env, got, hostGitConfigField(e.env))
+		}
 	}
 }
 
@@ -1589,8 +1611,8 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 	t.Setenv("GIT_USER_NAME", "Explicit Name")
 	calls := fakeHostGitConfig(t, nil)
 
-	if got := gitIdentityField("GIT_USER_NAME"); got != "Explicit Name" {
-		t.Errorf("gitIdentityField = %q, want Explicit Name", got)
+	if got := hostGitConfigField("GIT_USER_NAME"); got != "Explicit Name" {
+		t.Errorf("hostGitConfigField = %q, want Explicit Name", got)
 	}
 	if len(*calls) != 0 {
 		t.Errorf("gitConfigLookup called %v, want no calls when an explicit value is set", *calls)
@@ -3894,7 +3916,7 @@ func TestDispatchConfig_ResolveEnv_EmptyGitIdentityStaysEmpty(t *testing.T) {
 
 // Every knob the schema declares both host-derived and forwarded to the Box
 // must carry the launcher's snapshot into the Box (#5329, #5333), so a future
-// knob of that kind cannot skip gitIdentityResolver.
+// knob of that kind cannot skip hostGitConfigResolver.
 func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testing.T) {
 	lookups := map[string]string{}
 	for _, e := range schemaFlags {
@@ -3916,7 +3938,7 @@ func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testin
 		if got == "" {
 			t.Errorf("%s: ResolveEnv is empty, want the host-resolved value", e.env)
 		}
-		if want := gitIdentityField(e.env); got != want {
+		if want := hostGitConfigField(e.env); got != want {
 			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.env, got, want)
 		}
 	}

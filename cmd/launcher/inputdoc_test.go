@@ -302,6 +302,8 @@ func TestMainRun_AmbientDriverMismatch_WarnedMarkerSuppresses(t *testing.T) {
 	}
 }
 
+// TestMain in registryproxytransport_doctor_checks_test.go stubs
+// gitConfigLookup package-wide; this swaps per-test values over that stub.
 func fakeHostGitConfig(t *testing.T, vals map[string]string) *[]string {
 	t.Helper()
 	orig := gitConfigLookup

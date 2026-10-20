@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 		return registrymanifest.NewUnixEndpoint(""), nil
 	}
 	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) { return nil, nil, func() {} }
+	// loadSchemaConfig reads the host git identity, so a bare call would shell
+	// out to git; tests that need a value use fakeHostGitConfig.
+	gitConfigLookup = func(string) string { return "" }
 	// An ambient GH_HOST (e.g. a GHE dev shell) would otherwise flip every
 	// github.com-stubbed origin match, since checkoutIsTargetRepo follows it
 	// (issue #3912).
