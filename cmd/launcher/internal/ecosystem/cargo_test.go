@@ -726,57 +726,78 @@ index = "sparse+https://cargo.example.test/index/"
 	}
 }
 
-// A route declaring no cargo registries declares nothing, so nothing can go
-// unsatisfied, even when the repo config matches none of its host.
-func TestCargoSourceReplacements_EmptyDeclaredListNeverWarns(t *testing.T) {
+// The two ways a route leaves its cargo registries unrestricted. The empty
+// list is the []any{} a TOML decode of `registries = []` yields, spelled out
+// because CargoRouteBlock() maps zero names to a nil value instead.
+var unrestrictedCargoBlocks = []struct {
+	name   string
+	blocks registryvocab.RouteEcosystems
+}{
+	{"absent block", nil},
+	{"empty list", registryvocab.RouteEcosystems{
+		nameCargo: registryvocab.RouteDeclaration{CargoRouteRegistriesKey: []any{}},
+	}},
+}
+
+// An unrestricted route declares nothing, so nothing can go unsatisfied, even
+// when the repo config matches none of its host.
+func TestCargoSourceReplacements_UnrestrictedRouteNeverWarns(t *testing.T) {
 	const port = 27182
-	routes := []registrymanifest.Route{
-		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
-	}
 	repoConfig := `[registries.acme]
 index = "sparse+https://moved.example.test/index/"
 `
+	for _, tc := range unrestrictedCargoBlocks {
+		t.Run(tc.name, func(t *testing.T) {
+			routes := []registrymanifest.Route{
+				{Prefix: "r0", UpstreamHost: "crates.io"},
+				{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: tc.blocks},
+			}
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 0 {
-		t.Errorf("CargoSourceReplacements() = %+v, want no replacements", got)
-	}
-	if len(warnings) != 0 {
-		t.Errorf("warnings = %v, want none", warnings)
+			if len(got) != 0 {
+				t.Errorf("CargoSourceReplacements() = %+v, want no replacements", got)
+			}
+			if len(warnings) != 0 {
+				t.Errorf("warnings = %v, want none", warnings)
+			}
+		})
 	}
 }
 
-// The absent half of the filter: a route carrying no cargo block at all
-// restricts nothing, so every host-matching decl in the repo config binds and
-// no name goes unsatisfied.
-func TestCargoSourceReplacements_NoCargoBlockBindsEveryHostMatch(t *testing.T) {
+// Absent and empty registries both restrict nothing, so every host-matching
+// decl in the repo config binds and no name goes unsatisfied.
+func TestCargoSourceReplacements_UnrestrictedRouteBindsEveryHostMatch(t *testing.T) {
 	const port = 27182
-	routes := []registrymanifest.Route{
-		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test"},
-	}
 	repoConfig := `[registries.first-registry]
 index = "sparse+https://cargo.example.test/first-index/"
 
 [registries.second-registry]
 index = "sparse+https://cargo.example.test/second-index/"
 `
+	want := []string{"spindrift-upstream-first-registry", "spindrift-upstream-second-registry"}
+	for _, tc := range unrestrictedCargoBlocks {
+		t.Run(tc.name, func(t *testing.T) {
+			routes := []registrymanifest.Route{
+				{Prefix: "r0", UpstreamHost: "crates.io"},
+				{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: tc.blocks},
+			}
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(warnings) != 0 {
-		t.Errorf("warnings = %v, want none", warnings)
-	}
-	var names []string
-	for _, rep := range got {
-		for _, up := range rep.Upstreams {
-			names = append(names, up.SourceName)
-		}
-	}
-	if len(names) != 2 || names[0] != "spindrift-upstream-first-registry" || names[1] != "spindrift-upstream-second-registry" {
-		t.Errorf("upstream source names = %v, want both host-matching decls bound", names)
+			if len(warnings) != 0 {
+				t.Errorf("warnings = %v, want none", warnings)
+			}
+			var names []string
+			for _, rep := range got {
+				for _, up := range rep.Upstreams {
+					names = append(names, up.SourceName)
+				}
+			}
+			if !slices.Equal(names, want) {
+				t.Errorf("upstream source names = %v, want %v", names, want)
+			}
+		})
 	}
 }
 
