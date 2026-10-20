@@ -83,6 +83,8 @@ let
     # classifier reads its Go helper and reader list beside it (issue #5158).
     CI_CHANGES_SH = "${../../.github/scripts}/ci-changes.sh";
     CI_OK_SH = ../../.github/scripts/ci-ok.sh;
+    # Eval-cost table renderer (issue #5860).
+    EVAL_STATS_RENDER_SH = ../../.github/scripts/eval-stats-render.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles, fragment registry
     # and Claude settings.json tests/entrypoint-shim.bats and
@@ -174,6 +176,7 @@ in
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
           ${../../.github/scripts/ci-changes.sh} \
           ${../../.github/scripts/ci-ok.sh} \
+          ${../../.github/scripts/eval-stats-render.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/helper.bash}
