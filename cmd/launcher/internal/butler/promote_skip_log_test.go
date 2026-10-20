@@ -67,6 +67,7 @@ func skipLogPolicy() Policy {
 }
 
 func TestSettleRun_LogsWhyAFindingWasNotPromoted(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		intents []string
@@ -115,6 +116,7 @@ func TestSettleRun_LogsWhyAFindingWasNotPromoted(t *testing.T) {
 }
 
 func TestSettleRun_PromotionOffLogsOneSweepLevelLine(t *testing.T) {
+	t.Parallel()
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/1"
 	policy := skipLogPolicy()
@@ -136,6 +138,7 @@ func TestSettleRun_PromotionOffLogsOneSweepLevelLine(t *testing.T) {
 }
 
 func TestSettleRun_PromotedFindingLogsNoSkip(t *testing.T) {
+	t.Parallel()
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/1"
 	d := intentsDispatcher(skipLogIntent("f", "docs-drift", "agreed", "a.go"))
@@ -146,6 +149,7 @@ func TestSettleRun_PromotedFindingLogsNoSkip(t *testing.T) {
 }
 
 func TestSettleRun_PatchedFindingLogsNoPromoteSkip(t *testing.T) {
+	t.Parallel()
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9501"
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
@@ -163,6 +167,7 @@ func TestSettleRun_PatchedFindingLogsNoPromoteSkip(t *testing.T) {
 // also refuses, the skip is logged like any other. The patch class is not on
 // the promotion allow-list, so the fallback fails the class gate.
 func TestSettleRun_PatchLandingFailedFallbackSkipLogsReason(t *testing.T) {
+	t.Parallel()
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9502"
 	fc.SetIssue(forge.Issue{Number: "9502"})
@@ -182,6 +187,7 @@ func TestSettleRun_PatchLandingFailedFallbackSkipLogsReason(t *testing.T) {
 // With promotion off, the sweep-level line reports only a sweep that filed
 // something: a finding that fails to post leaves nothing to report.
 func TestSettleRun_PromotionOffLogsNothingWhenNoFindingFiled(t *testing.T) {
+	t.Parallel()
 	fc := forge.NewFake()
 	fc.PostIssueErr = errors.New("boom")
 	policy := skipLogPolicy()
@@ -196,6 +202,7 @@ func TestSettleRun_PromotionOffLogsNothingWhenNoFindingFiled(t *testing.T) {
 // A patch whose diff no longer applies is re-decided as a plain finding; when
 // promotion then refuses it, the skip is logged once like any other.
 func TestSettleRun_PatchApplyFailedSkipLogsReason(t *testing.T) {
+	t.Parallel()
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9503"
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatchErr: errors.New("does not apply")}

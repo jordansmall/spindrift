@@ -59,6 +59,7 @@ func readyResult(intents ...string) dispatch.Result {
 // ready-for-agent, each body naming the Chore and the files its own dedup
 // terms cover.
 func TestSettleRun_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -103,6 +104,7 @@ func TestSettleRun_FilesFindingsWithProvenanceLabelAndBacklink(t *testing.T) {
 // Dispatcher's cumulative usage; settle's own return also reports the run
 // landed, with the same counts.
 func TestSettleRun_DoneCommitContents(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -186,6 +188,7 @@ func TestSettleRun_ReportsChoreSettledNotIssue(t *testing.T) {
 // -- so the next run doesn't refile the success and can still re-find the
 // failure's own dedup keys via the backlog.
 func TestSettleRun_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -221,6 +224,7 @@ func TestSettleRun_PartialFilingFailure_RecordsOnlyWhatFiled(t *testing.T) {
 // room.Findings of them and records the overflow in the done commit's
 // Dropped field and settle's own return.
 func TestSettleRun_CapDropsOverflowAndRecordsDropped(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -272,6 +276,7 @@ func TestSettleRun_CapDropsOverflowAndRecordsDropped(t *testing.T) {
 // carrier's own scanner takes every verifying line unbounded, so the cap
 // enforced here, not there, is what actually bounds a run at twelve.
 func TestSettleRun_LogCarrierHonoursCapOfTwelve(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -314,6 +319,7 @@ func TestSettleRun_LogCarrierHonoursCapOfTwelve(t *testing.T) {
 // (c3) A cap of 0 (the default) is no cap at all: every well-formed intent
 // files and Dropped stays 0.
 func TestSettleRun_ZeroCapFilesEverything(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -347,6 +353,7 @@ func TestSettleRun_ZeroCapFilesEverything(t *testing.T) {
 
 // (c4) A malformed payload never counts toward the cap.
 func TestSettleRun_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -387,6 +394,7 @@ func TestSettleRun_MalformedPayloadDoesNotCountTowardCap(t *testing.T) {
 // done commit, lastSwept/cursor unadvanced, and settle reports it never
 // landed.
 func TestSettleRun_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		result dispatch.Result
@@ -500,6 +508,7 @@ func labelsForFinding(fc *forge.Fake, title string) []string {
 // naming the class and quoting the reviewer's own concurrence, and the
 // Ledger done commit records the URL in Promoted (issue #3880).
 func TestSettleRun_Promotion_AllGatesPass(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -543,6 +552,7 @@ func TestSettleRun_Promotion_AllGatesPass(t *testing.T) {
 // a promoted finding actually carries, not a hardcoded "ready-for-agent"
 // (issue #3880).
 func TestSettleRun_Promotion_CustomLabel(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -578,6 +588,7 @@ func TestSettleRun_Promotion_CustomLabel(t *testing.T) {
 
 // (f) Any single gate failing alone files the finding unlabelled.
 func TestSettleRun_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
+	t.Parallel()
 	base := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
 	baseRoom := chore.Room{Promotions: 1}
 
@@ -676,6 +687,7 @@ func TestSettleRun_Promotion_AnyGateFailingFilesUnlabelled(t *testing.T) {
 
 // (g) Room of 1 with two eligible findings: only the first promotes.
 func TestSettleRun_Promotion_RoomOfOnePromotesOnlyFirst(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -714,6 +726,7 @@ func TestSettleRun_Promotion_RoomOfOnePromotesOnlyFirst(t *testing.T) {
 // (g2) A failed post must not spend the room: the second finding still
 // promotes.
 func TestSettleRun_Promotion_FailedPostReturnsRoomToLaterFinding(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -749,6 +762,7 @@ func TestSettleRun_Promotion_FailedPostReturnsRoomToLaterFinding(t *testing.T) {
 
 // (h) The Box cannot widen its own promotion.
 func TestSettleRun_Promotion_PayloadCannotWidenPolicy(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -783,6 +797,7 @@ func TestSettleRun_Promotion_PayloadCannotWidenPolicy(t *testing.T) {
 
 // (i0) A multi-line Concurrence renders as one line in the promotion note.
 func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -822,6 +837,7 @@ func TestSettleRun_Promotion_ConcurrenceCollapsedToOneLine(t *testing.T) {
 // no case here sets Patch, so decide never reaches its patch branch (see
 // TestPromotion_DecidePatch for that).
 func TestPromotion_Decide(t *testing.T) {
+	t.Parallel()
 	base := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
 	baseFinding := settle.Finding{Class: "error-handling", DedupTerms: []string{"a.go:X"}, Concurrence: "agreed"}
 
@@ -945,6 +961,7 @@ func TestPromotion_Decide(t *testing.T) {
 // gate names itself in decision.patchSkip (empty for the two gates decide
 // checks before ever calling patchBlocker).
 func TestPromotion_DecidePatch(t *testing.T) {
+	t.Parallel()
 	patchable := newPromotion(
 		[]string{"error-handling"}, 4, 1, "ready-for-agent",
 		patchPolicy{classes: []string{"error-handling"}, perDay: 1, paths: DefaultPatchPaths, maxFiles: 3, maxLines: 20},
@@ -1180,6 +1197,7 @@ func TestPromotion_DecidePatch(t *testing.T) {
 // configured label, and at least one allow-listed class must all hold, or
 // enabled is false regardless of the others.
 func TestNewPromotion_Enabled(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		classes []string
@@ -1208,6 +1226,7 @@ func TestNewPromotion_Enabled(t *testing.T) {
 // so parseIssueIntent's sanitization actually runs before promotionNote sees
 // it -- promotionNote itself only collapses to one line.
 func TestPromotionNote_ConcurrenceMarkdownNeutralized(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		raw  string
@@ -1292,6 +1311,7 @@ func (w takeoverOnDone) Append(choreName, old string, s ledger.State, at time.Ti
 // failure: the promotion is already posted and labelled, so DayTotals must
 // still count it even though the done commit never landed (issue #3926).
 func TestSettleRun_Promotion_ReserveCountsDespiteDoneAppendFailure(t *testing.T) {
+	t.Parallel()
 	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, inner, "bugs", start)
@@ -1330,6 +1350,7 @@ func TestSettleRun_Promotion_ReserveCountsDespiteDoneAppendFailure(t *testing.T)
 // write: the done commit's own CAS legitimately loses, but the reservation
 // still stands in the chain and must still count (issue #3926).
 func TestSettleRun_Promotion_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T) {
+	t.Parallel()
 	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, inner, "bugs", start)
@@ -1365,6 +1386,7 @@ func TestSettleRun_Promotion_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T
 // already stale by the time Reserve runs, so Reserve itself loses its CAS.
 // The run must not promote (issue #3926).
 func TestSettleRun_Promotion_StaleClaimReserveFailsNeverPromotes(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	staleClaim := claimButlerChore(t, backend, "bugs", start)
@@ -1404,6 +1426,7 @@ func TestSettleRun_Promotion_StaleClaimReserveFailsNeverPromotes(t *testing.T) {
 // (m) The ordinary success path reserves then finishes on top of the
 // reservation: DayTotals must count the promotion exactly once.
 func TestSettleRun_Promotion_SuccessNoDoubleCount(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -1435,6 +1458,7 @@ func TestSettleRun_Promotion_SuccessNoDoubleCount(t *testing.T) {
 // (n) Nothing eligible in the sweep -- no reservation commit lands at all,
 // only the claim and the done commit.
 func TestSettleRun_Promotion_NoReservationCommitWhenNothingEligible(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -1498,6 +1522,7 @@ func patchReserveRig(fc *forge.Fake) (fakeTree, *fakePatchForge, *fakePatchGate)
 // DayTotals must count it even though the done commit never landed (issue
 // #4111, mirrors (j) for promotions).
 func TestSettleRun_Patch_ReserveCountsDespiteDoneAppendFailure(t *testing.T) {
+	t.Parallel()
 	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, inner, "bugs", start)
@@ -1534,6 +1559,7 @@ func TestSettleRun_Patch_ReserveCountsDespiteDoneAppendFailure(t *testing.T) {
 // reservation still stands in the chain and must still count (issue #4111,
 // mirrors (k) for promotions).
 func TestSettleRun_Patch_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T) {
+	t.Parallel()
 	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, inner, "bugs", start)
@@ -1567,6 +1593,7 @@ func TestSettleRun_Patch_ReserveCountsDespiteTakeoverBeforeDone(t *testing.T) {
 // and only patch room, a landed patch's reservation still survives a lost
 // Finish (issue #4111).
 func TestSettleRun_Patch_ReservesWithPromotionOff(t *testing.T) {
+	t.Parallel()
 	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, inner, "bugs", start)
@@ -1599,6 +1626,7 @@ func TestSettleRun_Patch_ReservesWithPromotionOff(t *testing.T) {
 // reservation: DayTotals must count the patch exactly once (mirrors (m)
 // for promotions).
 func TestSettleRun_Patch_SuccessNoDoubleCount(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -1631,6 +1659,7 @@ func TestSettleRun_Patch_SuccessNoDoubleCount(t *testing.T) {
 // the patch (no push, no draft PR), the same contract (l) pins for
 // promotions (issue #4111).
 func TestSettleRun_Patch_StaleClaimReserveFailsNeverLands(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	staleClaim := claimButlerChore(t, backend, "bugs", start)
@@ -1674,6 +1703,7 @@ func TestSettleRun_Patch_StaleClaimReserveFailsNeverLands(t *testing.T) {
 // counts the patch finding (its class is only on the patch allow-list, so it
 // never counts toward Reserved) -- issue #4111.
 func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -1722,6 +1752,7 @@ func TestSettleRun_ReservesPromotionAndPatchInOneCommit(t *testing.T) {
 // after the lost Finish attempt, so no Ledger write follows it -- the
 // takeover shape's rival claim lands inside that attempt (issue #4118).
 func TestSettleRun_Patch_GateRunsDespiteLostFinish(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		wrap func(ledger.Backend) ledger.Backend
@@ -1775,6 +1806,7 @@ func jsonQuote(s string) string {
 }
 
 func TestButlerBacklink_AllJunkTermsOmitsFilesSentence(t *testing.T) {
+	t.Parallel()
 	f := settle.Finding{DedupTerms: []string{"-", "!!", "-:Foo"}}
 	got := butlerBacklink("bugs", f)
 	if strings.Contains(got, "Files:") {
@@ -1787,6 +1819,7 @@ func TestButlerBacklink_AllJunkTermsOmitsFilesSentence(t *testing.T) {
 // never survive into the squash/PR title, and the subject is capped rather
 // than left to whatever length a Box happened to title the finding.
 func TestPatchCommitSubject(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		title string
@@ -1901,6 +1934,7 @@ func TestSettleRun_AllFindingsFailToFile_LeavesClaimStanding(t *testing.T) {
 
 // A sweep that found nothing is a quiet success, never the all-failed path.
 func TestSettleRun_NoFindings_StillDone(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -1915,6 +1949,7 @@ func TestSettleRun_NoFindings_StillDone(t *testing.T) {
 // A run's provenance labels ride on a promoted finding too, so "files with
 // every label" holds whichever branch the finding takes.
 func TestSettleRun_Promotion_KeepsRunLabels(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)

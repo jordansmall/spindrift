@@ -26,6 +26,7 @@ func newTreeBareRepo(t *testing.T, paths ...string) (repo, commit string) {
 }
 
 func TestGitTreeHead(t *testing.T) {
+	t.Parallel()
 	bare, commit := newTreeBareRepo(t, "a.go", "b.go")
 	tree := GitTree{Repo: bare}
 
@@ -43,6 +44,7 @@ func TestGitTreeHead(t *testing.T) {
 }
 
 func TestGitTreeTrackedFiles(t *testing.T) {
+	t.Parallel()
 	// mktree builds one flat tree (no --batch nesting), so this fixture
 	// sticks to top-level paths; ls-tree -r's recursion into subtrees is
 	// exercised by git itself, not this thin wrapper.
@@ -61,11 +63,7 @@ func TestGitTreeTrackedFiles(t *testing.T) {
 }
 
 func TestGitTreeTrackedFilesEmptyTree(t *testing.T) {
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-
+	t.Parallel()
 	bare := ledgertest.NewRepo(t)
 
 	mktreeCmd := exec.Command("git", "-C", bare, "mktree")
@@ -96,6 +94,7 @@ func TestGitTreeTrackedFilesEmptyTree(t *testing.T) {
 // hands FetchTree after ledger.NewRemote's own git init --bare), then
 // FetchTree fetches "main" into it exactly once.
 func TestFetchTree_FetchesBranchAndReturnsTreeOverScratch(t *testing.T) {
+	t.Parallel()
 	remote, head := newTreeBareRepo(t, "a.go", "b.go")
 	scratch := ledgertest.NewRepo(t)
 
@@ -193,6 +192,7 @@ func resolveRef(t *testing.T, repo, ref string) string {
 // applies cleanly to the tip lands as a new commit under the configured
 // identity, parented on the tip, at patchRef.
 func TestGitTreeCommitPatch_CommitsCleanDiffOnTip(t *testing.T) {
+	t.Parallel()
 	bare, tip := newTreeBareRepo(t)
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 
@@ -236,6 +236,7 @@ func TestGitTreeCommitPatch_CommitsCleanDiffOnTip(t *testing.T) {
 // CommitPatch must fail with an error naming "base head" and must leave
 // patchRef untouched (never partially write it).
 func TestGitTreeCommitPatch_StaleDiffErrorsAndWritesNoRef(t *testing.T) {
+	t.Parallel()
 	bare, tip := newTreeBareRepo(t)
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 	advanceBranch(t, bare, "main", "a.go", "package a\n\n// unrelated upstream change\n")
@@ -262,6 +263,7 @@ func TestGitTreeCommitPatch_StaleDiffErrorsAndWritesNoRef(t *testing.T) {
 // happens to still apply to wherever the base head drifted, which was never
 // what the Box actually reviewed.
 func TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit(t *testing.T) {
+	t.Parallel()
 	bare, scanned := newTreeBareRepo(t)
 	tip := advanceBranch(t, bare, "main", "a.go", "package a\n\n// upstream unrelated\n")
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// upstream unrelated\n\n// patched\n")
@@ -288,6 +290,7 @@ func TestGitTreeCommitPatch_FailsWhenDiffDoesNotApplyToScannedCommit(t *testing.
 // diff's own file -- matching between scanned (origTip) and the refetched
 // tip, so the scanned gate and the refetch are each pinned independently.
 func TestGitTreeCommitPatch_RefetchesBeforeApplying(t *testing.T) {
+	t.Parallel()
 	upstream, origTip := newTreeBareRepo(t, "a.go", "b.go")
 	scratch := ledgertest.NewRepo(t)
 
@@ -314,6 +317,7 @@ func TestGitTreeCommitPatch_RefetchesBeforeApplying(t *testing.T) {
 // to commit under git's ambient identity when Name/Email are unset -- a
 // host commit must always carry the configured launcher identity.
 func TestGitTreeCommitPatch_MissingIdentityErrors(t *testing.T) {
+	t.Parallel()
 	bare, tip := newTreeBareRepo(t)
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 
@@ -349,6 +353,7 @@ index 1111111..2222222 100644
 // CLAUDE.md section too), and verifyDiffMatchesGit must refuse on that
 // disagreement alone, whatever entries a parser handed it (issue #4075).
 func TestVerifyDiffMatchesGit_RefusesReviewerAttacks(t *testing.T) {
+	t.Parallel()
 	bare, _ := newTreeBareRepo(t)
 	entries := []signalwire.DiffFile{{Path: "docs/x.md", Added: 1, Removed: 1}}
 
@@ -375,6 +380,7 @@ func TestVerifyDiffMatchesGit_RefusesReviewerAttacks(t *testing.T) {
 // case: a plain modification whose parsed entries actually match git's own
 // numstat reading must not be refused.
 func TestVerifyDiffMatchesGit_AcceptsMatchingModification(t *testing.T) {
+	t.Parallel()
 	bare, tip := newTreeBareRepo(t)
 	diff := makeDiff(t, bare, tip, "a.go", "package a\n\n// patched\n")
 
@@ -392,6 +398,7 @@ func TestVerifyDiffMatchesGit_AcceptsMatchingModification(t *testing.T) {
 // alone (issue #4116): git reports a summary line exactly where the parser
 // reports a create/delete, which the modification-only gate catches first.
 func TestVerifyDiffMatchesGit_AgreesWithParserOnHunkShape(t *testing.T) {
+	t.Parallel()
 	bare, _ := newTreeBareRepo(t)
 
 	tests := []struct {
@@ -453,6 +460,7 @@ func TestVerifyDiffMatchesGit_AgreesWithParserOnHunkShape(t *testing.T) {
 // git wrappers give (forge.RedactURLCredentials) -- the port at 1 refuses
 // the connection immediately rather than hanging on GIT_TERMINAL_PROMPT=0.
 func TestFetchTree_RedactsCredentialsOnError(t *testing.T) {
+	t.Parallel()
 	scratch := ledgertest.NewRepo(t)
 	const secret = "secret-token"
 	url := "https://user:" + secret + "@127.0.0.1:1/x.git"
