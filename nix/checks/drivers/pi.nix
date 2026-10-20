@@ -354,10 +354,13 @@ in
     assert assertMsg (
       !(evalsWith "bogus").success
     ) "an unknown reviewEffort level must fail eval under pi, not reach the model id";
+    assert assertMsg (
+      hasInfix "fixture" (effortLib.message.badLevel "fixture" "bogus" [ "high" ])
+      && hasInfix "bogus" (effortLib.message.badLevel "fixture" "bogus" [ "high" ])
+    ) "the bad-level message must name the role and the effort";
     pkgs.runCommand "drivers-pi-rejects-unknown-effort-level" { } "touch $out";
 
-  # An opted-out role (model "") loses its default effort with it, rather than
-  # tripping the rule or being resurrected by the fallback.
+  # An opted-out role (model "") loses its default effort with it.
   drivers-pi-opt-out-role-drops-its-effort =
     let
       names = map (e: e.name) (
@@ -381,68 +384,24 @@ in
     ) "pi agentFilesTemplate must render identically when an entry carries spawns";
     pkgs.runCommand "drivers-pi-agent-files-ignore-spawns" { } "touch $out";
 
-  # A kept entry cannot reach finalRoster with model "" through mkHarness (the
-  # opt-out drops it first), so the resolution is exercised directly.
-  drivers-pi-effort-resolves-model-or-fails =
-    let
-      resolve =
-        coordinatorModel: effort:
-        effortLib.resolve {
-          roster = [
-            (
-              piFixtureEntry
-              // {
-                model = "";
-                inherit effort;
-              }
-            )
-          ];
-          levels = entry.effortOnModelLevels;
-          inherit coordinatorModel;
-        };
-      rejects =
-        coordinatorModel: effort:
-        !(builtins.tryEval (builtins.deepSeq (resolve coordinatorModel effort) true)).success;
-      resolved = builtins.head (resolve "anthropic/x" "high");
-      files = entry.agentFilesTemplate { roster = [ resolved ]; };
-      rendered = files.".pi/agent/agents/fixture.md";
-    in
-    assert assertMsg (rejects "" "high") "an effort with no model and no coordinator model must fail";
-    assert assertMsg (rejects "anthropic/x" "bogus") "an unknown level must fail even with a model";
-    assert assertMsg (
-      resolved.model == "anthropic/x"
-    ) "a role with an effort and no model must inherit the coordinator's, got: ${resolved.model}";
-    assert assertMsg (hasInfix ''model: "anthropic/x:high"'' rendered)
-      "the inherited model must render with the effort suffix, got: ${rendered}";
-    assert assertMsg (
-      (builtins.head (resolve "" "")).model == ""
-    ) "a role with no effort passes through untouched, even with no model";
-    assert assertMsg (
-      hasInfix "fixture" (effortLib.message.noModel "fixture" "high")
-      && hasInfix "high" (effortLib.message.noModel "fixture" "high")
-    ) "the no-model message must name the role and the effort";
-    pkgs.runCommand "drivers-pi-effort-resolves-model-or-fails" { } "touch $out";
-
   # Issue #5811: a model already ending in a known `:<level>` keeps that
   # suffix and the role's effort is dropped, so no `:low:high` doubling.
   drivers-pi-effort-suffixed-model-wins =
     let
       render =
-        coordinatorModel: model: effort:
+        model: effort:
         let
-          resolved = effortLib.resolve {
+          resolved = effortLib.applyEffort {
             roster = [ (piFixtureEntry // { inherit model effort; }) ];
             levels = entry.effortOnModelLevels;
-            inherit coordinatorModel;
           };
         in
         (entry.agentFilesTemplate { roster = resolved; }).".pi/agent/agents/fixture.md";
-      own = render "" "github-copilot/some-model:low" "high";
-      inherited = render "anthropic/x:low" "" "high";
-      tag = render "" "ollama/llama:8b" "high";
-      noEffort = render "" "github-copilot/some-model:low" "";
+      own = render "github-copilot/some-model:low" "high";
+      tag = render "ollama/llama:8b" "high";
+      noEffort = render "github-copilot/some-model:low" "";
       rejectsBad =
-        !(builtins.tryEval (builtins.deepSeq (render "" "github-copilot/some-model:low" "bogus") true))
+        !(builtins.tryEval (builtins.deepSeq (render "github-copilot/some-model:low" "bogus") true))
         .success;
       harness = fixtures.piHarnessWith (
         fixtures.opencodeNamespacedDefaults // { reviewModel = "anthropic/claude-opus-5:low"; }
@@ -456,9 +415,6 @@ in
       && hasInfix ''reasoningEffort: "low"'' own
       && !(hasInfix ":low:high" own)
     ) "the model's own suffix must win over the role effort, got: ${own}";
-    assert assertMsg (
-      hasInfix ''model: "anthropic/x:low"'' inherited && hasInfix ''reasoningEffort: "low"'' inherited
-    ) "an inherited suffixed model must keep its single suffix, got: ${inherited}";
     assert assertMsg (hasInfix ''model: "ollama/llama:8b:high"'' tag)
       "a colon tag that is not a level is part of the model id, got: ${tag}";
     assert assertMsg (

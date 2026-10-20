@@ -641,15 +641,15 @@ let
         e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e
       ) rosterWithoutBareWorker;
 
-  # A Driver whose effort rides on the model resolves each role's model here,
-  # after the opt-out drop and reviewEffort, so the agent files, roleModels and
-  # flags all see the resolved model (issue #5483).
+  # A Driver whose effort rides on the model validates each role's effort level
+  # and folds an existing `:<level>` suffix here, after the opt-out drop and
+  # reviewEffort, so the agent files, roleModels and flags all see the result
+  # (issues #5483, #5811).
   finalRoster =
     if driverEntry ? effortOnModelLevels then
-      (import ./effort-on-model.nix { inherit lib; }).resolve {
+      (import ./effort-on-model.nix { inherit lib; }).applyEffort {
         roster = effortAppliedRoster;
         levels = driverEntry.effortOnModelLevels;
-        coordinatorModel = mergedDefaults.model or "";
       }
     else
       effortAppliedRoster;
