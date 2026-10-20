@@ -161,6 +161,24 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     ) "assertShape must throw when a Driver entry is missing a required attribute";
     pkgs.runCommand "drivers-assert-shape-missing-attribute-throws" { } "touch $out";
 
+  # A misspelt optional attribute (providerNamespacedModel, no trailing s) would
+  # otherwise vanish silently and disable the Nix bare-model check that reads
+  # providerNamespacedModels.
+  drivers-assert-shape-unknown-attribute-throws =
+    let
+      control = builtins.tryEval (driverRegistry.assertShape "control" stubDriverComplete);
+      result = builtins.tryEval (
+        driverRegistry.assertShape "misspelt" (stubDriverComplete // { providerNamespacedModel = true; })
+      );
+    in
+    # tryEval cannot expose the thrown message, so only throw/no-throw is pinned;
+    # the control keeps the throw attributable to the one added attribute.
+    assert assertMsg control.success "assertShape must accept stubDriverComplete";
+    assert assertMsg (
+      !result.success
+    ) "assertShape must throw when a Driver entry carries an attribute outside the closed set";
+    pkgs.runCommand "drivers-assert-shape-unknown-attribute-throws" { } "touch $out";
+
   # A stub row added to the registry yields its file's checks with no other edit
   # (issue #5502). Only attr names are forced: the stub's check values would
   # build its fake rendering.

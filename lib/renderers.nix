@@ -768,8 +768,9 @@ rec {
   # name. driverEntries is the registry's `entries` attrset, not the whole
   # registry: the registry also exports shape-assertion and rendering
   # functions, which are not Drivers (issue #624). Driver rows carry many
-  # Nix-only attributes, so unlike renderBackendRegistryGo an attribute outside
-  # rowFields is not an error. Emits unaligned Go; gofmt owns column alignment.
+  # Nix-only attributes, so an attribute outside rowFields is not an error here;
+  # assertShape owns the closed set. Emits unaligned Go; gofmt owns column
+  # alignment.
   renderDriverDescriptorsGo =
     driverEntries:
     let
