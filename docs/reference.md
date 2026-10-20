@@ -7724,8 +7724,8 @@ entry leaves it unset, since pi's row declares no timeout variable. Other
 Consumers leave it unset and keep each Driver's own limit — see the
 `DRIVER_BASH_TIMEOUT_MS` row in the env-var table.
 
-**Daemon pool.** The dogfood config sets `dispatch.maxParallel` to `6` from
-`nix/dogfood-defaults.nix`'s `maxParallel`, a six-slot Daemon pool. It has
+**Daemon pool.** The dogfood config sets `dispatch.maxParallel` to `4` from
+`nix/dogfood-defaults.nix`'s `maxParallel`, a four-slot Daemon pool. It has
 to be baked: the Daemon resolves `MAX_PARALLEL` from the input document
 before the environment, so a `MAX_PARALLEL` line in `harness.env` never
 reaches the pool (issue #4623).
