@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -131,19 +132,14 @@ type rawCargoConfig struct {
 // .cargo/config.toml for its [registries.<name>] entries. An index URL's
 // leading "sparse+" is stripped because that prefix is cargo's own marker for
 // the sparse protocol, not part of the URL the Forwarder or credential lookup
-// ever sees. ParseCargoRegistryDecls answers a different question.
+// ever sees. ParseCargoRegistryDecls keeps the index verbatim instead.
 func parseCargoRegistryConfig(content string) ([]Declaration, bool, error) {
 	var raw rawCargoConfig
 	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
 		return nil, false, err
 	}
 
-	// Map iteration order is randomized; sort so output is deterministic.
-	names := make([]string, 0, len(raw.Registries))
-	for name := range raw.Registries {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(raw.Registries))
 
 	var out []Declaration
 	for _, name := range names {
@@ -155,8 +151,6 @@ func parseCargoRegistryConfig(content string) ([]Declaration, bool, error) {
 			// file's own TOML syntax is an error.
 			continue
 		}
-		// raw.Registries' keys are already unique, so nothing needs deduping
-		// here, unlike in the line-scanning parsers.
 		out = append(out, Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
@@ -179,18 +173,41 @@ type CargoRegistryDecl struct {
 	Index string
 }
 
-// ParseCargoRegistryDecls scans the repo's own tracked .cargo/config.toml,
-// before any rewrite, for every [registries.NAME] table carrying an `index`
-// assignment, in header-appearance order. A name failing cargoBareKeyPattern
-// is skipped: an untrusted name must never reach a caller that could turn it
-// into a shell-sourced env var name. A repeated name keeps its first table.
+// ParseCargoRegistryDecls decodes the repo's own tracked .cargo/config.toml,
+// before any rewrite, for every [registries.NAME] table carrying an `index`,
+// sorted by name. It decodes with go-toml like parseCargoRegistryConfig, so
+// every spelling discovery accepts reads the same here, and a file go-toml
+// rejects (a repeated table or key included) yields nil as discovery errors.
+// A name failing cargoBareKeyPattern is skipped: an untrusted name must never
+// reach a caller that could turn it into a shell-sourced env var name. Because
+// decls are in name order, when two registries share one index path the shared
+// proxy name (and so its CARGO_REGISTRIES_*_TOKEN env var) comes from the
+// alphabetically first registry, not the first written in the file.
 func ParseCargoRegistryDecls(content string) []CargoRegistryDecl {
-	raw := scanCargoNamedTable(content, "registries.", "index")
-	decls := make([]CargoRegistryDecl, len(raw))
-	for i, d := range raw {
-		decls[i] = CargoRegistryDecl{Name: d.name, Index: d.value}
+	var raw rawCargoConfig
+	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
+		return nil
+	}
+
+	var decls []CargoRegistryDecl
+	for _, name := range sortedBareNames(raw.Registries) {
+		if index := raw.Registries[name].Index; index != "" {
+			decls = append(decls, CargoRegistryDecl{Name: name, Index: index})
+		}
 	}
 	return decls
+}
+
+// sortedBareNames is the one place the cargoBareKeyPattern name filter lives:
+// m's keys in name order, minus any failing the pattern.
+func sortedBareNames[V any](m map[string]V) []string {
+	var names []string
+	for _, name := range slices.Sorted(maps.Keys(m)) {
+		if cargoBareKeyPattern.MatchString(name) {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // CargoSourceDecl is one [source.NAME] table in the Target repo's un-rewritten
@@ -203,132 +220,31 @@ type CargoSourceDecl struct {
 	Registry string
 }
 
-// ParseCargoSourceDecls scans content for every [source.NAME] table carrying
-// a `registry` assignment, in header-appearance order. It shares
-// ParseCargoRegistryDecls' contract through scanCargoNamedTable; only the
-// header prefix and key differ. A [source.NAME] carrying only `replace-with`
-// claims no URL and yields no decl.
+// cargoSourceConfig is the [source.*] slice of .cargo/config.toml, decoded
+// apart from rawCargoConfig so a mistyped source key cannot fail discovery.
+type cargoSourceConfig struct {
+	Source map[string]struct {
+		Registry string `toml:"registry"`
+	} `toml:"source"`
+}
+
+// ParseCargoSourceDecls is ParseCargoRegistryDecls' counterpart for every
+// [source.NAME] table carrying a `registry`, with the same decode, ordering
+// and name filter. A [source.NAME] carrying only `replace-with` claims no URL
+// and yields no decl.
 func ParseCargoSourceDecls(content string) []CargoSourceDecl {
-	raw := scanCargoNamedTable(content, "source.", "registry")
-	decls := make([]CargoSourceDecl, len(raw))
-	for i, d := range raw {
-		decls[i] = CargoSourceDecl{Name: d.name, Registry: d.value}
+	var raw cargoSourceConfig
+	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
+		return nil
+	}
+
+	var decls []CargoSourceDecl
+	for _, name := range sortedBareNames(raw.Source) {
+		if registry := raw.Source[name].Registry; registry != "" {
+			decls = append(decls, CargoSourceDecl{Name: name, Registry: registry})
+		}
 	}
 	return decls
-}
-
-type namedCargoTableDecl struct {
-	name  string
-	value string
-}
-
-// scanCargoNamedTableOccurrences is scanCargoNamedTable's core line scan,
-// split out for a caller that needs to see repeats: it applies neither the
-// untrusted-name filter nor the dedupe, and reports a matching header with no
-// matching key line as an empty-value decl. A section runs from its
-// "[<headerPrefix>NAME]" header to the next "[...]" header or EOF.
-func scanCargoNamedTableOccurrences(content, headerPrefix, key string) []namedCargoTableDecl {
-	lines := strings.Split(content, "\n")
-
-	var decls []namedCargoTableDecl
-
-	inSection := false
-	sectionName := ""
-	sectionValue := ""
-	haveValue := false
-
-	flush := func() {
-		if inSection {
-			decls = append(decls, namedCargoTableDecl{name: sectionName, value: sectionValue})
-		}
-	}
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-			// New header: close out whatever section (if any) precedes it.
-			flush()
-
-			header := strings.TrimSuffix(strings.TrimPrefix(trimmed, "["), "]")
-			name, ok := strings.CutPrefix(header, headerPrefix)
-			if ok {
-				inSection = true
-				sectionName = name
-				sectionValue = ""
-				haveValue = false
-			} else {
-				inSection = false
-				sectionName = ""
-				sectionValue = ""
-				haveValue = false
-			}
-			continue
-		}
-
-		if inSection && !haveValue {
-			k, value, ok := strings.Cut(trimmed, "=")
-			if ok && strings.TrimSpace(k) == key {
-				// First matching-key line wins even when malformed:
-				// haveValue latches either way, so a rejected value leaves
-				// the section value-less rather than falling through.
-				sectionValue, _ = cargoTOMLStringValue(value)
-				haveValue = true
-			}
-		}
-	}
-	flush()
-
-	return decls
-}
-
-// scanCargoNamedTable is the line-based scan ParseCargoRegistryDecls and
-// ParseCargoSourceDecls share, parameterized on header prefix and key. Over
-// scanCargoNamedTableOccurrences it drops a name failing cargoBareKeyPattern,
-// so an untrusted name never reaches a caller that could turn it into a shell
-// variable name, drops a keyless table, and dedupes a repeated name.
-func scanCargoNamedTable(content, headerPrefix, key string) []namedCargoTableDecl {
-	raw := scanCargoNamedTableOccurrences(content, headerPrefix, key)
-
-	var decls []namedCargoTableDecl
-	seen := make(map[string]bool)
-	for _, d := range raw {
-		if d.value == "" || seen[d.name] || !cargoBareKeyPattern.MatchString(d.name) {
-			continue
-		}
-		seen[d.name] = true
-		decls = append(decls, d)
-	}
-	return decls
-}
-
-// cargoTOMLStringValue extracts the string a TOML key assigns, allowing
-// nothing after the close quote but an optional "#" comment. The strictness is
-// load-bearing: an index with trailing junk still parses as a URL matching its
-// route and lands in a [source.NAME] stanza cargo never uses, so the replacement
-// silently never binds. It is escape-unaware, so an escaped quote truncates.
-func cargoTOMLStringValue(value string) (string, bool) {
-	v := strings.TrimSpace(value)
-	if v == "" {
-		return "", false
-	}
-
-	quote := v[0]
-	if quote != '"' && quote != '\'' {
-		return "", false
-	}
-
-	rest := v[1:]
-	end := strings.IndexByte(rest, quote)
-	if end < 0 {
-		return "", false
-	}
-
-	trailer := strings.TrimSpace(rest[end+1:])
-	if trailer != "" && !strings.HasPrefix(trailer, "#") {
-		return "", false
-	}
-
-	return rest[:end], true
 }
 
 // CargoUpstreamSource is one real-registry [source.NAME] stanza a
@@ -499,7 +415,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 	}
 
 	// Maps a repo-declared [source.NAME]'s registry URL to NAME,
-	// first-occurrence-wins. A guarded name is excluded up front so the
+	// first-by-name-wins. A guarded name is excluded up front so the
 	// minting site below falls back to its minted name rather than reusing it.
 	claimingSourceNameByURL := make(map[string]string)
 	for _, sd := range ParseCargoSourceDecls(repoConfig) {

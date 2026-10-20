@@ -2,10 +2,14 @@ package ecosystem
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/pelletier/go-toml/v2"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -80,10 +84,9 @@ index = 'sparse+https://cargo.example.test/index/'
 	}
 }
 
-// Each index value that is not a well-formed TOML string must yield no decl
-// at all. The first index line in a section wins, so a malformed one must not
-// fall through to a later, well-formed one.
-func TestParseCargoRegistryDecls_MalformedIndexRejected(t *testing.T) {
+// Invalid TOML fails the whole file, matching discovery's decode: a malformed
+// index value must not let a later well-formed line stand in for it.
+func TestParseCargoRegistryDecls_InvalidTOMLYieldsNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		value string
@@ -94,14 +97,75 @@ func TestParseCargoRegistryDecls_MalformedIndexRejected(t *testing.T) {
 		{"mismatched quotes", `"sparse+https://cargo.example.test/index/'`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			content := "[registries.othercorp]\nindex = " + tc.value + "\n" +
-				`index = "sparse+https://cargo.example.test/index/"` + "\n"
+			content := "[registries.othercorp]\nindex = " + tc.value + "\n"
 
 			got := ParseCargoRegistryDecls(content)
 			if len(got) != 0 {
 				t.Errorf("ParseCargoRegistryDecls() = %+v, want empty", got)
 			}
 		})
+	}
+}
+
+// A repeated index key is a TOML error, so the earlier well-formed line does
+// not survive either.
+func TestParseCargoRegistryDecls_DuplicateIndexKeyYieldsNothing(t *testing.T) {
+	content := `[registries.othercorp]
+index = "sparse+https://first.example.test/index/"
+index = "sparse+https://second.example.test/index/"
+`
+	if got := ParseCargoRegistryDecls(content); len(got) != 0 {
+		t.Errorf("ParseCargoRegistryDecls() = %+v, want empty", got)
+	}
+}
+
+// Every spelling TOML (and so discovery's go-toml decode) accepts must read the
+// same at bind time.
+func TestParseCargoRegistryDecls_TOMLSpellings(t *testing.T) {
+	const idx = "sparse+https://crates.acme.test/index/"
+	want := CargoRegistryDecl{Name: "acme", Index: idx}
+	for _, tc := range []struct{ name, content string }{
+		{"header trailing comment", "[registries.acme] # internal\nindex = \"" + idx + "\"\n"},
+		{"inline table", "[registries]\nacme = { index = \"" + idx + "\" }\n"},
+		{"dotted key", "registries.acme.index = \"" + idx + "\"\n"},
+		{"quoted key", "[registries.acme]\n\"index\" = \"" + idx + "\"\n"},
+		{"bracket whitespace", "[ registries.acme ]\nindex = \"" + idx + "\"\n"},
+		{"quoted table name", "[registries.\"acme\"]\nindex = \"" + idx + "\"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseCargoRegistryDecls(tc.content)
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// A header with a trailing comment once fell out of the line scan, so the
+// previous table's index was attributed to the wrong name.
+func TestParseCargoRegistryDecls_NoMisattributionAfterCommentedHeader(t *testing.T) {
+	content := `[registries.other]
+[registries.acme] # c
+index = "sparse+https://crates.acme.test/index/"
+`
+	want := CargoRegistryDecl{Name: "acme", Index: "sparse+https://crates.acme.test/index/"}
+	got := ParseCargoRegistryDecls(content)
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, want)
+	}
+}
+
+// Decls come back sorted by name, not in header order.
+func TestParseCargoRegistryDecls_SortedByName(t *testing.T) {
+	content := `[registries.zeta]
+index = "sparse+https://z.example.test/index/"
+
+[registries.alpha]
+index = "sparse+https://a.example.test/index/"
+`
+	got := ParseCargoRegistryDecls(content)
+	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "zeta" {
+		t.Errorf("ParseCargoRegistryDecls() = %+v, want alpha then zeta", got)
 	}
 }
 
@@ -168,18 +232,48 @@ registry = 'sparse+https://cargo.example.test/index/'
 	}
 }
 
-// A name repeated across two [source.NAME] headers keeps its first
-// occurrence, mirroring ParseCargoRegistryDecls' contract.
-func TestParseCargoSourceDecls_DedupedFirstWins(t *testing.T) {
+// A name repeated across two [source.NAME] headers is a TOML error, so the
+// whole file yields no decls, as discovery's decode does.
+func TestParseCargoSourceDecls_RepeatedTableYieldsNothing(t *testing.T) {
 	content := `[source.othercorp]
 registry = "sparse+https://first.example.test/index/"
 
 [source.othercorp]
 registry = "sparse+https://second.example.test/index/"
 `
+	if got := ParseCargoSourceDecls(content); len(got) != 0 {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want empty", got)
+	}
+}
+
+func TestParseCargoSourceDecls_TOMLSpellings(t *testing.T) {
+	const reg = "sparse+https://crates.acme.test/index/"
+	want := CargoSourceDecl{Name: "acme", Registry: reg}
+	for _, tc := range []struct{ name, content string }{
+		{"header trailing comment", "[source.acme] # internal\nregistry = \"" + reg + "\"\n"},
+		{"inline table", "[source]\nacme = { registry = \"" + reg + "\" }\n"},
+		{"dotted key", "source.acme.registry = \"" + reg + "\"\n"},
+		{"quoted key", "[source.acme]\n\"registry\" = \"" + reg + "\"\n"},
+		{"bracket whitespace", "[ source.acme ]\nregistry = \"" + reg + "\"\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseCargoSourceDecls(tc.content)
+			if len(got) != 1 || got[0] != want {
+				t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+func TestParseCargoSourceDecls_NoMisattributionAfterCommentedHeader(t *testing.T) {
+	content := `[source.other]
+[source.acme] # c
+registry = "sparse+https://crates.acme.test/index/"
+`
+	want := CargoSourceDecl{Name: "acme", Registry: "sparse+https://crates.acme.test/index/"}
 	got := ParseCargoSourceDecls(content)
-	if len(got) != 1 || got[0].Registry != "sparse+https://first.example.test/index/" {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want the first occurrence only", got)
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, want)
 	}
 }
 
@@ -451,15 +545,8 @@ registry = "sparse+https://cargo.example.test/a/"
 	if len(warnings) != 0 {
 		t.Errorf("CargoRepoAwareConfig() warnings = %v, want none", warnings)
 	}
-	homeNameCount := make(map[string]int)
-	for _, occ := range scanCargoNamedTableOccurrences(rendered, "source.", "registry") {
-		homeNameCount[occ.name]++
-	}
-	for name, count := range homeNameCount {
-		if count > 1 {
-			t.Errorf("home config declares [source.%s] %d times, want at most once", name, count)
-		}
-	}
+	// A decode error here means a duplicate [source.*] table in one file.
+	decodeCargoSourceRegistries(t, "home", rendered)
 }
 
 func TestCargoSourceReplacements_SingleRegistry(t *testing.T) {
@@ -722,7 +809,7 @@ index = "sparse+https://cargo.example.test/index/"
 
 // Cargo maps a URL to a source name 1:1, so two registry names pointing at
 // the same real index URL must collapse into one upstream stanza, keeping the
-// first name's stanza in repo-config appearance order.
+// stanza of the first name in name order.
 func TestCargoSourceReplacements_DedupeSameIndexURL(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
@@ -742,7 +829,7 @@ index = "sparse+https://cargo.example.test/index/"
 		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
 	}
 	if got[0].Upstreams[0].SourceName != "spindrift-upstream-first-name" {
-		t.Errorf("SourceName = %q, want first occurrence %q", got[0].Upstreams[0].SourceName, "spindrift-upstream-first-name")
+		t.Errorf("SourceName = %q, want first by name %q", got[0].Upstreams[0].SourceName, "spindrift-upstream-first-name")
 	}
 }
 
@@ -1256,6 +1343,25 @@ func cargoSourceIDCollisionKey(value string) string {
 	return key
 }
 
+// decodeCargoSourceRegistries decodes content's [source.*] tables with go-toml
+// into cargoSourceConfig, as sorted name/registry decls. A decode failure is a
+// test error: go-toml rejects a table declared twice, which is the same-file
+// duplicate these helpers exist to catch.
+func decodeCargoSourceRegistries(t *testing.T, label, content string) []CargoSourceDecl {
+	t.Helper()
+
+	var raw cargoSourceConfig
+	if err := toml.Unmarshal([]byte(content), &raw); err != nil {
+		t.Errorf("%s config is not valid TOML: %v", label, err)
+		return nil
+	}
+	var decls []CargoSourceDecl
+	for _, name := range slices.Sorted(maps.Keys(raw.Source)) {
+		decls = append(decls, CargoSourceDecl{Name: name, Registry: raw.Source[name].Registry})
+	}
+	return decls
+}
+
 // assertNoDuplicateCargoSourceTables pins AC 1 (issue #3248): homeConfig alone
 // must never declare the same [source.…] table name twice (a same-file
 // duplicate table is a TOML error, not a merge question), and once merged with
@@ -1268,33 +1374,24 @@ func cargoSourceIDCollisionKey(value string) string {
 func assertNoDuplicateCargoSourceTables(t *testing.T, repoConfig, homeConfig string) {
 	t.Helper()
 
-	homeOccurrences := scanCargoNamedTableOccurrences(homeConfig, "source.", "registry")
-	homeNameCount := make(map[string]int)
-	for _, occ := range homeOccurrences {
-		homeNameCount[occ.name]++
-	}
-	for name, count := range homeNameCount {
-		if count > 1 {
-			t.Errorf("home config declares [source.%s] %d times, want at most once", name, count)
-		}
-	}
+	homeDecls := decodeCargoSourceRegistries(t, "home", homeConfig)
 
 	type urlClaim struct {
 		name  string
 		value string
 	}
 	nameByURL := make(map[string]urlClaim)
-	merged := append(scanCargoNamedTableOccurrences(repoConfig, "source.", "registry"), homeOccurrences...)
+	merged := append(decodeCargoSourceRegistries(t, "repo", repoConfig), homeDecls...)
 	for _, occ := range merged {
-		if occ.value == "" {
+		if occ.Registry == "" {
 			continue
 		}
-		key := cargoSourceIDCollisionKey(occ.value)
-		if existing, ok := nameByURL[key]; ok && existing.name != occ.name {
-			t.Errorf("[source.%s] (registry = %q) and [source.%s] (registry = %q) claim one cargo source (canonical key %q), want at most one claimant per source", existing.name, existing.value, occ.name, occ.value, key)
+		key := cargoSourceIDCollisionKey(occ.Registry)
+		if existing, ok := nameByURL[key]; ok && existing.name != occ.Name {
+			t.Errorf("[source.%s] (registry = %q) and [source.%s] (registry = %q) claim one cargo source (canonical key %q), want at most one claimant per source", existing.name, existing.value, occ.Name, occ.Registry, key)
 			continue
 		}
-		nameByURL[key] = urlClaim{name: occ.name, value: occ.value}
+		nameByURL[key] = urlClaim{name: occ.Name, value: occ.Registry}
 	}
 }
 
@@ -1360,15 +1457,15 @@ index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/"
 }
 
 // Two declared registries whose index URLs differ only in scheme resolve to
-// the same local index URL, so the second reuses the proxy source the first
-// minted and the shared [source....]/[registries....] pair renders once.
+// the same local index URL, so the second (by name order) reuses the proxy
+// source the first minted and the shared [source....]/[registries....] pair renders once.
 // Emitting it per replacement would declare the same table name twice in one
 // file, a TOML error cargo refuses to parse at all.
 func TestCargoRepoAwareConfig_TwoRegistriesOnOneIndexPath(t *testing.T) {
-	repoConfig := `[registries.othercorp]
+	repoConfig := `[registries.first]
 index = "http://cargo.example.test/other-index/"
 
-[registries.other]
+[registries.second]
 index = "sparse+https://cargo.example.test/other-index/"
 `
 	routes := []registrymanifest.Route{{Prefix: "r1", UpstreamHost: "cargo.example.test"}}
@@ -1377,22 +1474,22 @@ index = "sparse+https://cargo.example.test/other-index/"
 
 	assertNoDuplicateCargoSourceTables(t, repoConfig, got)
 
-	if n := strings.Count(got, "[registries.spindrift-registry-proxy-r1-othercorp]"); n != 1 {
-		t.Errorf("CargoRepoAwareConfig() content declares [registries.spindrift-registry-proxy-r1-othercorp] %d times, want exactly 1: %q", n, got)
+	if n := strings.Count(got, "[registries.spindrift-registry-proxy-r1-first]"); n != 1 {
+		t.Errorf("CargoRepoAwareConfig() content declares [registries.spindrift-registry-proxy-r1-first] %d times, want exactly 1: %q", n, got)
 	}
 
 	// Both upstream stanzas still render: deduping the shared pair must not
 	// swallow the second replacement's own source stanza with it.
 	for _, want := range []string{
-		"[source.spindrift-upstream-othercorp]\nregistry = \"http://cargo.example.test/other-index/\"\nreplace-with = \"spindrift-registry-proxy-r1-othercorp\"\n",
-		"[source.spindrift-upstream-other]\nregistry = \"sparse+https://cargo.example.test/other-index/\"\nreplace-with = \"spindrift-registry-proxy-r1-othercorp\"\n",
+		"[source.spindrift-upstream-first]\nregistry = \"http://cargo.example.test/other-index/\"\nreplace-with = \"spindrift-registry-proxy-r1-first\"\n",
+		"[source.spindrift-upstream-second]\nregistry = \"sparse+https://cargo.example.test/other-index/\"\nreplace-with = \"spindrift-registry-proxy-r1-first\"\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("CargoRepoAwareConfig() content = %q, want it to contain %q", got, want)
 		}
 	}
 
-	if len(exports) != 1 || exports[0].Name != "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_OTHERCORP_TOKEN" {
+	if len(exports) != 1 || exports[0].Name != "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_FIRST_TOKEN" {
 		t.Errorf("CargoRepoAwareConfig() exports = %+v, want one export for the shared proxy source", exports)
 	}
 }
