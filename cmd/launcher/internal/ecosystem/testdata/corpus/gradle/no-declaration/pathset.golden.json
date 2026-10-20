@@ -2,8 +2,8 @@
   "derived": null,
   "enforced": [
     {
-      "enforcedPaths": null,
-      "enforcedSubtrees": null,
+      "enforcedPaths": [],
+      "enforcedSubtrees": [],
       "matchHost": "repo.acme.test",
       "upstream": "https://repo.acme.test"
     }

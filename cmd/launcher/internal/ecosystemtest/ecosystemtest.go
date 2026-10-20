@@ -35,14 +35,12 @@
 package ecosystemtest
 
 import (
-	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/bindregistry"
@@ -353,10 +351,10 @@ func (c *replay) pathSet() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// proxyRoutes is the proxy route table stages 4 to 6 run against. It mirrors
-// package main's resolveRegistryRoutesFromFile, applyHostPathSet and
-// registryproxy.AssignPrefixes, which the kit cannot import. Credentials stay
-// empty: no secret is resolved.
+// proxyRoutes is the proxy route table stages 4 to 6 run against: the
+// production projection (registrypathset.ApplyToRoute, then
+// registryproxy.AssignPrefixes) over the row's own derived path sets.
+// Credentials stay empty: no secret is resolved.
 func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 	return c.proxied.get(func() ([]registryproxy.Route, error) {
 		parsed, err := c.parsedRoutes()
@@ -369,42 +367,13 @@ func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 		}
 		byHost := make(map[string]registrypathset.HostPathSet, len(sets))
 		for _, s := range sets {
-			byHost[registryvocab.HostKey(s.Host)] = s
+			byHost[s.Host] = s
 		}
 		routes := make([]registryproxy.Route, len(parsed))
 		for i, r := range parsed {
-			hp, ok := byHost[registryvocab.HostKey(r.MatchHost)]
-			if !ok && r.UpstreamOrigin == "" {
-				return nil, fmt.Errorf("route %q is host-rooted but the Target repo declares no registry on that host; set the route's upstream-origin", r.MatchHost)
-			}
-			route := registryproxy.Route{
-				MatchHost:      r.MatchHost,
-				AuthScheme:     r.AuthScheme,
-				Ecosystems:     r.Ecosystems,
-				UpstreamOrigin: r.UpstreamOrigin,
-				Allow:          r.Allow,
-				Upstream:       cmp.Or(r.UpstreamOrigin, strings.TrimSuffix(hp.Origin, "/")),
-			}
-			seen := map[string]bool{}
-			addPath := func(p string) {
-				if !seen[p] {
-					seen[p] = true
-					route.EnforcedPaths = append(route.EnforcedPaths, p)
-				}
-			}
-			for _, sub := range hp.Subtrees {
-				addPath(sub.Path)
-				sub.RegistryName = "" // host-only, as in applyHostPathSet
-				route.EnforcedSubtrees = append(route.EnforcedSubtrees, sub)
-			}
-			for _, p := range r.Allow {
-				addPath(p)
-			}
-			// The Forwarder keys a rewrite row's bases off the tag, so a declared
-			// path keeps its own tagged subtree even when a derived path equals it.
-			if p := r.Ecosystems.Path(c.row.Name); p != "" {
-				addPath(p)
-				route.EnforcedSubtrees = append(route.EnforcedSubtrees, registryvocab.Subtree{Ecosystem: c.row.Name, Path: p})
+			route, err := registrypathset.ApplyToRoute(r.ProxyRoute(), byHost, c.rows())
+			if err != nil {
+				return nil, err
 			}
 			routes[i] = route
 		}

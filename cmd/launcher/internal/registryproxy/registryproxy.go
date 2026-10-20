@@ -57,8 +57,9 @@ type Route struct {
 	// time, and it is never re-derived mid-run (ADR 0045).
 	Prefix string
 	// Ecosystems is the route's [routes.ecosystems.<name>] declaration block
-	// (issue #3403), carried metadata for the manifest and for the launcher's
-	// applyHostPathSet. This package never reads it: routing is by Prefix.
+	// (issue #3403), carried metadata for the manifest and for
+	// registrypathset.ApplyToRoute. This package never reads it: routing is
+	// by Prefix.
 	Ecosystems registryvocab.RouteEcosystems
 	// UpstreamOrigin is the operator-declared origin from the routes file
 	// (ADR 0047, issue #3261). Carried metadata here: forwarding reads
@@ -73,7 +74,7 @@ type Route struct {
 	// set refuses every request rather than falling back to a default.
 	EnforcedPaths []string
 	// Allow is carried metadata (issue #3258): routes-file path patterns the
-	// launcher's applyHostPathSet already folded into EnforcedPaths before
+	// registrypathset.ApplyToRoute already folded into EnforcedPaths before
 	// this Route was built, so enforcement here reads EnforcedPaths alone.
 	Allow []string
 	// EnforcedSubtrees is EnforcedPaths tagged with the ecosystem that

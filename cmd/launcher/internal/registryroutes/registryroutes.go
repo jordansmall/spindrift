@@ -20,6 +20,7 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -867,4 +868,20 @@ func routeLabel(matchHost string, index int) string {
 		return fmt.Sprintf("route %q", matchHost)
 	}
 	return fmt.Sprintf("route %d", index+1)
+}
+
+// ProxyRoute carries r's routes-file fields into the registryproxy.Route
+// production and the ecosystemtest kit both build from. Credential, Upstream,
+// EnforcedPaths, EnforcedSubtrees and Prefix stay unset: the caller resolves
+// the credential, registrypathset.ApplyToRoute fills Upstream and the
+// enforced paths from the host's path set, and registryproxy.AssignPrefixes
+// sets Prefix across the whole route slice.
+func (r Route) ProxyRoute() registryproxy.Route {
+	return registryproxy.Route{
+		MatchHost:      r.MatchHost,
+		AuthScheme:     r.AuthScheme,
+		Ecosystems:     r.Ecosystems,
+		UpstreamOrigin: r.UpstreamOrigin,
+		Allow:          r.Allow,
+	}
 }
