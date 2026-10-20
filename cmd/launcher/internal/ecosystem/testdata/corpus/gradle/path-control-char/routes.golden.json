@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.gradle.path \"/mav\\x01en\" must not contain a control character"
+}
