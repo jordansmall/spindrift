@@ -3960,10 +3960,11 @@ This is the forgejo analog of the `gh` load out: in the default read-write
 mode an Agent reads its issue, comments, posts research verdicts, and opens
 the PR through `fj` porcelain rather than hand-assembled REST calls.
 
-`box` configures `fj` non-interactively before anything else it does:
-it feeds `FORGEJO_TOKEN` on stdin (never argv) to
-`fj auth add-key`, which writes `~/.local/share/forgejo-cli/keys.json` keyed
-by the instance host — an offline write, no network call. It runs only when
+`box` configures `fj` non-interactively right after it clones the Target
+repo, ahead of the read-only guards and branch recovery: it feeds
+`FORGEJO_TOKEN` on stdin (never argv) to `fj auth add-key`, which writes
+`~/.local/share/forgejo-cli/keys.json` keyed by the instance host — an
+offline write, no network call. It runs only when
 `ISSUE_TRACKER` or `CODE_FORGE` selects forgejo, and is inert on a
 non-forgejo image (no `fj`) or a read-only Box (no token), so the token
 plumbing follows exactly where `fj` is baked and permitted to write. The
