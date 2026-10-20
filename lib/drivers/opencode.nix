@@ -99,8 +99,17 @@ in
 
   # OPENCODE_DB (an absolute path, used verbatim) relocates the store into the
   # mounted directory above; derived from it so the two cannot drift.
+  #
+  # OPENCODE_CONFIG_CONTENT (issue #5374) pins formatters and LSP servers off.
+  # opencode spawns both with its full env, credentials included, and a Target
+  # repo's own opencode.json can enable them; this source merges after project
+  # config, so the Target repo cannot turn them back on.
   envCommon = {
     OPENCODE_DB = "/home/agent/${sessionCacheDirRelative}/opencode.db";
+    OPENCODE_CONFIG_CONTENT = builtins.toJSON {
+      formatter = false;
+      lsp = false;
+    };
   };
 
   # Issue #5351: opencode's bash tool defaults to a 2-minute timeout. This sets

@@ -402,6 +402,26 @@ in
       }";
     pkgs.runCommand "drivers-session-cache-dir-relative-opencode" { } "touch $out";
 
+  # Issue #5374: opencode spawns formatters and LSP servers with the Box's full
+  # env, so envCommon pins both off through OPENCODE_CONFIG_CONTENT, which
+  # outranks a Target repo's opencode.json. opencode-formatter-lsp-pin proves
+  # the behaviour; this keeps the value from vanishing.
+  drivers-opencode-formatter-lsp-pinned-off =
+    assert assertMsg
+      (
+        builtins.fromJSON (entry.envCommon.OPENCODE_CONFIG_CONTENT or "null") == {
+          formatter = false;
+          lsp = false;
+        }
+      )
+      "opencode Driver entry's envCommon must pin OPENCODE_CONFIG_CONTENT to {formatter:false,lsp:false}, got: ${
+        builtins.toJSON (entry.envCommon or null)
+      }";
+    assert assertMsg (hasInfix "export OPENCODE_CONFIG_CONTENT=" (
+      driverRegistry.renderPreamble entry
+    )) "renderPreamble must export OPENCODE_CONFIG_CONTENT from the opencode Driver entry";
+    pkgs.runCommand "drivers-opencode-formatter-lsp-pinned-off" { } "touch $out";
+
   # Issue #2152 slice C: opencode's agentFilesTemplate JSON-encodes the
   # `model` frontmatter scalar, so a model value carrying a double quote and
   # a newline cannot break out of the YAML scalar and inject a second
