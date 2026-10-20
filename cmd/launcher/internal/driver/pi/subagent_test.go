@@ -159,6 +159,87 @@ func TestSubagent_ShownUnderItsRoleNotAsMainNarration(t *testing.T) {
 	}
 }
 
+// A child that delegates further carries its own subagent toolResult: the
+// grandchildren's usage counts under their own role, once, and with ids that
+// cannot collide with the child's even at the same timestamp.
+func TestUsage_NestedSubagentCountsGrandchildren(t *testing.T) {
+	nested := `{"role":"toolResult","toolCallId":"n1","toolName":"subagent","content":[{"type":"text","text":"nested report"}],"details":{"mode":"parallel","results":[` +
+		subagentResult("worker", childAssistant(1600, `[{"type":"text","text":"grandchild says hi"}]`)) + `,` +
+		subagentResult("worker", childAssistant(1600, `[{"type":"text","text":"other"}]`)) +
+		`]},"isError":false}`
+	lines := []string{
+		toolTurn(1000, "s1", "subagent", `{}`),
+		subagentEnd("single", subagentResult("scout", scoutUser, scoutSays, nested)),
+		textEnd(2000, "parent done"),
+	}
+	path := pi.WriteLog(t, lines...)
+	rep, err := newDriver().ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	got := byAgent(rep)
+	if len(got) != 3 {
+		t.Fatalf("agents = %+v, want main, scout and worker", rep.SummedByAgent)
+	}
+	if s := got["scout"]; s.APICalls != 1 || s.UncachedInputTokens != 7 {
+		t.Errorf("scout = %+v, want its own 1 call", s)
+	}
+	if w := got["worker"]; w.APICalls != 2 || w.UncachedInputTokens != 14 || w.OutputTokens != 6 || w.CacheReadInputTokens != 10 {
+		t.Errorf("worker = %+v, want 2 calls, 14 in, 6 out, 10 cache read", w)
+	}
+	if u := rep.Totals; u.InputTokens != 181 || u.OutputTokens != 69 || u.TotalCostUSD < 1.5 || u.TotalCostUSD > 1.6 {
+		t.Errorf("totals = %+v, want 181 in, 69 out, ~1.5 cost", u)
+	}
+
+	ids := map[string]bool{}
+	for _, ev := range pi.Decode(subagentEnd("single", subagentResult("scout", scoutSays, nested))) {
+		if ev.Kind != driverkit.KindUsage {
+			continue
+		}
+		if ids[ev.MessageID] {
+			t.Errorf("message id %q repeats", ev.MessageID)
+		}
+		ids[ev.MessageID] = true
+	}
+	if len(ids) != 3 {
+		t.Errorf("usage ids = %v, want 3 distinct", ids)
+	}
+}
+
+// A nested subagent toolResult repeated by several cumulative updates and the
+// end yields the grandchildren's usage once.
+func TestUsage_NestedSubagentAcrossUpdatesCountsOnce(t *testing.T) {
+	nested := `{"role":"toolResult","toolCallId":"n1","toolName":"subagent","content":[{"type":"text","text":"nested report"}],"details":{"mode":"parallel","results":[` +
+		subagentResult("worker", childAssistant(1600, `[{"type":"text","text":"grandchild says hi"}]`)) + `,` +
+		subagentResult("worker", childAssistant(1600, `[{"type":"text","text":"other"}]`)) +
+		`]},"isError":false}`
+	lines := []string{
+		toolTurn(1000, "s1", "subagent", `{}`),
+		subagentUpdate(subagentResult("scout", scoutUser, scoutSays)),
+		subagentUpdate(subagentResult("scout", scoutUser, scoutSays, nested)),
+		subagentUpdate(subagentResult("scout", scoutUser, scoutSays, nested)),
+		subagentEnd("single", subagentResult("scout", scoutUser, scoutSays, nested)),
+		textEnd(2000, "parent done"),
+	}
+	rep, err := newDriver().ExtractUsage(pi.WriteLog(t, lines...))
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	got := byAgent(rep)
+	if len(got) != 3 {
+		t.Fatalf("agents = %+v, want main, scout and worker", rep.SummedByAgent)
+	}
+	if s := got["scout"]; s.APICalls != 1 || s.UncachedInputTokens != 7 || s.OutputTokens != 3 {
+		t.Errorf("scout = %+v, want its own 1 call, 7 in, 3 out", s)
+	}
+	if w := got["worker"]; w.APICalls != 2 || w.UncachedInputTokens != 14 || w.OutputTokens != 6 || w.CacheReadInputTokens != 10 {
+		t.Errorf("worker = %+v, want 2 calls, 14 in, 6 out, 10 cache read", w)
+	}
+	if u := rep.Totals; u.InputTokens != 181 || u.OutputTokens != 69 || u.TotalCostUSD < 1.5 || u.TotalCostUSD > 1.6 {
+		t.Errorf("totals = %+v, want 181 in, 69 out, ~1.5 cost", u)
+	}
+}
+
 // A provider may reuse a toolCallId across subagent calls: the first call's
 // emitted-message count must not hide the second call's children.
 func TestUsage_SubagentReusedToolCallID(t *testing.T) {
