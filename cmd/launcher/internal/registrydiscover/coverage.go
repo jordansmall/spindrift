@@ -5,17 +5,12 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// UncoveredHosts returns each host declared under repoDir that matches none of
-// covered, deduped in first-occurrence order. Both sides normalize through
-// registryvocab.HostKey so `spindrift doctor` and `spindrift registry discover`
-// agree (issue #3144 slice 2 AC5). registryproxy routes by the path prefix
-// derived from MatchHost, so comparing declared hosts is the whole of coverage.
-func UncoveredHosts(repoDir string, covered []string) ([]string, error) {
-	return UncoveredHostsRows(repoDir, covered, ecosystem.Table)
-}
-
-// UncoveredHostsRows is UncoveredHosts over the given rows rather than
-// ecosystem.Table.
+// UncoveredHostsRows returns each host declared under repoDir, read through the
+// given rows, that matches none of covered, deduped in first-occurrence order.
+// Both sides normalize through registryvocab.HostKey so `spindrift doctor` and
+// `spindrift registry discover` agree (issue #3144 slice 2 AC5). registryproxy
+// routes by the path prefix derived from MatchHost, so comparing declared hosts
+// is the whole of coverage.
 func UncoveredHostsRows(repoDir string, covered []string, rows []ecosystem.Row) ([]string, error) {
 	declared, _, err := ExtractRows(repoDir, rows)
 	if err != nil {
