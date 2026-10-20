@@ -255,6 +255,26 @@ let
   fragmentPaths = import ./fragment-paths.nix;
   # Shared per-file scan of the default prompt corpus (issue #5858).
   corpusScan = import ./prompt-corpus-scan.nix;
+  # A source left at its default resolves to the shared per-file scan; an
+  # override is scanned here. A prompt arg defaults to a readFile string, so
+  # "left at default" is string equality. A fragment absent from the default
+  # dir falls through to readFile and aborts eval; callers that tolerate
+  # absence check pathExists first.
+  promptScanOf =
+    file: text:
+    let
+      cached = corpusScan.prompts.${file} or null;
+    in
+    if cached != null && cached.text == text then cached else corpusScan.scan text;
+  fragmentScanOf =
+    path:
+    let
+      scanned = corpusScan.scan (builtins.readFile (fragmentsDir + "/${path}"));
+    in
+    if fragmentsDir == corpusScan.fragmentsDir then
+      corpusScan.fragments.${path} or scanned
+    else
+      scanned;
   inherit (promptContract) byId;
 
   # An alias for the fragmentsDir param above, kept so this file's existing
@@ -766,13 +786,13 @@ let
   # unsubstituted text, scanned for any forbiddenMarkers "substring" row. See
   # lib/prompt-contract.nix's buildTimeForbiddenMarkerViolations for the design.
   forbiddenMarkerViolations = promptContract.buildTimeForbiddenMarkerViolations {
-    fragmentContentByFile = builtins.listToAttrs (
+    fragmentHitsByFile = builtins.listToAttrs (
       builtins.concatMap (
         row:
         map
           (path: {
             name = path;
-            value = builtins.readFile (fragmentsDir + "/${path}");
+            value = (fragmentScanOf path).forbidden;
           })
           # An axis row's per-backend files and a deprecated row's files may
           # be absent from an old-layout fragmentsDir (a test fixture); a
@@ -789,12 +809,14 @@ let
     # the research prompts also carry forbiddenMarkers substrings, but
     # bringing them under this scan is out of scope. The issue prompt is
     # whatever file the rows give the `issue` role.
-    templateContentByFile = {
-      "review-prompt.md" = reviewPrompt;
-      "filer-prompt.md" = filerPrompt;
+    templateHitsByFile = {
+      "review-prompt.md" = (promptScanOf "review-prompt.md" reviewPrompt).forbidden;
+      "filer-prompt.md" = (promptScanOf "filer-prompt.md" filerPrompt).forbidden;
     }
     // lib.listToAttrs (
-      map (e: lib.nameValuePair e.file e.raw) (builtins.filter (e: e.role == issueRole) kindPrompts)
+      map (e: lib.nameValuePair e.file (promptScanOf e.file e.raw).forbidden) (
+        builtins.filter (e: e.role == issueRole) kindPrompts
+      )
     );
   };
 
@@ -819,24 +841,15 @@ let
   # on. Registry and rationale: lib/removed-fragment-vars.nix.
   removedFragmentVarHits =
     let
-      # A source left at its default resolves to the shared per-file scan in
-      # lib/prompt-corpus-scan.nix; an override is scanned here. A prompt arg
-      # defaults to a readFile string, so "left at default" is string equality.
-      scanOf =
-        file: text:
-        let
-          cached = corpusScan.prompts.${file} or null;
-        in
-        if cached != null && cached.text == text then cached else corpusScan.scan text;
       promptArgs = {
-        scoutPrompt = scanOf "scout-prompt.md" scoutPrompt;
-        reviewPrompt = scanOf "review-prompt.md" reviewPrompt;
-        reviewAxisPrompt = scanOf "review-axis-prompt.md" reviewAxisPrompt;
-        filerPrompt = scanOf "filer-prompt.md" filerPrompt;
-        workerPrompt = scanOf "worker-prompt.md" workerPrompt;
-        conflictResolvePrompt = scanOf "conflict-resolve-prompt.md" conflictResolvePrompt;
+        scoutPrompt = promptScanOf "scout-prompt.md" scoutPrompt;
+        reviewPrompt = promptScanOf "review-prompt.md" reviewPrompt;
+        reviewAxisPrompt = promptScanOf "review-axis-prompt.md" reviewAxisPrompt;
+        filerPrompt = promptScanOf "filer-prompt.md" filerPrompt;
+        workerPrompt = promptScanOf "worker-prompt.md" workerPrompt;
+        conflictResolvePrompt = promptScanOf "conflict-resolve-prompt.md" conflictResolvePrompt;
       }
-      // lib.listToAttrs (map (e: lib.nameValuePair e.source (scanOf e.file e.raw)) kindPrompts);
+      // lib.listToAttrs (map (e: lib.nameValuePair e.source (promptScanOf e.file e.raw)) kindPrompts);
       labelled = label: attrs: lib.mapAttrs' (n: v: lib.nameValuePair "${label} ${n}" v) attrs;
       fragmentFiles = builtins.listToAttrs (
         # A fragment missing from a Consumer fragmentsDir renders empty, so
@@ -844,11 +857,7 @@ let
         map
           (path: {
             name = path;
-            value =
-              if fragmentsDir == corpusScan.fragmentsDir then
-                corpusScan.fragments.${path} or (corpusScan.scan (builtins.readFile (fragmentsDir + "/${path}")))
-              else
-                corpusScan.scan (builtins.readFile (fragmentsDir + "/${path}"));
+            value = fragmentScanOf path;
           })
           (
             builtins.filter (path: builtins.pathExists (fragmentsDir + "/${path}")) (
