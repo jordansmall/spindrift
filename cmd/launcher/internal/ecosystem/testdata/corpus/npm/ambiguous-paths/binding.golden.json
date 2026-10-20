@@ -5,6 +5,6 @@
     "outcome": "applied"
   },
   "warnings": [
-    "==> WARNING: route \"acme-jfrog-test\" has 2 unscoped npm-tagged paths (/artifactory/api/npm/npm-remote, /artifactory/api/npm/npm-other); npm_config_registry is ambiguous and will not be bound"
+    "==> WARNING: 2 unscoped npm-tagged paths (route \"acme-jfrog-test\" path /artifactory/api/npm/npm-remote, route \"acme-jfrog-test\" path /artifactory/api/npm/npm-other); npm_config_registry is ambiguous and will not be bound"
   ]
 }

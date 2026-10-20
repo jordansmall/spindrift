@@ -21,8 +21,8 @@ var yarnRow = Row{
 	LockfileNames:    []string{"yarn.lock"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".yarnrc.yml",
-	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
-		return npmFamilyBinding(port, prefix, routes, yarnBindingEnvVar, nameYarn)
+	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		return npmFamilyBinding(port, routes, yarnBindingEnvVar, nameYarn)
 	},
 	BindingEnvVar: yarnBindingEnvVar,
 	ConfigParser:  parseYarnRegistryConfig,

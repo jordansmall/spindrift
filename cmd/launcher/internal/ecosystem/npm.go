@@ -23,8 +23,8 @@ var npmRow = Row{
 	LockfileNames:    []string{"package-lock.json"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".npmrc",
-	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
-		return npmFamilyBinding(port, prefix, routes, npmBindingEnvVar, nameNpm)
+	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+		return npmFamilyBinding(port, routes, npmBindingEnvVar, nameNpm)
 	},
 	BindingEnvVar: npmBindingEnvVar,
 	ConfigParser:  parseNpmRegistryConfig,
@@ -96,18 +96,27 @@ func addNpmFamilyDeclaration(out []Declaration, indexByURL map[string]int, d Dec
 	return append(out, d)
 }
 
-// npmFamilyBinding points one npm-family tool at the Forwarder on routes[0]
-// through envVar, from the path tagged with ecosystem. Each row computes its
-// own var independently (issue #3259): a route's tagged paths can differ across
-// npm, pnpm, and yarn. Unscoped registries only; these bind packument
-// requests, and streamNpmPackument (#3401) re-points embedded tarball URLs.
-func npmFamilyBinding(port int, prefix string, routes []registrymanifest.Route, envVar, ecosystem string) ([]EnvExport, []string) {
-	route := firstRoute(routes)
-
-	var matches []string
-	for _, p := range route.EnforcedPaths {
-		if p.Ecosystem == ecosystem && !p.Scoped {
-			matches = append(matches, p.Path)
+// npmFamilyBinding points one npm-family tool at the Forwarder through envVar,
+// searching every route for the one unscoped path tagged with ecosystem and
+// binding that route's own prefix. Unlike BindHomes' routes[0] rule (#3142),
+// npm need not follow route order: the unscoped registry is identifiable once
+// scope is carried (#5720). Each row computes its own var independently
+// (issue #3259): a route's tagged paths can differ across npm, pnpm, and yarn.
+// Unscoped registries only; these bind packument requests, and
+// streamNpmPackument (#3401) re-points embedded tarball URLs.
+func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, ecosystem string) ([]EnvExport, []string) {
+	var matches []npmFamilyMatch
+	for _, route := range routes {
+		// An empty prefix has no Forwarder address to bind. BindHomes'
+		// empty-prefix guard covers only routes[0], so later routes need their
+		// own check.
+		if route.Prefix == "" {
+			continue
+		}
+		for _, p := range route.EnforcedPaths {
+			if p.Ecosystem == ecosystem && !p.Scoped {
+				matches = append(matches, npmFamilyMatch{prefix: route.Prefix, path: p.Path})
+			}
 		}
 	}
 
@@ -122,18 +131,27 @@ func npmFamilyBinding(port int, prefix string, routes []registrymanifest.Route, 
 		// registrypathset renders a whole-host declaration as "/"
 		// (pathset.go's normalizePath), which would concatenate into a
 		// double slash below.
-		matchPath := matches[0]
+		matchPath := matches[0].path
 		if matchPath == "/" {
 			matchPath = ""
 		}
 		return []EnvExport{{
 			Name:  envVar,
-			Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, matchPath),
+			Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, matches[0].prefix, matchPath),
 		}}, nil
 	default:
-		// Two or more unscoped paths: no way to tell which is the default.
+		// Two or more unscoped paths, on one route or several: no way to tell
+		// which is the default registry.
+		entries := make([]string, len(matches))
+		for i, m := range matches {
+			entries[i] = fmt.Sprintf("route %q path %s", m.prefix, m.path)
+		}
 		return nil, []string{fmt.Sprintf(
-			"==> WARNING: route %q has %d unscoped %s-tagged paths (%s); %s is ambiguous and will not be bound",
-			route.Prefix, len(matches), ecosystem, strings.Join(matches, ", "), envVar)}
+			"==> WARNING: %d unscoped %s-tagged paths (%s); %s is ambiguous and will not be bound",
+			len(matches), ecosystem, strings.Join(entries, ", "), envVar)}
 	}
 }
+
+// npmFamilyMatch is one unscoped ecosystem-tagged path and the prefix of the
+// route that carries it.
+type npmFamilyMatch struct{ prefix, path string }

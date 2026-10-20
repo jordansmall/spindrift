@@ -13,8 +13,10 @@ import (
 // EnvExportRenderer renders an ecosystem's env-var exports and any warnings
 // about values they override. getenv lets a renderer preserve prior values
 // (go reads GOTOOLCHAIN and friends). The endpoint arrives as (port, prefix)
-// because npm's vars need a trailing slash and go's GOPROXY must not. routes
-// (issue #3259) carries the tagged EnforcedPaths a renderer keys off.
+// so each renderer owns its trailing-slash shape (go's GOPROXY has none,
+// gradle's URL does); the npm-family renderers ignore prefix and bind their
+// matched route's own. routes (issue #3259) carries the tagged EnforcedPaths a
+// renderer keys off.
 type EnvExportRenderer func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) (exports []EnvExport, warnings []string)
 
 // HomeConfigRenderer renders a home-level registry-config file for the local

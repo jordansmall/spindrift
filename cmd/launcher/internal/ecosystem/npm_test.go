@@ -53,7 +53,7 @@ func TestNpmFamilyRows_BindOnlyOwnVarFromOwnTaggedPath(t *testing.T) {
 			if got := rowByName(t, tc.row).BindingEnvVar; got != tc.envVar {
 				t.Fatalf("BindingEnvVar = %q, want %q", got, tc.envVar)
 			}
-			got, warnings := rowExports(t, tc.row, 27182, "r0", npmFamilyTaggedRoutes())
+			got, warnings := rowExports(t, tc.row, 27182, "", npmFamilyTaggedRoutes())
 			if len(warnings) != 0 {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
@@ -68,7 +68,7 @@ func TestNpmFamilyRows_BindOnlyOwnVarFromOwnTaggedPath(t *testing.T) {
 func TestNpmFamilyRows_DifferentPortDifferentURL(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
-			got, _ := rowExports(t, tc.row, 9999, "r0", npmFamilyTaggedRoutes())
+			got, _ := rowExports(t, tc.row, 9999, "", npmFamilyTaggedRoutes())
 			want := "http://127.0.0.1:9999/r0/" + tc.row + "/"
 			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
@@ -82,7 +82,9 @@ func TestNpmFamilyRows_DifferentPortDifferentURL(t *testing.T) {
 func TestNpmFamilyRows_DifferentPrefixDifferentURL(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
-			got, _ := rowExports(t, tc.row, 27182, "artifactory-npm", npmFamilyTaggedRoutes())
+			routes := npmFamilyTaggedRoutes()
+			routes[0].Prefix = "artifactory-npm"
+			got, _ := rowExports(t, tc.row, 27182, "", routes)
 			want := "http://127.0.0.1:27182/artifactory-npm/" + tc.row + "/"
 			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
@@ -97,7 +99,7 @@ func TestNpmFamilyRows_SingleTaggedPath(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
 			routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-local"})
-			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
 			if len(warnings) != 0 {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
@@ -110,7 +112,7 @@ func TestNpmFamilyRows_SingleTaggedPath(t *testing.T) {
 				if other.row == tc.row {
 					continue
 				}
-				otherGot, otherWarnings := rowExports(t, other.row, 27182, "r0", routes)
+				otherGot, otherWarnings := rowExports(t, other.row, 27182, "", routes)
 				if len(otherGot) != 0 || len(otherWarnings) != 0 {
 					t.Errorf("%s row = (%v, %v) on a %s-only route, want nothing", other.row, otherGot, otherWarnings, tc.row)
 				}
@@ -127,7 +129,7 @@ func TestNpmFamilyRows_WholeHostTaggedPath(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
 			routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/"})
-			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
 			if len(warnings) != 0 {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
@@ -144,7 +146,7 @@ func TestNpmFamilyRows_WholeHostTaggedPath(t *testing.T) {
 func TestNpmFamilyRows_ZeroTaggedPaths(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
-			got, warnings := rowExports(t, tc.row, 27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
+			got, warnings := rowExports(t, tc.row, 27182, "", []registrymanifest.Route{{Prefix: "r0"}})
 			if len(got) != 0 {
 				t.Errorf("got exports %v, want none", got)
 			}
@@ -165,7 +167,7 @@ func TestNpmFamilyRows_AmbiguousTaggedPaths(t *testing.T) {
 				registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-local"},
 				registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-other"},
 			)
-			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
 			if _, ok := ExportValue(got, tc.envVar); ok {
 				t.Errorf("%s exported, want no export (ambiguous)", tc.envVar)
 			}
@@ -191,7 +193,7 @@ func TestNpmFamilyRows_ScopedOnlyPathBindsNothing(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
 			routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/acme", Scoped: true})
-			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
 			if len(got) != 0 || len(warnings) != 0 {
 				t.Errorf("got (%v, %v), want no export and no warning", got, warnings)
 			}
@@ -208,12 +210,83 @@ func TestNpmFamilyRows_ScopedPathDoesNotMakeUnscopedAmbiguous(t *testing.T) {
 				registryvocab.Subtree{Ecosystem: tc.row, Path: "/acme", Scoped: true},
 				registryvocab.Subtree{Ecosystem: tc.row, Path: "/default"},
 			)
-			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
 			if len(warnings) != 0 {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
 			if value, ok := ExportValue(got, tc.envVar); !ok || value != "http://127.0.0.1:27182/r0/default/" {
 				t.Errorf("%s = (%q, %v), want the unscoped path", tc.envVar, value, ok)
+			}
+		})
+	}
+}
+
+// The unscoped registry binds under its own route's prefix even when an
+// earlier route (routes[0]) holds only a scoped path (#5813).
+func TestNpmFamilyRows_UnscopedOnLaterRouteBindsThatRoutePrefix(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := append(
+				taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/acme", Scoped: true}),
+				taggedRoute("r1", registryvocab.Subtree{Ecosystem: tc.row, Path: "/default"})...,
+			)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			want := "http://127.0.0.1:27182/r1/default/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
+			}
+		})
+	}
+}
+
+// Unscoped paths on different routes are as ambiguous as two on one route:
+// no export, and the warning names every contributing route and path.
+func TestNpmFamilyRows_UnscopedOnTwoRoutesIsAmbiguous(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := append(
+				taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/first"}),
+				taggedRoute("r1", registryvocab.Subtree{Ecosystem: tc.row, Path: "/second"})...,
+			)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
+			if _, ok := ExportValue(got, tc.envVar); ok {
+				t.Errorf("%s exported, want no export (ambiguous)", tc.envVar)
+			}
+			if len(warnings) != 1 {
+				t.Fatalf("got %d warnings, want 1: %v", len(warnings), warnings)
+			}
+			w := warnings[0]
+			if !strings.HasPrefix(w, "==> WARNING: ") {
+				t.Errorf("warning %q missing \"==> WARNING: \" prefix", w)
+			}
+			for _, want := range []string{tc.row, tc.envVar, "r0", "r1", "/first", "/second"} {
+				if !strings.Contains(w, want) {
+					t.Errorf("warning %q missing %q", w, want)
+				}
+			}
+		})
+	}
+}
+
+// A route with an empty prefix cannot be addressed through the Forwarder, so
+// it never contributes a match or a URL with an empty segment.
+func TestNpmFamilyRows_EmptyPrefixRouteIsIgnored(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := append(
+				taggedRoute("", registryvocab.Subtree{Ecosystem: tc.row, Path: "/ignored"}),
+				taggedRoute("r1", registryvocab.Subtree{Ecosystem: tc.row, Path: "/default"})...,
+			)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			want := "http://127.0.0.1:27182/r1/default/"
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
 	}
@@ -230,7 +303,7 @@ func TestNpmFamilyRows_IndependentPerEcosystem(t *testing.T) {
 	)
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
-			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			got, warnings := rowExports(t, tc.row, 27182, "", routes)
 			if tc.row == "yarn" {
 				if len(got) != 0 || len(warnings) != 1 {
 					t.Errorf("yarn = (%v, %v), want no export and one ambiguity warning", got, warnings)
