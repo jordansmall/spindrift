@@ -403,28 +403,29 @@ rec {
     text: builtins.filter (row: row.kind == "substring" && hasInfix row.marker text) forbiddenMarkers;
 
   # The inverse of buildTimeRejectVerdicts (issue #2510, parent #2498):
-  # asserts forbiddenMarkers are absent from the raw content a caller hands
-  # it. Unconditional, with no advise branch, because a forbidden marker in
-  # the corpus breaks any Consumer that configures boxAccessReadOnly. Callers
-  # pre-filter the fragments; only kind == "substring" rows can be scanned.
+  # reports every forbiddenMarkers row a caller found in a file. The hit
+  # lists come from forbiddenMarkersIn (via lib/prompt-corpus-scan.nix), so
+  # only kind == "substring" rows appear. Unconditional, with no advise
+  # branch, because a forbidden marker in the corpus breaks any Consumer that
+  # configures boxAccessReadOnly. Callers pre-filter the fragments.
   buildTimeForbiddenMarkerViolations =
     {
-      fragmentContentByFile,
-      templateContentByFile,
+      fragmentHitsByFile,
+      templateHitsByFile,
     }:
     let
       violationsIn =
-        contentByFile:
+        hitsByFile:
         builtins.concatMap (
           file:
           map (row: {
             inherit file;
             marker = row.marker;
             id = row.id;
-          }) (forbiddenMarkersIn contentByFile.${file})
-        ) (builtins.attrNames contentByFile);
+          }) hitsByFile.${file}
+        ) (builtins.attrNames hitsByFile);
     in
-    (violationsIn fragmentContentByFile) ++ (violationsIn templateContentByFile);
+    (violationsIn fragmentHitsByFile) ++ (violationsIn templateHitsByFile);
 
   # Asserts a research prompt never carries the envsubst placeholder for one
   # of lib/fragments.nix's FILER_FILE_DIRECT*-gated rows, which would file
