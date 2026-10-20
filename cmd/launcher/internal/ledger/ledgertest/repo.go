@@ -15,21 +15,20 @@ import (
 // tests that care about the tree shape rather than a specific file's
 // content. gc.auto and receive.autogc are both off since a detached `git gc
 // --auto` can still be repacking when t.TempDir()'s RemoveAll runs (same
-// rationale as forgetest.NewGitRepoFixture). Git identity env is set via
-// t.Setenv so a caller's own further plumbing commands against the repo
-// (e.g. a second commit-tree) inherit it without setting it again.
+// rationale as forgetest.NewGitRepoFixture). The git identity lives in
+// the repo's own config (user.name/user.email), so a caller's further plumbing
+// commands via `git -C <repo>` (e.g. a second commit-tree) inherit it. NewRepo
+// deliberately avoids t.Setenv, which panics under t.Parallel.
 func NewRepo(t *testing.T, paths ...string) string {
 	t.Helper()
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "repo.git")
 	runGit(t, "", "init", "--bare", "-q", bare)
 	runGit(t, bare, "config", "gc.auto", "0")
 	runGit(t, bare, "config", "receive.autogc", "false")
+	runGit(t, bare, "config", "user.name", "Test Bot")
+	runGit(t, bare, "config", "user.email", "bot@example.com")
 
 	entries := make([]string, 0, len(paths))
 	if len(paths) == 0 {
