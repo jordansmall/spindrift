@@ -296,7 +296,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   Digest corpus tests (each records Chore's `TestDigestCorpus` and the
   digestkit's `TestRunReplaysCorpusIntoGoldens`) to overwrite the goldens under
   `cmd/launcher/internal/*/testdata/digest/` and
-  `cmd/launcher/internal/digestkit/testdata/corpus/` —
+  `cmd/launcher/internal/digestkit/testdata/corpus/`, and the Ecosystem corpus
+  tests (`TestCorpus` in `cmd/launcher/internal/ecosystem` and
+  `cmd/launcher/internal/ecosystemtest`) to overwrite the goldens under
+  `cmd/launcher/internal/ecosystem/testdata/corpus/` and
+  `cmd/launcher/internal/ecosystemtest/testdata/corpus/` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a
   check when you add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
