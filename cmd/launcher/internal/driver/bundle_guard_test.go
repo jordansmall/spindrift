@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/driver"
 )
 
@@ -31,11 +32,40 @@ var bundleFixtures = []string{
 	module + "/internal/seamtest/bundled",
 }
 
-// isBundleOrDriver reports whether path is the bundle or a Driver package or
-// subpackage, for every registered Driver in names.
-func isBundleOrDriver(path string, names []string) bool {
+// coreBackends are the backends core keeps (ADR 0068, decision 7). Every other
+// backend row is guarded by default. Mirrored by coreBackendNames in
+// nix/checks/go.nix.
+var coreBackends = []string{"git", "local"}
+
+// guardedBackends returns the forge package path of every backend row not in
+// coreBackends.
+func guardedBackends(t *testing.T) []string {
+	t.Helper()
+	var pkgs []string
+	for _, c := range coreBackends {
+		if !slices.ContainsFunc(backend.Registry, func(d backend.Descriptor) bool { return d.Name == c }) {
+			t.Fatalf("coreBackends names %q, which is no backend.Registry row", c)
+		}
+	}
+	for _, d := range backend.Registry {
+		if !slices.Contains(coreBackends, d.Name) {
+			pkgs = append(pkgs, module+"/internal/forge/"+d.Name)
+		}
+	}
+	if len(pkgs) == 0 {
+		t.Fatal("no guarded backend packages; nothing to guard")
+	}
+	return pkgs
+}
+
+// isGuarded reports whether path is the bundle, any registered Driver's package
+// (names), any guarded backend's package (backends), or a subpackage of one.
+func isGuarded(path string, names, backends []string) bool {
+	roots := slices.Clone(backends)
 	for _, n := range append([]string{"bundle"}, names...) {
-		pkg := registry + "/" + n
+		roots = append(roots, registry+"/"+n)
+	}
+	for _, pkg := range roots {
 		if path == pkg || strings.HasPrefix(path, pkg+"/") {
 			return true
 		}
@@ -94,9 +124,10 @@ func bundleProblems(reach map[string][]string, binaries []string, list string) [
 	return problems
 }
 
-// TestOnlyBinariesReachTheBundle pins issues #5541 and #5545: only the
-// binaries (and the seamtest/bundled fixture) may reach the bundle or a Driver
-// in their tests; every library package tests through seamtest's Strategy. The
+// TestOnlyBinariesReachTheBundle pins issues #5541, #5545 and #5648: only the
+// binaries (and the seamtest/bundled fixture) may reach the bundle, a Driver or
+// a non-core backend adapter (github, forgejo, jira) in their tests; every
+// library package tests through seamtest's Strategy or the forge fake. The
 // scan is one go list over the module, so it costs one invocation, not one per
 // package.
 func TestOnlyBinariesReachTheBundle(t *testing.T) {
@@ -105,7 +136,8 @@ func TestOnlyBinariesReachTheBundle(t *testing.T) {
 		t.Fatal("driver.DescriptorNames() is empty; nothing to guard")
 	}
 	out := goList(t, "-test", "-f", `{{.ImportPath}}|{{.ForTest}}|{{join .Deps " "}}`, module+"/...")
-	isSubject := func(path string) bool { return isBundleOrDriver(path, names) }
+	backends := guardedBackends(t)
+	isSubject := func(path string) bool { return isGuarded(path, names, backends) }
 	for _, p := range bundleProblems(bundleReach(out, isSubject), slices.Concat(bundleBinaries, bundleFixtures), bundleList) {
 		t.Error(p)
 	}
@@ -152,6 +184,7 @@ func TestBoxAndDriverExecLinkNoHostSide(t *testing.T) {
 func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
 	names := []string{"claude", "opencode"}
 	m := module
+	backends := []string{m + "/internal/forge/jira", m + "/internal/forge/forgejo"}
 	out := strings.Join([]string{
 		m + "/internal/stray||fmt " + registry + "/claude",
 		m + "/internal/stray.test||fmt " + registry + "/claude",
@@ -160,12 +193,16 @@ func TestBundleProblemsClassifiesPlantedReach(t *testing.T) {
 		m + "/box||" + registry + "/bundle",
 		registry + "/claude.test||" + registry + "/opencode",
 		registry + "/bundle||" + registry + "/claude",
+		m + "/internal/stray2.test||fmt " + m + "/internal/forge/jira",
+		m + "/internal/stray3.test||fmt " + m + "/internal/forge/git",
+		m + "/internal/forge/jira.test||" + m + "/internal/forge/forgejo",
 	}, "\n")
-	isSubject := func(path string) bool { return isBundleOrDriver(path, names) }
+	isSubject := func(path string) bool { return isGuarded(path, names, backends) }
 	reach := bundleReach(out, isSubject)
 	got := bundleProblems(reach, []string{m + "/box"}, bundleList)
 	want := []string{
 		m + "/internal/stray's test closure reaches " + registry + "/claude; only bundleBinaries and bundleFixtures may",
+		m + "/internal/stray2's test closure reaches " + m + "/internal/forge/jira; only bundleBinaries and bundleFixtures may",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("bundleProblems = %q, want %q", got, want)
