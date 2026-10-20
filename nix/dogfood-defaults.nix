@@ -19,6 +19,8 @@ in
     p.nil
     p.bats
     p.shellcheck
+    # `nix run .#gate` evaluates the inbox checks with it (issue #5862).
+    p.nix-eval-jobs
   ];
   # Self-test mode (ADR 0018, issue #469): a writable store lets a Box working a
   # spindrift issue run real checks in-box (issue #470) instead of

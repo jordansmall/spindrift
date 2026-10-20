@@ -222,6 +222,12 @@
                 program = "${import ./nix/regen.nix { inherit pkgs; }}/bin/regen";
               };
 
+              # Evaluates and builds the inbox checks in parallel (issue #5862).
+              gate = {
+                type = "app";
+                program = "${import ./nix/gate.nix { inherit pkgs system; }}/bin/gate";
+              };
+
               # Rewrites the opencode session-store fixture from the baked
               # opencode (issue #5492); nix/checks/opencode-session-schema.nix
               # pins it to the derivation built here.

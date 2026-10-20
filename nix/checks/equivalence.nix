@@ -386,6 +386,17 @@ in
     assert assertMsg hasNil "expected nil to be baked into the dogfood toolchain";
     pkgs.runCommand "nil-baked-in-dogfood" { } "touch $out";
 
+  # nix-eval-jobs is baked into the dogfood toolchain for `nix run .#gate`
+  # (issue #5862), which evaluates and builds the inbox checks in one pipeline.
+  nix-eval-jobs-baked-in-dogfood =
+    let
+      inherit (pkgs.lib) assertMsg any hasInfix;
+      names = map (p: p.name or "") harness.internals.agentEnv.paths;
+      hasNixEvalJobs = any (n: hasInfix "nix-eval-jobs-" n || n == "nix-eval-jobs") names;
+    in
+    assert assertMsg hasNixEvalJobs "expected nix-eval-jobs to be baked into the dogfood toolchain";
+    pkgs.runCommand "nix-eval-jobs-baked-in-dogfood" { } "touch $out";
+
   # bats and shellcheck are baked into the dogfood toolchain so an agent editing
   # shell files can lint and test them in-box (issue #471).
   bats-baked-in-dogfood =
