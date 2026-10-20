@@ -1,0 +1,56 @@
+name: Eval profile
+
+# Not a ci.yml job (issue #5863): a `labeled` trigger there would re-run the
+# whole matrix and rewrite ci-ok's verdict on every label change.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    name: eval profile (x86_64-linux)
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (contains(github.event.pull_request.labels.*.name, 'eval-profile')
+          && (github.event.action != 'labeled' || github.event.label.name == 'eval-profile'))
+    runs-on: ubuntu-latest
+    # Job-level, so a skipped run (another label, an unlabelled push) never
+    # cancels a live profile; a newer profiled push does.
+    concurrency:
+      group: eval-profile-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      # Single-threaded: CI's Determinate Nix otherwise evaluates in parallel,
+      # which interleaves the sampled stacks into an unreadable profile. The
+      # launcher reads every check on a PR, not just required ones, so a
+      # profiler failure must not turn the run red.
+      - name: Profile the inbox checks' evaluation
+        continue-on-error: true
+        run: |
+          nix eval --no-eval-cache --raw .#packages.x86_64-linux.checks-inbox.drvPath \
+            --option eval-cores 1 \
+            --eval-profiler flamegraph --eval-profile-file "$RUNNER_TEMP/eval-profile.folded" \
+            >/dev/null
+
+      - name: Report the eval profile
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: bash .github/scripts/eval-profile-top.sh "$RUNNER_TEMP/eval-profile.folded" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the folded stacks
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-profile
+          path: ${{ runner.temp }}/eval-profile.folded
+          if-no-files-found: warn
