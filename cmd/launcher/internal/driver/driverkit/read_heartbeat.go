@@ -8,12 +8,15 @@ import (
 )
 
 // HeartbeatWriter decodes the Pass log stream it is written and emits
-// per-issue heartbeat lines to out: one for each KindText event with non-empty
-// prose, sanitized and bounded by TrimNarration, and one for each KindHostOp
-// event carrying a payload, rendered by FormatSpindriftOp. With Track set it
-// also groups tool calls into per-role phases and count lines, and prints a
-// turn line at each KindResult. Every byte is forwarded to raw unchanged; the
-// heartbeat is a side effect.
+// per-issue heartbeat lines to out. It narrates at most once per decoded
+// line, from that line's first KindText event, sanitized and bounded by
+// TrimNarration. That event narrates only when it is top-level (not
+// InSubagent) and non-empty after trimming; a later text event never stands
+// in for an empty or subagent first one. It emits one line for each
+// KindHostOp event carrying a payload, rendered by FormatSpindriftOp. With
+// Track set it also groups tool calls into per-role phases and count lines,
+// and prints a turn line at each KindResult. Every byte is forwarded to raw
+// unchanged; the heartbeat is a side effect.
 type HeartbeatWriter struct {
 	raw          io.Writer
 	issue        string
@@ -128,7 +131,7 @@ func (w *HeartbeatWriter) parseLine(line string) {
 		case KindModel:
 			w.onModelEvent(ev)
 		case KindText:
-			// Only a message's first text block narrates, even when it trims
+			// Only a line's first text event narrates, even when it trims
 			// to nothing.
 			if text == nil {
 				text = &ev
