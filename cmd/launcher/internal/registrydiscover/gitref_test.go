@@ -23,7 +23,7 @@ var (
 const hostDecl = "main = https://host.example.com/registry\n"
 
 // Pins ResolveRef's fail-closed contract directly, not only through its
-// MaterializeRef and UncoveredHostsFromGitRef callers.
+// MaterializeRef and UncoveredHostsFromGitRefRows callers.
 func TestResolveRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	if err := ResolveRef(missing, "main"); err == nil {
@@ -74,68 +74,68 @@ func TestResolveRef_ResolvableRefSucceeds(t *testing.T) {
 	}
 }
 
-func TestUncoveredHostsFromGitRef_UncoveredHostReported(t *testing.T) {
+func TestUncoveredHostsFromGitRefRows_UncoveredHostReported(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath: hostDecl,
 	}, nil)
 
 	got, err := UncoveredHostsFromGitRefRows(bare, "main", nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
 	}
 	want := []string{"host.example.com"}
 	if len(got) != 1 || got[0] != want[0] {
-		t.Errorf("UncoveredHostsFromGitRef = %v, want %v", got, want)
+		t.Errorf("UncoveredHostsFromGitRefRows = %v, want %v", got, want)
 	}
 }
 
-func TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone(t *testing.T) {
+func TestUncoveredHostsFromGitRefRows_FullyCoveredReturnsNone(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath: hostDecl,
 	}, nil)
 
 	got, err := UncoveredHostsFromGitRefRows(bare, "main", []string{"host.example.com"}, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("UncoveredHostsFromGitRef = %v, want none", got)
+		t.Errorf("UncoveredHostsFromGitRefRows = %v, want none", got)
 	}
 }
 
-func TestUncoveredHostsFromGitRef_MissingRepoDirFails(t *testing.T) {
+func TestUncoveredHostsFromGitRefRows_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	_, err := UncoveredHostsFromGitRefRows(missing, "main", nil, syntheticRows)
 	if err == nil {
-		t.Fatal("UncoveredHostsFromGitRef: want error for a missing repo dir, got nil")
+		t.Fatal("UncoveredHostsFromGitRefRows: want error for a missing repo dir, got nil")
 	}
 }
 
-func TestUncoveredHostsFromGitRef_MissingRefFails(t *testing.T) {
+func TestUncoveredHostsFromGitRefRows_MissingRefFails(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath: hostDecl,
 	}, nil)
 
 	_, err := UncoveredHostsFromGitRefRows(bare, "does-not-exist", nil, syntheticRows)
 	if err == nil {
-		t.Fatal("UncoveredHostsFromGitRef: want error for a ref that does not exist, got nil")
+		t.Fatal("UncoveredHostsFromGitRefRows: want error for a ref that does not exist, got nil")
 	}
 	if !strings.Contains(err.Error(), "does-not-exist") {
-		t.Errorf("UncoveredHostsFromGitRef error = %q, want it to name the missing ref", err.Error())
+		t.Errorf("UncoveredHostsFromGitRefRows error = %q, want it to name the missing ref", err.Error())
 	}
 }
 
 // A ref declaring no config files is not an error, unlike a broken repo or
 // ref. Both yield no hosts, so only the error distinguishes them.
-func TestUncoveredHostsFromGitRef_NoConfigFilesReturnsNone(t *testing.T) {
+func TestUncoveredHostsFromGitRefRows_NoConfigFilesReturnsNone(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, nil)
 
 	got, err := UncoveredHostsFromGitRefRows(bare, "main", nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("UncoveredHostsFromGitRef = %v, want none", got)
+		t.Errorf("UncoveredHostsFromGitRefRows = %v, want none", got)
 	}
 }
 
@@ -237,7 +237,7 @@ func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 // The checkout side of the parity above: ExtractRows does hard-error reading
 // a directory at the config path, unlike the ref snapshot it is compared
 // against.
-func TestUncoveredHosts_DirectoryAtConfigPathErrors(t *testing.T) {
+func TestUncoveredHostsRows_DirectoryAtConfigPathErrors(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, cfgPath), 0o755); err != nil {
 		t.Fatal(err)

@@ -9,10 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// UncoveredHosts must surface Extract's error instead of swallowing it. The
+// UncoveredHostsRows must surface Extract's error instead of swallowing it. The
 // synthetic parser never fails, so the row under test swaps in one that does;
 // the real parsers' malformed-input errors are pinned in the ecosystem package.
-func TestUncoveredHosts_ExtractErrorReturnsError(t *testing.T) {
+func TestUncoveredHostsRows_ExtractErrorReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "anything")
 	failing := synthetic.Row
@@ -31,7 +31,7 @@ func TestUncoveredHosts_ExtractErrorReturnsError(t *testing.T) {
 
 // Two config files (one per row) declaring the same host must produce one
 // entry, the first occurrence. Discover's own loop applies the same dedup.
-func TestUncoveredHosts_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
+func TestUncoveredHostsRows_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")
 	testutil.WriteFixture(t, dir, cfgPath, "a = https://registry.same.example.com/\n")
@@ -48,7 +48,7 @@ func TestUncoveredHosts_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 
 // A declared host with no matching covered entry is the drift doctor row's
 // core signal (issue #3144 slice 2).
-func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
+func TestUncoveredHostsRows_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
@@ -65,7 +65,7 @@ func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 // normalization Discover and registryroutes.Parse apply, so a covered
 // MatchHost differing only in case or an explicit default port still counts
 // as coverage.
-func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
+func TestUncoveredHostsRows_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
@@ -81,7 +81,7 @@ func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t 
 // A tree with none of the rows' config files, such as no checkout or a
 // checkout naming no registry, yields no uncovered hosts rather than an
 // error: nothing declared means nothing to be uncovered.
-func TestUncoveredHosts_NoDeclarations_ReturnsEmpty(t *testing.T) {
+func TestUncoveredHostsRows_NoDeclarations_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 
 	got, err := UncoveredHostsRows(dir, nil, syntheticRows)
@@ -94,11 +94,11 @@ func TestUncoveredHosts_NoDeclarations_ReturnsEmpty(t *testing.T) {
 }
 
 // This test pins the shared-engine acceptance criterion of issue #3144.
-// Discover and UncoveredHosts read their declared hosts off the same Extract
+// Discover and UncoveredHostsRows read their declared hosts off the same Extract
 // call, so with zero routes configured every host Discover proposes a route
 // for must come back uncovered, and covering exactly those routes' own
 // MatchHost values must leave nothing uncovered.
-func TestUncoveredHosts_ConsistentWithDiscover_SameTree(t *testing.T) {
+func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")
 	rows := []ecosystem.Row{synthetic.Row, twin}
