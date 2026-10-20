@@ -1,0 +1,7 @@
+[implementor] subagent()
+[auditor] [REDACTED:agent-text]
+[scout] read(plain.txt)
+[scout]   -> \[REDACTED:tool-output]
+[scout] [REDACTED:agent-text]
+[implementor]   -> [scout,auditor] \[REDACTED:tool-output]
+[implementor] parent done

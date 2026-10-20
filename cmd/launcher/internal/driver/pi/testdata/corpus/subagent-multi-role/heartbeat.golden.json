@@ -1,0 +1,23 @@
+{
+  "lines": [
+    "#42 · parent done"
+  ],
+  "onModel": [
+    {
+      "model": "stub/stub-model:off",
+      "role": ""
+    },
+    {
+      "model": "stub/stub-model:low",
+      "role": "auditor"
+    },
+    {
+      "model": "stub/stub-model:high",
+      "role": "scout"
+    },
+    {
+      "model": "stub/stub-model:off",
+      "role": ""
+    }
+  ]
+}
