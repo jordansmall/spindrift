@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -344,7 +346,62 @@ func TestMalformedEnvJSONFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	errs := replayCase(echoingSynthetic(), dir, true)
-	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "env.json") {
-		t.Fatalf("errs = %v, want one naming env.json", errs)
+	// Both stages that read env.json report the malformed file.
+	if len(errs) != 2 || !strings.Contains(errs[0].Error(), "env.json") || !strings.Contains(errs[1].Error(), "env.json") {
+		t.Fatalf("errs = %v, want the binding and bindings summary stages each naming env.json", errs)
+	}
+}
+
+func TestLockfileScanGoldenPinsAStaleForwarderPin(t *testing.T) {
+	got := readGolden(t, "stale-lockfile", "lockfile-scan.golden.txt")
+	if want := "==> WARNING: synthetic lockfile synthetic.lock still names the registry proxy Forwarder URL 127.0.0.1:" + strconv.Itoa(bindregistry.ForwarderPort); !strings.Contains(got, want) {
+		t.Errorf("stale-lockfile scan golden = %q, want it to contain %q", got, want)
+	}
+	if got := readGolden(t, "matched", "lockfile-scan.golden.txt"); got != "" {
+		t.Errorf("matched scan golden = %q, want empty", got)
+	}
+}
+
+func TestReplayCaseDriftedLockfileScanGoldenFails(t *testing.T) {
+	dir := copyCase(t, "stale-lockfile", true)
+	if err := os.WriteFile(filepath.Join(dir, "lockfile-scan.golden.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errs := replayCase(synthetic.Row, dir, false)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "lockfile scan") {
+		t.Fatalf("errs = %v, want exactly the drifted lockfile scan", errs)
+	}
+}
+
+func TestSummaryGoldenNamesTheHomeByItsEnvVarNotATempPath(t *testing.T) {
+	got := readGolden(t, "matched", "summary.golden.txt")
+	if !strings.Contains(got, "registry proxy Forwarder up on 127.0.0.1:"+strconv.Itoa(bindregistry.ForwarderPort)) {
+		t.Errorf("summary golden lacks the Forwarder line:\n%s", got)
+	}
+	if !strings.Contains(got, "$SYNTHETIC_HOME") || strings.Contains(got, os.TempDir()) {
+		t.Errorf("summary golden should name $SYNTHETIC_HOME and no temp path:\n%s", got)
+	}
+}
+
+func TestBindingsSummaryWritesNoHomeUnderTheRealHome(t *testing.T) {
+	realHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+	t.Setenv("SYNTHETIC_HOME", "")
+	if errs := replayCase(synthetic.Row, copyCase(t, "matched", true), false); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if entries, err := os.ReadDir(realHome); err != nil || len(entries) != 0 {
+		t.Fatalf("replay wrote under the real HOME: %v, %v", entries, err)
+	}
+}
+
+func TestReplayCaseDriftedSummaryGoldenFails(t *testing.T) {
+	dir := copyCase(t, "matched", true)
+	if err := os.WriteFile(filepath.Join(dir, "summary.golden.txt"), []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errs := replayCase(synthetic.Row, dir, false)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "bindings summary") {
+		t.Fatalf("errs = %v, want exactly the drifted bindings summary", errs)
 	}
 }

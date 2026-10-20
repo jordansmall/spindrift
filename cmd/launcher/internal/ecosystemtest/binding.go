@@ -53,8 +53,9 @@ func (c *replay) env() (env map[string]string, shipped bool, err error) {
 	return env, true, nil
 }
 
-// binding calls the row's renderers directly: bindregistry's BindHomes and
-// ApplyInTree need a Gate, which only a live Forwarder and manifest env build.
+// binding calls the row's renderers directly: the summary stage drives BindHomes
+// through a ready gate, but this golden pins each rendering on its own, and
+// ApplyInTree needs a Gate that only a live Forwarder and manifest env build.
 // Like BindHomes, every renderer gets the first route's prefix.
 func (c *replay) binding() ([]byte, error) {
 	routes, err := c.manifestRoutes()
@@ -105,6 +106,43 @@ func (c *replay) binding() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// gitCopy returns a throwaway git copy of repo/ with every file committed, and
+// its cleanup: bindregistry reads git-tracked paths only, and a corpus repo/
+// inside spindrift's own checkout would otherwise answer from the outer repo. A
+// case with no repo/ yields an empty repository.
+func (c *replay) gitCopy() (work string, cleanup func(), err error) {
+	work, err = os.MkdirTemp("", "ecosystemtest-repo-")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup = func() { os.RemoveAll(work) }
+	defer func() {
+		if err != nil {
+			cleanup()
+		}
+	}()
+	if _, serr := os.Stat(c.repo()); serr == nil {
+		if err = os.CopyFS(work, os.DirFS(c.repo())); err != nil {
+			return "", nil, err
+		}
+	} else if !errors.Is(serr, fs.ErrNotExist) {
+		return "", nil, serr
+	}
+	// gc.auto=0 and maintenance.auto=false keep a detached gc from racing the
+	// RemoveAll in cleanup.
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "-A"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "corpus"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", work, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
+		if out, cerr := cmd.CombinedOutput(); cerr != nil {
+			return "", nil, fmt.Errorf("git %v: %w: %s", args, cerr, out)
+		}
+	}
+	return work, cleanup, nil
+}
+
 // inTreeRewrite runs ApplyInTreeBinding, the in-tree rewrite's only exported
 // seam, over a throwaway git copy of repo/: it rewrites tracked files alone.
 func (c *replay) inTreeRewrite(rewrites []bindregistry.HostRewrite) (*inTreeOutput, error) {
@@ -112,26 +150,11 @@ func (c *replay) inTreeRewrite(rewrites []bindregistry.HostRewrite) (*inTreeOutp
 		return nil, nil
 	}
 
-	work, err := os.MkdirTemp("", "ecosystemtest-intree-")
+	work, cleanup, err := c.gitCopy()
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(work)
-	if err := os.CopyFS(work, os.DirFS(c.repo())); err != nil {
-		return nil, err
-	}
-	// gc.auto=0 and maintenance.auto=false keep a detached gc from racing the
-	// RemoveAll above.
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"add", "-A"},
-		{"-c", "user.name=t", "-c", "user.email=t@example.test", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "corpus"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", work, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("git %v: %w: %s", args, err, out)
-		}
-	}
+	defer cleanup()
 
 	outcome, err := bindregistry.ApplyInTreeBinding(work, c.row, rewrites)
 	if err != nil {

@@ -1,0 +1,2 @@
+==> WARNING: 2 unscoped npm-tagged paths (route "acme-jfrog-test" path /artifactory/api/npm/npm-remote, route "acme-jfrog-test" path /artifactory/api/npm/npm-other); npm_config_registry is ambiguous and will not be bound
+==> registry proxy Forwarder up on 127.0.0.1:27182

@@ -1,0 +1,2 @@
+==> WARNING: overriding GOTOOLCHAIN=auto with GOTOOLCHAIN=local — this Box only offers one baked Go toolchain through the Forwarder
+==> registry proxy Forwarder up on 127.0.0.1:27182

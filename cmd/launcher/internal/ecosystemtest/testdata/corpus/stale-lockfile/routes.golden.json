@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SPINDRIFT_REGISTRY_CREDENTIAL_REG_EXAMPLE_TEST",
+      "FromFile": "",
+      "MatchHost": "reg.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://reg.example.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "reg.example.test",
+    "UpstreamOrigin": ""
+  }
+]
