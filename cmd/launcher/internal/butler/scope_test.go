@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -102,6 +103,7 @@ func newTestRecordsSource(t *testing.T, root string, n, minRecords int) (records
 }
 
 func TestRecordsSourceDue(t *testing.T) {
+	t.Parallel()
 	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
 	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 3)
 
@@ -122,6 +124,7 @@ func TestRecordsSourceDue(t *testing.T) {
 }
 
 func TestRecordsSourceNextDue(t *testing.T) {
+	t.Parallel()
 	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
 	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 3)
 
@@ -137,6 +140,7 @@ func TestRecordsSourceNextDue(t *testing.T) {
 }
 
 func TestRecordsSourcePrepare(t *testing.T) {
+	t.Parallel()
 	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 1)
 
 	got, err := src.Prepare(ledger.Tip{State: ledger.State{Phase: ledger.Claimed}})
@@ -158,6 +162,7 @@ func TestRecordsSourcePrepare(t *testing.T) {
 }
 
 func TestRecordsSourcePrepareStartsPastCursor(t *testing.T) {
+	t.Parallel()
 	src, _, ids := newTestRecordsSource(t, t.TempDir(), 5, 1)
 
 	got, err := src.Prepare(ledger.Tip{State: ledger.State{Cursor: ids[2], Phase: ledger.Claimed}})
@@ -173,6 +178,7 @@ func TestRecordsSourcePrepareStartsPastCursor(t *testing.T) {
 }
 
 func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
+	t.Parallel()
 	src, r, _ := newTestRecordsSource(t, t.TempDir(), 5, 1)
 	p, err := src.Prepare(ledger.Tip{})
 	if err != nil {
@@ -181,7 +187,7 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.RecordIDResult = dispatchrecord.RecordID(tuning.Strategy.Name, tuning.Strategy.Name, tuningNow)
-	step := &settleRun{}
+	step := &settleRun{out: io.Discard}
 	if err := p.arm(d, step); err != nil {
 		t.Fatalf("arm: %v", err)
 	}
@@ -201,6 +207,7 @@ func TestRecordsSourceArmStoresSnapshot(t *testing.T) {
 }
 
 func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	src, _, _ := newTestRecordsSource(t, root, 5, 1)
 	p, err := src.Prepare(ledger.Tip{})
@@ -208,7 +215,7 @@ func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	step := &settleRun{}
+	step := &settleRun{out: io.Discard}
 	err = p.arm(dispatch.NewFake(), step)
 	if err == nil || !strings.HasPrefix(err.Error(), "butler: tuning: dispatch has no record ID") {
 		t.Fatalf("err = %v, want the no-record-ID error", err)
@@ -222,9 +229,10 @@ func TestRecordsSourceArmFailsClosedWithoutRecordID(t *testing.T) {
 }
 
 func TestRecordsSourceSnapshotsKeyedByChore(t *testing.T) {
+	t.Parallel()
 	_, r, _ := newTestRecordsSource(t, t.TempDir(), 5, 1)
 	id := dispatchrecord.RecordID("shared", "shared", tuningNow)
-	steps := map[string]*settleRun{tuning.Strategy.Name: {}, noPriorChore: {}}
+	steps := map[string]*settleRun{tuning.Strategy.Name: {out: io.Discard}, noPriorChore: {out: io.Discard}}
 	for name, step := range steps {
 		src, err := newRecordsSource(r, name, "head1", tuningNow)
 		if err != nil {
@@ -246,6 +254,7 @@ func TestRecordsSourceSnapshotsKeyedByChore(t *testing.T) {
 // The due check reads the knob the Chore's row names, not a field of the
 // Policy: the same three new Records are due at a floor of 3 and not at 4.
 func TestRecordsSourceDueReadsTheRowNamedKnob(t *testing.T) {
+	t.Parallel()
 	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
 	for _, tc := range []struct {
 		min  string
@@ -288,6 +297,7 @@ func countSnapshots(t *testing.T, root string) int {
 // A claim made before the upgrade left its digest in tuning_snapshots; the
 // settle after the upgrade must still load it, under the Chore's name.
 func TestRecordsSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s, err := dispatchrecord.Open(root)
 	if err != nil {
@@ -319,6 +329,7 @@ func TestRecordsSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 }
 
 func TestNewRecordsSourceErrorsOnAnUnresolvableKnob(t *testing.T) {
+	t.Parallel()
 	env := chore.MinRecordsKnob("tuning")
 	for name, knobs := range map[string]recordsdigest.Lookup{
 		"no lookup":       nil,
@@ -327,6 +338,7 @@ func TestNewRecordsSourceErrorsOnAnUnresolvableKnob(t *testing.T) {
 		"bad digest knob": mapKnobs(map[string]string{env: "1", "BUTLER_TUNING_COOLDOWN": "-1h"}),
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			p := tuningPolicy(t.TempDir(), 1)
 			p.Knobs = knobs
 			r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })

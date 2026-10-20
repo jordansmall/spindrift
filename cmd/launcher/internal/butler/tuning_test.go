@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -298,6 +299,7 @@ func seedTuningDone(t *testing.T, tr *tuningRun, at time.Time, cursor string) {
 }
 
 func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
 	tr := newTuningRun(t)
@@ -356,6 +358,7 @@ func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
 }
 
 func TestSweep_Tuning_NoRecordIDLeavesClaim(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
 	tr := newTuningRun(t)
@@ -374,6 +377,7 @@ func TestSweep_Tuning_NoRecordIDLeavesClaim(t *testing.T) {
 }
 
 func TestSweep_Tuning_NotDueBeforeInterval(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ids := seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
 	tr := newTuningRun(t)
@@ -429,8 +433,10 @@ func TestSweep_Tuning_NotDueTooFewRecords(t *testing.T) {
 }
 
 func TestSweep_Tuning_NeverDueWithoutStore(t *testing.T) {
+	t.Parallel()
 	for name, root := range map[string]string{"no root": "", "missing db": t.TempDir()} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			tr := newTuningRun(t)
 			out, err := tr.sweepTuning(t, tuningPolicy(root, 0), tuningNow)
 			if err != nil {
@@ -449,6 +455,7 @@ func TestSweep_Tuning_NeverDueWithoutStore(t *testing.T) {
 }
 
 func TestSweep_Tuning_DueFilesWithBothLabels(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 	tr := newTuningRun(t)
@@ -495,6 +502,7 @@ func TestSweep_Tuning_DueFilesWithBothLabels(t *testing.T) {
 }
 
 func TestSweep_Tuning_DoneAdvancesCursor(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	first := seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	tr := newTuningRun(t)
@@ -536,6 +544,7 @@ func TestSweep_Tuning_DoneAdvancesCursor(t *testing.T) {
 // Records sit before the cursor: the earlier Records are the baseline, the
 // ones settled after the cursor the window.
 func TestSweep_Tuning_InputCarriesBaselineAndDelta(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	// Baseline: 3 Records at $3 each (implement $2 + review $1).
 	base := seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
@@ -569,6 +578,7 @@ func atRevision(rev string) func(*hostop.DispatchStart) {
 // A dimension is split out only where the window and baseline between them
 // hold more than one value of it.
 func TestSweep_Tuning_InputCarriesSplitsAndQualityRows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	base := seedRecordsStamped(t, root, 1, 3, tuningNow.Add(-72*time.Hour), 2, atRevision("rev-old"))
 	seedRecordsStamped(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4, atRevision("rev-new"))
@@ -605,6 +615,7 @@ func TestSweep_Tuning_InputCarriesSplitsAndQualityRows(t *testing.T) {
 }
 
 func TestSweep_Tuning_NoSplitsWhenEveryDimensionHasOneValue(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	base := seedRecordsStamped(t, root, 1, 3, tuningNow.Add(-72*time.Hour), 2, atRevision("same"))
 	seedRecordsStamped(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4, atRevision("same"))
@@ -677,6 +688,7 @@ func resultLine(ts string, cost float64, text string) string {
 // the failures as Outliers and carries the Box-written text fenced, even text
 // that tries to close the fence.
 func TestSweep_Tuning_InputCarriesOutliersAndFencedEvidence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	claim := tuningNow.Add(-24 * time.Hour)
 	ts := claim.Add(time.Minute).Format(time.RFC3339)
@@ -745,6 +757,7 @@ func TestSweep_Tuning_InputCarriesOutliersAndFencedEvidence(t *testing.T) {
 // Every failed, blocked, or ambiguous Record is listed even when the top-K
 // cost list is already full of dearer successes.
 func TestSweep_Tuning_InputListsEveryFailureWhenTopKIsFull(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	claim := tuningNow.Add(-48 * time.Hour)
 	ts := claim.Add(time.Minute).Format(time.RFC3339)
@@ -779,6 +792,7 @@ func TestSweep_Tuning_InputListsEveryFailureWhenTopKIsFull(t *testing.T) {
 }
 
 func TestSweep_Tuning_NoEvidenceSectionWithoutBlockedVerdicts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-24*time.Hour))
 	tr := newTuningRun(t)
@@ -828,6 +842,7 @@ func sweepTuningInput(t *testing.T, root string, digestBytes int) string {
 // An over-cap store reaches the Box trimmed: evidence first, outliers second,
 // the aggregate tables whole.
 func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
+	t.Parallel()
 	const records = 8
 	// Each sweep gets its own store: every sweep claims at tuningNow, so a
 	// shared store would already hold that Record ID's tuning snapshot.
@@ -844,6 +859,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	tables := full[:strings.Index(full, "\n## Outliers")]
 
 	t.Run("evidence trimmed", func(t *testing.T) {
+		t.Parallel()
 		const capBytes = 6000
 		in := sweep(t, capBytes)
 		if len(in) > capBytes {
@@ -861,6 +877,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	})
 
 	t.Run("outliers trimmed too", func(t *testing.T) {
+		t.Parallel()
 		in := sweep(t, len(tables)+400)
 		if len(in) > len(tables)+400 {
 			t.Fatalf("len = %d, want <= %d", len(in), len(tables)+400)
@@ -874,6 +891,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	})
 
 	t.Run("cap between the tables and the trailer", func(t *testing.T) {
+		t.Parallel()
 		capBytes := len(tables) + 20
 		in := sweep(t, capBytes)
 		if len(in) > capBytes {
@@ -885,6 +903,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	})
 
 	t.Run("cap below the tables", func(t *testing.T) {
+		t.Parallel()
 		in := sweep(t, 1)
 		if !strings.HasPrefix(in, tables) || strings.Contains(in, "## Outliers") || strings.Contains(in, "## Evidence") {
 			t.Errorf("want the tables alone:\n%s", in)
@@ -892,6 +911,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	})
 
 	t.Run("roomy cap leaves the digest alone", func(t *testing.T) {
+		t.Parallel()
 		if in := sweep(t, len(full)); in != full {
 			t.Errorf("a cap the digest fits changed it")
 		}
@@ -901,6 +921,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 // Under a tightening cap the digest sheds Evidence, then Outliers, then Prior
 // findings, each from the tail, and never the aggregate tables.
 func TestSweep_Tuning_CapTrimsPriorFindingsAfterOutliers(t *testing.T) {
+	t.Parallel()
 	const records, findings = 6, 4
 	sweep := func(t *testing.T, digestBytes int) string {
 		t.Helper()
@@ -931,33 +952,40 @@ func TestSweep_Tuning_CapTrimsPriorFindingsAfterOutliers(t *testing.T) {
 	}
 	tables := full[:strings.Index(full, "\n## Prior findings")]
 
-	var sawPriorTrim bool
-	for capBytes := len(full) - 1; capBytes > len(tables); capBytes -= 150 {
-		in := sweep(t, capBytes)
-		ev, out, prior := count(in)
-		if len(in) > capBytes {
-			t.Errorf("cap %d: len = %d, over the cap", capBytes, len(in))
+	// Each cap is its own parallel subtest; the group Run returns only once
+	// all of them finish, so sawPriorTrim is complete when it is read below.
+	var sawPriorTrim atomic.Bool
+	t.Run("caps", func(t *testing.T) {
+		for capBytes := len(full) - 1; capBytes > len(tables); capBytes -= 150 {
+			t.Run(fmt.Sprint(capBytes), func(t *testing.T) {
+				t.Parallel()
+				in := sweep(t, capBytes)
+				ev, out, prior := count(in)
+				if len(in) > capBytes {
+					t.Errorf("cap %d: len = %d, over the cap", capBytes, len(in))
+				}
+				if !strings.HasPrefix(in, tables) {
+					t.Errorf("cap %d: aggregate tables changed", capBytes)
+				}
+				if out < fullOut && ev != 0 {
+					t.Errorf("cap %d: an outlier dropped while %d evidence items survive", capBytes, ev)
+				}
+				if prior < fullPrior && (ev != 0 || out != 0) {
+					t.Errorf("cap %d: a prior finding dropped while %d evidence items and %d outliers survive", capBytes, ev, out)
+				}
+				if prior < fullPrior && prior > 0 {
+					sawPriorTrim.Store(true)
+				}
+				if prior < fullPrior || out < fullOut || ev < fullEv {
+					want := fmt.Sprintf("%d evidence items, %d outliers, and %d prior findings omitted", fullEv-ev, fullOut-out, fullPrior-prior)
+					if strings.Contains(in, "Trimmed") && !strings.Contains(in, want) {
+						t.Errorf("cap %d: trailer lacks %q", capBytes, want)
+					}
+				}
+			})
 		}
-		if !strings.HasPrefix(in, tables) {
-			t.Errorf("cap %d: aggregate tables changed", capBytes)
-		}
-		if out < fullOut && ev != 0 {
-			t.Errorf("cap %d: an outlier dropped while %d evidence items survive", capBytes, ev)
-		}
-		if prior < fullPrior && (ev != 0 || out != 0) {
-			t.Errorf("cap %d: a prior finding dropped while %d evidence items and %d outliers survive", capBytes, ev, out)
-		}
-		if prior < fullPrior && prior > 0 {
-			sawPriorTrim = true
-		}
-		if prior < fullPrior || out < fullOut || ev < fullEv {
-			want := fmt.Sprintf("%d evidence items, %d outliers, and %d prior findings omitted", fullEv-ev, fullOut-out, fullPrior-prior)
-			if strings.Contains(in, "Trimmed") && !strings.Contains(in, want) {
-				t.Errorf("cap %d: trailer lacks %q", capBytes, want)
-			}
-		}
-	}
-	if !sawPriorTrim {
+	})
+	if !sawPriorTrim.Load() {
 		t.Error("no cap trimmed part of the Prior findings section")
 	}
 }
@@ -990,6 +1018,7 @@ func sweepWithIntents(t *testing.T, intents ...string) (*tuningRun, ledger.Tip) 
 }
 
 func TestSweep_Tuning_DropsFailingFindings(t *testing.T) {
+	t.Parallel()
 	good := []string{"summary:usd-per-record"}
 	tests := []struct {
 		name, intent, reason string
@@ -1002,6 +1031,7 @@ func TestSweep_Tuning_DropsFailingFindings(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr, tip := sweepWithIntents(t, tc.intent)
 			if len(tr.fc.PostIssueCalls) != 0 {
 				t.Errorf("PostIssueCalls = %+v, want none", tr.fc.PostIssueCalls)
@@ -1015,6 +1045,7 @@ func TestSweep_Tuning_DropsFailingFindings(t *testing.T) {
 }
 
 func TestSweep_Tuning_InvalidPayloadPassesThroughToFiling(t *testing.T) {
+	t.Parallel()
 	// Each payload fails the filing accept gate yet carries cites that would
 	// otherwise be an unknown-cite drop: filing skips it, so it must not be
 	// recorded as a drop (its model-authored title would reach the Ledger).
@@ -1029,6 +1060,7 @@ func TestSweep_Tuning_InvalidPayloadPassesThroughToFiling(t *testing.T) {
 		"bad metric":  withMetric("Bad Metric!"),
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if in.Validate() == nil {
 				t.Fatal("fixture passes Validate, want a rejected intent")
 			}
@@ -1040,6 +1072,7 @@ func TestSweep_Tuning_InvalidPayloadPassesThroughToFiling(t *testing.T) {
 		})
 	}
 	t.Run("undecodable labels", func(t *testing.T) {
+		t.Parallel()
 		// Passes IssueIntent.Validate but not filing's wider decode.
 		raw, err := json.Marshal(base)
 		if err != nil {
@@ -1064,6 +1097,7 @@ func assertNoDrop(t *testing.T, raw string) {
 }
 
 func TestSweep_Tuning_ThinEvidenceDropsButEvidenceGapIsExempt(t *testing.T) {
+	t.Parallel()
 	// A window of 3 Records is thin on every row against a floor of 15.
 	for _, tc := range []struct {
 		class     string
@@ -1074,6 +1108,7 @@ func TestSweep_Tuning_ThinEvidenceDropsButEvidenceGapIsExempt(t *testing.T) {
 		{"evidence-gap", 1, nil},
 	} {
 		t.Run(tc.class, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 			tr := newTuningRun(t)
@@ -1096,6 +1131,7 @@ func TestSweep_Tuning_ThinEvidenceDropsButEvidenceGapIsExempt(t *testing.T) {
 }
 
 func TestSweep_Tuning_FiledBodyEndsWithHostRenderedEvidence(t *testing.T) {
+	t.Parallel()
 	cites := []string{"summary:usd-per-record", "role:implement:avg-usd", "summary:usd-per-record"}
 	tr, tip := sweepWithIntents(t, tuningIntent(t, "f", "prompt-gap", cites, "a.go:Foo"))
 	if len(tr.fc.PostIssueCalls) != 1 || tip.State.Dropped != 0 || len(tip.State.Drops) != 0 {
@@ -1116,6 +1152,7 @@ func TestSweep_Tuning_FiledBodyEndsWithHostRenderedEvidence(t *testing.T) {
 }
 
 func TestSweep_Tuning_ListsTrackedFilesOnlyForFindingsPastTheCites(t *testing.T) {
+	t.Parallel()
 	tr, _ := sweepWithIntents(t, tuningIntent(t, "f", "prompt-gap", []string{"nope"}, "a.go:Foo"))
 	if tr.filesCalls != 0 {
 		t.Errorf("TrackedFiles called %d times, want 0 when no finding reaches the target check", tr.filesCalls)
@@ -1129,6 +1166,7 @@ func TestSweep_Tuning_ListsTrackedFilesOnlyForFindingsPastTheCites(t *testing.T)
 }
 
 func TestSweep_Tuning_TrackedFilesErrorLeavesClaim(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 16, tuningNow.Add(-48*time.Hour))
 	tr := newTuningRun(t)
@@ -1166,6 +1204,7 @@ func recordAnchorSweep(t *testing.T, class string, extra ...string) (*tuningRun,
 // A Record's Outliers anchor is a citable anchor in the snapshot; it counts
 // toward unknown-cite but is no aggregate row, so it never clears the floor.
 func TestSweep_Tuning_RecordAnchorWithAggregateCiteIsFiled(t *testing.T) {
+	t.Parallel()
 	tr, drops := recordAnchorSweep(t, "prompt-gap", "summary:usd-per-record")
 	if len(drops) != 0 {
 		t.Errorf("Drops = %v, want none", drops)
@@ -1179,6 +1218,7 @@ func TestSweep_Tuning_RecordAnchorWithAggregateCiteIsFiled(t *testing.T) {
 }
 
 func TestSweep_Tuning_RecordAnchorAloneDropsAsThinEvidence(t *testing.T) {
+	t.Parallel()
 	tr, drops := recordAnchorSweep(t, "prompt-gap")
 	want := []ledger.Drop{{Title: "f", Reason: "thin-evidence"}}
 	if !slices.Equal(drops, want) {
@@ -1193,6 +1233,7 @@ func TestSweep_Tuning_RecordAnchorAloneDropsAsThinEvidence(t *testing.T) {
 // Record's anchor is filed; no aggregate row was cited, so its body carries no
 // Evidence section over an empty table.
 func TestSweep_Tuning_EvidenceGapRecordAnchorOnlyFilesWithoutEvidenceTable(t *testing.T) {
+	t.Parallel()
 	tr, drops := recordAnchorSweep(t, "evidence-gap")
 	if len(drops) != 0 {
 		t.Errorf("Drops = %v, want none", drops)
@@ -1207,6 +1248,7 @@ func TestSweep_Tuning_EvidenceGapRecordAnchorOnlyFilesWithoutEvidenceTable(t *te
 
 // A blocked review's Evidence anchor is citable alongside a thick aggregate row.
 func TestSweep_Tuning_EvidenceAnchorCite(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	claim := tuningNow.Add(-48 * time.Hour)
 	ts := claim.Add(time.Minute).Format(time.RFC3339)
@@ -1239,6 +1281,7 @@ func TestSweep_Tuning_EvidenceAnchorCite(t *testing.T) {
 // A blocked verdict echoing a forged aggregate row cannot make a thin row look
 // well sampled to the thin-evidence gate.
 func TestSweep_Tuning_ForgedVerdictRowDoesNotClearThinEvidence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	claim := tuningNow.Add(-48 * time.Hour)
 	ts := claim.Add(time.Minute).Format(time.RFC3339)
@@ -1276,6 +1319,7 @@ func TestSweep_Tuning_ForgedVerdictRowDoesNotClearThinEvidence(t *testing.T) {
 // removed or altered after launch leaves the claim standing rather than
 // validating against the in-memory digest.
 func TestSweep_Tuning_StoredSnapshotGoneOrAlteredLeavesClaim(t *testing.T) {
+	t.Parallel()
 	sqlMutation := func(stmt string) func(t *testing.T, root string) {
 		return func(t *testing.T, root string) {
 			db, err := sql.Open("sqlite", hostpaths.DispatchRecordsDB(root))
@@ -1306,6 +1350,7 @@ func TestSweep_Tuning_StoredSnapshotGoneOrAlteredLeavesClaim(t *testing.T) {
 		{"sha256", sqlMutation(`UPDATE snapshots SET sha256 = 'deadbeef'`), "does not match its ledger ref", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			seedRecords(t, root, 1, 16, tuningNow.Add(-48*time.Hour))
 			tr := newTuningRun(t)
@@ -1361,6 +1406,7 @@ func closedTuning(filed forge.Issue, notPlanned bool, age time.Duration) []forge
 }
 
 func TestSweep_Tuning_PatternDedup(t *testing.T) {
+	t.Parallel()
 	cites := []string{"summary:usd-per-record"}
 	openMatch := func(f forge.Issue) ([]forge.Issue, []forge.Issue) { return []forge.Issue{f}, nil }
 	closedAt := func(notPlanned bool, age time.Duration) func(forge.Issue) ([]forge.Issue, []forge.Issue) {
@@ -1387,6 +1433,7 @@ func TestSweep_Tuning_PatternDedup(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := refiledAfter(t, c.second, c.backlog); got != c.want {
 				t.Errorf("second Sweep filed %d, want %d", got, c.want)
 			}
@@ -1462,6 +1509,7 @@ func sweepWithPrior(t *testing.T, root string, open, closed []forge.Issue, prep 
 // newest first, each with its state; a finding of another Chore never appears.
 // Keys are Jira-style, so the order is by trailing number across digit widths.
 func TestSweep_Tuning_InputListsPriorFindingsNewestFirst(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	var open, closed []forge.Issue
@@ -1509,6 +1557,7 @@ func TestSweep_Tuning_InputListsPriorFindingsNewestFirst(t *testing.T) {
 // change in its cited metric from the Records settled before the merge to
 // those settled after.
 func TestSweep_Tuning_PriorFindingShowsMergeDelta(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil, hostop.DispatchSettled{State: "complete", Reason: "merged", MergeCommit: "abc123def"})
@@ -1539,6 +1588,7 @@ func TestSweep_Tuning_PriorFindingShowsMergeDelta(t *testing.T) {
 // merged-reopened, still with its merge revision and Δ; one the tracker cannot
 // report reopened keeps merged, and a reopened one that never merged stays open.
 func TestSweep_Tuning_PriorFindingReopenedAfterMerge(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		merged   bool
@@ -1551,6 +1601,7 @@ func TestSweep_Tuning_PriorFindingReopenedAfterMerge(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 			if c.merged {
@@ -1573,6 +1624,7 @@ func TestSweep_Tuning_PriorFindingReopenedAfterMerge(t *testing.T) {
 // Record carries the hold reason and the PR URL but no merge; the forge says
 // the human has since merged it.
 func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanShowsDelta(t *testing.T) {
+	t.Parallel()
 	const pr = "https://example.com/pulls/5"
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
@@ -1604,6 +1656,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanShowsDelta(t *testing.T) {
 // A held PR a human later merged, whose issue was then reopened, renders
 // merged-reopened with the merge revision and Δ.
 func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanThenReopened(t *testing.T) {
+	t.Parallel()
 	const pr = "https://example.com/pulls/5"
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
@@ -1627,6 +1680,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanThenReopened(t *testing.T) 
 // A forge that reports the PR merged but not its commit still shows merged,
 // with no revision.
 func TestSweep_Tuning_PriorFindingHeldPRMergedWithoutCommit(t *testing.T) {
+	t.Parallel()
 	const pr = "https://example.com/pulls/5"
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
@@ -1647,6 +1701,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedWithoutCommit(t *testing.T) {
 // A held PR still open, or one whose state cannot be read, is not merged: the
 // row keeps the issue's own state, with no revision and no Δ.
 func TestSweep_Tuning_PriorFindingHeldPRNotMergedShowsNoDelta(t *testing.T) {
+	t.Parallel()
 	const pr = "https://example.com/pulls/5"
 	cases := []struct {
 		name string
@@ -1658,6 +1713,7 @@ func TestSweep_Tuning_PriorFindingHeldPRNotMergedShowsNoDelta(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 			seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
@@ -1678,6 +1734,7 @@ func TestSweep_Tuning_PriorFindingHeldPRNotMergedShowsNoDelta(t *testing.T) {
 // A finding is recognised by its chore=tuning marker alone, whatever finding
 // label it wears (the local and jira trackers have no tuning label registry).
 func TestSweep_Tuning_PriorFindingRecognisedByMarkerAlone(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	marked := tuningFinding("200", "usd-per-record")
@@ -1694,6 +1751,7 @@ func TestSweep_Tuning_PriorFindingRecognisedByMarkerAlone(t *testing.T) {
 
 // With no cited row the Δ is read off the summary row for the finding's metric.
 func TestSweep_Tuning_PriorFindingFallsBackToSummaryRow(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil, hostop.DispatchSettled{State: "complete", Reason: "merged", MergeCommit: "abc123def"})
@@ -1712,6 +1770,7 @@ func TestSweep_Tuning_PriorFindingFallsBackToSummaryRow(t *testing.T) {
 // The tuning Chore's own settled Records count in the window like any other:
 // in the header, the Roles table, and the Outliers Kind and Key columns.
 func TestSweep_Tuning_CountsOwnChoreRecords(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	claim := tuningNow.Add(-24 * time.Hour)
