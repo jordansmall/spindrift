@@ -20,7 +20,7 @@
 # tracker folder's), and a row whose fragment uses it lists it in
 # `extraSubstVars`. An omitted `axis` means a root-level fragment (Go's omitempty
 # reads the absent key as ""); lib/fragment-paths.nix expands a row to its
-# on-disk paths.
+# on-disk paths, and a new axis row must be declared in its `shipped` map.
 
 # `extraSubstVars` (default []) lists allowlist entries a fragment's own body
 # interpolates; every other fragment is static prose once its gate is on,
