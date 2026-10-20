@@ -369,6 +369,17 @@ in
     ) "an opted-out filer must stay dropped under pi, got roster: ${builtins.toJSON names}";
     pkgs.runCommand "drivers-pi-opt-out-role-drops-its-effort" { } "touch $out";
 
+  # Issue #5368: `spawns` scopes opencode's task permission only; pi's rendered
+  # agent files must be unchanged when an entry carries it.
+  drivers-pi-agent-files-ignore-spawns =
+    let
+      render = e: entry.agentFilesTemplate { roster = [ e ]; };
+    in
+    assert assertMsg (
+      render piFixtureEntry == render (piFixtureEntry // { spawns = [ "fixture" ]; })
+    ) "pi agentFilesTemplate must render identically when an entry carries spawns";
+    pkgs.runCommand "drivers-pi-agent-files-ignore-spawns" { } "touch $out";
+
   # A kept entry cannot reach finalRoster with model "" through mkHarness (the
   # opt-out drops it first), so the resolution is exercised directly.
   drivers-pi-effort-resolves-model-or-fails =

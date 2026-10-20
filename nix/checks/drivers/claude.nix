@@ -127,6 +127,29 @@ in
         fi
       '';
 
+  # Issue #5368: `spawns` scopes opencode's task permission only. claude's
+  # --agents JSON must render byte-identically with or without it.
+  drivers-claude-agents-json-ignores-spawns =
+    let
+      base = {
+        name = "scout";
+        model = "solo-scout-model";
+        mode = "subagent";
+        description = "fixture scout description";
+        tools = [
+          "Read"
+          "Agent"
+        ];
+        promptFile = "scout-prompt.md";
+        prompt = null;
+      };
+      render = e: entry.agentsJsonTemplate { roster = [ e ]; };
+    in
+    assert assertMsg (
+      render base == render (base // { spawns = [ "scout" ]; })
+    ) "claude agentsJsonTemplate must render identically when an entry carries spawns";
+    pkgs.runCommand "drivers-claude-agents-json-ignores-spawns" { } "touch $out";
+
   # Issue #264: claude's agentsJsonTemplate takes a roster list rather than
   # four fixed model-knob args, so a custom agent ("auditor") must render
   # into the --agents JSON like any built-in entry. That JSON must never gain

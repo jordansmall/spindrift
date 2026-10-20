@@ -6,8 +6,13 @@ A roster entry may now set `spawns`, a list of roster entry names it is
 allowed to spawn as subagents. Absent means no declared restriction, which is
 today's behaviour. The default `reviewer` declares `spawns = [ "review-axis"
 ];`; a hand-built `reviewer` entry without it keeps the unscoped behaviour.
-A non-list `spawns`, or one holding a non-string or empty element, fails eval
-with the `invalid-spawns-type` violation.
+A non-list `spawns`, or one holding an element that is not a valid entry name
+(a string matching `[a-z0-9-]+`), fails eval with the `invalid-spawns-type`
+violation. Under the opencode Driver the declaration renders `task` as a map
+allowing only the named entries, so the default reviewer can no longer spawn
+`worker`. A `spawns` target missing from the roster now fails eval under
+opencode, e.g. a roster that keeps the default reviewer but opts out
+`review-axis`; drop the target from `spawns` or restore it.
 
 ## Backend-varying prompt steps are slot variables (issues #5646, #5647)
 

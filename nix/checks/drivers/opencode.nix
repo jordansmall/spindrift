@@ -149,6 +149,18 @@ in
       assertMsg (permission.edit == expectedEdit.${agent})
         "opencode ${agent} agent must render edit: ${expectedEdit.${agent}}, got: ${builtins.toJSON permission}"
     ) (builtins.attrNames expectedEdit);
+    # Issue #5368: the default reviewer declares `spawns = [ "review-axis" ]`,
+    # so its task grant must name only that target, never worker. Matched as a
+    # string so the key order (`*` first, opencode's last-match-wins) is pinned.
+    assert assertMsg (hasInfix ''"task":{"*":"deny","review-axis":"allow"}'' (
+      rendered.".config/opencode/agents/reviewer.md" or ""
+    )) "opencode reviewer must render a scoped task map reaching only review-axis";
+    assert builtins.all (
+      agent:
+      assertMsg (
+        (opencodePermissionOf rendered agent).task == "deny"
+      ) "opencode ${agent} holds no Agent tool and must render task: deny"
+    ) (filter (a: a != "reviewer") (builtins.attrNames expectedEdit));
     pkgs.runCommand "drivers-opencode-agent-files-default-roster-permissions" { } "touch $out";
 
   # An explicit tool list maps to exactly the allow set; every other mapped
@@ -185,6 +197,101 @@ in
     assert assertMsg (parsed == expected)
       "opencode permission map for [Read Agent] must allow only read/task, got: ${builtins.toJSON parsed}";
     pkgs.runCommand "drivers-opencode-agent-files-permission-map" { } "touch $out";
+
+  # Issue #5368: an entry holding the task tool and declaring `spawns` gets task
+  # as a map denying everything but the named targets; `spawns` alone, without
+  # a task-mapped tool, grants nothing.
+  drivers-opencode-agent-files-spawns-scopes-task =
+    let
+      target = opencodeFixtureEntry // {
+        name = "x";
+        tools = [ "Read" ];
+      };
+      render =
+        spawns: tools:
+        entry.agentFilesTemplate {
+          roster = [
+            (
+              opencodeFixtureEntry
+              // {
+                inherit tools;
+                inherit spawns;
+              }
+            )
+            target
+          ];
+        };
+      agentTools = [
+        "Read"
+        "Agent"
+      ];
+      scoped = render [ "x" ] agentTools;
+      scopedFile = scoped.".config/opencode/agents/fixture.md";
+      noTask = opencodePermissionOf (render [ "x" ] [ "Read" ]) "fixture";
+      spawnsNone = opencodePermissionOf (render [ ] agentTools) "fixture";
+      # Omitted tools leave task allowed, so spawns alone must still narrow it
+      # (and set no other key).
+      bare = entry.agentFilesTemplate {
+        roster = [
+          (opencodeFixtureEntry // { spawns = [ "x" ]; })
+          target
+        ];
+      };
+      bareFile = bare.".config/opencode/agents/fixture.md";
+    in
+    assert assertMsg (
+      opencodePermissionOf bare "fixture" == {
+        task = {
+          "*" = "deny";
+          x = "allow";
+        };
+      }
+    ) "opencode spawns without tools must render only a scoped task map, got: ${bareFile}";
+    assert assertMsg (hasInfix ''permission: {"task":{"*":"deny","x":"allow"}}'' bareFile)
+      "opencode spawns without tools must render the task-only permission line, got: ${bareFile}";
+    assert assertMsg (hasInfix ''"task":{"*":"deny","x":"allow"}'' scopedFile)
+      "opencode [Read Agent] with spawns = [ x ] must render a scoped task map, got: ${scopedFile}";
+    assert assertMsg (
+      (opencodePermissionOf scoped "x").task == "deny"
+    ) "opencode entry without spawns or Agent must render task: deny";
+    assert assertMsg (
+      noTask.task == "deny"
+    ) "opencode spawns without a task-mapped tool must keep task: deny, got: ${builtins.toJSON noTask}";
+    assert assertMsg (spawnsNone.task == { "*" = "deny"; })
+      "opencode [Read Agent] with spawns = [ ] must deny every subagent, got: ${builtins.toJSON spawnsNone}";
+    pkgs.runCommand "drivers-opencode-agent-files-spawns-scopes-task" { } "touch $out";
+
+  # A spawn target absent from the roster would leave the entry no subagent at
+  # all, so the render must fail rather than hand the fan-out nothing to run on.
+  drivers-opencode-agent-files-spawns-missing-target-throws =
+    let
+      rendersWith =
+        extra: spawns:
+        let
+          rendered = entry.agentFilesTemplate {
+            roster = [
+              (opencodeFixtureEntry // extra // { inherit spawns; })
+            ];
+          };
+        in
+        builtins.tryEval (builtins.deepSeq rendered rendered);
+      renders = rendersWith { tools = [ "Agent" ]; };
+    in
+    # Omitted tools leave task allowed, so the check must fire there too.
+    assert assertMsg (rendersWith { } [ "fixture" ]).success
+      "opencode agentFilesTemplate control (no tools, spawns naming a roster entry) must render";
+    assert assertMsg (
+      !(rendersWith { } [ "absent" ]).success
+    ) "opencode agentFilesTemplate must throw when an entry without tools spawns an absent entry";
+    # With task not granted, spawns grants nothing, so an absent target is moot.
+    assert assertMsg (rendersWith { tools = [ "Read" ]; } [ "absent" ]).success
+      "opencode agentFilesTemplate must not throw on an absent spawns target when no tool maps to task";
+    assert assertMsg (renders [ "fixture" ]).success
+      "opencode agentFilesTemplate control (spawns naming a roster entry) must render";
+    assert assertMsg (
+      !(renders [ "absent" ]).success
+    ) "opencode agentFilesTemplate must throw when spawns names an entry absent from the roster";
+    pkgs.runCommand "drivers-opencode-agent-files-spawns-missing-target-throws" { } "touch $out";
 
   # A tool name with no opencode mapping must fail the render rather than be
   # dropped, which would silently widen or narrow the subagent's grant.
