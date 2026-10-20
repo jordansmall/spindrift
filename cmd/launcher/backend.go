@@ -56,8 +56,8 @@ func ledgerFor(c config, s backendkit.Strategy) (ledger.Backend, butler.Tree, fu
 }
 
 // mustBuild unwraps a Strategy constructor. They fail only when ReadKnobs
-// rejects a malformed knob, and the loader hands ReadKnobs only strings it
-// already normalised (a bool is "true"/"false"), so the error is unreachable.
+// rejects a malformed knob; a bool reader cannot fail, and the loader hands
+// ReadKnobs an int only as strconv.Itoa output, so the error is unreachable.
 func mustBuild[T any](v T, err error) T {
 	if err != nil {
 		panic(err)
@@ -90,11 +90,11 @@ func (c config) knobLookup(env string) (string, bool) {
 	return v, ok
 }
 
-// knobBool reports whether the row knob env resolved to "true"; the launcher
-// normalises boolean knobs with strconv.FormatBool.
+// knobBool reports whether the row knob env resolved to a non-empty value;
+// bool row knobs are presence-style, like the field loader's.
 func (c config) knobBool(env string) bool {
 	v, _ := c.knobLookup(env)
-	return v == "true"
+	return v != ""
 }
 
 // setRowKnob stores a row knob's resolved value. It copies the map first so a

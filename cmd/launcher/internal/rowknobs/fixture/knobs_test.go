@@ -70,13 +70,24 @@ func TestReadKnobs_SetYieldsTypedValues(t *testing.T) {
 
 func TestReadKnobs_BoolFalse(t *testing.T) {
 	// "" is set-but-empty: a bool's explicit off, as parseFlags encodes it.
-	for _, v := range []string{"0", "false", ""} {
+	k, err := fixture.ReadKnobs(lookupFrom(map[string]string{"FIXTURE_ENABLED": ""}))
+	if err != nil {
+		t.Fatalf("ReadKnobs: %v", err)
+	}
+	if k.FixtureEnabled {
+		t.Error("empty FIXTURE_ENABLED read as true")
+	}
+}
+
+// A bool is a presence knob: any non-empty value is on, "0" and "false" included.
+func TestReadKnobs_BoolNonEmptyIsOn(t *testing.T) {
+	for _, v := range []string{"0", "false", "no", "1", "true", "yes", "maybe"} {
 		k, err := fixture.ReadKnobs(lookupFrom(map[string]string{"FIXTURE_ENABLED": v}))
 		if err != nil {
 			t.Fatalf("ReadKnobs(%q): %v", v, err)
 		}
-		if k.FixtureEnabled {
-			t.Errorf("FIXTURE_ENABLED=%q read as true", v)
+		if !k.FixtureEnabled {
+			t.Errorf("FIXTURE_ENABLED=%q read as false", v)
 		}
 	}
 }
@@ -84,7 +95,6 @@ func TestReadKnobs_BoolFalse(t *testing.T) {
 func TestReadKnobs_MalformedValueNamesEnvVar(t *testing.T) {
 	for _, tc := range []struct{ env, value string }{
 		{"FIXTURE_COUNT", "three"},
-		{"FIXTURE_ENABLED", "maybe"},
 		{"FIXTURE_MODE", "slow"},
 		{"FIXTURE_BUDGET", "lots"},
 		{"FIXTURE_TIER", "bronze"},

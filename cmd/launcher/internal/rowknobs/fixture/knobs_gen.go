@@ -35,7 +35,7 @@ type Lookup func(env string) (value string, ok bool)
 
 // ReadKnobs reads every knob through lookup.
 // An unset knob takes its row default, as does an empty one unless empty is a
-// real setting for it: an empty bool reads false;
+// real setting for it: an empty bool reads false, any other value true;
 // an empty emptyDisables int reads 0;
 // an empty emptyDisables string or choice reads "".
 // A malformed value is an error naming the env var.
@@ -70,14 +70,7 @@ func ReadKnobs(lookup Lookup) (Knobs, error) {
 		k.FixtureCount = parsed
 	}
 	if v, ok := lookup("FIXTURE_ENABLED"); ok {
-		k.FixtureEnabled = false
-		if v != "" {
-			parsed, err := strconv.ParseBool(v)
-			if err != nil {
-				return Knobs{}, fmt.Errorf("%s: %q is not a boolean", "FIXTURE_ENABLED", v)
-			}
-			k.FixtureEnabled = parsed
-		}
+		k.FixtureEnabled = v != ""
 	}
 	if v, ok := lookup("FIXTURE_LIMIT"); ok {
 		k.FixtureLimit = v

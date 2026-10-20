@@ -49,8 +49,8 @@ func TestLoadSchemaConfigFillsRowKnobsWithDefaults(t *testing.T) {
 	if got := sc.rowKnobs["JIRA_TOKEN"]; got != "jt" {
 		t.Errorf("JIRA_TOKEN = %q, want it read from the environment", got)
 	}
-	if got := sc.rowKnobs["JIRA_INCLUDE_COMMENTS"]; got != "false" {
-		t.Errorf("JIRA_INCLUDE_COMMENTS = %q, want false", got)
+	if got := sc.rowKnobs["JIRA_INCLUDE_COMMENTS"]; got != "" {
+		t.Errorf("JIRA_INCLUDE_COMMENTS = %q, want empty", got)
 	}
 	if v, ok := (config{schemaConfig: sc}).knobLookup("LOCAL_ISSUES_DIR"); !ok || v == "" {
 		t.Errorf("LOCAL_ISSUES_DIR = %q, %v, want the schema default, set", v, ok)
@@ -58,4 +58,13 @@ func TestLoadSchemaConfigFillsRowKnobsWithDefaults(t *testing.T) {
 	if _, ok := (config{schemaConfig: sc}).knobLookup("NOT_A_KNOB"); ok {
 		t.Error("knobLookup reported an unknown env as set")
 	}
+}
+
+// boolKnob renders a bool for a presence-style row knob: any non-empty value
+// is on, "" is off.
+func boolKnob(on bool) string {
+	if on {
+		return "1"
+	}
+	return ""
 }

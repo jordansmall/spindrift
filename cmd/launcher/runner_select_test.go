@@ -2,7 +2,6 @@ package main
 
 import (
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -81,10 +80,10 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 	}
 }
 
-// TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter pins the launcher's
-// "non-empty BWRAP_UNSHARE_NET means on" bridge: NETWORK_MODE=host alone leaves
-// the bwrap Box on the host network, so only the knob can isolate it, even for
-// a value strconv.ParseBool would reject.
+// TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter pins "non-empty
+// BWRAP_UNSHARE_NET means on" end to end: NETWORK_MODE=host alone leaves the
+// bwrap Box on the host network, so only the knob can isolate it, whatever its
+// non-empty value.
 func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -109,7 +108,7 @@ func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 				t.Fatal(err)
 			}
 			want, err := bwrap.New(runnerConfig(c), runnertest.Lookup(map[string]string{
-				"BWRAP_UNSHARE_NET": strconv.FormatBool(tc.wantIsolate),
+				"BWRAP_UNSHARE_NET": boolKnob(tc.wantIsolate),
 			}), "/pwd")
 			if err != nil {
 				t.Fatal(err)

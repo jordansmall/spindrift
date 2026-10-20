@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -126,25 +125,14 @@ func TestPrerequisites_NetworkIsolationRequired(t *testing.T) {
 		{runner.NetworkModeNone, false, false},
 		{runner.NetworkModeHost, true, true},
 	} {
-		knobs := map[string]string{"BWRAP_UNSHARE_NET": strconv.FormatBool(tc.unshare)}
+		knobs := map[string]string{"BWRAP_UNSHARE_NET": ""}
+		if tc.unshare {
+			knobs["BWRAP_UNSHARE_NET"] = "1"
+		}
 		got := prereqWithKnobs(t, runner.Config{NetworkMode: tc.mode}, knobs, "bwrap-network-isolation")
 		if got.Required != tc.want {
 			t.Errorf("NetworkMode=%q BWRAP_UNSHARE_NET=%v: Required = %v, want %v", tc.mode, tc.unshare, got.Required, tc.want)
 		}
-	}
-}
-
-// A malformed BWRAP_UNSHARE_NET leaves the pasta decision unknown, so the
-// network row is Required and its Probe surfaces the knob error, not a pasta one.
-func TestPrerequisites_NetworkIsolationMalformedKnob(t *testing.T) {
-	stubValidators(t, nil, func() error { return errors.New("pasta failed") }, nil)
-	cfg := runner.Config{NetworkMode: runner.NetworkModeHost}
-	got := prereqWithKnobs(t, cfg, map[string]string{"BWRAP_UNSHARE_NET": "maybe"}, "bwrap-network-isolation")
-	if !got.Required {
-		t.Error("Required = false, want true for a malformed knob")
-	}
-	if _, err := got.Probe(); err == nil || !strings.Contains(err.Error(), "BWRAP_UNSHARE_NET") {
-		t.Errorf("Probe() = %v, want an error naming BWRAP_UNSHARE_NET", err)
 	}
 }
 
