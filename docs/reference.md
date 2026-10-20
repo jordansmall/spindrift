@@ -1285,7 +1285,7 @@ Driver entry declares:
   decoder its Pass-log readers share (see [Host-side event layer](#host-side-event-layer)).
   That package (`cmd/launcher/internal/driver/<name>`) also ships a
   canonical `testdata/outcome-fixture.jsonl` pinned by an
-  `outcome_fixture_test.go`, as claude, opencode and pi do.
+  `outcome_fixture_test.go`, as claude and opencode do.
   It proves itself with the conformance kit
   (`cmd/launcher/internal/driver/driverkit/conformance`): its corpus lives in
   `testdata/corpus/<case>/` there (see [Driver Pass-log
