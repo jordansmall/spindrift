@@ -118,11 +118,11 @@ func TestSubtree_JSONRoundTrip(t *testing.T) {
 }
 
 func TestSubtree_ScopedJSON(t *testing.T) {
-	encoded, err := json.Marshal(Subtree{Ecosystem: "npm", Path: "/npm", Scoped: true})
+	encoded, err := json.Marshal(Subtree{Ecosystem: "synthetic", Path: "/synthetic", Scoped: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"ecosystem":"npm","path":"/npm","scoped":true}`
+	const want = `{"ecosystem":"synthetic","path":"/synthetic","scoped":true}`
 	if string(encoded) != want {
 		t.Errorf("json.Marshal = %s, want %s", encoded, want)
 	}
