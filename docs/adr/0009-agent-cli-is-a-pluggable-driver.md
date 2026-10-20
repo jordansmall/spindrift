@@ -77,7 +77,7 @@ still reaches the Box's nudges.
 - The hardcoded `scoutModel`/`reviewModel` pair is a special case of a general **N-agent roster** (a list of `{name, model, prompt, mode}` helper agents), which both Drivers render — claude to `--agents` JSON, opencode to `agents/*.md`. That generalization has since shipped in `lib/roster.nix`, configured through the `agents.models.roster`/`agents.models.byName` flake-module options (`lib/flakeModule.nix`; `roster` is a structural option, `byName` is deliberately declared outside that set, but neither has an env var of its own). They supersede the per-agent model knobs — `scoutModel`, `filerModel`, and `workerModel` outright, and `reviewModel` only for non-orchestrator use; the `ORCHESTRATOR` carve-out and its precedence chain are stated in `lib/env-schema.nix`'s `reviewModel` and `reviewEffort` docs, and in `docs/reference.md`.
 - A one-time human step is required to mint Copilot credentials (`opencode auth login` on a host), analogous to `claude setup-token`; the device flow cannot run in the Box.
 - opencode already reads `.claude/skills/` and falls back to `CLAUDE.md` when no `AGENTS.md` exists, so baked skills and a target repo's `CLAUDE.md` are honored without extra wiring; generating `AGENTS.md` is only needed when we want it to win over an existing `CLAUDE.md`.
-- The Driver seam also owns **session pin/resume** (issue #427): a fix box resumes the Driver session the initial run used rather than cold-starting one, via an ephemeral per-issue host directory the launcher mounts writable over the Box's home. The launcher's half is Driver-agnostic — create/mount/evict an opaque directory, keyed strictly per issue — but the pin/resume *verb* is each Driver's own: claude pins a deterministic session id via `--session-id` and resumes it via `--resume`, falling back cleanly to a cold context when no session is found; opencode's half shipped as a deliberate no-op — it wires no resumable session state, so the launcher creates no per-issue cache for it, needing no launcher change, exactly as predicted (`lib/drivers/opencode.nix`). (Amended by issue #5349: opencode now pins and resumes a session; see the amendment below.)
+- The Driver seam also owns **session pin/resume** (issue #427): a fix box resumes the Driver session the initial run used rather than cold-starting one, via an ephemeral per-issue host directory the launcher mounts writable over the Box's home. The launcher's half is Driver-agnostic — create/mount/evict an opaque directory, keyed strictly per issue — but the pin/resume *verb* is each Driver's own: claude pins a deterministic session id via `--session-id` and resumes it via `--resume`, falling back cleanly to a cold context when no session is found; opencode's half shipped as a deliberate no-op — it wires no resumable session state, so the launcher creates no per-issue cache for it, needing no launcher change, exactly as predicted (`lib/drivers/opencode.nix`). (Amended by issue #5349: opencode now pins and resumes a session; and by issue #5481: pi pins and resumes one with `--session-id`; see the amendments below.)
 
 ## Amendment (issue #260): Copilot auth is env-native `OPENCODE_AUTH_CONTENT`, not `{env:}` config
 
@@ -453,9 +453,10 @@ The first `pi` slice registers the Driver, decodes its Pass logs and scrubs
 its corpus, and nothing more. It ships no roster (no scout, worker or Filer
 is provisioned; only the reviewer's model and effort survive, for the review
 pass), no session resume, no hooks and no credential knob; Provider API keys
-come from the environment. The choices above for the subagent extension,
-`--session-id` and `PI_AUTH_CONTENT` are still the plan, not what ships; the
-hook bridge shipped under issue #5482 (below). Two facts changed:
+come from the environment. Each of those four shipped later, with the
+differences its amendment below records: the roster under issue #5483,
+session resume under issue #5481, the hook bridge under issue #5482 and
+`PI_AUTH_CONTENT` under issue #5484. Two facts changed:
 
 - pi's skills directory is its agent directory, `~/.pi/agent/skills`, not
   claude's. "Every Driver reads the first Driver's skills directory" was only
@@ -487,6 +488,23 @@ tool hooks
 (fail closed, except the post-tool summary). pi runs with `--no-approve`, so
 the Target repo's `.pi/` is ignored while `AGENTS.md` and `CLAUDE.md` are
 still read.
+
+## Amendment (issue #5481): pi resumes its session
+
+Issue #5481 supersedes "no session resume" from the first pi slice, shipping
+the #4945 amendment's "Session resume" bullet as planned.
+`cmd/launcher/internal/driver/pi/session.go` renders `--session-id <id>` for
+the initial pass and for every resume (the outcome nudge, the PR-intent
+nudge, the fix box and the issue pass re-dispatched after a hold).
+A resume does no store lookup, unlike claude's `--resume` or opencode's title
+lookup: pi opens the session when it exists and creates it otherwise, so a
+missing store starts the pass fresh rather than failing.
+
+`sessionCacheDirRelative = ".pi/agent/sessions"` in `lib/drivers/pi.nix` makes
+the launcher mount the per-issue cache over pi's `sessions/` directory, the
+layout the #5478 note above records, not over the whole `.pi/agent`, which
+would shadow `auth.json` and `skills/` beside it. Beyond the shared id
+derivation, the launcher's half is unchanged.
 
 ## Amendment (issue #5349): opencode corrective resumes continue the pinned session
 
