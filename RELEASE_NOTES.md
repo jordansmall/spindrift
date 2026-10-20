@@ -9,6 +9,91 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.29.0 — 2026-10-20
+
+spindrift grows up: the driverkit pattern spreads to backends, runners,
+ecosystems, Chores and Dispatch kinds, so extending spindrift means adding
+a row and a package instead of editing core.
+
+**⚠ Breaking changes** this release: a custom prompt directory that
+overrides per-backend fragments needs its files renamed, and an opencode
+roster that drops `review-axis` must also drop it from the reviewer's
+spawns.
+
+Every kit has the same shape driverkit gave the Drivers in 0.27.0. A Nix
+row says what the thing is, a Go Strategy says how it behaves, and a shared
+test kit checks that every implementation keeps the same promises. Knobs
+now live on their row too: they're folded into the env schema, a duplicate
+name fails eval, and each package gets a generated typed reader. None of
+this changes what a default setup does. It changes how much work it takes
+to add the next one.
+
+- **backendkit, for Code Forges and Issue Trackers.** Adding a backend used
+  to touch about twenty files, because the daemon, quickstart and the Box
+  each re-derived backend facts by switching on its name, and an unlisted
+  forge would quietly clone from github.com. Now github, forgejo, jira,
+  local and git are each a row in `lib/backends/` plus a package exporting
+  a Strategy that owns its credential, remote identity, construction and
+  wording. Quickstart detects a backend from the hosts its row lists, every
+  Box token goes through one read-only check, and each backend has its own
+  `go test` check. Prompt steps that differ by backend are now one slot
+  filled from the backend's fragment folder.
+- **⚠ Breaking: prompt fragments moved.** If your prompt directory
+  overrides a per-backend fragment, rename it into the new layout
+  (`fragments/<backend>/<step>.md`, or one shared root file). The old
+  `*_<BACKEND>_STEP` variables still render but warn. Default prompts are
+  unaffected. `MIGRATING.md` has the full rename table.
+- **runnertest, for podman, docker, rancher and bwrap.** The two runner
+  families had no shared test and had picked up 15 features implemented by
+  hand twice, while a new family would have silently inherited OCI
+  behaviour wherever bwrap wasn't named. Families are now rows in
+  `lib/runners/` with a Runner Strategy, and `runnertest` holds lifecycle
+  and rendering contracts both families pass. You'll notice it in a few
+  places: a `NETWORK_MODE` the family can't render fails up front, launch
+  and doctor check the family's own prerequisites (pasta, the overlay
+  mount, the podman machine), bwrap refuses to start a Box that's already
+  running, and a Box killed by a signal exits 128+N under either family.
+- **ecosystemtest, for package-manager credentials.** Each ecosystem row
+  (cargo, the npm family, go, gradle) now declares which credential stores
+  it reads, so cargo no longer gets special-cased by name. `ecosystemtest`
+  replays every stage, from lockfile scan to binding and proxy rewrites,
+  against per-ecosystem goldens and a synthetic row, so a new ecosystem
+  gets checked the same way. The reference docs now render ecosystem facts
+  straight from the rows. Writing the corpus turned up real bugs: an
+  `.npmrc` that listed a scoped registry before the default one bound
+  npm, pnpm and yarn to the wrong host (or none), and cargo's bind-time
+  registry tables weren't decoded.
+- **digestkit, for history-scanning Chores.** In the butler, "scoped by
+  Dispatch Records" really meant "is the tuning Chore", with tuning's code
+  called by name in every branch. A Chore's scope source is now a seam
+  with a tree adapter and a records adapter, and a records Chore plugs in a
+  Digest Strategy, so the next history-scanning Chore is a row and a
+  Digest. Tuning's `BUTLER_TUNING_*` knobs and its merge-by-hand hold now
+  sit on its catalog row (`mergeByHand`), snapshots and the not-planned
+  cooldown are kept per Chore, and a records finding that cites no record
+  gets dropped.
+- **Dispatch kinds are Nix rows.** work, research, butler and recover are
+  declared once in `lib/dispatch-kinds/`, and `nix run .#regen` renders the
+  launcher's kind descriptor from them, including labels, statuses and
+  baked prompt files. The guards are generated from the full list, which
+  closes a gap where recover slipped past them.
+- **⚠ Breaking: opencode roster `spawns`.** Roster entries take an
+  optional `spawns` list, and under opencode it scopes the task permission,
+  so an agent can only start the subagents it names. A roster that keeps
+  the default reviewer but leaves out the `review-axis` entry now fails
+  eval. Drop `review-axis` from the reviewer's spawns or restore the
+  entry. opencode formatters and LSP servers are also pinned off inside the
+  Box.
+- **Smaller fixes.** pi records nested subagent usage under the right
+  role, and a role model's own level suffix wins over the role effort.
+  Jira's HTTP client has a timeout, so a stalled request can't hang a run.
+  The daemon won't build a github or forgejo tracker without
+  `REPO_SLUG` (it used to start a probe that could never count anything),
+  and doctor reports the missing slug once instead of twice. Registry route paths reject control characters
+  and Unicode spaces.
+
+---
+
 ## 0.28.0 — 2026-10-18
 
 pi joins claude and opencode as a third Driver, and it's the first one
