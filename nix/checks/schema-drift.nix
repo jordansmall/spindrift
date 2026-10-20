@@ -364,6 +364,29 @@ let
       "${name}: expected assertNixPathsOk to reject a synthetic path nesting under the leaf ${leaf}, but it evaluated successfully";
     pkgs.runCommand name { } "touch $out";
 
+  # One gofmt-then-diff body for each single-file, gofmt-normalized Go codegen
+  # drift check (issue #5710): gofmt the raw renderer output the way `nix run .#regen` does, then diff it
+  # against the committed file.
+  mkGofmtDriftCheck =
+    {
+      name,
+      rendered,
+      committedPath,
+      source,
+    }:
+    pkgs.runCommand name
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        raw = pkgs.writeText "${baseNameOf committedPath}.raw" rendered;
+        committed = ../../. + "/${committedPath}";
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo ${pkgs.lib.escapeShellArg "${committedPath} is out of sync with ${source} — regenerate it with `nix run .#regen`"} >&2; exit 1; }
+        touch $out
+      '';
+
   # Anti-vacuity check for lib/default-model-fixture.nix (issue #2514): a
   # schema default bump with the fixture left un-updated must fail here. The
   # other direction matters too, so every model-shaped schema key (named
@@ -553,48 +576,23 @@ let
 in
 checkedMerge {
   # Regenerate with `nix run .#regen` when lib/drivers/*.nix changes (issues
-  # #436, #5338, #5503). The raw renderer output is gofmt-normalized here the
-  # same way regen normalizes it.
-  driver-descriptors-gen =
-    let
-      raw = pkgs.writeText "descriptor_gen.go.raw" (
-        renderers.renderDriverDescriptorsGo driverRegistry.entries
-      );
-    in
-    pkgs.runCommand "driver-descriptors-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/driver/descriptor_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/driver/descriptor_gen.go is out of sync with lib/drivers/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  # #436, #5338, #5503).
+  driver-descriptors-gen = mkGofmtDriftCheck {
+    name = "driver-descriptors-gen";
+    rendered = renderers.renderDriverDescriptorsGo driverRegistry.entries;
+    committedPath = "cmd/launcher/internal/driver/descriptor_gen.go";
+    source = "lib/drivers/*.nix";
+  };
 
   # Regenerate with `nix run .#regen` when lib/dispatch-kinds/*.nix or
   # lib/prompt-contract.nix's outcomeStatusSets changes (issues #5668, #5670).
   # Same gofmt normalization as driver-descriptors-gen.
-  dispatch-kinds-gen =
-    let
-      raw = pkgs.writeText "kinds_gen.go.raw" (
-        renderers.renderDispatchKindsGo (import ../../lib/dispatch-kinds)
-      );
-    in
-    pkgs.runCommand "dispatch-kinds-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/dispatchkind/kinds_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/dispatchkind/kinds_gen.go is out of sync with lib/dispatch-kinds/*.nix or lib/prompt-contract.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  dispatch-kinds-gen = mkGofmtDriftCheck {
+    name = "dispatch-kinds-gen";
+    rendered = renderers.renderDispatchKindsGo (import ../../lib/dispatch-kinds);
+    committedPath = "cmd/launcher/internal/dispatchkind/kinds_gen.go";
+    source = "lib/dispatch-kinds/*.nix or lib/prompt-contract.nix";
+  };
 
   # dispatchkind.Default is rendered from the one row that sets `default =
   # true` (issue #5668), so the renderer must throw on zero or several. The
