@@ -156,15 +156,10 @@ func childEnvValue(doc *inputdoc.Document, key string) (string, bool) {
 	return childValue(doc, key, os.Getenv(key))
 }
 
-// knobLookup has backendkit.Lookup's underlying type, so it passes wherever a
-// Lookup is wanted. The daemon spells it out because the knob guard reads any
-// ".Lookup" selector, even in a type position, as an untraceable knob read.
-type knobLookup = func(env string) (string, bool)
-
 // childLookup is the Lookup a backend Strategy resolves its knobs through.
 // A knob unset in both places reports absent, so the backend's generated
 // ReadKnobs applies its own row default.
-func childLookup(doc *inputdoc.Document) knobLookup {
+func childLookup(doc *inputdoc.Document) backendkit.Lookup {
 	return func(key string) (string, bool) { return childEnvValue(doc, key) }
 }
 
@@ -250,7 +245,7 @@ func allMissing(probed []*dispatchkind.Descriptor, reason string) missingSources
 // when err is the blank-token failure, which every backend words as "set
 // <plain token knob> when ..."; any other validation error (a missing
 // REPO_SLUG, say) is not explained by the _CMD form.
-func tokenFormHint(strat backendkit.Strategy, lookup knobLookup, err error) string {
+func tokenFormHint(strat backendkit.Strategy, lookup backendkit.Lookup, err error) string {
 	plain := strat.TokenEnvVar
 	if plain == "" || !strings.Contains(err.Error(), plain) {
 		return ""
