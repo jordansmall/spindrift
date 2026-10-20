@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -245,7 +244,7 @@ func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
 				"JIRA_BASE_URL":         srv.URL,
 				"JIRA_PROJECT_KEY":      "PROJ",
 				"JIRA_TOKEN":            "tok",
-				"JIRA_INCLUDE_COMMENTS": strconv.FormatBool(include),
+				"JIRA_INCLUDE_COMMENTS": boolKnob(include),
 			},
 		}}
 		text, err := forge.IssueText(mustBuild(row.NewIssueTracker(backendShared(c), c.knobLookup)), "PROJ-7", io.Discard)

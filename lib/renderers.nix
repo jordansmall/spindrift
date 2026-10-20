@@ -1940,16 +1940,15 @@ rec {
       hostGitConfigCase = key: e: "\tcase \"${e.env}\":\n\t\treturn s.${key}, true\n";
       hostGitConfigCases = concatStrings (mapAttrsToList hostGitConfigCase gitKeyMembers);
       # A row knob's value stays a string whatever its kind: the row's
-      # ReadKnobs parses it. A bool or int is normalised the way the field
-      # loader read it (any non-empty value is true; a malformed int falls back
-      # to its default), so a stray value can never make ReadKnobs reject it.
+      # ReadKnobs parses it. A bool passes through as-is (its reader is
+      # presence-style); an int is normalised the way the field loader read it
+      # (a malformed int falls back to its default), so a stray value can never
+      # make ReadKnobs reject it.
       rowLoaderLine =
         e:
         "\t\t\t\"${e.env}\": ${
           if e.secret or false then
             "os.Getenv(\"${e.env}\")"
-          else if typeClass e == "bool" then
-            "strconv.FormatBool(getenvSchema(\"${e.env}\") != \"\")"
           else if typeClass e == "int" then
             "strconv.Itoa(${
               if e.intKind == "positive" then "atoiSchema" else "atoiNonnegSchema"
@@ -1961,14 +1960,9 @@ rec {
       usesOs = builtins.any (e: e.secret or false) (
         builtins.attrValues members ++ builtins.attrValues rowMembers
       );
-      usesStrconv = builtins.any (
-        e:
-        !(e.secret or false)
-        && builtins.elem (typeClass e) [
-          "bool"
-          "int"
-        ]
-      ) (builtins.attrValues rowMembers);
+      usesStrconv = builtins.any (e: !(e.secret or false) && typeClass e == "int") (
+        builtins.attrValues rowMembers
+      );
       imports = (if usesOs then [ "os" ] else [ ]) ++ (if usesStrconv then [ "strconv" ] else [ ]);
       importBlock =
         if imports == [ ] then
@@ -2068,13 +2062,9 @@ rec {
           builtins.toJSON d;
       field = key: upperFirst key;
       usesKind = kinds: builtins.any (key: builtins.elem (kindOf knobs.${key}) kinds) keys;
-      needsStrconv = usesKind [
-        "int"
-        "bool"
-      ];
+      needsStrconv = usesKind [ "int" ];
       needsFmt = usesKind [
         "int"
-        "bool"
         "choices"
       ];
       imports = (if needsFmt then [ "fmt" ] else [ ]) ++ (if needsStrconv then [ "strconv" ] else [ ]);
@@ -2098,34 +2088,20 @@ rec {
           # A secret's value never reaches an error message.
           errArgs = if e.secret or false then "${env}" else "${env}, v";
           errFmt = if e.secret or false then "%s " else "%s: %q ";
-          # A parsed kind (int, bool): where empty is a setting it resets the field
-          # to `zero` and only a non-empty value is parsed.
-          parsed =
-            {
-              call,
-              zero,
-              noun,
-            }:
-            (if setting then "\t\tk.${f} = ${zero}\n\t\tif v != \"\" {\n" else "")
-            + "\t\tparsed, err := ${call}\n"
-            + "\t\tif err != nil {\n"
-            + "\t\t\treturn Knobs{}, fmt.Errorf(\"${errFmt}is not ${noun}\", ${errArgs})\n"
-            + "\t\t}\n"
-            + "\t\tk.${f} = parsed\n"
-            + (if setting then "\t\t}\n" else "");
           body =
             if kind == "int" then
-              parsed {
-                call = "strconv.Atoi(v)";
-                zero = "0";
-                noun = "an integer";
-              }
+              # Where empty is a setting it resets the field to 0 and only a
+              # non-empty value is parsed.
+              (if setting then "\t\tk.${f} = 0\n\t\tif v != \"\" {\n" else "")
+              + "\t\tparsed, err := strconv.Atoi(v)\n"
+              + "\t\tif err != nil {\n"
+              + "\t\t\treturn Knobs{}, fmt.Errorf(\"${errFmt}is not an integer\", ${errArgs})\n"
+              + "\t\t}\n"
+              + "\t\tk.${f} = parsed\n"
+              + (if setting then "\t\t}\n" else "")
             else if kind == "bool" then
-              parsed {
-                call = "strconv.ParseBool(v)";
-                zero = "false";
-                noun = "a boolean";
-              }
+              # Presence, like flagKind's bool everywhere else: any non-empty value is on.
+              "\t\tk.${f} = v != \"\"\n"
             else if kind == "choices" then
               "\t\tswitch v {\n"
               + "\t\tcase ${
@@ -2146,7 +2122,12 @@ rec {
       settingKnobs = builtins.filter (key: emptyIsSetting knobs.${key}) keys;
       settingKinds = map (key: kindOf knobs.${key}) settingKnobs;
       settingReads =
-        (if builtins.elem "bool" settingKinds then [ "an empty bool reads false" ] else [ ])
+        (
+          if builtins.elem "bool" settingKinds then
+            [ "an empty bool reads false, any other value true" ]
+          else
+            [ ]
+        )
         ++ (if builtins.elem "int" settingKinds then [ "an empty emptyDisables int reads 0" ] else [ ])
         ++ (
           if builtins.any (k: k == "string" || k == "choices") settingKinds then

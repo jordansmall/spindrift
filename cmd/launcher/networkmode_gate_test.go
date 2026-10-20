@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -40,7 +39,7 @@ func TestNetworkModeRuntimeGate_EveryListedModePasses(t *testing.T) {
 				c.runnerKind = f.Name
 				c.networkMode = mode
 				c.setRowKnob("PODMAN_NETWORK", "")
-				c.setRowKnob("BWRAP_UNSHARE_NET", "false")
+				c.setRowKnob("BWRAP_UNSHARE_NET", "")
 				if err := checkNetworkModeRuntimeGate(c); err != nil {
 					t.Errorf("checkNetworkModeRuntimeGate() = %v, want nil", err)
 				}
@@ -138,7 +137,7 @@ func TestNetworkModeRuntimeGate_ModeAndRawKnobCoherence(t *testing.T) {
 			c := minimalValidConfig()
 			c.networkMode = tc.networkMode
 			c.setRowKnob("PODMAN_NETWORK", tc.podmanNet)
-			c.setRowKnob("BWRAP_UNSHARE_NET", strconv.FormatBool(tc.unshareNet))
+			c.setRowKnob("BWRAP_UNSHARE_NET", boolKnob(tc.unshareNet))
 
 			err := checkNetworkModeRuntimeGate(c)
 			if err == nil {
@@ -189,7 +188,7 @@ func TestNetworkModeRuntimeGate_RawKnobAloneIsNoOp(t *testing.T) {
 			c := minimalValidConfig()
 			c.networkMode = tc.networkMode
 			c.setRowKnob("PODMAN_NETWORK", tc.podmanNet)
-			c.setRowKnob("BWRAP_UNSHARE_NET", strconv.FormatBool(tc.unshareNet))
+			c.setRowKnob("BWRAP_UNSHARE_NET", boolKnob(tc.unshareNet))
 
 			if err := checkNetworkModeRuntimeGate(c); err != nil {
 				t.Errorf("checkNetworkModeRuntimeGate() with networkMode=%q, podmanNetwork=%q, bwrapUnshareNet=%v = %v, want nil (raw knob alone with open/unset mode is a supported escape hatch)", tc.networkMode, tc.podmanNet, tc.unshareNet, err)

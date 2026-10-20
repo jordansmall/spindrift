@@ -3,7 +3,6 @@ package bwrap
 import (
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/runner"
@@ -166,15 +165,5 @@ func TestNewBwrap_ReadsUnshareNetFromLookup(t *testing.T) {
 	}
 	if got := r.(*bwrapAdapter).network; got.Isolate {
 		t.Errorf("network = %+v, want shared host network with the knob unset", got)
-	}
-}
-
-// Guards only a direct-lookup caller: the launcher knobLookup normalizes
-// BWRAP_UNSHARE_NET through strconv.FormatBool, so the launcher path never
-// reaches this error (see TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter).
-func TestNewBwrap_MalformedUnshareNetIsAnError(t *testing.T) {
-	_, err := New(runner.Config{}, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "maybe"}), "/pwd")
-	if err == nil || !strings.Contains(err.Error(), "BWRAP_UNSHARE_NET") {
-		t.Errorf("New error = %v, want one naming BWRAP_UNSHARE_NET", err)
 	}
 }
