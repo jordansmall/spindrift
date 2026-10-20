@@ -1,0 +1,2 @@
+[registries.acme] # internal mirror
+index = "sparse+https://crates.acme.test/index/"
