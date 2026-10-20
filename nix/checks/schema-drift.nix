@@ -586,7 +586,6 @@ checkedMerge {
 
   # Regenerate with `nix run .#regen` when lib/dispatch-kinds/*.nix or
   # lib/prompt-contract.nix's outcomeStatusSets changes (issues #5668, #5670).
-  # Same gofmt normalization as driver-descriptors-gen.
   dispatch-kinds-gen = mkGofmtDriftCheck {
     name = "dispatch-kinds-gen";
     rendered = renderers.renderDispatchKindsGo (import ../../lib/dispatch-kinds);
@@ -803,26 +802,18 @@ checkedMerge {
         touch $out
       '';
 
-  # Regenerate with `nix run .#regen` when lib/backends/default.nix changes.
-  # The raw renderer output is gofmt-normalized here the same way regen
-  # normalizes it (issue #2521).
+  # Regenerate with `nix run .#regen` when lib/backends/default.nix changes
+  # (issue #2521).
   backend-registry-gen =
     let
       backends = import ../../lib/backends/default.nix;
-      raw = pkgs.writeText "registry_gen.go.raw" (renderers.renderBackendRegistryGo backends);
     in
-    pkgs.runCommand "backend-registry-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/backend/registry_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/backend/registry_gen.go is out of sync with lib/backends/default.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+    mkGofmtDriftCheck {
+      name = "backend-registry-gen";
+      rendered = renderers.renderBackendRegistryGo backends;
+      committedPath = "cmd/launcher/internal/backend/registry_gen.go";
+      source = "lib/backends/default.nix";
+    };
 
   # Each row that declares knobs owns a generated typed reader; a row without
   # knobs must have none (ADR 0068 decision 3, issue #5636). Regen writes and
@@ -1005,106 +996,52 @@ checkedMerge {
     pkgs.runCommand "backend-registry-quickstart-guard" { } "touch $out";
 
   # Regenerate with `nix run .#regen` when lib/env-schema.nix's bool or
-  # emptyDisables knobs change; gofmt-normalized the same way regen
-  # normalizes it (issue #4617).
-  empty-is-setting-gen-go =
-    let
-      raw = pkgs.writeText "emptyissetting_gen.go.raw" (renderers.renderEmptyIsSettingGo schema);
-    in
-    pkgs.runCommand "empty-is-setting-gen-go"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/inputdoc/emptyissetting_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/inputdoc/emptyissetting_gen.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  # emptyDisables knobs change (issue #4617).
+  empty-is-setting-gen-go = mkGofmtDriftCheck {
+    name = "empty-is-setting-gen-go";
+    rendered = renderers.renderEmptyIsSettingGo schema;
+    committedPath = "cmd/launcher/internal/inputdoc/emptyissetting_gen.go";
+    source = "lib/env-schema.nix";
+  };
 
   # Regenerate with `nix run .#regen` when a non-secret knob's default in
-  # lib/env-schema.nix changes; gofmt-normalized the same way regen normalizes
-  # it (issue #4592).
-  schema-defaults-gen-go =
-    let
-      raw = pkgs.writeText "schemadefaults_gen.go.raw" (renderers.renderSchemaDefaultsGo schema);
-    in
-    pkgs.runCommand "schema-defaults-gen-go"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/inputdoc/schemadefaults_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/inputdoc/schemadefaults_gen.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  # lib/env-schema.nix changes (issue #4592).
+  schema-defaults-gen-go = mkGofmtDriftCheck {
+    name = "schema-defaults-gen-go";
+    rendered = renderers.renderSchemaDefaultsGo schema;
+    committedPath = "cmd/launcher/internal/inputdoc/schemadefaults_gen.go";
+    source = "lib/env-schema.nix";
+  };
 
   # Regenerate with `nix run .#regen` when a knob's launcherIgnores in
-  # lib/env-schema.nix changes; gofmt-normalized the same way regen normalizes
-  # it (issue #4644).
-  daemon-only-knobs-gen-go =
-    let
-      raw = pkgs.writeText "daemononlyknobs_gen.go.raw" (renderers.renderDaemonOnlyKnobsGo schema);
-    in
-    pkgs.runCommand "daemon-only-knobs-gen-go"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  # lib/env-schema.nix changes (issue #4644).
+  daemon-only-knobs-gen-go = mkGofmtDriftCheck {
+    name = "daemon-only-knobs-gen-go";
+    rendered = renderers.renderDaemonOnlyKnobsGo schema;
+    committedPath = "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go";
+    source = "lib/env-schema.nix";
+  };
 
-  # Regenerate with `nix run .#regen` when lib/labels.nix changes. The raw
-  # renderer output is gofmt-normalized here the same way regen normalizes it
-  # (issue #2528).
+  # Regenerate with `nix run .#regen` when lib/labels.nix changes (issue
+  # #2528).
   label-registry-gen =
     let
       labels = import ../../lib/labels.nix;
-      raw = pkgs.writeText "labelmeta_gen.go.raw" (renderers.renderLabelRegistryGo labels);
     in
-    pkgs.runCommand "label-registry-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/doctor/labelmeta_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/doctor/labelmeta_gen.go is out of sync with lib/labels.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+    mkGofmtDriftCheck {
+      name = "label-registry-gen";
+      rendered = renderers.renderLabelRegistryGo labels;
+      committedPath = "cmd/launcher/internal/doctor/labelmeta_gen.go";
+      source = "lib/labels.nix";
+    };
 
   # Regenerate with `nix run .#regen` when lib/runners/*.nix changes (ADR 0069).
-  # Same gofmt normalization as dispatch-kinds-gen.
-  runners-gen =
-    let
-      raw = pkgs.writeText "families_gen.go.raw" (
-        renderers.renderRunnerFamiliesGo (import ../../lib/runners/index.nix { }).rows
-      );
-    in
-    pkgs.runCommand "runners-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/runner/families_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/runner/families_gen.go is out of sync with lib/runners/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  runners-gen = mkGofmtDriftCheck {
+    name = "runners-gen";
+    rendered = renderers.renderRunnerFamiliesGo (import ../../lib/runners/index.nix { }).rows;
+    committedPath = "cmd/launcher/internal/runner/families_gen.go";
+    source = "lib/runners/*.nix";
+  };
 
   # renderRunnerFamiliesGo throws on a row with an unknown or missing field, so
   # a new row attr cannot be silently dropped from the Go Descriptor. The
@@ -1247,45 +1184,26 @@ checkedMerge {
   outcome-status-gen =
     let
       promptContract = import ../../lib/prompt-contract.nix;
-      raw = pkgs.writeText "status_gen.go.raw" (
-        renderers.renderOutcomeStatusGo promptContract.outcomeStatusSets
-      );
     in
-    pkgs.runCommand "outcome-status-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/outcome/status_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/outcome/status_gen.go is out of sync with lib/prompt-contract.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+    mkGofmtDriftCheck {
+      name = "outcome-status-gen";
+      rendered = renderers.renderOutcomeStatusGo promptContract.outcomeStatusSets;
+      committedPath = "cmd/launcher/internal/outcome/status_gen.go";
+      source = "lib/prompt-contract.nix";
+    };
 
   # Regenerate with `nix run .#regen` when lib/prompt-contract.nix's
-  # markerChannels changes; gofmt-normalized the same way regen normalizes it
-  # (issue #2974, parent #2972).
+  # markerChannels changes (issue #2974, parent #2972).
   marker-channels-gen =
     let
       promptContract = import ../../lib/prompt-contract.nix;
-      raw = pkgs.writeText "markerchannels_gen.go.raw" (
-        renderers.renderMarkerChannelsGo promptContract.markerChannels
-      );
     in
-    pkgs.runCommand "marker-channels-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/outcome/markerchannels_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/outcome/markerchannels_gen.go is out of sync with lib/prompt-contract.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+    mkGofmtDriftCheck {
+      name = "marker-channels-gen";
+      rendered = renderers.renderMarkerChannelsGo promptContract.markerChannels;
+      committedPath = "cmd/launcher/internal/outcome/markerchannels_gen.go";
+      source = "lib/prompt-contract.nix";
+    };
 
   # Regenerate with `nix run .#regen` when lib/env-schema.nix gains a knob
   # (issue #109).
@@ -1890,20 +1808,13 @@ checkedMerge {
   launcher-schema-config =
     let
       schema = import ../../lib/env-schema.nix;
-      raw = pkgs.writeText "schemaconfig_gen.go.raw" (renderers.renderSchemaConfigGo schema);
     in
-    pkgs.runCommand "launcher-schema-config"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/schemaconfig_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/schemaconfig_gen.go is out of sync with lib/env-schema.nix — regenerate it" >&2; exit 1; }
-        touch $out
-      '';
+    mkGofmtDriftCheck {
+      name = "launcher-schema-config";
+      rendered = renderers.renderSchemaConfigGo schema;
+      committedPath = "cmd/launcher/schemaconfig_gen.go";
+      source = "lib/env-schema.nix";
+    };
 
   # Regenerate with `nix run .#regen` when a box-env row changes. The raw
   # renderer output is intentionally unaligned: gofmt owns the struct
@@ -1911,22 +1822,13 @@ checkedMerge {
   promptassembly-boxenv-gen =
     let
       promptAssemblyBoxEnv = import ../../lib/promptassembly-boxenv.nix;
-      raw = pkgs.writeText "boxenv_gen.go.raw" (
-        renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv
-      );
     in
-    pkgs.runCommand "promptassembly-boxenv-gen"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/promptassembly/boxenv_gen.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/promptassembly/boxenv_gen.go is out of sync with lib/promptassembly-boxenv.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+    mkGofmtDriftCheck {
+      name = "promptassembly-boxenv-gen";
+      rendered = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
+      committedPath = "cmd/launcher/internal/promptassembly/boxenv_gen.go";
+      source = "lib/promptassembly-boxenv.nix";
+    };
 
   # Regenerate with `nix run .#regen` when a flakeOption knob is added or
   # removed, or a structural knob's doc metadata changes (issue #2572).
@@ -2636,48 +2538,22 @@ checkedMerge {
     pkgs.runCommand "default-model-fixture-schema-sync-completeness-guard" { } "touch $out";
 
   # Regenerate with `nix run .#regen` when lib/default-model-fixture.nix
-  # changes; gofmt-normalized the same way regen normalizes it (issue #2514,
-  # slice 2 of 3).
-  default-models-gen-go =
-    let
-      raw = pkgs.writeText "defaultmodels_gen_test.go.raw" (
-        renderers.renderDefaultModelFixtureGo defaultModelFixture
-      );
-    in
-    pkgs.runCommand "default-models-gen-go"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/defaultmodels_gen_test.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/defaultmodels_gen_test.go is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  # changes (issue #2514, slice 2 of 3).
+  default-models-gen-go = mkGofmtDriftCheck {
+    name = "default-models-gen-go";
+    rendered = renderers.renderDefaultModelFixtureGo defaultModelFixture;
+    committedPath = "cmd/launcher/defaultmodels_gen_test.go";
+    source = "lib/default-model-fixture.nix";
+  };
 
   # Regenerate with `nix run .#regen` when lib/env-schema.nix's daemon tuning
-  # knob defaults change; gofmt-normalized the same way regen normalizes it
-  # (issue #3619).
-  daemon-knob-defaults-gen-go =
-    let
-      raw = pkgs.writeText "shippeddefaults_gen_test.go.raw" (
-        renderers.renderDaemonKnobDefaultsGo schema
-      );
-    in
-    pkgs.runCommand "daemon-knob-defaults-gen-go"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit raw;
-        committed = ../../cmd/launcher/internal/daemon/shippeddefaults_gen_test.go;
-      }
-      ''
-        gofmt "$raw" > generated.go
-        diff generated.go "$committed" \
-          || { echo "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
+  # knob defaults change (issue #3619).
+  daemon-knob-defaults-gen-go = mkGofmtDriftCheck {
+    name = "daemon-knob-defaults-gen-go";
+    rendered = renderers.renderDaemonKnobDefaultsGo schema;
+    committedPath = "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go";
+    source = "lib/env-schema.nix";
+  };
 
   # Proves assertMarkedBlockOk rejects a drifted block rather than passing
   # vacuously (issue #2948). Every row is exercised, not just the first, by
