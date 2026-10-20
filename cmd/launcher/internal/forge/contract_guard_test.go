@@ -100,11 +100,24 @@ func contractProblems(root string, descs []backend.Descriptor) []string {
 // TestEveryBackendRunsItsContracts pins issue #5637: a backend marked valid as
 // an Issue Tracker or a Code Forge must run the matching forgetest contract,
 // so registering one without the contract's coverage fails.
+//
+// The core go test run holds only the core backends' directories (issue
+// #5648), so a descriptor whose directory is absent is skipped there.
+// launcher-binaries-go-test copies the whole tree and sets
+// SPINDRIFT_CONTRACT_GUARD_FULL_TREE, where an absent directory is an error.
 func TestEveryBackendRunsItsContracts(t *testing.T) {
 	if len(backend.Registry) == 0 {
 		t.Fatal("backend.Registry is empty; nothing to guard")
 	}
-	for _, p := range contractProblems(".", backend.Registry) {
+	var present []backend.Descriptor
+	for _, d := range backend.Registry {
+		if _, err := os.Stat(d.Name); err == nil {
+			present = append(present, d)
+		} else if os.Getenv("SPINDRIFT_CONTRACT_GUARD_FULL_TREE") != "" {
+			t.Errorf("%s: registered in backend.Registry but has no package directory", d.Name)
+		}
+	}
+	for _, p := range contractProblems(".", present) {
 		t.Error(p)
 	}
 }

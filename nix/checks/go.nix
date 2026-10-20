@@ -41,26 +41,40 @@ let
       )
     )
     ++ map (d: launcherDir + "/${d}") ([ "testdata" ] ++ bundleMains ++ bundleFixtureDirs);
+  # The backends core keeps (ADR 0068, decision 7). Mirrors coreBackends in
+  # internal/driver/bundle_guard_test.go (bundle-binaries-match-guard pins
+  # them). Every other backend row is stripped from the core run.
+  coreBackendNames = [
+    "git"
+    "local"
+  ];
+  bundledBackendNames = builtins.filter (n: !builtins.elem n coreBackendNames) backendNames;
+  bundledBackendDirs = map (n: launcherDir + "/internal/forge/${n}") bundledBackendNames;
   runnerDir = name: launcherDir + "/internal/runner/${name}";
   allRunnerDirs = map runnerDir runnerNames;
   # `files` without the Drivers (and so their corpora), the runner families,
-  # the bundle and the binaries.
+  # the bundled backends, the bundle and the binaries.
   coreFiles =
     files:
     fs.difference files (
       fs.unions (
-        allDriverDirs ++ allRunnerDirs ++ [ (launcherDir + "/internal/driver/bundle") ] ++ bundleBinaryDirs
+        allDriverDirs
+        ++ allRunnerDirs
+        ++ bundledBackendDirs
+        ++ [ (launcherDir + "/internal/driver/bundle") ]
+        ++ bundleBinaryDirs
       )
     );
   # The vendor tree is re-derived from a source without any Driver, runner
-  # family, bundle or binary, so editing one Driver or family never changes
-  # another's drvPath nor the core go test's (a plain launcherGoModules would,
-  # its src being the whole tree). Fixed-output with the same vendorHash, so
-  # its outPath equals launcherGoModules' and nothing is fetched twice. `go
-  # mod vendor -e` tolerates the packages that import the absent directories.
-  # Gotcha: a Driver, runner family or main importing a third-party module no
-  # other package uses changes the vendored set, and the narrowed derivation
-  # then mismatches launcherVendorHash.
+  # family, bundled backend, bundle or binary, so editing one Driver, family or
+  # bundled backend never changes another's drvPath nor the core go test's (a
+  # plain launcherGoModules would, its src being the whole tree). Fixed-output
+  # with the same vendorHash, so its outPath equals launcherGoModules' and
+  # nothing is fetched twice. `go mod vendor -e` tolerates the packages that
+  # import the absent directories.
+  # Gotcha: a Driver, runner family, bundled backend or main importing a
+  # third-party module no other package uses changes the vendored set, and the
+  # narrowed derivation then mismatches launcherVendorHash.
   vendorFor =
     files:
     launcherGoModules.overrideAttrs (_: {
@@ -118,8 +132,8 @@ let
   # packages its tests reach. `files` is the cmd/launcher fileset every source
   # is cut from; the independence check perturbs it. The vendor tree is
   # `vendorFor files`, so one Driver's or runner family's edits never move
-  # another's drvPath; coreFiles strips no backend, so a backend edit moves every backend's
-  # drvPath, though not its outPath.
+  # another's drvPath; coreFiles keeps the core backends (git, local), so
+  # editing one moves every backend's drvPath, though not its outPath.
   # `setupFor name` is shell run after the copy for files outside cmd/launcher
   # its tests read.
   adapterGoTests =
@@ -371,6 +385,12 @@ let
           exit 1
         fi
       done
+      for held in ${pkgs.lib.concatStringsSep " " bundledBackendNames}; do
+        if [ -e "src/cmd/launcher/internal/forge/$held" ]; then
+          echo "launcher-go-test's source holds internal/forge/$held" >&2
+          exit 1
+        fi
+      done
       for held in ${pkgs.lib.concatStringsSep " " runnerNames}; do
         if [ -e "src/cmd/launcher/internal/runner/$held" ]; then
           echo "launcher-go-test's source holds internal/runner/$held" >&2
@@ -516,8 +536,9 @@ driverGoTests
   launcher-go-test = launcherGoTestFor launcherDir;
 
   # The packages that link every Driver through the bundle (bundleBinaryDirs),
-  # the bundle's own tests, plus the registry root's cross-Driver guard tests;
-  # the whole tree is copied, so a Driver edit reruns this.
+  # the bundle's own tests, the registry root's cross-Driver guard tests and the
+  # forge package's contract guard, which needs every backend directory; the
+  # whole tree is copied, so a Driver edit reruns this.
   launcher-binaries-go-test =
     pkgs.runCommand "launcher-binaries-go-test"
       {
@@ -532,6 +553,7 @@ driverGoTests
         go test . ${
           pkgs.lib.concatMapStringsSep " " (d: "./${d}/...") (bundleMains ++ bundleFixtureDirs)
         } ./internal/driver ./internal/driver/bundle/...
+        SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 go test ./internal/forge -run '^TestEveryBackendRunsItsContracts$'
         touch $out
       '';
 
@@ -566,7 +588,16 @@ driverGoTests
         entries (blockBody "bundleBinaries") ++ entries (blockBody "bundleFixtures")
       );
       listed = sort lessThan (bundleMains ++ bundleFixtureDirs);
+      guardedCore = sort lessThan (
+        map builtins.head (
+          builtins.filter builtins.isList (builtins.split "\"([^\"]+)\"" (blockBody "coreBackends"))
+        )
+      );
     in
+    assert assertMsg (guardedCore == sort lessThan coreBackendNames)
+      "coreBackendNames (nix/checks/go.nix) must equal coreBackends (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " coreBackendNames}; the guard has: ${concatStringsSep ", " guardedCore}";
+    assert assertMsg (builtins.all (n: builtins.elem n backendNames) coreBackendNames)
+      "coreBackendNames names a backend with no row in lib/backends: ${concatStringsSep ", " coreBackendNames}";
     assert assertMsg (guarded == listed)
       "bundleMains ++ bundleFixtureDirs (nix/checks/go.nix) must equal the module + \"/<dir>\" entries of bundleBinaries and bundleFixtures (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " listed}; the guard has: ${concatStringsSep ", " guarded}";
     pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
@@ -680,10 +711,11 @@ driverGoTests
     pkgs.runCommand "runners-go-test-independent" { } "touch $out";
 
   # No backend's go test source holds another backend's directory, bar the git
-  # backend's for `local` and forgejo (issue #5637). A fileset check, not the
-  # drvPath comparison the Drivers use: coreFiles strips no backend, so a
-  # backend edit moves every backend's vendor drvPath. The sensitivity assert
-  # keeps it from passing vacuously.
+  # backend's for `local` and forgejo (issue #5637). A fileset check for the
+  # backend-to-backend leaks, since a core backend edit still moves every
+  # backend's vendor drvPath. Editing a bundled backend (issue #5648) leaves the
+  # core launcher-go-test's drvPath unchanged, while editing a core backend
+  # moves it. The sensitivity asserts keep it from passing vacuously.
   backends-go-test-independent =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
@@ -693,6 +725,17 @@ driverGoTests
           fs.intersection (fs.unions (backendGoTestSharedFor name)) (internalDir + "/forge/${other}")
         );
       allowed = name: other: buildsOnFor name == other;
+      coreDrvAfterRemoving =
+        n:
+        let
+          dir = internalDir + "/forge/${n}";
+          file = builtins.head (
+            builtins.attrNames (pkgs.lib.filterAttrs (_: t: t == "regular") (builtins.readDir dir))
+          );
+        in
+        (launcherGoTestFor (fs.difference launcherDir (dir + "/${file}"))).drvPath;
+      coreDrv = (launcherGoTestFor launcherDir).drvPath;
+      coreMoved = builtins.filter (n: coreDrvAfterRemoving n != coreDrv) bundledBackendNames;
       sensitivityRows = builtins.filter (row: row ? goTestBuildsOn) backendRowList;
       leaks = concatStringsSep ", " (
         builtins.concatMap (
@@ -710,6 +753,12 @@ driverGoTests
     assert assertMsg (builtins.all (row: held row.name row.goTestBuildsOn != [ ])
       sensitivityRows
     ) "a goTestBuildsOn backend's go test source no longer holds its base; the check is inert";
+    assert assertMsg (
+      coreMoved == [ ]
+    ) "editing a bundled backend changed launcher-go-test: ${concatStringsSep ", " coreMoved}";
+    assert assertMsg (builtins.all (
+      n: coreDrvAfterRemoving n != coreDrv
+    ) coreBackendNames) "editing a core backend left launcher-go-test unchanged; the check is inert";
     assert assertMsg (leaks == "") "backend go test sources hold sibling backends: ${leaks}";
     pkgs.runCommand "backends-go-test-independent" { } "touch $out";
 
