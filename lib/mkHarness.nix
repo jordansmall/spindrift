@@ -830,8 +830,17 @@ let
       # Not lib.hasInfix: its `.*X.*` regex recurses per character under a
       # std::regex Nix (CI's) and overflows the evaluator's stack on a whole
       # prompt. Same split idiom as lib/prompt-contract.nix's
-      # hasDirectPlaceholder, braces in a character class.
-      mentions = name: text: builtins.length (builtins.split "\\$[{]${name}[}]" text) > 1;
+      # hasDirectPlaceholder, braces in a character class. One split per
+      # source keeps eval cost flat in the registry's size. The name class
+      # excludes `$`, `{` and `}` so `${${TDD_STEP}}` still captures TDD_STEP;
+      # a registry key outside the class is never matched, so keys must fit it.
+      mentioned =
+        text:
+        builtins.listToAttrs (
+          map (m: lib.nameValuePair (builtins.head m) true) (
+            builtins.filter builtins.isList (builtins.split "\\$[{]([A-Za-z0-9_]+)[}]" text)
+          )
+        );
     in
     lib.concatMap (
       source:
@@ -840,7 +849,7 @@ let
         inherit (removedFragmentVars.${name}) issue;
         severity = removedFragmentVars.${name}.severity or "removed";
         replacement = removedFragmentVars.${name}.replacement or null;
-      }) (builtins.filter (name: mentions name sources.${source}) (lib.attrNames removedFragmentVars))
+      }) (lib.attrNames (builtins.intersectAttrs (mentioned sources.${source}) removedFragmentVars))
     ) (lib.attrNames sources);
 
   removedFragmentVarViolations = builtins.filter (v: v.severity == "removed") removedFragmentVarHits;
