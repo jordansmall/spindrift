@@ -78,8 +78,8 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 			{
 				Prefix:        "r0",
 				UpstreamHost:  "artifactory.example.com",
-				EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
-				Ecosystems:    registryvocab.RouteEcosystems{"npm": registryvocab.RouteDeclaration{"path": "/npm"}},
+				EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/synthetic"}},
+				Ecosystems:    registryvocab.RouteEcosystems{"synthetic": registryvocab.RouteDeclaration{"path": "/synthetic"}},
 			},
 		},
 	}
@@ -105,8 +105,8 @@ func TestEncodeParse_RoundTrip(t *testing.T) {
 		got.Routes[0].UpstreamHost != "artifactory.example.com" {
 		t.Fatalf("Parse().Routes = %+v, want route r0/artifactory.example.com", got.Routes)
 	}
-	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (registryvocab.Subtree{Ecosystem: "npm", Path: "/npm"}) {
-		t.Fatalf("Parse().Routes[0].EnforcedPaths = %+v, want [{npm /npm}]", got.Routes[0].EnforcedPaths)
+	if len(got.Routes[0].EnforcedPaths) != 1 || got.Routes[0].EnforcedPaths[0] != (registryvocab.Subtree{Ecosystem: "synthetic", Path: "/synthetic"}) {
+		t.Fatalf("Parse().Routes[0].EnforcedPaths = %+v, want [{synthetic /synthetic}]", got.Routes[0].EnforcedPaths)
 	}
 }
 
@@ -123,8 +123,8 @@ func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
 				Prefix:       "r0",
 				UpstreamHost: "artifactory.example.com",
 				Ecosystems: registryvocab.RouteEcosystems{
-					"gradle": registryvocab.RouteDeclaration{"path": "/maven"},
-					"cargo":  registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"example-remote"})},
+					"synthetic": registryvocab.RouteDeclaration{"path": "/synthetic"},
+					"twin":      registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"example-remote"})},
 				},
 			},
 			{
@@ -159,12 +159,12 @@ func TestEncodeParse_RoundTrip_Ecosystems(t *testing.T) {
 	if len(got.Routes) != 2 {
 		t.Fatalf("Parse().Routes = %+v, want 2 routes", got.Routes)
 	}
-	if gotPath := got.Routes[0].Ecosystems.Path("gradle"); gotPath != "/maven" {
-		t.Errorf("Parse().Routes[0].Ecosystems.Path(\"gradle\") = %q, want %q", gotPath, "/maven")
+	if gotPath := got.Routes[0].Ecosystems.Path("synthetic"); gotPath != "/synthetic" {
+		t.Errorf("Parse().Routes[0].Ecosystems.Path(\"synthetic\") = %q, want %q", gotPath, "/synthetic")
 	}
 	wantRegistries := []string{"example-remote"}
-	if gotRegistries := got.Routes[0].Ecosystems.Strings("cargo", "registries"); !reflect.DeepEqual(gotRegistries, wantRegistries) {
-		t.Errorf("Parse().Routes[0].Ecosystems.Strings(\"cargo\", \"registries\") = %v, want %v", gotRegistries, wantRegistries)
+	if gotRegistries := got.Routes[0].Ecosystems.Strings("twin", "registries"); !reflect.DeepEqual(gotRegistries, wantRegistries) {
+		t.Errorf("Parse().Routes[0].Ecosystems.Strings(\"twin\", \"registries\") = %v, want %v", gotRegistries, wantRegistries)
 	}
 	if got.Routes[1].Ecosystems != nil {
 		t.Errorf("Parse().Routes[1].Ecosystems = %v, want nil", got.Routes[1].Ecosystems)
@@ -183,21 +183,21 @@ func TestEncode_ExactJSON(t *testing.T) {
 			{
 				Prefix:        "r0",
 				UpstreamHost:  "artifactory.example.com",
-				EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/npm"}},
+				EnforcedPaths: []registryvocab.Subtree{{Ecosystem: "synthetic", Path: "/synthetic"}},
 				Ecosystems: registryvocab.RouteEcosystems{
-					"cargo": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"example-remote"})},
+					"twin": registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue([]string{"example-remote"})},
 				},
 			},
 			{
 				Prefix:       "r1",
 				UpstreamHost: "artifactory.example.com",
 				EnforcedPaths: []registryvocab.Subtree{
-					{Ecosystem: "cargo", Path: "/index", RegistryName: "mycorp"},
+					{Ecosystem: "twin", Path: "/index", RegistryName: "mycorp"},
 				},
 			},
 		},
 	}
-	want := `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"npm","path":"/npm"}],"ecosystems":{"cargo":{"registries":["example-remote"]}}},{"prefix":"r1","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"cargo","path":"/index"}]}]}`
+	want := `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"r0","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"synthetic","path":"/synthetic"}],"ecosystems":{"twin":{"registries":["example-remote"]}}},{"prefix":"r1","upstreamHost":"artifactory.example.com","enforcedPaths":[{"ecosystem":"twin","path":"/index"}]}]}`
 	got, err := Encode(m)
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
