@@ -67,7 +67,11 @@ there without a migration.
   header-name validation), replacing the copies that were kept in sync by
   convention.
 - The containment scan covers every package that imports the ecosystem
-  package plus the launcher's main package.
+  package plus the launcher's main package (amended by issue #5748: it also
+  covers every direct importer of the `registryvocab` leaf, which declares
+  the string fields ecosystem names travel in, and the leaf itself). It
+  also covers `internal/credresolver`, which never imports the ecosystem
+  package.
 
 ## Amendment (2026-10-18 architecture review): credential stores stay one table; rows name the stores they read
 

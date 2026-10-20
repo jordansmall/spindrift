@@ -248,37 +248,51 @@ func packageDirs(t *testing.T, root string) []string {
 	return dirs
 }
 
-// deriveEcosystemImporters returns every directory under moduleRoot whose
-// non-test .go files directly import moduleName+"/internal/ecosystem", plus
-// moduleRoot itself, so a refactor routing main's ecosystem access through an
-// intermediary package still leaves main covered, and internal/credresolver,
-// which must never import this package yet must not re-name an ecosystem
-// either. Direct imports only: the criterion is reaching Table, not being
-// handed a row's Name as string data. The ecosystem package itself is exempt
-// because it never imports itself, and its testdata corpora because
-// packageDirs prunes testdata; both are deliberate.
+// deriveEcosystemImporters returns the directories under moduleRoot that can
+// handle an ecosystem name: direct importers of moduleName+"/internal/ecosystem"
+// or moduleName+"/internal/registryvocab", plus registryvocab itself (the leaf
+// declaring the string fields names travel in: Subtree.Ecosystem,
+// RouteEcosystems),
+// moduleRoot (so routing main's ecosystem access through an intermediary
+// cannot uncover it) and internal/credresolver (which must never import this
+// package yet must not re-name an ecosystem either).
+//
+// Direct imports only: a package that merely passes a registrymanifest along
+// opaquely, as the runners do, never sees a name. This package is skipped by
+// path, since it imports registryvocab to build Table and is where the names
+// live. Its testdata corpora are pruned by packageDirs.
 func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []string {
 	t.Helper()
 	ecosystemImport := moduleName + "/internal/ecosystem"
+	vocabImport := moduleName + "/internal/registryvocab"
 
 	var importers []string
+	ecosystemDir := filepath.Join(moduleRoot, "internal", "ecosystem")
 	for _, dir := range packageDirs(t, moduleRoot) {
-		if slices.Contains(nonTestImports(t, dir), ecosystemImport) {
+		if dir == ecosystemDir {
+			continue
+		}
+		imports := nonTestImports(t, dir)
+		if slices.Contains(imports, ecosystemImport) || slices.Contains(imports, vocabImport) {
 			importers = append(importers, dir)
 		}
 	}
 
-	// Checked before moduleRoot is added: a broken walker must not pass
-	// vacuously by falling back to the one guaranteed entry.
+	// Checked before the unconditional targets are added: a broken walker must
+	// not pass vacuously by falling back to the guaranteed entries.
 	if len(importers) == 0 {
-		t.Fatalf("deriveEcosystemImporters(%s, %s): zero directories directly import %s", moduleRoot, moduleName, ecosystemImport)
+		t.Fatalf("deriveEcosystemImporters(%s, %s): zero directories directly import %s or %s", moduleRoot, moduleName, ecosystemImport, vocabImport)
 	}
 
-	credResolver := filepath.Join(moduleRoot, "internal", "credresolver")
-	if _, err := os.Stat(credResolver); err != nil {
-		t.Fatalf("unconditional scan target %s: %v", credResolver, err)
+	unconditional := []string{
+		moduleRoot,
+		filepath.Join(moduleRoot, "internal", "registryvocab"),
+		filepath.Join(moduleRoot, "internal", "credresolver"),
 	}
-	for _, dir := range []string{moduleRoot, credResolver} {
+	for _, dir := range unconditional {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("unconditional scan target %s: %v", dir, err)
+		}
 		if !slices.Contains(importers, dir) {
 			importers = append(importers, dir)
 		}
@@ -287,12 +301,18 @@ func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []str
 	return importers
 }
 
-// buildSyntheticEcosystemModule writes a throwaway module tree: a go.mod, an
-// empty stub internal/ecosystem package, a package importing the stub that
-// holds plantedReader as a bare literal, a sibling importing nothing, and a
-// root file holding plantedRoot without importing the stub, and a credresolver
-// package holding plantedCred likewise without importing it. One tree serves
-// the fixture tests below, whose assertions do not interfere.
+// buildSyntheticEcosystemModule writes a throwaway module tree. Under
+// internal/, with the planted literals as bare string values:
+//   - ecosystem: stub importing the stub registryvocab and holding
+//     plantedReader, so only the by-path skip keeps it out of the targets;
+//   - registryvocab: stub leaf holding plantedReader;
+//   - newreader: imports the stub ecosystem, holds plantedReader;
+//   - vocabreader: imports only the stub registryvocab, holds plantedReader;
+//   - sibling: imports nothing;
+//   - credresolver: imports nothing, holds plantedCred.
+//
+// The module root holds plantedRoot and imports nothing. One tree serves the
+// fixture tests below, whose assertions do not interfere.
 func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, plantedCred string) (root, moduleName string) {
 	t.Helper()
 	root = t.TempDir()
@@ -300,9 +320,14 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, pla
 
 	testutil.WriteFixture(t, root, "go.mod", fmt.Sprintf("module %s\n\ngo 1.24\n", moduleName))
 	testutil.WriteFixture(t, root, "mainpkg.go", fmt.Sprintf("package mainpkg\n\nvar routed = %q\n", plantedRoot))
-	testutil.WriteFixture(t, filepath.Join(root, "internal", "ecosystem"), "ecosystem.go", "package ecosystem\n")
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "ecosystem"), "ecosystem.go", fmt.Sprintf(
+		"package ecosystem\n\nimport _ %q\n\nvar routed = %q\n", moduleName+"/internal/registryvocab", plantedReader))
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "registryvocab"), "registryvocab.go", fmt.Sprintf(
+		"package registryvocab\n\nvar routed = %q\n", plantedReader))
 	testutil.WriteFixture(t, filepath.Join(root, "internal", "newreader"), "newreader.go", fmt.Sprintf(
 		"package newreader\n\nimport _ %q\n\nvar routed = %q\n", moduleName+"/internal/ecosystem", plantedReader))
+	testutil.WriteFixture(t, filepath.Join(root, "internal", "vocabreader"), "vocabreader.go", fmt.Sprintf(
+		"package vocabreader\n\nimport _ %q\n\nvar routed = %q\n", moduleName+"/internal/registryvocab", plantedReader))
 	testutil.WriteFixture(t, filepath.Join(root, "internal", "sibling"), "sibling.go", "package sibling\n\nvar notRouted = \"unrelated\"\n")
 	testutil.WriteFixture(t, filepath.Join(root, "internal", "credresolver"), "credresolver.go", fmt.Sprintf(
 		"package credresolver\n\nvar routed = %q\n", plantedCred))
@@ -311,10 +336,15 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, pla
 }
 
 // TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically proves a new
-// importer needs no edit here: newreader turns up in the derived list purely
-// because it imports the stub ecosystem package, and scanning it then reports
-// its planted literal. sibling, which imports nothing, proves the
-// derivation does not just list every directory in the tree.
+// importer needs no edit here: each of newreader (imports the stub ecosystem)
+// and vocabreader (imports only the stub registryvocab, never ecosystem) turns
+// up in the derived list, and scanning it reports its single planted literal.
+//
+// Two exclusions are asserted so the derivation cannot pass by over-selecting.
+// sibling imports nothing, so listing every directory would include it. The
+// stub ecosystem imports registryvocab and holds a planted literal, so it
+// would be selected as a vocab importer were it not skipped by path; the
+// skip is what keeps the Table's own names out of the scan.
 func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T) {
 	if len(Table) < 1 {
 		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
@@ -324,18 +354,29 @@ func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T)
 
 	derived := deriveEcosystemImporters(t, root, moduleName)
 
-	readerDir := filepath.Join(root, "internal", "newreader")
-	if !slices.Contains(derived, readerDir) {
-		t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", root, derived, readerDir)
-	}
-	siblingDir := filepath.Join(root, "internal", "sibling")
-	if slices.Contains(derived, siblingDir) {
-		t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to exclude %s (imports nothing)", root, derived, siblingDir)
+	for _, pkg := range []string{"newreader", "vocabreader"} {
+		t.Run(pkg, func(t *testing.T) {
+			dir := filepath.Join(root, "internal", pkg)
+			if !slices.Contains(derived, dir) {
+				t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", root, derived, dir)
+			}
+			findings := scanForEcosystemLiterals(t, dir)
+			if len(findings) != 1 || findings[0].Value != plantedName {
+				t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", dir, findings, plantedName)
+			}
+		})
 	}
 
-	findings := scanForEcosystemLiterals(t, readerDir)
-	if len(findings) != 1 || findings[0].Value != plantedName {
-		t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", readerDir, findings, plantedName)
+	for _, excluded := range []struct{ pkg, why string }{
+		{"sibling", "imports nothing"},
+		{"ecosystem", "skipped by path though it imports registryvocab"},
+	} {
+		t.Run("excludes "+excluded.pkg, func(t *testing.T) {
+			dir := filepath.Join(root, "internal", excluded.pkg)
+			if slices.Contains(derived, dir) {
+				t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to exclude %s (%s)", root, derived, dir, excluded.why)
+			}
+		})
 	}
 }
 
@@ -368,42 +409,50 @@ func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T
 	}
 }
 
-// TestDeriveEcosystemImporters_CredResolverCoveredUnconditionally proves
-// internal/credresolver is a scan target although it never imports the
-// ecosystem package (it must stay below the registry layer), and that a
-// planted ecosystem name there is found.
-func TestDeriveEcosystemImporters_CredResolverCoveredUnconditionally(t *testing.T) {
+// TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally proves
+// internal/credresolver and internal/registryvocab are scan targets although
+// neither imports the ecosystem package (credresolver must stay below the
+// registry layer; registryvocab sits below ecosystem itself), and that a
+// planted ecosystem name in either is found.
+func TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally(t *testing.T) {
 	if len(Table) < 1 {
 		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
 	}
 	plantedName := Table[0].Name
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
-
-	credDir := filepath.Join(root, "internal", "credresolver")
 	derived := deriveEcosystemImporters(t, root, moduleName)
-	if !slices.Contains(derived, credDir) {
-		t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", root, derived, credDir)
-	}
-
-	findings := scanForEcosystemLiterals(t, credDir)
-	if len(findings) != 1 || findings[0].Value != plantedName {
-		t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", credDir, findings, plantedName)
-	}
 
 	const realModuleRoot = "../.."
 	realModuleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	realDerived := deriveEcosystemImporters(t, realModuleRoot, realModuleName)
-	realCredDir := filepath.Join(realModuleRoot, "internal", "credresolver")
-	if !slices.Contains(realDerived, realCredDir) {
-		t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", realModuleRoot, realDerived, realCredDir)
+
+	for _, pkg := range []string{"credresolver", "registryvocab"} {
+		t.Run(pkg, func(t *testing.T) {
+			dir := filepath.Join(root, "internal", pkg)
+			if !slices.Contains(derived, dir) {
+				t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", root, derived, dir)
+			}
+
+			findings := scanForEcosystemLiterals(t, dir)
+			if len(findings) != 1 || findings[0].Value != plantedName {
+				t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", dir, findings, plantedName)
+			}
+
+			realDir := filepath.Join(realModuleRoot, "internal", pkg)
+			if !slices.Contains(realDerived, realDir) {
+				t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", realModuleRoot, realDerived, realDir)
+			}
+		})
 	}
 }
 
-// TestEcosystemNamesStayInTheTable enforces that every package importing this
-// one reaches an ecosystem fact through its Table row, never by re-naming the
-// ecosystem as a bare literal. Targets come from deriveEcosystemImporters, so
-// the set tracks imports with no edit here; internal/registryproxy is absent
-// because ADR 0047 forbids it importing this package at all.
+// TestEcosystemNamesStayInTheTable enforces that ecosystem names live only in
+// Table: every direct importer of this package or of the registryvocab leaf
+// (whose string fields names travel in), and registryvocab itself, reaches an
+// ecosystem fact through its Table row and never re-names the ecosystem as a
+// bare literal. Targets come from deriveEcosystemImporters, so the set tracks
+// imports with no edit here. internal/registryproxy, which ADR 0047 forbids
+// importing this package, is covered through its registryvocab import.
 func TestEcosystemNamesStayInTheTable(t *testing.T) {
 	const moduleRoot = "../.."
 	moduleName := readModuleName(t, filepath.Join(moduleRoot, "go.mod"))
