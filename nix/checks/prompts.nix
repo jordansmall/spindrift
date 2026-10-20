@@ -2002,6 +2002,30 @@ in
             "\${COMMIT_STEP}";
       }
     ) "mkHarness.nix must throw when a fragment file references the removed \${COMMIT_STEP}";
+    assert assertMsg
+      (
+        !evaluates {
+          fragmentsDir =
+            dirWithAppended ../../templates/default/prompts/fragments "github/open-pr-create.md"
+              "\${COMMIT_STEP}";
+        }
+      )
+      "mkHarness.nix must throw when a per-backend fragment file (github/open-pr-create.md) of an overridden fragmentsDir references the removed \${COMMIT_STEP}";
+    # Only a row no Consumer *Prompt parameter binds is read from kindPromptsDir.
+    assert assertMsg
+      (
+        !evaluates {
+          dispatchKinds = (import ../../lib/dispatch-kinds) ++ [
+            {
+              name = "stub";
+              contract = "ContractInline";
+              prompts.base = "stub-prompt.md";
+            }
+          ];
+          kindPromptsDir = dirWithAppended ../fixtures/kind-prompts "stub-prompt.md" "\${TDD_STEP}";
+        }
+      )
+      "mkHarness.nix must throw when a kindPromptsDir-resolved row prompt references the removed \${TDD_STEP}";
     assert assertMsg (evaluates {
       fragmentsDir = pkgs.runCommand "fragments-without-read-only-variant" { } ''
         mkdir -p $out
