@@ -48,23 +48,27 @@ check for the declarative surface.
 spindrift's own dogfood Consumer config opts into `nixStoreWritable` and bakes
 the check/dev closure via `extraClosures` (ADR 0018, issue #470), so a Box
 working a spindrift issue has a writable `/nix/store` and can run real checks
-in-box. The primary in-box gate is the scoped `checks-inbox` target, not the
+in-box. The primary in-box gate is the scoped gate, `nix run .#gate`, not the
 full flake check (issue #581):
 
 ```sh
-nix build .#checks-inbox -L   # source-level checks only: go, shellcheck,
-                               # nil-clean, marker/parity — no bats shards
-                               # (CI runs them), no image build,
-                               # no docs-edit-isolation
+nix run .#gate   # source-level checks only: go, shellcheck,
+                 # nil-clean, marker/parity — no bats shards
+                 # (CI runs them), no image build,
+                 # no docs-edit-isolation
 ```
 
-`checks-inbox` excludes the checks that build/inspect the OCI image
+The gate evaluates the `checks-inbox` set in parallel `nix-eval-jobs` workers
+and builds each check as it evaluates; `nix build .#checks-inbox -L` builds
+the same set as one aggregate, for CI and humans.
+
+That set excludes the checks that build/inspect the OCI image
 (`dockerTools.buildLayeredImage`, `lib/image.nix`) or assert facts about
 the box's own baked toolchain — the box working the issue is already built
 from that image, so re-baking it in-box is redundant and the nested build is
 heavy/unreliable in a Box (issue #565 saw one killed with `EXIT:137`). Those
 checks still run in CI's full `nix flake check` below, so coverage isn't
-lost — just moved out of the box. `checks-inbox` likewise skips
+lost — just moved out of the box. It likewise skips
 `docs-edit-isolation`, too costly to evaluate in a Box; CLAUDE.md's "Nix
 edits" section says why (issue #5849).
 
@@ -72,7 +76,7 @@ For faster, store-free per-file iteration (or as a fallback on a Box built
 without the self-test knobs), use `nil diagnostics path/to/file.nix` for
 changed `*.nix` files and `shellcheck path/to/file.sh` for changed shell
 files. Both tools are baked into the Box and complement, but do not replace,
-a `checks-inbox` (or full `nix flake check`) run before opening a PR.
+a gate run (or full `nix flake check`) before opening a PR.
 
 ### Seam tests
 

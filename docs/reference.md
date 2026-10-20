@@ -4054,7 +4054,8 @@ contracts, the preambles) instead of hand-written copies. The `seamtest`
 package resolves them from `SPINDRIFT_SEAM_FIXTURES_DIR`, else by running
 `nix build .#seam-fixtures`, so `go test -tags integration ./...` from
 `cmd/launcher` in the devshell builds them automatically and skips where `nix` is absent. `nix flake
-check` and the in-box `nix build .#checks-inbox` both run them through
+check` and the in-box `nix run .#gate` (the same set as `nix build
+.#checks-inbox`) both run them through
 `launcher-go-seam-test`, which sets the variable to the built store path. The
 bats checks export the same variable and `tests/helper.bash` reads the
 contracts and preambles from it, so both suites test one set of bytes.
@@ -7733,7 +7734,7 @@ overview is [The pi Driver](#the-pi-driver).
 `agents.drivers.claude.bashTimeoutMs` and
 `agents.drivers.opencode.bashTimeoutMs` to `1800000` (30 minutes) from
 `nix/dogfood-defaults.nix`'s `driverBashTimeoutMs`, because a cold
-`checks-inbox` gate outruns Claude Code's stock 10-minute Bash cap (issue
+`nix run .#gate` outruns Claude Code's stock 10-minute Bash cap (issue
 #4409) and opencode's 2-minute default, shorter still (issue #5351). The pi
 entry leaves it unset, since pi's row declares no timeout variable. Other
 Consumers leave it unset and keep each Driver's own limit — see the

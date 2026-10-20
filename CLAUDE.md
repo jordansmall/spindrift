@@ -224,7 +224,7 @@ grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 ```
 
 See "## Nix edits" below for this repo's actual in-box gate (the concrete
-`nix build .#checks-inbox -L` invocation).
+`nix run .#gate` invocation).
 
 Write the log and grep it in the **same shell invocation and sandbox mode** —
 `$TMPDIR` differs across the sandbox boundary, so a file written sandboxed is
@@ -236,42 +236,51 @@ spindrift dogfoods the `nixStoreWritable` + `extraClosures` knobs (ADR 0018,
 issue #469) on its own Consumer config (issue #470), so the Box working a
 spindrift issue has a writable `/nix/store` and the check/dev closure
 pre-baked. That makes real checks the primary in-box gate — prefer them over
-guessing. But run the **scoped** target, not the full flake check (issue
-#581): `checks-inbox` covers the source-level checks (go test/vet/fmt,
-shellcheck, nil-clean, marker/parity checks) except the bats suite,
-which CI runs and which would push a cold gate past Claude Code's stock
-10-minute Bash cap (dogfood raises it to 30 minutes, issue #4409) —
+guessing. But run the **scoped** gate, not the full flake check (issue
+#581): the gate covers the inbox set of source-level checks (go
+test/vet/fmt, shellcheck, nil-clean, marker/parity checks) except the bats
+suite, which CI runs and which would push a cold gate past Claude Code's
+stock 10-minute Bash cap (dogfood raises it to 30 minutes, issue #4409) —
 build `.#checks.<system>.bats-shard-N` directly when you change
-bash under test. It also skips the checks that build/inspect the OCI image
-(`dockerTools.buildLayeredImage`) or assert facts about the box's own
+bash under test. The set also skips the checks that build/inspect the OCI
+image (`dockerTools.buildLayeredImage`) or assert facts about the box's own
 baked toolchain — the box is already built from that image, so
 re-baking it in-box tests nothing the pre-dispatch build didn't, and
 nested image builds are heavy/unreliable in a Box (issue #565 saw one
 kicked with `EXIT:137`). It also skips `docs-edit-isolation`, which proves a
 docs-only edit leaves the non-docs checks alone by re-evaluating the whole
-checkset twice — a large share of a cold `checks-inbox` evaluation — and which
+checkset twice — a large share of a cold inbox evaluation — and which
 guards CI's docs-lane membership, something a Box rarely changes; CI's full
 `nix flake check` still runs it (issue #5849):
 
 ```sh
-nix build .#checks-inbox -L >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
-grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
+nix run .#gate >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
+grep -nE '^gate:|error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 ```
 
-`-L` (`--print-build-logs`) is part of that invocation, not an extra.
-Without it a failure prints only the failing derivation's store path
-and a `[build failed]` line, so the compile or test error costs a second
-turn running `nix log`. Pass no `-j`, `--max-jobs`, or `--cores` flags
-alongside it: the Box's baked `nix.conf` pins `cores = 4` and
-`max-jobs = 2` (lib/image.nix's `nixConfigFile`), so hand-tuning either
-on top is guesswork. The one exception, an
+The gate evaluates that same set in parallel `nix-eval-jobs` workers (their
+count is clamped to the Box's memory limit) and builds each check as it
+evaluates, so builds overlap evaluation instead of waiting behind a
+single-threaded one. The `gate:` lines name each failing attr and end in a
+one-line summary, and the exit code is non-zero on any failure. `nix build
+.#checks-inbox` builds the same set as one aggregate and stays for CI and
+humans, but evaluates single-threaded, so a Box should use the gate.
+
+The gate builds with `-L` (`--print-build-logs`) already, so it is complete
+as written. Keep `-L` on every single-attr `nix build`: without it a failure
+prints only the failing derivation's store path and a `[build failed]`
+line, so the compile or test error costs a second turn running `nix log`.
+Pass the gate no `-j`, `--max-jobs`, or `--cores` flags: the Box's baked
+`nix.conf` pins `cores = 4` and `max-jobs = 2` (lib/image.nix's
+`nixConfigFile`) for its builds and the gate sizes its own eval workers, so
+hand-tuning either on top is guesswork. The one exception, an
 `EXIT:137` kill, is below.
 
 Checks run in two tiers. While iterating, run the narrowest check that
 covers the change — `go test` on one package, one bats shard, or a single
 check attr with `nix build .#checks.<system>.<name> -L` (`<system>` is
 e.g. `x86_64-linux`). List the attrs with `nix eval .#checks.<system>
---apply builtins.attrNames`. Run the full `checks-inbox` gate once per
+--apply builtins.attrNames`. Run the full gate (`nix run .#gate`) once per
 pass, just before the pass's final commit. After a rebase, re-run it only
 if the rebase hit conflicts or brought in changes to files the branch
 touches; otherwise CI's full `nix flake check` is the final gate. A Box's
@@ -292,14 +301,15 @@ foregone conclusion; the only remedies are to fix the code or read the
 log `-L` already surfaced, and re-run only after a real edit. A build the
 kernel killed (`EXIT:137`, out of memory) is the exception: that is not a
 check result at all, so a re-run is legitimate there, unlike a real
-failure. Under the full `nix flake check`, re-run the scoped
-`checks-inbox` target instead — a smaller target, not a smaller
-`--cores`. Under `checks-inbox` itself there is no smaller target left,
-so `--max-jobs 1 --cores 1` is the one sanctioned exception to the
-no-resource-flags rule above: it drops the two concurrent derivations to
-one and the concurrent compiles or test binaries inside it to one as
-well. Reach for it once, only after an `EXIT:137`, and never for a
-check that genuinely failed.
+failure. Under the full `nix flake check`, re-run the scoped gate
+instead — a smaller target, not a smaller `--cores`. Under the gate itself
+there is no smaller target left, so fall back to the single-threaded
+aggregate, `nix build .#checks-inbox -L --max-jobs 1 --cores 1`, the one
+sanctioned exception to the no-resource-flags rule above: it drops
+evaluation to one thread, the concurrent derivations to one, and the
+concurrent compiles or test binaries inside it to one as well. Reach for
+it once, only after an `EXIT:137`, and never for a check that genuinely
+failed.
 
 Nix flakes only evaluate git-tracked files: `git add` any new file (e.g.
 `git add -A`) before the first `nix build`/`nix flake check` that touches it,
@@ -317,7 +327,7 @@ If `nix develop` is unavailable or fails, fall back to the baked toolchain —
 so.
 
 The full `nix flake check` — including the image-building checks
-`checks-inbox` skips — is what CI runs pre-dispatch/pre-merge (a docs-only
+the gate skips — is what CI runs pre-dispatch/pre-merge (a docs-only
 PR builds just `checks-docs` instead; issue #5155); it isn't the
 in-box gate. Run it in-box only if you touched `nix/checks/image.nix`,
 `lib/image.nix`, or anything else that changes what gets baked into the
@@ -342,9 +352,9 @@ nil diagnostics path/to/file.nix
 ```
 
 `nil diagnostics` exits non-zero on errors (warnings still exit 0). It
-complements, but does not replace, `checks-inbox` before finishing the task —
+complements, but does not replace, the gate before finishing the task —
 `nil` catches structural mistakes early; only a real check build catches
-evaluation and build errors. If neither `checks-inbox` nor `nix flake check`
+evaluation and build errors. If neither the gate nor `nix flake check`
 is available — a Box built without the self-test knobs (`nixInBox` plus
 `nixStoreWritable`) — fall back to `nil diagnostics` and say so. The runner
 is not itself a reason: under bwrap a writable store is an ephemeral tmpfs
