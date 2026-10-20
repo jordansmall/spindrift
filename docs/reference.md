@@ -2154,17 +2154,21 @@ from one flake, each Driver's apps also read an optional
 `harness.<driver>.env` after `harness.env`; see [Several Drivers side by
 side](#several-drivers-side-by-side).
 
-Every secret knob (`GH_TOKEN`, `BOX_GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
-`ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`, each pi Provider key,
-`JIRA_TOKEN`) can also be sourced from an external command instead of a plaintext value — **the preferred, highly encouraged
-way to supply secrets**, since it keeps live credentials out of any file at
-rest on the host. Set `<SECRET>_CMD` (e.g. `GH_TOKEN_CMD="rbw get
-spindrift-gh-token"`) in `harness.env`, your shell, or direnv, or pass a
-one-off `--<secret>-cmd` flag; the mechanism is tool-agnostic and works with
-`rbw`, `op`, `pass`, `vault`, or any command that prints the secret on
-stdout. The launcher execs the command and captures its stdout into memory,
-trimming a trailing newline the same way `--<secret>-file` does — the secret
-never touches disk. Resolution precedence, first non-empty wins:
+A secret knob is any knob declared `secret = true` in `lib/env-schema.nix`
+or on a backend row in `lib/backends/` — `GH_TOKEN`, `BOX_GH_TOKEN`,
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`,
+each pi Provider key, `JIRA_TOKEN`, `FORGEJO_TOKEN`, and `BOX_FORGEJO_TOKEN`,
+among others; `spindrift --help --all` lists every one. Every secret knob
+can also be sourced from an external command instead of a plaintext value —
+**the preferred, highly encouraged way to supply secrets**, since it keeps
+live credentials out of any file at rest on the host. Set `<SECRET>_CMD`
+(e.g. `GH_TOKEN_CMD="rbw get spindrift-gh-token"`) in `harness.env`, your
+shell, or direnv, or pass a one-off `--<secret>-cmd` flag; the mechanism is
+tool-agnostic and works with `rbw`, `op`, `pass`, `vault`, or any command
+that prints the secret on stdout. The launcher execs the command and
+captures its stdout into memory, trimming a trailing newline the same way
+`--<secret>-file` does — the secret never touches disk. Resolution
+precedence, first non-empty wins:
 `--<secret>-cmd` flag > `<SECRET>_CMD` env > `--<secret>-file` flag >
 `<SECRET>` direct env > `--secret-cmd`/`SECRET_CMD` template — so a `_CMD`
 variant overrides a direct value, and migrating to a vault is a matter of
@@ -2198,12 +2202,14 @@ per-secret `_CMD` example above in one line. A per-secret `<SECRET>_CMD`
 (env or flag), file flag, or direct env value still wins over the template.
 With one exception (the `opencode` bullet below), the template is attempted
 only for a secret this run actually needs — e.g. `JIRA_TOKEN` only when
-`ISSUE_TRACKER=jira`, and never for the opt-in `BOX_GH_TOKEN` (ADR 0016) — so
-an operator who doesn't use those features never gets an unwanted vault
-lookup for them. The active Driver's credential is likewise the only one
-fetched; a credential outside the Driver's set is never looked up, so a
-vault missing it is never an error. This list mirrors the `credentials` rules
-on each Driver row in `lib/drivers/<name>.nix`, and a launcher test fails when
+`ISSUE_TRACKER=jira`, `FORGEJO_TOKEN` only when `CODE_FORGE` or
+`ISSUE_TRACKER` is `forgejo`, and never for the opt-in Box tokens
+`BOX_GH_TOKEN` (ADR 0016) and `BOX_FORGEJO_TOKEN` — so an operator who
+doesn't use those features never gets an unwanted vault lookup for them.
+The active Driver's credential is likewise the only one fetched; a
+credential outside the Driver's set is never looked up, so a vault missing
+it is never an error. This list mirrors the `credentials` rules on each
+Driver row in `lib/drivers/<name>.nix`, and a launcher test fails when
 it drifts from them:
 
 - `claude` (also an empty or default `DRIVER`): `CLAUDE_CODE_OAUTH_TOKEN`
