@@ -4,7 +4,8 @@
 # the active backend's signal picks the file at render time; a `shared` axis
 # row also has the root `<fragment>` every folder without its own file falls
 # back to. mkHarness's scan sites iterate `scanPathsOf`; the shipped-tree
-# checks (image bake, golden coverage) iterate `pathsOf`.
+# checks (image bake, golden coverage) iterate `pathsOf`. `axisSignals` exists
+# only to render the Go signal-parity fixture (issue #5727).
 #
 # The shipped tree's per-backend files are declared in `shipped` below,
 # independent of disk, so the shipped-tree checks fail when a declared file
@@ -44,6 +45,30 @@ let
       folders = map (b: folderOf (a.signal b)) (builtins.filter (b: b.${a.valid} or false) backends);
     in
     uniq folders;
+
+  # Per backend row, the raw signal and folder each axis it is valid for
+  # resolves to. The Go defaults are applied in backend's runtime accessors, not
+  # rendered into registry_gen.go, so the promptassembly parity test asserts
+  # them against this table (issue #5727).
+  axisSignals = map (
+    b:
+    {
+      inherit (b) name;
+    }
+    // builtins.listToAttrs (
+      map (axis: {
+        name = axis;
+        value =
+          let
+            signal = axes.${axis}.signal b;
+          in
+          {
+            inherit signal;
+            folder = folderOf signal;
+          };
+      }) (builtins.filter (axis: b.${axes.${axis}.valid} or false) (builtins.attrNames axes))
+    )
+  ) backends;
 
   # A row's files across the given axis folders; a shared row's root file is
   # the one every other folder reads, so it is always listed.
@@ -182,7 +207,12 @@ in
 {
   # Over the shipped tree by default; pass a fragmentsDir to a consumer that
   # reads another one.
-  inherit pathsOf pathsIn shippedProblemsIn;
+  inherit
+    pathsOf
+    pathsIn
+    shippedProblemsIn
+    axisSignals
+    ;
 
   # For the check's negative cases: the same comparison over a doctored `shipped`.
   inherit problemsWith shipped;

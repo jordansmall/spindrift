@@ -2169,6 +2169,10 @@ rec {
     + "\treturn k, nil\n"
     + "}\n";
 
+  # promptassembly/testdata/axis-signals.json content (issue #5727): the rows of
+  # lib/fragment-paths.nix's axisSignals as one JSON document.
+  renderAxisSignalsJson = rows: builtins.toJSON rows + "\n";
+
   # cmd/launcher/internal/promptassembly/boxenv_gen.go content (issue #2979): one
   # `Env{}` field assignment per lib/promptassembly-boxenv.nix row, read from the
   # Box's process environment. Emits unaligned Go; gofmt owns column alignment.
