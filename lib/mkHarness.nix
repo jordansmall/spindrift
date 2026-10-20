@@ -170,9 +170,10 @@ let
   # consult the shared per-system cache a `withSharedInstances`-wrapped input
   # carries (lib/nixpkgs-shared.nix). A Consumer passing `overlays` or
   # `config` cannot be cached: functions have no stable identity.
+  defaultToolset = overlays == [ ] && config == { };
   instantiate =
     forSystem:
-    if overlays == [ ] && config == { } then
+    if defaultToolset then
       (nixpkgsShared.sharedInstancesOf nixpkgs).${forSystem}
         or (nixpkgsShared.instantiate nixpkgs forSystem)
     else
@@ -190,8 +191,16 @@ let
   # launchers (gh/git/coreutils) can be overridden consistently.
   hostPkgs = if system == linuxSystem then pkgs else instantiate system;
 
-  # The revision-free Go binaries and their sources (lib/harness-core.nix).
-  core = import ./harness-core.nix { inherit pkgs hostPkgs; };
+  # The revision-free Go binaries and their sources (lib/harness-core.nix),
+  # evaluated once per system for a wrapped nixpkgs and default toolset.
+  core =
+    let
+      shared = (nixpkgsShared.sharedCoresOf nixpkgs).${system} or null;
+    in
+    if defaultToolset && shared != null && shared.root == ../cmd/launcher then
+      shared
+    else
+      nixpkgsShared.harnessCore { inherit pkgs hostPkgs; };
   inherit (core)
     spindriftVersion
     backendBundleDirs
