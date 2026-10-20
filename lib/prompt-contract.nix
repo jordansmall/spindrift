@@ -397,6 +397,11 @@ rec {
     in
     map verdictFor rejectRows;
 
+  # The forbiddenMarkers substring rows `text` contains, in row order; the one
+  # place the substring semantics live, shared with lib/prompt-corpus-scan.nix.
+  forbiddenMarkersIn =
+    text: builtins.filter (row: row.kind == "substring" && hasInfix row.marker text) forbiddenMarkers;
+
   # The inverse of buildTimeRejectVerdicts (issue #2510, parent #2498):
   # asserts forbiddenMarkers are absent from the raw content a caller hands
   # it. Unconditional, with no advise branch, because a forbidden marker in
@@ -408,24 +413,15 @@ rec {
       templateContentByFile,
     }:
     let
-      substringRows = builtins.filter (row: row.kind == "substring") forbiddenMarkers;
       violationsIn =
         contentByFile:
         builtins.concatMap (
           file:
-          builtins.concatMap (
-            row:
-            if hasInfix row.marker contentByFile.${file} then
-              [
-                {
-                  inherit file;
-                  marker = row.marker;
-                  id = row.id;
-                }
-              ]
-            else
-              [ ]
-          ) substringRows
+          map (row: {
+            inherit file;
+            marker = row.marker;
+            id = row.id;
+          }) (forbiddenMarkersIn contentByFile.${file})
         ) (builtins.attrNames contentByFile);
     in
     (violationsIn fragmentContentByFile) ++ (violationsIn templateContentByFile);
