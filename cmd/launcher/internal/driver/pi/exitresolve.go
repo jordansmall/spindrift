@@ -19,8 +19,9 @@ func ResolveExit(logPath string, exitCode int) (int, error) {
 		return exitCode, nil
 	}
 	sawError := false
+	decode := NewDecoder()
 	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
-		for _, e := range Decode(line) {
+		for _, e := range decode(line) {
 			switch {
 			case e.Kind == driverkit.KindError:
 				sawError = true
