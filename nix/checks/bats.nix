@@ -86,6 +86,9 @@ let
     # Eval-cost table renderer and marginal-cost probe runner (issue #5860).
     EVAL_STATS_RENDER_SH = ../../.github/scripts/eval-stats-render.sh;
     EVAL_PROBE_SH = ../../.github/scripts/eval-probe.sh;
+    # tests/gate.bats (issue #5862) runs the parallel-eval gate script against
+    # stubbed nix-eval-jobs/nix.
+    GATE_SH = ../../nix/gate.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles, fragment registry
     # and Claude settings.json tests/entrypoint-shim.bats and
@@ -179,6 +182,7 @@ in
           ${../../.github/scripts/ci-ok.sh} \
           ${../../.github/scripts/eval-stats-render.sh} \
           ${../../.github/scripts/eval-probe.sh} \
+          ${../../nix/gate.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/helper.bash}
