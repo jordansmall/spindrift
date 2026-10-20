@@ -35,6 +35,9 @@ type Subtree struct {
 	Ecosystem    string `json:"ecosystem"` // an ecosystem.Table row's Name: "cargo" | "npm" | "yarn" | "pnpm" | "go" | "gradle"
 	Path         string `json:"path"`      // leading "/", no trailing "/"; "/" is the whole host
 	RegistryName string `json:"-"`
+	// Scoped marks a path only an npm-family scoped declaration (`@acme:registry=`)
+	// names; only the npm-family binding reads it.
+	Scoped bool `json:"scoped,omitempty"`
 }
 
 // PathSet is a set of subtree roots, in the membership sense Admits defines.

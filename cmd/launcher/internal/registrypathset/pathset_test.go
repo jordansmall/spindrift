@@ -2,6 +2,7 @@ package registrypathset
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
@@ -280,5 +281,74 @@ b = https://other.example.com/repo
 	}
 	if !reflect.DeepEqual(first, second) {
 		t.Errorf("DeriveRows twice over one snapshot disagreed:\nfirst  = %+v\nsecond = %+v", first, second)
+	}
+}
+
+// scopedRow reads `name url [scoped]` lines so a test can declare a scoped
+// registry, which the synthetic row's parser never does.
+var scopedRow = ecosystem.Row{
+	Name:             "scopedfake",
+	InTreeConfigPath: ".scopedfake/registries",
+	ConfigParser: func(content string) ([]ecosystem.Declaration, bool, error) {
+		var decls []ecosystem.Declaration
+		for _, line := range strings.Split(strings.TrimSpace(content), "\n") {
+			f := strings.Fields(line)
+			decls = append(decls, ecosystem.Declaration{
+				Host:            strings.SplitN(strings.TrimPrefix(f[1], "https://"), "/", 2)[0],
+				UpstreamBaseURL: f[1],
+				RegistryName:    f[0],
+				Scoped:          len(f) > 2 && f[2] == "scoped",
+			})
+		}
+		return decls, true, nil
+	},
+}
+
+func deriveScoped(t *testing.T, body string) []HostPathSet {
+	t.Helper()
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, scopedRow.InTreeConfigPath, body)
+	got, err := DeriveRows(dir, []ecosystem.Row{scopedRow})
+	if err != nil {
+		t.Fatalf("DeriveRows: unexpected error: %v", err)
+	}
+	return got
+}
+
+func TestDerive_CopiesScopedFromDeclaration(t *testing.T) {
+	got := deriveScoped(t, "a https://h.example.com/scoped scoped\nb https://h.example.com/plain\n")
+	want := []registryvocab.Subtree{
+		{Ecosystem: "scopedfake", Path: "/scoped", RegistryName: "a", Scoped: true},
+		{Ecosystem: "scopedfake", Path: "/plain", RegistryName: "b"},
+	}
+	if len(got) != 1 || !reflect.DeepEqual(got[0].Subtrees, want) {
+		t.Errorf("DeriveRows = %+v, want one host with subtrees %+v", got, want)
+	}
+}
+
+// A path declared both scoped and unscoped must stay bound: only a path every
+// declaration scopes is skipped by the npm-family binding, so an unscoped twin
+// wins whichever order the two arrive in.
+func TestDerive_ScopedAndUnscopedTwinMergesToUnscoped(t *testing.T) {
+	for name, body := range map[string]string{
+		"scoped first":   "a https://h.example.com/r scoped\nb https://h.example.com/r\n",
+		"unscoped first": "b https://h.example.com/r\na https://h.example.com/r scoped\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := deriveScoped(t, body)
+			if len(got) != 1 || len(got[0].Subtrees) != 1 {
+				t.Fatalf("DeriveRows = %+v, want one host with one subtree", got)
+			}
+			if got[0].Subtrees[0].Scoped {
+				t.Errorf("Subtrees[0] = %+v, want Scoped false", got[0].Subtrees[0])
+			}
+		})
+	}
+}
+
+func TestDerive_ScopedTwinsStayScoped(t *testing.T) {
+	got := deriveScoped(t, "a https://h.example.com/r scoped\nb https://h.example.com/r scoped\n")
+	if len(got) != 1 || len(got[0].Subtrees) != 1 || !got[0].Subtrees[0].Scoped {
+		t.Errorf("DeriveRows = %+v, want one scoped subtree", got)
 	}
 }

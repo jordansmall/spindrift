@@ -116,3 +116,22 @@ func TestSubtree_JSONRoundTrip(t *testing.T) {
 		t.Errorf("round trip RegistryName = %q, want empty (json:\"-\")", decoded.RegistryName)
 	}
 }
+
+func TestSubtree_ScopedJSON(t *testing.T) {
+	encoded, err := json.Marshal(Subtree{Ecosystem: "npm", Path: "/npm", Scoped: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"ecosystem":"npm","path":"/npm","scoped":true}`
+	if string(encoded) != want {
+		t.Errorf("json.Marshal = %s, want %s", encoded, want)
+	}
+
+	var decoded Subtree
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Scoped {
+		t.Errorf("round trip = %+v, want Scoped true", decoded)
+	}
+}

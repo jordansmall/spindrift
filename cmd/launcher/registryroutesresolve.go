@@ -115,12 +115,12 @@ func applyHostPathSet(route registryproxy.Route, sets map[string]registrypathset
 		route.Upstream = route.UpstreamOrigin
 	}
 	paths := make([]string, len(hp.Subtrees))
-	// Field-by-field, not a copy of sub: this drops RegistryName, which the
-	// proxy's manifest-facing EnforcedSubtrees has never carried.
+	// RegistryName is host-only (json:"-"); EnforcedSubtrees drops it.
 	subtrees := make([]registryvocab.Subtree, len(hp.Subtrees))
 	for i, sub := range hp.Subtrees {
 		paths[i] = sub.Path
-		subtrees[i] = registryvocab.Subtree{Ecosystem: sub.Ecosystem, Path: sub.Path}
+		sub.RegistryName = ""
+		subtrees[i] = sub
 	}
 	derived := make(map[string]bool, len(paths))
 	for _, p := range paths {

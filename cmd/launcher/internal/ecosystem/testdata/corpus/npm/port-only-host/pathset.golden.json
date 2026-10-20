@@ -6,7 +6,8 @@
       "Subtrees": [
         {
           "ecosystem": "npm",
-          "path": "/"
+          "path": "/",
+          "scoped": true
         }
       ]
     }
@@ -19,7 +20,8 @@
       "enforcedSubtrees": [
         {
           "ecosystem": "npm",
-          "path": "/"
+          "path": "/",
+          "scoped": true
         }
       ],
       "matchHost": "registry.acme.test",
