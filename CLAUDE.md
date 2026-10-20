@@ -247,7 +247,11 @@ bash under test. It also skips the checks that build/inspect the OCI image
 baked toolchain — the box is already built from that image, so
 re-baking it in-box tests nothing the pre-dispatch build didn't, and
 nested image builds are heavy/unreliable in a Box (issue #565 saw one
-kicked with `EXIT:137`):
+kicked with `EXIT:137`). It also skips `docs-edit-isolation`, which proves a
+docs-only edit leaves the non-docs checks alone by re-evaluating the whole
+checkset twice — a large share of a cold `checks-inbox` evaluation — and which
+guards CI's docs-lane membership, something a Box rarely changes; CI's full
+`nix flake check` still runs it (issue #5849):
 
 ```sh
 nix build .#checks-inbox -L >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
