@@ -896,14 +896,14 @@ func setLongTMPDir(t *testing.T) {
 	t.Setenv("TMPDIR", longBase)
 }
 
-// stubRegistryProxyMkdirTemp points the mkdir seam at fn for the duration of
+// stubSocketDirMkdirTemp points the mkdir seam at fn for the duration of
 // the test. No test in this package calls t.Parallel(), so swapping the
 // package-level var cannot be observed by a concurrently running test.
-func stubRegistryProxyMkdirTemp(t *testing.T, fn func(base, pattern string) (string, error)) {
+func stubSocketDirMkdirTemp(t *testing.T, fn func(base, pattern string) (string, error)) {
 	t.Helper()
-	orig := registryProxyMkdirTemp
-	t.Cleanup(func() { registryProxyMkdirTemp = orig })
-	registryProxyMkdirTemp = fn
+	orig := socketDirMkdirTemp
+	t.Cleanup(func() { socketDirMkdirTemp = orig })
+	socketDirMkdirTemp = fn
 }
 
 // TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks pins issue
@@ -1023,9 +1023,13 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 // diffing os.TempDir() globs, and that the transport probe (issue #3111)
 // never runs: it costs a live exec, so it must be skipped, not discarded.
 func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
+	// The seam serves the Signal socket's directory too, so count only the
+	// registry proxy's own pattern.
 	var mkdirTempCalls int
-	stubRegistryProxyMkdirTemp(t, func(base, pattern string) (string, error) {
-		mkdirTempCalls++
+	stubSocketDirMkdirTemp(t, func(base, pattern string) (string, error) {
+		if pattern == spindriftRegistryProxyDirPattern {
+			mkdirTempCalls++
+		}
 		return os.MkdirTemp(base, pattern)
 	})
 
@@ -1052,7 +1056,7 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	}
 
 	if mkdirTempCalls != 0 {
-		t.Errorf("registryProxyMkdirTemp calls = %d, want 0 when RegistryProxyRoutes is empty", mkdirTempCalls)
+		t.Errorf("socketDirMkdirTemp calls for the registry proxy dir = %d, want 0 when RegistryProxyRoutes is empty", mkdirTempCalls)
 	}
 }
 
@@ -1447,13 +1451,13 @@ func TestRegistryProxySocketDir_LongTMPDIR_FallsBackToTmp(t *testing.T) {
 // $TMPDIR whose os.MkdirTemp fails for a reason other than the issue #3077
 // length overflow reaches the caller instead of being rerouted to a /tmp
 // fallback; only the length check falls back. A seam records every base
-// mkProxyDir sees, so nothing has to inspect shared, world-writable /tmp.
+// mkSocketDir sees, so nothing has to inspect shared, world-writable /tmp.
 func TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	t.Setenv("TMPDIR", missing)
 
 	var bases []string
-	stubRegistryProxyMkdirTemp(t, func(base, pattern string) (string, error) {
+	stubSocketDirMkdirTemp(t, func(base, pattern string) (string, error) {
 		bases = append(bases, base)
 		return os.MkdirTemp(base, pattern)
 	})
@@ -1465,7 +1469,7 @@ func TestRegistryProxySocketDir_NonexistentTMPDIR_ReturnsError(t *testing.T) {
 	}
 
 	if want := []string{""}; !reflect.DeepEqual(bases, want) {
-		t.Errorf("registryProxySocketDir swallowed the error into a /tmp fallback: mkProxyDir called with bases %v, want %v", bases, want)
+		t.Errorf("registryProxySocketDir swallowed the error into a /tmp fallback: mkSocketDir called with bases %v, want %v", bases, want)
 	}
 }
 
@@ -1478,9 +1482,9 @@ func TestRegistryProxySocketDir_RemoveOverlongDirFails_ReturnsError(t *testing.T
 	setLongTMPDir(t)
 
 	sentinel := errors.New("boom: remove failed")
-	origRemoveAll := registryProxyRemoveAll
-	t.Cleanup(func() { registryProxyRemoveAll = origRemoveAll })
-	registryProxyRemoveAll = func(string) error { return sentinel }
+	origRemoveAll := socketDirRemoveAll
+	t.Cleanup(func() { socketDirRemoveAll = origRemoveAll })
+	socketDirRemoveAll = func(string) error { return sentinel }
 
 	dir, err := registryProxySocketDir()
 	if err == nil {
@@ -1496,15 +1500,15 @@ func TestRegistryProxySocketDir_RemoveOverlongDirFails_ReturnsError(t *testing.T
 }
 
 // TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError verifies
-// that the fallback mkProxyDir("/tmp") leg's own error reaches the caller
-// (issue #3103). Go line coverage cannot tell the two mkProxyDir call sites
-// apart, both on the same source line, so exercising only the primary leg
-// let this fallback leg read as covered while never actually running.
+// that the fallback mkSocketDir("/tmp") leg's own error reaches the caller
+// (issue #3103). Both mkSocketDir calls share its one socketDirMkdirTemp
+// error branch, so exercising only the primary leg let that branch read as
+// covered while this fallback leg's error never actually ran.
 func TestRegistryProxySocketDir_TmpFallbackMkdirFails_ReturnsError(t *testing.T) {
 	setLongTMPDir(t)
 
 	sentinel := errors.New("boom: tmp mkdir failed")
-	stubRegistryProxyMkdirTemp(t, func(base, pattern string) (string, error) {
+	stubSocketDirMkdirTemp(t, func(base, pattern string) (string, error) {
 		if base == "/tmp" {
 			return "", sentinel
 		}

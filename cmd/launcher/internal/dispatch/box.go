@@ -711,18 +711,18 @@ const spindriftRegistryProxyDirPattern = "spindrift-registry-proxy-*"
 const signalSocketFile = "signal.sock"
 const spindriftSignalSocketDirPattern = "spindrift-signal-socket-*"
 
-// registryProxyMkdirTemp and registryProxyRemoveAll are swappable in tests the
-// way statCgroupControllerFile is (runner/bwrap/bwrap_validate.go, issue #3103): the
-// RemoveAll failure branch below is reachable only through an
+// socketDirMkdirTemp and socketDirRemoveAll are swappable in tests the way
+// statCgroupControllerFile is (runner/bwrap/bwrap_validate.go, issue #3103):
+// the RemoveAll failure branch below is reachable only through an
 // EACCES/EROFS/EBUSY-class error no test can provoke deterministically. Both
 // the registry proxy's and the Signal socket's directories are created
-// through registryProxyMkdirTemp (via mkSocketDir below).
-// registryProxyRemoveAll covers only socketDirWithFallback's removal of an
-// over-long directory, which both sockets share; every other removal of these
-// directories calls os.RemoveAll directly (runOnce, signal_socket.go).
+// through socketDirMkdirTemp (via mkSocketDir below). socketDirRemoveAll
+// covers only socketDirWithFallback's removal of an over-long directory,
+// which both sockets share; every other removal of these directories calls
+// os.RemoveAll directly (runOnce, signal_socket.go).
 var (
-	registryProxyMkdirTemp = os.MkdirTemp
-	registryProxyRemoveAll = os.RemoveAll
+	socketDirMkdirTemp = os.MkdirTemp
+	socketDirRemoveAll = os.RemoveAll
 )
 
 // mkSocketDir creates a fresh, unique directory for one of this Dispatch's
@@ -730,7 +730,7 @@ var (
 // default, os.TempDir()). label names the caller in error text ("registry
 // proxy" or "signal socket").
 func mkSocketDir(base, pattern, label string) (string, error) {
-	dir, err := registryProxyMkdirTemp(base, pattern)
+	dir, err := socketDirMkdirTemp(base, pattern)
 	if err != nil {
 		return "", fmt.Errorf("mktemp %s dir under %q: %w", label, base, err)
 	}
@@ -752,7 +752,7 @@ func socketDirWithFallback(pattern, socketFile, label string) (string, error) {
 	if !unixsocket.TooLong(filepath.Join(dir, socketFile)) {
 		return dir, nil
 	}
-	if err := registryProxyRemoveAll(dir); err != nil {
+	if err := socketDirRemoveAll(dir); err != nil {
 		return "", fmt.Errorf("remove over-long %s dir: %w", label, err)
 	}
 
