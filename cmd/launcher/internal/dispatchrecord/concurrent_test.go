@@ -80,6 +80,7 @@ func wantRecordIDs(t *testing.T, root string, n int) {
 
 // Several Daemon slots each hold their own Store on one root (issue #4788).
 func TestStoreConcurrentOpenAndIngestFromSeparateHandles(t *testing.T) {
+	t.Parallel()
 	const n = 8
 	root := t.TempDir()
 	for i := 0; i < n; i++ {
@@ -103,6 +104,7 @@ func TestStoreConcurrentOpenAndIngestFromSeparateHandles(t *testing.T) {
 }
 
 func TestStoreConcurrentSettlesEachIngestOwnLog(t *testing.T) {
+	t.Parallel()
 	const n = 8
 	root := t.TempDir()
 	errs := runConcurrently(n, func(i int) error {
@@ -129,6 +131,7 @@ func TestStoreConcurrentSettlesEachIngestOwnLog(t *testing.T) {
 // Ingest committing between them never shows a passes row without its record
 // (issue #4808).
 func TestStoreRecordsConsistentUnderConcurrentIngest(t *testing.T) {
+	t.Parallel()
 	const logs = 300
 	root := t.TempDir()
 	reader, writer := openStore(t, root), openStore(t, root)

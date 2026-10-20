@@ -66,18 +66,21 @@ func fillAfterWindow(t *testing.T, g gitRepo, merge string) Record {
 }
 
 func TestChurnCountsLinesRewrittenInsideTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	g.commitFile(mergedAt.Add(2*24*time.Hour), "f.txt", "one\nTWO\nthree\nfour\n", "rewrite a line")
 	wantChurn(t, fillAfterWindow(t, g, merge), 0.25)
 }
 
 func TestChurnIsZeroWhenNothingIsRewritten(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	g.commitFile(mergedAt.Add(2*24*time.Hour), "b.txt", "b\n", "unrelated")
 	wantChurn(t, fillAfterWindow(t, g, merge), 0)
 }
 
 func TestChurnIgnoresRewritesAfterTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	g.commitFile(mergedAt.Add(2*24*time.Hour), "f.txt", "one\nTWO\nthree\nfour\n", "inside")
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "f.txt", "ONE\nTWO\nTHREE\nfour\n", "outside")
@@ -85,6 +88,7 @@ func TestChurnIgnoresRewritesAfterTheWindow(t *testing.T) {
 }
 
 func TestChurnCountsAFileDeletedInsideTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	g.git(mergedAt.Add(24*time.Hour), "rm", "-q", "f.txt")
 	g.git(mergedAt.Add(24*time.Hour), "commit", "-q", "-m", "drop it")
@@ -107,18 +111,21 @@ func mvAt(g gitRepo, at time.Time, from, to, content string) {
 
 // A later move rewrote no line, so blame follows the lines to their new path.
 func TestChurnFollowsAFileRenamedInsideTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "")
 	wantChurn(t, fillAfterWindow(t, g, merge), 0)
 }
 
 func TestChurnCountsOnlyTheEditedLinesOfAFileRenamedInsideTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "one\nTWO\nthree\nfour\n")
 	wantChurn(t, fillAfterWindow(t, g, merge), 0.25)
 }
 
 func TestChurnFollowsAChainOfRenamesInsideTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "")
 	mvAt(g, mergedAt.Add(48*time.Hour), "g.txt", "h.txt", "")
@@ -126,6 +133,7 @@ func TestChurnFollowsAChainOfRenamesInsideTheWindow(t *testing.T) {
 }
 
 func TestChurnIgnoresARenameAfterTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	mvAt(g, mergedAt.Add(RevertWindow+time.Hour), "f.txt", "g.txt", "")
 	wantChurn(t, fillAfterWindow(t, g, merge), 0)
@@ -133,6 +141,7 @@ func TestChurnIgnoresARenameAfterTheWindow(t *testing.T) {
 
 // A PR commit that rewrites another PR commit's lines is the merge's own work.
 func TestChurnIgnoresTheMergesOwnRewrites(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	g.git(mergedAt, "checkout", "-q", "-b", "feature")
 	g.commitFile(mergedAt.Add(-2*time.Hour), "f.txt", fourLines, "first draft")
@@ -144,6 +153,7 @@ func TestChurnIgnoresTheMergesOwnRewrites(t *testing.T) {
 }
 
 func TestChurnLeavesAMergeWithNoAddedLinesNil(t *testing.T) {
+	t.Parallel()
 	g := gitRepo{t: t, dir: t.TempDir()}
 	g.git(mergedAt, "init", "-q", "-b", "main")
 	g.commitFile(mergedAt.Add(-48*time.Hour), "a.txt", "a\nb\n", "base")
@@ -176,11 +186,13 @@ func renameRepo(t *testing.T, editedContent string) (gitRepo, string) {
 
 // A rename the PR itself made rewrote no line, whatever blame says of the new path.
 func TestChurnIgnoresAFileTheMergeOnlyRenamed(t *testing.T) {
+	t.Parallel()
 	g, merge := renameRepo(t, "")
 	wantNilChurn(t, fillAfterWindow(t, g, merge))
 }
 
 func TestChurnCountsOnlyTheEditedLinesOfARenamedFile(t *testing.T) {
+	t.Parallel()
 	g, merge := renameRepo(t, "l1\nl2\nl3\nl4\nCHANGED\nl6\nl7\nl8\nl9\nl10\n")
 	wantChurn(t, fillAfterWindow(t, g, merge), 0)
 }
@@ -189,6 +201,7 @@ func TestChurnCountsOnlyTheEditedLinesOfARenamedFile(t *testing.T) {
 // is off the first-parent line at the window's end; the revert verdict is
 // still settled and churn is left empty.
 func TestChurnStaysNilButMaturesWhenMergeIsNotOnTheFirstParentLineAtWindowEnd(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	g.git(mergedAt, "checkout", "-q", "-b", "pulled")
 	merge := g.commitFile(mergedAt, "f.txt", fourLines, "feature")
@@ -206,6 +219,7 @@ func TestChurnStaysNilButMaturesWhenMergeIsNotOnTheFirstParentLineAtWindowEnd(t 
 // A PR that changes a base line and then restores it added nothing there;
 // blame must credit the restored line to the base, not to the PR's own commit.
 func TestChurnCountsRewritesOfLinesAPRRestoredToTheirBaseContent(t *testing.T) {
+	t.Parallel()
 	g := gitRepo{t: t, dir: t.TempDir()}
 	g.git(mergedAt, "init", "-q", "-b", "main")
 	g.commitFile(mergedAt.Add(-48*time.Hour), "f.txt", "X\n", "base")
@@ -222,6 +236,7 @@ func TestChurnCountsRewritesOfLinesAPRRestoredToTheirBaseContent(t *testing.T) {
 // A merge that reached the base branch as a later merge's second parent before
 // the window's end is just as far off the first-parent line.
 func TestChurnStaysNilButMaturesWhenMergeIsNotOnTheFirstParentLineBeforeWindowEnd(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	g.git(mergedAt, "checkout", "-q", "-b", "pulled")
 	merge := g.commitFile(mergedAt, "f.txt", fourLines, "feature")
@@ -238,6 +253,7 @@ func TestChurnStaysNilButMaturesWhenMergeIsNotOnTheFirstParentLineBeforeWindowEn
 // When nothing on the base branch's first-parent line predates the window's
 // end there is no state to blame; churn is empty but the verdict settles.
 func TestChurnStaysNilButMaturesWhenNoFirstParentCommitPredatesWindowEnd(t *testing.T) {
+	t.Parallel()
 	g := gitRepo{t: t, dir: t.TempDir()}
 	g.git(mergedAt, "init", "-q", "-b", "side")
 	g.commitFile(mergedAt.Add(-48*time.Hour), "a.txt", "a\n", "base")
@@ -255,6 +271,7 @@ func TestChurnStaysNilButMaturesWhenNoFirstParentCommitPredatesWindowEnd(t *test
 }
 
 func TestChurnLeavesImmatureRecordUnfilled(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	g.commitFile(mergedAt.Add(15*24*time.Hour), "b.txt", "b\n", "later")
 	wantUnfilled(t, fill(t, mergeRecordStore(t, merge), g, mergedAt.Add(RevertWindow-time.Minute)))
@@ -263,6 +280,7 @@ func TestChurnLeavesImmatureRecordUnfilled(t *testing.T) {
 // Without a first parent the lines cannot be told, but the revert search finds
 // nothing, so the verdict still stamps with churn left empty.
 func TestChurnStaysNilButMaturesWhenFirstParentIsMissing(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	merge := g.commitFile(mergedAt, "f.txt", fourLines, "squashed feature")
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
@@ -282,6 +300,7 @@ func TestChurnStaysNilButMaturesWhenFirstParentIsMissing(t *testing.T) {
 }
 
 func TestRecordJSONShowsChurnOnlyWhenFilled(t *testing.T) {
+	t.Parallel()
 	b, err := json.Marshal(Record{})
 	if err != nil || strings.Contains(string(b), "churn_14d") {
 		t.Fatalf("unfilled record json = %s, %v", b, err)
@@ -296,6 +315,7 @@ func TestRecordJSONShowsChurnOnlyWhenFilled(t *testing.T) {
 // Records matured under v8 never had churn judged, so the migration sends them
 // back through the maturity pass, but a v8 reverted verdict survives it.
 func TestStoreMigratesV8DatabaseAddingChurnAndKeepingRevertedVerdicts(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -333,6 +353,7 @@ func setGitlink(g gitRepo, at time.Time, sha string) string {
 // A submodule pointer has no lines to rewrite, and its commit is not in the
 // clone for blame to find.
 func TestChurnIgnoresABumpedSubmoduleGitlink(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	setGitlink(g, mergedAt.Add(-24*time.Hour), gitlinkSHA1)
 	merge := setGitlink(g, mergedAt, gitlinkSHA2)
@@ -340,12 +361,14 @@ func TestChurnIgnoresABumpedSubmoduleGitlink(t *testing.T) {
 }
 
 func TestChurnIgnoresAnAddedSubmoduleGitlink(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	merge := setGitlink(g, mergedAt, gitlinkSHA1)
 	wantNilChurn(t, fillAfterWindow(t, g, merge))
 }
 
 func TestChurnIsNotInflatedByAGitlink(t *testing.T) {
+	t.Parallel()
 	g := newBaseRepo(t)
 	setGitlink(g, mergedAt.Add(-24*time.Hour), gitlinkSHA1)
 	if err := os.WriteFile(filepath.Join(g.dir, "f.txt"), []byte(fourLines), 0o644); err != nil {
@@ -358,6 +381,7 @@ func TestChurnIsNotInflatedByAGitlink(t *testing.T) {
 }
 
 func TestIsBlobAtErrorsOnlyOnAnUnreadableTree(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	if ok, err := isBlobAt(g.dir, merge, "gone.txt"); err != nil || ok {
 		t.Fatalf("missing path: ok=%v err=%v; want false, nil", ok, err)
@@ -383,6 +407,7 @@ func replaceWithDirAt(g gitRepo, at time.Time, path string) {
 // A path that a later commit turned into a directory is still listed by
 // ls-tree, but blame cannot read it: the merge's lines there are rewritten.
 func TestChurnCountsAFileReplacedByADirectoryInsideTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newChurnRepo(t)
 	replaceWithDirAt(g, mergedAt.Add(24*time.Hour), "f.txt")
 	wantChurn(t, fillAfterWindow(t, g, merge), 1)

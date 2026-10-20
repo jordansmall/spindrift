@@ -13,6 +13,7 @@ import (
 )
 
 func TestSnapshotRoundTrips(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir())
 	want := Snapshot{
 		Chore:     "tuning",
@@ -34,6 +35,7 @@ func TestSnapshotRoundTrips(t *testing.T) {
 }
 
 func TestSnapshotMissingIDIsNotFound(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir())
 	got, ok, err := s.Snapshot("tuning", "nope")
 	if err != nil || ok || got != (Snapshot{}) {
@@ -44,6 +46,7 @@ func TestSnapshotMissingIDIsNotFound(t *testing.T) {
 // A Record ID is minted once per sweep, so a second snapshot under one would
 // mean two sweeps shared an ID.
 func TestPutSnapshotRejectsDuplicateChoreAndRecordID(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir())
 	first := Snapshot{Chore: "tuning", RecordID: "r", SHA256: "a", Rendered: "one", CreatedAt: time.UnixMilli(1)}
 	if err := s.PutSnapshot(first); err != nil {
@@ -59,6 +62,7 @@ func TestPutSnapshotRejectsDuplicateChoreAndRecordID(t *testing.T) {
 }
 
 func TestSnapshotsOfTwoChoresShareARecordIDWithoutColliding(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir())
 	for _, chore := range []string{"tuning", "noprior"} {
 		snap := Snapshot{Chore: chore, RecordID: "r", SHA256: "sha-" + chore, Rendered: "body " + chore, CreatedAt: time.UnixMilli(7).UTC()}
@@ -98,6 +102,7 @@ func seedDatabase(t *testing.T, root string, n int, extra ...string) {
 }
 
 func TestStoreMigratesV10DatabaseAddingSnapshots(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedDatabase(t, root, 10,
 		`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome) VALUES ('work:1@x', 'work', '1', 1000, 'inferred', 'unknown')`)
@@ -114,6 +119,7 @@ func TestStoreMigratesV10DatabaseAddingSnapshots(t *testing.T) {
 // Pre-upgrade tuning snapshots carry no Chore column; the migration must
 // backfill them to "tuning" and drop the old table.
 func TestStoreMigratesV12TuningSnapshotsIntoSnapshots(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedDatabase(t, root, 12,
 		`INSERT INTO tuning_snapshots (record_id, sha256, rendered, created_at) VALUES ('butler:butler-tuning@1', 'abc123', '# digest', 1700000000123)`)

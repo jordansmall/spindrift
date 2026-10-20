@@ -91,6 +91,7 @@ func ids(recs []Record) []string {
 }
 
 func TestStoreIngestRoundTripsParsedRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.123Z", 1.5)...)
 	want, _, err := ParseLog(p)
@@ -113,6 +114,7 @@ func TestStoreIngestRoundTripsParsedRecord(t *testing.T) {
 }
 
 func TestStoreIngestIdempotentAndSkipsUnchanged(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-13.log", workLog("2026-03-02T10:00:00.000Z", 2)...)
@@ -134,6 +136,7 @@ func TestStoreIngestIdempotentAndSkipsUnchanged(t *testing.T) {
 }
 
 func TestStoreReparsesAppendedLogIntoSameRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -157,6 +160,7 @@ func TestStoreReparsesAppendedLogIntoSameRecord(t *testing.T) {
 }
 
 func TestStoreRenamedPriorRunStaysOneRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -183,6 +187,7 @@ func TestStoreRenamedPriorRunStaysOneRecord(t *testing.T) {
 }
 
 func TestStoreKeepsRecordWhenLogDeleted(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -208,6 +213,7 @@ func passLogs(r Record) []string {
 }
 
 func TestStoreSatellitesJoinTheirDispatch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-12-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -238,6 +244,7 @@ func TestStoreSatellitesJoinTheirDispatch(t *testing.T) {
 }
 
 func TestStoreSatelliteWindowedByStartTime(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-42.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
@@ -261,6 +268,7 @@ func TestStoreSatelliteWindowedByStartTime(t *testing.T) {
 }
 
 func TestStoreRenamedSatelliteDoesNotDuplicatePasses(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	fix := putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -283,6 +291,7 @@ func TestStoreRenamedSatelliteDoesNotDuplicatePasses(t *testing.T) {
 }
 
 func TestStoreGrownSatelliteReplacesItsOwnPasses(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	fix := putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -297,6 +306,7 @@ func TestStoreGrownSatelliteReplacesItsOwnPasses(t *testing.T) {
 }
 
 func TestStoreOrphanSatelliteIsItsOwnRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
 	s := openStore(t, root)
@@ -315,6 +325,7 @@ func TestStoreOrphanSatelliteIsItsOwnRecord(t *testing.T) {
 }
 
 func TestStoreSatelliteBeforeEveryDispatchIsOrphan(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-42-fix-1.log.prior-run.1", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -326,6 +337,7 @@ func TestStoreSatelliteBeforeEveryDispatchIsOrphan(t *testing.T) {
 }
 
 func TestStoreUnchangedSatellitesAreNotReparsed(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -362,6 +374,7 @@ func seedV1DB(t *testing.T, root string, stmts ...string) {
 }
 
 func TestStoreMigratesV1Database(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	claim := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
 	seedV1DB(t, root,
@@ -395,6 +408,7 @@ func TestStoreMigratesV1Database(t *testing.T) {
 }
 
 func TestStoreMigratedV1RowsReparseStillPresentLogs(t *testing.T) {
+	t.Parallel()
 	researchLines := []string{result("2026-03-01T10:00:00.000Z", 1, 1, 1, 1, "m"), outcomeLine("recommend")}
 	crashLines := []string{"box: starting\n", "error: image pull failed\n"}
 	mtime := time.Date(2026, 3, 2, 9, 8, 7, 0, time.UTC)
@@ -455,6 +469,7 @@ func TestStoreMigratedV1RowsReparseStillPresentLogs(t *testing.T) {
 }
 
 func TestStoreMigratedV1RowKeepsRecordWhenPathReused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	march := "work:9@2026-03-01T10:00:00.000Z"
 	claim := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
@@ -474,6 +489,7 @@ func TestStoreMigratedV1RowKeepsRecordWhenPathReused(t *testing.T) {
 }
 
 func TestStoreNoLogDirIsEmpty(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir())
 	if n := ingest(t, s); n != 0 {
 		t.Fatalf("parsed = %d", n)
@@ -484,6 +500,7 @@ func TestStoreNoLogDirIsEmpty(t *testing.T) {
 }
 
 func TestStoreOrdersByClaimTimeThenID(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-b.log", workLog("2026-03-02T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-a.log", workLog("2026-03-02T10:00:00.000Z", 1)...)
@@ -500,6 +517,7 @@ func TestStoreOrdersByClaimTimeThenID(t *testing.T) {
 }
 
 func TestStoreSchemaVersionAndWAL(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s := openStore(t, root)
 	var v int
@@ -521,6 +539,7 @@ func TestStoreSchemaVersionAndWAL(t *testing.T) {
 }
 
 func TestStoreMtimeFallbackIDChangeReplacesRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
@@ -542,6 +561,7 @@ func TestStoreMtimeFallbackIDChangeReplacesRecord(t *testing.T) {
 }
 
 func TestStoreRotationKeepsBothRecords(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -566,6 +586,7 @@ func TestStoreRotationKeepsBothRecords(t *testing.T) {
 }
 
 func TestStoreKeepsRecordWhenDeletedLogPathIsReused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -585,6 +606,7 @@ func TestStoreKeepsRecordWhenDeletedLogPathIsReused(t *testing.T) {
 }
 
 func TestStoreReingestKeepsRecordWhenReusedPathChangedStatAndID(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -604,6 +626,7 @@ func TestStoreReingestKeepsRecordWhenReusedPathChangedStatAndID(t *testing.T) {
 }
 
 func TestStoreOverwrittenLogKeepsEarlierTimestampedRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	s := openStore(t, root)
@@ -616,6 +639,7 @@ func TestStoreOverwrittenLogKeepsEarlierTimestampedRecord(t *testing.T) {
 }
 
 func TestStoreGrowFromProvisionalLeavesOneRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
@@ -632,6 +656,7 @@ func TestStoreGrowFromProvisionalLeavesOneRecord(t *testing.T) {
 }
 
 func TestStoreKeepsProvisionalRecordWhenDeletedLogPathIsReused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
@@ -656,6 +681,7 @@ func TestStoreKeepsProvisionalRecordWhenDeletedLogPathIsReused(t *testing.T) {
 }
 
 func TestStoreTruncatedProvisionalLogKeepsRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
@@ -689,6 +715,7 @@ func TestStoreTruncatedProvisionalLogKeepsRecord(t *testing.T) {
 }
 
 func TestStoreLogDirRemovedKeepsProvisionalRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
@@ -713,6 +740,7 @@ func TestStoreLogDirRemovedKeepsProvisionalRecord(t *testing.T) {
 }
 
 func TestStoreProvisionalReplacedWhenPathReusedWithoutIngest(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
@@ -728,6 +756,7 @@ func TestStoreProvisionalReplacedWhenPathReusedWithoutIngest(t *testing.T) {
 }
 
 func TestStoreEventFreeLogYieldsNoRecordUntilItGrows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-5.log")
 	s := openStore(t, root)
@@ -764,6 +793,7 @@ func reviewEvidenceLog(verdict string) []string {
 }
 
 func TestStoreRoundTripsReviewEvidence(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-7.log", reviewEvidenceLog("VERDICT: BLOCK")...)
 	s := openStore(t, root)
@@ -781,6 +811,7 @@ func TestStoreRoundTripsReviewEvidence(t *testing.T) {
 }
 
 func TestStoreReingestRepairsUnchangedStatLog(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-7.log", reviewEvidenceLog("VERDICT: BLOCK")...)
 	gone := putLog(t, root, "issue-8.log", workLog("2026-10-07T13:00:00Z", 1)...)
@@ -831,6 +862,7 @@ func TestStoreReingestRepairsUnchangedStatLog(t *testing.T) {
 }
 
 func TestStoreReingestReplacesRecordWhoseIDChanged(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-7.log", workLog("2026-10-07T12:00:00Z", 1)...)
 	s := openStore(t, root)
@@ -903,6 +935,7 @@ func requireJoinedRecord(t *testing.T, got, want []Record) {
 // the claim-time tie against the primary's replacement, whether the stale ID
 // sorts below or above the new one.
 func TestStoreReingestMovesJoinedSatelliteToReplacementRecord(t *testing.T) {
+	t.Parallel()
 	for _, stale := range []string{"unknown:7@old", "zzz:7@old"} {
 		t.Run(stale, func(t *testing.T) {
 			root := t.TempDir()
@@ -926,6 +959,7 @@ func TestStoreReingestMovesJoinedSatelliteToReplacementRecord(t *testing.T) {
 // The same split without a forced re-parse: a provisional primary's ID moves
 // as its log grows while a satellite is joined to it.
 func TestStoreProvisionalIDChangeCarriesJoinedSatellite(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-7.log", workLog("2026-10-07T12:00:00Z", 1)...)
 	putLog(t, root, "issue-7-fix-1.log", workLog("2026-10-07T13:00:00Z", 2)...)
@@ -946,6 +980,7 @@ func TestStoreProvisionalIDChangeCarriesJoinedSatellite(t *testing.T) {
 }
 
 func TestStoreMigratesV1DatabaseKeepsVerdictEvidenceColumns(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -986,6 +1021,7 @@ func TestStoreMigratesV1DatabaseKeepsVerdictEvidenceColumns(t *testing.T) {
 // A v1 database already holds an ingested_files row for each log, so the
 // migration must make the next plain Ingest re-parse them for their evidence.
 func TestStoreReparsesV1IngestedLogAfterMigration(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-7.log", reviewEvidenceLog("VERDICT: BLOCK")...)
 	info, err := os.Stat(p)
@@ -1033,6 +1069,7 @@ func TestStoreReparsesV1IngestedLogAfterMigration(t *testing.T) {
 }
 
 func TestStoreMigratesV3DatabaseWithOutcomeDefaults(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1063,6 +1100,7 @@ func TestStoreMigratesV3DatabaseWithOutcomeDefaults(t *testing.T) {
 // v7 (issue #4833) gives each segment its log's identity and backfills the
 // orphan marker from the old claim-time inference.
 func TestStoreMigratesV6DatabaseBackfillsSegmentIdentity(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1123,6 +1161,7 @@ func TestStoreMigratesV6DatabaseBackfillsSegmentIdentity(t *testing.T) {
 // later Dispatch's start moves there whole: its earlier passes must not stay
 // behind on the first Record.
 func TestStoreGrowingProvisionalSatelliteLeavesNoPassesBehind(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-9.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
@@ -1174,6 +1213,7 @@ func TestStoreGrowingProvisionalSatelliteLeavesNoPassesBehind(t *testing.T) {
 // the stale-ID Record is replaced by plain Ingest and its joined satellite
 // moves to the replacement rather than keeping the stale Record alive.
 func TestStoreIngestKindChangeKeepsJoinedSatelliteOnReplacement(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-7.log", result("2026-10-07T12:00:00Z", 1, 1, 10, 5, "opus"))
 	putLog(t, root, "issue-7-fix-1.log", workLog("2026-10-07T13:00:00Z", 2)...)
@@ -1226,6 +1266,7 @@ func requireRecordLogs(t *testing.T, s *Store, want ...[]string) {
 // A satellite orphaned for want of a primary Dispatch rejoins the primary's
 // Record once the primary's log gains output.
 func TestStoreSatelliteRejoinsPrimaryThatGainsOutput(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log")
 	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1256,6 +1297,7 @@ func requirePassUSD(t *testing.T, s *Store, want ...float64) {
 // name; when an earlier Dispatch appears in the same Ingest it moves onto that
 // Dispatch and must not leave its old segment or Record behind.
 func TestStoreRenamedOrphanSatelliteMovesOntoEarlierDispatch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log")
 	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1274,6 +1316,7 @@ func TestStoreRenamedOrphanSatelliteMovesOntoEarlierDispatch(t *testing.T) {
 // A renamed satellite that had joined a Dispatch moves to a newer one in the
 // same Ingest; its pass must leave the old Record.
 func TestStoreRenamedJoinedSatelliteMovesOntoNewerDispatch(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1296,6 +1339,7 @@ func TestStoreRenamedJoinedSatelliteMovesOntoNewerDispatch(t *testing.T) {
 // must not stand in for the moved file, whose old segment still has to leave,
 // and the deleted file's pass stays where it was (a fresh store cannot know it).
 func TestStoreRenamedSatelliteIntoReusedSlot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	gone := putLog(t, root, "issue-9-fix-1.log.prior-run.1", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1344,6 +1388,7 @@ func TestStoreRenamedSatelliteIntoReusedSlot(t *testing.T) {
 // Ingest as the earlier Dispatch it belongs to: the moved log must still
 // adopt its old segment, so the orphan Record goes and nothing is left phantom.
 func TestStoreRenamedOrphanSatelliteWhoseNameIsReused(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log")
 	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1392,6 +1437,7 @@ func TestStoreRenamedOrphanSatelliteWhoseNameIsReused(t *testing.T) {
 // joined is then abandoned, that pass moves to the primary's Record, whether
 // the deletion and the primary's arrival are seen by separate Ingests or one.
 func TestStoreOrphanLeavingKeepsDeletedPeerPasses(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		separate bool
@@ -1432,6 +1478,7 @@ func TestStoreOrphanLeavingKeepsDeletedPeerPasses(t *testing.T) {
 // abandoned, landing on the later Dispatch that precedes it rather than the
 // replacement.
 func TestStoreOrphanLeavingRewindowsDeletedPeerPasses(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log")
 	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1463,6 +1510,7 @@ func TestStoreOrphanLeavingRewindowsDeletedPeerPasses(t *testing.T) {
 // A satellite ingested before its primary's log exists rejoins it when the
 // primary appears.
 func TestStoreSatelliteRejoinsPrimaryAddedLater(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
 	s := openStore(t, root)
@@ -1475,6 +1523,7 @@ func TestStoreSatelliteRejoinsPrimaryAddedLater(t *testing.T) {
 // Both orphans precede every Dispatch; the later-starting one sorts first by
 // name, yet they still end up on the earlier one's Record.
 func TestStoreOrphanPeersShareTheEarliestOrphan(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-9-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 4)...)
 	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1509,6 +1558,7 @@ type timedLog struct {
 
 // The Records a log set yields must not depend on the order logs arrive in.
 func TestStoreAssignmentIsOrderIndependent(t *testing.T) {
+	t.Parallel()
 	logs := []timedLog{
 		{"issue-9.log.prior-run.1", "2026-03-01T10:00:00.000Z", 1},
 		{"issue-9.log", "2026-03-05T10:00:00.000Z", 2},
@@ -1606,6 +1656,7 @@ func writeLogs(t *testing.T, root string, ws ...logWrite) {
 // land on the same Records however the files and their growth interleave
 // across Ingest calls.
 func TestStoreAssignmentIsOrderIndependentForGrowingLogs(t *testing.T) {
+	t.Parallel()
 	pass1 := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})
 	prior := logWrite{name: "issue-9.log.prior-run.1", lines: workLog("2026-03-01T10:00:00.000Z", 1)}
 	priorFix := logWrite{name: "issue-9-fix-1.log.prior-run.1", lines: workLog("2026-03-02T11:00:00.000Z", 2)}
@@ -1707,6 +1758,7 @@ func TestStoreAssignmentIsOrderIndependentForGrowingLogs(t *testing.T) {
 // A provisional primary's ID moves when its log gains a timestamped result;
 // the satellite joined to it must follow, with no pass counted twice.
 func TestStoreProvisionalPrimaryResultRekeysJoinedSatellite(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeLogs(t, root,
 		logWrite{name: "issue-9.log", mtime: "2026-03-01T11:00:00Z",
@@ -1731,6 +1783,7 @@ func TestStoreProvisionalPrimaryResultRekeysJoinedSatellite(t *testing.T) {
 // a log ingested earlier, then made unreadable, then fixed keeps its row and is
 // skipped as unchanged (chmod moves only ctime).
 func TestStoreIngestSkipsUnreadableLog(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() == 0 {
 		t.Skip("root reads past file modes")
 	}
@@ -1808,6 +1861,7 @@ func ingestedBases(t *testing.T, s *Store) []string {
 }
 
 func TestStoreIngestChainTouchesOnlyItsKey(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-12.log.1", workLog("2026-03-01T09:00:00.000Z", 3)...)
@@ -1839,6 +1893,7 @@ func TestStoreIngestChainTouchesOnlyItsKey(t *testing.T) {
 // A hyphenated key (the butler's) ends at the lazy capture before its
 // satellite suffix, so a key that merely extends it stays out.
 func TestStoreIngestChainHyphenatedKey(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-butler-deps.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-butler-deps-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
@@ -1859,6 +1914,7 @@ func TestStoreIngestChainHyphenatedKey(t *testing.T) {
 }
 
 func TestStoreIngestChainSkipsUnreadableUnrelatedLog(t *testing.T) {
+	t.Parallel()
 	if os.Getuid() == 0 {
 		t.Skip("root reads past file modes")
 	}
@@ -1883,6 +1939,7 @@ func TestStoreIngestChainSkipsUnreadableUnrelatedLog(t *testing.T) {
 }
 
 func TestStoreIngestChainForgetsOnlyItsOwnDeletedLogs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	mine := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	other := putLog(t, root, "issue-13.log", workLog("2026-03-01T10:00:00.000Z", 2)...)
@@ -1916,6 +1973,7 @@ func statAndParse(t *testing.T, p string) (os.FileInfo, Record, bool, time.Time)
 }
 
 func TestStoreUpsertDiscardsParseOfSupersededLog(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-42.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
 	s := openStore(t, root)
@@ -1954,6 +2012,7 @@ func TestStoreUpsertDiscardsParseOfSupersededLog(t *testing.T) {
 }
 
 func TestStoreUpsertDiscardsParseOfRemovedLog(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-42.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
 	s := openStore(t, root)
@@ -2042,6 +2101,7 @@ func requireCoincident(t *testing.T, s *Store, withPrior bool) {
 // gets the primary's Record ID by coincidence; it must still join the primary
 // rather than overwrite it or join an earlier Dispatch (issue #4833).
 func TestStoreCoincidentSatelliteJoinsItsCoincidentPrimary(t *testing.T) {
+	t.Parallel()
 	for _, withPrior := range []bool{false, true} {
 		t.Run(fmt.Sprintf("prior=%v", withPrior), func(t *testing.T) {
 			root := t.TempDir()
@@ -2063,6 +2123,7 @@ func TestStoreCoincidentSatelliteJoinsItsCoincidentPrimary(t *testing.T) {
 
 // The same coincidence, with the satellite ingested before its primary exists.
 func TestStoreCoincidentSatelliteIngestedBeforeItsPrimary(t *testing.T) {
+	t.Parallel()
 	for _, withPrior := range []bool{false, true} {
 		t.Run(fmt.Sprintf("prior=%v", withPrior), func(t *testing.T) {
 			together := t.TempDir()
@@ -2103,6 +2164,7 @@ func rootless(recs []Record) []Record {
 // stamp's claim millisecond mint the same Record ID; the fix log joins the
 // primary and never rewrites its row (issue #4833).
 func TestStoreCoincidentSatelliteLeavesStampedPrimaryRow(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	primary := append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), settledLine(id, "failed", "ci-red"))
 	fix := workLog(stampClaim.Format("2006-01-02T15:04:05.000Z"), 2)
@@ -2171,6 +2233,7 @@ func TestStoreCoincidentSatelliteLeavesStampedPrimaryRow(t *testing.T) {
 // A primary taking over the row of a coincident orphan satellite clears its
 // ownership mark.
 func TestStoreOrphanLogMarksOnlyOrphanRecords(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42-fix-1.log", workLog(coincidentTS, 2)...)
 	s := openStore(t, root)
@@ -2205,6 +2268,7 @@ func settleSeqs(t *testing.T, s *Store) map[string]int64 {
 // claimed, so a long-running Dispatch claimed first sorts after one that
 // settled earlier.
 func TestStoreSettledSeqFollowsSettleOrderNotClaimOrder(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	early, late := stampClaim, stampClaim.Add(time.Hour)
 	idA, idB := RecordID("work", "1", early), RecordID("work", "2", late)
@@ -2233,6 +2297,7 @@ func TestStoreSettledSeqFollowsSettleOrderNotClaimOrder(t *testing.T) {
 // A later log of the same Record that carries no settled outcome (a fix pass)
 // must not clear the sequence the settled one earned.
 func TestStoreSettledSeqSurvivesUnsettledLogOfSameRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	id := RecordID("work", "1", stampClaim)
 	putLog(t, root, "issue-1.log", append(keyedLog("1", stampClaim, "2026-05-01T09:00:00Z"), settledLine(id, "complete", "merged"))...)
@@ -2250,6 +2315,7 @@ func TestStoreSettledSeqSurvivesUnsettledLogOfSameRecord(t *testing.T) {
 }
 
 func TestStoreMigratesV9DatabaseBackfillingSettleOrderFromClaimOrder(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
