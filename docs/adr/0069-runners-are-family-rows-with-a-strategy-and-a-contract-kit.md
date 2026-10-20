@@ -44,13 +44,18 @@ Runners get the backend kit of ADR 0068, keyed by family.
 2. **A Runner Strategy per family package.** `internal/runner` splits into
    `runner/oci` and `runner/bwrap`, each exporting its Strategy to the Bundle.
    This split lands first. `internal/runner` keeps the `Runner` interface,
-   `Box`, the shared plan, the `Fake` and the kit.
+   `Box`, the shared plan, the `Fake` and the kit. A Strategy may carry an
+   optional hot-swap preparation hook: before a hot-swap binds a realized
+   closure for a nixInBox Consumer, core calls the active family's hook
+   (bwrap writes its store-DB snapshot generation). A nil hook means the
+   family needs no preparation.
 3. **The Box artifact is its own seam.** It has two adapters, `oci-image` and
    `store-closure`, owned by freshness. Each supplies how a tip build is
    identified and compared, the wording, the host-taint diagnostic, and
    whether a box-only rebuild can be swapped in. A runner row names the
-   artifact it boots. Freshness, preview and hot-swap never read the runner
-   family.
+   artifact it boots. Freshness and preview never read the runner family;
+   hot-swap reads it only through the Strategy's preparation hook
+   (decision 2).
 4. **Runner prerequisites on the Strategy.** Each family declares named
    checks, marked as launch gates (which doctor reports too) or doctor-only.
    The launch gates and doctor walk the active family's list. Network-mode
@@ -88,7 +93,8 @@ Runners get the backend kit of ADR 0068, keyed by family.
 ## Consequences
 
 - A new family is a row, a package with its Strategy, its decoder for the
-  rendering contract, and its prerequisites. A remote runner that boots OCI
+  rendering contract, its prerequisites, and, if a hot-swapped closure needs
+  preparing, the Strategy's preparation hook. A remote runner that boots OCI
   images reuses the `oci-image` artifact unchanged.
 - Adding a field to `Box` fails every adapter that does not yet render it,
   which turns a feature built twice by hand into a compile-and-test
