@@ -629,6 +629,77 @@ in
     ) "normalizeRoster must throw when promptFile isn't a non-empty string";
     pkgs.runCommand "roster-normalize-throws-on-invalid-promptfile-type" { } "touch $out";
 
+  # Issue #5368: `spawns` is an optional list of roster entry names, strings
+  # matching [a-z0-9-]+.
+  roster-normalize-accepts-valid-spawns =
+    let
+      result = rosterLib.normalizeRosterResult [
+        {
+          name = "reviewer";
+          model = "m";
+          mode = "subagent";
+          description = "fixture reviewer description";
+          tools = [ "Agent" ];
+          spawns = [ "review-axis" ];
+          promptFile = "review-prompt.md";
+        }
+      ];
+    in
+    assert assertMsg result.ok
+      "normalizeRosterResult must accept a list-of-strings spawns, got: ${builtins.toJSON result}";
+    assert assertMsg (
+      (builtins.head result.value).spawns == [ "review-axis" ]
+    ) "normalizeRosterResult must pass spawns through unchanged";
+    pkgs.runCommand "roster-normalize-accepts-valid-spawns" { } "touch $out";
+
+  roster-normalize-rejects-invalid-spawns =
+    let
+      resultFor =
+        spawns:
+        rosterLib.normalizeRosterResult [
+          {
+            name = "reviewer";
+            model = "m";
+            mode = "subagent";
+            description = "fixture reviewer description";
+            tools = [ ];
+            inherit spawns;
+            promptFile = "review-prompt.md";
+          }
+        ];
+      check =
+        label: spawns:
+        let
+          r = resultFor spawns;
+        in
+        assert assertMsg (r.ok == false) "normalizeRosterResult must reject ${label} spawns";
+        assert assertMsg (r.violation == "invalid-spawns-type")
+          "${label} spawns must report violation == \"invalid-spawns-type\", got: ${builtins.toJSON r.violation}";
+        assert assertMsg (r.entryName == "reviewer") "${label} spawns must name the offending entry";
+        assert assertMsg (hasInfix "spawns" r.message) "${label} spawns message must mention spawns";
+        true;
+    in
+    assert check "string" "review-axis";
+    assert check "null" null;
+    assert check "non-string element" [ 1 ];
+    assert check "empty-string element" [ "" ];
+    assert check "malformed-name element" [ "Review Axis" ];
+    pkgs.runCommand "roster-normalize-rejects-invalid-spawns" { } "touch $out";
+
+  roster-default-reviewer-spawns-review-axis =
+    let
+      roster = rosterLib.defaultRoster { };
+    in
+    assert assertMsg (
+      (entryFor "reviewer" roster).spawns == [ "review-axis" ]
+    ) "defaultRoster's reviewer must declare spawns = [ \"review-axis\" ]";
+    assert assertMsg (
+      !((entryFor "worker" roster) ? spawns)
+    ) "defaultRoster's worker must not declare spawns";
+    assert assertMsg (rosterLib.normalizeRosterResult roster).ok
+      "defaultRoster must pass normalizeRoster";
+    pkgs.runCommand "roster-default-reviewer-spawns-review-axis" { } "touch $out";
+
   # Issue #2571 tied non-blocking finding (issue #2555 user story 23):
   # promptFile = "" resolves to templates/default/prompts/ itself, which
   # exists, so builtins.pathExists alone would wrongly accept it. It must be

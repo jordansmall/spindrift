@@ -1,5 +1,14 @@
 # Migration Guide
 
+## Roster entries take an optional `spawns` key (issue #5368)
+
+A roster entry may now set `spawns`, a list of roster entry names it is
+allowed to spawn as subagents. Absent means no declared restriction, which is
+today's behaviour. The default `reviewer` declares `spawns = [ "review-axis"
+];`; a hand-built `reviewer` entry without it keeps the unscoped behaviour.
+A non-list `spawns`, or one holding a non-string or empty element, fails eval
+with the `invalid-spawns-type` violation.
+
 ## Backend-varying prompt steps are slot variables (issues #5646, #5647)
 
 Every prompt step that used to fork per backend, with one variable and one

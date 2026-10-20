@@ -69,7 +69,7 @@
             #         review = "claude-opus-5";
             #         # value for the orchestrator's code-owned review pass's own --effort flag (issue #2387); pass-through only, no normalization, same accepted values as EFFORT for the active Driver. Overrides the roster reviewer entry's own effort (rosterDefaults.reviewer.effort by default), regardless of whether the roster is the built-in default or a Consumer-supplied explicit one (lib/mkHarness.nix applies the override post-normalize, issue #2512) -- empty means follow the roster, a non-empty value overrides it. Unlike the four legacy per-agent model knobs (scoutModel/reviewModel/filerModel/workerModel), which an explicit roster arg always wins over, this override applies regardless of roster source (lib/roster.nix). Meaningful only under ORCHESTRATOR: the resolved value reaches the orchestrator via the prompt-assembly Handoff's ReviewEffort field (issue #2512), mirroring how ReviewModel reaches it. Like REVIEW_MODEL, an explicit dispatch-time value (REVIEW_EFFORT=... / --review-effort ...) overrides the baked value on an already-built image, no rebuild needed (issue #3171) -- precedence is dispatch-time env > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged (see MIGRATING.md).
             #         reviewEffort = "";
-            #         # Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above (agents.drivers.<name>.models.byName), when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this two-entry scout/reviewer example verbatim drops filer/worker/review-axis. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings).
+            #         # Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above (agents.drivers.<name>.models.byName), when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this scout/reviewer/review-axis example verbatim drops filer/worker. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings). The reviewer's `spawns` scopes what it can spawn under opencode.
             #         roster = [
             #           {
             #             name = "scout";
@@ -86,7 +86,17 @@
             #             mode = "subagent";
             #             description = "Review the branch diff for spec compliance and coding standards";
             #             tools = [ "Read" "Bash" "WebFetch" "Agent" ];
+            #             spawns = [ "review-axis" ];
             #             promptFile = "review-prompt.md";
+            #             effort = "high";
+            #           }
+            #           {
+            #             name = "review-axis";
+            #             model = "claude-opus-5";
+            #             mode = "subagent";
+            #             description = "Run one axis (Standards or Spec) of the code-review skill's two-axis fan-out";
+            #             tools = [ "Read" "Bash" "Glob" "Grep" ];
+            #             promptFile = "review-axis-prompt.md";
             #             effort = "high";
             #           }
             #         ];

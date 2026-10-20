@@ -34,7 +34,7 @@ in
   roster = {
     doc = ''
       The first-class N-agent roster (issue #264, lib/roster.nix): a list of
-      `{ name; model; effort; mode; description; tools; promptFile; prompt }`
+      `{ name; model; effort; mode; description; tools; spawns; promptFile; prompt }`
       attrsets that every Driver renders subagents from, replacing the four
       hardcoded scout/reviewer/filer/worker model knobs. An explicit
       `roster` always wins over the legacy per-agent model knobs
