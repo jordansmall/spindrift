@@ -65,7 +65,11 @@ func osImportNames(file *ast.File) map[string]bool {
 // normalised form for messages and allow-list matching, or "" if sel is not
 // a knob read. Resolve/ResolveOptional/Lookup match on method name alone,
 // regardless of receiver shape (doc, d2.doc, h.d, ...): without go/types
-// the receiver cannot be confirmed as an inputdoc.Document anyway.
+// the receiver cannot be confirmed as an inputdoc.Document anyway. Callers
+// skip selectors in type positions (see markTypeSelectors), so a type named
+// pkg.Lookup is not a read. Type spellings the parser places in expression
+// position stay flagged: a conversion pkg.Lookup(fn) (a CallExpr), a generic
+// type argument f[pkg.Lookup](x), and a new(pkg.Lookup) or make argument.
 func selectorLabel(sel *ast.SelectorExpr, osNames map[string]bool) string {
 	if knobEnvGuardMethods[sel.Sel.Name] {
 		return "." + sel.Sel.Name
@@ -76,6 +80,35 @@ func selectorLabel(sel *ast.SelectorExpr, osNames map[string]bool) string {
 		}
 	}
 	return ""
+}
+
+// markTypeSelectors records in set every selector that n names as a type:
+// a Field, ValueSpec, TypeSpec, CompositeLit or TypeAssertExpr type. The
+// whole type subtree is marked: a type holds no evaluated expression (an
+// array length must be constant), so no knob read can hide there.
+func markTypeSelectors(n ast.Node, set map[*ast.SelectorExpr]bool) {
+	var t ast.Expr
+	switch n := n.(type) {
+	case *ast.Field:
+		t = n.Type
+	case *ast.ValueSpec:
+		t = n.Type
+	case *ast.TypeSpec:
+		t = n.Type
+	case *ast.CompositeLit:
+		t = n.Type
+	case *ast.TypeAssertExpr:
+		t = n.Type
+	}
+	if t == nil {
+		return
+	}
+	ast.Inspect(t, func(m ast.Node) bool {
+		if sel, ok := m.(*ast.SelectorExpr); ok {
+			set[sel] = true
+		}
+		return true
+	})
 }
 
 // scanKnobEnvSites walks every non-test *.go file in dir and returns each
@@ -121,7 +154,9 @@ func scanKnobEnvSites(dir string) (sites map[string][]string, violations []strin
 			// declared inside it.
 			callFun := make(map[*ast.SelectorExpr]*ast.CallExpr)
 			inFuncLit := make(map[*ast.SelectorExpr]bool)
+			typePos := make(map[*ast.SelectorExpr]bool)
 			ast.Inspect(decl, func(n ast.Node) bool {
+				markTypeSelectors(n, typePos)
 				if call, ok := n.(*ast.CallExpr); ok {
 					if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 						callFun[sel] = call
@@ -140,7 +175,7 @@ func scanKnobEnvSites(dir string) (sites map[string][]string, violations []strin
 
 			ast.Inspect(decl, func(n ast.Node) bool {
 				sel, ok := n.(*ast.SelectorExpr)
-				if !ok {
+				if !ok || typePos[sel] {
 					return true
 				}
 				label := selectorLabel(sel, osNames)
@@ -317,6 +352,23 @@ func readsD() {
 	stdos.LookupEnv("D")
 }
 
+type lookupHolder struct {
+	f backendkit.Lookup
+}
+
+func typePositions(doc *Document, fn backendkit.Lookup, fns []backendkit.Lookup) backendkit.Lookup {
+	var v backendkit.Lookup = fn
+	_ = backendkit.Lookup{} // parse-only fixture: a CompositeLit type, though not valid Go for a func type
+	_, _ = any(v).(backendkit.Lookup)
+	doc.Lookup("E")
+	return v
+}
+
+func methodValueLookup(doc *Document) {
+	l := doc.Lookup
+	_ = l
+}
+
 func nonLiteral(doc *Document, w Writer, key string) {
 	doc.Resolve(key, w)
 }
@@ -379,7 +431,7 @@ func TestScanKnobEnvSites_HasTeeth(t *testing.T) {
 		t.Fatalf("scanKnobEnvSites: %v", err)
 	}
 
-	for _, key := range []string{"A", "B", "C", "D"} {
+	for _, key := range []string{"A", "B", "C", "D", "E"} {
 		if len(sites[key]) == 0 {
 			t.Errorf("sites is missing literal key %q", key)
 		}
@@ -415,6 +467,7 @@ func TestScanKnobEnvSites_HasTeeth(t *testing.T) {
 	}{
 		{"non-literal key outside the allow-list", "doc.Resolve(key, w)"},
 		{"method value doc.Resolve, never called directly", "r := doc.Resolve"},
+		{"method value doc.Lookup, never called directly", "l := doc.Lookup"},
 		{"method value os.Getenv, never called directly", "f := os.Getenv"},
 		{"zero-argument os.Getenv call", "\tos.Getenv()\n"},
 		{"warnStrippedChildEnv on mutT has a receiver, so it does not qualify for the allow-list", "return os.Getenv(key)"},
