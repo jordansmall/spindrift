@@ -9,10 +9,8 @@ import (
 	"io/fs"
 	"maps"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -619,7 +617,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 
 		manifest := registrymanifest.Manifest{
 			Endpoint: manifestEndpoint,
-			Routes:   registryManifestRoutes(d.cfg.RegistryProxyRoutes),
+			Routes:   registryproxy.ManifestRoutes(d.cfg.RegistryProxyRoutes),
 		}
 		encoded, err := registrymanifest.Encode(manifest)
 		if err != nil {
@@ -673,28 +671,6 @@ func newRegistryProxyTCPSecret() string {
 		panic("dispatch: crypto/rand.Read failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
-}
-
-// registryManifestRoutes projects Config.RegistryProxyRoutes into the ADR-0045
-// manifest's Route shape. It carries Prefix verbatim: AssignPrefixes already
-// ran over the table. An Upstream that fails to parse keeps its route with an
-// empty UpstreamHost. EnforcedPaths clones EnforcedSubtrees so it cannot alias
-// route's array (issue #3259); Ecosystems aliases, a map-of-maps clone being shallow.
-func registryManifestRoutes(routes []registryproxy.Route) []registrymanifest.Route {
-	out := make([]registrymanifest.Route, len(routes))
-	for i, route := range routes {
-		var upstreamHost string
-		if u, err := url.Parse(route.Upstream); err == nil {
-			upstreamHost = u.Host
-		}
-		out[i] = registrymanifest.Route{
-			Prefix:        route.Prefix,
-			UpstreamHost:  upstreamHost,
-			EnforcedPaths: slices.Clone(route.EnforcedSubtrees),
-			Ecosystems:    route.Ecosystems,
-		}
-	}
-	return out
 }
 
 // registryProxySocketFile is shared by registryProxySocketDir's length check
