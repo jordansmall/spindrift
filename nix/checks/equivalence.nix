@@ -1680,6 +1680,40 @@ in
     touch $out
   '';
 
+  # Only the Box links backend adapters (ADR 0068 decision 1: it looks them up
+  # at runtime). orchestrator and driver-exec use none, so their srcs must carry
+  # no adapter path: an adapter-free src cannot move their drvPaths on a backend
+  # edit (issue #5738).
+  inbox-bins-link-no-backends =
+    let
+      adapters = [
+        "internal/driver/bundle/backends.go"
+      ]
+      ++ map (d: "internal/${d}") nonRustHarness.internals.backendBundleDirs;
+      probe = name: bin: ''
+        for a in ${pkgs.lib.escapeShellArgs adapters}; do
+          if [ -e ${bin.src}/$a ]; then
+            echo "${name}.src contains backend adapter path $a" >&2
+            fail=1
+          fi
+        done
+      '';
+    in
+    pkgs.runCommand "inbox-bins-link-no-backends" { } ''
+      fail=0
+      ${probe "driverExecBin" nonRustHarness.internals.driverExecBin}
+      ${probe "orchestratorBin" nonRustHarness.internals.orchestratorBin}
+      if [ ! -e ${nonRustHarness.internals.boxBin.src}/internal/driver/bundle/backends.go ]; then
+        echo "boxBin.src lacks internal/driver/bundle/backends.go: the Box must register backends" >&2
+        fail=1
+      fi
+      if [ "$fail" -ne 0 ]; then
+        echo "Tighten the filesets in lib/mkHarness.nix (issue #5738)" >&2
+        exit 1
+      fi
+      touch $out
+    '';
+
   # The agent-image drvPath must be a pure function of flake content, not the
   # Consumer's host system (issue #597). ADR 0019's freshness probe compares a
   # fresh `.#packages.<linuxSystem>.agent-image.drvPath` against the baked
@@ -2101,6 +2135,7 @@ in
         "daemonBin"
         "imageAttrName"
         "runInputDocumentFile"
+        "backendBundleDirs"
         "roster"
         "launcherCurrencyFileset"
         "directFileFragmentRows"
