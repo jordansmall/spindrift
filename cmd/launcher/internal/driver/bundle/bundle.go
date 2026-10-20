@@ -4,9 +4,9 @@
 // Strategy with the runner registry (runners.go). Only binaries import it
 // (ADR 0066 decision 8); the registries and the libraries that read them import
 // no Driver or concrete backend adapter. The in-box filesets
-// (lib/mkHarness.nix driverTreeFiles) drop backends.go and runners.go; only the
-// Box adds backends.go back, so the other in-box binaries register no backends
-// and no runners.
+// (lib/harness-core.nix driverTreeFiles) drop backends.go and runners.go; only
+// the Box adds backends.go back, so the other in-box binaries register no
+// backends and no runners.
 package bundle
 
 import (

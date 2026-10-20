@@ -10,7 +10,7 @@ import (
 )
 
 // TestImportGraphIsStandardLibraryOnly pins the package doc's claim, which
-// lib/mkHarness.nix's driver-exec fileset depends on: signalwire imports
+// lib/harness-core.nix's driver-exec fileset depends on: signalwire imports
 // nothing outside the standard library, so a Box binary linking it never
 // drags in the launcher-side listener's closure (internal/doctor, and behind
 // it internal/runner, internal/forge and the container backend). No transitive

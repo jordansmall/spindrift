@@ -1685,7 +1685,7 @@ in
     if [ -n "$test_files" ]; then
       echo "driverExecBin.src contains *_test.go files:" >&2
       echo "$test_files" >&2
-      echo "Tighten the fileset in lib/mkHarness.nix (issue #474)" >&2
+      echo "Tighten the fileset in lib/harness-core.nix (issue #474)" >&2
       exit 1
     fi
     touch $out
@@ -1719,7 +1719,7 @@ in
         fail=1
       fi
       if [ "$fail" -ne 0 ]; then
-        echo "Tighten the filesets in lib/mkHarness.nix (issue #5738)" >&2
+        echo "Tighten the filesets in lib/harness-core.nix (issue #5738)" >&2
         exit 1
       fi
       touch $out
