@@ -8,6 +8,7 @@
 package backendkit
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -204,11 +205,14 @@ func Strategies() []Strategy {
 	return append([]Strategy(nil), registry...)
 }
 
+// ErrRepoSlugRequired is the blank-REPO_SLUG failure RequireRepoSlug wraps.
+var ErrRepoSlugRequired = errors.New("set REPO_SLUG")
+
 // RequireRepoSlug is the ValidateTracker check shared by the backends whose
 // issue tracker is keyed on REPO_SLUG.
 func RequireRepoSlug(s Shared, trackerName string) error {
 	if s.RepoSlug == "" {
-		return fmt.Errorf("set REPO_SLUG when ISSUE_TRACKER=%s", trackerName)
+		return fmt.Errorf("%w when ISSUE_TRACKER=%s", ErrRepoSlugRequired, trackerName)
 	}
 	return nil
 }

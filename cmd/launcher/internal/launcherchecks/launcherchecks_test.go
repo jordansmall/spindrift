@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -466,6 +467,30 @@ func TestCrossKnobChecks_ValidatorErrorPropagates(t *testing.T) {
 	_, err := ch.Probe()
 	if err == nil || (!errors.Is(err, wantErr) && err.Error() != wantErr.Error()) {
 		t.Errorf("code-forge-config Probe() error = %v, want %v", err, wantErr)
+	}
+}
+
+// A blank REPO_SLUG is owned by the repo-slug row, so issue-tracker-config
+// drops the slug sentinel and keeps every other validator error.
+func TestCrossKnobChecks_IssueTrackerConfigDropsRepoSlugError(t *testing.T) {
+	probe := func(validateErr error) error {
+		d := minimalDeps()
+		d.Backend = func(name string) (Backend, bool) {
+			return Backend{Descriptor: backend.GitHub, ValidateTracker: func() error { return validateErr }}, name == "github"
+		}
+		_, err := checkByName(t, CrossKnobChecks(minimalValidConfig(), d), "issue-tracker-config").Probe()
+		return err
+	}
+	slugErr := backendkit.RequireRepoSlug(backendkit.Shared{}, "github")
+	if err := probe(slugErr); err != nil {
+		t.Errorf("issue-tracker-config Probe() = %v, want nil for a blank-slug error", err)
+	}
+	other := errors.New("set FORGEJO_TOKEN")
+	if err := probe(other); !errors.Is(err, other) {
+		t.Errorf("issue-tracker-config Probe() = %v, want %v", err, other)
+	}
+	if err := probe(errors.Join(other, slugErr)); !errors.Is(err, other) {
+		t.Errorf("issue-tracker-config Probe() = %v, want the joined %v kept", err, other)
 	}
 }
 
