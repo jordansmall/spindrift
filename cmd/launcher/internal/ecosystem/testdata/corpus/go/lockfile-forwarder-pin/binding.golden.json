@@ -1,0 +1,11 @@
+{
+  "envExports": [
+    {
+      "Name": "GOTOOLCHAIN",
+      "Value": "local"
+    }
+  ],
+  "warnings": [
+    "==> WARNING: overriding GOTOOLCHAIN=auto with GOTOOLCHAIN=local — this Box only offers one baked Go toolchain through the Forwarder"
+  ]
+}

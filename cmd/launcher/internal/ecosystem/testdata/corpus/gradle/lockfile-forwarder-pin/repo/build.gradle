@@ -1,0 +1,3 @@
+repositories {
+    maven { url = uri("http://127.0.0.1:27182/repo-acme-test/gradle") }
+}

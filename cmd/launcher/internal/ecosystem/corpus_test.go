@@ -98,3 +98,49 @@ func TestCorpus_EveryInTreeRowDerivesAPath(t *testing.T) {
 		})
 	}
 }
+
+// A name added to a row's LockfileNames without a case holding that file under
+// the row's corpus directory would go unclassified and unscanned, since each
+// stage replays only what a case's repo/ holds.
+func TestCorpus_EveryLockfileNameHasACase(t *testing.T) {
+	for _, row := range ecosystem.Table {
+		for _, lockfile := range row.LockfileNames {
+			t.Run(row.Name+"/"+lockfile, func(t *testing.T) {
+				matches, err := filepath.Glob(filepath.Join("testdata", "corpus", row.Name, "*", "repo", lockfile))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(matches) == 0 {
+					t.Errorf("no corpus case under testdata/corpus/%s holds repo/%s", row.Name, lockfile)
+				}
+			})
+		}
+	}
+}
+
+// The lockfile scan's golden is empty unless a lockfile names the Forwarder, so
+// a row whose cases all leave it empty proves nothing about the scan reaching
+// that row.
+func TestCorpus_EveryLockfileRowHasAScanHit(t *testing.T) {
+	for _, row := range ecosystem.Table {
+		if len(row.LockfileNames) == 0 {
+			continue
+		}
+		t.Run(row.Name, func(t *testing.T) {
+			goldens, err := filepath.Glob(filepath.Join("testdata", "corpus", row.Name, "*", "lockfile-scan.golden.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, g := range goldens {
+				info, err := os.Stat(g)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info.Size() > 0 {
+					return
+				}
+			}
+			t.Errorf("no corpus case under testdata/corpus/%s has a non-empty lockfile-scan.golden.txt", row.Name)
+		})
+	}
+}
