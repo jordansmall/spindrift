@@ -688,8 +688,8 @@ effort/reasoning-level string — spindrift does not normalize it, so the value
 must already be one the target driver accepts (e.g. `"high"`). The claude
 Driver emits it as an `"effort"` key beside `model` in the agent's `--agents`
 JSON object; the opencode Driver emits it as a `reasoningEffort:` key beside
-`model:` in the agent's YAML frontmatter; the pi Driver folds it into the
-agent file's `model:` as a `:<level>` suffix and requires a model for it (see
+`model:` in the agent's YAML frontmatter; the pi Driver carries it on the role's
+model, folding it into the agent file's `model:` as a `:<level>` suffix (see
 [The pi Driver](#the-pi-driver)). Omitting `effort` omits the
 key/line entirely on every Driver — the same inherit-session-effort behavior
 as today. `byName.<name>.effort = ""` is accepted, not rejected, but is not
@@ -1214,24 +1214,23 @@ What the Driver carries:
   forwards the coordinator's `--thinking` only to agents with no model. The
   file also carries `reasoningEffort: "<level>"`, which the extension ignores;
   the review pass reads it so its `--thinking` matches the suffix rather than
-  falling back to the coordinator's effort. `<level>` is one of
-  `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; any other value
-  fails evaluation, since pi would read it as part of the model id. A role
-  that sets an effort needs a model to carry it: an entry with an effort and
-  no model takes the coordinator's (default) model, and with neither,
-  evaluation fails naming the role. The rule runs after the `model = ""`
-  opt-out drop, so an opted-out role is removed together with its effort. The
-  default roster sets an effort on every role, so under pi each one renders
-  with a model suffix. The review pass reads `reviewer.md`'s model with its
-  suffix, so pi applies the reviewer's effort from it. A model that already
-  ends in one of those levels (`github-copilot/some-model:low`), including the
-  default model a role inherits, keeps its own suffix: the role's effort is
+  falling back to the coordinator's effort. `<level>` is one of `off`,
+  `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; any other value fails
+  evaluation, since pi would read it as part of the model id. Every roster
+  entry must set a model anyway, so a role's effort always has one to ride on.
+  The rule runs after the `model = ""` opt-out drop, so an opted-out role is
+  removed together with its effort. The default roster sets an effort on every
+  role, so under pi each one renders with a model suffix. The review pass reads
+  `reviewer.md`'s model with its suffix, so pi applies the reviewer's effort
+  from it. A model that already ends in one of those levels
+  (`github-copilot/some-model:low`), including a default model the role takes
+  when the default roster is built, keeps its own suffix: the role's effort is
   dropped and `reasoningEffort` follows the suffix (a role with no effort
-  renders no `reasoningEffort` line), so the level is never doubled. The
-  role's effort must still be a valid level. A trailing colon segment that is
-  not a level (`ollama/llama:8b`) is part of the model id and still takes the
-  effort suffix. The dispatch-time `REVIEW_MODEL` side of the same question
-  is #5625, which should keep the same rule: the suffix wins.
+  renders no `reasoningEffort` line), so the level is never doubled. The role's
+  effort must still be a valid level. A trailing colon segment that is not a
+  level (`ollama/llama:8b`) is part of the model id and still takes the effort
+  suffix. The dispatch-time `REVIEW_MODEL` side of the same question is #5625,
+  which should keep the same rule: the suffix wins.
 - **Usage by role.** The decoder attributes each child's usage to the agent's
   role, read from the child's own messages; the extension's summed per-agent
   totals are ignored.

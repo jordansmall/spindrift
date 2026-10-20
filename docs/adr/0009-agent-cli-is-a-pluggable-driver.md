@@ -473,11 +473,13 @@ The Roster and Usage-by-role choices above now ship. Three details differ from
 the plan. The effort rule runs after the `model = ""` opt-out drop, so an
 opted-out role is removed with its effort. A role with an effort and no model
 takes the coordinator's default model instead of failing, and evaluation fails
-only when that is empty too. The tool mapping sends `WebFetch`, `WebSearch`,
-`TodoWrite` and `Skill` to nothing; an unknown tool name, or a `tools` list
-that maps to nothing, fails evaluation, since an empty `tools` line would grant
-every tool. Effort levels are checked at evaluation, as a bad level would
-otherwise be read as part of the model id.
+only when that is empty too. (Amended by issue #5626: neither branch was
+reachable, since `normalizeRoster` rejects an entry without a string `model`
+and the opt-out drop runs first, so both are gone.) The tool mapping sends
+`WebFetch`, `WebSearch`, `TodoWrite` and `Skill` to nothing; an unknown tool
+name, or a `tools` list that maps to nothing, fails evaluation, since an empty
+`tools` line would grant every tool. Effort levels are checked at evaluation,
+as a bad level would otherwise be read as part of the model id.
 
 ## Amendment (issue #5482): pi gets the hook bridge
 
