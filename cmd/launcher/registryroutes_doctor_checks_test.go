@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
@@ -60,7 +61,7 @@ match-host = "registry-b.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Table)
 	checks := routeChecksFor(routes)
 	if len(checks) != 4 {
 		t.Fatalf("routeChecksFor() returned %d rows, want 4", len(checks))
@@ -94,7 +95,7 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Table)
 	checks := routeChecksFor(routes)
 	ch := checkByName(t, checks, "registry-route-credential[registry.example.com]")
 	_, err := ch.Probe()
@@ -331,7 +332,7 @@ match-host = "registry-resolved.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Table)
 	checks := routeChecksFor(routes)
 
 	passthroughCh := checkByName(t, checks, "registry-route-credential[registry-passthrough.example.com]")
@@ -366,9 +367,9 @@ func checkNames(checks []doctor.Check) []string {
 
 // mustLoadRoutes parses file through the same loader doctorCheckSets uses, so
 // these tests exercise the production parse rather than hand-built Routes.
-func mustLoadRoutes(t *testing.T, file string) []registryroutes.Route {
+func mustLoadRoutes(t *testing.T, file string, rows []ecosystem.Row) []registryroutes.Route {
 	t.Helper()
-	routes, err := loadRegistryRoutes(file)
+	routes, err := loadRegistryRoutes(file, rows)
 	if err != nil {
 		t.Fatalf("loadRegistryRoutes(%q) unexpected error: %v", file, err)
 	}

@@ -5,6 +5,7 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -79,7 +80,7 @@ func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
 			// The Probe loads the file on every call rather than reusing a
 			// hoisted load: it must report a read or parse failure even on
 			// validate()'s fail-fast path, where the per-route rows never run.
-			routes, err := loadRegistryRoutes(c.registryProxyRoutesFile)
+			routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Table)
 			if err != nil {
 				return nil, err
 			}
