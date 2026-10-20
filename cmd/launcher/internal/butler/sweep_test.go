@@ -58,6 +58,7 @@ func testPolicy() Policy {
 // chores is due: the head equals the (empty) tip's LastSwept with an empty
 // Cursor, so chore.Check reports NothingToScan for it.
 func TestSweep_NotDue(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: ""}
 	it := forge.NewFake().AsIssueFiler()
@@ -81,6 +82,7 @@ func TestSweep_NotDue(t *testing.T) {
 // TestSweep_EmptyChoresErrors pins the exact error text for an empty chores
 // list.
 func TestSweep_EmptyChoresErrors(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	r := New(backend, fakeTree{}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), time.Now)
 
@@ -93,6 +95,7 @@ func TestSweep_EmptyChoresErrors(t *testing.T) {
 // TestSweep_UnconfiguredChoreErrors rejects a candidate absent from
 // Policy.Chores rather than sweeping it with a zero Every and no PromotionClasses.
 func TestSweep_UnconfiguredChoreErrors(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	r := New(backend, fakeTree{}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), time.Now)
 
@@ -125,6 +128,7 @@ func (w *claimRace) Append(choreName, old string, s ledger.State, at time.Time) 
 // TestSweep_LostRace pins the LostRace Outcome: a due Chore whose Claim call
 // loses its compare-and-swap to a rival claim reports LostRace, not an error.
 func TestSweep_LostRace(t *testing.T) {
+	t.Parallel()
 	inner := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	backend := &claimRace{Backend: inner}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
@@ -146,6 +150,7 @@ func TestSweep_LostRace(t *testing.T) {
 // crashes (no ready outcome) files nothing and leaves the claim standing --
 // Sweep learns this from the settle step's own return, not a re-read.
 func TestSweep_ClaimLeft(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 	it := forge.NewFake().AsIssueFiler()
@@ -177,6 +182,7 @@ func TestSweep_ClaimLeft(t *testing.T) {
 // runs to completion, with Filed/Promoted/Dropped read off the settle step's
 // return, never a Ledger re-read.
 func TestSweep_Swept(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go", "b.go"}}
 	fc := forge.NewFake()
@@ -224,6 +230,7 @@ func (erroringBackend) Read(string) (ledger.Tip, error) { return ledger.Tip{}, e
 // TestSweep_ReadLedgerError pins the wrap text for a per-candidate Read
 // failure.
 func TestSweep_ReadLedgerError(t *testing.T) {
+	t.Parallel()
 	backend := erroringBackend{ledger.Local{Repo: ledgertest.NewRepo(t)}}
 	tree := fakeTree{head: "headsha"}
 	it := forge.NewFake().AsIssueFiler()
@@ -349,6 +356,7 @@ func TestSweep_NotDueBudgetLiftsAtPolicyZoneMidnight(t *testing.T) {
 // Sweep with the Ledger untouched, so the next sweep retries rather than
 // waiting out a stale takeover.
 func TestSweep_TrackedFilesErrorLeavesLedgerUnclaimed(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	boom := errors.New("ls-tree failed")
 	tree := fakeTree{head: "headsha", filesErr: boom}

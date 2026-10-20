@@ -162,6 +162,7 @@ func promotableDispatcher(class string) *dispatch.Fake {
 // acceptance criterion (`git log refs/spindrift/butler/bugs`). A
 // Consumer-declared Chore ("tidy-deps") runs exactly like a built-in one.
 func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
+	t.Parallel()
 	for _, choreName := range []string{"bugs", "tidy-deps"} {
 		t.Run(choreName, func(t *testing.T) {
 			repo := ledgertest.NewRepo(t)
@@ -227,6 +228,7 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 // carries the day's actual per-sweep cap rather than the socket's own
 // hardcoded default.
 func TestSweep_PassesRoomFindingsAsBoxMaxFindings(t *testing.T) {
+	t.Parallel()
 	const choreName = "bugs"
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 
@@ -255,6 +257,7 @@ func TestSweep_PassesRoomFindingsAsBoxMaxFindings(t *testing.T) {
 // writes nothing, so the Ledger tip after the run is still the claim, and
 // Sweep reports ClaimLeft.
 func TestSweep_CrashedRunLeavesClaimStanding(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -329,6 +332,7 @@ func TestSweep_AlreadyInFlightSkipsSettle(t *testing.T) {
 // reading: with a clock that advances on every call, the crashed run's
 // standing claim must still carry the first reading.
 func TestSweep_ClaimStartIsDueCheckInstant(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -357,6 +361,7 @@ func TestSweep_ClaimStartIsDueCheckInstant(t *testing.T) {
 // (c) A live (non-stale) claim held by another run makes Sweep report
 // NotDue without dispatching a Box or writing a new commit.
 func TestSweep_LiveClaimReportsNoWork(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -401,6 +406,7 @@ func TestSweep_LiveClaimReportsNoWork(t *testing.T) {
 // (ADR 0056): the next run takes it over rather than reporting NotDue, and a
 // clean sweep against it still ends in a done commit.
 func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -450,6 +456,7 @@ func TestSweep_StaleClaimIsTakenOver(t *testing.T) {
 // between the seed and this run (fakeTree, no real git needed -- issue
 // #3995).
 func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
+	t.Parallel()
 	const head1, head2 = "head1", "head2"
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 
@@ -526,6 +533,7 @@ func TestSweep_StaleClaimTakeoverEndToEnd(t *testing.T) {
 // (e) A claim just younger than the claim timeout is still live: Sweep
 // reports NotDue without taking it over or dispatching a Box.
 func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -567,6 +575,7 @@ func TestSweep_ClaimJustUnderTimeoutStillLive(t *testing.T) {
 // claiming or dispatching. (ledger.Claim losing the race, the "f" case in
 // cmd/launcher's retired suite, is covered by TestSweep_LostRace above.)
 func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	const head = "headsha"
 	tree := fakeTree{head: head, files: []string{"a.go"}}
@@ -613,6 +622,7 @@ func TestSweep_NamedChoreNotDueByIntervalReportsWhy(t *testing.T) {
 // (h) A named chore fully rotated through the tree, with head unmoved since
 // the last sweep, reports "nothing to scan" and NotDue.
 func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	const head = "headsha"
 	tree := fakeTree{head: head, files: []string{"a.go"}}
@@ -659,6 +669,7 @@ func TestSweep_NamedChoreNothingToScanReportsWhy(t *testing.T) {
 // due candidate in order, skipping one that isn't due yet and leaving its
 // Ledger untouched.
 func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	const head = "headsha"
 	tree := fakeTree{head: head, files: []string{"a.go"}}
@@ -711,6 +722,7 @@ func TestSweep_NoChorePicksFirstDueCandidate(t *testing.T) {
 // every candidate's own reason. (An empty chores slice is
 // TestSweep_EmptyChoresErrors above.)
 func TestSweep_NoChoreNoneDueReportsEachReason(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	const head = "headsha"
 	tree := fakeTree{head: head, files: []string{"a.go"}}
@@ -755,6 +767,7 @@ func TestSweep_NoChoreNoneDueReportsEachReason(t *testing.T) {
 // shared day's sweep budget, so a distinct due candidate on another enabled
 // Chore reports the budget spent rather than running.
 func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -798,6 +811,7 @@ func TestSweep_BudgetSpentByAnotherEnabledChore(t *testing.T) {
 // morning finds a fresh day and runs. head1/head2 stand in for the branch
 // tip before/after the seeded run, as above (fakeTree, no real git needed).
 func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
+	t.Parallel()
 	const head1, head2 = "head1", "head2"
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	// The current tree head (head2) differs from the seeded LastSwept
@@ -871,6 +885,7 @@ func TestSweep_DayBoundaryUsesConfiguredZoneNotUTC(t *testing.T) {
 // that relays more findings than the cap gets the overflow dropped, and the
 // Ledger done commit records it (Dropped), matching Outcome.Dropped.
 func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -922,6 +937,7 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 // 6 findings gets only 6 filed, the rest dropped (issue #3994 review
 // finding).
 func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 
 	fc := forge.NewFake()
@@ -1000,6 +1016,7 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 // anything -- a Consumer has to opt in to promotion itself, not just to a
 // Chore (issue #3880).
 func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1054,6 +1071,7 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 // every other gate is filed carrying ready-for-agent, and the Ledger done
 // commit records its URL in Promoted (issue #3880).
 func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1101,6 +1119,7 @@ func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 // the label a promoted finding actually carries end to end through Sweep's
 // run step (issue #3880).
 func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1135,6 +1154,7 @@ func TestSweep_PromotionUsesConfiguredWorkLabel(t *testing.T) {
 // Sweep's own single Room walk at its own start (issue #3994) already sees
 // it spent -- no second walk at settle time is needed to catch it.
 func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
+	t.Parallel()
 	const head1, head2 = "head1", "head2"
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	// The current tree head (head2) differs from the seeded LastSwept
@@ -1195,6 +1215,7 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 // allow-list is per Chore, so a Box relaying a class that is only on another
 // Chore's entry stays unlabelled (issue #3880).
 func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1237,6 +1258,7 @@ func TestSweep_PromotionClassNotAllowlistedForChoreFilesUnlabelled(t *testing.T)
 // TestSweep_PromotionDisabledByDefaultFilesUnlabelled for the patch rung
 // (issue #4072, ADR 0057).
 func TestSweep_PatchRungOffByDefaultOmitsPatchClasses(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1271,6 +1293,7 @@ func TestSweep_PatchRungOffByDefaultOmitsPatchClasses(t *testing.T) {
 // patchForge must withhold PatchClasses regardless of budget, per
 // TestSweep_NoPatchForgeOmitsPatchClassesFromBox.
 func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1306,6 +1329,7 @@ func TestSweep_PatchRungOnWithRoomForwardsPatchClasses(t *testing.T) {
 // for a class also present on CHORE_CLASSES, and with promotion off that
 // list is always empty (review finding on issue #4072, ADR 0057).
 func TestSweep_PatchRungOnPromotionOffOmitsPatchClasses(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1356,6 +1380,7 @@ func (w *countingHistoryBackend) History(choreName string, since time.Time) ([]l
 // settle (issue #3994; before this the promotion Room closure re-walked the
 // Ledger fresh at settle time on top of Sweep's own walk, costing two).
 func TestSweep_PromotionEnabledWalksDayTotalsOnce(t *testing.T) {
+	t.Parallel()
 	midnight := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	backend := &countingHistoryBackend{Backend: ledger.Local{Repo: ledgertest.NewRepo(t)}, midnight: midnight}
 
@@ -1388,6 +1413,7 @@ func TestSweep_PromotionEnabledWalksDayTotalsOnce(t *testing.T) {
 // Chores walked twice" since both read back totalsWalks == N in that case;
 // this pins the count where the two diverge (issue #3994 review finding).
 func TestSweep_PromotionEnabledWalksDayTotalsOncePerChore(t *testing.T) {
+	t.Parallel()
 	midnight := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	backend := &countingHistoryBackend{Backend: ledger.Local{Repo: ledgertest.NewRepo(t)}, midnight: midnight}
 
@@ -1431,6 +1457,7 @@ func TestSweep_PromotionEnabledWalksDayTotalsOncePerChore(t *testing.T) {
 // one case actually exercising the Ledger/Tree wiring over real git, not
 // just Runner's own logic (issue #3995).
 func TestSweep_RemoteBackendEndToEndAgainstHostedForgeShape(t *testing.T) {
+	t.Parallel()
 	remoteRepo := ledgertest.NewRepo(t)
 	head := strings.TrimSpace(string(runRepoGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
 
@@ -1638,6 +1665,7 @@ func patchTestPolicy() Policy {
 // host would tell the Box to spend its diff budget on patch classes the
 // host can never land (issue #4074).
 func TestSweep_NoPatchForgeOmitsPatchClassesFromBox(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
 
@@ -1668,6 +1696,7 @@ func TestSweep_NoPatchForgeOmitsPatchClassesFromBox(t *testing.T) {
 // reviewer's concurrence. The Ledger done commit records the PR URL in
 // Patched, not Promoted.
 func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -1740,6 +1769,7 @@ func TestSweep_PatchedFindingLandsDraftPR(t *testing.T) {
 // all: promoted here, since promotion is on and otherwise eligible. No push
 // or PR is attempted.
 func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatchErr: errors.New("does not apply")}
 
@@ -1796,6 +1826,7 @@ func TestSweep_PatchDiffNoLongerAppliesFallsBackToPromote(t *testing.T) {
 // (r3) The same stale-diff fallback with promotion off: the finding still
 // files, just plain -- no dispatch label, no patch label.
 func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatchErr: errors.New("does not apply")}
 
@@ -1842,6 +1873,7 @@ func TestSweep_PatchDiffNoLongerAppliesFilesPlainWithPromotionOff(t *testing.T) 
 // provenance label; ready-for-agent is added on top. The orphaned branch the
 // failed push left behind is deleted (issue #4112).
 func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -1898,6 +1930,7 @@ func TestSweep_PatchPRCreateFailsFallsBackToPromoteViaAddLabels(t *testing.T) {
 // own patch gate then sees zero Patches left for the second and falls
 // straight through to decidePromote, so it promotes instead of patching.
 func TestSweep_PatchBudgetSpendsOncePerSweep(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -1950,6 +1983,7 @@ func TestSweep_PatchBudgetSpendsOncePerSweep(t *testing.T) {
 // ever attempted, and the finding falls back to promoting the already-filed
 // issue.
 func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2001,6 +2035,7 @@ func TestSweep_PatchPushFailsFallsBackToPromote(t *testing.T) {
 // URL under Patched, same as an ordinary landed patch, with the merge gate
 // handed that URL too.
 func TestSweep_PatchPRCreateErrorsButPRWasCreatedAdopts(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2053,6 +2088,7 @@ func TestSweep_PatchPRCreateErrorsButPRWasCreatedAdopts(t *testing.T) {
 // the branch is kept (a PR might be live that the lookup just couldn't see),
 // and the create error still falls the finding back to promote.
 func TestSweep_PatchPRLookupErrorsFallsBackToPromoteKeepsBranch(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2096,6 +2132,7 @@ func TestSweep_PatchPRLookupErrorsFallsBackToPromoteKeepsBranch(t *testing.T) {
 // cleanup DeleteBranch itself fails: cleanup failure is logged and best-
 // effort -- the finding still falls back to promote as usual.
 func TestSweep_PatchBranchCleanupFailsStillFallsBackToPromote(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2139,6 +2176,7 @@ func TestSweep_PatchBranchCleanupFailsStillFallsBackToPromote(t *testing.T) {
 // counted -- the label never actually landed -- and no promotion comment is
 // posted, since that comment only makes sense once the label add succeeded.
 func TestSweep_PatchFallbackAddLabelsFailsCountsNoPromotion(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2183,6 +2221,7 @@ func TestSweep_PatchFallbackAddLabelsFailsCountsNoPromotion(t *testing.T) {
 // landed -- only the note comment is lost, exactly as promotionNote's other
 // best-effort callers behave.
 func TestSweep_PatchFallbackCommentFailsStillCountsPromotion(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2230,6 +2269,7 @@ func TestSweep_PatchFallbackCommentFailsStillCountsPromotion(t *testing.T) {
 // issueNumberFromURL's own guard as defense in depth, not the only thing
 // standing between local and a patch attempt.
 func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2342,6 +2382,7 @@ func sameLabelSet(got, want []string) bool {
 // the commit -- Phase done, claim released, Patched carrying the PR URL --
 // already there.
 func TestSweep_PatchGateCalledAfterDoneCommit(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2392,6 +2433,7 @@ func TestSweep_PatchGateCalledAfterDoneCommit(t *testing.T) {
 // issue at exactly its two filed labels -- no agent-failed, since there was
 // never an InProgress state for the gate to demote from (issue #4076).
 func TestSweep_PatchGateRedLeavesLedgerAndLabelsUnchanged(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2434,6 +2476,7 @@ func TestSweep_PatchGateRedLeavesLedgerAndLabelsUnchanged(t *testing.T) {
 // tracker transition an unclaimed issue does commit, since it reflects the
 // PR having landed rather than a claim being released (issue #4076).
 func TestSweep_PatchGateImmediateGreenMergesAndCompletes(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2473,6 +2516,7 @@ func TestSweep_PatchGateImmediateGreenMergesAndCompletes(t *testing.T) {
 // unclaimed finding issue's labels are left completely untouched -- there is
 // nothing for the gate to commit (issue #4076).
 func TestSweep_PatchGateManualAndAutoLeaveIssueUntouched(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		mode          string
 		wantAutoMerge bool
@@ -2532,6 +2576,7 @@ func TestSweep_PatchGateManualAndAutoLeaveIssueUntouched(t *testing.T) {
 // finding issue's labels are left untouched, the same as an ordinary
 // manual-mode green gate (issue #4076).
 func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}}
 
@@ -2591,6 +2636,7 @@ func captureSweepOutput(t *testing.T, r *Runner, fn func()) string {
 // exactly what promote would do with no Patch, logging the gate's own
 // reason as a patch-skipped status line.
 func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	var commitPatchCalls int
 	tree := fakeTree{head: "headsha", files: []string{"a.go"}, commitPatch: PatchCommit{Dir: "/repo", Ref: "refs/butler/patch"}, commitPatchCalls: &commitPatchCalls}
@@ -2674,6 +2720,7 @@ func patchableTopLevelDispatcher(path, diff string) *dispatch.Fake {
 // candidate does, and the settle log names the gate it failed. Runs over a
 // real GitTree/CommitPatch round trip, not fakeTree's scripted answer.
 func TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	bare, _ := newTreeBareRepo(t, "a.md")
 	advanceBranch(t, bare, "main", "a.md", "different content\n")
@@ -2719,6 +2766,7 @@ func TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough(t *testing.T) {
 // PR, over a real GitTree/CommitPatch round trip rather than fakeTree's
 // scripted answer.
 func TestSweep_PatchAppliesToScannedAndMovedBaseHeadLands(t *testing.T) {
+	t.Parallel()
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	bare, _ := newTreeBareRepo(t, "a.md", "other.md")
 	advanceBranch(t, bare, "main", "a.md", "old\n")
