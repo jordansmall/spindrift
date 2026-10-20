@@ -93,6 +93,7 @@ let
     // (import ./dashboard-constant-parity.nix common)
     // (import ./dashboard-js.nix common)
     // (import ./opencode-guards.nix common)
+    // (import ./opencode-formatter-lsp-pin.nix common)
     // (import ./opencode-session-schema.nix common)
     // (import ./doctor-report-routing.nix common)
     // (import ./agent-workflow-smoke.nix common)
