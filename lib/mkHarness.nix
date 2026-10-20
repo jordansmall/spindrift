@@ -916,7 +916,7 @@ let
 
   # internal/forge's own Go files without its backend subpackages (github,
   # forgejo, ...): the top level carries the shared verdict vocabulary
-  # (promptassembly, issue #4159). The backends the Bundle links come in
+  # (promptassembly, issue #4159). The backends only the Box links come in
   # through backendBundleFiles.
   forgeTopLevelFiles = lib.fileset.unions (
     lib.mapAttrsToList (n: _: ../cmd/launcher/internal/forge + "/${n}") (
@@ -930,7 +930,9 @@ let
   # internal/golden and internal/passmachine, which no in-box fileset carries,
   # and `go mod vendor` loads every package in the tree, not just subPackages.
   # Nothing in-box imports it (Driver packages call it from _test.go only).
-  # bundle/runners.go registers the runner families, which no Box constructs.
+  # bundle/runners.go registers the runner families, which no Box constructs;
+  # bundle/backends.go registers the backends, which only the Box looks up (the
+  # Box adds it back through backendBundleFiles).
   driverTreeFiles =
     lib.fileset.difference
       (lib.fileset.fileFilter (
@@ -940,36 +942,39 @@ let
         lib.fileset.unions [
           ../cmd/launcher/internal/driver/driverkit/conformance
           ../cmd/launcher/internal/driver/bundle/runners.go
+          ../cmd/launcher/internal/driver/bundle/backends.go
         ]
       );
 
-  # The Bundle in driverTreeFiles registers the Backend Strategies too (ADR
-  # 0068), so every fileset carrying it also needs the backend adapters and
-  # their internal import closure: `go mod vendor` loads every package in the
-  # tree. A backend edit therefore changes the in-box binaries' drvPaths.
+  # Only the Box links backend adapters: it calls backendkit.ByName at runtime
+  # for the clone URL, CLI setup and the recovery PR query (ADR 0068 decision
+  # 1). backendBundleFiles is bundle/backends.go, which driverTreeFiles drops,
+  # plus these adapters and their internal import closure (`go mod vendor`
+  # loads every package in the tree). orchestrator and driver-exec use no
+  # backend, so a backend edit leaves their drvPaths unchanged (issue #5738).
+  backendBundleDirs = [
+    "backendkit"
+    "flock"
+    "forge/bundlerelay"
+    "forge/forgejo"
+    "forge/git"
+    "forge/github"
+    "forge/gitplumbing"
+    "forge/jira"
+    "forge/local"
+    "forge/rest"
+    "gitexec"
+    "gitremote"
+    "seambundle"
+  ];
   backendBundleFiles = lib.fileset.unions (
-    map
-      (
-        d:
-        lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) (
-          ../cmd/launcher/internal + "/${d}"
-        )
+    [ ../cmd/launcher/internal/driver/bundle/backends.go ]
+    ++ map (
+      d:
+      lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) (
+        ../cmd/launcher/internal + "/${d}"
       )
-      [
-        "backendkit"
-        "flock"
-        "forge/bundlerelay"
-        "forge/forgejo"
-        "forge/git"
-        "forge/github"
-        "forge/gitplumbing"
-        "forge/jira"
-        "forge/local"
-        "forge/rest"
-        "gitexec"
-        "gitremote"
-        "seambundle"
-      ]
+    ) backendBundleDirs
   );
 
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
@@ -995,7 +1000,6 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/driver-exec)
         driverTreeFiles
-        backendBundleFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
@@ -1214,7 +1218,6 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/orchestrator)
         driverTreeFiles
-        backendBundleFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
@@ -2090,6 +2093,7 @@ else
         driverPreambleFile
         agentPathsPreambleFile
         runInputDocumentFile
+        backendBundleDirs
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;
