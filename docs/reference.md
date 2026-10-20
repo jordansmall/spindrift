@@ -1223,7 +1223,15 @@ What the Driver carries:
   opt-out drop, so an opted-out role is removed together with its effort. The
   default roster sets an effort on every role, so under pi each one renders
   with a model suffix. The review pass reads `reviewer.md`'s model with its
-  suffix, so pi applies the reviewer's effort from it.
+  suffix, so pi applies the reviewer's effort from it. A model that already
+  ends in one of those levels (`github-copilot/some-model:low`), including the
+  default model a role inherits, keeps its own suffix: the role's effort is
+  dropped and `reasoningEffort` follows the suffix (a role with no effort
+  renders no `reasoningEffort` line), so the level is never doubled. The
+  role's effort must still be a valid level. A trailing colon segment that is
+  not a level (`ollama/llama:8b`) is part of the model id and still takes the
+  effort suffix. The dispatch-time `REVIEW_MODEL` side of the same question
+  is #5625, which should keep the same rule: the suffix wins.
 - **Usage by role.** The decoder attributes each child's usage to the agent's
   role, read from the child's own messages; the extension's summed per-agent
   totals are ignored.
