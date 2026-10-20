@@ -466,6 +466,32 @@ let
     ) "checks-inbox must not contain ${kind} checks: ${concatStringsSep ", " leaked}";
     pkgs.runCommand drvName { } "touch $out";
 
+  # Scoped in-box gate (issue #581): the source-level checks joined into one
+  # derivation so it builds with a single `nix build .#checks-inbox` instead
+  # of enumerating names.
+  checks-inbox = pkgs.runCommand "checks-inbox" { } ''
+    ${pkgs.lib.concatMapStringsSep "\n" (p: ": ${p}") (builtins.attrValues checksInboxSet)}
+    touch $out
+  '';
+
+  # The set is also exposed as an attrset (issue #5862) so per-check builds can
+  # enumerate it. The aggregate's build script holds the drvPath of every check
+  # it depends on in its string context, so comparing that against the exposed
+  # set catches drift instead of restating the value both are built from.
+  checks-inbox-set = checksInboxSet;
+
+  checks-inbox-set-parity =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep subtractLists;
+      aggregated = builtins.attrNames (builtins.getContext checks-inbox.drvAttrs.buildCommand);
+      exposed = map (d: d.drvPath) (builtins.attrValues checks-inbox-set);
+      extra = subtractLists exposed aggregated;
+      missing = subtractLists aggregated exposed;
+    in
+    assert assertMsg (extra == [ ] && missing == [ ])
+      "checks-inbox differs from checks-inbox-set: aggregate-only [${concatStringsSep ", " extra}], set-only [${concatStringsSep ", " missing}]";
+    pkgs.runCommand "checks-inbox-set-parity" { } "touch $out";
+
   checks-inbox-excludes-image-checks = mkInboxExclusionGuard {
     drvName = "checks-inbox-excludes-image-checks";
     listName = "imageOnlyCheckNames";
@@ -488,19 +514,14 @@ in
       inherit
         checks-inbox-excludes-image-checks
         checks-inbox-excludes-eval-heavy-checks
+        checks-inbox-set-parity
         linux-only-check-names-exist
         checks-docs-covers-docs-readers
         ci-comment-readers-cover-checks
         ;
     };
 
-  # Scoped in-box gate (issue #581): the source-level checks joined into one
-  # derivation so it builds with a single `nix build .#checks-inbox` instead
-  # of enumerating names.
-  checks-inbox = pkgs.runCommand "checks-inbox" { } ''
-    ${pkgs.lib.concatMapStringsSep "\n" (p: ": ${p}") (builtins.attrValues checksInboxSet)}
-    touch $out
-  '';
+  inherit checks-inbox checks-inbox-set;
 
   # CI's docs-only lane (issue #5155): the checks whose modules read docs
   # files, plus the guards that keep that membership and the comment-only

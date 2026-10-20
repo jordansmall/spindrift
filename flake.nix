@@ -188,6 +188,10 @@
               inherit system;
             };
 
+            # The inbox checks as an attrset (issue #5862), outside `packages`
+            # because `nix flake check` requires derivations there.
+            legacyPackages.checks-inbox-set = checksResult.checks-inbox-set;
+
             packages = {
               # Scoped in-box gate (issue #581): the source-level checks only,
               # skipping the OCI-image realization the full `checks` set above
