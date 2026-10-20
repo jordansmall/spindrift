@@ -1981,6 +1981,9 @@ in
       !evaluates { prompt = defaultPrompt + "\n\${REVIEW_LOOP_INLINE_STEP}\n"; }
     ) "mkHarness.nix must throw when prompt references the removed \${REVIEW_LOOP_INLINE_STEP}";
     assert assertMsg (
+      !evaluates { prompt = defaultPrompt + "\n\${\${TDD_STEP}}\n"; }
+    ) "mkHarness.nix must throw when a removed var sits inside another brace pair, \${\${TDD_STEP}}";
+    assert assertMsg (
       !evaluates { fixPrompt = defaultFixPrompt + "\n\${TDD_STEP}\n"; }
     ) "mkHarness.nix must throw when fixPrompt references the removed \${TDD_STEP}";
     assert assertMsg (
@@ -2043,6 +2046,19 @@ in
       hasInfix "\${ISSUE_READ_GITHUB_STEP} in prompt arg prompt" warning
       && hasInfix "use \${ISSUE_READ_STEP}" warning
     ) "the warning must name the old var and the replacement \${ISSUE_READ_STEP}: ${warning}";
+    assert assertMsg (
+      (harness {
+        prompt =
+          defaultPrompt
+          + "\n\${ISSUE_READ_LOCAL_STEP} \${ISSUE_READ_GITHUB_STEP} \${ISSUE_READ_LOCAL_STEP}\n";
+      }).internals.deprecatedFragmentVarWarnings == [
+        (
+          "mkHarness: a prompt arg, fragment file or chore file references a deprecated fragment variable, slated for removal (see MIGRATING.md):\n"
+          + "  \${ISSUE_READ_GITHUB_STEP} in prompt arg prompt (deprecated in issue #5646); use \${ISSUE_READ_STEP} instead\n"
+          + "  \${ISSUE_READ_LOCAL_STEP} in prompt arg prompt (deprecated in issue #5646); use \${ISSUE_READ_STEP} instead"
+        )
+      ]
+    ) "repeated and out-of-order deprecated vars must warn once each, in name order";
     assert assertMsg (
       (harness { }).internals.deprecatedFragmentVarWarnings == [ ]
     ) "the default build must raise no deprecation warning";
