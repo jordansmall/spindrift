@@ -168,6 +168,16 @@ func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 	}
 }
 
+// BindHomes announces AnnounceBindingValue by reading the BindingEnvVar export,
+// so a row setting it without naming a var would announce nothing.
+func TestTable_AnnounceBindingValueRequiresBindingEnvVar(t *testing.T) {
+	for _, row := range Table {
+		if row.AnnounceBindingValue && row.BindingEnvVar == "" {
+			t.Errorf("row %q sets AnnounceBindingValue with an empty BindingEnvVar, want both set", row.Name)
+		}
+	}
+}
+
 // Table order is the export-file order, so the stub's export-less row must be
 // skipped without disturbing the rest.
 func TestEnvExportRows_FollowsTableOrder(t *testing.T) {

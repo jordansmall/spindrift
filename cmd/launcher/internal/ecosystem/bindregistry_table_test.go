@@ -198,7 +198,7 @@ func bindGoRowSummary(t *testing.T, route registrymanifest.Route) string {
 		Timeout:      bindregistry.ForwarderReadyTimeout,
 		PollInterval: bindregistry.ForwarderPollInterval,
 	})
-	if !bindregistry.BindHomes(out, []ecosystem.Row{goRow}, gate, nil) {
+	if !bindregistry.BindHomes(out, []ecosystem.Row{goRow}, gate, nil, os.Getenv) {
 		t.Fatalf("BindHomes failed (output=%q)", out.String())
 	}
 	return out.String()

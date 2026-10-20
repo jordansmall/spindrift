@@ -18,13 +18,13 @@ import (
 // must never do that. An absent manifest (registry proxy off) is silent, and
 // every failure path only warns.
 func WarnStaleLockfiles(w io.Writer, workDir string) {
-	WarnStaleLockfilesRows(w, workDir, ecosystem.Table)
+	WarnStaleLockfilesRows(w, workDir, ecosystem.Table, os.Getenv)
 }
 
 // WarnStaleLockfilesRows is WarnStaleLockfiles over the given rows, so a
 // synthetic row can prove the scan without ecosystem.Table.
-func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Row) {
-	if _, err := registrymanifest.Parse(os.Getenv(registrymanifest.EnvVar)); err != nil {
+func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Row, getenv func(string) string) {
+	if _, err := registrymanifest.Parse(getenv(registrymanifest.EnvVar)); err != nil {
 		if errors.Is(err, registrymanifest.ErrAbsent) {
 			return
 		}

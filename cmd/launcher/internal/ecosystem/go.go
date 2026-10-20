@@ -34,7 +34,8 @@ var goRow = Row{
 		})
 		return result.Exports, result.Warnings
 	},
-	BindingEnvVar: "GOPROXY",
+	BindingEnvVar:        "GOPROXY",
+	AnnounceBindingValue: true,
 }
 
 // GoBindingInput is the environment subset ComputeGoBindings reads. The caller
