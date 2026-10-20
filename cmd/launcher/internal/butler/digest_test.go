@@ -74,6 +74,7 @@ func (l *listCountingTracker) ListOpenIssues() ([]forge.Issue, error) {
 }
 
 func TestUnregisteredRecordsChoreErrorsNamingIt(t *testing.T) {
+	t.Parallel()
 	p := tuningPolicy(t.TempDir(), 1)
 	p.Chores = []chore.Chore{{Name: "undigested", Every: time.Hour, Records: true}}
 	r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })
@@ -87,6 +88,7 @@ func TestUnregisteredRecordsChoreErrorsNamingIt(t *testing.T) {
 }
 
 func TestRecordsSourceWithoutParsePriorSkipsBacklog(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 	p := tuningPolicy(root, 1)
@@ -113,6 +115,7 @@ func TestRecordsSourceWithoutParsePriorSkipsBacklog(t *testing.T) {
 // settled Records past the tip's cursor. A Chore with no catalog row names no
 // min-records knob, so one new Record is enough.
 func TestRecordsSourceDueCountsNewRecordsForAnyDigest(t *testing.T) {
+	t.Parallel()
 	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: time.Hour}
 	for _, tc := range []struct {
 		name     string
@@ -125,6 +128,7 @@ func TestRecordsSourceDueCountsNewRecordsForAnyDigest(t *testing.T) {
 		{"cursor at the latest Record", 3, 2, chore.TooFewRecords},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			ids := seedRecords(t, root, 1, tc.seeded, tuningNow.Add(-48*time.Hour))
 			p := tuningPolicy(root, 1)
@@ -149,6 +153,7 @@ func TestRecordsSourceDueCountsNewRecordsForAnyDigest(t *testing.T) {
 // the issues carry only the generic butler provenance label, no Chore-specific
 // finding label, so only the marker ties them to the Chore.
 func TestRecordsSourcePrepareFindsPriorFindingsByMarker(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 	p := tuningPolicy(root, 1)
@@ -181,6 +186,7 @@ func TestRecordsSourcePrepareFindsPriorFindingsByMarker(t *testing.T) {
 // findings on one site dedup on their own DedupTerms rather than
 // class:file:metric.
 func TestRecordsChoreWithoutValidateOrDedupTermsSettlesWithoutTuningRules(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 	p := tuningPolicy(root, 1)
@@ -221,6 +227,7 @@ func TestRecordsChoreWithoutValidateOrDedupTermsSettlesWithoutTuningRules(t *tes
 // The cite check belongs to the records adapter, not the Digest: a Digest with
 // no Validate still has an uncited or unknown-anchor finding dropped.
 func TestRecordsChoreWithNilValidateStillDropsBadCites(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
 	p := tuningPolicy(root, 1)
@@ -264,6 +271,7 @@ func TestRecordsChoreWithNilValidateStillDropsBadCites(t *testing.T) {
 // any records Chore, not only tuning: a synthetic Digest's finding closed before
 // now-cooldown no longer suppresses a re-filing, one closed after still does.
 func TestRecordsChoreNotPlannedCooldownExpiresItsOwnFindings(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		age  time.Duration
@@ -273,6 +281,7 @@ func TestRecordsChoreNotPlannedCooldownExpiresItsOwnFindings(t *testing.T) {
 		{"closed inside the cooldown", 24 * time.Hour, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 			p := tuningPolicy(root, 1)
@@ -353,6 +362,7 @@ func sweepOneCitedFinding(t *testing.T, name string) string {
 // A Digest's Evidence hook, not the butler, writes the block appended to a
 // filed finding, from the stored digest and the finding's cites.
 func TestRecordsChoreEvidenceHookOutputEndsFiledBody(t *testing.T) {
+	t.Parallel()
 	body := sweepOneCitedFinding(t, evidenceChore)
 	want := "host-evidence[digest|" + noPriorAnchor + "]"
 	if !strings.Contains(body, "\n\n"+want+"\n") {
@@ -361,6 +371,7 @@ func TestRecordsChoreEvidenceHookOutputEndsFiledBody(t *testing.T) {
 }
 
 func TestRecordsChoreWithNilEvidenceAppendsNothing(t *testing.T) {
+	t.Parallel()
 	body := sweepOneCitedFinding(t, noPriorChore)
 	if strings.Contains(body, "host-evidence") || strings.Contains(body, "## Evidence") {
 		t.Errorf("body = %q, want no evidence block", body)
