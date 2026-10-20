@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\n  \"name\": \"widget\",\n  \"dist-tags\": {\"latest\": \"1.0.0\"},\n  \"versions\": {\n    \"1.0.0\": {\n      \"name\": \"widget\",\n      \"version\": \"1.0.0\",\n      \"dist\": {\n        \"tarball\": \"http://127.0.0.1:27182/registry-acme-test/widget/-/widget-1.0.0.tgz\",\n        \"integrity\": \"sha512-Y29ycHVzLXRlc3QtZmFrZS1pbnRlZ3JpdHktbm90LXJlYWw=\"\n      }\n    }\n  }\n}\n",
+    "request": "GET /registry-acme-test/widget",
+    "status": 200
+  }
+]

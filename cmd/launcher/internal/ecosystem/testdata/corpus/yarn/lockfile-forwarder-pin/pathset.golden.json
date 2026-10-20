@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "registry.acme.test",
+      "Origin": "https://registry.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "yarn",
+          "path": "/"
+        }
+      ],
+      "matchHost": "registry.acme.test",
+      "upstream": "https://registry.acme.test"
+    }
+  ]
+}

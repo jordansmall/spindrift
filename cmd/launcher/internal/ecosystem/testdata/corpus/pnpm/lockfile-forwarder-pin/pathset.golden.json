@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "registry.acme.test",
+      "Origin": "https://registry.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "pnpm",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "pnpm",
+          "path": "/"
+        }
+      ],
+      "matchHost": "registry.acme.test",
+      "upstream": "https://registry.acme.test"
+    }
+  ]
+}

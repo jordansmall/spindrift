@@ -1,0 +1,1 @@
+==> registry proxy Forwarder up on 127.0.0.1:27182 — yarn bound to it via YARN_NPM_REGISTRY_SERVER
