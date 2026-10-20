@@ -34,6 +34,7 @@ func usageCall(msgID, model string, in, out, cacheRead, cacheWrite int, cost flo
 }
 
 func TestParseLogStampedDriverReadsThePassLog(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	p := writeLog(t, "issue-42.log",
 		driverStamp(altDriver),
@@ -82,6 +83,7 @@ func TestParseLogStampedDriverReadsThePassLog(t *testing.T) {
 }
 
 func TestParseLogStampedDriverPassNamesItsModels(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-42.log", driverStamp(altDriver),
 		usageCall("m1", "gpt-5", 100, 50, 200, 20, 0.01),
 		usageCall("m2", "claude-sonnet-4", 200, 100, 300, 30, 0.02),
@@ -97,6 +99,7 @@ func TestParseLogStampedDriverPassNamesItsModels(t *testing.T) {
 }
 
 func TestParseLogUnregisteredDriverIsReported(t *testing.T) {
+	t.Parallel()
 	lines := append([]string{driverStamp("nope")}, workLog("2026-05-01T09:00:00Z", 1)...)
 	p := writeLog(t, "issue-42.log", lines...)
 	if _, _, err := ParseLog(p); err == nil || !strings.Contains(err.Error(), "nope") {
@@ -116,6 +119,7 @@ func TestParseLogUnregisteredDriverIsReported(t *testing.T) {
 }
 
 func TestParseLogEmptyDriverStampReadsAsClaude(t *testing.T) {
+	t.Parallel()
 	lines := append([]string{driverStamp("")}, workLog("2026-05-01T09:00:00Z", 1.5)...)
 	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...))
 	if err != nil {
@@ -127,6 +131,7 @@ func TestParseLogEmptyDriverStampReadsAsClaude(t *testing.T) {
 }
 
 func TestParseLogStampNotFirstTypedLineIsReported(t *testing.T) {
+	t.Parallel()
 	// A typed JSON line that is not an event precedes the stamp, so ReadStamp
 	// cannot see it and would pick the default Driver for a log stamped with another.
 	p := writeLog(t, "issue-42.log", `{"type":"unknown"}`+"\n", driverStamp(altDriver), usageCall("m1", "gpt-5", 1, 1, 1, 1, 0))
@@ -136,6 +141,7 @@ func TestParseLogStampNotFirstTypedLineIsReported(t *testing.T) {
 }
 
 func TestParseLogUntimestampedTypedLineBeforeClaudeStampStillStamped(t *testing.T) {
+	t.Parallel()
 	// ReadStamp cannot see past the typed line, but the loop accepts the stamp;
 	// both read it in the claude grammar, so the log ingests as stamped.
 	lines := append([]string{`{"type":"system"}` + "\n", driverStamp("claude")}, workLog("2026-05-01T09:00:00Z", 1)...)

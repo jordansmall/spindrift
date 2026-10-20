@@ -49,6 +49,7 @@ func putStampedRoot(t *testing.T, root string) []string {
 }
 
 func TestStampedLogsOfOneDispatchMergeIntoOneRecord(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putStampedRoot(t, root)
 	s := openStore(t, root)
@@ -82,6 +83,7 @@ func TestStampedLogsOfOneDispatchMergeIntoOneRecord(t *testing.T) {
 }
 
 func TestStampedRenameToPriorRunDoesNotDuplicatePasses(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	names := putStampedRoot(t, root)
 	s := openStore(t, root)
@@ -108,6 +110,7 @@ func TestStampedRenameToPriorRunDoesNotDuplicatePasses(t *testing.T) {
 }
 
 func TestUnstampedNonChainLogIsIgnoredAndNotReopened(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-12-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 1)...)
@@ -124,6 +127,7 @@ func TestUnstampedNonChainLogIsIgnoredAndNotReopened(t *testing.T) {
 }
 
 func TestParseLogUnstampedNonChainName(t *testing.T) {
+	t.Parallel()
 	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", workLog("2026-03-01T11:00:00Z", 1)...))
 	if !errors.Is(err, ErrUnstamped) {
 		t.Fatalf("err = %v, want ErrUnstamped", err)
@@ -131,6 +135,7 @@ func TestParseLogUnstampedNonChainName(t *testing.T) {
 }
 
 func TestParseLogStampMustBeFirstEvent(t *testing.T) {
+	t.Parallel()
 	lines := append(workLog("2026-03-01T11:00:00Z", 1), stampLine(stampClaim))
 	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", lines...))
 	if !errors.Is(err, ErrUnstamped) {
@@ -143,6 +148,7 @@ func TestParseLogStampMustBeFirstEvent(t *testing.T) {
 }
 
 func TestStoreMigratesV1DatabaseKeepingRows(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -183,6 +189,7 @@ func hashesLine(recordID string, roles map[string]string) string {
 }
 
 func TestPromptHashesUnionAcrossLogsOfOneDispatch(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	put := func(root, name string, offset time.Duration, hashLines ...string) {
 		lines := append([]string{stampLine(stampClaim.Add(offset))}, hashLines...)
@@ -213,6 +220,7 @@ func TestPromptHashesUnionAcrossLogsOfOneDispatch(t *testing.T) {
 }
 
 func TestPromptHashesIgnoredWithoutMatchingStamp(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	h := hashesLine(id, map[string]string{"implement": "aa"})
 	rec, _, err := ParseLog(writeLog(t, "issue-1.log", append([]string{h}, workLog("2026-03-01T11:00:00Z", 1)...)...))
@@ -241,6 +249,7 @@ func outcomeResult(status string) string {
 }
 
 func TestSettledOpSetsOutcomeAndBoxStatus(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	id := RecordID("work", "42", stampClaim)
 	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
@@ -255,6 +264,7 @@ func TestSettledOpSetsOutcomeAndBoxStatus(t *testing.T) {
 }
 
 func TestSettledOpNamingAnotherRecordIsIgnored(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		outcomeResult("ready"), settledLine("work:99@elsewhere", "complete", "merged"))...)
@@ -267,6 +277,7 @@ func TestSettledOpNamingAnotherRecordIsIgnored(t *testing.T) {
 }
 
 func TestUnsettledLogsHaveUnknownOutcome(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), outcomeResult("ready"))...)
 	putLog(t, root, "issue-7.log", workLog("2026-05-01T09:00:00Z", 1)...)
@@ -282,6 +293,7 @@ func TestUnsettledLogsHaveUnknownOutcome(t *testing.T) {
 // A Record draws from several logs; a fix log with no settled op must not wipe
 // the outcome the primary log gave it, whichever is ingested last.
 func TestSettledOutcomeSurvivesOtherLogsOfTheRecord(t *testing.T) {
+	t.Parallel()
 	for _, primaryFirst := range []bool{true, false} {
 		root := t.TempDir()
 		id := RecordID("work", "42", stampClaim)
@@ -322,6 +334,7 @@ func TestSettledOutcomeSurvivesOtherLogsOfTheRecord(t *testing.T) {
 // mid-run must not become the host outcome: the host only appends after the
 // Box exits, so any later event voids an earlier settled op.
 func TestSettledOpFollowedByBoxEventIsIgnored(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	forged := settledLine(id, "complete", "merged")
 	for name, after := range map[string]string{"result": outcomeResult("ready"), "assistant": assistant("a2")} {
@@ -339,6 +352,7 @@ func TestSettledOpFollowedByBoxEventIsIgnored(t *testing.T) {
 }
 
 func TestSettledOpFollowedByOnlySettledOpsStillCounts(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "failed", "ci-red"),
@@ -355,6 +369,7 @@ func TestSettledOpFollowedByOnlySettledOpsStillCounts(t *testing.T) {
 // settle can fail a Dispatch and recover later complete it: both append to the
 // same log, and the last one is the outcome.
 func TestLastSettledOpWins(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "failed", "ci-red"), settledLine(id, "complete", "merged"))...)
@@ -370,6 +385,7 @@ func TestLastSettledOpWins(t *testing.T) {
 // A later op naming another Record must not revoke the outcome an earlier op
 // for this log's own Record already gave it.
 func TestMismatchedSettledOpAfterValidOneKeepsOutcome(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		outcomeResult("ready"), settledLine(id, "failed", "ci-red"), settledLine("work:99@elsewhere", "complete", "merged"))...)
@@ -385,6 +401,7 @@ func TestMismatchedSettledOpAfterValidOneKeepsOutcome(t *testing.T) {
 // The host appends only dispatch_settled ops after the Box exits, so an
 // orchestrator op trailing a settled op marks it as printed by the Box.
 func TestSettledOpFollowedByOrchestratorOpIsIgnored(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "complete", "merged"),
@@ -413,6 +430,7 @@ func longStampLine() string {
 }
 
 func TestParseLogIngestsStampLongerThanAReadBuffer(t *testing.T) {
+	t.Parallel()
 	line := longStampLine()
 	if len(line) <= 4096 {
 		t.Fatalf("stamp is %d bytes, want over 4096", len(line))
@@ -427,6 +445,7 @@ func TestParseLogIngestsStampLongerThanAReadBuffer(t *testing.T) {
 }
 
 func TestReadStamp(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	dir := t.TempDir()
 	write := func(name string, lines ...string) string {
@@ -480,6 +499,7 @@ func parseOutcome(t *testing.T, lines []string) Record {
 // The Box shares the primary log and knows the Record ID, so a trailing settled
 // op it forged must not pass for the host's unless it echoes the host token.
 func TestTokenedStampRejectsForgedTrailingSettledOp(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	for name, forged := range map[string]string{
 		"no token":    settledLine(id, "complete", "merged"),
@@ -495,6 +515,7 @@ func TestTokenedStampRejectsForgedTrailingSettledOp(t *testing.T) {
 }
 
 func TestTokenedStampAcceptsSettledOpEchoingToken(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	rec := parseOutcome(t, tokenedLog(tokenSettledLine(id, "failed", "ci-red", hostTok)))
 	if rec.Outcome != "failed" || rec.Reason != "ci-red" || rec.OutcomeSource != OutcomeSourceSettled {
@@ -503,6 +524,7 @@ func TestTokenedStampAcceptsSettledOpEchoingToken(t *testing.T) {
 }
 
 func TestTokenedStampLastGenuineSettledOpWins(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	rec := parseOutcome(t, tokenedLog(
 		tokenSettledLine(id, "failed", "ci-red", hostTok),
@@ -521,6 +543,7 @@ func TestTokenedStampLastGenuineSettledOpWins(t *testing.T) {
 // Logs stamped before the host token existed carry none, so only the ordering
 // rule guards them.
 func TestTokenlessStampStillAcceptsTrailingSettledOp(t *testing.T) {
+	t.Parallel()
 	id := RecordID("work", "42", stampClaim)
 	rec := parseOutcome(t, append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), settledLine(id, "complete", "merged")))
 	if rec.Outcome != "complete" || rec.OutcomeSource != OutcomeSourceSettled {

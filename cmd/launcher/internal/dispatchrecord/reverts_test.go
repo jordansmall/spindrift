@@ -114,6 +114,7 @@ func wantUnfilled(t *testing.T, r Record) {
 }
 
 func TestMergeCommitIsStoredFromSettledOp(t *testing.T) {
+	t.Parallel()
 	_, merge := newMergedRepo(t)
 	if r := onlyRecord(t, mergeRecordStore(t, merge)); r.MergeCommit != merge {
 		t.Fatalf("merge commit = %q, want %q", r.MergeCommit, merge)
@@ -121,6 +122,7 @@ func TestMergeCommitIsStoredFromSettledOp(t *testing.T) {
 }
 
 func TestFillMaturityLeavesImmatureRecordUnfilled(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(15*24*time.Hour), "b.txt", "b\n", "later")
 	s := mergeRecordStore(t, merge)
@@ -128,6 +130,7 @@ func TestFillMaturityLeavesImmatureRecordUnfilled(t *testing.T) {
 }
 
 func TestFillMaturityMarksUntouchedMergeNotReverted(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(2*24*time.Hour), "b.txt", "b\n", "unrelated")
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
@@ -136,6 +139,7 @@ func TestFillMaturityMarksUntouchedMergeNotReverted(t *testing.T) {
 }
 
 func TestFillMaturityFindsRevertTrailer(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	at := mergedAt.Add(24 * time.Hour)
 	g.git(at, "revert", "--no-edit", "-m", "1", merge)
@@ -145,6 +149,7 @@ func TestFillMaturityFindsRevertTrailer(t *testing.T) {
 }
 
 func TestFillMaturityFindsInverseDiffWithoutTrailer(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	at := mergedAt.Add(24 * time.Hour)
 	g.git(at, "rm", "-q", "f.txt")
@@ -155,6 +160,7 @@ func TestFillMaturityFindsInverseDiffWithoutTrailer(t *testing.T) {
 }
 
 func TestFillMaturityIgnoresPartialInverse(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(24*time.Hour), "f.txt", "feature, edited\n", "edit the feature")
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
@@ -163,6 +169,7 @@ func TestFillMaturityIgnoresPartialInverse(t *testing.T) {
 }
 
 func TestFillMaturityIgnoresRevertAfterTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
 	g.git(mergedAt.Add(RevertWindow+2*time.Hour), "revert", "--no-edit", "-m", "1", merge)
@@ -171,6 +178,7 @@ func TestFillMaturityIgnoresRevertAfterTheWindow(t *testing.T) {
 }
 
 func TestFillMaturitySkipsMergeCommitUnknownToClone(t *testing.T) {
+	t.Parallel()
 	g, _ := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
 	s := mergeRecordStore(t, strings.Repeat("ab", 20))
@@ -178,6 +186,7 @@ func TestFillMaturitySkipsMergeCommitUnknownToClone(t *testing.T) {
 }
 
 func TestFillMaturitySkipsMergeCommitOffTheBaseBranch(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.git(mergedAt, "checkout", "-q", "-b", "other", merge+"~1")
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip on a branch without the merge")
@@ -186,6 +195,7 @@ func TestFillMaturitySkipsMergeCommitOffTheBaseBranch(t *testing.T) {
 }
 
 func TestFillMaturitySkipsStaleCloneWhoseTipPredatesTheWindow(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(24*time.Hour), "b.txt", "b\n", "last commit the clone has")
 	s := mergeRecordStore(t, merge)
@@ -193,12 +203,14 @@ func TestFillMaturitySkipsStaleCloneWhoseTipPredatesTheWindow(t *testing.T) {
 }
 
 func TestFillMaturityRejectsNonSHAMergeCommit(t *testing.T) {
+	t.Parallel()
 	g, _ := newMergedRepo(t)
 	s := mergeRecordStore(t, "--output=/tmp/x")
 	wantUnfilled(t, fill(t, s, g, mergedAt.Add(RevertWindow+24*time.Hour)))
 }
 
 func TestFillMaturityKeepsAnswerOnceFilled(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
 	s := mergeRecordStore(t, merge)
@@ -209,6 +221,7 @@ func TestFillMaturityKeepsAnswerOnceFilled(t *testing.T) {
 }
 
 func TestFilledRevertsSurviveReingest(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
 	s := mergeRecordStore(t, merge)
@@ -225,6 +238,7 @@ func TestFilledRevertsSurviveReingest(t *testing.T) {
 }
 
 func TestFillMaturityWithNothingPendingNeedsNoRepo(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	putLog(t, root, "issue-7.log", workLog("2026-05-01T09:00:00Z", 1)...)
 	s := openStore(t, root)
@@ -235,6 +249,7 @@ func TestFillMaturityWithNothingPendingNeedsNoRepo(t *testing.T) {
 }
 
 func TestFillMaturityErrorsOnANonRepo(t *testing.T) {
+	t.Parallel()
 	_, merge := newMergedRepo(t)
 	s := mergeRecordStore(t, merge)
 	if err := s.FillMaturity(t.TempDir(), mergedAt.Add(RevertWindow)); err == nil {
@@ -243,6 +258,7 @@ func TestFillMaturityErrorsOnANonRepo(t *testing.T) {
 }
 
 func TestRecordJSONShowsRevertFieldsOnlyWhenFilled(t *testing.T) {
+	t.Parallel()
 	enc := func(r Record) string {
 		b, err := json.Marshal(r)
 		if err != nil {
@@ -263,6 +279,7 @@ func TestRecordJSONShowsRevertFieldsOnlyWhenFilled(t *testing.T) {
 }
 
 func TestStoreMigratesV7DatabaseAddingRevertColumns(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -291,6 +308,7 @@ func TestStoreMigratesV7DatabaseAddingRevertColumns(t *testing.T) {
 // The trailer alone counts: a revert whose conflict resolution changed the
 // patch no longer matches the inverse diff.
 func TestFillMaturityFindsTrailerOnACommitWithADifferentPatch(t *testing.T) {
+	t.Parallel()
 	g, merge := newMergedRepo(t)
 	g.commitFile(mergedAt.Add(24*time.Hour), "other.txt", "x\n", "Revert feature\n\nThis reverts commit "+merge+".")
 	g.commitFile(mergedAt.Add(RevertWindow+time.Hour), "c.txt", "c\n", "tip")
@@ -301,6 +319,7 @@ func TestFillMaturityFindsTrailerOnACommitWithADifferentPatch(t *testing.T) {
 // patch-id ignores whitespace by default; a later gofmt-style retab of the
 // lines the merge reindented is not an undo of the merge.
 func TestFillMaturityIgnoresWhitespaceOnlyChangeThatPatchIDWouldMatch(t *testing.T) {
+	t.Parallel()
 	g := gitRepo{t: t, dir: t.TempDir()}
 	g.git(mergedAt, "init", "-q", "-b", "main")
 	g.commitFile(mergedAt.Add(-48*time.Hour), "a.go", "func f() {\nfoo()\n}\n", "base")
@@ -318,6 +337,7 @@ func TestFillMaturityIgnoresWhitespaceOnlyChangeThatPatchIDWouldMatch(t *testing
 // At a shallow clone's boundary the merge's parent is missing, so the clone
 // cannot say whether a hand-made inverse exists.
 func TestFillMaturityLeavesRecordUnfilledWhenFirstParentIsMissing(t *testing.T) {
+	t.Parallel()
 	g := gitRepo{t: t, dir: t.TempDir()}
 	g.git(mergedAt, "init", "-q", "-b", "main")
 	g.commitFile(mergedAt.Add(-48*time.Hour), "a.txt", "a\n", "base")
@@ -340,6 +360,7 @@ func TestFillMaturityLeavesRecordUnfilledWhenFirstParentIsMissing(t *testing.T) 
 }
 
 func TestRunGitErrorCarriesStderrAndStillUnwrapsToExitError(t *testing.T) {
+	t.Parallel()
 	_, err := runGit(t.TempDir(), "", "rev-parse", "--git-dir")
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) {
@@ -354,6 +375,7 @@ func TestRunGitErrorCarriesStderrAndStillUnwrapsToExitError(t *testing.T) {
 
 // One Record's broken history must not stop the pass for the Records after it.
 func TestFillMaturityFillsOtherRecordsWhenOneCheckErrors(t *testing.T) {
+	t.Parallel()
 	g, broken := newMergedRepo(t)
 	g.git(mergedAt, "checkout", "-q", "-b", "feature2")
 	g.commitFile(mergedAt.Add(time.Minute), "g.txt", "second\n", "second feature")

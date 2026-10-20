@@ -28,6 +28,7 @@ func agentsLog() []string {
 }
 
 func TestParseLogPassAgentsBreakDownEachPass(t *testing.T) {
+	t.Parallel()
 	rec, _, err := ParseLog(writeLog(t, "issue-42.log", agentsLog()...))
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +66,7 @@ func TestParseLogPassAgentsBreakDownEachPass(t *testing.T) {
 }
 
 func TestParseLogPassWithoutUsageHasNoAgents(t *testing.T) {
+	t.Parallel()
 	rec, _, err := ParseLog(writeLog(t, "issue-42.log", driverStamp(altDriver),
 		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}), outcomeResult("ready")))
 	if err != nil {
@@ -76,6 +78,7 @@ func TestParseLogPassWithoutUsageHasNoAgents(t *testing.T) {
 }
 
 func TestStoreRoundTripsPassAgentsAndReupsertReplacesThem(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-42.log", agentsLog()...)
 	rec, _, err := ParseLog(p)
@@ -116,6 +119,7 @@ func TestStoreRoundTripsPassAgentsAndReupsertReplacesThem(t *testing.T) {
 }
 
 func TestStoreMigratesV11DatabaseGainsPassAgents(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p := putLog(t, root, "issue-42.log", agentsLog()...)
 	rec, _, err := ParseLog(p)

@@ -43,6 +43,7 @@ func writeLog(t *testing.T, name string, lines ...string) string {
 }
 
 func TestParseLog(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		file     string
@@ -166,6 +167,7 @@ func TestParseLog(t *testing.T) {
 }
 
 func TestParseLogCrashFallsBackToMtime(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	mtime := time.Date(2026, 10, 7, 9, 8, 7, 654_000_000, time.FixedZone("x", 3600))
 	if err := os.Chtimes(p, mtime, mtime); err != nil {
@@ -187,6 +189,7 @@ func TestParseLogCrashFallsBackToMtime(t *testing.T) {
 }
 
 func TestParseLogDeterministicID(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-3.log", result("2026-10-07T12:00:00.123Z", 1, 1, 1, 1, "m"))
 	a, _, err := ParseLog(p)
 	if err != nil {
@@ -205,18 +208,21 @@ func TestParseLogDeterministicID(t *testing.T) {
 }
 
 func TestParseLogMissingFile(t *testing.T) {
+	t.Parallel()
 	if _, _, err := ParseLog(filepath.Join(t.TempDir(), "issue-1.log")); err == nil {
 		t.Fatal("want error for missing file")
 	}
 }
 
 func TestParseLogRejectsNonChainName(t *testing.T) {
+	t.Parallel()
 	if _, _, err := ParseLog(writeLog(t, "issue-1-fix-2.log")); err == nil {
 		t.Fatal("want error for fix log name")
 	}
 }
 
 func TestChainKey(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		key       string
@@ -248,6 +254,7 @@ func TestChainKey(t *testing.T) {
 }
 
 func TestParseLogPassOrdinalsStrictlyIncrease(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-7.log",
 		result("2026-10-07T12:00:00Z", 1, 1, 10, 5, "opus"),
 		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
@@ -267,6 +274,7 @@ func TestParseLogPassOrdinalsStrictlyIncrease(t *testing.T) {
 }
 
 func TestParseLogTimestampedClaimIsNotProvisional(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-3.log", result("2026-10-07T12:00:00.123Z", 1, 1, 1, 1, "m"))
 	_, provisional, err := ParseLog(p)
 	if err != nil {
@@ -278,6 +286,7 @@ func TestParseLogTimestampedClaimIsNotProvisional(t *testing.T) {
 }
 
 func TestParseLogEventFreeLog(t *testing.T) {
+	t.Parallel()
 	for name, lines := range map[string][]string{
 		"empty":      nil,
 		"whitespace": {" \n", "\n", "\t\n"},
@@ -291,6 +300,7 @@ func TestParseLogEventFreeLog(t *testing.T) {
 }
 
 func TestChoreKeyedKindFollowsDescriptor(t *testing.T) {
+	t.Parallel()
 	if got := choreKeyedKind(); got != dispatchkind.Butler.Name {
 		t.Fatalf("choreKeyedKind = %q, want %q", got, dispatchkind.Butler.Name)
 	}
@@ -317,6 +327,7 @@ func toolResult(toolID string, isError bool) string {
 }
 
 func TestParseLogReviewEvidence(t *testing.T) {
+	t.Parallel()
 	const ts = "2026-10-07T12:00:00Z"
 	write := func(id, path, content string) string {
 		return assistantTool(id, "Write", map[string]string{"file_path": path, "content": content}) + toolResult(id, false)
@@ -359,6 +370,7 @@ func TestParseLogReviewEvidence(t *testing.T) {
 }
 
 func TestParseLogDispositionsNeedASuccessfulWrite(t *testing.T) {
+	t.Parallel()
 	w := func(id, content string) string {
 		return assistantTool(id, "Write", map[string]string{"file_path": passmachine.DispositionsPath, "content": content})
 	}
@@ -395,6 +407,7 @@ func outcomeLine(status string, extra ...string) string {
 }
 
 func TestParseLogKindFromOutcomeStatus(t *testing.T) {
+	t.Parallel()
 	start := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
 	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
 	roleless := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
@@ -440,6 +453,7 @@ func TestParseLogKindFromOutcomeStatus(t *testing.T) {
 // A custom RESEARCH_VERDICTS set can reuse a work-unique status; the research
 // announce must still win.
 func TestParseLogAnnounceBeatsWorkUniqueStatus(t *testing.T) {
+	t.Parallel()
 	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
 	researching := "==> claude researching issue #42\n"
 	tests := []struct {
@@ -463,6 +477,7 @@ func TestParseLogAnnounceBeatsWorkUniqueStatus(t *testing.T) {
 }
 
 func TestParseLogChoreKeyBeatsOutcomeStatus(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-"+dispatchkey.ChorePrefix+"x.log", result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m"), outcomeLine("recommend"))
 	rec, _, err := ParseLog(p)
 	if err != nil {
@@ -474,6 +489,7 @@ func TestParseLogChoreKeyBeatsOutcomeStatus(t *testing.T) {
 }
 
 func TestParseLogPlainTextLogYieldsZeroCostRecord(t *testing.T) {
+	t.Parallel()
 	p := writeLog(t, "issue-9.log", "box: starting\n", "\n", "error: image pull failed\n")
 	mtime := time.Date(2026, 10, 7, 9, 8, 7, 0, time.UTC)
 	if err := os.Chtimes(p, mtime, mtime); err != nil {
@@ -489,6 +505,7 @@ func TestParseLogPlainTextLogYieldsZeroCostRecord(t *testing.T) {
 }
 
 func TestStatusKind(t *testing.T) {
+	t.Parallel()
 	for status, want := range map[string]string{
 		"ready":            dispatchkind.Work.Name,
 		"already-resolved": dispatchkind.Work.Name,
