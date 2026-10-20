@@ -2,7 +2,9 @@
 # Driver sends a role's effort as a `<model>:<level>` suffix on its model, so
 # an effort with no model to ride on would be dropped silently, and a level the
 # Driver does not know is sent through as part of the model id (ADR 0009
-# amendment). Pure so a check can read the message that a `throw` inside
+# amendment). A model that already ends in a known `:<level>` keeps it and the
+# role's effort (still validated) is dropped, so the suffix is never doubled
+# (issue #5811). Pure so a check can read the message that a `throw` inside
 # mkHarness would hide from builtins.tryEval.
 { lib }:
 let
@@ -20,6 +22,9 @@ let
       let
         effort = e.effort or "";
         model = if (e.model or "") != "" then e.model else coordinatorModel;
+        suffixMatch = builtins.match "(.*):([^:]*)" model;
+        baseModel = if suffixMatch == null then null else builtins.head suffixMatch;
+        ownLevel = if suffixMatch == null then null else builtins.elemAt suffixMatch 1;
       in
       if effort == "" then
         e
@@ -27,6 +32,12 @@ let
         throw (message.noModel e.name effort)
       else if !(lib.elem effort levels) then
         throw (message.badLevel e.name effort levels)
+      else if ownLevel != null && lib.elem ownLevel levels then
+        e
+        // {
+          model = baseModel;
+          effort = ownLevel;
+        }
       else
         e // { inherit model; }
     ) roster;
