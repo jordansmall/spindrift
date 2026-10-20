@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
@@ -394,12 +395,37 @@ func TestRunContinuousDispatch_StoreClosureNonConvergingSwap_HaltsHostTainted(t 
 	}
 }
 
-// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotsGenerationBeforeBinding
-// pins slice 2's fix for issue #2682's blocking bug: under a nixInBox Consumer
-// (c.nixConfigFile set), a successful hot-swap must call snapshotGeneration
-// with the swap's own pwd and closure before binding the generation, or every
-// later Box launch fails bwrapAdapter.Run's "no longer exists" stat guard.
-func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotsGenerationBeforeBinding(t *testing.T) {
+// nixInBoxSwapResult is what runNixInBoxSwap observed.
+type nixInBoxSwapResult struct {
+	err    error
+	f      *dispatch.Factory
+	fr     *runner.Fake
+	stdout string
+	stderr string
+	stale  string // the swap's target closure (res.TipTag)
+	dir    string
+}
+
+// strategyWithHook answers lookupRunnerStrategy with a bare Strategy carrying
+// only hook as its PrepareHotSwap, the one field hot-swap reads.
+func strategyWithHook(hook func(pwd, closure string) error) func(string) (runner.Strategy, error) {
+	return func(string) (runner.Strategy, error) {
+		return runner.Strategy{PrepareHotSwap: hook}, nil
+	}
+}
+
+// runNixInBoxSwap drives one continuous dispatch whose Box-only-stale probe
+// hot-swaps a store-closure, with nixInBox (c.nixConfigFile set) on or off and
+// lookup answering the runner family.
+func runNixInBoxSwap(t *testing.T, nixInBox bool, lookup func(string) (runner.Strategy, error)) nixInBoxSwapResult {
+	t.Helper()
+	return runNixInBoxSwapTo(t, nixInBox, lookup, false)
+}
+
+// runNixInBoxSwapTo is runNixInBoxSwap with emptyTipTag making the image eval
+// yield an empty out-path, the one non-store tip tag Probe can hand back.
+func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.Strategy, error), emptyTipTag bool) nixInBoxSwapResult {
+	t.Helper()
 	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
 	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct from loadedHash
 
@@ -414,55 +440,68 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotsGenerationBefor
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
+	if nixInBox {
+		c.nixConfigFile = "/fake/nix.conf"
+	}
 	// flakeLauncherAttr is configured and genuinely fresh. See
 	// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling
 	// for why the swap branch requires it.
 	c.flakeLauncherAttr = ".#launcher-currency"
 	c.loadedLauncherHash = staleHash
 
+	orig := lookupRunnerStrategy
+	t.Cleanup(func() { lookupRunnerStrategy = orig })
+	lookupRunnerStrategy = lookup
+
 	dir, _ := newStaleProbeRepo(t)
 
 	it := forge.NewFake(testDispatchLabels)
+	// A dispatchable issue is present so a swap that wrongly binds would reach
+	// dispatch, making "zero RunCalls" meaningful rather than vacuous.
 	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	cf := it
 
 	fr := runner.NewFake()
 	f := testFactory(t, dir, fr)
-	s := settle.NewFake()
-	lp := fakeLiveness{}
-
 	staleOutPath := "/nix/store/" + staleHash + "-agent-closure"
 	staleEval := &freshness.Fake{OutPath: staleOutPath}
-	realizeFake := freshness.NewRealizerFake()
-
-	origSnapshot := snapshotGeneration
-	t.Cleanup(func() { snapshotGeneration = origSnapshot })
-	var calls []struct{ pwd, closure string }
-	snapshotGeneration = func(pwd, closure string) error {
-		calls = append(calls, struct{ pwd, closure string }{pwd, closure})
-		return nil
+	if emptyTipTag {
+		staleEval.OutPathForAttr = map[string]string{"packages.x86_64-linux.agent-closure": ""}
 	}
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
-	if err != nil {
-		t.Fatalf("runContinuousDispatch = %v, want nil", err)
+	var stdout, stderr bytes.Buffer
+	err := runContinuousDispatch(c, it, it, dir, f, settle.NewFake(), staleEval, freshness.NewRealizerFake(), fakeLiveness{}, &stdout, &stderr)
+	return nixInBoxSwapResult{err: err, f: f, fr: fr, stdout: stdout.String(), stderr: stderr.String(), stale: staleOutPath, dir: dir}
+}
+
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PreparesClosureBeforeBinding
+// pins slice 2's fix for issue #2682's blocking bug: under a nixInBox Consumer
+// a successful hot-swap must call the selected family's PrepareHotSwap with the
+// swap's own pwd and closure before binding the generation, or every later Box
+// launch fails bwrapAdapter.Run's "no longer exists" stat guard.
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PreparesClosureBeforeBinding(t *testing.T) {
+	var calls []struct{ pwd, closure string }
+	r := runNixInBoxSwap(t, true, strategyWithHook(func(pwd, closure string) error {
+		calls = append(calls, struct{ pwd, closure string }{pwd, closure})
+		return nil
+	}))
+	if r.err != nil {
+		t.Fatalf("runContinuousDispatch = %v, want nil", r.err)
 	}
 
 	if len(calls) != 1 {
-		t.Fatalf("snapshotGeneration calls = %v, want exactly one call", calls)
+		t.Fatalf("PrepareHotSwap calls = %v, want exactly one call", calls)
 	}
-	if calls[0].pwd != dir {
-		t.Errorf("snapshotGeneration pwd = %q, want %q", calls[0].pwd, dir)
+	if calls[0].pwd != r.dir {
+		t.Errorf("PrepareHotSwap pwd = %q, want %q", calls[0].pwd, r.dir)
 	}
-	if calls[0].closure != staleOutPath {
-		t.Errorf("snapshotGeneration closure = %q, want %q (res.TipTag)", calls[0].closure, staleOutPath)
+	if calls[0].closure != r.stale {
+		t.Errorf("PrepareHotSwap closure = %q, want %q (res.TipTag)", calls[0].closure, r.stale)
 	}
 
-	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
-		t.Fatalf("fr.RunCalls = %v, want exactly one Run call for issue #1 -- the swap must still dispatch once the snapshot succeeds", fr.RunCalls)
+	if len(r.fr.RunCalls) != 1 || r.fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("fr.RunCalls = %v, want exactly one Run call for issue #1 -- the swap must still dispatch once preparation succeeds", r.fr.RunCalls)
 	}
-	box := fr.RunCalls[0]
+	box := r.fr.RunCalls[0]
 	if box.ClosureGeneration == nil {
 		t.Fatalf("box.ClosureGeneration = nil, want the swapped generation bound onto the launched Box")
 	}
@@ -471,65 +510,109 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotsGenerationBefor
 	}
 }
 
-// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain
-// proves the snapshotGeneration seam's failure path mirrors RealizeSync's: a
-// failed snapshot must drain (exit 4) rather than bind a generation whose
-// snapshot dir does not exist, which would otherwise appear only as every
-// later Box launch's "no longer exists" stat-guard failure (issue #2682).
-func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_SnapshotGenerationFails_FallsBackToDrain(t *testing.T) {
-	const loadedHash = "11111111111111111111111111111111" // 32 chars, the loaded closure
-	const staleHash = "22222222222222222222222222222222"  // 32 chars, distinct
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_NilHook_SwapsWithoutPreparation
+// pins ADR 0069 decision 2: a family with no PrepareHotSwap needs no
+// preparation, so a nixInBox hot-swap binds the generation without one.
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_NilHook_SwapsWithoutPreparation(t *testing.T) {
+	r := runNixInBoxSwap(t, true, strategyWithHook(nil))
+	if r.err != nil {
+		t.Fatalf("runContinuousDispatch = %v, want nil", r.err)
+	}
+	if !strings.Contains(r.stdout, "hot-swap: swapped in agent") {
+		t.Errorf("stdout = %q, want the swapped-in message", r.stdout)
+	}
+	if len(r.fr.RunCalls) != 1 || r.fr.RunCalls[0].ClosureGeneration == nil {
+		t.Fatalf("fr.RunCalls = %v, want one Run call carrying the swapped generation", r.fr.RunCalls)
+	}
+}
 
-	c := baseConfig()
-	c.continuousDispatch = true
-	c.maxParallel = 1
-	c.runnerKind = runner.KindBwrap
-	c.boxArtifact = "store-closure"
-	c.baseBranch = "main"
-	c.label = "ready-for-agent"
-	c.issueTracker = "local"
-	c.codeForge = "local"
-	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
-	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	c.nixConfigFile = "/fake/nix.conf" // nixInBox on
-	// flakeLauncherAttr is configured and genuinely fresh. See
-	// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling
-	// for why the swap branch requires it.
-	c.flakeLauncherAttr = ".#launcher-currency"
-	c.loadedLauncherHash = staleHash
+// TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_SkipsPreparation pins
+// that the nixInBox gate stays in core: with it off, a family's hook is never
+// called.
+func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_SkipsPreparation(t *testing.T) {
+	called := false
+	r := runNixInBoxSwap(t, false, strategyWithHook(func(string, string) error {
+		called = true
+		return nil
+	}))
+	if r.err != nil {
+		t.Fatalf("runContinuousDispatch = %v, want nil", r.err)
+	}
+	if called {
+		t.Error("PrepareHotSwap was called with nixInBox off")
+	}
+	if len(r.fr.RunCalls) != 1 || r.fr.RunCalls[0].ClosureGeneration == nil {
+		t.Fatalf("fr.RunCalls = %v, want one Run call carrying the swapped generation", r.fr.RunCalls)
+	}
+}
 
-	dir, _ := newStaleProbeRepo(t)
-
-	it := forge.NewFake(testDispatchLabels)
-	// A dispatchable issue is present so a successful swap, the bug this test
-	// guards against, would reach dispatch. That makes "zero RunCalls" below a
-	// meaningful assertion rather than a vacuous one from an empty queue.
-	it.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
-	cf := it
-
-	fr := runner.NewFake()
-	f := testFactory(t, dir, fr)
-	s := settle.NewFake()
-	lp := fakeLiveness{}
-
-	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
-	realizeFake := freshness.NewRealizerFake()
-
-	origSnapshot := snapshotGeneration
-	t.Cleanup(func() { snapshotGeneration = origSnapshot })
-	snapshotGeneration = func(pwd, closure string) error {
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PrepareFails_FallsBackToDrain
+// proves the hook's failure path mirrors RealizeSync's: a failed preparation
+// must drain (exit 4) rather than bind a generation whose snapshot dir does
+// not exist, which would otherwise appear only as every later Box launch's
+// "no longer exists" stat-guard failure (issue #2682).
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PrepareFails_FallsBackToDrain(t *testing.T) {
+	r := runNixInBoxSwap(t, true, strategyWithHook(func(string, string) error {
 		return errors.New("boom: vacuum into failed")
+	}))
+	if got := exitCodeFor(r.err); got != 4 {
+		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed PrepareHotSwap must fall back to the ordinary drain, not crash or hang", got)
 	}
+	if !strings.Contains(r.stderr, "snapshot generation failed, draining instead: boom: vacuum into failed") {
+		t.Errorf("stderr = %q, want the snapshot-failed drain message", r.stderr)
+	}
+	if got := r.f.AgentGeneration(); got != nil {
+		t.Errorf("f.AgentGeneration() = %+v, want nil -- a failed PrepareHotSwap must never bind a swapped generation", got)
+	}
+	if len(r.fr.RunCalls) != 0 {
+		t.Errorf("fr.RunCalls = %v, want 0 (no Box launches once the probe is stale)", r.fr.RunCalls)
+	}
+}
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
-	if got := exitCodeFor(err); got != 4 {
-		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed snapshotGeneration must fall back to the ordinary drain, not crash or hang", got)
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_UnknownFamily_FallsBackToDrain
+// pins that an unresolvable runner family drains rather than binding an
+// unprepared generation.
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_UnknownFamily_FallsBackToDrain(t *testing.T) {
+	r := runNixInBoxSwap(t, true, func(string) (runner.Strategy, error) {
+		return runner.Strategy{}, errors.New("no such family")
+	})
+	if got := exitCodeFor(r.err); got != 4 {
+		t.Fatalf("exitCodeFor(err) = %d, want 4", got)
 	}
-	if got := f.AgentGeneration(); got != nil {
-		t.Errorf("f.AgentGeneration() = %+v, want nil -- a failed snapshotGeneration must never bind a swapped generation", got)
+	if !strings.Contains(r.stderr, "runner family lookup failed, draining instead: no such family") {
+		t.Errorf("stderr = %q, want the family-lookup drain message", r.stderr)
 	}
-	if len(fr.RunCalls) != 0 {
-		t.Errorf("fr.RunCalls = %v, want 0 (no Box launches once the probe is stale)", fr.RunCalls)
+	if got := r.f.AgentGeneration(); got != nil {
+		t.Errorf("f.AgentGeneration() = %+v, want nil", got)
+	}
+	if len(r.fr.RunCalls) != 0 {
+		t.Errorf("fr.RunCalls = %v, want 0 (no Box launches once the probe is stale)", r.fr.RunCalls)
+	}
+}
+
+// TestRunContinuousDispatch_StoreClosureNixInBoxSwap_EmptyTipTag_SkipsPreparation
+// pins that the store-path rejection runs before the hook: an empty tip tag
+// drains without ever reaching the runner family's preparation.
+func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_EmptyTipTag_SkipsPreparation(t *testing.T) {
+	called := false
+	r := runNixInBoxSwapTo(t, true, strategyWithHook(func(string, string) error {
+		called = true
+		return nil
+	}), true)
+	if got := exitCodeFor(r.err); got != 4 {
+		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- an empty tip tag must drain", got)
+	}
+	if !strings.Contains(r.stderr, "is not a nix store path, draining instead") {
+		t.Errorf("stderr = %q, want the non-store-path drain message", r.stderr)
+	}
+	if called {
+		t.Error("PrepareHotSwap was called for a tip tag that is not a store path")
+	}
+	if got := r.f.AgentGeneration(); got != nil {
+		t.Errorf("f.AgentGeneration() = %+v, want nil", got)
+	}
+	if len(r.fr.RunCalls) != 0 {
+		t.Errorf("fr.RunCalls = %v, want 0 (no Box launches once the probe is stale)", r.fr.RunCalls)
 	}
 }
 

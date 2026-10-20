@@ -41,7 +41,6 @@ import (
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
-	"spindrift.dev/launcher/internal/runner/bwrap"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/stopsignal"
@@ -1242,15 +1241,8 @@ func checkNetworkModeRuntimeGate(c config) error {
 // exitCodeFor and bootstrapExitCode for the full mapping.
 var errQueueEmpty = errors.New("queue empty")
 
-// snapshotGeneration creates the nix-var store-DB snapshot generation a bwrap
-// hot-swap is about to bind (ADR 0043, issue #2682); nothing else writes one
-// for a hot-swapped closure. It is a package-level test seam, like exec.go's
-// ExecCommand, rather than a threaded parameter, so runContinuousDispatch's
-// many nixInBox-indifferent test call sites need not pass it.
-var snapshotGeneration = bwrap.SnapshotGeneration
-
-// installStopSignal is a package-level test seam, like snapshotGeneration
-// above, so tests drive waves.Config.Stop and waves.Config.Abort through
+// installStopSignal is a package-level test seam, like lookupRunnerStrategy,
+// so tests drive waves.Config.Stop and waves.Config.Abort through
 // fake channels, or spy on cmdConsole's channel-discarding hold, instead of
 // registering a real signal handler or sending a real SIGTERM/SIGINT to the
 // test binary (#3520, #3521, #3651).
@@ -1948,15 +1940,22 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 				fmt.Fprintf(stderr, "==> %s hot-swap: realized tip tag %q is not a nix store path, draining instead\n", art.Name, res.TipTag)
 				return drain()
 			}
-			// nixInBox Consumers need a real nix-var store-DB snapshot
-			// generation on disk before a Box can bind it, and nothing else
-			// writes one for a hot-swapped closure (ADR 0043). Draining beats
-			// binding a generation whose snapshot dir does not exist, which
-			// would otherwise surface as every later Box launch failing to stat.
+			// nixInBox Consumers need the runner family to prepare the
+			// realized closure, e.g. a nix-var store-DB snapshot generation a
+			// Box can bind (ADR 0043, ADR 0069). Draining beats
+			// binding an unprepared generation, which would otherwise surface
+			// as every later Box launch failing to stat.
 			if c.nixConfigFile != "" {
-				if err := snapshotGeneration(pwd, res.TipTag); err != nil {
-					fmt.Fprintf(stderr, "==> %s hot-swap: snapshot generation failed, draining instead: %v\n", art.Name, err)
+				s, err := lookupRunnerStrategy(c.runnerKind)
+				if err != nil {
+					fmt.Fprintf(stderr, "==> %s hot-swap: runner family lookup failed, draining instead: %v\n", art.Name, err)
 					return drain()
+				}
+				if s.PrepareHotSwap != nil {
+					if err := s.PrepareHotSwap(pwd, res.TipTag); err != nil {
+						fmt.Fprintf(stderr, "==> %s hot-swap: snapshot generation failed, draining instead: %v\n", art.Name, err)
+						return drain()
+					}
 				}
 			}
 			gen := runner.NewAgentGeneration(res.TipTag)

@@ -3047,3 +3047,10 @@ func TestNew_NoHostLoopbackRendersRuntimeDialect(t *testing.T) {
 		}
 	}
 }
+
+// The oci family needs no hot-swap preparation (ADR 0069 decision 2).
+func TestStrategy_PrepareHotSwapIsNil(t *testing.T) {
+	if Strategy.PrepareHotSwap != nil {
+		t.Fatal("oci Strategy.PrepareHotSwap is set, want nil")
+	}
+}

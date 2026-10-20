@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -534,4 +535,13 @@ func TestLockedFDMatchesPath(t *testing.T) {
 			t.Errorf("LockedFDMatchesPath(%q) = true, want false (os.Stat(path) should fail)", path)
 		}
 	})
+}
+
+// The bwrap family prepares a hot-swapped closure by snapshotting it; core
+// reaches that only through the Strategy hook.
+func TestStrategy_PrepareHotSwapIsSet(t *testing.T) {
+	got := reflect.ValueOf(Strategy.PrepareHotSwap).Pointer()
+	if want := reflect.ValueOf(SnapshotGeneration).Pointer(); got != want {
+		t.Fatal("bwrap Strategy.PrepareHotSwap is not SnapshotGeneration")
+	}
 }
