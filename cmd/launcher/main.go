@@ -377,14 +377,14 @@ func floatNonnegSchema(key string) float64 {
 	return floatSchemaDefault(key)
 }
 
-// gitIdentityField resolves a commit-identity knob (GIT_USER_NAME/
-// GIT_USER_EMAIL) via the normal document/flag/env chain, falling back to the
-// host git config when none of those supply a value. The wrapper exports no
-// knob env at all (ADR 0020), so this fallback has to live in process. The
-// schema row's hostGitConfigKey is the one place the key lives, so the
-// launcher's startup snapshot (which the Box env reuses) reads the same keys
-// (issues #5329, #5333).
-func gitIdentityField(env string) string {
+// hostGitConfigField resolves a schema member carrying a hostGitConfigKey via
+// the normal document/flag/env chain, falling back to the host git config when
+// none of those supply a value. The wrapper exports no knob env at all (ADR
+// 0020), so this fallback has to live in process. The schema row's
+// hostGitConfigKey is the one place the key lives, so the launcher's startup
+// snapshot (which the Box env reuses) reads the same keys (issues #5329,
+// #5333).
+func hostGitConfigField(env string) string {
 	if v := getenvSchema(env); v != "" {
 		return v
 	}
@@ -399,8 +399,6 @@ func loadConfig() config {
 	image := getenvArtifact("IMAGE", imageTag)
 
 	sc := loadSchemaConfig()
-	sc.gitUserName = gitIdentityField("GIT_USER_NAME")
-	sc.gitUserEmail = gitIdentityField("GIT_USER_EMAIL")
 	sc.setRowKnob(accumulationRepoDirEnv, absCodeForgeAccumulationRepoDir(sc.codeForge, sc.rowKnobs[accumulationRepoDirEnv]))
 
 	runtime := getenvArtifact("RUNTIME", "")
@@ -910,19 +908,16 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 	}
 }
 
-// gitIdentityResolver wraps next, answering the Box's GIT_USER_NAME /
-// GIT_USER_EMAIL from the identity loadConfig snapshotted at startup. The
+// hostGitConfigResolver wraps next, answering every schema member with a
+// hostGitConfigKey from the values loadConfig snapshotted at startup. The
 // snapshot is deliberate (issue #5333): Box commits and host-side commits
 // carry one identity for the process's lifetime, rather than re-reading host
-// git config per dispatch (fix passes, multi-job waves). An empty snapshot
-// stays empty, so the Box's GIT_USER_NAME guard still fires.
-func gitIdentityResolver(c config, next func(num, name string) string) func(num, name string) string {
+// git config per dispatch (fix passes, multi-job waves).
+// An empty snapshot stays empty, so the Box's GIT_USER_NAME guard still fires.
+func hostGitConfigResolver(c config, next func(num, name string) string) func(num, name string) string {
 	return func(num, name string) string {
-		switch name {
-		case "GIT_USER_NAME":
-			return c.gitUserName
-		case "GIT_USER_EMAIL":
-			return c.gitUserEmail
+		if v, ok := c.hostGitConfigValue(name); ok {
+			return v
 		}
 		return next(num, name)
 	}
@@ -969,7 +964,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 	reviewModel := os.Getenv("REVIEW_MODEL")
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
-		ResolveEnv: boxTokenResolver(gitIdentityResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
+		ResolveEnv: boxTokenResolver(hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
 		// Raw os.Getenv, not getenvSchema (issue #3171): these two carry only
 		// what the operator set at dispatch time. The document/schema-default
 		// chain must stay out, since those values already reached the baked

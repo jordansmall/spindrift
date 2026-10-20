@@ -99,8 +99,8 @@ type schemaConfig struct {
 }
 
 // loadSchemaConfig reads schemaConfig's fields from the environment.
-// hostDerived members get a struct field above but no loader line here
-// — their loader is hand-written elsewhere (e.g. gitIdentityField).
+// hostDerived members without a hostGitConfigKey get a struct field above
+// but no loader line here — their loader is hand-written elsewhere.
 // Secret members read the environment directly, never through the
 // schema-default helper (a document-first path would open a
 // Launcher-input secret-injection channel that does not exist today).
@@ -144,6 +144,8 @@ func loadSchemaConfig() schemaConfig {
 		geminiAPIKey:              os.Getenv("GEMINI_API_KEY"),
 		ghToken:                   os.Getenv("GH_TOKEN"),
 		ghTokenRefreshFile:        getenvSchema("GH_TOKEN_REFRESH_FILE"),
+		gitUserEmail:              hostGitConfigField("GIT_USER_EMAIL"),
+		gitUserName:               hostGitConfigField("GIT_USER_NAME"),
 		groqAPIKey:                os.Getenv("GROQ_API_KEY"),
 		holdJitterSecs:            atoiNonnegSchema("HOLD_JITTER_SECS"),
 		inProgressLabel:           getenvSchema("IN_PROGRESS_LABEL"),
@@ -204,4 +206,17 @@ func loadSchemaConfig() schemaConfig {
 			"PODMAN_NETWORK":                   getenvSchema("PODMAN_NETWORK"),
 		},
 	}
+}
+
+// hostGitConfigValue returns the loaded value of the member whose env name is
+// env, for the members that declare a hostGitConfigKey; ok is false for any
+// other name.
+func (s schemaConfig) hostGitConfigValue(env string) (string, bool) {
+	switch env {
+	case "GIT_USER_EMAIL":
+		return s.gitUserEmail, true
+	case "GIT_USER_NAME":
+		return s.gitUserName, true
+	}
+	return "", false
 }

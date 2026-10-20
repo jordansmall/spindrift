@@ -1908,7 +1908,12 @@ rec {
       fields = concatStrings (mapAttrsToList fieldLine members);
       loaderLine =
         key: e:
-        if e.hostDerived or false then
+        if e ? hostGitConfigKey then
+          if (e.secret or false) || typeClass e != "string" then
+            throw "renderSchemaConfigGo: ${key} carries hostGitConfigKey but is secret or non-string; hostGitConfigField only loads plain string knobs"
+          else
+            "\t\t${key}: hostGitConfigField(\"${e.env}\"),\n"
+        else if e.hostDerived or false then
           ""
         else if e.secret or false then
           "\t\t${key}: os.Getenv(\"${e.env}\"),\n"
@@ -1923,6 +1928,9 @@ rec {
         else
           "\t\t${key}: getenvSchema(\"${e.env}\"),\n";
       loaderLines = concatStrings (mapAttrsToList loaderLine members);
+      gitKeyMembers = filterAttrs (_: e: e ? hostGitConfigKey) members;
+      hostGitConfigCase = key: e: "\tcase \"${e.env}\":\n\t\treturn s.${key}, true\n";
+      hostGitConfigCases = concatStrings (mapAttrsToList hostGitConfigCase gitKeyMembers);
       # A row knob's value stays a string whatever its kind: the row's
       # ReadKnobs parses it. A bool or int is normalised the way the field
       # loader read it (any non-empty value is true; a malformed int falls back
@@ -1979,8 +1987,8 @@ rec {
     + "}\n"
     + "\n"
     + "// loadSchemaConfig reads schemaConfig's fields from the environment.\n"
-    + "// hostDerived members get a struct field above but no loader line here\n"
-    + "// — their loader is hand-written elsewhere (e.g. gitIdentityField).\n"
+    + "// hostDerived members without a hostGitConfigKey get a struct field above\n"
+    + "// but no loader line here — their loader is hand-written elsewhere.\n"
     + "// Secret members read the environment directly, never through the\n"
     + "// schema-default helper (a document-first path would open a\n"
     + "// Launcher-input secret-injection channel that does not exist today).\n"
@@ -1992,6 +2000,16 @@ rec {
     + rowLoaderLines
     + "\t\t},\n"
     + "\t}\n"
+    + "}\n"
+    + "\n"
+    + "// hostGitConfigValue returns the loaded value of the member whose env name is\n"
+    + "// env, for the members that declare a hostGitConfigKey; ok is false for any\n"
+    + "// other name.\n"
+    + "func (s schemaConfig) hostGitConfigValue(env string) (string, bool) {\n"
+    + "\tswitch env {\n"
+    + hostGitConfigCases
+    + "\t}\n"
+    + "\treturn \"\", false\n"
     + "}\n";
 
   # A typed knob reader for one row (ADR 0068 decision 3, issue #5636): a

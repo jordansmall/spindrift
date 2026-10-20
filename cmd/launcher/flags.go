@@ -161,7 +161,7 @@ type flagEntry struct {
 	// host-derived row in a regen that never ran schema-drift.
 	boxHostDerived bool
 	// hostGitConfigKey is the host git config key (git config --get) a
-	// boxHostDerived knob falls back to; read by gitIdentityField.
+	// boxHostDerived knob falls back to; read by hostGitConfigField.
 	hostGitConfigKey string
 }
 

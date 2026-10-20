@@ -80,7 +80,7 @@ var gitConfigLookup = func(key string) string {
 // first (parseFlags lands an explicit flag there via os.Setenv), then the
 // document's settings or artifacts, then the schema default, because the
 // wrapper no longer pre-populates env with baked defaults (ADR 0020). The
-// host-derived commit identity is not resolved here: gitIdentityResolver
+// host-derived commit identity is not resolved here: hostGitConfigResolver
 // answers it from the launcher's startup snapshot, not re-read per dispatch,
 // so Box and host commits carry one identity for the process's lifetime
 // (issue #5333).
