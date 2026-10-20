@@ -1,12 +1,14 @@
 # Update-mode regenerator for the Go-test goldens (issue #2951): prompt
-# assembly, `spindrift stats`, the per-Driver Pass-log corpus, and the Digest
-# corpora (the digestkit's own and each Chore's). It runs
-# the Go golden tests
+# assembly, `spindrift stats`, the per-Driver Pass-log corpus, the Digest
+# corpora (the digestkit's own and each Chore's), and the Ecosystem
+# corpora. It runs the Go golden tests
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
 # cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
 # cmd/launcher/internal/driver/<driver>/corpus_test.go,
 # cmd/launcher/internal/ecosystem/referencedocs_test.go,
+# cmd/launcher/internal/ecosystem/corpus_test.go,
+# cmd/launcher/internal/ecosystemtest/ecosystemtest_test.go,
 # cmd/launcher/internal/digestkit/digestkit_test.go,
 # cmd/launcher/internal/<chore>/digest_corpus_test.go) with
 # UPDATE_GOLDENS=1, which flips their compare helpers from fail to
@@ -49,8 +51,9 @@ pkgs.writeShellApplication {
     # ../../tests, ../../templates, and ../../docs relative to the module, so
     # those three are symlinks back into the checkout. So are the module's own
     # testdata/golden, each Driver's corpus
-    # (internal/driver/<driver>/testdata/corpus), and each Digest corpus
+    # (internal/driver/<driver>/testdata/corpus), each Digest corpus
     # (internal/*/testdata/digest, plus the digestkit's own testdata/corpus),
+    # and both Ecosystem corpora (internal/ecosystem{,test}/testdata/corpus),
     # so goldens written through them land in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
@@ -94,6 +97,18 @@ pkgs.writeShellApplication {
     kit_corpus=cmd/launcher/internal/digestkit/testdata/corpus
     rm -rf "$scratch/src/$kit_corpus"
     ln -s "$root/$kit_corpus" "$scratch/src/$kit_corpus"
+    # Symlinked, not copied: ecosystemtest.Run also deletes goldens for stages a
+    # row skips, and a copy would lose those deletions with the scratch tree.
+    for eco_corpus in \
+      cmd/launcher/internal/ecosystem/testdata/corpus \
+      cmd/launcher/internal/ecosystemtest/testdata/corpus; do
+      if [ ! -d "$root/$eco_corpus" ]; then
+        echo "regen-goldens: no Ecosystem corpus found at $eco_corpus" >&2
+        exit 1
+      fi
+      rm -rf "$scratch/src/$eco_corpus"
+      ln -s "$root/$eco_corpus" "$scratch/src/$eco_corpus"
+    done
 
     ${import ./checks/go-check-env.nix}
     export SPINDRIFT_SEAM_FIXTURES_DIR=${fixtures.seamFixtures}
@@ -109,6 +124,7 @@ pkgs.writeShellApplication {
     go test -count=1 -run '^TestCorpus$' "''${driver_pkgs[@]}"
     go test -count=1 -run '^TestDigestCorpus$' "''${digest_pkgs[@]}"
     go test -count=1 -run '^TestRunReplaysCorpusIntoGoldens$' ./internal/digestkit
+    go test -count=1 -run '^TestCorpus$' ./internal/ecosystem ./internal/ecosystemtest
     # Rewrites the generated spans in docs/reference.md (the docs link above).
     go test -count=1 -run '^TestReferenceDocs_GeneratedSpans$' ./internal/ecosystem
   '';
