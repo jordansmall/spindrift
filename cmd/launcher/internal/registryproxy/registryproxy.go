@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -994,4 +995,26 @@ func (p *Proxy) Close() error {
 		c.Close()
 	}
 	return err
+}
+
+// ManifestRoutes projects a resolved route table into the ADR-0045 manifest's
+// Route shape. It carries Prefix verbatim: AssignPrefixes already ran over the
+// table. An Upstream that fails to parse keeps its route with an empty
+// UpstreamHost. EnforcedPaths clones EnforcedSubtrees so it cannot alias
+// route's array (issue #3259); Ecosystems aliases, a map-of-maps clone being shallow.
+func ManifestRoutes(routes []Route) []registrymanifest.Route {
+	out := make([]registrymanifest.Route, len(routes))
+	for i, route := range routes {
+		var upstreamHost string
+		if u, err := url.Parse(route.Upstream); err == nil {
+			upstreamHost = u.Host
+		}
+		out[i] = registrymanifest.Route{
+			Prefix:        route.Prefix,
+			UpstreamHost:  upstreamHost,
+			EnforcedPaths: slices.Clone(route.EnforcedSubtrees),
+			Ecosystems:    route.Ecosystems,
+		}
+	}
+	return out
 }

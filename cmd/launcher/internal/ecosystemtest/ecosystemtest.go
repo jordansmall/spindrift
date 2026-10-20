@@ -40,10 +40,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -415,25 +413,11 @@ func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 	})
 }
 
-// manifestRoutes projects proxyRoutes the way the dispatch package's
-// registryManifestRoutes does.
+// manifestRoutes projects proxyRoutes through registryproxy.ManifestRoutes.
 func (c *replay) manifestRoutes() ([]registrymanifest.Route, error) {
 	routes, err := c.proxyRoutes()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]registrymanifest.Route, len(routes))
-	for i, r := range routes {
-		var host string
-		if u, err := url.Parse(r.Upstream); err == nil {
-			host = u.Host
-		}
-		out[i] = registrymanifest.Route{
-			Prefix:        r.Prefix,
-			UpstreamHost:  host,
-			EnforcedPaths: slices.Clone(r.EnforcedSubtrees),
-			Ecosystems:    r.Ecosystems,
-		}
-	}
-	return out, nil
+	return registryproxy.ManifestRoutes(routes), nil
 }

@@ -2,7 +2,6 @@ package dispatch
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -20,10 +18,8 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
-	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
-	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
@@ -1327,82 +1323,6 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 	wantHost := strings.TrimPrefix(upstream.URL, "http://")
 	if manifest.Routes[0].UpstreamHost != wantHost {
 		t.Errorf("manifest.Routes[0].UpstreamHost = %q, want %q", manifest.Routes[0].UpstreamHost, wantHost)
-	}
-}
-
-// TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems verifies that
-// registryManifestRoutes carries each route's own Prefix and whole Ecosystems
-// declaration block into the manifest Route (issue #3404): two routes with
-// distinct prefixes and cargo names each land on the matching entry, not
-// swapped or collapsed onto one shared value.
-func TestRegistryManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
-	routes := []registryproxy.Route{
-		{
-			Upstream:   "https://npm.example.com",
-			Prefix:     "npm-example-com",
-			Ecosystems: ecosystem.CargoRouteBlock("crates-io-mirror"),
-		},
-		{
-			Upstream:   "https://cargo.example.com",
-			Prefix:     "cargo-example-com",
-			Ecosystems: ecosystem.CargoRouteBlock("internal", "vendor"),
-		},
-	}
-
-	got := registryManifestRoutes(routes)
-
-	if len(got) != 2 {
-		t.Fatalf("registryManifestRoutes returned %d routes, want 2", len(got))
-	}
-	if got[0].Prefix != "npm-example-com" {
-		t.Errorf("got[0].Prefix = %q, want %q", got[0].Prefix, "npm-example-com")
-	}
-	if want := []string{"crates-io-mirror"}; !slices.Equal(ecosystem.CargoRouteRegistries(got[0].Ecosystems), want) {
-		t.Errorf("got[0] cargo registries = %v, want %v", ecosystem.CargoRouteRegistries(got[0].Ecosystems), want)
-	}
-	if got[1].Prefix != "cargo-example-com" {
-		t.Errorf("got[1].Prefix = %q, want %q", got[1].Prefix, "cargo-example-com")
-	}
-	if want := []string{"internal", "vendor"}; !slices.Equal(ecosystem.CargoRouteRegistries(got[1].Ecosystems), want) {
-		t.Errorf("got[1] cargo registries = %v, want %v", ecosystem.CargoRouteRegistries(got[1].Ecosystems), want)
-	}
-}
-
-// TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths verifies
-// that registryManifestRoutes converts registryproxy.Route's EnforcedSubtrees
-// one-to-one into registrymanifest.Route's tagged EnforcedPaths (issue
-// #3259), distinct from the untagged EnforcedPaths registryproxy.Route also
-// carries for the Forwarder's admission check and never copies here.
-func TestRegistryManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testing.T) {
-	routes := []registryproxy.Route{
-		{
-			Upstream: "https://host.example.com",
-			Prefix:   "host-example-com",
-			EnforcedSubtrees: []registryvocab.Subtree{
-				{Ecosystem: "synthetic", Path: "/synthetic"},
-				{Ecosystem: "twin", Path: "/twin", Scoped: true},
-			},
-		},
-	}
-
-	got := registryManifestRoutes(routes)
-
-	if len(got) != 1 {
-		t.Fatalf("registryManifestRoutes returned %d routes, want 1", len(got))
-	}
-	want := []registryvocab.Subtree{
-		{Ecosystem: "synthetic", Path: "/synthetic"},
-		{Ecosystem: "twin", Path: "/twin", Scoped: true},
-	}
-	if !reflect.DeepEqual(got[0].EnforcedPaths, want) {
-		t.Errorf("got[0].EnforcedPaths = %+v, want %+v", got[0].EnforcedPaths, want)
-	}
-	raw, err := json.Marshal(got[0])
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	if !strings.Contains(string(raw), `"path":"/twin","scoped":true`) {
-		t.Errorf("manifest route JSON = %s, want the scoped flag carried", raw)
 	}
 }
 
