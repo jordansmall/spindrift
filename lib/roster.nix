@@ -19,7 +19,8 @@ rec {
     roster:
     let
       inherit (lib) foldl' imap0;
-      # MIGRATING.md documents these eight keys as the whole entry shape.
+      # MIGRATING.md documents the entry shape: the issue #2571 entry's eight
+      # keys plus `spawns` from the issue #5368 entry.
       knownKeys = [
         "name"
         "model"
@@ -27,6 +28,7 @@ rec {
         "mode"
         "description"
         "tools"
+        "spawns"
         "promptFile"
         "prompt"
       ];
@@ -37,6 +39,7 @@ rec {
         reviewer = "review-prompt.md";
       };
       defaultPromptFileFor = name: defaultPromptFileOverrides.${name} or "${name}-prompt.md";
+      isEntryName = n: builtins.isString n && builtins.match "[a-z0-9-]+" n != null;
       violation = tag: name: message: {
         ok = false;
         value = null;
@@ -62,7 +65,7 @@ rec {
           //
             violation "invalid-name" e.name
               "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- name must be a string"
-        else if builtins.match "[a-z0-9-]+" e.name == null then
+        else if !(isEntryName e.name) then
           acc
           //
             violation "invalid-name" e.name
@@ -82,6 +85,11 @@ rec {
           //
             violation "missing-model" e.name
               "normalizeRoster: entry ${builtins.toJSON e.name} is missing model -- every roster entry must set model as a string (\"\" is a valid explicit opt-out)"
+        else if e ? spawns && !(builtins.isList e.spawns && builtins.all isEntryName e.spawns) then
+          acc
+          //
+            violation "invalid-spawns-type" e.name
+              "normalizeRoster: entry ${builtins.toJSON e.name} spawns must be a list of valid roster entry names (strings matching [a-z0-9-]+), got ${builtins.toJSON e.spawns}"
         # Checked ahead of the promptFile branch, which also reads e.prompt,
         # so an invalid prompt is reported on its own terms (issue #2571).
         else if e ? prompt && e.prompt != null && !(builtins.isString e.prompt) then
@@ -328,6 +336,7 @@ rec {
             "WebFetch"
             "Agent"
           ];
+          spawns = [ "review-axis" ];
           promptFile = "review-prompt.md";
           prompt = null;
         }

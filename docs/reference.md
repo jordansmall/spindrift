@@ -511,7 +511,7 @@ all, `roster` is reachable from the flake module itself, and appears in
 [`docs/flake-options.md`](flake-options.md) with its own entry, the same
 as every other domain-tree option.
 `roster` takes a list of subagent entries, each shaped `{ name; model; mode;
-description; tools; promptFile; prompt; effort }`. It supersedes the four fixed
+description; tools; spawns; promptFile; prompt; effort }`. It supersedes the four fixed
 `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
 knob per hardcoded agent, a Consumer flake can pass any number of roster
 entries, including a custom Nth agent beyond the historical four. When
@@ -521,6 +521,10 @@ entries, including a custom Nth agent beyond the historical four. When
 scout/reviewer/filer/worker composition exactly, plus a fifth `review-axis`
 entry (issue #3447) that has no legacy model arg of its own — see
 [ADR 0049](adr/0049-role-capability-profiles-are-provider-neutral.md).
+
+`spawns` is optional: a list of roster entry names the entry may spawn as
+subagents. Absent means no declared restriction; the default `reviewer`
+declares `[ "review-axis" ]`.
 
 Every roster — explicit or default — passes through `lib/roster.nix`'s
 `normalizeRoster` before any Driver renders it, and `normalizeRoster` is

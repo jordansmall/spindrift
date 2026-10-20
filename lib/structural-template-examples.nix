@@ -14,6 +14,7 @@ let
   defaultRosterEntries = rosterLib.defaultRoster { };
   scoutDefaults = entryFor "scout" defaultRosterEntries;
   reviewerDefaults = entryFor "reviewer" defaultRosterEntries;
+  reviewAxisDefaults = entryFor "review-axis" defaultRosterEntries;
 
   byNameExample = {
     filer = {
@@ -45,6 +46,18 @@ let
       inherit (reviewerDefaults)
         description
         tools
+        spawns
+        promptFile
+        effort
+        ;
+    }
+    {
+      name = "review-axis";
+      model = defaultModelFixture.schemaDefaults.reviewModel;
+      mode = "subagent";
+      inherit (reviewAxisDefaults)
+        description
+        tools
         promptFile
         effort
         ;
@@ -63,24 +76,30 @@ let
     ]) (builtins.attrNames example)
     ++ [ "};" ];
 
-  # A Nix list literal separates elements with spaces, not commas, so tools
+  # A Nix list literal separates elements with spaces, not commas, so a list
   # cannot reuse builtins.toJSON: `["a","b"]` is a Nix syntax error.
-  renderToolsLiteral = tools: "[ ${lib.concatStringsSep " " (map builtins.toJSON tools)} ]";
+  renderListLiteral = xs: "[ ${lib.concatStringsSep " " (map builtins.toJSON xs)} ]";
 
   renderRosterLines =
     example:
     [ "roster = [" ]
-    ++ lib.concatMap (e: [
-      "  {"
-      "    name = ${builtins.toJSON e.name};"
-      "    model = ${builtins.toJSON e.model};"
-      "    mode = ${builtins.toJSON e.mode};"
-      "    description = ${builtins.toJSON e.description};"
-      "    tools = ${renderToolsLiteral e.tools};"
-      "    promptFile = ${builtins.toJSON e.promptFile};"
-      "    effort = ${builtins.toJSON e.effort};"
-      "  }"
-    ]) example
+    ++ lib.concatMap (
+      e:
+      [
+        "  {"
+        "    name = ${builtins.toJSON e.name};"
+        "    model = ${builtins.toJSON e.model};"
+        "    mode = ${builtins.toJSON e.mode};"
+        "    description = ${builtins.toJSON e.description};"
+        "    tools = ${renderListLiteral e.tools};"
+      ]
+      ++ lib.optional (e ? spawns) "    spawns = ${renderListLiteral e.spawns};"
+      ++ [
+        "    promptFile = ${builtins.toJSON e.promptFile};"
+        "    effort = ${builtins.toJSON e.effort};"
+        "  }"
+      ]
+    ) example
     ++ [ "];" ];
 
   # Guards against a typo silently rendering a mismatched key: lines[0] must
@@ -107,7 +126,7 @@ map checkEntry [
   }
   {
     path = underDriver exampleDriver structuralPaths.roster;
-    doc = "Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above (agents.drivers.<name>.models.byName), when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this two-entry scout/reviewer example verbatim drops filer/worker/review-axis. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings).";
+    doc = "Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above (agents.drivers.<name>.models.byName), when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this scout/reviewer/review-axis example verbatim drops filer/worker. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings). The reviewer's `spawns` scopes what it can spawn under opencode.";
     example = rosterExample;
     lines = renderRosterLines rosterExample;
   }
