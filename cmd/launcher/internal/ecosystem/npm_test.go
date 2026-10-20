@@ -185,6 +185,40 @@ func TestNpmFamilyRows_AmbiguousTaggedPaths(t *testing.T) {
 	}
 }
 
+// A scoped "@scope:registry=" path is not the default registry, so a route
+// holding only scoped paths binds nothing and warns about nothing (#5720).
+func TestNpmFamilyRows_ScopedOnlyPathBindsNothing(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: tc.row, Path: "/acme", Scoped: true})
+			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			if len(got) != 0 || len(warnings) != 0 {
+				t.Errorf("got (%v, %v), want no export and no warning", got, warnings)
+			}
+		})
+	}
+}
+
+// A scoped path beside one unscoped path neither binds nor makes the unscoped
+// one ambiguous.
+func TestNpmFamilyRows_ScopedPathDoesNotMakeUnscopedAmbiguous(t *testing.T) {
+	for _, tc := range npmFamilyCases {
+		t.Run(tc.row, func(t *testing.T) {
+			routes := taggedRoute("r0",
+				registryvocab.Subtree{Ecosystem: tc.row, Path: "/acme", Scoped: true},
+				registryvocab.Subtree{Ecosystem: tc.row, Path: "/default"},
+			)
+			got, warnings := rowExports(t, tc.row, 27182, "r0", routes)
+			if len(warnings) != 0 {
+				t.Fatalf("got warnings %v, want none", warnings)
+			}
+			if value, ok := ExportValue(got, tc.envVar); !ok || value != "http://127.0.0.1:27182/r0/default/" {
+				t.Errorf("%s = (%q, %v), want the unscoped path", tc.envVar, value, ok)
+			}
+		})
+	}
+}
+
 // Each row resolves its own tagged path, so distinct paths per ecosystem do
 // not bleed into one another and one row's ambiguity does not silence another.
 func TestNpmFamilyRows_IndependentPerEcosystem(t *testing.T) {

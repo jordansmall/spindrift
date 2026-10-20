@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\n  \"name\": \"@acme/gadget\",\n  \"dist-tags\": {\"latest\": \"1.0.0\"},\n  \"versions\": {\n    \"1.0.0\": {\n      \"name\": \"@acme/gadget\",\n      \"version\": \"1.0.0\",\n      \"dist\": {\n        \"tarball\": \"https://cdn.acme.test/@acme/gadget/-/gadget-1.0.0.tgz\",\n        \"integrity\": \"sha512-Y29ycHVzLXRlc3QtZmFrZS1pbnRlZ3JpdHktbm90LXJlYWw=\"\n      }\n    }\n  }\n}\n",
+    "request": "GET /npm-acme-test/@acme/gadget",
+    "status": 200
+  }
+]

@@ -106,14 +106,14 @@ func npmFamilyBinding(port int, prefix string, routes []registrymanifest.Route, 
 
 	var matches []string
 	for _, p := range route.EnforcedPaths {
-		if p.Ecosystem == ecosystem {
+		if p.Ecosystem == ecosystem && !p.Scoped {
 			matches = append(matches, p.Path)
 		}
 	}
 
 	switch len(matches) {
 	case 0:
-		// Nothing tagged for this ecosystem, so nothing to bind (AC3).
+		// Nothing unscoped and tagged for this ecosystem, so nothing to bind (AC3).
 		// A registry declared only in another row's config lands here
 		// (a pnpm registry in .npmrc is tagged "npm"); the in-tree
 		// rewrite still covers that traffic.
@@ -131,11 +131,9 @@ func npmFamilyBinding(port int, prefix string, routes []registrymanifest.Route, 
 			Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, matchPath),
 		}}, nil
 	default:
-		// registrydiscover does not distinguish a scoped
-		// "@scope:registry=" declaration from an unscoped "registry=",
-		// so there is no way to tell which path is the default.
+		// Two or more unscoped paths: no way to tell which is the default.
 		return nil, []string{fmt.Sprintf(
-			"==> WARNING: route %q has %d %s-tagged paths (%s); %s is ambiguous and will not be bound",
+			"==> WARNING: route %q has %d unscoped %s-tagged paths (%s); %s is ambiguous and will not be bound",
 			route.Prefix, len(matches), ecosystem, strings.Join(matches, ", "), envVar)}
 	}
 }
