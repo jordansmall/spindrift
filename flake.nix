@@ -180,6 +180,14 @@
 
             checks = checksResult.checks;
 
+            # Marginal-cost eval probe (issue #5860); see nix/eval-probe.nix.
+            # Under legacyPackages so `nix flake check` leaves its contents
+            # alone.
+            legacyPackages.evalProbe = import ./nix/eval-probe.nix {
+              nixpkgs = nixpkgsShared;
+              inherit system;
+            };
+
             packages = {
               # Scoped in-box gate (issue #581): the source-level checks only,
               # skipping the OCI-image realization the full `checks` set above

@@ -83,8 +83,9 @@ let
     # classifier reads its Go helper and reader list beside it (issue #5158).
     CI_CHANGES_SH = "${../../.github/scripts}/ci-changes.sh";
     CI_OK_SH = ../../.github/scripts/ci-ok.sh;
-    # Eval-cost table renderer (issue #5860).
+    # Eval-cost table renderer and marginal-cost probe runner (issue #5860).
     EVAL_STATS_RENDER_SH = ../../.github/scripts/eval-stats-render.sh;
+    EVAL_PROBE_SH = ../../.github/scripts/eval-probe.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles, fragment registry
     # and Claude settings.json tests/entrypoint-shim.bats and
@@ -177,6 +178,7 @@ in
           ${../../.github/scripts/ci-changes.sh} \
           ${../../.github/scripts/ci-ok.sh} \
           ${../../.github/scripts/eval-stats-render.sh} \
+          ${../../.github/scripts/eval-probe.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/helper.bash}
