@@ -9,7 +9,14 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
+	"spindrift.dev/launcher/internal/testutil"
 )
+
+// Every drift test runs on the synthetic row, so none writes a real config
+// path or declares a real ecosystem's route block.
+var driftRows = []ecosystem.Row{synthetic.Row}
 
 // The check runs on the tempdir itself, not on a parent: t.TempDir() lives
 // outside any git checkout, so no walk up can find a ".git" entry.
@@ -94,10 +101,7 @@ func assertNoDriftRow(t *testing.T, report []doctor.Check, condition string) {
 
 func TestRegistryRouteDriftCheckForRoutes_UncoveredHostFailsNamingHostAndRemedy(t *testing.T) {
 	repoDir := t.TempDir()
-	npmrc := "registry=https://uncovered.example.com/\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/\n")
 	withDriftRepoDir(t, repoDir)
 	withDriftMatchingRemote(t)
 
@@ -108,8 +112,8 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
-	checks := registryRouteDriftCheckForRoutes(c, routes)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 	}
@@ -134,10 +138,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED" }
 
 func TestRegistryRouteDriftCheckForRoutes_FullyCoveredRepoPasses(t *testing.T) {
 	repoDir := t.TempDir()
-	npmrc := "registry=https://covered.example.com/\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticRegistries(t, repoDir, "reg = https://covered.example.com/\n")
 	withDriftRepoDir(t, repoDir)
 	withDriftMatchingRemote(t)
 
@@ -148,8 +149,8 @@ match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
-	checks := registryRouteDriftCheckForRoutes(c, routes)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 	}
@@ -167,15 +168,12 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 }
 
 // Pins issue #3405: a route in ADR 0048 block grammar still parses through
-// registryroutes.Parse. The len(checks) == 1 assertion plus a passing Probe
+// registryroutes.ParseRows. The len(checks) == 1 assertion plus a passing Probe
 // together prove the migrated grammar reached the drift check rather than
 // degrading down the parse-error path, which returns zero rows.
 func TestRegistryRouteDriftCheckForRoutes_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {
 	repoDir := t.TempDir()
-	npmrc := "registry=https://covered.example.com/\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticRegistries(t, repoDir, "reg = https://covered.example.com/\n")
 	withDriftRepoDir(t, repoDir)
 	withDriftMatchingRemote(t)
 
@@ -185,15 +183,12 @@ func TestRegistryRouteDriftCheckForRoutes_BlockGrammarRouteParsesAndReportsNoDri
 match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_BLOCK_GRAMMAR" }
 
-[routes.ecosystems.go]
-path = "/go-modules"
-
-[routes.ecosystems.cargo]
-registries = ["internal"]
+[routes.ecosystems.synthetic]
+mirror-path = "/synthetic-mirror"
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
-	checks := registryRouteDriftCheckForRoutes(c, routes)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
+	checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 	if len(checks) != 1 {
 		t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 	}
@@ -223,9 +218,9 @@ func TestRegistryRouteDriftCheckForRoutes_NoCheckoutAvailable_ReturnsNil(t *test
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NO_CHECKOUT" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when no repo checkout is available", got)
 	}
 }
@@ -245,9 +240,9 @@ func TestRegistryRouteDriftCheckForRoutes_EmptyRepoDirReturnsNil(t *testing.T) {
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_EMPTY_REPO_DIR" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when no checkout is resolved", got)
 	}
 }
@@ -288,18 +283,18 @@ func TestDoctorCheckSets_UnparsableRoutesFileExcludesRegistryRouteDriftRow(t *te
 // as an ordinary "no route covers it" result.
 func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 	repoDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repoDir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	malformed := "not valid toml [[["
-	if err := os.WriteFile(filepath.Join(repoDir, ".cargo", "config.toml"), []byte(malformed), 0o644); err != nil {
-		t.Fatal(err)
+	writeSyntheticRegistries(t, repoDir, "reg = https://host.example.com/\n")
+	// The synthetic parser never errors, so a copy of the row stands in for a
+	// config its parser cannot read.
+	failing := synthetic.Row
+	failing.ConfigParser = func(string) ([]ecosystem.Declaration, bool, error) {
+		return nil, false, errors.New("unparsable config")
 	}
 
-	ch := registryRouteDriftCheckFor(repoDir, nil)
+	ch := registryRouteDriftCheckFor(repoDir, nil, []ecosystem.Row{failing})
 	_, err := ch.Probe()
 	if err == nil {
-		t.Fatal("Probe() succeeded, want an error for malformed .cargo/config.toml")
+		t.Fatal("Probe() succeeded, want an error for a config the row cannot parse")
 	}
 	if !errors.Is(err, doctor.ErrDegraded) {
 		t.Errorf("Probe() error %v must wrap doctor.ErrDegraded", err)
@@ -315,19 +310,16 @@ func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 // error, not a doctor.ErrDegraded wrap.
 func TestRegistryRouteDriftCheckFor_UncoveredHostRendersAdvisoryNotMissing(t *testing.T) {
 	repoDir := t.TempDir()
-	npmrc := "registry=https://uncovered.example.com/\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/\n")
 
 	routesFile := writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 `)
-	routes := mustLoadRoutes(t, routesFile)
+	routes := mustLoadRoutes(t, routesFile, driftRows)
 
-	ch := registryRouteDriftCheckFor(repoDir, routes)
+	ch := registryRouteDriftCheckFor(repoDir, routes, driftRows)
 	_, probeErr := ch.Probe()
 	if probeErr == nil {
 		t.Fatal("Probe() succeeded, want an error for the uncovered host")
@@ -349,21 +341,21 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_ADVISORY_RENDER" }
 }
 
 // Pins that drift is host coverage only. The fixture declares two registries
-// on one Artifactory host at different index paths, and the single route
+// on one host at different index paths, and the single route
 // covers that host while declaring no path, so differing paths under a
 // covered host are not a drift category (ADR 0047, issue #3262).
 func TestRegistryRouteDriftCheckFor_DifferingPathsOnCoveredHostIsNotDrift(t *testing.T) {
 	repoDir := t.TempDir()
-	writeTwoRegistryCargoFixture(t, repoDir, "artifactory.example.com")
+	writeTwoRegistrySameHostFixture(t, repoDir, "registry.example.com")
 
 	routesFile := writeRoutesFile(t, `
 [[routes]]
-match-host = "artifactory.example.com"
+match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_PATH_NOT_CATEGORY" }
 `)
-	routes := mustLoadRoutes(t, routesFile)
+	routes := mustLoadRoutes(t, routesFile, driftRows)
 
-	ch := registryRouteDriftCheckFor(repoDir, routes)
+	ch := registryRouteDriftCheckFor(repoDir, routes, driftRows)
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("Probe() = %v, want no drift: the host is covered, so differing declared paths on it are not drift", err)
 	}
@@ -374,19 +366,16 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_PATH_NOT_CATEGORY" }
 // host.
 func TestRegistryRouteDriftCheckFor_UncoveredHostFailureIsSilentAboutPath(t *testing.T) {
 	repoDir := t.TempDir()
-	npmrc := "registry=https://uncovered.example.com/some/path/\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/some/path/\n")
 
 	routesFile := writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT" }
 `)
-	routes := mustLoadRoutes(t, routesFile)
+	routes := mustLoadRoutes(t, routesFile, driftRows)
 
-	ch := registryRouteDriftCheckFor(repoDir, routes)
+	ch := registryRouteDriftCheckFor(repoDir, routes, driftRows)
 	_, err := ch.Probe()
 	if err == nil {
 		t.Fatal("Probe() succeeded, want an error naming the uncovered host")
@@ -407,10 +396,7 @@ func TestRegistryRouteDriftCheckForRoutes_NonTargetCheckoutReturnsNil(t *testing
 	repoDir := t.TempDir()
 	mustRunGit(t, repoDir, "init")
 	mustRunGit(t, repoDir, "remote", "add", "origin", "git@github.com:other/elsewhere.git")
-	npmrc := "registry=https://uncovered.example.com/\n"
-	if err := os.WriteFile(filepath.Join(repoDir, ".npmrc"), []byte(npmrc), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/\n")
 	withDriftRepoDir(t, repoDir)
 
 	c := minimalValidConfig() // codeForge: "github", repoSlug: "owner/repo"
@@ -419,9 +405,9 @@ func TestRegistryRouteDriftCheckForRoutes_NonTargetCheckoutReturnsNil(t *testing
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_NON_TARGET" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when the checkout's origin remote does not match the configured Target repo", got)
 	}
 }
@@ -444,16 +430,16 @@ func TestRegistryRouteDriftCheckForRoutes_LocalForgeReadsFromAccumulationRepo(t 
 	t.Chdir(t.TempDir())
 
 	t.Run("drift", func(t *testing.T) {
-		accumRepo := mustLocalAccumulationRepo(t, ".npmrc", "registry=https://uncovered.example.com/\n")
+		accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 `)
-		routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+		routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-		checks := registryRouteDriftCheckForRoutes(c, routes)
+		checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 		if len(checks) != 1 {
 			t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 		}
@@ -467,16 +453,16 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 	})
 
 	t.Run("no drift", func(t *testing.T) {
-		accumRepo := mustLocalAccumulationRepo(t, ".npmrc", "registry=https://covered.example.com/\n")
+		accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "reg = https://covered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
 match-host = "covered.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_COVERED" }
 `)
-		routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+		routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-		checks := registryRouteDriftCheckForRoutes(c, routes)
+		checks := registryRouteDriftCheckForRoutes(c, routes, driftRows)
 		if len(checks) != 1 {
 			t.Fatalf("registryRouteDriftCheckForRoutes() returned %d rows, want 1", len(checks))
 		}
@@ -496,9 +482,9 @@ func TestRegistryRouteDriftCheckForRoutes_LocalForgeMissingAccumulationRepo_Retu
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when the Accumulation repo does not exist", got)
 	}
 }
@@ -507,7 +493,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 // ref it does not have also skips the row, rather than failing with a git
 // error where a checkout-availability skip belongs.
 func TestRegistryRouteDriftCheckForRoutes_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
-	accumRepo := mustLocalAccumulationRepo(t, ".npmrc", "registry=https://uncovered.example.com/\n")
+	accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.baseBranch = "does-not-exist"
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -515,9 +501,9 @@ func TestRegistryRouteDriftCheckForRoutes_LocalForgeUnresolvableRef_ReturnsNil(t
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_BAD_REF" }
 `)
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, driftRows)
 
-	if got := registryRouteDriftCheckForRoutes(c, routes); got != nil {
+	if got := registryRouteDriftCheckForRoutes(c, routes, driftRows); got != nil {
 		t.Errorf("registryRouteDriftCheckForRoutes() = %#v, want nil when baseBranch names a ref the Accumulation repo does not have", got)
 	}
 }
@@ -729,20 +715,19 @@ func TestRegistryRouteDriftRow_RemedyDerivesDiscoverSynopsis(t *testing.T) {
 	}
 }
 
-// writeTwoRegistryCargoFixture writes a .cargo/config.toml declaring two
-// [registries.NAME] entries on the same host with Artifactory-shaped index
-// paths (ADR 0047 / spec #3253's field shape: one Artifactory host fronting
-// both an internal repo and a proxied crates.io remote).
-func writeTwoRegistryCargoFixture(t *testing.T, dir, host string) {
+// writeSyntheticRegistries writes content to the synthetic row's in-tree
+// config path under dir.
+func writeSyntheticRegistries(t *testing.T, dir, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(dir, ".cargo"), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	content := "[registries.internal]\n" +
-		"index = \"https://" + host + "/artifactory/api/cargo/internal-crates/index\"\n" +
-		"[registries.crates-io-remote]\n" +
-		"index = \"https://" + host + "/artifactory/api/cargo/crates-io-remote/index\"\n"
-	if err := os.WriteFile(filepath.Join(dir, ".cargo", "config.toml"), []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, content)
+}
+
+// writeTwoRegistrySameHostFixture writes a synthetic config declaring two
+// registries on the same host at different paths (ADR 0047 / spec #3253's
+// field shape: one host fronting both an internal repo and a proxied remote).
+func writeTwoRegistrySameHostFixture(t *testing.T, dir, host string) {
+	t.Helper()
+	writeSyntheticRegistries(t, dir,
+		"internal = https://"+host+"/repos/internal/index\n"+
+			"proxied = https://"+host+"/repos/proxied/index\n")
 }

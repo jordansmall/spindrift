@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
@@ -73,17 +74,17 @@ func gitCheckoutRoot(dir string) string {
 // compare a future host-mediated backend would break. A host-mediated forge
 // reads the bare Accumulation repo at c.baseBranch, the same snapshot the
 // launch itself derives host-rooted routes from.
-func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) []doctor.Check {
+func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, rows []ecosystem.Row) []doctor.Check {
 	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
-		return registryRouteDriftCheckForRef(c.accumulationRepoDir(), c.baseBranch, routes)
+		return registryRouteDriftCheckForRef(c.accumulationRepoDir(), c.baseBranch, routes, rows)
 	}
 
 	repoDir, err := registryRouteDriftRepoDirFn()
 	if err != nil || repoDir == "" || !checkoutIsTargetRepo(repoDir, c) {
 		return nil
 	}
-	return []doctor.Check{registryRouteDriftCheckFor(repoDir, routes)}
+	return []doctor.Check{registryRouteDriftCheckFor(repoDir, routes, rows)}
 }
 
 // registryRouteDriftCheckForRef builds the drift row for a host-mediated
@@ -91,12 +92,12 @@ func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route) [
 // ResolveRef runs eagerly, and it materializes nothing, so a fail-fast run
 // that never reaches the Probe leaks no snapshot dir. The Probe materializes
 // the ref itself and cleans up, at the cost of a repeated rev-parse.
-func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route) []doctor.Check {
+func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route, rows []ecosystem.Row) []doctor.Check {
 	if err := registrydiscover.ResolveRef(repoDir, ref); err != nil {
 		return nil
 	}
 	check := registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
-		return registrydiscover.UncoveredHostsFromGitRef(repoDir, ref, covered)
+		return registrydiscover.UncoveredHostsFromGitRefRows(repoDir, ref, covered, rows)
 	})
 	return []doctor.Check{check}
 }
@@ -107,9 +108,9 @@ const registryRouteDriftCheckName = "registry-route-drift"
 
 // registryRouteDriftCheckFor builds the drift row for an already-resolved cwd
 // checkout, so a test can hand it a fixture dir directly.
-func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route) doctor.Check {
+func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route, rows []ecosystem.Row) doctor.Check {
 	return registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
-		return registrydiscover.UncoveredHosts(dir, covered)
+		return registrydiscover.UncoveredHostsRows(dir, covered, rows)
 	})
 }
 

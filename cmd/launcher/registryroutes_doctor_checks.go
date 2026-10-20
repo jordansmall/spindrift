@@ -6,19 +6,20 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
 // loadRegistryRoutes reads and parses file so doctorCheckSets and
-// registryProxyRoutesCheck word a read failure the same way. A Parse
-// failure passes through unwrapped: registryroutes.Parse's own
+// registryProxyRoutesCheck word a read failure the same way. A ParseRows
+// failure passes through unwrapped: registryroutes.ParseRows's own
 // "registryroutes: ..." message already names what is wrong.
-func loadRegistryRoutes(file string) ([]registryroutes.Route, error) {
+func loadRegistryRoutes(file string, rows []ecosystem.Row) ([]registryroutes.Route, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", file, err)
 	}
-	return registryroutes.Parse(data)
+	return registryroutes.ParseRows(data, rows)
 }
 
 // routeChecksFor takes an already-parsed route slice so a test can pass a route

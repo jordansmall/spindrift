@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // doctorCheckSets builds the classify and report halves (issue #3144).
@@ -25,9 +26,9 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 		extra = replaceCheckByName(extra, registryProxyRoutesCheckName, registryProxyRoutesCheck(c, false))
 		// One parse feeds both row families. A read or parse failure
 		// yields nil for both, leaving the failure to registryProxyRoutesCheck.
-		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile); err == nil {
+		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Table); err == nil {
 			perRoute = routeChecksFor(routes)
-			drift = registryRouteDriftCheckForRoutes(c, routes)
+			drift = registryRouteDriftCheckForRoutes(c, routes, ecosystem.Table)
 		}
 	}
 	extra = memoizeCheckProbes(extra)
