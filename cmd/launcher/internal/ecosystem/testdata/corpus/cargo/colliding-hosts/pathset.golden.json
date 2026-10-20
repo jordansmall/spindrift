@@ -13,14 +13,14 @@
   ],
   "enforced": [
     {
-      "enforcedPaths": null,
-      "enforcedSubtrees": null,
+      "enforcedPaths": [],
+      "enforcedSubtrees": [],
       "matchHost": "one.acme.test",
       "upstream": "https://Crates.Acme.Test"
     },
     {
-      "enforcedPaths": null,
-      "enforcedSubtrees": null,
+      "enforcedPaths": [],
+      "enforcedSubtrees": [],
       "matchHost": "two.acme.test",
       "upstream": "https://crates.acme.test"
     }

@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
+	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryroutes"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -1872,5 +1873,28 @@ credential = { %s }
 				t.Errorf("expected error to name companion key %q, got: %v", kind.CompanionKey, err)
 			}
 		})
+	}
+}
+
+// ProxyRoute must never carry the credential: a routes-file credential is a
+// resolver config, and only the caller's resolved secret reaches the proxy.
+func TestRoute_ProxyRoute_CarriesRoutesFileFieldsOnly(t *testing.T) {
+	r := registryroutes.Route{
+		MatchHost:      "host.example.com",
+		AuthScheme:     "Bearer",
+		UpstreamOrigin: "https://origin.example.com",
+		Credential:     credresolver.Config{FromEnv: "REGISTRY_TOKEN"},
+		Ecosystems:     registryvocab.RouteEcosystems{"synthetic": registryvocab.RouteDeclaration{"path": "/x"}},
+		Allow:          []string{"/extra"},
+	}
+	want := registryproxy.Route{
+		MatchHost:      "host.example.com",
+		AuthScheme:     "Bearer",
+		UpstreamOrigin: "https://origin.example.com",
+		Ecosystems:     r.Ecosystems,
+		Allow:          []string{"/extra"},
+	}
+	if got := r.ProxyRoute(); !reflect.DeepEqual(got, want) {
+		t.Errorf("ProxyRoute() = %+v, want %+v (Upstream, Prefix, EnforcedPaths, EnforcedSubtrees and Credential left for later)", got, want)
 	}
 }
