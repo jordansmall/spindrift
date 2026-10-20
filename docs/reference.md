@@ -1477,9 +1477,12 @@ canonical-event `Strategy` under the `claude` name unless the bundle is
 linked, or registers that `Strategy` itself once from a `TestMain` via
 `driver.Register`; it never imports the bundle or a Driver.
 `TestOnlyBinariesReachTheBundle` fails on any package outside the binaries
-and the `seamtest/bundled` fixture whose tests reach the bundle or a Driver,
-which is what lets the core `launcher-go-test` check build from a source
-holding no Driver (ADR 0066 decision 8). The fields are the contract:
+and the `seamtest/bundled` fixture whose tests reach the bundle, a Driver,
+or a backend adapter other than `git` and `local` (which core keeps), which
+is what lets the core `launcher-go-test` check build from a source holding
+no Driver and no github, forgejo or jira adapter (ADR 0066 decision 8, ADR
+0068 decision 7). A library test that needs a tracker or Code Forge uses
+`forge.NewFake`. The fields are the contract:
 
 - `Name` — the Driver identifier; it must match a key in the Nix
   `lib/drivers/` registry.

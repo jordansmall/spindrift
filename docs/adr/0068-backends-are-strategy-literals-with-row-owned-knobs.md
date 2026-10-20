@@ -89,7 +89,9 @@ package, and its Nix row owns its knobs.
      imports adapters.
 
    `local` stays a core dependency, because the local loop is built on it,
-   and keeps its own derivation as well.
+   and keeps its own derivation as well. (Amended by issue #5648: `git` stays
+   in core too, with its own derivation, because `local` and forgejo build on
+   it as a library.)
 8. **Quickstart reads the rows.** A row's optional `quickstart` block names
    the remote hosts that identify the backend and which axes it sets. A row
    without the block is hand-edit only, which is what jira and local are
