@@ -25,6 +25,11 @@ type Strategy struct {
 	// remedies depend on cfg and the family's knobs, read through l; nil means
 	// none.
 	Prerequisites func(cfg Config, l KnobLookup) []Prerequisite
+	// PrepareHotSwap prepares a realized store-closure (a /nix/store path) before
+	// a hot-swap binds it as the new agent generation; core calls it only for a
+	// nixInBox Consumer. nil means the family needs no preparation (ADR 0069
+	// decision 2).
+	PrepareHotSwap func(pwd, closure string) error
 }
 
 // Launch says where the launch path enforces a Required prerequisite. Doctor
