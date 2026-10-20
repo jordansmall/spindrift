@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\"api\":\"https://crates.acme.test\",\"dl\":\"http://127.0.0.1:27182/crates-acme-test/index/api/v1/crates/{crate}/{version}/download\"}",
+    "request": "GET /crates-acme-test/index/config.json",
+    "status": 200
+  }
+]

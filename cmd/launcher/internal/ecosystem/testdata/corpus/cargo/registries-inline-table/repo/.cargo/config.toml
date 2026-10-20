@@ -1,0 +1,2 @@
+[registries]
+acme = { index = "sparse+https://crates.acme.test/index/" }
