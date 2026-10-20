@@ -31,8 +31,8 @@ func TestComputeGoBindings(t *testing.T) {
 		port   int
 		prefix string
 		// A case that leaves routes unset gets goDeclaredRoutes: the
-		// env-driven GOTOOLCHAIN/GONOPROXY/GOSUMDB decisions only apply
-		// alongside a bound GOPROXY. A case pinning the routes axis sets it.
+		// env-driven GONOPROXY/GOSUMDB decisions only apply alongside a
+		// bound GOPROXY. A case pinning the routes axis sets it.
 		routes []registrymanifest.Route
 		input  GoBindingInput
 
