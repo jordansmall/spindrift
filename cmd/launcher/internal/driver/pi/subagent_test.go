@@ -31,37 +31,82 @@ func subagentResult(agent string, messages ...string) string {
 	return `{"agent":"` + agent + `","exitCode":0,"messages":[` + strings.Join(messages, ",") + `],"usage":{"input":9000,"output":8000,"cacheRead":7000,"cacheWrite":6000,"cost":99,"turns":50}}`
 }
 
+// subagentUpdate is a subagent tool_execution_update: partialResult carries the
+// children's messages so far, cumulatively.
+func subagentUpdate(results ...string) string {
+	return `{"type":"tool_execution_update","toolCallId":"s1","toolName":"subagent","args":{},"partialResult":{"content":[{"type":"text","text":"(running...)"}],"details":{"mode":"parallel","results":[` + strings.Join(results, ",") + `]}}}`
+}
+
+// Both children share timestamp 1500: only the agent and index tell their
+// messages apart.
+var (
+	scoutUser   = `{"role":"user","content":[{"type":"text","text":"Task: look"}]}`
+	scoutCall   = childAssistant(1500, `[{"type":"toolCall","id":"k1","name":"read","arguments":{"path":"a.go"}}]`)
+	scoutResult = `{"role":"toolResult","toolCallId":"k1","toolName":"read","content":[{"type":"text","text":"file body"}],"isError":false}`
+	scoutSays   = childAssistant(1600, `[{"type":"text","text":"child says hi"}]`)
+	secondSays  = childAssistant(1500, `[{"type":"text","text":"second"}]`)
+)
+
+// subagentUpdates are the cumulative updates ahead of the end: each repeats the
+// earlier messages verbatim, as the extension's does.
+func subagentUpdates() []string {
+	return []string{
+		subagentUpdate(subagentResult("scout", scoutUser, scoutCall)),
+		subagentUpdate(subagentResult("scout", scoutUser, scoutCall, scoutResult, scoutSays)),
+		subagentUpdate(subagentResult("scout", scoutUser, scoutCall, scoutResult, scoutSays), subagentResult("scout", secondSays)),
+	}
+}
+
 func subagentLog(t *testing.T) string {
 	t.Helper()
-	return pi.WriteLog(t,
-		toolTurn(1000, "s1", "subagent", `{"agent":"scout","task":"look"}`),
+	lines := []string{toolTurn(1000, "s1", "subagent", `{"agent":"scout","task":"look"}`)}
+	lines = append(lines, subagentUpdates()...)
+	lines = append(lines,
 		subagentEnd("parallel",
-			// Both children share timestamp 1500: only the agent and index tell
-			// their messages apart.
-			subagentResult("scout",
-				`{"role":"user","content":[{"type":"text","text":"Task: look"}]}`,
-				childAssistant(1500, `[{"type":"toolCall","id":"k1","name":"read","arguments":{"path":"a.go"}}]`),
-				`{"role":"toolResult","toolCallId":"k1","toolName":"read","content":[{"type":"text","text":"file body"}],"isError":false}`,
-				childAssistant(1600, `[{"type":"text","text":"child says hi"}]`)),
-			subagentResult("scout", childAssistant(1500, `[{"type":"text","text":"second"}]`)),
+			subagentResult("scout", scoutUser, scoutCall, scoutResult, scoutSays),
+			subagentResult("scout", secondSays),
 		),
-		`{"type":"tool_execution_update","toolCallId":"s1","toolName":"subagent","partialResult":{"details":{"results":[`+subagentResult("scout", childAssistant(1500, `[]`))+`]}}}`,
 		textEnd(2000, "parent done"),
 	)
+	return pi.WriteLog(t, lines...)
+}
+
+// byAgent indexes a report's per-agent rows by agent name.
+func byAgent(rep usage.Report) map[string]usage.AgentUsage {
+	got := map[string]usage.AgentUsage{}
+	for _, a := range rep.SummedByAgent {
+		got[a.Agent] = a
+	}
+	return got
+}
+
+// A run killed mid-subagent has no tool_execution_end: the child calls its
+// updates already carried still count.
+func TestUsage_SubagentCutAfterUpdate(t *testing.T) {
+	lines := append([]string{toolTurn(1000, "s1", "subagent", `{}`)}, subagentUpdates()[:2]...)
+	rep, err := newDriver().ExtractUsage(pi.WriteLog(t, lines...))
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	got := byAgent(rep)
+	if s := got["scout"]; s.APICalls != 2 || s.UncachedInputTokens != 14 || s.OutputTokens != 6 {
+		t.Errorf("scout = %+v, want the update's 2 calls, 14 in, 6 out", s)
+	}
+	if u := rep.Totals; u.InputTokens != 94 || u.TotalCostUSD < 1.0 {
+		t.Errorf("totals = %+v, want 94 in and the children's ~1.0 cost", u)
+	}
 }
 
 // The per-agent usage sums the child assistant messages only: the extension's
-// own totals and its repeated tool_execution_update are not counted on top, and
-// the main loop's row excludes the children.
+// own totals are not counted on top, each child call is counted once however
+// many cumulative tool_execution_updates repeated it, and the main loop's row
+// excludes the children.
 func TestUsage_SubagentChildMessagesOnly(t *testing.T) {
 	rep, err := newDriver().ExtractUsage(subagentLog(t))
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}
-	got := map[string]usage.AgentUsage{}
-	for _, a := range rep.SummedByAgent {
-		got[a.Agent] = a
-	}
+	got := byAgent(rep)
 	if len(got) != 2 {
 		t.Fatalf("agents = %+v, want main and scout", rep.SummedByAgent)
 	}
@@ -111,5 +156,31 @@ func TestSubagent_ShownUnderItsRoleNotAsMainNarration(t *testing.T) {
 	cut := pi.WriteLog(t, toolTurn(1000, "s1", "subagent", `{}`), subagentEnd("single", subagentResult("scout", childAssistant(1500, `[{"type":"text","text":"child says hi"}]`))))
 	if last, err := driverkit.LastMessageText(cut, pi.NewDecoder); err != nil || last != "" {
 		t.Errorf("LastMessageText = %q, %v, want no text", last, err)
+	}
+}
+
+// A provider may reuse a toolCallId across subagent calls: the first call's
+// emitted-message count must not hide the second call's children.
+func TestUsage_SubagentReusedToolCallID(t *testing.T) {
+	first := []string{scoutUser, scoutCall, scoutResult, scoutSays}
+	second := []string{
+		scoutUser,
+		childAssistant(2500, `[{"type":"text","text":"again"}]`),
+		childAssistant(2600, `[{"type":"text","text":"more"}]`),
+	}
+	lines := []string{
+		toolTurn(1000, "s1", "subagent", `{}`),
+		subagentUpdate(subagentResult("scout", first[:2]...)),
+		subagentEnd("single", subagentResult("scout", first...)),
+		toolTurn(2400, "s1", "subagent", `{}`),
+		subagentUpdate(subagentResult("scout", second[:2]...)),
+		subagentEnd("single", subagentResult("scout", second...)),
+	}
+	rep, err := newDriver().ExtractUsage(pi.WriteLog(t, lines...))
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	if s := byAgent(rep)["scout"]; s.APICalls != 4 || s.UncachedInputTokens != 28 || s.OutputTokens != 12 {
+		t.Errorf("scout = %+v, want both calls' 4 child calls, 28 in, 12 out", s)
 	}
 }

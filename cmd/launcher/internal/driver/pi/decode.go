@@ -12,11 +12,28 @@ import (
 // WriteTool is the pi CLI's file-write tool name.
 const WriteTool = "write"
 
-// NewDecoder returns the pi decoder. Decode is stateless, so every call shares
-// it.
-func NewDecoder() driverkit.Decoder { return Decode }
+// NewDecoder returns a pi decoder with fresh state for one scan: it remembers
+// how many of each subagent result's child messages it has emitted, since the
+// extension's tool_execution_updates repeat them cumulatively.
+func NewDecoder() driverkit.Decoder {
+	d := &decoder{seen: map[seenKey]int{}}
+	return d.decode
+}
 
-// Decode turns one line of a pi `--print --mode json` Pass log into canonical
+// Decode decodes one line with fresh state, so a subagent update's child
+// messages are all new. A scan over a log uses NewDecoder.
+func Decode(line string) []driverkit.Event { return NewDecoder()(line) }
+
+// decoder holds the child messages already emitted, keyed by tool call and
+// result index.
+type decoder struct{ seen map[seenKey]int }
+
+type seenKey struct {
+	call   string
+	result int
+}
+
+// decode turns one line of a pi `--print --mode json` Pass log into canonical
 // events. Text that does not parse as a JSON object is stderr sharing the log
 // and yields one KindUnparsed; a blank line, a literal `null` or an event type
 // outside the grammar yields none.
@@ -26,12 +43,14 @@ func NewDecoder() driverkit.Decoder { return Decode }
 // and its usage with it, so reading any of those too would count a call more
 // than once; the retry events repeat the failed message's errorMessage.
 //
-// A subagent tool_execution_end also unpacks details.results[].messages into
-// InSubagent events with the agent as Role (see decodeSubagent).
+// A subagent tool_execution_update or tool_execution_end also unpacks
+// details.results[].messages into InSubagent events with the agent as Role,
+// each child message once (see decodeSubagent). Reading the update, not just
+// the end, keeps the usage of a run killed mid-subagent.
 //
 // Every field the readers consume is strict except the tool fields and the
 // error payload, which are lenient (see the driverkit.Decoder contract).
-func Decode(line string) []driverkit.Event {
+func (d *decoder) decode(line string) []driverkit.Event {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil
@@ -47,6 +66,11 @@ func Decode(line string) []driverkit.Event {
 		if l.Message.Role == "assistant" {
 			return decodeAssistant(l.Message, scope{})
 		}
+	case "tool_execution_update":
+		if l.ToolName == subagentTool {
+			children, _ := d.decodeSubagent(l.ToolCallID, l.PartialResult, false)
+			return children
+		}
 	case "tool_execution_end":
 		ev := driverkit.Event{
 			Kind:       driverkit.KindToolResult,
@@ -56,7 +80,9 @@ func Decode(line string) []driverkit.Event {
 			IsError:    l.IsError,
 		}
 		if l.ToolName == subagentTool {
-			return decodeSubagent(ev, l.Result)
+			children, agents := d.decodeSubagent(l.ToolCallID, l.Result, true)
+			ev.Subagent = agents
+			return append(children, ev)
 		}
 		return []driverkit.Event{ev}
 	}
@@ -66,10 +92,10 @@ func Decode(line string) []driverkit.Event {
 // subagentTool is the tool name of pi's official subagent extension.
 const subagentTool = "subagent"
 
-// subagentResult is the part of a subagent tool_execution_end result Decode
-// reads. The per-child usage the extension sums beside the messages, and its
-// tool_execution_update events, repeat what the child messages already carry,
-// so reading them too would count the cost twice.
+// subagentResult is the part of a subagent result or partialResult
+// decodeSubagent reads. The per-child usage the extension sums beside the
+// messages repeats what the child messages already carry, so reading it too
+// would count the cost twice.
 type subagentResult struct {
 	Details struct {
 		Results []struct {
@@ -79,26 +105,31 @@ type subagentResult struct {
 	} `json:"details"`
 }
 
-// decodeSubagent returns each child's events, then the subagent tool's own
-// result tagged with the agents it ran: the model, text, tool calls and usage
-// of a child's assistant messages and its tool results, as InSubagent events
-// with the agent as Role, ahead of the result as in claude's log order. The
-// readers keep InSubagent text out of the heartbeat narration and the
-// last-message result. A result with no parsable details yields the bare tool
-// result.
-func decodeSubagent(res driverkit.Event, raw json.RawMessage) []driverkit.Event {
-	var d subagentResult
-	if json.Unmarshal(raw, &d) != nil {
-		return []driverkit.Event{res}
+// decodeSubagent returns the child events of a subagent result not yet emitted,
+// and the agents it names joined: the model, text, tool calls and usage of a
+// child's assistant messages and its tool results, as InSubagent events with
+// the agent as Role. The caller puts them ahead of the subagent tool's own
+// result, as in claude's log order. The readers keep InSubagent text out of the
+// heartbeat narration and the last-message result. A result with no parsable
+// details yields nothing.
+//
+// A child message is appended only once it ends, so a message seen is complete
+// and the prefix a cumulative update repeats is skipped by count. The final
+// result (the tool_execution_end) forgets the call's counts, so a provider
+// reusing a toolCallId for a later subagent call starts that call from zero.
+func (d *decoder) decodeSubagent(toolCallID string, raw json.RawMessage, final bool) (children []driverkit.Event, agents string) {
+	var res subagentResult
+	if json.Unmarshal(raw, &res) != nil {
+		return nil, ""
 	}
-	var agents []string
-	var children []driverkit.Event
-	for i, r := range d.Details.Results {
+	var names []string
+	for i, r := range res.Details.Results {
 		if r.Agent == "" {
 			continue
 		}
-		agents = append(agents, r.Agent)
-		for _, m := range r.Messages {
+		names = append(names, r.Agent)
+		key := seenKey{toolCallID, i}
+		for _, m := range r.Messages[min(d.seen[key], len(r.Messages)):] {
 			switch m.Role {
 			case "assistant":
 				// The index keeps a parallel run's children, whose timestamps can
@@ -116,9 +147,13 @@ func decodeSubagent(res driverkit.Event, raw json.RawMessage) []driverkit.Event 
 				})
 			}
 		}
+		if final {
+			delete(d.seen, key)
+		} else {
+			d.seen[key] = max(d.seen[key], len(r.Messages))
+		}
 	}
-	res.Subagent = strings.Join(agents, ",")
-	return append(children, res)
+	return children, strings.Join(names, ",")
 }
 
 // logLine is one Pass-log line. The message's content stays raw because only an
@@ -129,8 +164,10 @@ type logLine struct {
 	ToolCallID string  `json:"toolCallId"`
 	ToolName   string  `json:"toolName"`
 	// Result is raw so a malformed one costs only itself rather than the line.
-	Result  json.RawMessage `json:"result"`
-	IsError bool            `json:"isError"`
+	Result json.RawMessage `json:"result"`
+	// PartialResult is a tool_execution_update's counterpart of Result.
+	PartialResult json.RawMessage `json:"partialResult"`
+	IsError       bool            `json:"isError"`
 }
 
 type message struct {
