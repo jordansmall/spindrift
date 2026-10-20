@@ -39,18 +39,50 @@ let
   # produces (list, lsp, question, external_directory, doom_loop, MCP/custom
   # tools) keep opencode's defaults. An explicit `tools = [ ]` denies every
   # mapped key, read included, unlike an omitted `tools`.
+  #
+  # An entry allowing `task` with `spawns` gets `task` as a map (issue #5368).
+  # opencode evaluates rules last-match-wins, so `*` must come first:
+  # builtins.toJSON sorts keys and `*` (0x2A) sorts before letters. The `*` deny
+  # also hides opencode's built-in subagents, so a target absent from the
+  # roster would leave nothing to spawn and throws instead. An empty `spawns`
+  # is deliberate: spawn nothing. Returns "" when the entry sets neither key.
   permissionLineFor =
-    e:
+    rosterNames: e:
     let
-      unmapped = lib.filter (t: !(rosterToolPermissions ? ${t})) e.tools;
-      allowed = map (t: rosterToolPermissions.${t}) e.tools;
+      tools = e.tools or [ ];
+      unmapped = lib.filter (t: !(rosterToolPermissions ? ${t})) tools;
+      allowed = map (t: rosterToolPermissions.${t}) tools;
+      taskAllowed = !(e ? tools) || lib.elem "task" allowed;
+      spawns = e.spawns or [ ];
+      missing = lib.optionals taskAllowed (lib.filter (n: !(lib.elem n rosterNames)) spawns);
+      scopedTask = {
+        "*" = "deny";
+      }
+      // lib.genAttrs spawns (_: "allow");
+      keys =
+        if e ? tools then
+          permissionKeys
+        else if e ? spawns then
+          [ "task" ]
+        else
+          [ ];
+      valueFor =
+        k:
+        if e ? tools && !(lib.elem k allowed) then
+          "deny"
+        else if k == "task" && e ? spawns then
+          scopedTask
+        else
+          "allow";
     in
     if unmapped != [ ] then
       throw "opencode Driver: roster agent '${e.name}' lists tools with no opencode permission mapping: ${lib.concatStringsSep ", " unmapped}"
+    else if missing != [ ] then
+      throw "opencode Driver: roster agent '${e.name}' spawns ${lib.concatStringsSep ", " missing}, absent from the roster; add the entry or drop it from spawns"
+    else if keys == [ ] then
+      ""
     else
-      "permission: ${
-        builtins.toJSON (lib.genAttrs permissionKeys (k: if lib.elem k allowed then "allow" else "deny"))
-      }\n";
+      "permission: ${builtins.toJSON (lib.genAttrs keys valueFor)}\n";
 in
 {
   name = "opencode";
@@ -127,8 +159,8 @@ in
   # drops empty-model entries upstream, so e.model needs no fallback and reaches
   # driver-exec verbatim. Every frontmatter scalar is JSON-encoded (issue #2152
   # slice C) so a newline or colon cannot inject a second YAML key.
-  # An entry with a `tools` list also gets a `permission` map; one without keeps
-  # opencode's full tool set.
+  # An entry with a `tools` list also gets a `permission` map (`spawns` alone
+  # gets a task-only one); one with neither keeps opencode's full tool set.
   agentFilesTemplate =
     { roster }:
     {
@@ -146,7 +178,7 @@ in
           description: ${builtins.toJSON (e.description or "")}
           mode: ${builtins.toJSON (e.mode or "subagent")}
           model: ${builtins.toJSON e.model}
-          ${lib.optionalString (e ? tools) (permissionLineFor e)}${
+          ${permissionLineFor (map (r: r.name) roster) e}${
             lib.optionalString ((e.effort or "") != "") "reasoningEffort: ${builtins.toJSON e.effort}\n"
           }---
           ${e.description or ""}

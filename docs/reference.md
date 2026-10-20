@@ -511,10 +511,11 @@ all, `roster` is reachable from the flake module itself, and appears in
 [`docs/flake-options.md`](flake-options.md) with its own entry, the same
 as every other domain-tree option.
 `roster` takes a list of subagent entries, each shaped `{ name; model; mode;
-description; tools; spawns; promptFile; prompt; effort }`. It supersedes the four fixed
-`scoutModel`/`reviewModel`/`filerModel`/`workerModel` args: instead of one
-knob per hardcoded agent, a Consumer flake can pass any number of roster
-entries, including a custom Nth agent beyond the historical four. When
+description; tools; spawns; promptFile; prompt; effort }`. It supersedes the
+four fixed `scoutModel`/`reviewModel`/`filerModel`/`workerModel` args:
+instead of one knob per hardcoded agent, a Consumer flake can pass any
+number of roster entries, including a custom Nth agent beyond the
+historical four. When
 `roster` is omitted, `mkHarness` falls back to `lib/roster.nix`'s
 `defaultRoster`, built from the four legacy model args (or their
 `agents.drivers.<name>.models.*` defaults) and reproducing today's
@@ -524,7 +525,10 @@ entry (issue #3447) that has no legacy model arg of its own — see
 
 `spawns` is optional: a list of roster entry names the entry may spawn as
 subagents. Absent means no declared restriction; the default `reviewer`
-declares `[ "review-axis" ]`.
+declares `[ "review-axis" ]`. Each element must be a valid entry name (a string
+matching `[a-z0-9-]+`), else eval fails with the `invalid-spawns-type`
+violation. An empty list is deliberate: the entry spawns nothing. Today only
+the opencode Driver enforces it; claude and pi ignore it.
 
 Every roster — explicit or default — passes through `lib/roster.nix`'s
 `normalizeRoster` before any Driver renders it, and `normalizeRoster` is
@@ -655,11 +659,22 @@ permission key the `rosterToolPermissions` table (top of
 `lib/drivers/opencode.nix`) can produce: a key is `"allow"` when any of the
 entry's tools maps to it and `"deny"` otherwise, since opencode treats an unset
 key as allow (`Edit`/`Write`/`MultiEdit` share opencode's single `edit` key).
+The exception is `task`: an entry that allows it and declares `spawns` gets
+`task` as a map denying `*` and allowing each named entry, so the default
+reviewer reaches only `review-axis` and never `worker` (opencode drops a denied
+subagent from the task tool's description). A `spawns` target absent from the
+roster fails evaluation, naming the agent and the target, because the `*` deny
+also hides opencode's built-in subagents and would leave the entry nothing to
+spawn. An entry that omits `tools` keeps `task` allowed, so `spawns` alone
+renders a `permission:` line setting only `task`, under the same missing-target
+failure; `spawns` on an entry whose `tools` has no task-mapped tool grants
+nothing and is not checked against the roster. An empty `spawns` on an entry
+that allows `task` denies every subagent.
 Permission keys outside the table keep opencode's defaults, so the restriction
-covers the mapped tools only. An entry without `tools` gets no `permission:`
-line and keeps opencode's full tool set, whereas an explicit empty `tools = [ ]`
-denies every mapped key (`claude.nix` renders an omitted list as `[ ]`, so only
-opencode distinguishes the two); a tool name the table does not map fails
+covers the mapped tools only. An entry with neither `tools` nor `spawns` gets
+no `permission:` line and keeps opencode's full tool set, whereas an explicit
+empty `tools = [ ]` denies every mapped key (`claude.nix` renders an
+omitted list as `[ ]`, so only opencode distinguishes the two); a tool name the table does not map fails
 evaluation, naming the agent and the tool, rather than being dropped. opencode
 model ids are Provider-namespaced (`<provider>/<model>`), so under opencode a
 worker whose model has no `/` (such as the inherited schema default) is
