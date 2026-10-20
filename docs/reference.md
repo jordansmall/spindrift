@@ -1876,6 +1876,20 @@ and the guard plugin described after this list (issue #5346):
     hook, by contrast, is home-wide and not overridable from the repo.
   - The env-credential scrub has no permission-config equivalent; the guard
     plugin below runs the scrub hook itself on each opencode Bash call.
+  - Formatters and LSP servers are subprocesses opencode starts with its full
+    environment, credentials included, outside the Bash tool and so outside
+    the scrub. Both are off by default in opencode, but a Target repo's
+    project config could turn them on, so the Driver pins
+    `{"formatter":false,"lsp":false}` in `OPENCODE_CONFIG_CONTENT`, which
+    opencode merges after project config. A Target repo cannot enable them.
+    A check starts a project-defined LSP server with the real binary (from
+    root `opencode.json` and from `.opencode/`) and reads the formatters'
+    state from the resolved config, so an opencode bump that changes that
+    merge order fails the build instead of silently reopening the gap.
+    Local MCP servers stay a residual: opencode has no global off switch for
+    them, so a local MCP server a Target repo defines inherits the full
+    environment, credentials included. Severity is low, since the repo
+    already controls the commands those servers run.
 
 None of these controls break legitimate agent work: `gh`, `git`, and the
 Driver authenticate via environment variables already forwarded into the
@@ -5592,7 +5606,10 @@ boundary does and does not promise.
    #5346), and a baked opencode permission config denies the same paths plus
    its own auth store (issue #5345), with a Target repo's own opencode config
    able to widen the deny, and redirects on compound commands, bare
-   `$(<file)`, and a glob next to the path (`cat .env*`) slipping past it —
+   `$(<file)`, and a glob next to the path (`cat .env*`) slipping past it.
+   The Driver also pins formatters and LSP servers off so a Target repo
+   cannot start them with the full environment, but a Target-defined local
+   MCP server still inherits it —
    see [Self-inflicted secret reads are denied per
    Driver](#self-inflicted-secret-reads-are-denied-per-driver).
 3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
