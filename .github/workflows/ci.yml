@@ -136,8 +136,48 @@ jobs:
           purge-primary-key: never
 
       # shellcheck, the bats suite, and the eval-only equivalence checks.
+      # The x86_64 leg also records eval stats for the report below; Nix
+      # reads any NIX_SHOW_STATS but "0" as on, so the other leg sets "0".
       - name: nix flake check
+        env:
+          NIX_SHOW_STATS: ${{ matrix.nix-system == 'x86_64-linux' && '1' || '0' }}
+          NIX_SHOW_STATS_PATH: ${{ runner.temp }}/eval-stats.json
         run: nix flake check --print-build-logs
+
+      # Eval cost is reviewed, never gated (issue #5863): the report can't
+      # change the job's conclusion. A PR compares against the latest
+      # successful main run's artifact; a run that went red uploads nothing
+      # worth comparing to.
+      - name: Report eval stats
+        if: ${{ !cancelled() && matrix.nix-system == 'x86_64-linux' }}
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          bash .github/scripts/eval-probe.sh >"$RUNNER_TEMP/eval-probe.json" || true
+          args=("$RUNNER_TEMP/eval-stats.json" "$RUNNER_TEMP/eval-probe.json")
+          base=$RUNNER_TEMP/eval-baseline
+          if [ "$EVENT" = pull_request ] &&
+            read -r run_id base_sha < <(gh run list --workflow ci.yml --branch main --event push \
+              --status success --limit 1 --json databaseId,headSha \
+              --jq '.[] | "\(.databaseId) \(.headSha)"') &&
+            gh run download "$run_id" --name eval-stats --dir "$base"; then
+            args+=("$base/eval-stats.json" "$base/eval-probe.json" "$base_sha")
+          fi
+          bash .github/scripts/eval-stats-render.sh "${args[@]}" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the eval stats baseline
+        if: ${{ !cancelled() && matrix.nix-system == 'x86_64-linux' && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-stats
+          path: |
+            ${{ runner.temp }}/eval-stats.json
+            ${{ runner.temp }}/eval-probe.json
+          if-no-files-found: warn
 
       # Realize the Linux OCI image natively — the one thing the checks only
       # assert at eval time. Both matrix arches build their own image on a
