@@ -97,12 +97,16 @@ const subagentTool = "subagent"
 // messages repeats what the child messages already carry, so reading it too
 // would count the cost twice.
 type subagentResult struct {
-	Details struct {
-		Results []struct {
-			Agent    string    `json:"agent"`
-			Messages []message `json:"messages"`
-		} `json:"results"`
-	} `json:"details"`
+	Details subagentDetails `json:"details"`
+}
+
+type subagentDetails struct {
+	Results []childResult `json:"results"`
+}
+
+type childResult struct {
+	Agent    string    `json:"agent"`
+	Messages []message `json:"messages"`
 }
 
 // decodeSubagent returns the child events of a subagent result not yet emitted,
@@ -122,38 +126,72 @@ func (d *decoder) decodeSubagent(toolCallID string, raw json.RawMessage, final b
 	if json.Unmarshal(raw, &res) != nil {
 		return nil, ""
 	}
-	var names []string
-	for i, r := range res.Details.Results {
-		if r.Agent == "" {
-			continue
-		}
-		names = append(names, r.Agent)
+	agents = eachChild(res.Details.Results, func(i int, r childResult) {
 		key := seenKey{toolCallID, i}
-		for _, m := range r.Messages[min(d.seen[key], len(r.Messages)):] {
-			switch m.Role {
-			case "assistant":
-				// The index keeps a parallel run's children, whose timestamps can
-				// collide, and a chain's repeated agent apart.
-				children = append(children, decodeAssistant(m, scope{role: r.Agent, idPrefix: r.Agent + ":" + strconv.Itoa(i) + ":"})...)
-			case "toolResult":
-				children = append(children, driverkit.Event{
-					Kind:       driverkit.KindToolResult,
-					Role:       r.Agent,
-					InSubagent: true,
-					ToolID:     m.ToolCallID,
-					ToolName:   m.ToolName,
-					ToolOutput: contentText(m.Content, compact(m.Content)),
-					IsError:    m.IsError,
-				})
-			}
-		}
+		children = append(children, childEvents(r, i, "", min(d.seen[key], len(r.Messages)))...)
 		if final {
 			delete(d.seen, key)
 		} else {
 			d.seen[key] = max(d.seen[key], len(r.Messages))
 		}
+	})
+	return children, agents
+}
+
+// eachChild calls emit for each named result and returns the agents joined, the
+// one place the rule for a result without an agent lives.
+func eachChild(results []childResult, emit func(i int, r childResult)) string {
+	var names []string
+	for i, r := range results {
+		if r.Agent == "" {
+			continue
+		}
+		names = append(names, r.Agent)
+		emit(i, r)
 	}
-	return children, strings.Join(names, ",")
+	return strings.Join(names, ",")
+}
+
+// childEvents decodes result i's messages from index from on. The index keeps a
+// parallel run's children, whose timestamps can collide, and a chain's repeated
+// agent apart in the message ids; parentPrefix extends a grandchild's ids past
+// its parent's, so they cannot collide with the child's at the same timestamp.
+//
+// A child that delegates further holds its own subagent toolResult, whose
+// details carry the grandchildren's messages: they come out ahead of that
+// toolResult event, to any depth. A toolResult is whole once present, so a
+// nested one needs no seen-state. The extension appends a child's message only
+// when it ends, so a grandchild's usage reaches the log once its parent's
+// subagent call completes; a kill during a grandchild's run loses that cost.
+func childEvents(r childResult, i int, parentPrefix string, from int) []driverkit.Event {
+	prefix := parentPrefix + r.Agent + ":" + strconv.Itoa(i) + ":"
+	var events []driverkit.Event
+	for _, m := range r.Messages[from:] {
+		switch m.Role {
+		case "assistant":
+			events = append(events, decodeAssistant(m, scope{role: r.Agent, idPrefix: prefix})...)
+		case "toolResult":
+			ev := driverkit.Event{
+				Kind:       driverkit.KindToolResult,
+				Role:       r.Agent,
+				InSubagent: true,
+				ToolID:     m.ToolCallID,
+				ToolName:   m.ToolName,
+				ToolOutput: contentText(m.Content, compact(m.Content)),
+				IsError:    m.IsError,
+			}
+			if m.ToolName == subagentTool {
+				var nested subagentDetails
+				if json.Unmarshal(m.Details, &nested) == nil {
+					ev.Subagent = eachChild(nested.Results, func(j int, g childResult) {
+						events = append(events, childEvents(g, j, prefix, 0)...)
+					})
+				}
+			}
+			events = append(events, ev)
+		}
+	}
+	return events
 }
 
 // logLine is one Pass-log line. The message's content stays raw because only an
@@ -187,6 +225,9 @@ type message struct {
 	ToolCallID string `json:"toolCallId"`
 	ToolName   string `json:"toolName"`
 	IsError    bool   `json:"isError"`
+	// Details is a subagent toolResult's own details, raw so a malformed one
+	// costs only its nested results.
+	Details json.RawMessage `json:"details"`
 }
 
 // scope attributes a decoded assistant message: the zero value is the main
