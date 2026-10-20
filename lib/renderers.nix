@@ -1534,6 +1534,12 @@ rec {
         "// path${upperFirst key} is the nix option path for the quickstart wizard's ${key} knob.\n"
         + "const path${upperFirst key} = ${builtins.toJSON value}\n";
       constBlocks = mapAttrsToList renderConst quickstartPaths;
+      hostGitConfigKeyBlocks = mapAttrsToList (
+        key: value:
+        "// hostGitConfigKey${upperFirst key} is the host git config key the wizard reads\n"
+        + "// to pre-fill the ${key} prompt.\n"
+        + "const hostGitConfigKey${upperFirst key} = ${builtins.toJSON value}\n"
+      ) quickstartTable.hostGitConfigKeys;
       # Padded the way gofmt aligns consecutive map values, since the drift
       # check diffs this file unformatted.
       knobKeyWidth = builtins.foldl' (
@@ -1562,6 +1568,8 @@ rec {
     + "// defaultCodeForge is the CODE_FORGE schema default; the wizard omits the\n"
     + "// codeForge line when the chosen backend equals it.\n"
     + "const defaultCodeForge = ${builtins.toJSON quickstartTable.defaultCodeForge}\n"
+    + "\n"
+    + builtins.concatStringsSep "\n" hostGitConfigKeyBlocks
     + "\n"
     + "// quickstartKnob is one flakeOption knob of a quickstart-capable backend row:\n"
     + "// its nix option path and schema default.\n"
