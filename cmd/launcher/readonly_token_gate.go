@@ -41,7 +41,9 @@ func checkReadOnlyTokenGate(c config, row backendkit.Strategy, w io.Writer) (ver
 	if boxToken == "" {
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to be set to a credential distinct from %s — the Box must never receive the Launcher's own write-capable token", errReadOnlyGateMisconfigured, boxEnv, hostEnv)
 	}
-	if boxToken == hostToken(c, hostEnv) {
+	// A host token resolved from a _FILE/_CMD form reads back as "", so this
+	// check cannot fire for it.
+	if boxToken == c.hostTokenValue(hostEnv) {
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to differ from %s — it is byte-for-byte identical to the Launcher's own token, which defeats read-only", errReadOnlyGateMisconfigured, boxEnv, hostEnv)
 	}
 	if row.IntrospectToken == nil {
@@ -64,19 +66,4 @@ func checkReadOnlyTokenGate(c config, row backendkit.Strategy, w io.Writer) (ver
 		return false, fmt.Errorf("%w: BOX_FORGE_AND_ISSUE_ACCESS=read-only requires %s to carry no write scopes; the provided token is write-capable", errReadOnlyGateMisconfigured, boxEnv)
 	}
 	return true, nil
-}
-
-// hostToken returns the Launcher's own value of the token env var a row names.
-// GH_TOKEN is a core config field rather than a backend knob, so knobLookup
-// does not serve it. Any other unserved name falls back to the environment,
-// which is empty when the host token came from a _FILE/_CMD form; the
-// identical-token check then compares against "" and cannot fire.
-func hostToken(c config, env string) string {
-	if v, ok := c.knobLookup(env); ok {
-		return v
-	}
-	if env == "GH_TOKEN" {
-		return c.ghToken
-	}
-	return os.Getenv(env)
 }
