@@ -286,8 +286,9 @@ credential = { netrc = "~/.netrc" }
 // Every refusal below is the shared validateDeclaredPath ban, so it holds for
 // any row's path key. The rejected shapes are:
 //   - a leading slash is required;
-//   - whitespace, and "$", "`" and "\" which flow into shell-sourced exports
-//     and init-script string literals downstream;
+//   - whitespace (any Unicode space) and control characters, and "$", "`"
+//     and "\" which flow into shell-sourced exports and init-script string
+//     literals downstream;
 //   - "?" and "#", which would cut a URL short (issue #3321);
 //   - ".", ".." and an interior doubled slash, which the path.Clean-based
 //     consumers downstream can never produce or match;
@@ -298,6 +299,8 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 	const host = "repo.example.com"
 	const wholeHost = "whole host"
 	const urlDelimiter = `must not contain "?" or "#"`
+	const whitespace = "must not contain whitespace"
+	const control = "must not contain a control character"
 	for _, tc := range []struct {
 		name     string
 		pathLine string
@@ -307,6 +310,14 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 		{"leading whitespace", `path = " /mirror"`, host},
 		{"trailing whitespace", `path = "/mirror "`, host},
 		{"interior whitespace", `path = "/mir ror"`, host},
+		{"interior vertical tab", `path = "/mir\u000bror"`, whitespace},
+		{"interior form feed", `path = "/mir\u000cror"`, whitespace},
+		{"interior NBSP", `path = "/mir\u00a0ror"`, whitespace},
+		{"interior NEL", `path = "/mir\u0085ror"`, whitespace},
+		{"interior line separator", `path = "/mir\u2028ror"`, whitespace},
+		{"interior SOH", `path = "/mir\u0001ror"`, control},
+		{"interior unit separator", `path = "/mir\u001fror"`, control},
+		{"interior DEL", `path = "/mir\u007fror"`, control},
 		{"dot-dot segment", `path = "/mirror/../etc"`, host},
 		{"dot segment", `path = "/mirror/./release"`, host},
 		{"empty segment", `path = "/mirror//release"`, host},
