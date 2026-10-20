@@ -61,6 +61,7 @@ let
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
   promptAssemblyBoxEnvFile = renderers.renderPromptAssemblyBoxEnvGo promptAssemblyBoxEnv;
+  axisSignalsJson = renderers.renderAxisSignalsJson (import ../lib/fragment-paths.nix).axisSignals;
   rowKnobReaders = import ../lib/row-knob-readers.nix;
   documentedFacts = import ../lib/documented-facts.nix { inherit (pkgs) lib; };
   # write_between below builds on this shared marker-splice implementation
@@ -213,6 +214,7 @@ pkgs.writeShellApplication {
     }
     ${writeGenerated "cmd/launcher/internal/promptassembly/boxenv_gen.go" promptAssemblyBoxEnvFile}
     gofmt -w "$root/cmd/launcher/internal/promptassembly/boxenv_gen.go"
+    ${writeGenerated "cmd/launcher/internal/promptassembly/testdata/axis-signals.json" axisSignalsJson}
     ${concatStrings (
       map (
         target:
