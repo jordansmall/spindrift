@@ -156,8 +156,9 @@ in
     # (issue #4409) and opencode's 2-minute default (issue #5351); 30 minutes
     # lets it finish in one blocking call.
     driverBashTimeoutMs = 1800000;
-    # A six-slot Daemon pool. The daemon reads MAX_PARALLEL from the baked
-    # settings only, so harness.env cannot raise it.
-    maxParallel = 6;
+    # A four-slot Daemon pool: at six, concurrent checks-inbox gates contend
+    # for host CPU and roughly double each gate. The daemon reads MAX_PARALLEL
+    # from the baked settings only, so harness.env cannot change it.
+    maxParallel = 4;
   };
 }
