@@ -1,6 +1,7 @@
 # The Harness core: the Go binaries and their fileset sources that depend on
 # nothing a mkHarness caller varies (no revision, no knobs), so one evaluation
-# can serve every harness over the same toolset.
+# serves every harness over the same toolset. lib/nixpkgs-shared.nix caches it
+# per system beside the nixpkgs instances.
 { pkgs, hostPkgs }:
 let
   inherit (pkgs) lib;
@@ -468,6 +469,10 @@ let
   };
 in
 {
+  # mkHarness compares this to its own cmd/launcher before reusing a cached
+  # core: a checkset re-evaluated from a copied source tree must not pick up
+  # binaries built from the original tree.
+  root = ../cmd/launcher;
   inherit
     spindriftVersion
     backendBundleDirs

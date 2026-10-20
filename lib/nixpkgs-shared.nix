@@ -26,24 +26,44 @@ rec {
       };
     };
 
+  # Likewise the only spelling of the Harness core's call (lib/harness-core.nix).
+  harnessCore =
+    { pkgs, hostPkgs }:
+    import ./harness-core.nix { inherit pkgs hostPkgs; };
+
   # listToAttrs leaves the per-system values as unforced thunks, so a system
   # nothing asks for costs nothing. Only the default toolset is cached: a
   # Consumer passing `overlays` or `config` gets its own instantiation, since
-  # functions have no stable identity to key a cache on.
+  # functions have no stable identity to key a cache on. The core sits beside
+  # the instances; mkHarness.nix reuses it only when its `root` is this tree's
+  # cmd/launcher, so a copied tree or another spindrift version builds its own.
   withSharedInstances =
     nixpkgs:
-    nixpkgs
-    // {
-      spindriftSharedInstances = builtins.listToAttrs (
+    let
+      instances = builtins.listToAttrs (
         map (s: {
           name = s;
           value = instantiate nixpkgs s;
         }) (builtins.attrNames linuxTwin)
       );
+    in
+    nixpkgs
+    // {
+      spindriftSharedInstances = instances;
+      spindriftSharedCores = builtins.mapAttrs (
+        s: twin:
+        harnessCore {
+          pkgs = instances.${twin};
+          hostPkgs = instances.${s};
+        }
+      ) linuxTwin;
     };
 
   # This is total on any nixpkgs a caller may pass: a bare path, a bare flake
   # input, or a withSharedInstances-wrapped input.
   sharedInstancesOf =
     nixpkgs: if builtins.isAttrs nixpkgs then nixpkgs.spindriftSharedInstances or { } else { };
+
+  sharedCoresOf =
+    nixpkgs: if builtins.isAttrs nixpkgs then nixpkgs.spindriftSharedCores or { } else { };
 }
