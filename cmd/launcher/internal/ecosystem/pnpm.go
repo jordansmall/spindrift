@@ -44,7 +44,7 @@ func isPnpmRegistryKey(key string) bool {
 // lines covers the shapes pnpm emits without a YAML library for one key;
 // adding one is an ADR 0048 promotion trigger, not a prohibition.
 func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
-	seenURL := make(map[string]bool)
+	indexByURL := make(map[string]int)
 	var out []Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(content, "\n") {
@@ -61,13 +61,13 @@ func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		sawDeclaration = true
 		value = unquoteYAMLScalar(stripYAMLTrailingComment(value))
 		host, upstreamBaseURL, ok := httpAbsoluteURL(value)
-		if !ok || seenURL[upstreamBaseURL] {
+		if !ok {
 			continue
 		}
-		seenURL[upstreamBaseURL] = true
-		out = append(out, Declaration{
+		out = addNpmFamilyDeclaration(out, indexByURL, Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
+			Scoped:          isScopedNpmFamilyKey(key),
 		})
 	}
 

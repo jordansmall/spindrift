@@ -42,7 +42,7 @@ var npmRow = Row{
 // values, so a line-based scan matches npm's own parsing more closely than a
 // general-purpose ini library would.
 func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
-	seenURL := make(map[string]bool)
+	indexByURL := make(map[string]int)
 	var out []Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(content, "\n") {
@@ -61,19 +61,39 @@ func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		}
 		sawDeclaration = true
 		host, upstreamBaseURL, ok := httpAbsoluteURL(value)
-		if !ok || seenURL[upstreamBaseURL] {
+		if !ok {
 			continue
 		}
-		seenURL[upstreamBaseURL] = true
-		out = append(out, Declaration{
+		out = addNpmFamilyDeclaration(out, indexByURL, Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
+			Scoped:          isScopedNpmFamilyKey(key),
 		})
 	}
 
 	// sawDeclaration tells the caller the file named a registry key but no
 	// usable value, which differs from a file that names no registry key.
 	return out, sawDeclaration, nil
+}
+
+// isScopedNpmFamilyKey reports whether a key the row's own predicate already
+// matched is a scope's ("@acme:registry") rather than the default registry.
+func isScopedNpmFamilyKey(key string) bool { return key != "registry" }
+
+// addNpmFamilyDeclaration appends d unless its URL is already declared. A
+// repeat declaration unscoped upgrades the earlier scoped one: the binding
+// skips scoped declarations, so a URL that is also the default registry must
+// not stay scoped just because a scoped line came first. registrypathset
+// applies the same rule per host+path; change one, change both.
+func addNpmFamilyDeclaration(out []Declaration, indexByURL map[string]int, d Declaration) []Declaration {
+	if i, seen := indexByURL[d.UpstreamBaseURL]; seen {
+		if !d.Scoped {
+			out[i].Scoped = false
+		}
+		return out
+	}
+	indexByURL[d.UpstreamBaseURL] = len(out)
+	return append(out, d)
 }
 
 // npmFamilyBinding points one npm-family tool at the Forwarder on routes[0]

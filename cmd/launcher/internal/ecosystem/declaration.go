@@ -7,6 +7,7 @@ type Declaration struct {
 	Host            string // url.URL.Host (hostname, plus ":port" if present)
 	UpstreamBaseURL string // absolute http(s) URL, trailing "/" trimmed
 	RegistryName    string // named sub-registry it came from (e.g. cargo's [registries.<name>]), else ""
+	Scoped          bool   // npm-family scoped registry (e.g. "@org:registry="); the npm-family binding skips it
 }
 
 // Note reports a config file that exists but yields no Declaration row.

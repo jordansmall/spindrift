@@ -232,7 +232,7 @@ registry=https://npm.example.com/
 	}
 	want := []Declaration{
 		{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"},
-		{Host: "scoped.example.com", UpstreamBaseURL: "https://scoped.example.com/npm"},
+		{Host: "scoped.example.com", UpstreamBaseURL: "https://scoped.example.com/npm", Scoped: true},
 	}
 	if len(decls) != len(want) {
 		t.Fatalf("decls = %+v, want %+v", decls, want)

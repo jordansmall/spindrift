@@ -18,7 +18,7 @@ npmScopes:
 	}
 	want := []Declaration{
 		{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/registry"},
-		{Host: "scoped-yarn.example.com", UpstreamBaseURL: "https://scoped-yarn.example.com/registry"},
+		{Host: "scoped-yarn.example.com", UpstreamBaseURL: "https://scoped-yarn.example.com/registry", Scoped: true},
 	}
 	if len(decls) != len(want) {
 		t.Fatalf("decls = %+v, want %+v", decls, want)
