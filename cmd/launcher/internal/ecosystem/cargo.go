@@ -551,7 +551,7 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 				continue
 			}
 			if declared != nil && !declared[d.name] {
-				warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(d.name)+" matches route prefix "+strconv.Quote(route.Prefix)+"'s upstream host but is not declared in that route's cargo-registries")
+				warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(d.name)+" matches route prefix "+strconv.Quote(route.Prefix)+"'s upstream host but is not declared in that route's [routes.ecosystems."+nameCargo+"] "+CargoRouteRegistriesKey)
 				continue
 			}
 			// Marked before the dedupe check on purpose: a name collapsed
@@ -584,8 +584,8 @@ func CargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 			// name is interpolated unquoted into "[registries.<name>]" here,
 			// safe because validateCargoRouteDeclaration (issue #3403) pins
 			// every cargo block entry to the bare-key pattern when the host
-			// parses the routes file. The retired "cargo-registries" key
-			// translates into that same block, so both spellings are pinned.
+			// parses the routes file. The retired "cargo-registries" key is
+			// refused at that parse (registryroutes), so it never reaches here.
 			warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(name)+" is declared on route prefix "+strconv.Quote(route.Prefix)+" (upstream host "+strconv.Quote(route.UpstreamHost)+") but the repo's .cargo/config.toml has no [registries."+name+"] with a well-formed index URL on that host, so it will not be bound to the Forwarder -- cargo will try to reach the real registry directly, which a network-less Box cannot do; verify the route's declared cargo registries against the repo's .cargo/config.toml")
 		}
 
