@@ -125,6 +125,7 @@ let
   # while `checks` keeps them for CI's pre-dispatch gate.
   imageOnlyCheckNames = [
     "nil-baked-in-dogfood"
+    "nix-eval-jobs-baked-in-dogfood"
     "bats-baked-in-dogfood"
     "shellcheck-baked-in-dogfood"
     "caveman-baked-in-dogfood"
