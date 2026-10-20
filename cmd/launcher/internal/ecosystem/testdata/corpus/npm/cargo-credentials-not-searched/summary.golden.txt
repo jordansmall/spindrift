@@ -1,0 +1,1 @@
+==> registry proxy Forwarder up on 127.0.0.1:27182 — npm bound to it via npm_config_registry

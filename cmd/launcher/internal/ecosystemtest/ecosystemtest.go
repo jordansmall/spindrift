@@ -12,17 +12,22 @@
 //	                              instead of discovery's rendered output; one the parser
 //	                              refuses is pinned in routes.golden.json, and the stages
 //	                              that consume the resolved routes (path-set, binding,
-//	                              rewrites) have no golden; classification still runs
+//	                              bindings summary, rewrites) have no golden;
+//	                              classification and the lockfile scan still run
 //	env.json                      optional JSON object of string to string: the prior
-//	                              environment the binding stage's renderers read (default empty)
-//	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 6)
+//	                              environment the binding and bindings summary stages
+//	                              read (default empty)
+//	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 8)
 //	classification.golden.txt     stage 1: the lockfile classification, empty when no lockfile matches
-//	discovery.golden.toml         stage 2: the routes file discovery proposes
-//	routes.golden.json            stage 3: the resolved routes, or {"refused": <error>}
-//	pathset.golden.json           stage 4: {"derived": the in-tree path-sets, "enforced":
+//	lockfile-scan.golden.txt      stage 2: the warnings for a tracked lockfile still naming the
+//	                              Forwarder URL, empty when none does
+//	discovery.golden.toml         stage 3: the routes file discovery proposes
+//	routes.golden.json            stage 4: the resolved routes, or {"refused": <error>}
+//	pathset.golden.json           stage 5: {"derived": the in-tree path-sets, "enforced":
 //	                              each route's enforced paths and tagged subtrees}
-//	binding.golden.json           stage 5: the env exports, home config and in-tree rewrite
-//	rewrites.golden.json          stage 6: the proxy's responses for the upstream bodies
+//	binding.golden.json           stage 6: the env exports, home config and in-tree rewrite
+//	summary.golden.txt            stage 7: what bindings mode prints for those routes
+//	rewrites.golden.json          stage 8: the proxy's responses for the upstream bodies
 //
 // A stage the row does not take part in has no golden and is skipped; a stale
 // golden for one fails. Importing this package from non-test code pulls in
@@ -83,6 +88,12 @@ var stages = []stage{
 		replay:    (*replay).classification,
 	},
 	{
+		name:      "lockfile scan",
+		golden:    "lockfile-scan.golden.txt",
+		takesPart: func(row ecosystem.Row) bool { return len(row.LockfileNames) > 0 },
+		replay:    (*replay).lockfileScan,
+	},
+	{
 		name:      "discovery",
 		golden:    "discovery.golden.toml",
 		takesPart: func(row ecosystem.Row) bool { return row.ConfigParser != nil },
@@ -114,6 +125,13 @@ var stages = []stage{
 			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindingsOf([]ecosystem.Row{row})) > 0
 		},
 		replay: (*replay).binding,
+	},
+	{
+		name:        "bindings summary",
+		golden:      "summary.golden.txt",
+		afterRoutes: true,
+		takesPart:   func(row ecosystem.Row) bool { return row.EnvExports != nil || row.HomeConfig != nil },
+		replay:      (*replay).bindingsSummary,
 	},
 	{
 		name:        "proxy rewrites",
