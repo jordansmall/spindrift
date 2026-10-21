@@ -281,7 +281,7 @@ func decodeAssistant(m message, sc scope) []driverkit.Event {
 		events = append(events, driverkit.Event{Kind: driverkit.KindStart, Timestamp: ts, MessageID: id})
 	}
 	if model != "" {
-		events = append(events, driverkit.Event{Kind: driverkit.KindModel, Timestamp: ts, MessageID: id, Model: model})
+		events = append(events, driverkit.Event{Kind: driverkit.KindModel, Timestamp: ts, MessageID: id, Model: model, Effort: m.ThinkingLevel})
 	}
 	for _, b := range blocks {
 		switch b.Type {
@@ -338,10 +338,9 @@ func decodeAssistant(m message, sc scope) []driverkit.Event {
 	return kept
 }
 
-// observedModel composes the model id in force the way pi itself writes one,
-// `<provider>/<model>:<thinkingLevel>` (the form --model accepts). The level
-// rides in the id because the heartbeat and the Dispatch Record's model list
-// carry only an id, so this is how they show the effort actually applied.
+// observedModel composes the model id in force as `<provider>/<model>`, the
+// form --model names it. The thinking level rides separately as Event.Effort,
+// so a mid-Pass level change never splits per-model accounting.
 func observedModel(m message) string {
 	if m.Model == "" {
 		return ""
@@ -349,9 +348,6 @@ func observedModel(m message) string {
 	id := m.Model
 	if m.Provider != "" {
 		id = m.Provider + "/" + id
-	}
-	if m.ThinkingLevel != "" {
-		id += ":" + m.ThinkingLevel
 	}
 	return id
 }

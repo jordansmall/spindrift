@@ -4,7 +4,7 @@
   ],
   "onModel": [
     {
-      "model": "stub/stub-model:high",
+      "model": "stub/stub-model",
       "role": ""
     }
   ]

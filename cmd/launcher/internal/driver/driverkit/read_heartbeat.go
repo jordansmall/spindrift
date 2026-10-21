@@ -176,6 +176,11 @@ func (w *HeartbeatWriter) onModelEvent(ev Event) {
 	if w.track.Family != nil {
 		model, _ = w.track.Family(model)
 	}
+	// The shared header notation is `model:effort`; a Driver opts in by
+	// setting Effort on its KindModel events. OnModel above keeps the bare id.
+	if ev.Effort != "" {
+		model += ":" + ev.Effort
+	}
 	if role != w.currentRole || model != w.currentModel {
 		w.flushRole(w.rolePhase[w.currentRole])
 		w.currentRole = role

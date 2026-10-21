@@ -62,8 +62,8 @@ func TestUsage_OneTurnPerAssistantMessage(t *testing.T) {
 	if u.DurationMs != 2035-1000 {
 		t.Errorf("DurationMs = %d, want %d", u.DurationMs, 2035-1000)
 	}
-	if got := len(rep.SummedByModel); got != 1 || rep.SummedByModel[0].Model != "stub/stub-model:high" {
-		t.Errorf("SummedByModel = %+v, want one stub/stub-model:high row", rep.SummedByModel)
+	if got := len(rep.SummedByModel); got != 1 || rep.SummedByModel[0].Model != "stub/stub-model" {
+		t.Errorf("SummedByModel = %+v, want one stub/stub-model row", rep.SummedByModel)
 	}
 }
 
@@ -237,9 +237,8 @@ func TestTranscript(t *testing.T) {
 	}
 }
 
-// The model and thinking level in force reach the heartbeat's OnModel hook as
-// one id, so the live header and the Dispatch Record both show the effort.
-func TestHeartbeat_ReportsModelWithThinkingLevel(t *testing.T) {
+// OnModel receives the bare model id; the thinking level is not part of it.
+func TestHeartbeat_ReportsBareModelId(t *testing.T) {
 	var out, raw strings.Builder
 	var seen []string
 	w := newDriver().NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{
@@ -250,8 +249,8 @@ func TestHeartbeat_ReportsModelWithThinkingLevel(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !reflect.DeepEqual(seen, []string{"stub/stub-model:high"}) {
-		t.Errorf("OnModel saw %v, want one stub/stub-model:high", seen)
+	if !reflect.DeepEqual(seen, []string{"stub/stub-model"}) {
+		t.Errorf("OnModel saw %v, want one stub/stub-model", seen)
 	}
 }
 
@@ -272,8 +271,8 @@ func TestReadPasses_TracksWriteModelsAndTotals(t *testing.T) {
 	if p.Usage.NumTurns != 2 || p.APICalls != 2 {
 		t.Errorf("turns/APICalls = %d/%d, want 2/2", p.Usage.NumTurns, p.APICalls)
 	}
-	if !reflect.DeepEqual(p.Models, []string{"stub/stub-model:high"}) {
-		t.Errorf("Models = %v, want [stub/stub-model:high]", p.Models)
+	if !reflect.DeepEqual(p.Models, []string{"stub/stub-model"}) {
+		t.Errorf("Models = %v, want [stub/stub-model]", p.Models)
 	}
 	if !reflect.DeepEqual(p.Results, []string{"Done.\n"}) {
 		t.Errorf("Results = %q, want [\"Done.\\n\"]", p.Results)

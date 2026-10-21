@@ -10,7 +10,7 @@ import (
 )
 
 func TestDecode(t *testing.T) {
-	const model = "stub/stub-model:high"
+	const model = "stub/stub-model"
 	tests := []struct {
 		name string
 		line string
@@ -33,7 +33,7 @@ func TestDecode(t *testing.T) {
 			textEnd(1000, "\n hello \n"),
 			[]driverkit.Event{
 				{Kind: driverkit.KindStart, Timestamp: 1000, MessageID: "1000"},
-				{Kind: driverkit.KindModel, Timestamp: 1000, MessageID: "1000", Model: model},
+				{Kind: driverkit.KindModel, Timestamp: 1000, MessageID: "1000", Model: model, Effort: "high"},
 				{Kind: driverkit.KindText, Timestamp: 1000, MessageID: "1000", Text: "\n hello \n"},
 				{
 					Kind: driverkit.KindUsage, Timestamp: 1035, MessageID: "1000", Model: model, Effort: "high",
@@ -46,7 +46,7 @@ func TestDecode(t *testing.T) {
 			assistantEnd(2000, `[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"done"}]`, "stop", ""),
 			[]driverkit.Event{
 				{Kind: driverkit.KindStart, Timestamp: 2000, MessageID: "2000"},
-				{Kind: driverkit.KindModel, Timestamp: 2000, MessageID: "2000", Model: model},
+				{Kind: driverkit.KindModel, Timestamp: 2000, MessageID: "2000", Model: model, Effort: "high"},
 				{Kind: driverkit.KindReasoning, Timestamp: 2000, MessageID: "2000", Text: "hmm"},
 				{Kind: driverkit.KindText, Timestamp: 2000, MessageID: "2000", Text: "done"},
 				{
@@ -60,7 +60,7 @@ func TestDecode(t *testing.T) {
 			assistantEnd(3000, `[{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"echo hi"}}]`, "toolUse", ""),
 			[]driverkit.Event{
 				{Kind: driverkit.KindStart, Timestamp: 3000, MessageID: "3000"},
-				{Kind: driverkit.KindModel, Timestamp: 3000, MessageID: "3000", Model: model},
+				{Kind: driverkit.KindModel, Timestamp: 3000, MessageID: "3000", Model: model, Effort: "high"},
 				{
 					Kind: driverkit.KindToolCall, Timestamp: 3000, MessageID: "3000", ToolID: "call_1", ToolName: "bash",
 					ToolInput: json.RawMessage(`{"command":"echo hi"}`), ToolTarget: "echo hi",
@@ -76,7 +76,7 @@ func TestDecode(t *testing.T) {
 			assistantEnd(3000, `[{"type":"toolCall","id":"c2","name":"read","arguments":{"path":"a.txt"}}]`, "toolUse", ""),
 			[]driverkit.Event{
 				{Kind: driverkit.KindStart, Timestamp: 3000, MessageID: "3000"},
-				{Kind: driverkit.KindModel, Timestamp: 3000, MessageID: "3000", Model: model},
+				{Kind: driverkit.KindModel, Timestamp: 3000, MessageID: "3000", Model: model, Effort: "high"},
 				{
 					Kind: driverkit.KindToolCall, Timestamp: 3000, MessageID: "3000", ToolID: "c2", ToolName: "read",
 					ToolInput: json.RawMessage(`{"path":"a.txt"}`), ToolTarget: "a.txt",
@@ -91,7 +91,7 @@ func TestDecode(t *testing.T) {
 			"failed turn is an error with no progress",
 			errorEnd(4000, rateLimitMsg),
 			[]driverkit.Event{
-				{Kind: driverkit.KindModel, Timestamp: 4000, MessageID: "4000", Model: model},
+				{Kind: driverkit.KindModel, Timestamp: 4000, MessageID: "4000", Model: model, Effort: "high"},
 				{Kind: driverkit.KindError, Timestamp: 4000, MessageID: "4000", Text: rateLimitMsg},
 				{
 					Kind: driverkit.KindUsage, Timestamp: 4035, MessageID: "4000", Model: model, Effort: "high",
@@ -133,7 +133,7 @@ func TestDecode(t *testing.T) {
 			assistantEnd(9, `[{"type":"toolCall","id":"c","name":"bash","arguments":"oops"}]`, "toolUse", ""),
 			[]driverkit.Event{
 				{Kind: driverkit.KindStart, Timestamp: 9, MessageID: "9"},
-				{Kind: driverkit.KindModel, Timestamp: 9, MessageID: "9", Model: model},
+				{Kind: driverkit.KindModel, Timestamp: 9, MessageID: "9", Model: model, Effort: "high"},
 				{Kind: driverkit.KindToolCall, Timestamp: 9, MessageID: "9", ToolID: "c", ToolName: "bash", ToolInput: json.RawMessage(`"oops"`)},
 				{
 					Kind: driverkit.KindUsage, Timestamp: 44, MessageID: "9", Model: model, Effort: "high",

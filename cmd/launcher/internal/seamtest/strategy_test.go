@@ -24,7 +24,7 @@ func TestStrategyDecodesOneEventPerKind(t *testing.T) {
 	kinds := []driverkit.Kind{
 		driverkit.KindStart, driverkit.KindText, driverkit.KindReasoning,
 		driverkit.KindToolCall, driverkit.KindToolResult, driverkit.KindUsage,
-		driverkit.KindModel, driverkit.KindEffort, driverkit.KindError,
+		driverkit.KindModel, driverkit.KindError,
 		driverkit.KindUnparsed, driverkit.KindHostOp, driverkit.KindResult,
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
