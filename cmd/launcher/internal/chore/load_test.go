@@ -458,3 +458,41 @@ func TestMinRecordsKnob(t *testing.T) {
 		}
 	}
 }
+
+func TestMinRecords(t *testing.T) {
+	env := func(v string, set bool) func(string) (string, bool) {
+		return func(k string) (string, bool) {
+			if k != "BUTLER_TUNING_MIN_RECORDS" {
+				t.Errorf("lookup of %q, want BUTLER_TUNING_MIN_RECORDS", k)
+			}
+			return v, set
+		}
+	}
+	for _, tc := range []struct {
+		name, chore string
+		lookup      func(string) (string, bool)
+		want        int
+		wantErr     string
+	}{
+		{name: "unset uses row default", chore: "tuning", lookup: env("", false), want: 20},
+		{name: "empty uses row default", chore: "tuning", lookup: env("", true), want: 20},
+		{name: "nil lookup uses row default", chore: "tuning", lookup: nil, want: 20},
+		{name: "value without ok uses row default", chore: "tuning", lookup: env("7", false), want: 20},
+		{name: "integer", chore: "tuning", lookup: env("7", true), want: 7},
+		{name: "malformed", chore: "tuning", lookup: env("many", true), wantErr: `BUTLER_TUNING_MIN_RECORDS: "many" is not an integer`},
+		{name: "chore without a knob", chore: "bugs", lookup: nil, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MinRecords(tc.chore, tc.lookup)
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("MinRecords = %d, %v; want %d, nil", got, err, tc.want)
+			}
+		})
+	}
+}

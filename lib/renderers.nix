@@ -1091,6 +1091,12 @@ rec {
           choreCatalog.minRecordsKnobs.${n}
         }\",\n"
       ) minRecordsNames;
+      minRecordsDefaultLines = map (
+        n:
+        "\t\"${n}\":${padRight (minRecordsWidth - builtins.stringLength n + 1) ""}${
+          toString choreCatalog.minRecordsDefaults.${n}
+        },\n"
+      ) minRecordsNames;
     in
     renderGoStringSliceFile {
       generator = "nix/regen.nix";
@@ -1132,6 +1138,12 @@ rec {
     + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
     + "var builtinMinRecordsKnobs = map[string]string{\n"
     + concatStrings minRecordsLines
+    + "}\n"
+    + "\n// builtinMinRecordsDefaults is the row default of each knob in builtinMinRecordsKnobs,\n"
+    + "// used when the knob is unset or empty.\n"
+    + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
+    + "var builtinMinRecordsDefaults = map[string]int{\n"
+    + concatStrings minRecordsDefaultLines
     + "}\n";
 
   # cmd/launcher/internal/promptassembly/skillprobe.go's generated skill-baked
