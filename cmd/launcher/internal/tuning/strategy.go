@@ -13,32 +13,10 @@ import (
 
 // Strategy is the tuning Chore's Digest (ADR 0070 decision 2). The host-side
 // bundle registers it; this package does not.
-var Strategy = recordsdigest.Strategy{
+var Strategy = recordsdigest.WithPrior(recordsdigest.Strategy{
 	Name:      "tuning",
 	ReadKnobs: readKnobs,
-	Render: func(in recordsdigest.Input) recordsdigest.Output {
-		prior := make([]Prior, 0, len(in.Prior))
-		for _, p := range in.Prior {
-			prior = append(prior, p.(Prior))
-		}
-		d := Render(in.Records, in.Cursor, in.Now, in.Limits, prior, in.Merged)
-		return recordsdigest.Output{Text: d.Text, Latest: d.Latest}
-	},
-	Anchors: Anchors,
-	ParsePrior: func(f settle.PriorFinding) any {
-		p := Prior{
-			Number:     f.Issue.Number,
-			Open:       f.Open,
-			NotPlanned: f.Issue.ClosedNotPlanned,
-			Reopened:   f.Issue.Reopened,
-			Body:       f.Issue.Body,
-		}
-		if len(f.Terms) > 0 {
-			t := f.Terms[0]
-			p.Metric = t[strings.LastIndex(t, ":")+1:]
-		}
-		return p
-	},
+	Anchors:   Anchors,
 	Validate: func(in signalwire.IssueIntent, digest string, lim recordsdigest.Limits, tracked func() (map[string]bool, error)) (string, error) {
 		files := settle.DedupFiles(in.DedupTerms)
 		if len(files) == 0 {
@@ -73,6 +51,26 @@ var Strategy = recordsdigest.Strategy{
 	Evidence: func(digest string, cites []string) string {
 		return Evidence(Rows(digest), cites)
 	},
+}, parsePrior, renderInput)
+
+func parsePrior(f settle.PriorFinding) Prior {
+	p := Prior{
+		Number:     f.Issue.Number,
+		Open:       f.Open,
+		NotPlanned: f.Issue.ClosedNotPlanned,
+		Reopened:   f.Issue.Reopened,
+		Body:       f.Issue.Body,
+	}
+	if len(f.Terms) > 0 {
+		t := f.Terms[0]
+		p.Metric = t[strings.LastIndex(t, ":")+1:]
+	}
+	return p
+}
+
+func renderInput(in recordsdigest.Input, prior []Prior) recordsdigest.Output {
+	d := Render(in.Records, in.Cursor, in.Now, in.Limits, prior, in.Merged)
+	return recordsdigest.Output{Text: d.Text, Latest: d.Latest}
 }
 
 // readKnobs maps the row's generated knob reader onto the Digest's Knobs. A
