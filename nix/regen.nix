@@ -49,6 +49,7 @@ let
   markerChannelsGoFile = renderers.renderMarkerChannelsGo promptContract.markerChannels;
   backendRegistry = import ../lib/backends/default.nix;
   backendRegistryFile = renderers.renderBackendRegistryGo backendRegistry;
+  dashboardBackendNamesFile = renderers.renderDashboardBackendNamesGo backendRegistry;
   labelRegistry = import ../lib/labels.nix;
   labelRegistryFile = renderers.renderLabelRegistryGo labelRegistry;
   defaultModelFixture = import ../lib/default-model-fixture.nix;
@@ -194,6 +195,8 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/outcome/markerchannels_gen.go"
     ${writeGenerated "cmd/launcher/internal/backend/registry_gen.go" backendRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
+    ${writeGenerated "dashboard/backendnames_gen_test.go" dashboardBackendNamesFile}
+    gofmt -w "$root/dashboard/backendnames_gen_test.go"
     ${writeGenerated "cmd/launcher/internal/doctor/labelmeta_gen.go" labelRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/doctor/labelmeta_gen.go"
     ${writeGenerated "cmd/launcher/defaultmodels_gen_test.go" defaultModelFixtureGo}

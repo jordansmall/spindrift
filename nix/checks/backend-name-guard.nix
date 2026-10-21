@@ -1,15 +1,15 @@
 # Fails when core code compares a backend-name literal (`== "github"`,
 # `"jira" !=`, `builtins.elem x [ "github" ]`, ...), ADR 0068 / issue #5645:
 # behavior varies through the row's facts, never a name test.
-# The dashboard's Go is scanned here because it is a separate module that
-# cmd/launcher's TestCoreDoesNotCompareBackendNames cannot reach. _test.go files
-# are exempt: they assert per-backend outcomes rather than branch behavior.
+# The two Go modules are scanned by their AST tests
+# (cmd/launcher/backend_name_guard_test.go, dashboard/backend_name_guard_test.go);
+# the Go outside them (.github/scripts) is line-scanned here, with _test.go and
+# generated files skipped.
 # Pure eval regex, so it is a tripwire, not a proof: it misses a comparison
 # split across lines, a named list of names, a literal needle
 # (`elem "github" names`), a concatenated list (`elem t ([ "github" ] ++ xs)`),
-# a membership test whose subject nests parens (`elem (f (x)) [ "github" ]`),
-# and Go `case "github":` in the dashboard (cmd/launcher's AST test catches
-# that one for the launcher). It errs closed on `if elem x xs then [ "github" ]`,
+# and a membership test whose subject nests parens (`elem (f (x)) [ "github" ]`).
+# It errs closed on `if elem x xs then [ "github" ]`,
 # a hit though no list holds the needle. Comment lines are skipped.
 { pkgs, ... }:
 let
@@ -66,7 +66,6 @@ let
           map toString (
             lib.filesystem.listFilesRecursive ../../lib
             ++ lib.filesystem.listFilesRecursive ../../nix
-            ++ lib.filesystem.listFilesRecursive ../../dashboard
             ++ lib.filesystem.listFilesRecursive ../../.github/scripts
             ++ [
               ../../flake.nix
@@ -87,7 +86,7 @@ let
   mustScan = [
     "lib/mkHarness.nix"
     "nix/checks/go.nix"
-    "dashboard/server.go"
+    ".github/scripts/ci-go-tokens.go"
   ];
 
   # Each case is scanned alone; `hit` is the verdict the scanner must reach.
