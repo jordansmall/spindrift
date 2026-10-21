@@ -958,7 +958,8 @@ func toKebab(name string) string {
 
 // gatherCredentials walks the Driver's credential rules in order. A rule an
 // ambient variable already satisfies is reused; otherwise its setup command
-// is offered, and if declined each remaining variable is prompted for in turn
+// is offered (with its SetupHint, if any), and if declined each remaining
+// variable is prompted for in turn, by its Labels entry when it has one,
 // until one is non-empty. When none is, the last variable is written blank so
 // harness.env still shows where the credential goes. A rule with no setup
 // command only prints its Remedy. Quickstart configures no models, so a
@@ -980,7 +981,11 @@ func gatherCredentials(env Environment, rules []driver.CredentialRule, w io.Writ
 			continue
 		}
 		cmdLine := strings.Join(rule.SetupCommand, " ")
-		if strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("No ambient credential found (%s). Run `%s` now? [y/N]", strings.Join(rule.Env, "/"), cmdLine)))) == "y" {
+		hint := ""
+		if rule.SetupHint != "" {
+			hint = " (" + rule.SetupHint + ")"
+		}
+		if strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("No ambient credential found (%s). Run `%s` now%s? [y/N]", strings.Join(rule.Env, "/"), cmdLine, hint)))) == "y" {
 			if err := cmdRunner.Run(rule.SetupCommand[0], rule.SetupCommand[1:]...); err != nil {
 				return nil, fmt.Errorf("run %s: %w", cmdLine, err)
 			}
@@ -993,7 +998,11 @@ func gatherCredentials(env Environment, rules []driver.CredentialRule, w io.Writ
 		}
 		supplied := false
 		for _, name := range rule.Env[1:] {
-			v := promptMasked(fmt.Sprintf("Value for %s", name))
+			question := "Value for " + name
+			if label := rule.Labels[name]; label != "" {
+				question = fmt.Sprintf("%s (%s)", label, name)
+			}
+			v := promptMasked(question)
 			if v == "" {
 				continue
 			}

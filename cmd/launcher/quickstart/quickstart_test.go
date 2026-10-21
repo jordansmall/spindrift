@@ -3601,6 +3601,77 @@ func TestGatherCredentials_BlankFallbacksLeaveLastVariablePlaceholder(t *testing
 	}
 }
 
+// recordingPrompts answers from the script like scriptedPrompts and records
+// every question asked, so a test can assert the exact prompt wording.
+func recordingPrompts(asked *[]string, answers ...string) func(string) string {
+	next := scriptedPrompts(answers...)
+	return func(q string) string {
+		*asked = append(*asked, q)
+		return next(q)
+	}
+}
+
+func TestGatherCredentials_PromptsUseRuleLabelsAndSetupHint(t *testing.T) {
+	rules := []driver.CredentialRule{{
+		Env:          []string{"SYNTH_TOKEN", "SYNTH_KEY"},
+		Remedy:       "run synth login",
+		SetupCommand: []string{"synth", "login"},
+		Labels:       map[string]string{"SYNTH_KEY": "Synth API key"},
+		SetupHint:    "browser OAuth",
+	}}
+	var asked, masked []string
+
+	_, err := gatherCredentials(fakeEnvironment{}, rules, &bytes.Buffer{}, recordingPrompts(&asked, "n"), recordingPrompts(&masked, "k"), &fakeCommandRunner{})
+	if err != nil {
+		t.Fatalf("gatherCredentials: %v", err)
+	}
+	if want := []string{"No ambient credential found (SYNTH_TOKEN/SYNTH_KEY). Run `synth login` now (browser OAuth)? [y/N]"}; !slices.Equal(asked, want) {
+		t.Errorf("setup prompt: got %q, want %q", asked, want)
+	}
+	if want := []string{"Synth API key (SYNTH_KEY)"}; !slices.Equal(masked, want) {
+		t.Errorf("value prompt: got %q, want %q", masked, want)
+	}
+}
+
+func TestGatherCredentials_UnlabelledRuleKeepsPlainPrompts(t *testing.T) {
+	rules := []driver.CredentialRule{{
+		Env:          []string{"SYNTH_TOKEN", "SYNTH_KEY"},
+		Remedy:       "run synth login",
+		SetupCommand: []string{"synth", "login"},
+	}}
+	var asked, masked []string
+
+	_, err := gatherCredentials(fakeEnvironment{}, rules, &bytes.Buffer{}, recordingPrompts(&asked, "n"), recordingPrompts(&masked, "k"), &fakeCommandRunner{})
+	if err != nil {
+		t.Fatalf("gatherCredentials: %v", err)
+	}
+	if want := []string{"No ambient credential found (SYNTH_TOKEN/SYNTH_KEY). Run `synth login` now? [y/N]"}; !slices.Equal(asked, want) {
+		t.Errorf("setup prompt: got %q, want %q", asked, want)
+	}
+	if want := []string{"Value for SYNTH_KEY"}; !slices.Equal(masked, want) {
+		t.Errorf("value prompt: got %q, want %q", masked, want)
+	}
+}
+
+func TestGatherCredentials_ClaudeRowPrompts(t *testing.T) {
+	rules, ok := driver.CredentialRules("claude")
+	if !ok {
+		t.Fatal("no claude credential rules")
+	}
+	var asked, masked []string
+
+	_, err := gatherCredentials(fakeEnvironment{}, rules[:1], &bytes.Buffer{}, recordingPrompts(&asked, "n"), recordingPrompts(&masked, "k"), &fakeCommandRunner{})
+	if err != nil {
+		t.Fatalf("gatherCredentials: %v", err)
+	}
+	if want := []string{"No ambient credential found (CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY). Run `claude setup-token` now (browser OAuth)? [y/N]"}; !slices.Equal(asked, want) {
+		t.Errorf("setup prompt: got %q, want %q", asked, want)
+	}
+	if want := []string{"Anthropic API key (ANTHROPIC_API_KEY)"}; !slices.Equal(masked, want) {
+		t.Errorf("value prompt: got %q, want %q", masked, want)
+	}
+}
+
 // A knob a Strategy derives from the remote but quickstartKnobs omits would
 // silently never reach the rendered flake.
 func TestQuickstartKnobs_CoverEveryKnobsFromRemoteEnv(t *testing.T) {
