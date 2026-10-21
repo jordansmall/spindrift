@@ -6,7 +6,7 @@ var descriptors = []Descriptor{
 	{
 		Name: "claude",
 		Credentials: []CredentialRule{
-			{Env: []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}, Remedy: "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY", SetupCommand: []string{"claude", "setup-token"}},
+			{Env: []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}, Remedy: "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY", SetupCommand: []string{"claude", "setup-token"}, Labels: map[string]string{"ANTHROPIC_API_KEY": "Anthropic API key"}, SetupHint: "browser OAuth"},
 		},
 	},
 	{

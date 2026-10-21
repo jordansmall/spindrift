@@ -23,6 +23,10 @@
         "claude"
         "setup-token"
       ];
+      setupHint = "browser OAuth";
+      labels = {
+        ANTHROPIC_API_KEY = "Anthropic API key";
+      };
     }
   ];
 

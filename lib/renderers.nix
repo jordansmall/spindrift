@@ -783,6 +783,13 @@ rec {
         (optional "authContent" "AuthContent" null)
       ];
       goStrings = items: "[]string{${builtins.concatStringsSep ", " (map builtins.toJSON items)}}";
+      goStringMap =
+        m:
+        "map[string]string{"
+        + builtins.concatStringsSep ", " (
+          map (k: "${builtins.toJSON k}: ${builtins.toJSON m.${k}}") (builtins.attrNames m)
+        )
+        + "}";
       # Optional rule keys render only when present, like empty scalar fields.
       credentialRuleLiteral =
         rule:
@@ -792,6 +799,8 @@ rec {
           ++ (if rule ? modelPrefix then [ "ModelPrefix: ${builtins.toJSON rule.modelPrefix}" ] else [ ])
           ++ [ "Remedy: ${builtins.toJSON rule.remedy}" ]
           ++ (if rule ? setupCommand then [ "SetupCommand: ${goStrings rule.setupCommand}" ] else [ ])
+          ++ (if rule ? labels then [ "Labels: ${goStringMap rule.labels}" ] else [ ])
+          ++ (if rule ? setupHint then [ "SetupHint: ${builtins.toJSON rule.setupHint}" ] else [ ])
         )
         + "},\n";
       authAPIKeyProviders =

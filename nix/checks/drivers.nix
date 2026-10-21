@@ -568,6 +568,15 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
         env = [ "STUB_TOKEN" ];
         remedy = "set STUB_TOKEN";
       };
+      # Labels apply only to the variables after Env[0], and need setupCommand.
+      labelled = okRule // {
+        env = [
+          "STUB_TOKEN"
+          "STUB_KEY"
+        ];
+        setupCommand = [ "stub" ];
+        labels.STUB_KEY = "Stub key";
+      };
       throws =
         credentials:
         !(builtins.tryEval (driverRegistry.assertShape "stub" (complete // { inherit credentials; })))
@@ -584,11 +593,35 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
         (okRule // { setupCommand = [ ]; })
         (okRule // { setupCommand = "stub login"; })
         (okRule // { modelPrefx = "x/"; })
+        (labelled // { labels.STUB_OTHER = "Other"; })
+        (labelled // { labels.STUB_TOKEN = "Stub token"; })
+        (labelled // { labels.STUB_KEY = ""; })
+        (labelled // { labels.STUB_KEY = 1; })
+        (removeAttrs labelled [ "setupCommand" ])
+        (labelled // { labels = { }; })
+        (labelled // { labels = [ "Stub key" ]; })
+        (labelled // { labels = "Stub key"; })
+        (
+          okRule
+          // {
+            setupCommand = [ "stub" ];
+            setupHint = "";
+          }
+        )
+        (
+          okRule
+          // {
+            setupCommand = [ "stub" ];
+            setupHint = 1;
+          }
+        )
+        (okRule // { setupHint = "browser OAuth"; })
         "not-a-rule"
       ];
       notThrown = filter (r: !(throws [ r ])) badRules;
-      fullRule = okRule // {
+      fullRule = labelled // {
         modelPrefix = "stub/";
+        setupHint = "browser OAuth";
         setupCommand = [
           "stub"
           "login"
@@ -601,7 +634,7 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
       }";
     assert assertMsg (throws "oops") "assertShape must throw when credentials is not a list";
     assert assertMsg (
-      !(throws [ ]) && !(throws [ okRule ]) && !(throws [ fullRule ])
+      !(throws [ ]) && !(throws [ okRule ]) && !(throws [ labelled ]) && !(throws [ fullRule ])
     ) "assertShape must accept an empty credentials list and well-formed rules";
     pkgs.runCommand "drivers-assert-shape-credentials-rules" { } "touch $out";
 

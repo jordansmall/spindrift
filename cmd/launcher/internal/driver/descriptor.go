@@ -35,6 +35,13 @@ type CredentialRule struct {
 	// SetupCommand is the argv that obtains the credential for Env[0]; empty
 	// when the Driver offers none.
 	SetupCommand []string
+	// Labels is the human label quickstart's fallback prompt shows for an env
+	// var after Env[0], keyed by name; a var without one is prompted as
+	// "Value for NAME".
+	Labels map[string]string
+	// SetupHint is a short note shown beside the setup command offer, e.g. how
+	// it authenticates; empty when none.
+	SetupHint string
 }
 
 // Satisfied reports whether any of the rule's env vars has a non-empty value
