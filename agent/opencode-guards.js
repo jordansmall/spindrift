@@ -38,14 +38,19 @@ const CLAUDE_TOOLS = {
 };
 
 // Every tool a generated hook names must be mapped: the handler skips unmapped
-// tools, which would leave one silently unguarded.
-for (const { script, tools } of HOOKS) {
-  for (const tool of tools) {
-    if (!Object.hasOwn(CLAUDE_TOOLS, tool)) {
-      throw new Error(`spindrift-guards: ${script} names tool ${tool} with no CLAUDE_TOOLS entry`);
+// tools, which would leave one silently unguarded. Throwing here would not help:
+// opencode logs a plugin whose load throws and carries on without it, failing
+// every guard open. So the message is held and thrown on every call instead.
+const unmappedMessage = (() => {
+  for (const { script, tools } of HOOKS) {
+    for (const tool of tools) {
+      if (!Object.hasOwn(CLAUDE_TOOLS, tool)) {
+        return `spindrift-guards: ${script} names tool ${tool} with no CLAUDE_TOOLS entry, refusing the call`;
+      }
     }
   }
-}
+  return null;
+})();
 
 // A guard without a working jq exits 0 and allows the call (see guardHook in
 // lib/image.nix), so a silent exit 0 is only trustworthy once jq has run.
@@ -80,6 +85,7 @@ function runHook(script, toolName, args, onFailure = "") {
 
 export const SpindriftGuards = async () => ({
   "tool.execute.before": async (input, output) => {
+    if (unmappedMessage) throw new Error(unmappedMessage);
     if (!Object.hasOwn(CLAUDE_TOOLS, input.tool)) return;
     requireJq();
     for (const { script, tools, rewrites } of HOOKS) {
