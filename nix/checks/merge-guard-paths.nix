@@ -12,6 +12,7 @@ let
     assertMsg
     all
     concatStringsSep
+    filter
     splitString
     ;
   schemaDefault = (import ../../lib/env-schema.nix).mergeGuardPaths.default;
@@ -34,6 +35,10 @@ let
     "nix/dogfood-defaults.nix"
     "lib/default-model-fixture.nix"
   ];
+  rowKnobSources = map (r: r.source) (import ../../lib/row-knob-registries.nix);
+  uncoveredRowKnobSources = filter (
+    s: !(builtins.elem "${s}/**" dogfoodGlobs && builtins.elem "${s}/**" added)
+  ) rowKnobSources;
 in
 {
   # Extending the dogfood must not widen what every consumer gets by default.
@@ -55,4 +60,14 @@ in
       splitGlobs schemaDefault
     )) "the dogfood's git.merge.guardPaths must still contain every shipped-default glob";
     pkgs.runCommand "merge-guard-paths-dogfood-keeps-shipped-default" { } "touch $out";
+
+  # A row-knob registry's rows set env knobs (ADR 0068), so a new registry's
+  # directory must merge by hand like the existing ones (ADR 0062). Only each
+  # `source` dir is checked: a row importing outside it (lib/chore-catalog.nix)
+  # is guarded by its own glob above, not seen here; lib/row-knob-fixture.nix
+  # is deliberately not a registry.
+  merge-guard-paths-dogfood-covers-row-knob-registries =
+    assert assertMsg (uncoveredRowKnobSources == [ ])
+      "lib/row-knob-registries.nix sources not guarded: ${concatStringsSep ", " uncoveredRowKnobSources}; add `<source>/**` to mergeGuardPaths in nix/dogfood-defaults.nix and to the `added` pin in nix/checks/merge-guard-paths.nix";
+    pkgs.runCommand "merge-guard-paths-dogfood-covers-row-knob-registries" { } "touch $out";
 }
