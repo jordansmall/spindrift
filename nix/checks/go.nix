@@ -200,9 +200,10 @@ let
   };
   # Packages the backends' tests reach (go list -test -deps over every
   # backend's package): the union of their closures, so one list serves
-  # every backend. Never a backend's directory. The forge and driver roots are
-  # listed file by file because backend and Driver directories lie beneath
-  # them; the driver root is seamtest's registry import, non-test files only.
+  # every backend. Never a backend's directory. The forge, driver and runner
+  # roots are listed file by file because backend, Driver and runner family
+  # directories lie beneath them; the driver root is seamtest's registry
+  # import, non-test files only. Backends need only the runner root package.
   rootGoFiles =
     dir:
     pkgs.lib.mapAttrsToList (n: _: dir + "/${n}") (
@@ -238,7 +239,6 @@ let
       "registryvocab"
       "report"
       "retry"
-      "runner"
       "seambundle"
       "seamtest"
       "testutil"
@@ -246,7 +246,8 @@ let
       "usage"
     ]
     ++ rootGoFiles (internalDir + "/forge")
-    ++ rootGoFiles (internalDir + "/driver");
+    ++ rootGoFiles (internalDir + "/driver")
+    ++ rootGoFiles (internalDir + "/runner");
   # A row's goTestBuildsOn names a sibling it uses as a library, not as an
   # adapter: no other backend's fileset holds a sibling backend.
   backendRowList = import ../../lib/backends/default.nix;
@@ -355,8 +356,8 @@ let
   #
   # With `independence = { dirFor, noun; }` (`dirFor name` the adapter's
   # directory, `noun` what the assert messages call an adapter), editing one
-  # adapter leaves every other adapter's go test derivation path, and the core
-  # launcher-go-test's, unchanged (issues #5508, #5545, #5688): coreFiles strips
+  # adapter leaves every other adapter's go test derivation path, and every core
+  # check's, unchanged (issues #5508, #5545, #5562, #5688): coreFiles strips
   # the adapter directories, so no vendor tree or source is shared. Each adapter
   # in turn has one file removed; the sensitivity assert keeps the check from
   # passing vacuously.
@@ -396,7 +397,7 @@ let
             inherit names;
           };
           moved = builtins.filter (n: n != p && drv baseline n != drv after n) names;
-          core = launcherGoTestFor edited;
+          coreMoved = coreChecksMovedBy edited;
         in
         assertMsg (drv baseline p != drv after p)
           "removing ${file} from the ${p} ${noun} did not change its own go test derivation; the perturbation is inert"
@@ -404,8 +405,8 @@ let
           moved == [ ]
         ) "editing the ${p} ${noun} changed the go test derivation of: ${concatStringsSep ", " moved}"
         && assertMsg (
-          core.drvPath == (launcherGoTestFor launcherDir).drvPath
-        ) "editing the ${p} ${noun} changed launcher-go-test";
+          coreMoved == [ ]
+        ) "editing the ${p} ${noun} changed: ${concatStringsSep ", " coreMoved}";
     in
     {
       ${stubName} =
@@ -447,6 +448,15 @@ let
     pkgs.go
     pkgs.git
   ];
+  coreSrc =
+    files:
+    fs.toSource {
+      root = launcherDir;
+      fileset = coreFiles files;
+    };
+  # The registry root's guard tests need every Driver, and run in
+  # launcher-binaries-go-test.
+  corePkgs = ''$(go list ./... | grep -vxF "$(go list -m)/internal/driver")'';
   # The core run: every package that needs no Driver, bundle or main. It cuts
   # its source from coreFiles, so a Driver edit never reaches this derivation;
   # the assert fails if the copied tree still holds one. The corpus find is
@@ -456,12 +466,7 @@ let
     files:
     pkgs.runCommand "launcher-go-test" { nativeBuildInputs = goTestInputs; } ''
       mkdir -p src/cmd
-      cp -r ${
-        fs.toSource {
-          root = launcherDir;
-          fileset = coreFiles files;
-        }
-      } src/cmd/launcher
+      cp -r ${coreSrc files} src/cmd/launcher
       ${sideTrees}
       chmod -R +w src
       for held in bundle ${pkgs.lib.concatStringsSep " " driverNames}; do
@@ -488,12 +493,98 @@ let
         exit 1
       fi
       ${goTestPrologueWith (vendorFor files)}
-      module=$(go list -m)
-      # The registry root's guard tests need every Driver, and run in
-      # launcher-binaries-go-test.
-      go test $(go list ./... | grep -vxF "$module/internal/driver")
+      go test ${corePkgs}
       touch $out
     '';
+  # Copies the core source and its vendor tree; ends with src as the working
+  # directory.
+  corePrologue = files: ''
+    cp -r ${coreSrc files} src
+    chmod -R +w src
+    cp -r ${vendorFor files} src/vendor
+    ${goCheckEnv}
+    cd src
+  '';
+  # ADR 0023 makes console a leaf UI package: engine packages never import it.
+  # go list -deps walks the whole transitive graph, so an import that reaches
+  # console through another engine package is caught too, not just a direct one.
+  consoleIsolationFor =
+    files:
+    let
+      # runner/oci and runner/bwrap are adapters, not in the core source.
+      # runnerGoTestShared is the structural guard, asserted below: a family's
+      # go test source holds no internal/console, so a family importing it
+      # fails to compile in its own runners-<name>-go-test.
+      guardedPackages = pkgs.lib.concatStringsSep " " [
+        "dispatch"
+        "waves"
+        "forge"
+        "settle"
+        "runner"
+        "driver"
+        "freshness"
+      ];
+      runnerConsole = fs.toList (
+        fs.intersection (fs.unions runnerGoTestShared) (internalDir + "/console")
+      );
+    in
+    assert pkgs.lib.assertMsg (
+      runnerConsole == [ ]
+    ) "runnerGoTestShared holds internal/console, so runner families escape launcher-console-isolation";
+    pkgs.runCommand "launcher-console-isolation"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit guardedPackages;
+      }
+      ''
+        ${corePrologue files}
+        for pkg in $guardedPackages; do
+          if ! deps=$(go list -deps "./internal/$pkg" 2>&1); then
+            # console already imports most guarded packages, so a reverse
+            # import forms a cycle — go list fails outright instead of
+            # listing console as a dependency. Treat that failure itself
+            # as the violation signal. But go list -deps also fails for
+            # reasons unrelated to console (an unresolvable import, a
+            # malformed package clause in a dependency), so only blame
+            # console when the toolchain actually reports a cycle.
+            if echo "$deps" | grep -q 'import cycle'; then
+              echo "go list failed for internal/$pkg — likely an import cycle through internal/console, which violates ADR 0023's one-way dependency:" >&2
+            else
+              echo "go list failed for internal/$pkg for a reason unrelated to a console cycle (see stderr below) — not necessarily an ADR 0023 violation:" >&2
+            fi
+            echo "$deps" >&2
+            exit 1
+          fi
+          if echo "$deps" | grep -qx 'spindrift.dev/launcher/internal/console'; then
+            echo "internal/$pkg imports internal/console — violates ADR 0023's one-way dependency (engine packages never import console)" >&2
+            exit 1
+          fi
+        done
+        touch $out
+      '';
+  # The core checks, each cut from coreFiles so an adapter edit never moves one;
+  # adapterRegistryChecks and backends-go-test-independent pin that.
+  coreChecksFor = files: {
+    launcher-go-test = launcherGoTestFor files;
+    launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
+      ${gofmtCheck (coreSrc files)}
+      touch $out
+    '';
+    launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
+      ${corePrologue files}
+      go vet ${corePkgs}
+      touch $out
+    '';
+    launcher-console-isolation = consoleIsolationFor files;
+  };
+  # Names of the core checks whose drvPath differs from the unedited tree's.
+  coreChecksMovedBy =
+    files:
+    let
+      base = coreChecksFor launcherDir;
+      after = coreChecksFor files;
+    in
+    builtins.filter (n: base.${n}.drvPath != after.${n}.drvPath) (builtins.attrNames base);
   # The Dashboard is a separate dependency-free module (ADR 0060), so the
   # vendored-launcher GOFLAGS=-mod=vendor from goCheckEnv is reset: it has no
   # vendor/ tree. Ends with src as the working directory.
@@ -532,11 +623,6 @@ driverGoTests
   };
 }
 // {
-  launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
-    ${gofmtCheck "${../../cmd/launcher}"}
-    touch $out
-  '';
-
   dashboard-go-fmt = pkgs.runCommand "dashboard-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     ${gofmtCheck ../../dashboard}
     touch $out
@@ -621,17 +707,12 @@ driverGoTests
       touch $out
     '';
 
-  launcher-go-vet = pkgs.runCommand "launcher-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
-    cp -r ${../../cmd/launcher} src
-    chmod -R +w src
-    cp -r ${launcherGoModules} src/vendor
-    ${goCheckEnv}
-    cd src
-    go vet ./...
-    touch $out
-  '';
-
-  launcher-go-test = launcherGoTestFor launcherDir;
+  inherit (coreChecksFor launcherDir)
+    launcher-go-test
+    launcher-go-fmt
+    launcher-go-vet
+    launcher-console-isolation
+    ;
 
   # The packages that link every Driver through the bundle (bundleBinaryDirs),
   # the bundle's own tests, the registry root's cross-Driver guard tests and the
@@ -713,14 +794,17 @@ driverGoTests
     pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
 
   # Stands in for adapterRegistryChecks' independence half, which cannot hold
-  # for backends: the core backends live in launcher-go-test.
+  # for backends: the core backends live in the core checks.
   #
   # No backend's go test source holds another backend's directory, bar the git
   # backend's for `local` and forgejo (issue #5637). A fileset check for the
   # backend-to-backend leaks, since a core backend edit still moves every
   # backend's vendor drvPath. Editing a bundled backend (issue #5648) leaves the
-  # core launcher-go-test's drvPath unchanged, while editing a core backend
-  # moves it. The sensitivity asserts keep it from passing vacuously.
+  # core checks' drvPaths unchanged, while editing a core backend moves every
+  # core check's. Editing a runner family leaves every backend's go test
+  # drvPath unchanged, as backends need only the runner root package; the
+  # family's own sensitivity is asserted by runners-go-test-independent. The
+  # sensitivity asserts keep it from passing vacuously.
   backends-go-test-independent =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
@@ -730,17 +814,31 @@ driverGoTests
           fs.intersection (fs.unions (backendGoTestSharedFor name)) (internalDir + "/forge/${other}")
         );
       allowed = name: other: buildsOnFor name == other;
-      coreDrvAfterRemoving =
-        n:
+      afterRemoving =
+        dir:
         let
-          dir = internalDir + "/forge/${n}";
           file = builtins.head (
             builtins.attrNames (pkgs.lib.filterAttrs (_: t: t == "regular") (builtins.readDir dir))
           );
         in
-        (launcherGoTestFor (fs.difference launcherDir (dir + "/${file}"))).drvPath;
-      coreDrv = (launcherGoTestFor launcherDir).drvPath;
-      coreMoved = builtins.filter (n: coreDrvAfterRemoving n != coreDrv) bundledBackendNames;
+        fs.difference launcherDir (dir + "/${file}");
+      backendDir = n: internalDir + "/forge/${n}";
+      movedBy = n: coreChecksMovedBy (afterRemoving (backendDir n));
+      coreMoved = pkgs.lib.unique (builtins.concatMap movedBy bundledBackendNames);
+      allCoreChecks = builtins.attrNames (coreChecksFor launcherDir);
+      coreInert = pkgs.lib.unique (
+        builtins.concatMap (
+          n: builtins.filter (c: !builtins.elem c (movedBy n)) allCoreChecks
+        ) coreBackendNames
+      );
+      backendDrvs = set: map (n: set.${adapterGoTestAttr "backends" n}.drvPath) backendNames;
+      runnerMoved = builtins.filter (
+        n:
+        backendDrvs (backendGoTestsFor {
+          files = afterRemoving (runnerDir n);
+          names = backendNames;
+        }) != backendDrvs backendGoTests
+      ) runnerNames;
       sensitivityRows = builtins.filter (row: row ? goTestBuildsOn) backendRowList;
       leaks = concatStringsSep ", " (
         builtins.concatMap (
@@ -760,10 +858,12 @@ driverGoTests
     ) "a goTestBuildsOn backend's go test source no longer holds its base; the check is inert";
     assert assertMsg (
       coreMoved == [ ]
-    ) "editing a bundled backend changed launcher-go-test: ${concatStringsSep ", " coreMoved}";
-    assert assertMsg (builtins.all (
-      n: coreDrvAfterRemoving n != coreDrv
-    ) coreBackendNames) "editing a core backend left launcher-go-test unchanged; the check is inert";
+    ) "editing a bundled backend changed: ${concatStringsSep ", " coreMoved}";
+    assert assertMsg (
+      coreInert == [ ]
+    ) "editing a core backend left unchanged: ${concatStringsSep ", " coreInert}; the check is inert";
+    assert assertMsg (runnerMoved == [ ])
+      "editing the ${concatStringsSep ", " runnerMoved} runner family changed a backend's go test derivation";
     assert assertMsg (leaks == "") "backend go test sources hold sibling backends: ${leaks}";
     pkgs.runCommand "backends-go-test-independent" { } "touch $out";
 
@@ -774,6 +874,13 @@ driverGoTests
   # same way, via SPINDRIFT_PI_BIN, _BRIDGE and _HOOKS_DIR. The
   # other integration tests self-skip without nix/bwrap/podman/docker. The
   # package list is derived from the tree, so a new tagged file is picked up.
+  #
+  # Unlike the core checks it copies the whole tree (issue #5562): the fixtures'
+  # run-input documents name the image built from the bundle-linking box
+  # binary, so any Driver, runner family or bundled backend edit moves them
+  # anyway, and several tagged packages (the root, box, driver-exec,
+  # internal/forge/forgejo, internal/runner/bwrap, internal/runner/oci) lie
+  # outside coreFiles.
   launcher-go-seam-test =
     pkgs.runCommand "launcher-go-seam-test"
       {
@@ -831,59 +938,6 @@ driverGoTests
         go build -o "$TMPDIR/launcher-linux" .
         GOOS=darwin GOARCH=amd64 go build -o "$TMPDIR/launcher-darwin-amd64" .
         GOOS=darwin GOARCH=arm64 go build -o "$TMPDIR/launcher-darwin-arm64" .
-        touch $out
-      '';
-
-  # ADR 0023 makes console a leaf UI package: engine packages never import it.
-  # go list -deps walks the whole transitive graph, so an import that reaches
-  # console through another engine package is caught too, not just a direct one.
-  launcher-console-isolation =
-    let
-      guardedPackages = pkgs.lib.concatStringsSep " " [
-        "dispatch"
-        "waves"
-        "forge"
-        "settle"
-        "runner"
-        "runner/oci"
-        "runner/bwrap"
-        "driver"
-        "freshness"
-      ];
-    in
-    pkgs.runCommand "launcher-console-isolation"
-      {
-        nativeBuildInputs = [ pkgs.go ];
-        inherit guardedPackages;
-      }
-      ''
-        cp -r ${../../cmd/launcher} src
-        chmod -R +w src
-        cp -r ${launcherGoModules} src/vendor
-        ${goCheckEnv}
-        cd src
-        for pkg in $guardedPackages; do
-          if ! deps=$(go list -deps "./internal/$pkg" 2>&1); then
-            # console already imports most guarded packages, so a reverse
-            # import forms a cycle — go list fails outright instead of
-            # listing console as a dependency. Treat that failure itself
-            # as the violation signal. But go list -deps also fails for
-            # reasons unrelated to console (an unresolvable import, a
-            # malformed package clause in a dependency), so only blame
-            # console when the toolchain actually reports a cycle.
-            if echo "$deps" | grep -q 'import cycle'; then
-              echo "go list failed for internal/$pkg — likely an import cycle through internal/console, which violates ADR 0023's one-way dependency:" >&2
-            else
-              echo "go list failed for internal/$pkg for a reason unrelated to a console cycle (see stderr below) — not necessarily an ADR 0023 violation:" >&2
-            fi
-            echo "$deps" >&2
-            exit 1
-          fi
-          if echo "$deps" | grep -qx 'spindrift.dev/launcher/internal/console'; then
-            echo "internal/$pkg imports internal/console — violates ADR 0023's one-way dependency (engine packages never import console)" >&2
-            exit 1
-          fi
-        done
         touch $out
       '';
 
