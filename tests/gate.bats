@@ -205,3 +205,51 @@ workers_for() {
     [ "$(grep -o -- "/nix/store/$j.drv^\*" "$NIX_ARGV" | wc -l)" -eq 1 ]
   done
 }
+
+# The liveness probe must be sampled before the line count. Reversed, an eval
+# that writes its last line and exits between the two reads reports "dead" with
+# that line unread, and the gate drops the job. A wc shim lands exactly that
+# write+exit between the probe and the count.
+@test "a job written just before eval exits is still built" {
+  job a
+  job b
+  local fifo="$BATS_TEST_TMPDIR/release" realwc
+  realwc=$(command -v wc)
+  mkfifo "$fifo"
+  export FIFO="$fifo" EVAL_PID_FILE="$BATS_TEST_TMPDIR/eval.pid" \
+    WC_MARK="$BATS_TEST_TMPDIR/wc.done" REAL_WC="$realwc"
+
+  cat >"$STUBS/nix-eval-jobs" <<'STUB'
+#!/usr/bin/env bash
+echo $$ >"$EVAL_PID_FILE"
+sed -n 1p "$NEJ_JOBS"
+read -r <"$FIFO"
+sed -n 2p "$NEJ_JOBS"
+STUB
+  mkdir "$BATS_TEST_TMPDIR/wcdir"
+  cat >"$BATS_TEST_TMPDIR/wcdir/wc" <<'STUB'
+#!/usr/bin/env bash
+if [ ! -e "$WC_MARK" ] && grep -qsF -- '/nix/store/a.drv' "$NIX_ARGV"; then
+  : >"$WC_MARK"
+  stale=$("$REAL_WC" "$@")
+  echo >"$FIFO"
+  for _ in $(seq 200); do
+    if ! kill -0 "$(cat "$EVAL_PID_FILE")" 2>/dev/null; then
+      printf '%s\n' "$stale"
+      exit 0
+    fi
+    sleep 0.05
+  done
+  exit 1
+fi
+exec "$REAL_WC" "$@"
+STUB
+  sed -i "1s|.*|#!$BASH|" "$STUBS/nix-eval-jobs" "$BATS_TEST_TMPDIR/wcdir/wc"
+  chmod +x "$STUBS/nix-eval-jobs" "$BATS_TEST_TMPDIR/wcdir/wc"
+
+  PATH="$BATS_TEST_TMPDIR/wcdir:$PATH" run timeout 30 bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ -e "$WC_MARK" ]
+  [[ "$output" == *"all 2 jobs passed"* ]]
+  grep -qF -- '/nix/store/b.drv^*' "$NIX_ARGV"
+}
