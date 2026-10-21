@@ -39,13 +39,11 @@ let
       )
     )
     ++ map (d: launcherDir + "/${d}") ([ "testdata" ] ++ bundleMains ++ bundleFixtureDirs);
-  # The backends core keeps (ADR 0068, decision 7). Mirrors coreBackends in
-  # internal/driver/bundle_guard_test.go (bundle-binaries-match-guard pins
-  # them). Every other backend row is stripped from the core run.
-  coreBackendNames = [
-    "git"
-    "local"
-  ];
+  # The backends core keeps (ADR 0068, decision 7): the rows marked `core`.
+  # Mirrors coreBackends in internal/driver/bundle_guard_test.go
+  # (bundle-binaries-match-guard pins them). Every other backend row is
+  # stripped from the core run.
+  coreBackendNames = map (row: row.name) (builtins.filter (row: row.core or false) backendRowList);
   bundledBackendNames = builtins.filter (n: !builtins.elem n coreBackendNames) backendNames;
   bundledBackendDirs = map (n: launcherDir + "/internal/forge/${n}") bundledBackendNames;
   runnerDir = name: launcherDir + "/internal/runner/${name}";
@@ -787,8 +785,6 @@ driverGoTests
     in
     assert assertMsg (guardedCore == sort lessThan coreBackendNames)
       "coreBackendNames (nix/checks/go.nix) must equal coreBackends (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " coreBackendNames}; the guard has: ${concatStringsSep ", " guardedCore}";
-    assert assertMsg (builtins.all (n: builtins.elem n backendNames) coreBackendNames)
-      "coreBackendNames names a backend with no row in lib/backends: ${concatStringsSep ", " coreBackendNames}";
     assert assertMsg (guarded == listed)
       "bundleMains ++ bundleFixtureDirs (nix/checks/go.nix) must equal the module + \"/<dir>\" entries of bundleBinaries and bundleFixtures (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " listed}; the guard has: ${concatStringsSep ", " guarded}";
     pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
