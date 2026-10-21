@@ -151,7 +151,7 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 				}
 				if a, ok := driver.AuthContentFor(c.Driver); ok {
 					if content := c.Credentials[a.Env]; content != "" {
-						if err := a.Check(content, rules); err != nil {
+						if err := a.Check(content, rules, c.Models); err != nil {
 							errs = append(errs, err)
 						}
 					}

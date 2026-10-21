@@ -40,8 +40,10 @@ func AuthContentFor(name string) (a AuthContent, ok bool) {
 
 // Check validates content, the value of a.Env, and returns an error naming
 // every Provider holding an OAuth entry outside OAuthProviders. rules supply
-// the API-key env var each rejection points at. Errors never carry content.
-func (a AuthContent) Check(content string, rules []CredentialRule) error {
+// the API-key env var each rejection points at. It also requires an OAuth entry
+// for each OAuthProviders Provider that a model in models targets by prefix.
+// Errors never carry content.
+func (a AuthContent) Check(content string, rules []CredentialRule, models []string) error {
 	var store map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(content), &store); err != nil || store == nil {
 		return fmt.Errorf("%s must be a JSON object keyed by Provider id", a.Env)
@@ -63,6 +65,22 @@ func (a AuthContent) Check(content string, rules []CredentialRule) error {
 		}
 		errs = append(errs, fmt.Errorf("%s holds an OAuth entry for the %s Provider, but only %s may use OAuth in a Box (a refresh there must not rotate the host's token); %s",
 			a.Env, p, strings.Join(a.OAuthProviders, ", "), a.apiKeyPointer(p, rules)))
+	}
+	for _, p := range a.OAuthProviders {
+		if !(CredentialRule{ModelPrefix: p + "/"}).AppliesTo(models...) {
+			continue
+		}
+		raw, present := store[p]
+		if present {
+			typ, ok := entryType(raw)
+			if !ok {
+				continue // the loop above already reported the malformed entry
+			}
+			if typ == oauthEntryType {
+				continue
+			}
+		}
+		errs = append(errs, fmt.Errorf("%s holds no OAuth entry for the %s Provider, which a %s/ model needs", a.Env, p, p))
 	}
 	return errors.Join(errs...)
 }

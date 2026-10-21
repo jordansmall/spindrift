@@ -24,39 +24,57 @@ var testRules = []CredentialRule{
 
 func TestAuthContentCheck(t *testing.T) {
 	const oauth = `{"type":"oauth","access":"SECRET-A","refresh":"SECRET-R","expires":1}`
+	copilot := []string{"github-copilot/gpt-5"}
+	const noEntry = "holds no OAuth entry"
 	tests := []struct {
-		name    string
-		content string
-		wantErr []string
+		name       string
+		content    string
+		models     []string
+		wantErr    []string
+		wantAbsent []string
 	}{
-		{"allowed oauth", `{"github-copilot":` + oauth + `}`, nil},
-		{"api_key for any provider", `{"anthropic":{"type":"api_key","key":"SECRET-K"}}`, nil},
-		{"empty object", `{}`, nil},
-		{"anthropic oauth rejected", `{"anthropic":` + oauth + `}`,
-			[]string{"PI_AUTH_CONTENT", "anthropic", "github-copilot", "set ANTHROPIC_API_KEY for anthropic"}},
-		{"mapped oauth id names the api-key provider", `{"codex-sub":` + oauth + `}`,
-			[]string{"codex-sub", "set OPENAI_API_KEY for openai instead"}},
-		{"mapped oauth id, other provider", `{"gemini-sub":` + oauth + `}`,
-			[]string{"set GEMINI_API_KEY for google instead"}},
-		{"mapped to a provider with no rule", `{"orphan-sub":` + oauth + `}`,
-			[]string{"orphan-sub", "spindrift carries no API key for the nowhere Provider"}},
-		{"duplicate type key differing in case", `{"anthropic":{"type":"oauth","Type":"api_key"}}`,
-			[]string{"anthropic", "OAuth entry"}},
-		{"type key only in the wrong case", `{"anthropic":{"Type":"api_key"}}`,
-			[]string{"anthropic", "\"type\""}},
-		{"non-string type", `{"anthropic":{"type":1}}`, []string{"anthropic", "\"type\""}},
-		{"unknown provider oauth", `{"zed":` + oauth + `}`,
-			[]string{"zed", "spindrift carries no API key for the zed Provider"}},
-		{"two providers", `{"zed":` + oauth + `,"anthropic":` + oauth + `}`,
-			[]string{"anthropic", "zed"}},
-		{"invalid json", `{not json SECRET-X`, []string{"PI_AUTH_CONTENT", "JSON object"}},
-		{"non-object", `["SECRET-X"]`, []string{"PI_AUTH_CONTENT", "JSON object"}},
-		{"entry not object", `{"anthropic":"SECRET-X"}`, []string{"anthropic", "\"type\""}},
-		{"entry without type", `{"anthropic":{"key":"SECRET-X"}}`, []string{"anthropic", "\"type\""}},
+		{name: "allowed oauth", content: `{"github-copilot":` + oauth + `}`},
+		{name: "api_key for any provider", content: `{"anthropic":{"type":"api_key","key":"SECRET-K"}}`},
+		{name: "empty object", content: `{}`},
+		{name: "anthropic oauth rejected", content: `{"anthropic":` + oauth + `}`,
+			wantErr: []string{"PI_AUTH_CONTENT", "anthropic", "github-copilot", "set ANTHROPIC_API_KEY for anthropic"}},
+		{name: "mapped oauth id names the api-key provider", content: `{"codex-sub":` + oauth + `}`,
+			wantErr: []string{"codex-sub", "set OPENAI_API_KEY for openai instead"}},
+		{name: "mapped oauth id, other provider", content: `{"gemini-sub":` + oauth + `}`,
+			wantErr: []string{"set GEMINI_API_KEY for google instead"}},
+		{name: "mapped to a provider with no rule", content: `{"orphan-sub":` + oauth + `}`,
+			wantErr: []string{"orphan-sub", "spindrift carries no API key for the nowhere Provider"}},
+		{name: "duplicate type key differing in case", content: `{"anthropic":{"type":"oauth","Type":"api_key"}}`,
+			wantErr: []string{"anthropic", "OAuth entry"}},
+		{name: "type key only in the wrong case", content: `{"anthropic":{"Type":"api_key"}}`,
+			wantErr: []string{"anthropic", "\"type\""}},
+		{name: "non-string type", content: `{"anthropic":{"type":1}}`, wantErr: []string{"anthropic", "\"type\""}},
+		{name: "unknown provider oauth", content: `{"zed":` + oauth + `}`,
+			wantErr: []string{"zed", "spindrift carries no API key for the zed Provider"}},
+		{name: "two providers", content: `{"zed":` + oauth + `,"anthropic":` + oauth + `}`,
+			wantErr: []string{"anthropic", "zed"}},
+		{name: "invalid json", content: `{not json SECRET-X`, wantErr: []string{"PI_AUTH_CONTENT", "JSON object"}},
+		{name: "non-object", content: `["SECRET-X"]`, wantErr: []string{"PI_AUTH_CONTENT", "JSON object"}},
+		{name: "entry not object", content: `{"anthropic":"SECRET-X"}`, wantErr: []string{"anthropic", "\"type\""}},
+		{name: "entry without type", content: `{"anthropic":{"key":"SECRET-X"}}`, wantErr: []string{"anthropic", "\"type\""}},
+
+		{name: "empty store, copilot model", content: `{}`, models: copilot,
+			wantErr: []string{"PI_AUTH_CONTENT", "github-copilot", noEntry}},
+		{name: "api_key-only store, copilot model", content: `{"github-copilot":{"type":"api_key","key":"SECRET-K"}}`, models: copilot,
+			wantErr: []string{"PI_AUTH_CONTENT", "github-copilot", noEntry}},
+		{name: "other provider only, copilot model", content: `{"anthropic":{"type":"api_key","key":"SECRET-K"}}`, models: copilot,
+			wantErr: []string{"PI_AUTH_CONTENT", "github-copilot", noEntry}},
+		{name: "copilot model among tiers", content: `{}`, models: []string{"openai/gpt-5", "", "github-copilot/x"},
+			wantErr: []string{"github-copilot", noEntry}},
+		{name: "malformed copilot entry reported once", content: `{"github-copilot":"SECRET-X"}`, models: copilot,
+			wantErr: []string{"github-copilot", "\"type\""}, wantAbsent: []string{noEntry}},
+		{name: "oauth entry, copilot model", content: `{"github-copilot":` + oauth + `}`, models: copilot},
+		{name: "empty store, other model", content: `{}`, models: []string{"openai/gpt-5"}},
+		{name: "api_key-only store, other model", content: `{"github-copilot":{"type":"api_key","key":"SECRET-K"}}`, models: []string{"openai/gpt-5"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := testAuth.Check(tt.content, testRules)
+			err := testAuth.Check(tt.content, testRules, tt.models)
 			if tt.wantErr == nil {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
@@ -72,6 +90,11 @@ func TestAuthContentCheck(t *testing.T) {
 					t.Errorf("error %q lacks %q", msg, w)
 				}
 			}
+			for _, w := range tt.wantAbsent {
+				if strings.Contains(msg, w) {
+					t.Errorf("error %q contains %q", msg, w)
+				}
+			}
 			if strings.Contains(msg, "SECRET") {
 				t.Errorf("error echoes secret content: %q", msg)
 			}
@@ -80,7 +103,7 @@ func TestAuthContentCheck(t *testing.T) {
 }
 
 func TestAuthContentCheckSortsProviders(t *testing.T) {
-	err := testAuth.Check(`{"zed":{"type":"oauth"},"anthropic":{"type":"oauth"}}`, testRules)
+	err := testAuth.Check(`{"zed":{"type":"oauth"},"anthropic":{"type":"oauth"}}`, testRules, nil)
 	if err == nil {
 		t.Fatal("want error")
 	}
@@ -116,7 +139,7 @@ func TestPiAPIKeyProvidersResolveToNamedVariable(t *testing.T) {
 	}
 	for id, provider := range a.APIKeyProviderFor {
 		t.Run(id, func(t *testing.T) {
-			err := a.Check(`{"`+id+`":{"type":"oauth"}}`, rules)
+			err := a.Check(`{"`+id+`":{"type":"oauth"}}`, rules, nil)
 			if err == nil {
 				t.Fatalf("OAuth entry for %s accepted", id)
 			}

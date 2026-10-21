@@ -572,6 +572,27 @@ func TestRequiredKnobChecks_DriverCredentials_PiCopilotAuthContent(t *testing.T)
 	}
 }
 
+func TestRequiredKnobChecks_DriverCredentials_PiCopilotNeedsOAuthEntry(t *testing.T) {
+	copilot := []string{"github-copilot/gpt-5"}
+	for _, tt := range []struct{ name, auth string }{
+		{"empty store", `{}`},
+		{"api_key only", `{"github-copilot":{"type":"api_key","key":"SECRET-K"}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := piCredentialProbe(t, copilot, map[string]string{"PI_AUTH_CONTENT": tt.auth})
+			if err == nil || !strings.Contains(err.Error(), "github-copilot") || !strings.Contains(err.Error(), "OAuth") {
+				t.Errorf("Probe() = %v, want the missing github-copilot OAuth entry", err)
+			}
+			if err != nil && strings.Contains(err.Error(), "SECRET") {
+				t.Errorf("error echoes credential content: %q", err)
+			}
+		})
+	}
+	if err := piCredentialProbe(t, []string{"openai/gpt-5"}, map[string]string{"PI_AUTH_CONTENT": `{}`, "OPENAI_API_KEY": "sk-x"}); err != nil {
+		t.Errorf("empty store with a non-copilot model rejected: %v", err)
+	}
+}
+
 const piCopilotAuth = `{"github-copilot":{"type":"oauth","access":"a","refresh":"r","expires":1}}`
 
 func TestRequiredKnobChecks_DriverCredentials_PiAuthContentRejectsOtherOAuth(t *testing.T) {
