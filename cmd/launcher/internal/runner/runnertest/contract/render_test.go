@@ -2,6 +2,7 @@ package contract
 
 import (
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -25,9 +26,26 @@ type stubHarness struct {
 	drop   string // Box field (or networkField) the stub fails to render
 	hosts  hostFault
 	last   Launch
+
+	extraMount *Mount            // a bind no spec asked for
+	extraEnv   map[string]string // env no spec asked for
+	dupMounts  bool              // renders every bind twice, baked one included
+	skipBaked  bool              // renders neither baked entry
+	ghostBaked bool              // declares baked entries it never renders
 }
 
+// bakedMount is the one bind the stub renders on every launch.
+var bakedMount = Mount{"/baked-src", "/baked", false}
+
 func (s *stubHarness) Family() string { return s.family }
+
+func (s *stubHarness) Baked(Launch) BakedSet {
+	baked := BakedSet{EnvKeys: []string{"BAKED"}, MountTargets: []string{bakedMount.Target}}
+	if s.ghostBaked {
+		baked.EnvKeys, baked.MountTargets = append(baked.EnvKeys, "GHOST"), append(baked.MountTargets, "/ghost")
+	}
+	return baked
+}
 
 func (s *stubHarness) Render(_ *testing.T, l Launch) []string {
 	s.last = l
@@ -39,7 +57,11 @@ func (s *stubHarness) Render(_ *testing.T, l Launch) []string {
 
 func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 	b, oci := s.last.Box, s.family == runner.KindOCI
-	d := Decoded{Env: map[string]string{"BAKED": "x"}, Network: s.last.Network}
+	d := Decoded{Env: map[string]string{}, Network: s.last.Network}
+	if !s.skipBaked {
+		d.Env["BAKED"] = "x"
+		d.Mounts = append(d.Mounts, bakedMount)
+	}
 	keep := func(field string) bool { return s.drop != field }
 	if oci && keep("Name") {
 		d.Name = b.Name
@@ -49,6 +71,7 @@ func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 			d.Env[k] = v
 		}
 	}
+	maps.Copy(d.Env, s.extraEnv)
 	if b.DriverCacheDir != "" && keep("DriverCacheDir") {
 		d.Mounts = append(d.Mounts, Mount{b.DriverCacheDir, runnertest.DriverSessionCacheTarget, false})
 	}
@@ -59,6 +82,12 @@ func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 		for _, m := range b.Sockets {
 			d.Mounts = append(d.Mounts, Mount{m.Source, m.Target, false})
 		}
+	}
+	if s.extraMount != nil {
+		d.Mounts = append(d.Mounts, *s.extraMount)
+	}
+	if s.dupMounts {
+		d.Mounts = append(d.Mounts, d.Mounts...)
 	}
 	if oci && s.hosts != hostsNone {
 		addHost := func(h string) {
@@ -123,6 +152,63 @@ func TestDroppedFieldFailsItsRows(t *testing.T) {
 		h := &stubHarness{family: tc.family, drop: tc.drop}
 		if err := checkRow(t, h, rowNamed(t, tc.row)); err == nil {
 			t.Errorf("%s: dropping %s passed", tc.row, tc.drop)
+		}
+	}
+}
+
+func TestStraysAndDuplicatesFail(t *testing.T) {
+	for _, tc := range []struct {
+		name, row string
+		h         stubHarness
+		want      string
+	}{
+		{"stray mount", "DriverCacheDir/set", stubHarness{extraMount: &Mount{"/s", "/stray", false}}, "mounts ="},
+		{"stray mount on unset field", "OutboxDir/unset", stubHarness{extraMount: &Mount{"/s", outboxTarget, false}}, "mounts ="},
+		{"stray mount on a non-mount row", "Name", stubHarness{extraMount: &Mount{"/s", "/stray", false}}, "mounts ="},
+		{"duplicated owned mount", "Sockets/two", stubHarness{dupMounts: true}, "mounts ="},
+		{"duplicated baked mount", "Name", stubHarness{extraMount: &bakedMount}, "mounts ="},
+		{"every mount duplicated", "Network/none", stubHarness{dupMounts: true}, "mounts ="},
+		{"stray env on Env row", "Env/plain", stubHarness{extraEnv: map[string]string{"STRAY": "x"}}, "env ="},
+		{"stray env on a non-Env row", "Name", stubHarness{extraEnv: map[string]string{"STRAY": "x"}}, "env ="},
+		{"wrong env value", "Env/plain", stubHarness{extraEnv: map[string]string{envKey: "other"}}, "env ="},
+		{"unrendered baked entries", "Name", stubHarness{skipBaked: true}, "stale Baked declaration"},
+		{"stale baked declaration", "Name", stubHarness{ghostBaked: true}, "stale Baked declaration"},
+	} {
+		h := tc.h
+		h.family = runner.KindOCI
+		err := checkRow(t, &h, rowNamed(t, tc.row))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s (%s): err = %v, want it to mention %q", tc.name, tc.row, err, tc.want)
+		}
+	}
+}
+
+func TestPutEnvRejectsRepeatedKey(t *testing.T) {
+	env := map[string]string{}
+	if err := PutEnv(env, "K", "one"); err != nil {
+		t.Fatalf("first PutEnv: %v", err)
+	}
+	err := PutEnv(env, "K", "two")
+	if err == nil || !strings.Contains(err.Error(), "rendered twice") {
+		t.Errorf("repeated key: err = %v, want a rendered-twice failure", err)
+	}
+	if env["K"] != "one" {
+		t.Errorf("env[K] = %q, repeated key overwrote the first value", env["K"])
+	}
+}
+
+func TestBakedCollisionRejectsRow(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		launch func(*testing.T) Launch
+	}{
+		{"env key", withBox(func(_ *testing.T, b *runner.Box) { b.Env = map[string]string{"BAKED": "y"} })},
+		{"socket target", withBox(sockets([2]string{"a.sock", bakedMount.Target}))},
+	} {
+		r := row{tc.name, "Name", tc.launch, nil}
+		err := checkRow(t, &stubHarness{family: runner.KindOCI}, r)
+		if err == nil || !strings.Contains(err.Error(), "collides") {
+			t.Errorf("%s: err = %v, want a baked-collision failure", tc.name, err)
 		}
 	}
 }
