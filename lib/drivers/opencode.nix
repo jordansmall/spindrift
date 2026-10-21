@@ -145,8 +145,10 @@ in
   };
 
   # Issue #5351: opencode's bash tool defaults to a 2-minute timeout. This sets
-  # that default only; a model-set per-call `timeout` overrides it and opencode
-  # applies no maximum. It has no config-file key, so env is the only route.
+  # that default; opencode applies no maximum itself, so the guard plugin
+  # (agent/opencode-guards.js, issue #5381) caps a longer model-set per-call
+  # `timeout` at the same value. It has no config-file key, so env is the only
+  # route.
   bashTimeoutEnv = [ "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS" ];
 
   # opencode composes subagents from the on-disk files agentFilesTemplate below

@@ -173,7 +173,7 @@ withRowKnobs {
   driverBashTimeoutMs = {
     env = "DRIVER_BASH_TIMEOUT_MS";
     group = "agents";
-    doc = "per-call Bash timeout in milliseconds (issue #4409): exported into the Box under the env var names the active Driver's registry entry declares in bashTimeoutEnv (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, the default and maximum a single Bash call may run; opencode: OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS, the default only -- a per-call timeout the model sets overrides it and nothing caps it); a Driver declaring none ignores it; unset exports nothing and the Driver keeps its own limits (claude: 10-minute maximum; opencode: 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log rather than exported";
+    doc = "per-call Bash timeout in milliseconds (issue #4409): exported into the Box under the env var names the active Driver's registry entry declares in bashTimeoutEnv (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, the default and maximum a single Bash call may run; opencode: OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS, the default, and spindrift's opencode guard plugin caps a longer model-set per-call timeout at that same value (issue #5381), and, like claude's maximum, leaves a shorter per-call timeout alone); a Driver declaring none ignores it; unset exports nothing and the Driver keeps its own limits (claude: 10-minute maximum; opencode: 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log rather than exported";
     # int-typed with no default, so the type cannot be inferred from `default`.
     kind = "int";
     flakeOption = true;
