@@ -1,0 +1,48 @@
+{
+  "derived": [
+    {
+      "Host": "reg.example.test",
+      "Origin": "https://reg.example.test",
+      "Subtrees": [
+        {
+          "ecosystem": "synthetic",
+          "path": "/api/synth"
+        }
+      ]
+    },
+    {
+      "Host": "twin.example.test",
+      "Origin": "https://twin.example.test",
+      "Subtrees": [
+        {
+          "ecosystem": "twin",
+          "path": "/api/twin"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/api/synth",
+        "/api/twin"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "synthetic",
+          "path": "/api/synth"
+        },
+        {
+          "ecosystem": "synthetic",
+          "path": "/api/synth"
+        },
+        {
+          "ecosystem": "twin",
+          "path": "/api/twin"
+        }
+      ],
+      "matchHost": "reg.example.test",
+      "upstream": "https://reg.example.test"
+    }
+  ]
+}

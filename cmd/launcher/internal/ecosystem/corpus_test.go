@@ -30,7 +30,7 @@ func TestCorpus(t *testing.T) {
 			if !ok {
 				t.Fatalf("testdata/corpus/%s matches no ecosystem.Table row", name)
 			}
-			ecosystemtest.Run(t, row, filepath.Join("testdata", "corpus", name))
+			ecosystemtest.Run(t, row, filepath.Join("testdata", "corpus", name), tableRow)
 		})
 	}
 }

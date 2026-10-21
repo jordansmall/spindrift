@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strings"
 
-	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -80,7 +79,7 @@ func (c *replay) rewrites() ([]byte, error) {
 			continue
 		}
 		hostRoot := filepath.Join(root, dir)
-		localURL, err := url.Parse(ecosystem.RouteLocalURL(r.Prefix, bindregistry.ForwarderPort))
+		localURL, err := url.Parse(ecosystem.RouteLocalURL(r.Prefix, c.port))
 		if err != nil {
 			return nil, err
 		}

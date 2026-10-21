@@ -65,7 +65,7 @@ func (c *replay) binding() ([]byte, error) {
 	if len(routes) == 0 || routes[0].Prefix == "" {
 		return json.Marshal(bindingOutput{NoRoutePrefix: true})
 	}
-	port, prefix := bindregistry.ForwarderPort, routes[0].Prefix
+	port, prefix := c.port, routes[0].Prefix
 	rewrites, inTreeRoutes, collisionWarnings := bindregistry.InTreeRoutes(routes, port)
 
 	out := bindingOutput{Warnings: collisionWarnings}
@@ -98,7 +98,7 @@ func (c *replay) binding() ([]byte, error) {
 		}
 		out.HomeConfig = home
 	}
-	if len(bindregistry.InTreeBindingsOf(c.rows())) > 0 {
+	if len(bindregistry.InTreeBindingsOf(c.primaryRows())) > 0 {
 		if out.InTree, err = c.inTreeRewrite(rewrites); err != nil {
 			return nil, err
 		}

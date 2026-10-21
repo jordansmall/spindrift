@@ -1,0 +1,27 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "basic",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "SYNTH_TOKEN",
+      "FromFile": "",
+      "MatchHost": "reg.example.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://reg.example.test"
+    },
+    "Ecosystems": {
+      "synthetic": {
+        "mirror-path": "/mirror",
+        "path": "/api/synth"
+      },
+      "twin": {
+        "path": "/api/twin"
+      }
+    },
+    "MatchHost": "reg.example.test",
+    "UpstreamOrigin": ""
+  }
+]

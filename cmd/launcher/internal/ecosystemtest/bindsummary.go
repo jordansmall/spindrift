@@ -29,7 +29,7 @@ func (c *replay) lockfileScan() ([]byte, error) {
 		return nil, err
 	}
 	var buf bytes.Buffer
-	bindregistry.WarnStaleLockfilesRows(&buf, work, c.rows(), func(k string) string {
+	bindregistry.WarnStaleLockfilesRows(&buf, work, c.allRows, func(k string) string {
 		if k == registrymanifest.EnvVar {
 			return encoded
 		}
@@ -66,7 +66,7 @@ func (c *replay) bindingsSummary() ([]byte, error) {
 
 	var buf bytes.Buffer
 	gate := bindregistry.ReadyGate(registrymanifest.Manifest{Endpoint: forwarderEndpoint, Routes: routes})
-	ok := bindregistry.BindHomes(&buf, c.rows(), gate, nil, getenv)
+	ok := bindregistry.BindHomes(&buf, c.primaryRows(), gate, nil, getenv)
 	out := buf.String()
 	if home != "" {
 		out = strings.ReplaceAll(out, home, "$"+c.row.HomeConfig.HomeEnvVar)
