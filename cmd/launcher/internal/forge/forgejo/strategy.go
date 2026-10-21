@@ -1,7 +1,6 @@
 package forgejo
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -68,7 +67,7 @@ var Strategy = backendkit.Strategy{
 			return "", err
 		}
 		if k.ForgejoToken == "" {
-			return "", errors.New("FORGEJO_TOKEN is required when CODE_FORGE=forgejo")
+			return "", fmt.Errorf("%s is required when CODE_FORGE=forgejo", ForgejoTokenEnv)
 		}
 		base := strings.TrimSuffix(k.ForgejoBaseURL, "/")
 		scheme, rest, ok := strings.Cut(base, "://")
@@ -104,7 +103,7 @@ var Strategy = backendkit.Strategy{
 		if host == "" {
 			return nil
 		}
-		return map[string]string{"FORGEJO_BASE_URL": "https://" + host}
+		return map[string]string{ForgejoBaseURLEnv: "https://" + host}
 	},
 	AcquireToken: acquireToken,
 }
@@ -113,7 +112,7 @@ var Strategy = backendkit.Strategy{
 // explicitly blank value yields "" (the launcher rejects it, so those facets
 // stay silent), while an unset one takes ReadKnobs' codeberg default.
 func identityBase(l backendkit.Lookup) string {
-	if v, ok := l("FORGEJO_BASE_URL"); ok && v == "" {
+	if v, ok := l(ForgejoBaseURLEnv); ok && v == "" {
 		return ""
 	}
 	k, err := ReadKnobs(l)
@@ -130,7 +129,7 @@ func identityBase(l backendkit.Lookup) string {
 // there.
 func validate(axis string) func(backendkit.Shared, backendkit.Lookup) error {
 	return func(_ backendkit.Shared, l backendkit.Lookup) error {
-		if v, ok := l("FORGEJO_BASE_URL"); ok && v == "" {
+		if v, ok := l(ForgejoBaseURLEnv); ok && v == "" {
 			return errBaseURLRequired(axis)
 		}
 		k, err := ReadKnobs(l)
