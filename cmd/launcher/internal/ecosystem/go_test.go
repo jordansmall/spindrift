@@ -128,29 +128,9 @@ func TestComputeGoBindings(t *testing.T) {
 			wantNoWarningSubstrings: []string{"GOSUMDB"},
 		},
 		{
-			name:   "GOPROXY interpolates the given port",
-			port:   9999,
-			prefix: "r0",
-			input: GoBindingInput{
-				GOTOOLCHAIN: "auto",
-				GONOPROXY:   "example.com/*",
-				GOSUMDB:     "sum.golang.org",
-			},
-			// Asserting the three forced exports here too confirms the
-			// port-only change leaves them alone. The dedicated cases above
-			// already cover the warnings these same inputs trigger, so this
-			// case stays Exports-only.
-			wantExports: map[string]string{
-				"GOPROXY":     "http://127.0.0.1:9999/r0/go",
-				"GOTOOLCHAIN": "local",
-				"GONOPROXY":   "none",
-				"GOSUMDB":     "off",
-			},
-		},
-		{
-			// Pins that the route prefix, not just the port, lands in GOPROXY
-			// (issue #3142: bindings mode has no per-ecosystem route mapping,
-			// so it binds to the first manifest route's prefix).
+			// Pins that the route prefix lands in GOPROXY (issue #3142:
+			// bindings mode has no per-ecosystem route mapping, so it binds
+			// to the first manifest route's prefix).
 			name:        "GOPROXY interpolates the given prefix",
 			port:        27182,
 			prefix:      "artifactory-go",

@@ -1,0 +1,11 @@
+[[routes]]
+match-host = "repo.acme.test"
+upstream-origin = "https://repo.acme.test"
+auth-scheme = "bearer"
+credential = { env = "GRADLE_TOKEN" }
+
+[routes.ecosystems.gradle]
+path = "/some/path"
+
+[routes.ecosystems.npm]
+path = "/npm"

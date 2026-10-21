@@ -1,0 +1,25 @@
+{
+  "envExports": [
+    {
+      "Name": "GOPROXY",
+      "Value": "http://127.0.0.1:9999/repo-acme-test/go"
+    },
+    {
+      "Name": "GOTOOLCHAIN",
+      "Value": "local"
+    },
+    {
+      "Name": "GONOPROXY",
+      "Value": "none"
+    },
+    {
+      "Name": "GOSUMDB",
+      "Value": "off"
+    }
+  ],
+  "warnings": [
+    "==> WARNING: overriding GOTOOLCHAIN=auto with GOTOOLCHAIN=local — this Box only offers one baked Go toolchain through the Forwarder",
+    "==> WARNING: overriding pre-existing GONOPROXY/GOPRIVATE with GONOPROXY=none — every module path, private or not, now routes through the Forwarder",
+    "==> WARNING: overriding explicit GOSUMDB=sum.golang.org with GOSUMDB=off — no GOPRIVATE/GONOSUMDB exemption declared"
+  ]
+}
