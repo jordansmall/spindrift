@@ -1035,6 +1035,14 @@ checkedMerge {
       source = "lib/labels.nix";
     };
 
+  # Regenerate with `nix run .#regen` when lib/backends changes (ADR 0068).
+  dashboard-backend-names-gen = mkGofmtDriftCheck {
+    name = "dashboard-backend-names-gen";
+    rendered = renderers.renderDashboardBackendNamesGo (import ../../lib/backends/default.nix);
+    committedPath = "dashboard/backendnames_gen_test.go";
+    source = "lib/backends";
+  };
+
   # Regenerate with `nix run .#regen` when lib/runners/*.nix changes (ADR 0069).
   runners-gen = mkGofmtDriftCheck {
     name = "runners-gen";

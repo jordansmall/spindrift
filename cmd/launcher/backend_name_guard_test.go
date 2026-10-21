@@ -33,7 +33,9 @@ type backendNameHit struct {
 // slices.Index in src. Walking the AST skips comments, and
 // exec.Command("git", ...) arguments or assignments are not comparisons, so
 // only a branch on a backend name is flagged. It is a tripwire, not a proof:
-// map-key lookups and a backend name held in a named constant escape it.
+// map-key lookups, a backend name held in a named constant, an aliased slices
+// import, slices.ContainsFunc, and strings.Contains-style helpers, for example,
+// escape it. Keep in sync with dashboard/backend_name_guard_test.go.
 func scanBackendNameComparisons(t *testing.T, filename string, src any, names map[string]bool) []backendNameHit {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -96,9 +98,8 @@ func registeredBackendNames() map[string]bool {
 //
 // _test.go files are skipped: a test asserts per-backend outcomes
 // (`if got != "local"` checks an expected value) rather than branching
-// production behavior. The walk stops at cmd/launcher
-// because dashboard/ is a separate Go module this test cannot see; the Nix side
-// (nix/checks/backend-name-guard.nix) scans its non-test .go files.
+// production behavior. The walk stops at cmd/launcher because dashboard/ is a
+// separate Go module; dashboard/backend_name_guard_test.go is its counterpart.
 func TestCoreDoesNotCompareBackendNames(t *testing.T) {
 	names := registeredBackendNames()
 	if len(names) == 0 {
