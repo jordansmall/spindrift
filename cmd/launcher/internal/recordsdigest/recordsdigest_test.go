@@ -2,8 +2,11 @@ package recordsdigest
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/settle"
 )
 
 func render(Input) Output            { return Output{} }
@@ -103,4 +106,33 @@ func TestStrategyKnobs(t *testing.T) {
 			t.Errorf("err = %v, want boom", err)
 		}
 	})
+}
+
+func TestWithPriorSkipsForeignPrior(t *testing.T) {
+	var got []string
+	var gotPrior []any
+	s := WithPrior(Strategy{Name: "p", Anchors: anchors},
+		func(f settle.PriorFinding) string { return f.Issue.Number },
+		func(in Input, prior []string) Output {
+			got, gotPrior = prior, in.Prior
+			return Output{Text: "t", Latest: in.Cursor}
+		})
+	if s.Name != "p" || s.Anchors == nil {
+		t.Errorf("WithPrior dropped the base fields: %+v", s)
+	}
+	var f settle.PriorFinding
+	f.Issue.Number = "12"
+	if v := s.ParsePrior(f); v != "12" {
+		t.Errorf("ParsePrior = %#v, want the typed value", v)
+	}
+	out := s.Render(Input{Cursor: "r1", Prior: []any{"a", 7, "b"}})
+	if out.Text != "t" || out.Latest != "r1" {
+		t.Errorf("Render = %+v", out)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("render prior = %v, want %v (a prior of another type is skipped)", got, want)
+	}
+	if gotPrior != nil {
+		t.Errorf("render saw in.Prior = %v, want nil", gotPrior)
+	}
 }
