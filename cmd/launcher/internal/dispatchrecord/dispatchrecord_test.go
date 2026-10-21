@@ -158,6 +158,9 @@ func TestParseLog(t *testing.T) {
 			}
 			for i := range tc.passes {
 				tc.passes[i].Log = tc.file
+				if tc.passes[i].Efforts == nil {
+					tc.passes[i].Efforts = []string{}
+				}
 			}
 			if !reflect.DeepEqual(rec.Passes, tc.passes) {
 				t.Errorf("passes =\n%+v\nwant\n%+v", rec.Passes, tc.passes)

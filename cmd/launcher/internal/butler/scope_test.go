@@ -313,6 +313,7 @@ func TestRecordsSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 	db := openRecordsDB(t, root)
 	for _, q := range []string{
 		"DROP TABLE snapshots",
+		"ALTER TABLE passes DROP COLUMN efforts",
 		"CREATE TABLE tuning_snapshots (record_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, rendered TEXT NOT NULL, created_at INTEGER NOT NULL)",
 		"INSERT INTO tuning_snapshots VALUES ('" + ref.Sweep + "', '" + ref.SHA256 + "', '" + digest + "', 5)",
 		"PRAGMA user_version = 12",

@@ -257,6 +257,10 @@ var migrations = []string{
 	INSERT INTO snapshots (chore, record_id, sha256, rendered, created_at)
 		SELECT 'tuning', record_id, sha256, rendered, created_at FROM tuning_snapshots;
 	DROP TABLE tuning_snapshots;`,
+	// v14: the observed reasoning effort per Pass, comma-joined like models (issue #5592).
+	`ALTER TABLE passes ADD COLUMN efforts TEXT NOT NULL DEFAULT '';
+	-- Existing rows were parsed before efforts were tallied, so re-read them (mtime -1 never matches a real file).
+	UPDATE ingested_files SET mtime_ns = -1;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -650,7 +654,7 @@ func windowQuery(start, exclude string) string {
 }
 
 // passColumns is shared by the passes INSERT and SELECT so they cannot drift.
-const passColumns = `record_id, log_start, log, ordinal, role, models, usd, input_tokens, output_tokens,
+const passColumns = `record_id, log_start, log, ordinal, role, models, efforts, usd, input_tokens, output_tokens,
 	cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms,
 	api_duration_ms, verdict, verdict_text, dispositions`
 
@@ -834,8 +838,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		for _, p := range rec.Passes {
 			if _, err := tx.Exec(
 				`INSERT INTO passes (`+passColumns+`)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				newID, logStart, p.Log, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				newID, logStart, p.Log, p.Ordinal, p.Role, strings.Join(p.Models, ","), strings.Join(p.Efforts, ","), p.USD, p.InputTokens, p.OutputTokens,
 				p.CacheReadInputTokens, p.CacheCreationInputTokens, p.APICalls, p.Turns, p.DurationMs,
 				p.APIDurationMs, p.Verdict, p.VerdictText, p.Dispositions); err != nil {
 				return "", err
@@ -974,18 +978,16 @@ func (s *Store) Records() ([]Record, error) {
 	defer prows.Close()
 	passAt := map[passKey]passIndex{}
 	for prows.Next() {
-		var id, models string
+		var id, models, efforts string
 		var logStart int64
 		var p Pass
-		if err := prows.Scan(&id, &logStart, &p.Log, &p.Ordinal, &p.Role, &models, &p.USD, &p.InputTokens, &p.OutputTokens,
+		if err := prows.Scan(&id, &logStart, &p.Log, &p.Ordinal, &p.Role, &models, &efforts, &p.USD, &p.InputTokens, &p.OutputTokens,
 			&p.CacheReadInputTokens, &p.CacheCreationInputTokens, &p.APICalls, &p.Turns, &p.DurationMs,
 			&p.APIDurationMs, &p.Verdict, &p.VerdictText, &p.Dispositions); err != nil {
 			return nil, err
 		}
-		p.Models = []string{}
-		if models != "" {
-			p.Models = strings.Split(models, ",")
-		}
+		p.Models = splitList(models)
+		p.Efforts = splitList(efforts)
 		i, ok := byID[id]
 		if !ok {
 			return nil, fmt.Errorf("dispatchrecord: passes row for unknown record %q", id)
@@ -1245,4 +1247,13 @@ func nameHoldsSegment(tx *sql.Tx, path, recordID string, start int64) (bool, err
 		return false, &readError{err}
 	}
 	return sameStat(size, mtime, info), nil
+}
+
+// splitList inverts strings.Join(list, ","), reading "" as an empty list
+// rather than one empty entry.
+func splitList(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
 }

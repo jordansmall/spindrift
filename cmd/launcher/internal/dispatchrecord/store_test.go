@@ -392,7 +392,7 @@ func TestStoreMigratesV1Database(t *testing.T) {
 		ID: "work:7@2026-03-01T10:00:00.000Z", Root: root, Kind: "work", DispatchKey: "7", ClaimTime: claim,
 		Attribution: AttributionInferred, Outcome: OutcomeUnknown, OutcomeSource: OutcomeSourceNone,
 		Passes: []Pass{{
-			Ordinal: 1, Role: "implement", Models: []string{"opus", "haiku"}, USD: 1.5, InputTokens: 1,
+			Ordinal: 1, Role: "implement", Models: []string{"opus", "haiku"}, Efforts: []string{}, USD: 1.5, InputTokens: 1,
 			OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4, APICalls: 5, Turns: 6,
 			DurationMs: 7, APIDurationMs: 8, Verdict: "ready",
 		}},
@@ -1011,7 +1011,7 @@ func TestStoreMigratesV1DatabaseKeepsVerdictEvidenceColumns(t *testing.T) {
 	if len(recs) != 1 || len(recs[0].Passes) != 1 {
 		t.Fatalf("records = %+v", recs)
 	}
-	want := Pass{Ordinal: 1, Role: "review", Models: []string{"m"}, USD: 1.5, InputTokens: 1, OutputTokens: 2,
+	want := Pass{Ordinal: 1, Role: "review", Models: []string{"m"}, Efforts: []string{}, USD: 1.5, InputTokens: 1, OutputTokens: 2,
 		CacheReadInputTokens: 3, CacheCreationInputTokens: 4, APICalls: 5, Turns: 6, DurationMs: 7, APIDurationMs: 8, Verdict: "BLOCK"}
 	if !reflect.DeepEqual(recs[0].Passes[0], want) {
 		t.Fatalf("pass = %+v, want %+v", recs[0].Passes[0], want)

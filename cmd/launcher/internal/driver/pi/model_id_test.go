@@ -1,6 +1,7 @@
 package pi_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -58,5 +59,40 @@ func TestUsage_SameModelSubagentAtOtherEffortKeepsOneModelRow(t *testing.T) {
 	}
 	if len(rep.SummedByModel) != 1 || rep.SummedByModel[0].Model != "stub/stub-model" {
 		t.Errorf("SummedByModel = %+v, want one stub/stub-model row", rep.SummedByModel)
+	}
+}
+
+// A mid-Pass level change on one model is one model and both efforts.
+func TestReadPasses_MidPassLevelChangeKeepsOneModelBothEfforts(t *testing.T) {
+	path := pi.WriteLog(t, textEnd(1000, "a"), atLevel(textEnd(2000, "b"), "low"))
+	passes, err := newDriver().ReadPasses(path, "", nil)
+	if err != nil || len(passes) != 1 {
+		t.Fatalf("ReadPasses: %v, %d passes", err, len(passes))
+	}
+	if want := []string{"stub/stub-model"}; !reflect.DeepEqual(passes[0].Models, want) {
+		t.Errorf("Models = %v, want %v", passes[0].Models, want)
+	}
+	if want := []string{"high", "low"}; !reflect.DeepEqual(passes[0].Efforts, want) {
+		t.Errorf("Efforts = %v, want %v", passes[0].Efforts, want)
+	}
+}
+
+// A same-model subagent at another effort adds an effort, not a model.
+func TestReadPasses_SameModelSubagentAtOtherEffortAddsEffort(t *testing.T) {
+	child := strings.Replace(atLevel(childAssistant(1500, `[]`), "low"), "child-model", "stub-model", 1)
+	path := pi.WriteLog(t,
+		toolTurn(1000, "s1", "subagent", `{"agent":"scout","task":"look"}`),
+		subagentEnd("single", subagentResult("scout", child)),
+		textEnd(2000, "done"),
+	)
+	passes, err := newDriver().ReadPasses(path, "", nil)
+	if err != nil || len(passes) != 1 {
+		t.Fatalf("ReadPasses: %v, %d passes", err, len(passes))
+	}
+	if want := []string{"stub/stub-model"}; !reflect.DeepEqual(passes[0].Models, want) {
+		t.Errorf("Models = %v, want %v", passes[0].Models, want)
+	}
+	if want := []string{"high", "low"}; !reflect.DeepEqual(passes[0].Efforts, want) {
+		t.Errorf("Efforts = %v, want %v", passes[0].Efforts, want)
 	}
 }

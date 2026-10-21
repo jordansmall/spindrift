@@ -35,6 +35,9 @@ type PassTally struct {
 	Usage usage.Usage
 	// Models is the sorted, deduped model ids the segment named.
 	Models []string
+	// Efforts is the sorted, deduped reasoning-effort levels the segment's
+	// usage events observed; empty when its per-call usage events carry none.
+	Efforts []string
 	// Agents is the segment's per-agent breakdown, keyed, deduped and sorted as
 	// UsageByAgent does the whole log, so rows summed across segments are its
 	// rows. Under SessionTotals the main-loop row's OutputTokens is the
@@ -67,6 +70,7 @@ type passState struct {
 	tally   PassTally
 	seenIDs map[string]bool
 	models  map[string]bool
+	efforts map[string]bool
 	agents  map[string]*usage.AgentUsage
 	pending map[string]string // write ToolID -> content, until its result
 
@@ -78,12 +82,13 @@ type passState struct {
 }
 
 func newPassState() *passState {
-	return &passState{seenIDs: map[string]bool{}, models: map[string]bool{}, agents: map[string]*usage.AgentUsage{}, pending: map[string]string{}}
+	return &passState{seenIDs: map[string]bool{}, models: map[string]bool{}, efforts: map[string]bool{}, agents: map[string]*usage.AgentUsage{}, pending: map[string]string{}}
 }
 
 func (s *passState) finish(src TotalsSource) PassTally {
 	t := s.tally
 	t.Models = slices.Sorted(maps.Keys(s.models))
+	t.Efforts = slices.Sorted(maps.Keys(s.efforts))
 	t.Agents = sortedAgents(s.agents)
 	if src == SessionTotals {
 		t.Agents = withMainLoopOutput(t.Agents, t.Usage.OutputTokens)
@@ -169,6 +174,9 @@ func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
 			s.lastUsage = ev.Timestamp
 			if ev.Model != "" {
 				s.models[ev.Model] = true
+			}
+			if ev.Effort != "" {
+				s.efforts[ev.Effort] = true
 			}
 		}
 	case KindResult:
