@@ -187,9 +187,10 @@ in
     );
 
   # Files baked under /home/agent, path -> content (issue #5345). Optional: a
-  # Driver whose config lives in hooks (claude) bakes none here. opencode has no
-  # PreToolUse hook, so its Box refuses credential paths through deny rules
-  # instead. They must be a literal "deny": the Box runs with --auto
+  # Driver whose config lives in hooks (claude) bakes none here. opencode's guard
+  # plugin runs credential-deny.sh; these deny rules are a floor beneath it,
+  # still holding the plain forms if opencode cannot load the plugin. They must
+  # be a literal "deny": the Box runs with --auto
   # (flagsCommon), which approves every ask. opencode globs have no character
   # classes, so the bash boundaries enumerate credential-deny.sh's lead and
   # trail classes char by char, minus `*` and `?` (wildcards here, so a literal

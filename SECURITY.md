@@ -67,14 +67,15 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   (`~/.claude/.credentials.json`, `**/.env`, `~/.config/gh/hosts.yml`) —
   both enforced independently of `--dangerously-skip-permissions`. The
   opencode Driver never reads Claude Code's hooks; a baked plugin runs the
-  same env-credential scrub on its Bash calls, and a baked opencode
-  permission config denies the same paths plus opencode's own auth store
-  instead of the path hook. A Target repo's own opencode config can widen
-  that deny, and it misses redirects on compound commands, bare
-  `$(<file)`, and a glob next to the path (`cat .env*`). The Driver also pins
-  opencode's formatters and LSP servers off, so a Target repo cannot start
-  them with the full environment; a local MCP server the repo defines still
-  inherits it, credentials included. See [Secret exposure
+  path deny on its `bash` and `read` calls and the scrub on `bash`, with a
+  baked opencode permission config denying the same paths as a floor. A
+  Target repo's own opencode config can widen that floor but not the
+  plugin's refusal; a Target repo's own opencode plugin runs in the Driver
+  process and could still rewrite a call after the guards ran, and if
+  opencode cannot import the baked plugin it runs without it. The Driver
+  also pins opencode's formatters and LSP servers off, so a Target repo
+  cannot start them with the full environment; a local MCP server the repo
+  defines still inherits it, credentials included. See [Secret exposure
   model](docs/reference.md#secret-exposure-model).
 
 The secrets bullet above targets a different threat than the first two:
