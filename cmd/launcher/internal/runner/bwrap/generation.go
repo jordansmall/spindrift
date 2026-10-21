@@ -20,11 +20,11 @@ var statHostNixDB = func() error {
 	return err
 }
 
-// LockRaceWindowHook runs between the os.OpenFile that opens a lock path and the
+// lockRaceWindowHook runs between the os.OpenFile that opens a lock path and the
 // syscall.Flock that follows, so a test can deterministically swap the path's
 // inode inside the window LockedFDMatchesPath guards (issue #3005). No-op in
 // production.
-var LockRaceWindowHook = func() {}
+var lockRaceWindowHook = func() {}
 
 // vacuumTempRaceWindowHook runs in createLockedVacuumTemp's CreateTemp-to-Flock
 // window so a test can sweep the fresh temp. No-op in production.
@@ -101,7 +101,7 @@ func LockSnapshotShared(dir string) (*os.File, error) {
 		if err != nil {
 			return nil, err
 		}
-		LockRaceWindowHook()
+		lockRaceWindowHook()
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
 			lf.Close()
 			return nil, err

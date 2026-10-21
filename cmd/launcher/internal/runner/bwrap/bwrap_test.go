@@ -3125,17 +3125,17 @@ func runLockSnapshotSharedRace(dir string, openToFlockDelay time.Duration) (wins
 	return
 }
 
-// installOnceInodeSwapHook installs a once-only LockRaceWindowHook that
+// installOnceInodeSwapHook installs a once-only lockRaceWindowHook that
 // removes lockPath and recreates it, simulating a concurrent actor swapping
 // the inode inside the window between os.OpenFile and syscall.Flock that
 // LockSnapshotShared, reclaimStaleSnapshots and sweepOrphanedLock all call it
 // from. It returns the "did the hook fire" flag; t.Cleanup restores the hook.
 func installOnceInodeSwapHook(t *testing.T, lockPath string) *bool {
 	t.Helper()
-	orig := LockRaceWindowHook
-	t.Cleanup(func() { LockRaceWindowHook = orig })
+	orig := lockRaceWindowHook
+	t.Cleanup(func() { lockRaceWindowHook = orig })
 	swapped := false
-	LockRaceWindowHook = func() {
+	lockRaceWindowHook = func() {
 		if swapped {
 			return
 		}
@@ -3154,7 +3154,7 @@ func installOnceInodeSwapHook(t *testing.T, lockPath string) *bool {
 // generation dir exists, so a concurrent build's reclaim pass can see the lock
 // file as orphaned and win LOCK_EX in the open-then-lock window. The returned
 // *os.File must always identify whatever sits at SnapshotLockPath. A once-only
-// LockRaceWindowHook (issue #3005) forces that swap on every run.
+// lockRaceWindowHook (issue #3005) forces that swap on every run.
 func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gen-race")
 	lockPath := SnapshotLockPath(dir)
@@ -3169,7 +3169,7 @@ func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !*swapped {
-		t.Fatalf("LockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
+		t.Fatalf("lockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
 	}
 	if wins == 0 {
 		t.Fatalf("adversary never won a race against LockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
@@ -3196,7 +3196,7 @@ func TestLockSnapshotShared_SurvivesConcurrentOrphanSweep_WidenedGap(t *testing.
 		t.Fatal(err)
 	}
 	if !*swapped {
-		t.Fatalf("LockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
+		t.Fatalf("lockRaceWindowHook never fired -- test did not exercise the acquire-path race deterministically")
 	}
 	if wins == 0 {
 		t.Fatalf("adversary never won a race against LockSnapshotShared across %d attempts -- test did not exercise the organic hazard", attempts)
@@ -3291,7 +3291,7 @@ func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock
 }
 
 // Drives the issue #3005 race through reclaimStaleSnapshots deterministically
-// via LockRaceWindowHook rather than hoping a goroutine lands in the
+// via lockRaceWindowHook rather than hoping a goroutine lands in the
 // nanosecond-scale open-to-flock window. The "identity unchanged" case rules
 // out the swapped case passing vacuously, by proving reclaim does remove a
 // stale generation when nothing races it.
