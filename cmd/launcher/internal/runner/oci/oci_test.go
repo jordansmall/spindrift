@@ -1722,7 +1722,7 @@ func TestRegistryProxyTransport_BothNoVerdict_NeverCached(t *testing.T) {
 // A wedged probe container (never exits) must return a Go error naming the
 // timeout rather than hanging dispatch (issue #3111 finding 1).
 // registryProxyProbeTimeout is overridden to a short duration, following the
-// ExecCommand-seam override idiom used elsewhere here. A socket-probe timeout
+// execCommand-seam override idiom used elsewhere here. A socket-probe timeout
 // is a no-verdict outcome, so the control probe wedges too: callCount is 2.
 func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
@@ -2725,7 +2725,7 @@ func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 	}
 }
 
-// The host `nix build` step in EnsureReady goes through the ExecCommand seam,
+// The host `nix build` step in EnsureReady goes through the execCommand seam,
 // and a genuine (non-builder-missing) scripted failure returns an error without
 // falling back to the container build.
 func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
@@ -2733,10 +2733,10 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	cliScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // image inspect: absent
 
 	nixScript, nixDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotName string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(nixScript, args...)
 	}
@@ -2750,7 +2750,7 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 	err := a.EnsureReady()
 
 	if gotName != "nix" {
-		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
 	}
 	if err == nil {
 		t.Error("expected error from scripted nix build failure, got nil")
@@ -2785,7 +2785,7 @@ func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 		runnertest.Call{},        // load
 		runnertest.Call{},        // tag
 	)
-	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 0})
+	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 0})
 
 	a := &ociAdapter{
 		cli:          cliScript,
@@ -2825,7 +2825,7 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 		runnertest.Call{},        // load
 		runnertest.Call{},        // tag
 	)
-	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	pwd := t.TempDir()
 	pinned := "docker.io/nixos/nix@sha256:0123456789abcdef"
@@ -2893,7 +2893,7 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 		runnertest.Call{Exit: 1}, // image inspect: absent under the lock
 		runnertest.Call{Exit: 1}, // run (container build) fails
 	)
-	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	a := &ociAdapter{
 		cli:             cliScript,
@@ -2918,7 +2918,7 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 // missing pieces instead of a bare exec failure.
 func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 	redirectImageLockDir(t)
-	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
+	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 1, Stderr: "error: a Linux system is required to build a Linux derivation"})
 
 	a := &ociAdapter{
 		cli:      "spindrift-no-such-runtime",
@@ -2946,7 +2946,7 @@ func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
 func TestEnsureReady_RealNixError_SurfacesStderrWithoutContainerRun(t *testing.T) {
 	redirectImageLockDir(t)
 	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // every call fails, so a fallback `run` would still "pass" on error alone
-	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stderr: "error: undefined variable 'frobnicate'"})
+	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 1, Stderr: "error: undefined variable 'frobnicate'"})
 
 	a := &ociAdapter{
 		cli:             cliScript,

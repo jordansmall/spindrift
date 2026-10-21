@@ -12,7 +12,7 @@ import (
 
 // InstallImageBuildPipe installs a reporter on a fresh pipe and returns a
 // drain that returns the image_build states written since the last call. It
-// reads with a deadline, so it can be called mid-run (from a faked ExecCommand)
+// reads with a deadline, so it can be called mid-run (from a faked execCommand)
 // to observe what has been sent so far.
 func InstallImageBuildPipe(t *testing.T) func() []string {
 	t.Helper()

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/report"
-	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -38,10 +37,10 @@ func TestOCIEnsureReady_ColdBuildReportsStartedBeforeNixThenFinished(t *testing.
 	drain := runnertest.InstallImageBuildPipe(t)
 	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 1}, runnertest.Call{}, runnertest.Call{})
 	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var beforeNix []string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		beforeNix = drain()
 		return exec.Command(nixScript, args...)
 	}
@@ -64,7 +63,7 @@ func TestOCIEnsureReady_ColdBuildFailureStillReportsFinished(t *testing.T) {
 	redirectImageLockDir(t)
 	drain := runnertest.InstallImageBuildPipe(t)
 	cli, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 1})
-	runnertest.StubExec(t, &runner.ExecCommand, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
+	runnertest.StubExec(t, &execCommand, runnertest.Call{Exit: 1, Stdout: "genuine derivation error"})
 	a := &ociAdapter{cli: cli, image: "spindrift:abc123", imageDrv: "/nix/store/fake.drv"}
 
 	if err := a.EnsureReady(); err == nil {

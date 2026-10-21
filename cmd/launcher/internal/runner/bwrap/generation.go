@@ -236,7 +236,7 @@ func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
 	// dot-commands are whitespace-tokenized, but a SQL statement on argv is not.
 	escapedTmp := strings.ReplaceAll(tmp, "'", "''")
 	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedTmp)
-	vacuumInto := runner.ExecCommand("sqlite3", hostNixDBPath, stmt)
+	vacuumInto := execCommand("sqlite3", hostNixDBPath, stmt)
 	vacuumInto.Stdout = os.Stdout
 	vacuumInto.Stderr = os.Stderr
 	if err := vacuumInto.Run(); err != nil {

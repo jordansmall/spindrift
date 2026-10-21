@@ -31,9 +31,9 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -83,9 +83,9 @@ func TestNixRealizer_Start_ChildInOwnProcessGroup(t *testing.T) {
 // working tree, and with no .outPath suffix, unlike NixEvaluator.Eval's ref.
 func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -106,10 +106,10 @@ func TestNixRealizerStart_BuildsHermeticGitFileRef(t *testing.T) {
 
 func TestNixRealizer_Start_ViaSeam(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1, Stdout: "boom"})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotName string
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -117,7 +117,7 @@ func TestNixRealizer_Start_ViaSeam(t *testing.T) {
 	wait, err := NixRealizer{}.Start("/repo", "deadbeef", "packages.x86_64-linux.agent-image")
 
 	if gotName != "nix" {
-		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
 	}
 	if err != nil {
 		t.Fatalf("Start() error = %v, want nil (Start only forks/execs; the scripted failure surfaces from wait)", err)
@@ -129,9 +129,9 @@ func TestNixRealizer_Start_ViaSeam(t *testing.T) {
 
 func TestNixRealizer_Start_SuccessReturnsNil(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -149,9 +149,9 @@ func TestNixRealizer_Start_SuccessReturnsNil(t *testing.T) {
 // fails to fork/exec at all errors from Start, with no wait function, unlike
 // one that runs and then fails, which surfaces from wait.
 func TestNixRealizer_Start_ForkFailureReturnsError(t *testing.T) {
-	orig := ExecCommand
-	t.Cleanup(func() { ExecCommand = orig })
-	ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(filepath.Join(t.TempDir(), "no-such-binary"), args...)
 	}
 
