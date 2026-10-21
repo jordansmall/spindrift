@@ -116,14 +116,14 @@ func Prerequisites(cfg runner.Config, _ runner.KnobLookup) []runner.Prerequisite
 	}}
 }
 
-// RawNetworkKnobs names PODMAN_NETWORK when l sets it.
+// RawNetworkKnobs names PodmanNetworkEnv when l sets it.
 func RawNetworkKnobs(l runner.KnobLookup) ([]string, error) {
 	k, err := ReadKnobs(Lookup(l))
 	if err != nil {
 		return nil, err
 	}
 	if k.PodmanNetwork != "" {
-		return []string{"PODMAN_NETWORK"}, nil
+		return []string{PodmanNetworkEnv}, nil
 	}
 	return nil, nil
 }
