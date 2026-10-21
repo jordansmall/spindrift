@@ -282,7 +282,7 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 			}
 			d.toolNames[b.ID] = b.Name
 			ev.Kind, ev.ToolID, ev.ToolName, ev.ToolInput = driverkit.KindToolCall, b.ID, b.Name, b.Input
-			ev.ToolTarget = toolTarget(b.Name, b.Input)
+			ev.ToolTarget = driverkit.ToolTarget(toolTargetField, b.Name, b.Input)
 		case "tool_result":
 			if env.Type != "user" {
 				continue
@@ -338,11 +338,35 @@ type cacheCreation struct {
 	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 }
 
+// The subagent-spawn tools. "Task" is the legacy name; "Agent" is the current
+// Box claude name, confirmed in a real --output-format stream-json sample
+// (issue #2078).
+const (
+	taskTool  = "Task"
+	agentTool = "Agent"
+)
+
 // isSubagentSpawnTool reports whether a tool-use block with this name spawns a
-// subagent. "Task" is the legacy name; "Agent" is the current Box claude name,
-// confirmed in a real --output-format stream-json sample (issue #2078).
+// subagent.
 func isSubagentSpawnTool(name string) bool {
-	return name == "Task" || name == "Agent"
+	return name == taskTool || name == agentTool
+}
+
+// toolTargetField names, per Claude tool, the input field that best identifies
+// what the call acted on. An unknown tool, or a missing or non-string field,
+// yields "", which the renderer shows as a bare "Name()".
+var toolTargetField = map[string]string{
+	taskTool:       "subagent_type",
+	agentTool:      "subagent_type",
+	"Read":         "file_path",
+	"Edit":         "file_path",
+	"Write":        "file_path",
+	"NotebookEdit": "file_path",
+	"Grep":         "pattern",
+	"Glob":         "pattern",
+	"Bash":         "command",
+	"WebFetch":     "url",
+	"WebSearch":    "query",
 }
 
 // subagentType reads subagent_type from a spawn tool's input, or "" when it is
