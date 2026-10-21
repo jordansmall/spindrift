@@ -2,7 +2,6 @@ package registrydiscover
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -18,20 +17,10 @@ func alwaysMatch(Store, ecosystem.Declaration) (bool, error) { return true, nil 
 
 func probeAs(scheme string) Probe { return func(string) string { return scheme } }
 
-// storesOf maps each row to the credential stores it declares, the way
-// ecosystem.CredentialStores does for the table.
-func storesOf(rows ...ecosystem.Row) map[string][]string {
-	m := make(map[string][]string, len(rows))
-	for _, r := range rows {
-		m[r.Name] = slices.Clone(r.CredentialStores)
-	}
-	return m
-}
-
 // discoverSynthetic runs DiscoverRows over the synthetic row alone.
 func discoverSynthetic(t *testing.T, dir string, stores []Store, lookup Lookup, probe Probe) ([]Route, Report) {
 	t.Helper()
-	routes, report, err := DiscoverRows(dir, syntheticRows, stores, storesOf(syntheticRows...), lookup, probe)
+	routes, report, err := DiscoverRows(dir, syntheticRows, stores, lookup, probe)
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
@@ -78,7 +67,7 @@ func TestDiscover_TwoHostsAcrossFilesTwoRoutes(t *testing.T) {
 
 	rows := []ecosystem.Row{syntheticRows[0], twin}
 	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
-	routes, _, err := DiscoverRows(dir, rows, stores, storesOf(rows...), noMatch, probeAs("bearer"))
+	routes, _, err := DiscoverRows(dir, rows, stores, noMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
@@ -90,19 +79,6 @@ func TestDiscover_TwoHostsAcrossFilesTwoRoutes(t *testing.T) {
 	}
 	if routes[1].MatchHost != "second.example.com" {
 		t.Errorf("routes[1].MatchHost = %q, want second.example.com", routes[1].MatchHost)
-	}
-}
-
-func TestDiscover_EcosystemWithoutDeclaredStoresIsAnError(t *testing.T) {
-	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, cfgPath, "main = https://reg.acme.example/\n")
-
-	routes, report, err := DiscoverRows(dir, syntheticRows, nil, map[string][]string{}, noMatch, probeAs("bearer"))
-	if err == nil || !strings.Contains(err.Error(), `"`+synthetic.Row.Name+`"`) {
-		t.Fatalf("err = %v, want an error naming ecosystem %q", err, synthetic.Row.Name)
-	}
-	if routes != nil || !reflect.DeepEqual(report, Report{}) {
-		t.Errorf("routes = %v, report = %+v, want nil routes and empty report", routes, report)
 	}
 }
 
@@ -147,8 +123,9 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 		{Name: "other-store", Path: "/home/agent/other"},
 	}
 	// Both stores would report a match; earlier in the slice must win.
-	byEcosystem := map[string][]string{synthetic.Row.Name: {"netrc", "other-store"}}
-	routes, report, err := DiscoverRows(dir, syntheticRows, stores, byEcosystem, alwaysMatch, probeAs("bearer"))
+	row := synthetic.Row
+	row.CredentialStores = []string{"netrc", "other-store"}
+	routes, report, err := DiscoverRows(dir, []ecosystem.Row{row}, stores, alwaysMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
@@ -232,7 +209,7 @@ func TestFirstMatch_StoreOutsideRowSkippedForDeclarationWithRegistryName(t *test
 	}
 	d := ecosystem.Declaration{Ecosystem: synthetic.Row.Name, Host: "registry.example.com", RegistryName: "myorg"}
 
-	_, searched, found := firstMatch(stores, storesOf(syntheticRows...), lookup, d)
+	_, searched, found := firstMatch(stores, ecosystem.CredentialStores(syntheticRows), lookup, d)
 	if found {
 		t.Errorf("firstMatch found = true, want false")
 	}
@@ -537,7 +514,7 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 		return d.Host == matchedHost, nil
 	}
 
-	routes, report, err := DiscoverRows(dir, syntheticRows, stores, storesOf(syntheticRows...), lookup, probeAs("bearer"))
+	routes, report, err := DiscoverRows(dir, syntheticRows, stores, lookup, probeAs("bearer"))
 	if err == nil {
 		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
 	}
@@ -616,7 +593,7 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://shared.example.com/second/\n")
 
 	rows := []ecosystem.Row{syntheticRows[0], twin}
-	routes, _, err := DiscoverRows(dir, rows, nil, storesOf(rows...), noMatch, probeAs("bearer"))
+	routes, _, err := DiscoverRows(dir, rows, nil, noMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
@@ -646,8 +623,9 @@ func TestDiscover_MatchedStoreCompanionsComeFromKindStoreConfig(t *testing.T) {
 		t.Run(kind.SourceKey, func(t *testing.T) {
 			const path = "/home/agent/store"
 			stores := []Store{{Name: kind.SourceKey, Path: path}}
-			byEcosystem := map[string][]string{synthetic.Row.Name: {kind.SourceKey}}
-			routes, _, err := DiscoverRows(dir, syntheticRows, stores, byEcosystem, alwaysMatch, probeAs("bearer"))
+			row := synthetic.Row
+			row.CredentialStores = []string{kind.SourceKey}
+			routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, stores, alwaysMatch, probeAs("bearer"))
 			if err != nil {
 				t.Fatalf("DiscoverRows: unexpected error: %v", err)
 			}
@@ -703,7 +681,7 @@ func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 		},
 	}
 
-	routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, nil, map[string][]string{"fake": nil}, noMatch, probeAs("bearer"))
+	routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, nil, noMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: %v", err)
 	}

@@ -262,7 +262,6 @@ func (c *replay) discovery() ([]byte, error) {
 		}
 		routes, _, err := registrydiscover.DiscoverRows(
 			c.repo(), c.rows(), stores,
-			map[string][]string{c.row.Name: c.row.CredentialStores},
 			lookup, func(string) string { return probedAuthScheme })
 		if err != nil {
 			return nil, err

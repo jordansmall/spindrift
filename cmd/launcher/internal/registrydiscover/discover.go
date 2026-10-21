@@ -69,11 +69,11 @@ type Report struct {
 
 // DiscoverRows extracts registry declarations from repoDir over the given rows
 // and proposes a route per unique host, searching stores in order for a
-// matching credential. storesByEcosystem maps an ecosystem row name to the
-// source keys of the stores that row reads (ecosystem.CredentialStores); a
-// store outside a declaration's row is named in StoresSearched but never
-// queried.
-func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, storesByEcosystem map[string][]string, lookup Lookup, probe Probe) ([]Route, Report, error) {
+// matching credential. Each row's CredentialStores bound which stores are
+// queried for its declarations; a store outside a declaration's row is named
+// in StoresSearched but never queried.
+func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
+	storesByEcosystem := ecosystem.CredentialStores(rows)
 	declared, notes, err := ExtractRows(repoDir, rows)
 	if err != nil {
 		return nil, Report{}, err
@@ -88,10 +88,6 @@ func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, storesBy
 			continue
 		}
 		seen[host] = true
-
-		if _, ok := storesByEcosystem[d.Ecosystem]; !ok {
-			return nil, Report{}, fmt.Errorf("no credential stores declared for ecosystem %q", d.Ecosystem)
-		}
 
 		matchedStore, searched, found := firstMatch(stores, storesByEcosystem, lookup, d)
 
