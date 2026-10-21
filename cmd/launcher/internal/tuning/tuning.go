@@ -235,10 +235,11 @@ func groupRows(prefix, tag string, window, baseline []dispatchrecord.Record) []r
 	}
 	// Only work Dispatches land code, so the share is over work Records: a
 	// window skewed toward research or butler Records must not read as a drop.
+	// Landing is the work kind's fact, not an unset kind's, so this names Work.
 	workOnly := func(rs []dispatchrecord.Record) []dispatchrecord.Record {
 		var out []dispatchrecord.Record
 		for _, r := range rs {
-			if k, _ := dispatchkind.ByName(r.Kind); k == dispatchkind.Default {
+			if k, _ := dispatchkind.ByName(r.Kind); k == dispatchkind.Work {
 				out = append(out, r)
 			}
 		}

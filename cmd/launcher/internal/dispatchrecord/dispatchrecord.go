@@ -461,24 +461,27 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	switch {
 	case dispatchkey.IsChoreKey(key):
 		kind = choreKeyedKind()
-	case announced != "" && announcedDesc != dispatchkind.Default:
-		// Only the default kind's verb is ambiguous: logs before #734
+	case announced != "" && announcedDesc != dispatchkind.Work:
+		// Only the work kind's verb is ambiguous: logs before #734
 		// announce research as "implementing" too, so a kind-unique status
 		// must outrank that verb.
-		// A frozen quirk of old logs, not a kind fact, so it stays off the
-		// descriptor.
+		// A frozen quirk of old logs, not a descriptor axis, so it names
+		// Work itself: an unset kind's Default has nothing to do with it.
 		kind = announced
 	case sk != KindUnknown:
 		kind = sk
 	case announced != "":
 		kind = announced
 	case firstRole != "":
-		kind = dispatchkind.Default.Name
+		// An old log shape that was always a work run, so it names Work, not
+		// the unset kind's Default.
+		kind = dispatchkind.Work.Name
 	case status == outcome.StatusBlocked:
 		// Pre-orchestrator single-pass run: no pass_start names a role. Of the
 		// compiled-default statuses only the shared blocked is still unsettled
-		// here; any other status falls through to KindUnknown.
-		kind = dispatchkind.Default.Name
+		// here; any other status falls through to KindUnknown. Those runs were
+		// all work runs, so this names Work, not Default.
+		kind = dispatchkind.Work.Name
 	}
 
 	return Record{

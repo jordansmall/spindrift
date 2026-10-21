@@ -229,6 +229,20 @@ func TestRenderPassesPerRecordZeroWhenRoleAbsentFromBaseline(t *testing.T) {
 // Research and butler Records never land code, so a window full of them must
 // not read as a drop in the share of work Dispatches that landed.
 func TestRenderLandedShareCountsWorkRecordsOnly(t *testing.T) {
+	assertLandedShareCountsWorkOnly(t)
+}
+
+// Landing is the work kind's own fact, so re-pointing Default must not change
+// which Records the share counts. Not parallel: it mutates Default.
+func TestRenderLandedShareIgnoresDefault(t *testing.T) {
+	old := dispatchkind.Default
+	t.Cleanup(func() { dispatchkind.Default = old })
+	dispatchkind.Default = dispatchkind.Research
+	assertLandedShareCountsWorkOnly(t)
+}
+
+func assertLandedShareCountsWorkOnly(t *testing.T) {
+	t.Helper()
 	landed := func(id, key string) dispatchrecord.Record {
 		r := rec(id, hour, 1)
 		r.DispatchKey, r.Outcome, r.Reason = key, forge.Complete.String(), settle.ReasonMerged
