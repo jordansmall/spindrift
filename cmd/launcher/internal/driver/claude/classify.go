@@ -87,19 +87,9 @@ func matchMarker(line string) (driverkit.Reason, driverkit.Class, bool) {
 // across lines a terminal marker seen first latches Terminal; safe for the
 // --agents case, which aborts before any API call. ChunkOversized scans an
 // oversized line in chunks, so a chunk of an oversized agent-content line
-// fails the whole-chunk JSON parse in classifyTurn and is scanned as normal
+// fails the whole-chunk JSON parse in parseTopLevel and is scanned as normal
 // (known gap, issue #579 review).
 var ClassifyOptions = driverkit.ClassifyOptions{Oversized: logscan.ChunkOversized, FirstMatch: true}
-
-// agentContentEvent is the minimal stream-json envelope for telling
-// agent-authored content from a terminating API error event.
-type agentContentEvent struct {
-	Type    string          `json:"type"`
-	Error   json.RawMessage `json:"error"`
-	Message struct {
-		Model string `json:"model"`
-	} `json:"message"`
-}
 
 // syntheticModelSentinel is the claude CLI's message.model value on its
 // synthetic terminator event for a mid-stream API error (issue #815). No
@@ -111,16 +101,22 @@ const syntheticModelSentinel = "<synthetic>"
 // classifyTurn splits an assistant or user stream-json line into agent
 // content (an assistant message, or a user message: the Claude API returns
 // tool results as a user-role turn) and the CLI's synthetic terminator
-// (issue #815). Non-JSON lines and other types are neither.
-func classifyTurn(chunk string) (content, synthetic bool) {
-	var ev agentContentEvent
-	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
+// (issue #815). A nil top (a line that is not a JSON object) and other types
+// are neither.
+func classifyTurn(top *topLevel) (content, synthetic bool) {
+	if top == nil {
 		return false, false
 	}
-	if ev.Type == "assistant" && ev.Message.Model == syntheticModelSentinel && errorPresent(ev.Error) {
+	var msg struct {
+		Model string `json:"model"`
+	}
+	if !decodeField(top.Message, &msg) {
+		return false, false
+	}
+	if top.Type == "assistant" && msg.Model == syntheticModelSentinel && errorPresent(top.Error) {
 		return false, true
 	}
-	return ev.Type == "assistant" || ev.Type == "user", false
+	return top.Type == "assistant" || top.Type == "user", false
 }
 
 // errorPresent reports whether a top-level "error" value is set. The CLI's
@@ -138,7 +134,7 @@ func errorPresent(raw json.RawMessage) bool {
 // synthetic terminator (issue #815) fall through. It is the test seam over
 // classifyTurn, which decoder.decodeLine calls on the live path.
 func isAgentContentEvent(chunk string) bool {
-	content, _ := classifyTurn(chunk)
+	content, _ := classifyTurn(parseTopLevel(chunk))
 	return content
 }
 
