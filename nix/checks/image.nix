@@ -777,9 +777,9 @@ in
         touch $out
       '';
 
-  # opencode has no PreToolUse hook, so its Box refuses credential paths
-  # through a baked config of deny rules (issue #5345), rendered from
-  # lib/credential-paths.nix. The claude Box bakes no such file.
+  # opencode's Box bakes a config of credential-path deny rules (issue #5345),
+  # rendered from lib/credential-paths.nix, as a floor beneath the guard
+  # plugin's credential-deny.sh. The claude Box bakes no such file.
   opencode-credential-deny-config-baked-into-image =
     pkgs.runCommand "opencode-credential-deny-config-baked-into-image" { }
       ''

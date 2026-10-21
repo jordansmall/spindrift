@@ -1874,35 +1874,45 @@ and the guard plugin described after this list (issue #5346):
   which bypasses the permission-rule system entirely, but hooks are their
   own enforcement layer and still fire under that flag.
 - **opencode credential deny config (issue #5345).** Under the opencode
-  Driver the two hooks above do not run. The Driver entry
-  (`lib/drivers/opencode.nix`) instead bakes
+  Driver the hooks above do not run directly; the guard plugin below runs
+  `credential-deny.sh` on opencode's `bash` and `read` calls. The Driver entry
+  (`lib/drivers/opencode.nix`) also bakes
   `~/.config/opencode/opencode.json` with `permission.read` and
   `permission.bash` rules, all literal `"deny"`, generated from
   `lib/credential-paths.nix` (the hook's paths, pinned to it by a parity
-  check) plus opencode's own auth store
-  (`.local/share/opencode/auth.json`). The Box runs opencode with
+  check, including opencode's own auth store,
+  `.local/share/opencode/auth.json`) as a floor beneath the plugin. The Box
+  runs opencode with
   `--auto`, which approves only asks that no rule denies, and a deny wins
   over opencode's built-in read defaults because its permission evaluation
   takes the last matching rule and user config follows its defaults. Read
   rules match the worktree-relative path (`P` and `*/P`); bash rules match
   each parsed command's text, with the hook's lead/trail boundary classes
   enumerated character by character (a check sweeps each one against the real
-  hook), so `config.env`, `.envrc`, and `printenv` stay allowed. Residuals
-  stay open, and opencode is not at parity with the hook:
+  hook), so `config.env`, `.envrc`, and `printenv` stay allowed. The config
+  alone is not at parity with the hook, and the plugin covers what it misses:
+  opencode builds bash patterns only from simple commands, so a redirect on a
+  compound command, a bare `x=$(<file)`, or a `*` or `?` next to the path
+  (`cat .env*`) never reaches its matcher, but the hook sees the
+  raw command text and refuses all of them. Residuals stay open:
   - Like the hook, it is a text match: a path split across arguments or
     built from a variable escapes it.
-  - opencode builds bash patterns only from simple commands (a command's own
-    text, or its enclosing redirect), so a redirect on a compound command,
-    subshell, loop, or `if` never reaches the matcher: `{ cat; } < .env`,
-    `( cat ) < .env`, and `while read l; do echo $l; done < .env` read a
-    credential the claude hook refuses, as does a bare `x=$(<.env)`, which
-    has no command node and triggers no permission check.
-  - A `*` or `?` directly next to the path (`cat .env*`) cannot be written as
-    a literal boundary, so it is not matched.
   - opencode merges a Target repo's own project config (`opencode.json`,
     `.opencode/`) after the global file, and the last matching rule wins, so
-    a Target repo can add an allow rule that widens the deny. The Claude
-    hook, by contrast, is home-wide and not overridable from the repo.
+    a Target repo's allow rule (top-level or per-agent `permission`) can
+    widen this config. It cannot widen the plugin's refusal, which throws
+    before opencode's permission check, and the plugin covers the same paths.
+  - A Target repo's own `.opencode/plugin/` (or `.opencode/plugins/`) code
+    loads after the global plugin and runs arbitrary code in the Driver
+    process, so it could rewrite a call's arguments after the guards ran. No
+    in-process guard stops it.
+  - If opencode cannot import the plugin at all, it logs `failed to load
+    plugin` and runs without it, leaving only this config. Nothing refuses
+    the run then; `opencode-guards-test` proves the baked file importable at
+    build time instead (see the plugin section below).
+  - opencode tools other than `bash` and `read` (such as `grep` or `glob`) are
+    not guarded by the hook, as under claude, whose matchers are `Read` and
+    `Bash`.
   - The env-credential scrub has no permission-config equivalent; the guard
     plugin below runs the scrub hook itself on each opencode Bash call.
   - Formatters and LSP servers are subprocesses opencode starts with its full
@@ -1936,14 +1946,15 @@ lists cannot drift. The `CREDENTIAL_VARS_FILE` environment variable overrides
 the path. A missing or empty list, or a missing helper, fails closed: the
 scrub hook denies the Bash call and the tee hook exits 2.
 
-#### The opencode Driver guards Bash through a plugin
+#### The opencode Driver guards Bash and Read through a plugin
 
 opencode never runs Claude Code's `PreToolUse` hooks, so the `opencode` Driver
 bakes a plugin instead (issue #5346): `agent/opencode-guards.js`, placed at
 `~/.config/opencode/plugins/spindrift-guards.js`, which opencode registers on
 its own — no `opencode.json` entry. It is absent from the `claude` image. Its
-`tool.execute.before` hook runs the same baked scripts on every `bash` call,
-in this order:
+`tool.execute.before` hook runs the same baked scripts on every `bash` call
+(and `credential-deny.sh` on every `read` call, its `filePath` mapped to the
+hook's `file_path`), in this order:
 
 <!-- BEGIN GENERATED OPENCODE HOOK ORDER -- nix run .#regen -- DO NOT EDIT -->
 1. `reject-background-bash.sh`
@@ -1957,7 +1968,12 @@ credential list single-sourced. Each hook sees the arguments the hooks above it
 rewrote. A hook deny throws the hook's own message, refusing the call; the
 scrub's `unset` rewrite is applied to the command. A hook that cannot run or
 answer refuses the call rather than letting it through with its credentials
-intact or without the tee's log.
+intact or without the tee's log. The same holds when `jq` cannot run (the
+hooks allow silently without it) and when a hook row names a tool the plugin
+does not map: the plugin refuses every guarded call, or every call when a
+tool is unmapped, since opencode skips a plugin whose load throws.
+The refusal is a throw in `tool.execute.before`, which precedes opencode's
+permission check, so a Target repo's allow rule cannot widen it.
 
 Its `tool.execute.after` hook runs the summary hook (the `PostToolUse` row of
 `lib/bash-hooks.nix`) on the same rewritten arguments and replaces the tool output
@@ -1967,10 +1983,15 @@ interceptor](#bash-command-output-interceptor) bound holds under `opencode` too
 or user-abort notice) after the summary. Unlike a before hook, a failing
 summary hook leaves the result unchanged, since the call has already run.
 
-The plugin does not run `credential-deny.sh`; the opencode credential deny
-config above stands in for it. The plugin is plain ESM with `node:` builtins
-only, since opencode's background `npm install` into its directory fails
-offline.
+The plugin is plain ESM with `node:` builtins only, since opencode's
+background `npm install` into its directory fails offline. If opencode cannot
+import the module at all (missing file, syntax error) it logs `failed to load
+plugin` and runs without it; only the credential deny config's permission
+rules then remain, which still cover the plain forms. The baked file is
+fixed, `opencode-guards-test` proves it importable at build time, and
+`opencode-guards-plugin-baked-into-image` checks the image carries it. A
+Target repo's own `.opencode/plugin/` code loads after this plugin and is not
+guarded against (see the residuals above).
 
 ### Cold-run toolchain nudge
 
@@ -2783,7 +2804,7 @@ inside its own wrapped command — redundant if both hooks' rewrites do compose,
 but correct either way.
 
 Under the `opencode` Driver the [guard
-plugin](#the-opencode-driver-guards-bash-through-a-plugin) runs the same two
+plugin](#the-opencode-driver-guards-bash-and-read-through-a-plugin) runs the same two
 scripts, so the tail bound (`BASH_OUTPUT_SUMMARY_TAIL_BYTES`) is the same.
 
 ### Declared touch-set overlap
@@ -5639,12 +5660,14 @@ boundary does and does not promise.
    before it runs, so a spawned subprocess never inherits a credential, and
    a second `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash`
    call targeting a known credential path. Both are always-on Harness
-   defaults, no operator configuration. The opencode Driver runs neither
-   hook; a baked plugin runs the same env scrub on its Bash calls (issue
-   #5346), and a baked opencode permission config denies the same paths plus
-   its own auth store (issue #5345), with a Target repo's own opencode config
-   able to widen the deny, and redirects on compound commands, bare
-   `$(<file)`, and a glob next to the path (`cat .env*`) slipping past it.
+   defaults, no operator configuration. The opencode Driver never runs
+   Claude's hook registration; a baked plugin (issue #5346) runs the path
+   deny on its `bash` and `read` calls and the scrub on `bash`, and a baked
+   opencode permission config denies the same paths as a floor (issue
+   #5345). A Target repo's own opencode config can widen that floor but not
+   the plugin's refusal; a Target repo's own opencode plugin could still
+   rewrite a call after the guards ran, and if opencode cannot import the
+   baked plugin it runs without it, leaving only the floor.
    The Driver also pins formatters and LSP servers off so a Target repo
    cannot start them with the full environment, but a Target-defined local
    MCP server still inherits it —
