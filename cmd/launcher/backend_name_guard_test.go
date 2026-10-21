@@ -29,11 +29,11 @@ type backendNameHit struct {
 }
 
 // scanBackendNameComparisons reports each backend-name string literal that is
-// an operand of == or != or a case label in src. Walking the AST skips
-// comments, and exec.Command("git", ...) arguments or assignments are not
-// comparisons, so only a branch on a backend name is flagged. It is a tripwire,
-// not a proof: slices.Contains(xs, "github"), map-key lookups, and a backend
-// name held in a named constant all escape it.
+// an operand of == or !=, a case label, or an argument to slices.Contains or
+// slices.Index in src. Walking the AST skips comments, and
+// exec.Command("git", ...) arguments or assignments are not comparisons, so
+// only a branch on a backend name is flagged. It is a tripwire, not a proof:
+// map-key lookups and a backend name held in a named constant escape it.
 func scanBackendNameComparisons(t *testing.T, filename string, src any, names map[string]bool) []backendNameHit {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -63,6 +63,16 @@ func scanBackendNameComparisons(t *testing.T, filename string, src any, names ma
 		case *ast.CaseClause:
 			for _, e := range n.List {
 				check(e)
+			}
+		case *ast.CallExpr:
+			sel, ok := n.Fun.(*ast.SelectorExpr)
+			if !ok {
+				break
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "slices" && (sel.Sel.Name == "Contains" || sel.Sel.Name == "Index") {
+				for _, a := range n.Args {
+					check(a)
+				}
 			}
 		}
 		return true
@@ -160,6 +170,9 @@ func f(tracker string) {
 	case "other":
 	}
 	_ = tracker == "jira"
+	_ = slices.Contains(xs, "github")
+	_ = slices.Index(xs, "git")
+	_ = slices.Contains(xs, "other")
 }
 `
 	got := scanBackendNameComparisons(t, "fixture.go", src, names)
@@ -167,7 +180,7 @@ func f(tracker string) {
 	for _, h := range got {
 		values = append(values, h.Value)
 	}
-	if want := "github,git,git"; strings.Join(values, ",") != want {
+	if want := "github,git,git,github,git"; strings.Join(values, ",") != want {
 		t.Fatalf("flagged %v, want [%s]", values, want)
 	}
 }
