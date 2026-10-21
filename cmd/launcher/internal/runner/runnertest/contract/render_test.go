@@ -22,16 +22,21 @@ const (
 // stubHarness stands in for an adapter: Render stashes the Launch and Decode
 // reads back whatever the stub's family would have rendered, minus drop.
 type stubHarness struct {
-	family string
-	drop   string // Box field (or networkField) the stub fails to render
-	hosts  hostFault
-	last   Launch
+	family  string
+	drop    string // Box field (or networkField) the stub fails to render
+	hosts   hostFault
+	name    string             // decoded as the Name on either family, when non-empty
+	network runner.NetworkMode // overrides the decoded mode, when non-empty
+	last    Launch
 
 	extraMount *Mount            // a bind no spec asked for
 	extraEnv   map[string]string // env no spec asked for
 	dupMounts  bool              // renders every bind twice, baked one included
 	skipBaked  bool              // renders neither baked entry
 	ghostBaked bool              // declares baked entries it never renders
+
+	wrongClosure *runner.AgentGeneration // decoded as the closure generation, when non-nil
+	wrongHosts   []string                // decoded as the add-hosts, when non-nil
 }
 
 // bakedMount is the one bind the stub renders on every launch.
@@ -65,6 +70,9 @@ func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 	keep := func(field string) bool { return s.drop != field }
 	if oci && keep("Name") {
 		d.Name = b.Name
+	}
+	if s.name != "" {
+		d.Name = s.name
 	}
 	if keep("Env") {
 		for k, v := range b.Env {
@@ -102,11 +110,20 @@ func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 			addHost(b.SignalSocket.Endpoint.Host())
 		}
 	}
+	if s.wrongHosts != nil {
+		d.AddHosts = s.wrongHosts
+	}
 	if !oci && keep("ClosureGeneration") {
 		d.ClosureGeneration = b.ClosureGeneration
 	}
+	if s.wrongClosure != nil {
+		d.ClosureGeneration = s.wrongClosure
+	}
 	if d.Network == "" {
 		d.Network = runner.NetworkModeOpen
+	}
+	if s.network != "" {
+		d.Network = s.network
 	}
 	switch {
 	case !keep("Network"):
@@ -234,16 +251,41 @@ func TestStaleGuardFails(t *testing.T) {
 	// This stub renders Name as bwrap would not, so a guard saying bwrap
 	// never does is stale.
 	r := rowNamed(t, "Name")
-	r.only = &familyOnly{runner.KindBwrap, "reason"}
+	r.only = &familyOnly{Family: runner.KindBwrap, Reason: "reason", Otherwise: absentName}
 	err := checkRow(t, &stubHarness{family: runner.KindOCI}, r)
 	if err == nil || !strings.Contains(err.Error(), "stale guard") {
 		t.Errorf("err = %v, want a stale-guard failure", err)
 	}
 }
 
+func TestWrongRenderingSatisfiesNoGuard(t *testing.T) {
+	wrongGeneration := &runner.AgentGeneration{Generation: "wrong-gen"}
+	for _, tc := range []struct {
+		name, row, family string
+		h                 stubHarness
+	}{
+		{"name on a family that renders none", "Name", runner.KindBwrap, stubHarness{name: "wrong-name"}},
+		{"network alias to the wrong mode", "Network/open", runner.KindBwrap, stubHarness{network: runner.NetworkModeNone}},
+		{"host aliased to the wrong mode", "Network/host", runner.KindOCI, stubHarness{network: runner.NetworkModeNone}},
+		{"closure generation on a family that binds none", "ClosureGeneration/set", runner.KindOCI, stubHarness{wrongClosure: wrongGeneration}},
+		{"add-host on a family that maps none", "RegistryProxy/tcp-add-host", runner.KindBwrap, stubHarness{wrongHosts: []string{"wrong-host"}}},
+	} {
+		h := tc.h
+		h.family = tc.family
+		err := checkRow(t, &h, rowNamed(t, tc.row))
+		if err == nil || !strings.Contains(err.Error(), "neither as the row asks") {
+			t.Errorf("%s (%s): err = %v, want a wrong-rendering failure", tc.name, tc.row, err)
+		}
+	}
+}
+
 func TestValidateRejectsMalformedTables(t *testing.T) {
+	noOtherwise := rowNamed(t, "Name")
+	noOtherwise.only = &familyOnly{Family: runner.KindOCI, Reason: "r"}
 	noReason := rowNamed(t, "Name")
 	noReason.only = &familyOnly{Family: runner.KindOCI}
+	guardedLaunchWide := rowNamed(t, "Env/plain")
+	guardedLaunchWide.only = &familyOnly{Family: runner.KindOCI, Reason: "r", Otherwise: absentName}
 	unknown := rowNamed(t, "Env/plain")
 	unknown.field = "Bogus"
 
@@ -264,6 +306,8 @@ func TestValidateRejectsMalformedTables(t *testing.T) {
 		want       string
 	}{
 		{"missing reason", append([]row{noReason}, table...), unrendered, "no Reason"},
+		{"missing otherwise", append([]row{noOtherwise}, table...), unrendered, "no Otherwise"},
+		{"guard on a launch-wide field", append([]row{guardedLaunchWide}, table...), unrendered, "checkRow compares"},
 		{"unknown field", append([]row{unknown}, table...), unrendered, "no facet"},
 		{"untabled Box field", table, nil, "Issue"},
 		{"unrendered without reason", table, map[string]string{"Issue": ""}, "no reason"},
