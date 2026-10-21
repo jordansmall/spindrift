@@ -7,6 +7,12 @@
 # name inside a longer string ("docker-compose") or an indented-string prose
 # mention without quotes is unseen; a full-line `#` comment is skipped but a
 # trailing `#` comment after code is not; a name built by interpolation is unseen.
+# Exemptions are whole-file or directory-prefix, so a literal added anywhere in
+# an exempt path passes unseen: keep an exempt file down to the one site that
+# needs the names (issue #5804). The golden directory stays a prefix exemption
+# because the Go golden tests in cmd/launcher/quickstart/quickstart_test.go pin
+# its files byte-for-byte, so a new literal there fails those tests, not this
+# one.
 { pkgs, ... }:
 let
   rows = import ../../lib/runners;
@@ -15,12 +21,14 @@ let
   # Repo-relative path prefix -> why that tree may name a runner. lib/runners/
   # (the rows) is structurally out of scope and is not listed here.
   exemptions = {
-    "nix/checks/schema-drift.nix" = ''
-      the runners-unique-runtime check pins the rows' derived runtime union and
-      runtime-to-family lookup by value, so it must spell the names it expects'';
+    "nix/checks/runners-unique-runtime.nix" = ''
+      the runners-unique-runtime check pins the rows' derived runtime union
+      and runtime-to-family lookup by value, so it must spell the names it
+      expects'';
     "cmd/launcher/quickstart/testdata/golden/" = ''
-      golden quickstart output: a generated Consumer flake that chooses its own
-      runtime, which is data the Consumer owns, not repo logic'';
+      golden quickstart output: Consumer flakes (generated, plus a hand-made
+      broken fixture) that choose their own runtime, which is data the
+      Consumer owns, not repo logic'';
   };
   checkedExemptions = pkgs.lib.mapAttrs (
     path: reason:
