@@ -226,25 +226,47 @@ func TestNewDecoder_IsDecode(t *testing.T) {
 	}
 }
 
-// TestDecode_CorpusLines decodes every real pass.jsonl line: none may panic or
-// yield an event with an empty Kind.
+// TestDecode_CorpusLines decodes every corpus pass.jsonl line: none may panic or
+// yield an event with an empty Kind. Every text event of a real capture must
+// also carry its part.messageID, and at least one real case must hold text under
+// more than one messageID so the check cannot pass vacuously. LastMessageText
+// resets on an ID-less text event too, so the result goldens would stay green if
+// opencode dropped the ID, and only this assertion pins it. Synthetic cases are
+// exempt: hand-written, they say nothing about what opencode emits.
 func TestDecode_CorpusLines(t *testing.T) {
 	paths, err := filepath.Glob("testdata/corpus/*/pass.jsonl")
 	if err != nil || len(paths) == 0 {
 		t.Fatalf("no corpus pass logs found: %v", err)
 	}
+	multiMessage := false
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, line := range strings.Split(string(data), "\n") {
+		dir := filepath.Base(filepath.Dir(path))
+		realCapture := strings.HasPrefix(dir, "real-")
+		textIDs := map[string]bool{}
+		for i, line := range strings.Split(string(data), "\n") {
 			for _, ev := range opencode.Decode(line) {
 				if ev.Kind == "" {
-					t.Errorf("%s: empty Kind decoding %.120s", path, line)
+					t.Errorf("%s:%d: empty Kind decoding %.120s", dir, i+1, line)
 				}
+				if !realCapture || ev.Kind != driverkit.KindText {
+					continue
+				}
+				if ev.MessageID == "" {
+					t.Errorf("%s:%d: text event without messageID decoding %.120s", dir, i+1, line)
+				}
+				textIDs[ev.MessageID] = true
 			}
 		}
+		if len(textIDs) > 1 {
+			multiMessage = true
+		}
+	}
+	if !multiMessage {
+		t.Error("no real corpus case carries text from more than one messageID")
 	}
 }
 
