@@ -49,6 +49,7 @@ let
   bundledBackendNames = builtins.filter (n: !builtins.elem n coreBackendNames) backendNames;
   bundledBackendDirs = map (n: launcherDir + "/internal/forge/${n}") bundledBackendNames;
   runnerDir = name: launcherDir + "/internal/runner/${name}";
+  bundleDir = launcherDir + "/internal/driver/bundle";
   allRunnerDirs = map runnerDir runnerNames;
   # `files` without the Drivers (and so their corpora), the runner families,
   # the bundled backends, the bundle and the binaries.
@@ -56,11 +57,7 @@ let
     files:
     fs.difference files (
       fs.unions (
-        allDriverDirs
-        ++ allRunnerDirs
-        ++ bundledBackendDirs
-        ++ [ (launcherDir + "/internal/driver/bundle") ]
-        ++ bundleBinaryDirs
+        allDriverDirs ++ allRunnerDirs ++ bundledBackendDirs ++ [ bundleDir ] ++ bundleBinaryDirs
       )
     );
   # The vendor tree is re-derived from a source without any Driver, runner
@@ -103,6 +100,15 @@ let
     cd src/cmd/launcher
   '';
   goTestPrologue = goTestPrologueWith launcherGoModules;
+  # Fails listing every file under `paths` that gofmt would rewrite.
+  gofmtCheck = paths: ''
+    unformatted=$(gofmt -l ${paths})
+    if [ -n "$unformatted" ]; then
+      echo "gofmt violations:" >&2
+      echo "$unformatted" >&2
+      exit 1
+    fi
+  '';
   # Packages a Driver's tests reach (go list -deps -test over every Driver's
   # package). Hand-listed so one Driver's edits never rebuild another's check;
   # a Driver whose tests import a new internal package must add it here, and a
@@ -133,7 +139,8 @@ let
   # another's drvPath; coreFiles keeps the core backends (git, local), so
   # editing one moves every backend's drvPath, though not its outPath.
   # `setupFor name` is shell run after the copy for files outside cmd/launcher
-  # its tests read.
+  # its tests read. Each also gofmts and vets the adapter's own package, so
+  # launcher-go-fmt and launcher-go-vet need not see it.
   adapterGoTests =
     {
       files,
@@ -172,6 +179,8 @@ let
             chmod -R +w src
             ${setupFor name}
             ${goTestPrologueWith vendor}
+            ${gofmtCheck "./${pkgFor name}"}
+            go vet ./${pkgFor name}/...
             go test ./${pkgFor name}/...
             touch $out
           '';
@@ -524,22 +533,12 @@ driverGoTests
 }
 // {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
-    unformatted=$(gofmt -l ${../../cmd/launcher})
-    if [ -n "$unformatted" ]; then
-      echo "gofmt violations:" >&2
-      echo "$unformatted" >&2
-      exit 1
-    fi
+    ${gofmtCheck "${../../cmd/launcher}"}
     touch $out
   '';
 
   dashboard-go-fmt = pkgs.runCommand "dashboard-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
-    unformatted=$(gofmt -l ${../../dashboard})
-    if [ -n "$unformatted" ]; then
-      echo "gofmt violations:" >&2
-      echo "$unformatted" >&2
-      exit 1
-    fi
+    ${gofmtCheck ../../dashboard}
     touch $out
   '';
 
@@ -637,8 +636,15 @@ driverGoTests
   # The packages that link every Driver through the bundle (bundleBinaryDirs),
   # the bundle's own tests, the registry root's cross-Driver guard tests and the
   # forge package's contract guard, which needs every backend directory; the
-  # whole tree is copied, so a Driver edit reruns this.
+  # whole tree is copied, so a Driver edit reruns this. It also gofmts and vets
+  # those packages (not the adapters', which their own go-test does), so
+  # launcher-go-fmt and launcher-go-vet need not see them.
   launcher-binaries-go-test =
+    let
+      binaryPkgs = ". ${
+        pkgs.lib.concatMapStringsSep " " (d: "./${d}/...") (bundleMains ++ bundleFixtureDirs)
+      } ./internal/driver ./internal/driver/bundle/...";
+    in
     pkgs.runCommand "launcher-binaries-go-test"
       {
         nativeBuildInputs = goTestInputs;
@@ -649,9 +655,14 @@ driverGoTests
         ${sideTrees}
         chmod -R +w src
         ${goTestPrologue}
-        go test . ${
-          pkgs.lib.concatMapStringsSep " " (d: "./${d}/...") (bundleMains ++ bundleFixtureDirs)
-        } ./internal/driver ./internal/driver/bundle/...
+        # gofmt on . would recurse the whole tree, so name each path.
+        ${gofmtCheck (
+          pkgs.lib.concatMapStringsSep " " (
+            p: pkgs.lib.removePrefix "${toString launcherDir}/" (toString p)
+          ) (bundleBinaryDirs ++ [ bundleDir ])
+        )}
+        go vet ${binaryPkgs}
+        go test ${binaryPkgs}
         SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 go test ./internal/forge -run '^TestEveryBackendRunsItsContracts$'
         touch $out
       '';
