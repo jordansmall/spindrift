@@ -426,6 +426,12 @@ func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 	const parent = "1700"
 	fx := newSurfaceFixture(t, parent, "github")
 
+	// The Accumulation repo path comes from c.codeForge's Strategy, so
+	// wire the loop from a local-forge copy; the guard still sees github in c.
+	localC := fx.c
+	localC.codeForge = "local"
+	fx.lw = localloop.Wire(localloopConfig(localC), fx.it)
+
 	caps := forge.ResolveCapabilities(nil, fx.it, localDescriptor(t), backend.Descriptor{})
 
 	var buf bytes.Buffer

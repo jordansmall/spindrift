@@ -105,26 +105,19 @@ func (c config) hostTokenValue(env string) string {
 	return os.Getenv(env)
 }
 
-// setRowKnob stores a row knob's resolved value. It copies the map first so a
-// config copied by value never shares writes with the original.
-func (c *schemaConfig) setRowKnob(env, value string) {
-	m := make(map[string]string, len(c.rowKnobs)+1)
-	for k, v := range c.rowKnobs {
-		m[k] = v
+// hostRepoDir is the host-side repo path the code forge's Strategy resolves
+// for a HostMediatedRemote backend (the local forge's Accumulation repo), ""
+// for every other backend. A resolution error also yields "": the Strategy's
+// NewCodeForge reports the same ReadKnobs error at startup.
+func (c config) hostRepoDir() string {
+	s, _ := backendkit.ByName(c.codeForge)
+	if s.HostRepoDir == nil {
+		return ""
 	}
-	m[env] = value
-	c.rowKnobs = m
-}
-
-// accumulationRepoDirEnv names the local-only knob core code reads by name.
-const accumulationRepoDirEnv = "CODE_FORGE_ACCUMULATION_REPO_DIR"
-
-// accumulationRepoDir is the resolved CODE_FORGE_ACCUMULATION_REPO_DIR: the
-// absolute Accumulation repo path under CODE_FORGE=local, "" elsewhere unless
-// the knob is set. Core code reads it here rather than from the local
-// Strategy, which sees the same value through knobLookup.
-func (c config) accumulationRepoDir() string {
-	v, _ := c.knobLookup(accumulationRepoDirEnv)
+	v, err := s.HostRepoDir(backendShared(c), c.knobLookup)
+	if err != nil {
+		return ""
+	}
 	return v
 }
 

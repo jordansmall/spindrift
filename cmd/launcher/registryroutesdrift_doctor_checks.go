@@ -77,7 +77,7 @@ func gitCheckoutRoot(dir string) string {
 func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, rows []ecosystem.Row) []doctor.Check {
 	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
-		return registryRouteDriftCheckForRef(c.accumulationRepoDir(), c.baseBranch, routes, rows)
+		return registryRouteDriftCheckForRef(c.hostRepoDir(), c.baseBranch, routes, rows)
 	}
 
 	repoDir, err := registryRouteDriftRepoDirFn()
