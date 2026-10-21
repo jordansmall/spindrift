@@ -36,3 +36,13 @@ func TestCodeForgeStrategiesHaveLandedBanner(t *testing.T) {
 		}
 	}
 }
+
+// HostRepoDir is how core learns the Accumulation repo path, so a backend
+// declares it exactly when its repo is host-mediated.
+func TestHostRepoDirIffHostMediatedRemote(t *testing.T) {
+	for _, s := range backendkit.Strategies() {
+		if s.HostMediatedRemote != (s.HostRepoDir != nil) {
+			t.Errorf("backend %q: HostMediatedRemote=%v but HostRepoDir set=%v", s.Name, s.HostMediatedRemote, s.HostRepoDir != nil)
+		}
+	}
+}

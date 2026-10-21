@@ -86,6 +86,11 @@ type Strategy struct {
 	WebURL      func(Shared, Lookup) string
 	RemoteMatch func(Shared, Lookup, string) bool
 
+	// HostRepoDir is the absolute host path of a host-mediated forge's repo:
+	// the Accumulation repo the Box mounts read-only and the forge lands into.
+	// Nil on a backend that is not HostMediatedRemote.
+	HostRepoDir func(Shared, Lookup) (string, error)
+
 	// ConfigureCLI sets up the backend's CLI inside the Box; nil means the
 	// backend has none to set up.
 	ConfigureCLI func(BoxCLI) error

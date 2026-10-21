@@ -49,8 +49,9 @@ package, and its Nix row owns its knobs.
    - remote identity: clone URL, web URL and remote match;
    - in-box CLI setup (`ConfigureCLI`) and the in-box open-PR query;
    - optional hooks: `IntrospectToken`, `AcquireToken` (quickstart token
-     setup, taking a `TokenPrompt`), `KnobsFromRemote` and the auto-merge
-     remedy. A nil hook is an absence, not a stub.
+     setup, taking a `TokenPrompt`), `KnobsFromRemote`, the auto-merge
+     remedy, and `HostRepoDir` (a host-mediated forge's host repo path,
+     issue #5796). A nil hook is an absence, not a stub.
 
    The Bundle registers the Strategies, and the launcher, daemon, quickstart
    and Box look a backend up through it. `backendRows` and `trackerbuild` are
