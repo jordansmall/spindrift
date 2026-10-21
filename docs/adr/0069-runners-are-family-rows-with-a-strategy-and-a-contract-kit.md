@@ -99,5 +99,16 @@ Runners get the backend kit of ADR 0068, keyed by family.
 - Adding a field to `Box` fails every adapter that does not yet render it,
   which turns a feature built twice by hand into a compile-and-test
   checklist.
+- Decision 1's "core never compares a runtime value" holds for core non-test
+  code, and a guard enforces it (issue #5803): `TestRunnerFamilyGuard`
+  (`cmd/launcher/runner_family_guard_test.go`) fails on a runtime or family
+  name compared, a family constant referenced, or a family package imported.
+  It exempts the family packages (they own the runtime spellings), the Bundle
+  (it links every family in by name), generated code (`families_gen.go`
+  renders the rows; the guard walks it but `ast.IsGenerated` quiets it by its
+  header), `internal/runner/runnertest/**` (the contract kit scopes a row to
+  a family on purpose), and `_test.go` files (a test asserts
+  per-family outcomes and sets fixtures rather than branching production
+  behavior, as the backend, kind-axes and tuning guards also skip them).
 - Like ADR 0068, this ships incrementally, and each change leaves `main`
   releasable.
