@@ -73,7 +73,7 @@ type Policy struct {
 	// the like) to its resolved value (ADR 0068). The butler holds no per-Chore
 	// knob field: the records adapter reads the min-records knob the Chore's row
 	// names, and a Digest reads its own through Strategy.Knobs. Nil resolves
-	// none, so a records Chore whose row names a min-records knob is an error.
+	// none, so every row knob takes its row default.
 	Knobs recordsdigest.Lookup
 }
 

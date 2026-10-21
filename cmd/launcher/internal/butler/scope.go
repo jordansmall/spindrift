@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"strconv"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
@@ -102,7 +101,8 @@ type recordsSource struct {
 	digest recordsdigest.Strategy
 	chore  string
 	head   string
-	// minRecords is the knob chore.MinRecordsKnob names for this Chore; knobs is
+	// minRecords is the knob chore.MinRecordsKnob names for this Chore (its row
+	// default when unset), read as the row's generated reader does; knobs is
 	// what its Digest's own ReadKnobs read. Both resolve once, at build.
 	minRecords int
 	knobs      recordsdigest.Knobs
@@ -121,11 +121,12 @@ func newRecordsSource(r *Runner, choreName, head string, claimedAt time.Time) (r
 	if err != nil {
 		return recordsSource{}, err
 	}
-	minRecords, err := r.policy.minRecords(choreName)
+	lookup := r.policy.knobLookup()
+	minRecords, err := chore.MinRecords(choreName, lookup)
 	if err != nil {
-		return recordsSource{}, err
+		return recordsSource{}, fmt.Errorf("butler: %s: %w", choreName, err)
 	}
-	knobs, err := digest.Knobs(r.policy.Knobs)
+	knobs, err := digest.Knobs(lookup)
 	if err != nil {
 		return recordsSource{}, fmt.Errorf("butler: %s: %w", choreName, err)
 	}
@@ -135,30 +136,13 @@ func newRecordsSource(r *Runner, choreName, head string, claimedAt time.Time) (r
 	}, nil
 }
 
-// minRecords resolves the knob the Chore's row names as its minimum new-Record
-// count. A knob that is unset or not an integer is an error: the Chore would
-// otherwise be due on a made-up threshold (the adapter, unlike the row's
-// generated reader, has no row default to fall back to; the launcher's lookup
-// always resolves one). A Chore whose row names no knob has
-// no floor beyond CheckRecords' own "at least one new Record".
-func (p Policy) minRecords(choreName string) (int, error) {
-	env := chore.MinRecordsKnob(choreName)
-	if env == "" {
-		return 0, nil
-	}
-	var v string
-	var ok bool
+// knobLookup is Knobs, or a lookup that resolves nothing when it is nil, so
+// every row knob takes its row default instead of the readers dereferencing nil.
+func (p Policy) knobLookup() recordsdigest.Lookup {
 	if p.Knobs != nil {
-		v, ok = p.Knobs(env)
+		return p.Knobs
 	}
-	if !ok {
-		return 0, fmt.Errorf("butler: %s: %s is not set", choreName, env)
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, fmt.Errorf("butler: %s: %s: %q is not an integer: %w", choreName, env, v, err)
-	}
-	return n, nil
+	return func(string) (string, bool) { return "", false }
 }
 
 func (s recordsSource) newSettled(tip ledger.Tip) int {
