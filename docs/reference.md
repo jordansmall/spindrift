@@ -1241,9 +1241,11 @@ What the Driver carries:
   variable, stay off the bwrap argv, and are in the shared Bash scrub list
   (`agent/credential-vars`),
   which the bridge's scrub hook below enforces on every `bash` call. A
-  Provider outside the eight gets no preflight check and its key is not
-  forwarded into the Box. GitHub Copilot, which has no API key, takes
-  `PI_AUTH_CONTENT` instead; see [pi Driver: github-copilot Provider
+  Provider outside the eight fails the credentials check (preflight and
+  `spindrift doctor`) unless `PI_AUTH_CONTENT` carries an `api_key` entry
+  for it, and its key is not forwarded as an environment variable. GitHub
+  Copilot, which has no API key, takes `PI_AUTH_CONTENT` instead; see
+  [pi Driver: github-copilot Provider
   credential](#pi-driver-github-copilot-provider-credential).
 - **Hooks through a bridge extension (issue #5482).** pi has no hook config,
   so claude's five tool hooks (credential deny on `read` and `bash`, env
@@ -1277,9 +1279,10 @@ notation, so the effort in force shows next to the model.
   rotate the refresh token on each use (Anthropic Pro/Max, ChatGPT
   subscriptions) must use API keys, since pi refreshes inside the Box and the
   host would keep a spent token. Host-side refresh is not supported yet.
-- Only the eight API-key Providers in the credential list and Copilot get a
-  preflight check and key forwarding; a model on any other Provider cannot
-  authenticate.
+- Only the eight API-key Providers in the credential list and Copilot get
+  key forwarding from the environment. A model on any other Provider fails
+  the credentials check (preflight and `spindrift doctor`) unless
+  `PI_AUTH_CONTENT` carries an `api_key` entry for that Provider.
 - `--no-approve` is fixed. There is no opt-in to trust a Target repo's
   `.pi/`, so its settings, extensions, MCP servers, skills and prompts never
   load.
@@ -1397,6 +1400,14 @@ Driver entry declares:
   it (issue #5355). It also renders into the launcher's Driver Descriptor
   (`cmd/launcher/internal/driver/descriptor_gen.go`), which the launcher's
   bare-worker gate reads.
+- `closedCredentials` (bool, default `false`) — set when the Driver's
+  `credentials` rules name every Provider it can authenticate from the
+  environment, so a model whose provider prefix matches none of them is
+  authenticated only by an `authContent` entry for that Provider. The
+  `driver-credentials` check (preflight and `spindrift doctor`) fails such a
+  model otherwise, naming the Provider and the supported prefixes. Optional;
+  pi sets it, while opencode, whose Provider set is open-ended, leaves it
+  off. It renders into the Driver Descriptor as `ClosedCredentials`.
 
 The registry validates every entry against this required-attribute list at
 eval time (`assertShape` in `lib/drivers/default.nix`): an entry missing one
@@ -1405,7 +1416,8 @@ Driver and the missing attribute, before an image is ever produced.
 `sessionCacheDirRelative` and, within `argvShape`, `promptFlag`/`agentsFlag`
 are the fields this check treats as optional (`argvShape` itself is still a
 required top-level attribute); `providerNamespacedModels` is optional too,
-and `assertShape` does not check its value. An attribute outside
+and `assertShape` does not check its value; `closedCredentials` is optional
+and `assertShape` requires it to be a bool. An attribute outside
 `requiredAttrs` and `optionalAttrs` (both in `lib/drivers/default.nix`) is
 refused, so a misspelt name fails the build; a new Driver attribute is added
 to one of those lists. When
@@ -2226,7 +2238,10 @@ it drifts from them:
   (`mistral/`), `DEEPSEEK_API_KEY` (`deepseek/`), `PI_AUTH_CONTENT`
   (`github-copilot/`). A miss is an error only
   when `MODEL` or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`,
-  `SCOUT_MODEL`, `FILER_MODEL`) uses that Provider. Like opencode, the
+  `SCOUT_MODEL`, `FILER_MODEL`) uses that Provider. The list is closed: a
+  tier on a Provider with none of these prefixes is also an error unless
+  `PI_AUTH_CONTENT` holds an `api_key` entry for it, where opencode accepts
+  any Provider. Like opencode, the
   lookup still runs for each key that has no value (a tier baked into the
   image may select it), a miss for a Provider no tier visibly uses is
   ignored, and a hit is passed into the Box anyway.
@@ -2418,7 +2433,12 @@ instead`). A ChatGPT-subscription `openai-codex` entry, whose Provider id
 differs from the one its API key is under, maps through
 `authContent.apiKeyProviders` and gets `set OPENAI_API_KEY for openai
 instead`. `api_key` entries in `PI_AUTH_CONTENT` are accepted for any
-Provider. Host-side refresh for rotating Providers is a later decision (ADR
+Provider, and are the only way to use one outside the credential list: a
+model tier `<provider>/<model>` whose prefix matches none of the pi row's
+credential rules fails the `driver-credentials` check, naming the Provider
+and the supported prefixes, unless `PI_AUTH_CONTENT` has an `api_key`
+entry for it (a model with an empty Provider, `/x`, always fails).
+Host-side refresh for rotating Providers is a later decision (ADR
 0009's pi amendment).
 
 ### Advanced tuning
