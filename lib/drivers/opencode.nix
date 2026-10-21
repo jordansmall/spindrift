@@ -196,7 +196,7 @@ in
   # one cannot be written) and `\` (opencode rewrites it to `/`).
   configFiles =
     let
-      paths = (import ../credential-paths.nix) ++ [ ".local/share/opencode/auth.json" ];
+      paths = import ../credential-paths.nix;
       # The hook's classes negate [:alnum:] plus the excluded chars. Keep the
       # always-excluded `* ? \` in step with sweepChars in
       # nix/checks/drivers/opencode.nix.
