@@ -1947,8 +1947,9 @@ in this order:
 
 <!-- BEGIN GENERATED OPENCODE HOOK ORDER -- nix run .#regen -- DO NOT EDIT -->
 1. `reject-background-bash.sh`
-2. `env-credential-scrub.sh`
-3. `bash-output-tee.sh`
+2. `credential-deny.sh`
+3. `env-credential-scrub.sh`
+4. `bash-output-tee.sh`
 <!-- END GENERATED OPENCODE HOOK ORDER -->
 
 Running the baked scripts keeps their logic, messages, and the shared

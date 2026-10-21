@@ -14,14 +14,15 @@
 # (agent/opencode-guards.js): a PreToolUse row in its tool.execute.before
 # HOOKS, where `rewrites` marks a hook whose silence on a non-empty command is
 # a failure rather than "allow", and the one PostToolUse row as its
-# tool.execute.after SUMMARY_HOOK. A row without one has no plugin
-# counterpart: credential-deny.sh is stood in for by opencode's own deny config
-# (lib/drivers/opencode.nix).
+# tool.execute.after SUMMARY_HOOK. A PreToolUse row's opencode tools are its
+# `matchers`, lowercased to opencode's tool names (Bash -> bash, Read -> read).
+# credential-deny.sh runs there too: the plugin's throw precedes opencode's
+# permission check, so a Target repo's opencode.json allow rule cannot widen it.
+# opencode's own deny config (lib/drivers/opencode.nix) stays as a floor.
 #
 # A row with a `pi` attr is run the same way by the pi bridge extension
-# (agent/pi-hook-bridge.js), which has no deny config to lean on and so also
-# carries credential-deny.sh. A PreToolUse row's pi tools are its `matchers`,
-# lowercased to pi's tool names (Bash -> bash, Read -> read).
+# (agent/pi-hook-bridge.js), which has no deny config to lean on. A
+# PreToolUse row's pi tools are its `matchers`, lowercased the same way.
 rec {
   hooks = [
     # reject-background-bash.sh (issue #1609): --disallowedTools strips whole
@@ -47,6 +48,7 @@ rec {
         "Read"
         "Bash"
       ];
+      opencode.rewrites = false;
       pi.rewrites = false;
     }
     # env-credential-scrub.sh (issue #1927, spec #1907) unsets every variable
