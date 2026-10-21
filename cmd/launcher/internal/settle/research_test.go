@@ -40,7 +40,7 @@ func TestResearchSettle_Recommend(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	stdout := captureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -71,7 +71,7 @@ func TestResearchSettle_Reject(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "7", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Reject {
@@ -91,7 +91,7 @@ func TestResearchSettle_Unclear(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "8", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Unclear {
@@ -111,7 +111,7 @@ func TestResearchSettle_CompleteVerdictError(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -141,7 +141,7 @@ func TestResearchSettle_CompleteVerdictError_MissingInProgress(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -169,7 +169,7 @@ func TestResearchSettle_Local_PostsCommentBlockThenVerdict(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -195,7 +195,7 @@ func TestResearchSettle_Local_MissingCommentBlockTreatedAsBlocked(t *testing.T) 
 		CommentFound: false,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -226,7 +226,7 @@ func TestResearchSettle_Local_MissingCommentBlock_NotePinned(t *testing.T) {
 		CommentFound: false,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -259,7 +259,7 @@ func TestResearchSettle_Local_MalformedCommentBlock_NoteNamesCause(t *testing.T)
 		CommentRejected: outcome.Rejections{Malformed: 1, LongestPayload: 8154},
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	out := testutil.CaptureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -296,7 +296,7 @@ func TestResearchSettle_Local_EmptyCommentBlockTreatedAsBlocked(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -323,7 +323,7 @@ func TestResearchSettle_Github_NeverPostsComment(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels, false)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -349,7 +349,7 @@ func TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAs
 		CommentFound: false,
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels, true)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, true, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -379,7 +379,7 @@ func TestResearchSettle_UnwritableTrackerRelayed_MissingCommentFails(t *testing.
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, true)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, true, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
@@ -399,7 +399,7 @@ func TestResearchSettle_Blocked(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "9", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
@@ -420,7 +420,7 @@ func TestResearchSettle_MissingOutcome(t *testing.T) {
 	fc := newResearchFake("11")
 	result := dispatch.Result{}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "11", 0, result)
 
 	if len(fc.TransitionStateCalls) != 1 {
@@ -448,7 +448,7 @@ func TestResearchSettle_GithubReadOnly_PostsCommentBlockThenVerdict(t *testing.T
 		CommentFound: true,
 	}
 
-	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels, false)
+	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -475,7 +475,7 @@ func TestResearchSettle_GithubReadOnly_MissingCommentBlockTreatedAsBlocked(t *te
 		CommentFound: false,
 	}
 
-	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels, false)
+	s := NewResearchSettleReadOnly(ghLike, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -513,7 +513,7 @@ func TestResearchSettle_GithubReadWrite_FilesIntentsAndLinksVerdictComment(t *te
 		},
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels, false)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -565,7 +565,7 @@ func TestResearchSettle_Local_FilesIntentsAndLinksVerdictComment(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(localLike, researchVerdictLabels, false)
+	s := NewResearchSettle(localLike, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -612,7 +612,7 @@ func TestResearchSettle_FilingFailureDegradesInlineInComment(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -650,7 +650,7 @@ func TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel(t *tes
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -674,7 +674,7 @@ func TestResearchSettle_Local_NoIntentsNoCommentSection(t *testing.T) {
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(fc, researchVerdictLabels, false)
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 1 {
@@ -704,7 +704,7 @@ func TestResearchSettle_GithubReadWrite_EmptyRelayedCommentIgnored(t *testing.T)
 		CommentFound: true,
 	}
 
-	s := NewResearchSettle(ghLike, researchVerdictLabels, false)
+	s := NewResearchSettle(ghLike, researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CommentCalls) != 0 {
@@ -736,7 +736,7 @@ func TestResearchSettle_CustomVerdictSet(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 1 {
@@ -766,7 +766,7 @@ func TestResearchSettle_CustomVerdictSet_DefaultTokenNotRecognized(t *testing.T)
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), custom, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.CompleteVerdictCalls) != 0 {
@@ -801,7 +801,7 @@ func TestResearchSettle_ReportsFiledTally_TwoOK(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, testResearchFindingLabel)
 	stdout := captureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -832,7 +832,7 @@ func TestResearchSettle_ReportsFiledTally_TwoFailed(t *testing.T) {
 		},
 	}
 
-	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, testResearchFindingLabel)
 	stdout := captureStdout(t, func() {
 		s.Settle(dispatch.NewFake(), "42", 0, result)
 	})
@@ -868,7 +868,7 @@ func TestResearchSettle_AllDedupedAgainstBacklog_CommentCarriesSkippedSection(t 
 		},
 	}
 
-	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -919,7 +919,7 @@ func TestResearchSettle_MixedFiledAndDeduped_CommentCarriesBothSections(t *testi
 		},
 	}
 
-	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -955,7 +955,7 @@ func TestResearchSettle_RecordsWarnings(t *testing.T) {
 	}
 
 	d := dispatch.NewFake()
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	captureStdout(t, func() { s.Settle(d, "42", 0, result) })
 
 	want := [][]string{{"scan warning", "2 malformed issue-intent line(s) rejected"}}
@@ -963,3 +963,7 @@ func TestResearchSettle_RecordsWarnings(t *testing.T) {
 		t.Errorf("RecordedWarnings = %q, want %q", d.RecordedWarnings, want)
 	}
 }
+
+// testResearchFindingLabel is the label research settle files findings under,
+// handed to the constructor rather than looked up by kind.
+const testResearchFindingLabel = "agent-research-finding"

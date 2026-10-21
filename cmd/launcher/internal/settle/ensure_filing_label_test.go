@@ -50,7 +50,7 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 		label string
 		meta  doctor.LabelMeta
 		newFC func() *forge.Fake
-		file  func(fc *forge.Fake)
+		file  func(fc *forge.Fake, label string)
 	}{
 		{
 			"work", dispatchkind.Work.FindingLabel, doctor.ReviewFindingLabelMeta[dispatchkind.Work.FindingLabel],
@@ -59,23 +59,25 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 				fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 				return fc
 			},
-			func(fc *forge.Fake) {
-				newTestSettle(baseConfig(), fc.AsIssueFiler(), fc).Settle(dispatch.NewFake(), "1", 0, withIntents(resolved("blocked")))
+			func(fc *forge.Fake, label string) {
+				cfg := baseConfig()
+				cfg.FindingLabel = label
+				newTestSettle(cfg, fc.AsIssueFiler(), fc).Settle(dispatch.NewFake(), "1", 0, withIntents(resolved("blocked")))
 			},
 		},
 		{
 			"research", dispatchkind.Research.FindingLabel, doctor.TriageLabelMeta[dispatchkind.Research.FindingLabel],
 			func() *forge.Fake { return newResearchFake("1") },
-			func(fc *forge.Fake) {
-				NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false).Settle(dispatch.NewFake(), "1", 0, withIntents(resolved("recommend")))
+			func(fc *forge.Fake, label string) {
+				NewResearchSettle(fc.AsIssueFiler(), researchVerdictLabels, false, label).Settle(dispatch.NewFake(), "1", 0, withIntents(resolved("recommend")))
 			},
 		},
 		{
 			"butler", dispatchkind.Butler.FindingLabel, doctor.TriageLabelMeta[dispatchkind.Butler.FindingLabel],
 			func() *forge.Fake { return forge.NewFake(testDispatchLabels) },
-			func(fc *forge.Fake) {
+			func(fc *forge.Fake, label string) {
 				plan := func([]Finding) func(Finding) Decoration { return func(Finding) Decoration { return Decoration{} } }
-				FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, DedupPolicy{}, plan)
+				FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, label, DedupPolicy{}, plan)
 			},
 		},
 	} {
@@ -87,7 +89,7 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 			fc.RequireLabelsExist = true
 			fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
 
-			tc.file(fc)
+			tc.file(fc, tc.label)
 
 			if len(fc.PostIssueCalls) != 2 {
 				t.Fatalf("PostIssueCalls = %+v, want both filed", fc.PostIssueCalls)
@@ -116,7 +118,7 @@ func TestFileButlerFindings_EnsuresExtraLabels(t *testing.T) {
 	plan := func([]Finding) func(Finding) Decoration {
 		return func(Finding) Decoration { return Decoration{ExtraLabels: []string{patchLabel}} }
 	}
-	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, DedupPolicy{}, plan)
+	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, testButlerFindingLabel, DedupPolicy{}, plan)
 
 	if len(filing.Filed) != 2 {
 		t.Fatalf("filed = %v, want 2", filing.Filed)

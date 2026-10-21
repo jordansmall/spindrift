@@ -1005,6 +1005,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 		MergePollTimeout:  c.mergePollTimeout,
 		MaxFixAttempts:    c.maxFixAttempts,
 		Unclaimed:         c.kind().UnclaimedGate,
+		FindingLabel:      c.kind().FindingLabel,
 		MaxRebaseAttempts: c.maxRebaseAttempts,
 		// Policy reuses dispatch's transient-retry tuning rather than a second
 		// knob pair (issue #2095, #2325, #2928); it covers the rebase-push
@@ -1051,9 +1052,9 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 		vl := researchVerdictLabels(c)
 		verdictRelayed := backend.ResearchVerdictRelayed(c.issueTracker, resolveAgentPresenceSignals(c.driver).filerEnabled)
 		if c.boxForgeAndIssueAccess == "read-only" {
-			return settle.NewResearchSettleReadOnly(it, vl, verdictRelayed)
+			return settle.NewResearchSettleReadOnly(it, vl, verdictRelayed, c.kind().FindingLabel)
 		}
-		return settle.NewResearchSettle(it, vl, verdictRelayed)
+		return settle.NewResearchSettle(it, vl, verdictRelayed, c.kind().FindingLabel)
 	}
 	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
 }

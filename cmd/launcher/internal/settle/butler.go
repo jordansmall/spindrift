@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -71,7 +70,7 @@ type ButlerFiling struct {
 // failed count (PostIssue failures only; a dedup skip or malformed payload is
 // neither), so a caller can tell a sweep whose every filing failed from one
 // that simply found nothing.
-func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, dedup DedupPolicy, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
+func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, findingLabel string, dedup DedupPolicy, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
 	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
 	capped := result
 	capped.IssueIntents = kept
@@ -86,7 +85,7 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 	}
 	decide := plan(findings)
 
-	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, dispatchkind.MustBySettle(dispatchkind.SettleLedger).FindingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
+	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, findingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
 		d := decide(in.finding())
 		return d.Backlink, d.ExtraLabels, d.OnFiled
 	})

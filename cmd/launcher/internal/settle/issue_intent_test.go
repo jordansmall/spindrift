@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -449,7 +450,7 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "fix(auth): validate token expiry" {
 		t.Errorf("PostIssueCalls = %+v, want exactly the one intent filed", fc.PostIssueCalls)
 	}
-	// Guards gate.go's own literal argument: unlike the direct
+	// Guards gate.go's Config.FindingLabel read: unlike the direct
 	// fileIssueIntents calls above, this test drives the real work path from
 	// Settle.Settle through gate.go.
 	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
@@ -2283,5 +2284,35 @@ func TestFileIssueIntentsDetailed_Dedup_QuotedMarkerNeverIndexed(t *testing.T) {
 
 	if len(index) != 0 {
 		t.Errorf("index = %v, want empty (the quoted marker must not become this issue's key set)", index)
+	}
+}
+
+// The merge gate files under Config.FindingLabel and nothing else: a
+// distinctive value lands verbatim, proving the label is read off the config
+// in hand rather than looked up by strategy.
+func TestSettle_FilesIssueIntents_UsesConfiguredFindingLabel(t *testing.T) {
+	const issNum = "2019"
+	const prURL = "https://github.com/owner/repo/pull/2019"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/77"
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
+		},
+		IssueIntentsFound: true,
+		IssueIntents:      []string{`{"title":"fix(auth): validate token expiry","body":"body"}`},
+	}
+
+	cfg := baseConfig()
+	cfg.FindingLabel = "custom-finding-label"
+	newTestSettle(cfg, fc.AsIssueFiler(), fc).Settle(dispatch.NewFake(), issNum, 0, result)
+
+	if len(fc.PostIssueCalls) != 1 || !slices.Equal(fc.PostIssueCalls[0].Labels, []string{"custom-finding-label"}) {
+		t.Errorf("PostIssueCalls = %+v, want one filing labelled [custom-finding-label]", fc.PostIssueCalls)
 	}
 }

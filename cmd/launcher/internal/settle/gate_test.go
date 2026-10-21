@@ -13,6 +13,7 @@ import (
 func baseConfig() Config {
 	return Config{
 		CompleteLabel:     "agent-complete",
+		FindingLabel:      "agent-review-finding",
 		MergePollInterval: 1,   // The Clock below never sleeps for real, so this costs nothing.
 		MergePollTimeout:  100, // Large enough for multi-poll tests.
 		MergeMode:         "immediate",

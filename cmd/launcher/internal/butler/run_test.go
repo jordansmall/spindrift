@@ -51,6 +51,8 @@ func testRunPolicy(every time.Duration, chores ...string) Policy {
 		ClaimTimeout:   testRunClaimTimeout,
 		Zone:           time.UTC,
 		PromotionLabel: "ready-for-agent",
+		FindingLabel:   testKindLabels.finding,
+		PatchLabel:     testKindLabels.patch,
 	}
 }
 

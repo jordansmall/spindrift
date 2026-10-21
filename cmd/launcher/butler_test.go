@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
@@ -887,6 +888,25 @@ func promotableRunFunc(class string) func(runner.Box) error {
 	}
 }
 
+// butlerTestSchemaConfig is the schedule, claim, and promotion-budget config
+// the cmdButler tests share; adjust sets the rest per test.
+func butlerTestSchemaConfig(chores, codeForge string, knobs map[string]string, adjust func(*schemaConfig)) schemaConfig {
+	knobs["BUTLER_TUNING_COOLDOWN"] = schemaDefault("BUTLER_TUNING_COOLDOWN")
+	sc := schemaConfig{
+		codeForge:                 codeForge,
+		rowKnobs:                  knobs,
+		butlerChores:              chores,
+		butlerEvery:               schemaDefault("BUTLER_EVERY"),
+		butlerClaimTimeout:        schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+		daemonAwakeWindow:         schemaDefault("DAEMON_AWAKE_WINDOW"),
+		baseBranch:                schemaDefault("BASE_BRANCH"),
+		butlerMaxPromotionsPerDay: 1,
+		butlerPromotionMaxFiles:   3,
+	}
+	adjust(&sc)
+	return sc
+}
+
 // cmdButler hands a promoted finding the operator's configured work label
 // through lc.config.workLabel (issue #3993, #4054). Every host-side gate
 // clears: "bugs" is allow-listed for class "error-handling", the finding
@@ -905,21 +925,9 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 	fr.RunFunc = promotableRunFunc("error-handling")
 
 	lc := &launchContext{
-		config: config{schemaConfig: schemaConfig{
-			codeForge: "local",
-			rowKnobs: map[string]string{
-				"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
-				"BUTLER_TUNING_COOLDOWN":           schemaDefault("BUTLER_TUNING_COOLDOWN"),
-			},
-			butlerChores:              "bugs",
-			butlerChoreClasses:        "bugs=error-handling",
-			butlerEvery:               schemaDefault("BUTLER_EVERY"),
-			butlerClaimTimeout:        schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-			daemonAwakeWindow:         schemaDefault("DAEMON_AWAKE_WINDOW"),
-			baseBranch:                schemaDefault("BASE_BRANCH"),
-			butlerMaxPromotionsPerDay: 1,
-			butlerPromotionMaxFiles:   3,
-		}, workLabel: "agent-go"},
+		config: config{schemaConfig: butlerTestSchemaConfig("bugs", "local", map[string]string{
+			"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
+		}, func(sc *schemaConfig) { sc.butlerChoreClasses = "bugs=error-handling" }), workLabel: "agent-go", dispatchKind: dispatchkind.Butler},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
 		// This test never runs the patch rung (no PatchForge is wired), so
@@ -998,5 +1006,84 @@ func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 	}
 	if v, ok := c.knobLookup(chore.MinRecordsKnob("tuning")); !ok || v != c.rowKnobs["BUTLER_TUNING_MIN_RECORDS"] {
 		t.Errorf("min-records knob = %q, %v, want the config's", v, ok)
+	}
+}
+
+// cmdButler hands the patch rung's finding the row's patch provenance label
+// through Policy.PatchLabel (ADR 0057), driving the real patch path: a real
+// Ledger tree applies the diff, and push-/draft-PR-capable fakes satisfy
+// butlerPatchForge. Only PostIssue's labels are asserted; the landing past it
+// is not this test's concern.
+func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
+	t.Setenv("FILER_MODEL", "test-model")
+	repo := ledgertest.NewRepo(t, "a.md")
+	// CommitPatch needs the launcher identity, which only the remote Ledger
+	// row stamps (the local row's GitTree has none), so run against a forgejo
+	// remote that git redirects to the fixture's bare repo.
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url."+repo+".insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "http://tok@forgejo.test/owner/repo.git")
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/9301"
+	cf := pushDraftForge{CodeForge: fc, PRForgeFake: fc.PRForgeFake}
+
+	forgejoDesc, _ := backend.ByName("forgejo")
+	caps := forge.Capabilities{
+		BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+		PRForge: fc.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
+		ForgeDescriptor: forgejoDesc, TrackerDescriptor: forgejoDesc,
+	}
+
+	// ledgertest.NewRepo's file content is its path with no trailing newline.
+	diff := "--- a/a.md\n+++ b/a.md\n@@ -1 +1 @@\n-a.md\n\\ No newline at end of file\n+new\n"
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		outcomeLine := outcome.Outcome{Landing: "none", Status: outcome.StatusReady, Note: "swept"}.Line()
+		if _, err := box.Output.Write([]byte(outcomeLine + "\n")); err != nil {
+			return err
+		}
+		payload := fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["a.md:Foo"],"class":"stale-reference","concurrence":"agreed","patch":%q}`, diff)
+		encoded := base64.StdEncoding.EncodeToString([]byte(payload))
+		_, err := fmt.Fprintf(box.Output, "%s %s %s\n", outcome.IssueIntentToken, box.Env["RUN_NONCE"], encoded)
+		return err
+	}
+
+	lc := &launchContext{
+		config: config{schemaConfig: butlerTestSchemaConfig("docs-drift", "forgejo", map[string]string{
+			"FORGEJO_BASE_URL": "http://forgejo.test",
+			"FORGEJO_TOKEN":    "tok",
+		}, func(sc *schemaConfig) {
+			sc.repoSlug = "owner/repo"
+			sc.butlerChoreClasses = schemaDefault("BUTLER_CHORE_CLASSES")
+			sc.butlerPatchClasses = schemaDefault("BUTLER_PATCH_CLASSES")
+			sc.butlerPatchPaths = schemaDefault("BUTLER_PATCH_PATHS")
+			sc.butlerPatchMaxFiles = 3
+			sc.butlerPatchMaxLines = 20
+			sc.butlerMaxPatchesPerDay = 1
+			sc.gitUserName = "Test Bot"
+			sc.gitUserEmail = "bot@example.com"
+		}), dispatchKind: dispatchkind.Butler},
+		factory:      testFactory(t, t.TempDir(), fr),
+		issueTracker: fc.AsIssueFiler(),
+		codeForge:    cf,
+		capabilities: caps,
+		settle:       settle.NewFake(),
+		cleanup:      func() {},
+	}
+
+	var stderr bytes.Buffer
+	if code := cmdButler(lc, "docs-drift", &stderr); code != 0 {
+		t.Fatalf("cmdButler code = %d, want 0 (stderr: %s)", code, stderr.String())
+	}
+	if len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("PostIssueCalls = %+v, want 1 (stderr: %s)", fc.PostIssueCalls, stderr.String())
+	}
+	got := fc.PostIssueCalls[0].Labels
+	if !slices.Contains(got, "agent-butler-patch") {
+		t.Errorf("labels = %v, want agent-butler-patch", got)
+	}
+	if !slices.Contains(got, "agent-butler-finding") {
+		t.Errorf("labels = %v, want agent-butler-finding", got)
 	}
 }

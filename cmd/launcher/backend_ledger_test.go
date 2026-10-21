@@ -183,6 +183,8 @@ func TestRemoteLedger_CountsOneFetchAndOnePushPerSweep(t *testing.T) {
 		ClaimTimeout:   6 * time.Hour,
 		Zone:           time.UTC,
 		PromotionLabel: "ready-for-agent",
+		FindingLabel:   "agent-butler-finding",
+		PatchLabel:     "agent-butler-patch",
 	}
 	r := butler.New(backend, tree, forge.NewFake().AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	out, err := r.Sweep([]string{"bugs"})

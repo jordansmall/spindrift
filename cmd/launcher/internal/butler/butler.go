@@ -50,6 +50,12 @@ type Policy struct {
 	// swapped it out -- the label a promoted finding must carry for the work
 	// path to pick it up (issue #3880).
 	PromotionLabel string
+	// FindingLabel is the butler kind row's provenance label, worn by every
+	// filed finding.
+	FindingLabel string
+	// PatchLabel is the butler kind row's patch provenance label, worn beside
+	// FindingLabel by a finding landed as a patch PR (ADR 0057).
+	PatchLabel string
 	// PatchPaths is BUTLER_PATCH_PATHS, the host allow/deny glob list a patch
 	// candidate's diff paths must clear (ADR 0057).
 	PatchPaths string
@@ -393,7 +399,7 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: p.scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: p.input, ClaimTime: p.claimTime})
 	defer d.Close()
-	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate}, r.out)
+	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate}, kindLabels{finding: r.policy.FindingLabel, patch: r.policy.PatchLabel}, r.out)
 	if p.arm != nil {
 		if err := p.arm(d, step); err != nil {
 			return Outcome{}, err
