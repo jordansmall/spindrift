@@ -2,7 +2,8 @@
 // own tests: Run replays a corpus of Target-repo trees through the registry
 // pipeline's stages in order and checks each stage's output against the golden
 // beside the case (issue #5654). It takes an ecosystem.Row and a directory,
-// never ecosystem.Table, so a row proves itself over its own corpus alone.
+// never ecosystem.Table, so a row proves itself over its own corpus, plus the
+// neighbour rows a case names, which the caller resolves.
 //
 // A corpus directory holds one subdirectory per case:
 //
@@ -17,6 +18,14 @@
 //	env.json                      optional JSON object of string to string: the prior
 //	                              environment the binding and bindings summary stages
 //	                              read (default empty)
+//	case.json                     optional JSON object, unknown keys refused: "rows", the
+//	                              names of neighbour rows replayed beside the primary row
+//	                              (naming the primary row too fixes its place in the order,
+//	                              as ecosystem.Table does in production; else it comes first),
+//	                              and "port", the Forwarder port the binding and rewrites
+//	                              stages render against (default bindregistry.ForwarderPort);
+//	                              the lockfile scan and bindings summary run production code
+//	                              on the fixed ForwarderPort, so "port" does not reach them
 //	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 8)
 //	classification.golden.txt     stage 1: the lockfile classification, empty when no lockfile matches
 //	lockfile-scan.golden.txt      stage 2: the warnings for a tracked lockfile still naming the
@@ -35,6 +44,7 @@
 package ecosystemtest
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,14 +149,19 @@ var stages = []stage{
 	},
 }
 
+// RowLookup resolves a neighbour row name from a case's case.json. A nil
+// RowLookup is allowed for a corpus whose cases name no neighbour.
+type RowLookup func(name string) (ecosystem.Row, bool)
+
 // Run replays every case under corpusDir against row: one subtest per case. A
-// corpusDir with no case fails.
-func Run(t *testing.T, row ecosystem.Row, corpusDir string) {
+// corpusDir with no case fails. lookup resolves the neighbour row names a
+// case's case.json lists; it may be nil when no case names a neighbour.
+func Run(t *testing.T, row ecosystem.Row, corpusDir string, lookup RowLookup) {
 	t.Helper()
 	update := golden.Update()
 	for _, c := range caseDirs(t, corpusDir) {
 		t.Run(c, func(t *testing.T) {
-			for _, err := range replayCase(row, filepath.Join(corpusDir, c), update) {
+			for _, err := range replayCase(row, filepath.Join(corpusDir, c), update, lookup) {
 				t.Error(err)
 			}
 		})
@@ -177,8 +192,19 @@ func caseDirs(t testing.TB, corpusDir string) []string {
 // any other mismatch; update mode writes it instead. A case whose operator
 // routes file is refused skips the stages that consume the resolved routes;
 // classification, which reads the repo alone, still runs.
-func replayCase(row ecosystem.Row, dir string, update bool) []error {
-	c := &replay{row: row, dir: dir}
+func replayCase(row ecosystem.Row, dir string, update bool, lookup RowLookup) []error {
+	cfg, err := readCaseConfig(dir)
+	if err != nil {
+		return []error{err}
+	}
+	rows, err := cfg.resolveRows(row, lookup)
+	if err != nil {
+		return []error{err}
+	}
+	c := &replay{row: row, allRows: rows, port: bindregistry.ForwarderPort, dir: dir}
+	if cfg.Port != nil {
+		c.port = *cfg.Port
+	}
 	var errs []error
 	for _, s := range stages {
 		path := filepath.Join(dir, s.golden)
@@ -203,6 +229,65 @@ func replayCase(row ecosystem.Row, dir string, update bool) []error {
 	return errs
 }
 
+// caseConfig is a case's case.json.
+type caseConfig struct {
+	Rows []string `json:"rows"`
+	// Port is a pointer so an explicit "port": 0 is refused, not defaulted.
+	Port *int `json:"port"`
+}
+
+func readCaseConfig(dir string) (caseConfig, error) {
+	var cfg caseConfig
+	raw, err := os.ReadFile(filepath.Join(dir, "case.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return cfg, nil
+	}
+	if err != nil {
+		return cfg, fmt.Errorf("case.json: %w", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
+		return cfg, fmt.Errorf("case.json: %w", err)
+	}
+	if cfg.Port != nil && (*cfg.Port < 1 || *cfg.Port > 65535) {
+		return cfg, fmt.Errorf("case.json: port %d is outside 1-65535", *cfg.Port)
+	}
+	return cfg, nil
+}
+
+// resolveRows is the case's rows in the order the pipeline reads them. Naming
+// the primary row fixes its position among the neighbours, which matters where
+// production's ecosystem.Table order shows in a golden; left unnamed it comes
+// first. A row named twice would declare twice.
+func (cfg caseConfig) resolveRows(primary ecosystem.Row, lookup RowLookup) ([]ecosystem.Row, error) {
+	seen := map[string]bool{}
+	var rows []ecosystem.Row
+	for _, name := range cfg.Rows {
+		if seen[name] {
+			return nil, fmt.Errorf("case.json: row %q is named twice", name)
+		}
+		seen[name] = true
+		if name == primary.Name {
+			rows = append(rows, primary)
+			continue
+		}
+		var row ecosystem.Row
+		ok := false
+		if lookup != nil {
+			row, ok = lookup(name)
+		}
+		if !ok {
+			return nil, fmt.Errorf("case.json: row %q is not known to the lookup", name)
+		}
+		rows = append(rows, row)
+	}
+	if !seen[primary.Name] {
+		rows = append([]ecosystem.Row{primary}, rows...)
+	}
+	return rows, nil
+}
+
 // memo caches one stage computation shared by later stages.
 type memo[T any] struct {
 	v    T
@@ -221,8 +306,14 @@ func (m *memo[T]) get(f func() (T, error)) (T, error) {
 // replay is one case's state across stages: later stages consume earlier
 // stages' output.
 type replay struct {
-	row ecosystem.Row
-	dir string
+	// row is the primary row: the binding stage's renderers and in-tree gate,
+	// the bindings summary (BindHomes) and the rewrites stage's RewriteRows use
+	// it alone. allRows, which holds row, widens what the pipeline reads across
+	// rows, including the rewrites stage's proxy routes.
+	row     ecosystem.Row
+	allRows []ecosystem.Row
+	port    int
+	dir     string
 
 	rendered memo[[]byte]
 	parsed   memo[[]registryroutes.Route]
@@ -230,12 +321,13 @@ type replay struct {
 	proxied  memo[[]registryproxy.Route]
 }
 
-func (c *replay) rows() []ecosystem.Row { return []ecosystem.Row{c.row} }
+// primaryRows is what the stages that render only the case's own row see.
+func (c *replay) primaryRows() []ecosystem.Row { return []ecosystem.Row{c.row} }
 
 func (c *replay) repo() string { return filepath.Join(c.dir, "repo") }
 
 func (c *replay) classification() ([]byte, error) {
-	return []byte(bindregistry.ClassifyRows(c.repo(), c.rows()) + "\n"), nil
+	return []byte(bindregistry.ClassifyRows(c.repo(), c.allRows) + "\n"), nil
 }
 
 // discovery hands DiscoverRows a repo-relative display path for each store, so
@@ -257,7 +349,7 @@ func (c *replay) discovery() ([]byte, error) {
 			return registrydiscover.StoreLookup(registrydiscover.Store{Name: s.Name, Path: filepath.Join(c.dir, s.Path)}, d)
 		}
 		routes, _, err := registrydiscover.DiscoverRows(
-			c.repo(), c.rows(), stores,
+			c.repo(), c.allRows, stores,
 			lookup, func(string) string { return probedAuthScheme })
 		if err != nil {
 			return nil, err
@@ -276,7 +368,7 @@ func (c *replay) parsedRoutes() ([]registryroutes.Route, error) {
 		if err != nil {
 			return nil, err
 		}
-		routes, err := registryroutes.ParseRows(input, c.rows())
+		routes, err := registryroutes.ParseRows(input, c.allRows)
 		if err != nil && operator {
 			return nil, &refusedError{err}
 		}
@@ -311,7 +403,7 @@ func (c *replay) routes() ([]byte, error) {
 
 func (c *replay) pathSets() ([]registrypathset.HostPathSet, error) {
 	return c.sets.get(func() ([]registrypathset.HostPathSet, error) {
-		return registrypathset.DeriveRows(c.repo(), c.rows())
+		return registrypathset.DeriveRows(c.repo(), c.allRows)
 	})
 }
 
@@ -353,7 +445,8 @@ func (c *replay) pathSet() ([]byte, error) {
 
 // proxyRoutes is the proxy route table stages 4 to 6 run against: the
 // production projection (registrypathset.ApplyToRoute, then
-// registryproxy.AssignPrefixes) over the row's own derived path sets.
+// registryproxy.AssignPrefixes) over the path sets derived from every row the
+// case names.
 // Credentials stay empty: no secret is resolved.
 func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 	return c.proxied.get(func() ([]registryproxy.Route, error) {
@@ -371,7 +464,7 @@ func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 		}
 		routes := make([]registryproxy.Route, len(parsed))
 		for i, r := range parsed {
-			route, err := registrypathset.ApplyToRoute(r.ProxyRoute(), byHost, c.rows())
+			route, err := registrypathset.ApplyToRoute(r.ProxyRoute(), byHost, c.allRows)
 			if err != nil {
 				return nil, err
 			}

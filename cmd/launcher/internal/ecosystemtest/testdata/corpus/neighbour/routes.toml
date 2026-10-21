@@ -1,0 +1,11 @@
+[[routes]]
+match-host = "reg.example.test"
+auth-scheme = "basic"
+credential = { env = "SYNTH_TOKEN" }
+
+[routes.ecosystems.synthetic]
+path = "/api/synth/"
+mirror-path = "/mirror"
+
+[routes.ecosystems.twin]
+path = "/api/twin/"
