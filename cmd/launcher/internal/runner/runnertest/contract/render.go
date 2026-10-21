@@ -172,6 +172,8 @@ var table = []row{
 	}), &familyOnly{runner.KindBwrap, "OCI boots a baked image and never binds a closure generation"}},
 	{"Network/open", networkField, network(runner.NetworkModeOpen),
 		&familyOnly{runner.KindOCI, "bwrap's pasta namespace always runs --no-map-gw (ADR 0042), so open renders identically to no-host-loopback"}},
+	{"Network/zero", networkField, network(""),
+		&familyOnly{runner.KindOCI, "bwrap isolates every mode but host, the zero value included (BwrapNetwork), so pasta's --no-map-gw renders it identically to no-host-loopback"}},
 	{"Network/no-host-loopback", networkField, network(runner.NetworkModeNoHostLoopback), nil},
 	{"Network/none", networkField, network(runner.NetworkModeNone), nil},
 	{"Network/host", networkField, network(runner.NetworkModeHost),
@@ -222,8 +224,14 @@ var facets = map[string]func(d Decoded, l Launch) error{
 		return nil
 	},
 	networkField: func(d Decoded, l Launch) error {
-		if d.Network != l.Network {
-			return fmt.Errorf("network = %q, want %q", d.Network, l.Network)
+		// The zero value is specced as open: OCINetwork emits no --network
+		// flag for it, so both families render it exactly as they render open.
+		want := l.Network
+		if want == "" {
+			want = runner.NetworkModeOpen
+		}
+		if d.Network != want {
+			return fmt.Errorf("network = %q, want %q", d.Network, want)
 		}
 		return nil
 	},
@@ -284,7 +292,7 @@ func Rendering(t *testing.T, h RenderingHarness) {
 
 func rendering(t *testing.T, h RenderingHarness, rows []row, unrendered map[string]string) {
 	t.Helper()
-	if err := validate(rows, unrendered); err != nil {
+	if err := validate(t, rows, unrendered); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range rows {
@@ -297,10 +305,12 @@ func rendering(t *testing.T, h RenderingHarness, rows []row, unrendered map[stri
 }
 
 // validate fails on a malformed table: a guard without a reason, a row for
-// an unknown field, or a Box field no row and no unrendered entry covers.
-func validate(rows []row, unrendered map[string]string) error {
+// an unknown field, a Box field no row and no unrendered entry covers, or a
+// network mode (the zero value included) no networkField row covers.
+func validate(t *testing.T, rows []row, unrendered map[string]string) error {
 	boxType := reflect.TypeOf(runner.Box{})
 	covered := map[string]bool{}
+	modes := map[runner.NetworkMode]bool{}
 	for _, r := range rows {
 		if r.only != nil && r.only.Reason == "" {
 			return fmt.Errorf("row %s: only(%s) carries no Reason", r.name, r.only.Family)
@@ -309,6 +319,14 @@ func validate(rows []row, unrendered map[string]string) error {
 			return fmt.Errorf("row %s: no facet for field %q", r.name, r.field)
 		}
 		covered[r.field] = true
+		if r.field == networkField {
+			modes[r.launch(t).Network] = true
+		}
+	}
+	for _, m := range append([]runner.NetworkMode{""}, runner.NetworkModes()...) {
+		if !modes[m] {
+			return fmt.Errorf("network mode %q has no row: add a %s row for it", m, networkField)
+		}
 	}
 	for name, reason := range unrendered {
 		if _, ok := boxType.FieldByName(name); !ok {

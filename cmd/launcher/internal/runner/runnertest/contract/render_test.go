@@ -76,6 +76,9 @@ func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 	if !oci && keep("ClosureGeneration") {
 		d.ClosureGeneration = b.ClosureGeneration
 	}
+	if d.Network == "" {
+		d.Network = runner.NetworkModeOpen
+	}
 	switch {
 	case !keep("Network"):
 		d.Network = ""
@@ -158,6 +161,16 @@ func TestValidateRejectsMalformedTables(t *testing.T) {
 	unknown := rowNamed(t, "Env/plain")
 	unknown.field = "Bogus"
 
+	without := func(name string) []row {
+		var rows []row
+		for _, r := range table {
+			if r.name != name {
+				rows = append(rows, r)
+			}
+		}
+		return rows
+	}
+
 	for _, tc := range []struct {
 		name       string
 		rows       []row
@@ -170,13 +183,15 @@ func TestValidateRejectsMalformedTables(t *testing.T) {
 		{"unrendered without reason", table, map[string]string{"Issue": ""}, "no reason"},
 		{"unrendered non-Box field", table, map[string]string{"Bogus": "r"}, "not a runner.Box field"},
 		{"unrendered and tabled", table, map[string]string{"Env": "r"}, "both unrendered and tabled"},
+		{"untabled network mode", without("Network/none"), unrendered, `network mode "none" has no row`},
+		{"untabled zero network mode", without("Network/zero"), unrendered, `network mode "" has no row`},
 	} {
-		err := validate(tc.rows, tc.unrendered)
+		err := validate(t, tc.rows, tc.unrendered)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want it to mention %q", tc.name, err, tc.want)
 		}
 	}
-	if err := validate(table, unrendered); err != nil {
+	if err := validate(t, table, unrendered); err != nil {
 		t.Errorf("shipped table invalid: %v", err)
 	}
 }
