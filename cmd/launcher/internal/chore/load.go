@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,6 +177,30 @@ func FindingLabel(name string) string { return builtinFindingLabels[name] }
 // MinRecordsKnob is the env name of the knob holding a records-scoped built-in
 // Chore's minimum new-Record count, or "" for a Chore with none.
 func MinRecordsKnob(name string) string { return builtinMinRecordsKnobs[name] }
+
+// MinRecords resolves a records-scoped built-in Chore's minimum new-Record
+// count through lookup: a nil lookup, an unset or an empty value is the row
+// default, anything else must be an integer. It applies the same rule as the
+// row's generated tuning reader. A Chore whose row names no knob resolves to 0.
+func MinRecords(name string, lookup func(env string) (string, bool)) (int, error) {
+	env := MinRecordsKnob(name)
+	if env == "" {
+		return 0, nil
+	}
+	var v string
+	var ok bool
+	if lookup != nil {
+		v, ok = lookup(env)
+	}
+	if !ok || v == "" {
+		return builtinMinRecordsDefaults[name], nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %q is not an integer", env, v)
+	}
+	return n, nil
+}
 
 // FindingLabels is the deduplicated FindingLabel of each BUTLER_CHORES entry,
 // tokenised the way Load tokenises it, so a caller never re-parses the list.

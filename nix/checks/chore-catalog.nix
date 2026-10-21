@@ -247,6 +247,16 @@ in
       "lib/chore-catalog.nix: minRecordsKnobs must map tuning to BUTLER_TUNING_MIN_RECORDS (issue #5700)";
     pkgs.runCommand "chore-catalog-tuning-min-records-knob" { } "touch $out";
 
+  chore-catalog-tuning-min-records-default =
+    assert assertMsg
+      (
+        catalog.minRecordsDefaults == {
+          tuning = tuningRow.knobs.butlerTuningMinRecords.default;
+        }
+      )
+      "lib/chore-catalog.nix: minRecordsDefaults must map tuning to the row's butlerTuningMinRecords default (issue #5791)";
+    pkgs.runCommand "chore-catalog-tuning-min-records-default" { } "touch $out";
+
   chore-catalog-built-ins-class-lists-ok =
     let
       ok = builtins.tryEval (builtins.deepSeq catalog.classLists "reached");

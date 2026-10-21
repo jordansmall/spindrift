@@ -44,3 +44,10 @@ var builtinFindingLabels = map[string]string{
 var builtinMinRecordsKnobs = map[string]string{
 	"tuning": "BUTLER_TUNING_MIN_RECORDS",
 }
+
+// builtinMinRecordsDefaults is the row default of each knob in builtinMinRecordsKnobs,
+// used when the knob is unset or empty.
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
+var builtinMinRecordsDefaults = map[string]int{
+	"tuning": 20,
+}

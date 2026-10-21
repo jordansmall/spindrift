@@ -150,6 +150,14 @@ let
       value = c.knobs.${c.minRecordsKnob}.env;
     }) (builtins.filter (c: c ? minRecordsKnob) chores)
   );
+  # Chore name -> that knob's row default, so the Go side reads the knob with
+  # the same default the generated reader does.
+  minRecordsDefaults = builtins.listToAttrs (
+    map (c: {
+      inherit (c) name;
+      value = c.knobs.${c.minRecordsKnob}.default;
+    }) (builtins.filter (c: c ? minRecordsKnob) chores)
+  );
   classLists = builtins.listToAttrs (
     map (c: {
       inherit (c) name;
@@ -182,6 +190,7 @@ in
     everyDefaults
     findingLabels
     minRecordsKnobs
+    minRecordsDefaults
     classesDefault
     patchClassesDefault
     checkClassLists
