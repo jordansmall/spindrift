@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -423,7 +422,7 @@ func (a *ociAdapter) buildRunArgs(box runner.Box) []string {
 		args = append(args, "--network", a.network.Arg)
 	}
 	for k, v := range box.Env {
-		if runner.OffArgvKeys[k] {
+		if runner.IsOffArgvKey(k) {
 			// Bare "-e KEY" forwards KEY's value from the CLI process's own
 			// environment, which ociRunEnv sets, so the value never lands in
 			// argv, where ps/proc exposes it to any local user for the
@@ -813,11 +812,7 @@ func reapOrphanedRebaseDirs(root string) {
 // replacing it as bwrap's allowlist-only resolvedRunEnv does. The appended
 // values exist only for buildRunArgs' bare "-e KEY" entries to forward.
 func ociRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(runner.OffArgvKeys))
-	for k := range runner.OffArgvKeys {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := runner.OffArgvKeys()
 	env := os.Environ()
 	for _, k := range keys {
 		if v, ok := boxEnv[k]; ok {

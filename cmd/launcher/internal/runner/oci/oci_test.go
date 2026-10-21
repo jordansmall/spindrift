@@ -672,7 +672,7 @@ func TestOciRunEnv(t *testing.T) {
 	// guard below fails loudly in that case instead.
 	offArgv := []string{"FORGEJO_TOKEN", "GH_TOKEN", "ISSUE_TEXT", "REGISTRY_PROXY_TCP_SECRET"}
 	for _, k := range offArgv {
-		if !runner.OffArgvKeys[k] {
+		if !runner.IsOffArgvKey(k) {
 			t.Fatalf("ociRunEnv fixture: %s is no longer an OffArgvKeys member; update this test alongside the set", k)
 		}
 	}

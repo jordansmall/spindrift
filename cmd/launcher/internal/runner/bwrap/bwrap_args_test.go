@@ -42,7 +42,7 @@ func TestBwrapArgs_NoOffArgvKeysOnArgv(t *testing.T) {
 
 // Issue #3470: ISSUE_TEXT absent from box.Env, or present as an empty string,
 // must emit no "--setenv ISSUE_TEXT" pair. buildArgs emits --setenv for a key
-// only when !OffArgvKeys[k], and ISSUE_TEXT is always in OffArgvKeys, so this
+// only when !IsOffArgvKey(k), and ISSUE_TEXT is always in OffArgvKeys, so this
 // holds for any value, unlike the OCI runner's bare "-e KEY" rendering.
 func TestBwrapArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	a := &bwrapAdapter{

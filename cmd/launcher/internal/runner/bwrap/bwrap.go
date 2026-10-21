@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -372,7 +371,7 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 		"--setenv", "PREFETCH", a.prefetchFor(box),
 	)
 	for k, v := range box.Env {
-		if !runner.OffArgvKeys[k] {
+		if !runner.IsOffArgvKey(k) {
 			args = append(args, "--setenv", k, v)
 		}
 	}
@@ -471,11 +470,7 @@ var pastaHardenedFlags = []string{"-t", "none", "-T", "none", "-u", "none", "-U"
 // needs it (buildArgs delivers every other key on argv). TERM/LANG/TZ/TMPDIR and
 // the proxy vars are excluded on the OCI runner's precedent: it forwards none.
 func resolvedRunEnv(boxEnv map[string]string) []string {
-	keys := make([]string, 0, len(runner.OffArgvKeys))
-	for k := range runner.OffArgvKeys {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := runner.OffArgvKeys()
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
 		if v, ok := boxEnv[k]; ok {
