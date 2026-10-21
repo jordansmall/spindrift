@@ -14,7 +14,9 @@
     source = "lib/chores";
     rows = (import ./chore-catalog.nix).chores;
     # A knob-bearing Chore's Go package is named after it, so its name must
-    # not collide with an unrelated internal package.
+    # not collide with an unrelated internal package; nix/checks/row-knobs.nix
+    # fails eval on an existing dir its ownedChorePackages does not pin, so a
+    # new knob-bearing Chore pins its name there once regen creates the dir.
     goPackageDir = name: "cmd/launcher/internal/${name}";
   }
   {
