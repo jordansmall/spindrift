@@ -87,12 +87,12 @@ A parser on npm's row that yarn and pnpm borrow would be the cross-row
 dependency this ADR rules out.
 
 Credential sources therefore stay one table in `credresolver`. Each
-Ecosystem row declares, by source key, which stores it reads, and the
-launcher's `registry discover` command builds that map once with
-`ecosystem.CredentialStores(rows)` and hands it to
-`registrydiscover.DiscoverRows`, the way it already wires rewrite rows
-into the proxy. That removes `f.Ecosystem == "cargo"`, the one name
-literal the containment scan could not reach.
+Ecosystem row declares, by source key, which stores it reads, and
+`registrydiscover.DiscoverRows` derives that map from the rows it is
+given with `ecosystem.CredentialStores(rows)`, as the proxy's rewrite
+rows come from the same table. That removes
+`f.Ecosystem == "cargo"`, the one name literal the containment scan
+could not reach.
 
 The same review added two things:
 
