@@ -175,6 +175,11 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 	}
 	if g != baked {
 		d.ClosureGeneration = &g
+		prefetch, ok := d.Env["PREFETCH"]
+		if !ok {
+			t.Fatalf("bound generation renders no --setenv PREFETCH (bwrap keeps the launcher's ambient env): %v", argv)
+		}
+		d.ClosurePrefetch = prefetch
 	}
 	return d
 }

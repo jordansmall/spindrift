@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"testing"
@@ -30,6 +32,9 @@ type Decoded struct {
 	Network  runner.NetworkMode
 	// ClosureGeneration is nil when the argv binds no generation.
 	ClosureGeneration *runner.AgentGeneration
+	// ClosurePrefetch is the PREFETCH content a bound generation rendered;
+	// empty when no generation is bound.
+	ClosurePrefetch string
 }
 
 // Launch is one row's input: a Box plus the adapter's network-mode config,
@@ -163,7 +168,31 @@ var (
 		Reason:    "bwrap's registry transport is always unix (RegistryProxyTransport returns a unix endpoint), and the Signal socket takes that same verdict (dispatch/box.go passes it to startSignalSocket), so bwrap never needs a host-gateway mapping",
 		Otherwise: noAddHost,
 	}
+
+	bwrapOnlyClosure = &familyOnly{
+		Family:    runner.KindBwrap,
+		Reason:    "OCI boots a baked image and never binds a closure generation",
+		Otherwise: noClosureGeneration,
+	}
 )
+
+// closureGenerationWith binds a generation whose fields all differ from the
+// baked ones and whose prefetch file holds prefetch.
+func closureGenerationWith(prefetch string) func(t *testing.T) Launch {
+	return withBox(func(t *testing.T, b *runner.Box) {
+		file := filepath.Join(t.TempDir(), "prefetch")
+		if err := os.WriteFile(file, []byte(prefetch), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		b.ClosureGeneration = &runner.AgentGeneration{
+			PrefetchFile:  file,
+			AgentFiles:    "/nix/store/contract-agent-files",
+			AgentEnv:      "/nix/store/contract-agent-env",
+			NixConfigFile: "/nix/store/contract-nix-conf",
+			Generation:    "contract-gen-1",
+		}
+	})
+}
 
 var table = []row{
 	{"Name", "Name", withBox(func(*testing.T, *runner.Box) {}),
@@ -208,15 +237,10 @@ var table = []row{
 		b.SignalSocket = runner.SignalSocketLocation{Endpoint: tcpHost}
 	}), nil},
 	{"ClosureGeneration/unset", "ClosureGeneration", withBox(func(*testing.T, *runner.Box) {}), nil},
-	{"ClosureGeneration/set", "ClosureGeneration", withBox(func(_ *testing.T, b *runner.Box) {
-		// PrefetchFile stays empty: bwrap renders its content, not its path.
-		b.ClosureGeneration = &runner.AgentGeneration{
-			AgentFiles:    "/nix/store/contract-agent-files",
-			AgentEnv:      "/nix/store/contract-agent-env",
-			NixConfigFile: "/nix/store/contract-nix-conf",
-			Generation:    "contract-gen-1",
-		}
-	}), &familyOnly{Family: runner.KindBwrap, Reason: "OCI boots a baked image and never binds a closure generation", Otherwise: noClosureGeneration}},
+	{"ClosureGeneration/set", "ClosureGeneration", closureGenerationWith("echo contract-prefetch"), bwrapOnlyClosure},
+	// An empty prefetch is a legitimate swapped value, not "unset": bwrap must
+	// render "" rather than fall back to the baked one.
+	{"ClosureGeneration/set-empty-prefetch", "ClosureGeneration", closureGenerationWith(""), bwrapOnlyClosure},
 	{"Network/open", networkField, network(runner.NetworkModeOpen),
 		&familyOnly{Family: runner.KindOCI, Reason: "bwrap's pasta namespace always runs --no-map-gw (ADR 0042), so open renders identically to no-host-loopback", Otherwise: rendersAs(runner.NetworkModeNoHostLoopback)}},
 	{"Network/zero", networkField, network(""),
@@ -248,18 +272,12 @@ var facets = map[string]func(d Decoded, l Launch) error{
 		}
 		return nil
 	},
-	"DriverCacheDir": launchWide,
-	"OutboxDir":      launchWide,
-	"Sockets":        addHosts,
-	"RegistryProxy":  addHosts,
-	"SignalSocket":   addHosts,
-	"ClosureGeneration": func(d Decoded, l Launch) error {
-		want, got := l.Box.ClosureGeneration, d.ClosureGeneration
-		if (want == nil) != (got == nil) || (want != nil && *want != *got) {
-			return fmt.Errorf("ClosureGeneration = %+v, want %+v", got, want)
-		}
-		return nil
-	},
+	"DriverCacheDir":    launchWide,
+	"OutboxDir":         launchWide,
+	"Sockets":           addHosts,
+	"RegistryProxy":     addHosts,
+	"SignalSocket":      addHosts,
+	"ClosureGeneration": closureGeneration,
 	networkField: func(d Decoded, l Launch) error {
 		// The zero value is specced as open: OCINetwork emits no --network
 		// flag for it, so both families render it exactly as they render open.
@@ -364,6 +382,32 @@ func bakedCollision(l Launch, baked BakedSet) error {
 		if slices.Contains(baked.MountTargets, m.Target) {
 			return fmt.Errorf("mount target %s collides with a baked mount target", m.Target)
 		}
+	}
+	return nil
+}
+
+// closureGeneration wants the Box's generation recovered field for field. The
+// prefetch file is compared by content: bwrap renders what the file holds, not
+// its path.
+func closureGeneration(d Decoded, l Launch) error {
+	want, got := l.Box.ClosureGeneration, d.ClosureGeneration
+	if (want == nil) != (got == nil) {
+		return fmt.Errorf("ClosureGeneration = %+v, want %+v", got, want)
+	}
+	if want == nil {
+		return nil
+	}
+	w, g := *want, *got
+	w.PrefetchFile, g.PrefetchFile = "", ""
+	if w != g {
+		return fmt.Errorf("ClosureGeneration (PrefetchFile aside) = %+v, want %+v", g, w)
+	}
+	content, err := os.ReadFile(want.PrefetchFile)
+	if err != nil {
+		return fmt.Errorf("read PrefetchFile: %w", err)
+	}
+	if d.ClosurePrefetch != string(content) {
+		return fmt.Errorf("ClosurePrefetch = %q, want %q", d.ClosurePrefetch, content)
 	}
 	return nil
 }
