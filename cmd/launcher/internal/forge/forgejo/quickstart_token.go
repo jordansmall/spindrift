@@ -14,7 +14,7 @@ import (
 // There is no retry loop, so every failure path here aborts the run and tells
 // the operator to rerun the wizard.
 func acquireToken(s backendkit.Shared, l backendkit.Lookup, p backendkit.TokenPrompt) (string, error) {
-	k, err := ReadKnobs(Lookup(l))
+	k, err := ReadKnobs(l)
 	if err != nil {
 		return "", err
 	}

@@ -18,7 +18,7 @@ var Strategy = backendkit.Strategy{
 		return "branches pushed on " + s.RepoSlug
 	},
 	ValidateCodeForge: func(_ backendkit.Shared, l backendkit.Lookup) error {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return err
 		}
@@ -28,14 +28,14 @@ var Strategy = backendkit.Strategy{
 		return nil
 	},
 	NewCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, _ forge.IssueTracker) (forge.CodeForge, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
 		return NewGitClient(k.CodeForgeRemoteURL, s.BaseBranch, s.GitUserName, s.GitUserEmail, s.BranchPrefix), nil
 	},
 	CloneURL: func(_ backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return "", err
 		}
@@ -45,7 +45,7 @@ var Strategy = backendkit.Strategy{
 		return k.CodeForgeRemoteURL, nil
 	},
 	RemoteMatch: func(_ backendkit.Shared, l backendkit.Lookup, remote string) bool {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil || k.CodeForgeRemoteURL == "" {
 			return false
 		}

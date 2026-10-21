@@ -55,7 +55,7 @@ var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Pr
 // container-fallback build mounts as /workspace, a per-invocation dependency
 // passed separately from cfg.
 func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, error) {
-	k, err := ReadKnobs(Lookup(l))
+	k, err := ReadKnobs(l)
 	if err != nil {
 		return nil, err
 	}
