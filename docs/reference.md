@@ -1664,6 +1664,11 @@ The opencode cases `rate-limit-reset`, `recovered-error`, and `unsupported-flag`
 opencode v1.18.35's source (`run.ts` `emit()` and the yargs fail handler), and
 a scrubbed real capture should replace them when one exists.
 
+The real opencode cases, captured on v1.18.35, pin `LastMessageText`'s
+grouping by `part.messageID`: their result goldens hold only the last
+message's text, and `TestDecode_CorpusLines` fails if any real text event
+lacks a `messageID` (issue #5389).
+
 To add a log, scrub a raw capture, then review it by hand. The scrubber
 redacts credential-shaped strings, emails, host home paths (anything under
 `/home/<user>` or `/Users/<user>` except the Box's `/home/agent`) and the
