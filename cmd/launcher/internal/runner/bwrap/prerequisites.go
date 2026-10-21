@@ -95,3 +95,15 @@ func network(cfg runner.Config, l runner.KnobLookup) (runner.BwrapNetwork, error
 	}
 	return cfg.BwrapNetwork(k.BwrapUnshareNet), nil
 }
+
+// RawNetworkKnobs names BWRAP_UNSHARE_NET when l sets it.
+func RawNetworkKnobs(l runner.KnobLookup) ([]string, error) {
+	k, err := ReadKnobs(Lookup(l))
+	if err != nil {
+		return nil, err
+	}
+	if k.BwrapUnshareNet {
+		return []string{"BWRAP_UNSHARE_NET"}, nil
+	}
+	return nil, nil
+}

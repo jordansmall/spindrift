@@ -30,6 +30,10 @@ type Strategy struct {
 	// nixInBox Consumer. nil means the family needs no preparation (ADR 0069
 	// decision 2).
 	PrepareHotSwap func(pwd, closure string) error
+	// RawNetworkKnobs returns the env names of the family's raw network knobs
+	// set in l, read through the family's own reader; core refuses a non-open
+	// NETWORK_MODE beside any of them. nil means the family has none.
+	RawNetworkKnobs func(l KnobLookup) ([]string, error)
 }
 
 // Launch says where the launch path enforces a Required prerequisite. Doctor
