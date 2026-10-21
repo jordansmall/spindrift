@@ -1344,18 +1344,18 @@ Driver entry declares:
   `launcher-console-isolation`), which `drivers-go-test-independent`,
   `runners-go-test-independent` and `backends-go-test-independent` pin.
   Those build from a source without any Driver, runner family, bundled
-  backend, bundle or binary, and each adapter's check gofmts and vets its own
-  package instead. A
+  backend, bundle or binary (bar the vendor input, whose outPath is pinned),
+  and each adapter's check gofmts and vets its own package instead. A
   Driver, runner-family or bundled-backend edit never reruns another
   Driver's, family's or bundled backend's check either (the backends that
   build on another, `local` and `forgejo`, build on the core `git`
   backend), and a runner-family edit never reruns a backend check, which
   `backends-go-test-independent` also pins. If
   the tests import an internal package missing from that check's fileset, add
-  it to `driverGoTestShared` in `nix/checks/go.nix`. The check vendors from a
-  source without any Driver directory under the launcher's `launcherVendorHash`,
-  so a Driver importing a third-party module no other launcher package uses
-  makes that vendor derivation mismatch the hash.
+  it to `driverGoTestShared` in `nix/checks/go.nix`. Every go test vendors the
+  whole launcher tree under `launcherVendorHash`, so a Driver importing a
+  third-party package nothing else vendors changes that hash for every check
+  alike (issue #5529).
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row

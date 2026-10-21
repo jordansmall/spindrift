@@ -60,24 +60,26 @@ let
         allDriverDirs ++ allRunnerDirs ++ bundledBackendDirs ++ [ bundleDir ] ++ bundleBinaryDirs
       )
     );
-  # The vendor tree is re-derived from a source without any Driver, runner
-  # family, bundled backend, bundle or binary, so editing one Driver, family or
-  # bundled backend never changes another's drvPath nor the core go test's (a
-  # plain launcherGoModules would, its src being the whole tree). Fixed-output
-  # with the same vendorHash, so its outPath equals launcherGoModules' and
-  # nothing is fetched twice. `go mod vendor -e` tolerates the packages that
-  # import the absent directories.
-  # Gotcha: a Driver, runner family, bundled backend or main importing a
-  # third-party module no other package uses changes the vendored set, and the
-  # narrowed derivation then mismatches launcherVendorHash.
+  # The vendor tree follows `files` so the independence checks model a real
+  # edit: a real Driver edit moves launcherGoModules' src and so its drvPath.
+  # That is harmless: it is fixed-output with launcherVendorHash, so it always
+  # realises to launcherGoModules' outPath (nothing is fetched twice, and the
+  # baked closure substitutes it), and a dependant's outPath takes a
+  # fixed-output input's output hash, not its drvPath. The checks therefore
+  # compare outPaths, never drvPaths. It is deliberately not narrowed to
+  # coreFiles (issue #5529): a narrowed FOD with the same name and hash shares
+  # launcherGoModules' outPath, so a narrowing-induced hash mismatch would
+  # fail only by scheduling luck; renaming it would force a second module
+  # fetch on every cold build, unsubstitutable from the extraClosures
+  # (ADR 0018); and comparing its modules.txt with the full one only detects
+  # the mismatch, still building the narrowed FOD and paying that fetch.
   vendorFor =
     files:
     launcherGoModules.overrideAttrs (_: {
       src = fs.toSource {
         root = launcherDir;
-        fileset = coreFiles files;
+        fileset = files;
       };
-      preBuild = "goModVendorFlags=(-e)";
     });
   nixSrc = fs.toSource {
     root = ../..;
@@ -135,9 +137,8 @@ let
   # adapter's package directory under cmd/launcher; `sharedFor name` the extra
   # packages its tests reach. `files` is the cmd/launcher fileset every source
   # is cut from; the independence check perturbs it. The vendor tree is
-  # `vendorFor files`, so one Driver's or runner family's edits never move
-  # another's drvPath; coreFiles keeps the core backends (git, local), so
-  # editing one moves every backend's drvPath, though not its outPath.
+  # `vendorFor files`, whose drvPath follows `files` but whose outPath never
+  # does, so an edit moves only the go tests whose source holds the file.
   # `setupFor name` is shell run after the copy for files outside cmd/launcher
   # its tests read. Each also gofmts and vets the adapter's own package, so
   # launcher-go-fmt and launcher-go-vet need not see it.
@@ -186,6 +187,8 @@ let
           '';
       }) names
     );
+  # The vendor tree is not narrowed per Driver; vendorFor records why (issue
+  # #5529).
   driverGoTestsFor =
     { files, names }:
     adapterGoTests {
@@ -356,9 +359,9 @@ let
   #
   # With `independence = { dirFor, noun; }` (`dirFor name` the adapter's
   # directory, `noun` what the assert messages call an adapter), editing one
-  # adapter leaves every other adapter's go test derivation path, and every core
+  # adapter leaves every other adapter's go test outPath, and every core
   # check's, unchanged (issues #5508, #5545, #5562, #5688): coreFiles strips
-  # the adapter directories, so no vendor tree or source is shared. Each adapter
+  # the adapter directories, so no source is shared. Each adapter
   # in turn has one file removed; the sensitivity assert keeps the check from
   # passing vacuously.
   adapterRegistryChecks =
@@ -381,7 +384,7 @@ let
         files = launcherDir;
         inherit names;
       };
-      drv = set: n: set.${adapterGoTestAttr prefix n}.drvPath;
+      outOf = set: n: set.${adapterGoTestAttr prefix n}.outPath;
       # The pattern rejects an `independence` missing either key at the call,
       # not later when a failing assert first builds its message.
       independent =
@@ -396,14 +399,14 @@ let
             files = edited;
             inherit names;
           };
-          moved = builtins.filter (n: n != p && drv baseline n != drv after n) names;
+          moved = builtins.filter (n: n != p && outOf baseline n != outOf after n) names;
           coreMoved = coreChecksMovedBy edited;
         in
-        assertMsg (drv baseline p != drv after p)
-          "removing ${file} from the ${p} ${noun} did not change its own go test derivation; the perturbation is inert"
+        assertMsg (outOf baseline p != outOf after p)
+          "removing ${file} from the ${p} ${noun} did not change its own go test outPath; the perturbation is inert"
         && assertMsg (
           moved == [ ]
-        ) "editing the ${p} ${noun} changed the go test derivation of: ${concatStringsSep ", " moved}"
+        ) "editing the ${p} ${noun} changed the go test outPath of: ${concatStringsSep ", " moved}"
         && assertMsg (
           coreMoved == [ ]
         ) "editing the ${p} ${noun} changed: ${concatStringsSep ", " coreMoved}";
@@ -458,8 +461,9 @@ let
   # launcher-binaries-go-test.
   corePkgs = ''$(go list ./... | grep -vxF "$(go list -m)/internal/driver")'';
   # The core run: every package that needs no Driver, bundle or main. It cuts
-  # its source from coreFiles, so a Driver edit never reaches this derivation;
-  # the assert fails if the copied tree still holds one. The corpus find is
+  # its source from coreFiles, so a Driver edit never moves its outPath (only
+  # its vendorFor input's drvPath, which a dependant's outPath ignores); the
+  # assert fails if the copied tree still holds one. The corpus find is
   # defence in depth, for a corpus landing under internal/driver outside a
   # Driver directory.
   launcherGoTestFor =
@@ -577,14 +581,14 @@ let
     '';
     launcher-console-isolation = consoleIsolationFor files;
   };
-  # Names of the core checks whose drvPath differs from the unedited tree's.
+  # Names of the core checks whose outPath differs from the unedited tree's.
   coreChecksMovedBy =
     files:
     let
       base = coreChecksFor launcherDir;
       after = coreChecksFor files;
     in
-    builtins.filter (n: base.${n}.drvPath != after.${n}.drvPath) (builtins.attrNames base);
+    builtins.filter (n: base.${n}.outPath != after.${n}.outPath) (builtins.attrNames base);
   # The Dashboard is a separate dependency-free module (ADR 0060), so the
   # vendored-launcher GOFLAGS=-mod=vendor from goCheckEnv is reset: it has no
   # vendor/ tree. Ends with src as the working directory.
@@ -797,14 +801,13 @@ driverGoTests
   # for backends: the core backends live in the core checks.
   #
   # No backend's go test source holds another backend's directory, bar the git
-  # backend's for `local` and forgejo (issue #5637). A fileset check for the
-  # backend-to-backend leaks, since a core backend edit still moves every
-  # backend's vendor drvPath. Editing a bundled backend (issue #5648) leaves the
-  # core checks' drvPaths unchanged, while editing a core backend moves every
-  # core check's. Editing a runner family leaves every backend's go test
-  # drvPath unchanged, as backends need only the runner root package; the
-  # family's own sensitivity is asserted by runners-go-test-independent. The
-  # sensitivity asserts keep it from passing vacuously.
+  # backend's for `local` and forgejo (issue #5637), which a fileset check
+  # asserts. Editing a bundled backend (issue #5648) leaves the core checks'
+  # outPaths unchanged, while editing a core backend moves every core check's.
+  # Editing a runner family leaves every backend's go test outPath unchanged,
+  # as backends need only the runner root package; the family's own
+  # sensitivity is asserted by runners-go-test-independent. The sensitivity
+  # asserts keep it from passing vacuously.
   backends-go-test-independent =
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
@@ -831,13 +834,13 @@ driverGoTests
           n: builtins.filter (c: !builtins.elem c (movedBy n)) allCoreChecks
         ) coreBackendNames
       );
-      backendDrvs = set: map (n: set.${adapterGoTestAttr "backends" n}.drvPath) backendNames;
+      backendOuts = set: map (n: set.${adapterGoTestAttr "backends" n}.outPath) backendNames;
       runnerMoved = builtins.filter (
         n:
-        backendDrvs (backendGoTestsFor {
+        backendOuts (backendGoTestsFor {
           files = afterRemoving (runnerDir n);
           names = backendNames;
-        }) != backendDrvs backendGoTests
+        }) != backendOuts backendGoTests
       ) runnerNames;
       sensitivityRows = builtins.filter (row: row ? goTestBuildsOn) backendRowList;
       leaks = concatStringsSep ", " (
@@ -863,7 +866,7 @@ driverGoTests
       coreInert == [ ]
     ) "editing a core backend left unchanged: ${concatStringsSep ", " coreInert}; the check is inert";
     assert assertMsg (runnerMoved == [ ])
-      "editing the ${concatStringsSep ", " runnerMoved} runner family changed a backend's go test derivation";
+      "editing the ${concatStringsSep ", " runnerMoved} runner family changed a backend's go test outPath";
     assert assertMsg (leaks == "") "backend go test sources hold sibling backends: ${leaks}";
     pkgs.runCommand "backends-go-test-independent" { } "touch $out";
 
