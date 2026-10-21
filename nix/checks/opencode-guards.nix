@@ -43,6 +43,9 @@
         stage $TMPDIR/guards-silent.js $TMPDIR/silent
         stage $TMPDIR/guards-silent-tee.js $TMPDIR/silent-tee
 
+        sed 's|tools: \["bash"\], rewrites: false|tools: ["bash", "nosuchtool"], rewrites: false|' $TMPDIR/guards.js > $TMPDIR/guards-unmapped.js
+        grep -qF '"nosuchtool"' $TMPDIR/guards-unmapped.js
+
         export HOME=$TMPDIR/home
         mkdir -p $HOME
         export HOOKS_DIR=$hooks
@@ -53,6 +56,7 @@
         export PLUGIN_GARBAGE=$TMPDIR/guards-garbage.js
         export PLUGIN_SILENT=$TMPDIR/guards-silent.js
         export PLUGIN_SILENT_TEE=$TMPDIR/guards-silent-tee.js
+        export PLUGIN_UNMAPPED=$TMPDIR/guards-unmapped.js
         export CREDENTIAL_PATHS='${builtins.toJSON (import ../../lib/credential-paths.nix)}'
         BUN_BE_BUN=1 ${pkgs.opencode}/bin/opencode ${../../tests/opencode-guards.test.mjs}
         touch $out

@@ -2,11 +2,12 @@
 // nix/checks/opencode-guards.nix under opencode's own runtime. Env in:
 // PLUGIN (wired to the staged hooks), PLUGIN_MISSING, PLUGIN_GARBAGE and
 // PLUGIN_SILENT (wired to a missing dir, to hooks that print non-JSON, and to
-// hooks that exit 0 printing nothing), PLUGIN_SILENT_TEE (the real hooks, except a
-// tee that exits 0 printing nothing), CREDENTIAL_PATHS (the JSON of
-// lib/credential-paths.nix), HOOKS_DIR. The summary hook reads
-// BASH_OUTPUT_SUMMARY_TAIL_BYTES from this env; the test takes the bound from
-// there, never from a constant of its own.
+// hooks that exit 0 printing nothing), PLUGIN_SILENT_TEE (the real hooks,
+// except a tee that exits 0 printing nothing), CREDENTIAL_PATHS (the JSON of
+// lib/credential-paths.nix), PLUGIN_UNMAPPED (a hook row naming an unmapped
+// tool), HOOKS_DIR. The summary hook reads BASH_OUTPUT_SUMMARY_TAIL_BYTES from
+// this env; the test takes the bound from there, never from a constant of its
+// own.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -270,6 +271,15 @@ for (const [label, env] of [
     assert.equal(output.output, raw);
   });
 }
+
+// opencode skips a plugin whose load throws, leaving every guard off; a hook row
+// naming an unmapped tool must still import and refuse every call, guarded or not.
+test("an unmapped hook tool still loads and refuses every call", async () => {
+  const bad = await load(process.env.PLUGIN_UNMAPPED);
+  for (const tool of ["bash", "read", "glob"]) {
+    await assert.rejects(run(bad.before, tool, { command: "true", filePath: "x" }), /nosuchtool.*no CLAUDE_TOOLS entry/);
+  }
+});
 
 let failed = 0;
 for (const [name, fn] of cases) {
