@@ -28,6 +28,7 @@ targets_credential_path() {
   [[ "$s" =~ (^|$lead)\.claude/\.credentials\.json($|$trail) ]] && return 0
   [[ "$s" =~ (^|$lead)\.config/gh/hosts\.yml($|$trail) ]] && return 0
   [[ "$s" =~ (^|$lead)\.pi/agent/auth\.json($|$trail) ]] && return 0
+  [[ "$s" =~ (^|$lead)\.local/share/opencode/auth\.json($|$trail) ]] && return 0
   [[ "$s" =~ (^|$lead)\.env(\.[[:alnum:]_-]+)?($|$trail) ]] && return 0
   return 1
 }
