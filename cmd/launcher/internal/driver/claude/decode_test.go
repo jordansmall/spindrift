@@ -394,6 +394,32 @@ func TestDecodeObjectErrorAssistantLineIsContent(t *testing.T) {
 	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage)
 }
 
+// Each top-level probe reads only its own fields, so one mistyped field fails
+// only the probe that reads it (issue #5438).
+func TestDecodeNumericTimestampKeepsContentDropsTimestamp(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"assistant","timestamp":123,"message":{"model":"claude-x","content":[{"type":"text","text":"hi"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindUsage)
+	for _, ev := range evs {
+		if ev.Timestamp != 0 {
+			t.Errorf("%s timestamp = %d, want 0", ev.Kind, ev.Timestamp)
+		}
+	}
+}
+
+func TestDecodeMistypedHostOpFallsThroughToError(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"spindrift_op","spindrift_op":"oops"}`)
+	wantKinds(t, evs, driverkit.KindError)
+}
+
+func TestDecodeMistypedModelIsErrorKeepsTimestamp(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z","message":{"model":7,"content":[{"type":"text","text":"hi"}]}}`)
+	wantKinds(t, evs, driverkit.KindError)
+	want := time.Date(2026, 8, 11, 19, 0, 0, 0, time.UTC).UnixMilli()
+	if evs[0].Timestamp != want {
+		t.Errorf("timestamp = %d, want %d", evs[0].Timestamp, want)
+	}
+}
+
 func TestDecodeToolResultBlockInSubagent(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	d(`{"type":"assistant","message":{"id":"s","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
