@@ -2167,9 +2167,9 @@ rec {
     + "}\n"
     + "\n"
     + "// Lookup resolves one knob's env name to its already-resolved value (after any\n"
-    + "// _CMD resolution) and whether it is set. It has os.LookupEnv's shape, so\n"
-    + "// os.LookupEnv is a valid Lookup.\n"
-    + "type Lookup func(env string) (value string, ok bool)\n"
+    + "// _CMD resolution) and whether it is set. An alias of os.LookupEnv's unnamed\n"
+    + "// func type, so any lookup of that shape passes without conversion.\n"
+    + "type Lookup = func(env string) (value string, ok bool)\n"
     + "\n"
     + "// ReadKnobs reads every knob through lookup.\n"
     + emptyDoc

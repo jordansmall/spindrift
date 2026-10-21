@@ -29,9 +29,9 @@ type Knobs struct {
 }
 
 // Lookup resolves one knob's env name to its already-resolved value (after any
-// _CMD resolution) and whether it is set. It has os.LookupEnv's shape, so
-// os.LookupEnv is a valid Lookup.
-type Lookup func(env string) (value string, ok bool)
+// _CMD resolution) and whether it is set. An alias of os.LookupEnv's unnamed
+// func type, so any lookup of that shape passes without conversion.
+type Lookup = func(env string) (value string, ok bool)
 
 // ReadKnobs reads every knob through lookup.
 // An unset knob takes its row default, as does an empty one unless empty is a
