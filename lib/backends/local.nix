@@ -4,6 +4,8 @@
 {
   name = "local";
   goVar = "Local";
+  # ADR 0068, decision 7: core keeps this backend; read by nix/checks/go.nix.
+  core = true;
   displayName = "local";
   validAsTracker = true;
   validAsCodeForge = true;

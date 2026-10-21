@@ -100,8 +100,9 @@
 # tests read beside cmd/launcher; nix/checks/go.nix copies them into that
 # backend's test source. goTestBuildsOn (optional) names the backend whose
 # package this one uses as a library, so its go test source may hold that
-# sibling's directory (issue #5637). Like `knobs`, the generated Descriptor
-# ignores both.
+# sibling's directory (issue #5637). core (optional bool) marks a backend the core
+# build keeps (ADR 0068, decision 7); every other row is stripped from the core run.
+# Like `knobs`, the generated Descriptor ignores all three.
 
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
