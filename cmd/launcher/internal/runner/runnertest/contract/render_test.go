@@ -3,6 +3,8 @@ package contract
 import (
 	"io"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -19,15 +21,24 @@ const (
 	hostsNone               // renders no host
 )
 
+type prefetchFault int
+
+const (
+	prefetchFaithful prefetchFault = iota
+	prefetchBaked                  // renders the baked value, ignoring the file
+	prefetchEmpty                  // renders nothing
+)
+
 // stubHarness stands in for an adapter: Render stashes the Launch and Decode
 // reads back whatever the stub's family would have rendered, minus drop.
 type stubHarness struct {
-	family  string
-	drop    string // Box field (or networkField) the stub fails to render
-	hosts   hostFault
-	name    string             // decoded as the Name on either family, when non-empty
-	network runner.NetworkMode // overrides the decoded mode, when non-empty
-	last    Launch
+	family   string
+	drop     string // Box field (or networkField) the stub fails to render
+	hosts    hostFault
+	prefetch prefetchFault
+	name     string             // decoded as the Name on either family, when non-empty
+	network  runner.NetworkMode // overrides the decoded mode, when non-empty
+	last     Launch
 
 	extraMount *Mount            // a bind no spec asked for
 	extraEnv   map[string]string // env no spec asked for
@@ -60,7 +71,7 @@ func (s *stubHarness) Render(_ *testing.T, l Launch) []string {
 	return []string{"stub"}
 }
 
-func (s *stubHarness) Decode(*testing.T, []string) Decoded {
+func (s *stubHarness) Decode(t *testing.T, _ []string) Decoded {
 	b, oci := s.last.Box, s.family == runner.KindOCI
 	d := Decoded{Env: map[string]string{}, Network: s.last.Network}
 	if !s.skipBaked {
@@ -115,6 +126,19 @@ func (s *stubHarness) Decode(*testing.T, []string) Decoded {
 	}
 	if !oci && keep("ClosureGeneration") {
 		d.ClosureGeneration = b.ClosureGeneration
+		if g := b.ClosureGeneration; g != nil && g.PrefetchFile != "" {
+			content, err := os.ReadFile(g.PrefetchFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.ClosurePrefetch = string(content)
+			switch s.prefetch {
+			case prefetchBaked:
+				d.ClosurePrefetch = "echo ok"
+			case prefetchEmpty:
+				d.ClosurePrefetch = ""
+			}
+		}
 	}
 	if s.wrongClosure != nil {
 		d.ClosureGeneration = s.wrongClosure
@@ -237,6 +261,30 @@ func TestSharedAddHostRowWantsExactlyOneHost(t *testing.T) {
 		if err := checkRow(t, h, r); err == nil {
 			t.Errorf("stub rendering hosts fault %d passed the shared add-host row", hosts)
 		}
+	}
+}
+
+func TestClosureGenerationRowsWantTheRenderedPrefetch(t *testing.T) {
+	for _, tc := range []struct {
+		row   string
+		fault prefetchFault
+	}{
+		{"ClosureGeneration/set", prefetchBaked},
+		{"ClosureGeneration/set", prefetchEmpty},
+		{"ClosureGeneration/set-empty-prefetch", prefetchBaked},
+	} {
+		h := &stubHarness{family: runner.KindBwrap, prefetch: tc.fault}
+		if err := checkRow(t, h, rowNamed(t, tc.row)); err == nil {
+			t.Errorf("%s: prefetch fault %d passed", tc.row, tc.fault)
+		}
+	}
+}
+
+func TestClosureGenerationFacetRejectsUnreadablePrefetch(t *testing.T) {
+	g := &runner.AgentGeneration{PrefetchFile: filepath.Join(t.TempDir(), "missing")}
+	l := Launch{Box: runner.Box{ClosureGeneration: g}}
+	if err := facets["ClosureGeneration"](Decoded{ClosureGeneration: g}, l); err == nil {
+		t.Error("unreadable PrefetchFile passed")
 	}
 }
 
