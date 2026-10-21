@@ -792,6 +792,7 @@ rec {
       rowFields = [
         (required "name" "Name")
         (optional "providerNamespacedModels" "ProviderNamespacedModels" false)
+        (optional "effortOnModelLevels" "EffortOnModelLevels" null)
         (required "credentials" "Credentials")
         (optional "authContent" "AuthContent" null)
       ];
@@ -834,6 +835,7 @@ rec {
             "\t${goName}: &AuthContent{Env: ${builtins.toJSON value.env}, OAuthProviders: ${goStrings value.oauthProviders}${
               authAPIKeyProviders (value.apiKeyProviders or { })
             }},\n";
+          effortOnModelLevels = goName: value: "\t${goName}: ${goStrings value},\n";
           credentials =
             goName: value:
             if value == [ ] then

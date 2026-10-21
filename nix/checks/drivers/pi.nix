@@ -8,7 +8,7 @@
   ...
 }:
 let
-  inherit (pkgs.lib) assertMsg hasInfix;
+  inherit (pkgs.lib) assertMsg concatStringsSep hasInfix;
   inherit (fixtures) piFullRosterHarness;
   preamble = driverRegistry.renderPreamble entry;
   piFixtureEntry = {
@@ -23,6 +23,7 @@ let
     promptFile = "fixture-prompt.md";
     prompt = null;
   };
+  renderers = import ../../../lib/renderers.nix;
   effortLib = import ../../../lib/effort-on-model.nix { inherit (pkgs) lib; };
 in
 {
@@ -428,4 +429,15 @@ in
       && !(hasInfix ":low:high" reviewer)
     ) "a suffixed reviewModel must render once through mkHarness, got: ${reviewer}";
     pkgs.runCommand "drivers-pi-effort-suffixed-model-wins" { } "touch $out";
+
+  # Issue #5625: Go reads the levels from the generated Descriptor, so the pi
+  # row's own list must reach descriptor_gen.go's pi Descriptor.
+  drivers-pi-effort-on-model-levels-reach-descriptor =
+    let
+      rendered = renderers.renderDriverDescriptorsGo driverRegistry.entries;
+      levels = "[]string{${concatStringsSep ", " (map builtins.toJSON entry.effortOnModelLevels)}}";
+    in
+    assert assertMsg (hasInfix "EffortOnModelLevels: ${levels}," rendered)
+      "the rendered pi Descriptor must carry the row's effortOnModelLevels ${levels}";
+    pkgs.runCommand "drivers-pi-effort-on-model-levels-reach-descriptor" { } "touch $out";
 }

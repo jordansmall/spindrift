@@ -13,6 +13,10 @@ type Descriptor struct {
 	// ProviderNamespacedModels is set when the Driver's model ids are
 	// <provider>/<model>.
 	ProviderNamespacedModels bool
+	// EffortOnModelLevels are the levels a model id's `:<level>` suffix may
+	// carry, as the Driver reads effort from it; nil when effort does not ride
+	// on the model.
+	EffortOnModelLevels []string
 	// Credentials are the rules by which the Driver is authenticated; a run
 	// is authenticated when every rule that applies to its models is met.
 	Credentials []CredentialRule
