@@ -514,3 +514,15 @@ func TestHostTokenValue(t *testing.T) {
 		}
 	}
 }
+
+// setRowKnob stores a row knob's resolved value, as a test fixture would set
+// it. It copies the map first so a config copied by value never shares writes
+// with the original.
+func (c *schemaConfig) setRowKnob(env, value string) {
+	m := make(map[string]string, len(c.rowKnobs)+1)
+	for k, v := range c.rowKnobs {
+		m[k] = v
+	}
+	m[env] = value
+	c.rowKnobs = m
+}

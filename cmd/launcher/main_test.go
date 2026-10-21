@@ -972,10 +972,9 @@ func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
 	}
 }
 
-// loadConfig() itself applies absCodeForgeAccumulationRepoDir when
-// CODE_FORGE=local, so newCodeForge's host-side landing forge and
-// runnerConfig's /repo mount source agree on one resolved absolute path
-// (issue #1726).
+// core obtains the Accumulation repo path through the local Strategy, so
+// newCodeForge's host-side landing forge and runnerConfig's /repo mount source
+// agree on one resolved absolute path (issue #1726).
 func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
 	t.Setenv("CODE_FORGE", "local")
 	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
@@ -987,21 +986,53 @@ func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := filepath.Join(wd, ".spindrift", "accum.git")
-	if c.accumulationRepoDir() != want {
-		t.Errorf("loadConfig().accumulationRepoDir() = %q, want %q", c.accumulationRepoDir(), want)
+	if c.hostRepoDir() != want {
+		t.Errorf("loadConfig().hostRepoDir() = %q, want %q", c.hostRepoDir(), want)
+	}
+}
+
+// An operator-supplied relative override beats the default and resolves
+// absolute, in every consumer of the path.
+func TestLoadConfig_CodeForgeLocal_RelativeAccumulationRepoDirResolvedAbsolute(t *testing.T) {
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "custom-accum-dir")
+
+	c := loadConfig()
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(wd, "custom-accum-dir")
+	if got := c.hostRepoDir(); got != want {
+		t.Errorf("loadConfig().hostRepoDir() = %q, want %q", got, want)
+	}
+	if got := runnerConfig(c).AccumulationRepoDir; got != want {
+		t.Errorf("runnerConfig().AccumulationRepoDir = %q, want %q", got, want)
+	}
+	if got := localloopConfig(c).AccumulationRepoDir; got != want {
+		t.Errorf("localloopConfig().AccumulationRepoDir = %q, want %q", got, want)
 	}
 }
 
 // The default is local-only: github/git forges get no Accumulation repo
 // default, so the field stays empty (issue #1726).
-func TestLoadConfig_CodeForgeGithub_AccumulationRepoDirStaysEmpty(t *testing.T) {
-	t.Setenv("CODE_FORGE", "github")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+func TestLoadConfig_NonLocalForge_AccumulationRepoDirStaysEmpty(t *testing.T) {
+	for _, cf := range []string{"github", "git", "forgejo"} {
+		t.Setenv("CODE_FORGE", cf)
+		t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
-	c := loadConfig()
+		c := loadConfig()
 
-	if c.accumulationRepoDir() != "" {
-		t.Errorf("loadConfig().accumulationRepoDir() = %q, want empty for CODE_FORGE=github", c.accumulationRepoDir())
+		if got := c.hostRepoDir(); got != "" {
+			t.Errorf("CODE_FORGE=%s: loadConfig().hostRepoDir() = %q, want empty", cf, got)
+		}
+	}
+	// An empty or unregistered forge name has no Strategy, so no hook either.
+	var c config
+	c.setRowKnob("CODE_FORGE_ACCUMULATION_REPO_DIR", "/acc")
+	if got := c.hostRepoDir(); got != "" {
+		t.Errorf("CODE_FORGE=\"\": hostRepoDir() = %q, want empty", got)
 	}
 }
 
@@ -1021,52 +1052,11 @@ func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *t
 	if !filepath.IsAbs(rc.AccumulationRepoDir) {
 		t.Fatalf("runnerConfig().AccumulationRepoDir = %q, want an absolute path", rc.AccumulationRepoDir)
 	}
-	if rc.AccumulationRepoDir != c.accumulationRepoDir() {
-		t.Errorf("runnerConfig().AccumulationRepoDir = %q, want %q (loadConfig's resolved value)", rc.AccumulationRepoDir, c.accumulationRepoDir())
+	if rc.AccumulationRepoDir != c.hostRepoDir() {
+		t.Errorf("runnerConfig().AccumulationRepoDir = %q, want %q (the Strategy's resolved value)", rc.AccumulationRepoDir, c.hostRepoDir())
 	}
-}
-
-// CODE_FORGE=local with the knob unset defaults to .spindrift/accum.git under
-// the process cwd, resolved absolute, so the /repo mount and the host-side
-// landing forge agree (issue #1726).
-func TestAbsCodeForgeAccumulationRepoDir_DefaultsWhenLocalAndUnset(t *testing.T) {
-	got := absCodeForgeAccumulationRepoDir("local", "")
-
-	if !filepath.IsAbs(got) {
-		t.Fatalf("absCodeForgeAccumulationRepoDir(local, \"\") = %q, want an absolute path", got)
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(wd, ".spindrift", "accum.git")
-	if got != want {
-		t.Errorf("absCodeForgeAccumulationRepoDir(local, \"\") = %q, want %q", got, want)
-	}
-}
-
-// An operator-supplied relative override still beats the default and is
-// resolved to an absolute path (issue #1726).
-func TestAbsCodeForgeAccumulationRepoDir_ExplicitOverrideResolvedAbsolute(t *testing.T) {
-	got := absCodeForgeAccumulationRepoDir("local", "custom-accum-dir")
-
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(wd, "custom-accum-dir")
-	if got != want {
-		t.Errorf("absCodeForgeAccumulationRepoDir(local, %q) = %q, want %q", "custom-accum-dir", got, want)
-	}
-}
-
-// github/git forges get no default and no resolution: the field stays empty
-// (issue #1726).
-func TestAbsCodeForgeAccumulationRepoDir_NonLocalLeavesDirUntouched(t *testing.T) {
-	for _, cf := range []string{"github", "git", ""} {
-		if got := absCodeForgeAccumulationRepoDir(cf, ""); got != "" {
-			t.Errorf("absCodeForgeAccumulationRepoDir(%q, \"\") = %q, want \"\"", cf, got)
-		}
+	if got := localloopConfig(c).AccumulationRepoDir; got != rc.AccumulationRepoDir {
+		t.Errorf("localloopConfig().AccumulationRepoDir = %q, want %q", got, rc.AccumulationRepoDir)
 	}
 }
 

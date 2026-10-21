@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -398,7 +397,6 @@ func loadConfig() config {
 	image := getenvArtifact("IMAGE", imageTag)
 
 	sc := loadSchemaConfig()
-	sc.setRowKnob(accumulationRepoDirEnv, absCodeForgeAccumulationRepoDir(sc.codeForge, sc.rowKnobs[accumulationRepoDirEnv]))
 
 	runtime := getenvArtifact("RUNTIME", "")
 	// No runtime-name fallback: the nix pipeline always renders RUNNER_KIND
@@ -770,26 +768,6 @@ func delivered(o settle.DispatchOutcome) bool {
 		(o.PRURL != "" || o.Reason != settle.ReasonMergeBlocked)
 }
 
-// absCodeForgeAccumulationRepoDir resolves the Accumulation repo dir (ADR
-// 0033) for CODE_FORGE=local to an absolute host path, defaulting an unset
-// knob to .spindrift/accum.git under the process cwd (issue #1726). The
-// read-only /repo Box mount and the landing forge's git subprocesses both need
-// the same path, so it is resolved once here. Other forges leave dir alone.
-func absCodeForgeAccumulationRepoDir(codeForge, dir string) string {
-	row, _ := backendkit.ByName(codeForge)
-	if !row.HostMediatedRemote {
-		return dir
-	}
-	if dir == "" {
-		dir = filepath.Join(".spindrift", "accum.git")
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return dir
-	}
-	return abs
-}
-
 // runnerConfig builds the runner.Config a runner adapter needs. Shared by the
 // `run` and `build` entry points; build never calls Run, so leaving
 // PromptDir/SkillsDir populated is harmless there.
@@ -827,7 +805,7 @@ func runnerConfig(c config) runner.Config {
 			SkillsDir:             c.spindriftSkillsDir,
 			DriverSessionCacheDir: c.driverSessionCacheDir,
 			HostMediatedRemote:    sig.hostMediatedRemote,
-			AccumulationRepoDir:   c.accumulationRepoDir(),
+			AccumulationRepoDir:   c.hostRepoDir(),
 		},
 	}
 }
@@ -1054,7 +1032,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 // which Accumulation repo, base branch, or git identity a seam lands through.
 func localloopConfig(c config) localloop.Config {
 	return localloop.Config{
-		AccumulationRepoDir: c.accumulationRepoDir(),
+		AccumulationRepoDir: c.hostRepoDir(),
 		BaseBranch:          c.baseBranch,
 		GitUserName:         c.gitUserName,
 		GitUserEmail:        c.gitUserEmail,
