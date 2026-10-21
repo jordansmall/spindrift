@@ -1132,16 +1132,17 @@ rec {
 
   # The HOOKS array and SUMMARY_HOOK line shared by both generated hook files:
   # `column`'s PreToolUse rows in table order (each hook sees the args the
-  # earlier ones rewrote), `fields` rendering one row's extra object members.
+  # earlier ones rewrote). `tools` are the row's claude matchers lowercased,
+  # which is how both opencode and pi name them.
   renderHooksJs =
-    column: fields: rows:
+    column: rows:
     "const HOOKS = [\n"
     + concatStrings (
       map (
         r:
-        "  { script: \"${r.script}\", ${fields r}rewrites: ${
-            if r.${column}.rewrites then "true" else "false"
-          } },\n"
+        "  { script: \"${r.script}\", tools: [${
+            builtins.concatStringsSep ", " (map (m: "\"${toLower m}\"") r.matchers)
+          }], rewrites: ${if r.${column}.rewrites then "true" else "false"} },\n"
       ) (preToolUseRows column rows)
     )
     + "];\n"
@@ -1151,14 +1152,11 @@ rec {
 
   # agent/opencode-guards.js's generated HOOKS and SUMMARY_HOOK (issue #5408):
   # the opencode rows of lib/bash-hooks.nix (whose opencodeHooks validates them).
-  renderOpencodeHooksJs = renderHooksJs "opencode" (_: "");
+  renderOpencodeHooksJs = renderHooksJs "opencode";
 
   # agent/pi-hook-bridge.js's generated HOOKS and SUMMARY_HOOK (issue #5482):
-  # the pi rows of lib/bash-hooks.nix (whose piHooks validates them). `tools`
-  # are the row's claude matchers named as pi names them.
-  renderPiHooksJs = renderHooksJs "pi" (
-    r: "tools: [${builtins.concatStringsSep ", " (map (m: "\"${toLower m}\"") r.matchers)}], "
-  );
+  # the pi rows of lib/bash-hooks.nix (whose piHooks validates them).
+  renderPiHooksJs = renderHooksJs "pi";
 
   # docs/reference.md's opencode tool.execute.before run order (issue #5408):
   # the same HOOKS as renderOpencodeHooksJs, as a numbered list.

@@ -1,9 +1,9 @@
 # Behaviour test for the opencode guard plugin (issue #5346): it must run the
-# baked claude Bash hooks, so credentials are scrubbed, environ reads and
-# backgrounding are refused with the hooks' own messages, a broken hook
-# fails closed, and a long Bash result is bounded to a tail by the baked
-# summary hook (issue #5358). Runs under opencode's own runtime
-# (BUN_BE_BUN=1) so no separate JS engine is needed.
+# baked claude Bash hooks, so credentials are scrubbed, environ reads,
+# credential-file bash and read calls, and backgrounding are refused with the
+# hooks' own messages, a broken hook or jq fails closed, and a long Bash result
+# is bounded to a tail by the baked summary hook (issue #5358). Runs under
+# opencode's own runtime (BUN_BE_BUN=1) so no separate JS engine is needed.
 { pkgs, ... }:
 {
   opencode-guards-test =
@@ -53,6 +53,7 @@
         export PLUGIN_GARBAGE=$TMPDIR/guards-garbage.js
         export PLUGIN_SILENT=$TMPDIR/guards-silent.js
         export PLUGIN_SILENT_TEE=$TMPDIR/guards-silent-tee.js
+        export CREDENTIAL_PATHS='${builtins.toJSON (import ../../lib/credential-paths.nix)}'
         BUN_BE_BUN=1 ${pkgs.opencode}/bin/opencode ${../../tests/opencode-guards.test.mjs}
         touch $out
       '';

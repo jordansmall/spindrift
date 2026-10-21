@@ -3,12 +3,15 @@
 // PLUGIN (wired to the staged hooks), PLUGIN_MISSING, PLUGIN_GARBAGE and
 // PLUGIN_SILENT (wired to a missing dir, to hooks that print non-JSON, and to
 // hooks that exit 0 printing nothing), PLUGIN_SILENT_TEE (the real hooks, except a
-// tee that exits 0 printing nothing), HOOKS_DIR. The summary hook reads
+// tee that exits 0 printing nothing), CREDENTIAL_PATHS (the JSON of
+// lib/credential-paths.nix), HOOKS_DIR. The summary hook reads
 // BASH_OUTPUT_SUMMARY_TAIL_BYTES from this env; the test takes the bound from
 // there, never from a constant of its own.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 async function load(path) {
@@ -93,8 +96,95 @@ test("backgrounding is refused with the reject hook's message", async () => {
 });
 
 test("other tools are untouched", async () => {
-  assert.deepEqual(await run(plugin.before, "read", { filePath: "/etc/hostname" }), { filePath: "/etc/hostname" });
+  assert.deepEqual(await run(plugin.before, "glob", { pattern: ".env" }), { pattern: ".env" });
 });
+
+const credentialDeny = (tool, input) =>
+  JSON.parse(
+    execFileSync(`${process.env.HOOKS_DIR}/credential-deny.sh`, [], {
+      input: JSON.stringify({ tool_name: tool, tool_input: input }),
+      encoding: "utf8",
+    }),
+  ).hookSpecificOutput.permissionDecisionReason;
+
+// Refused by the plugin's throw, which runs before opencode's permission check,
+// so a Target-repo opencode.json allow rule has nothing to widen.
+test("a plain cat of a credential file is refused with the hook's message", async () => {
+  const command = "cat .env";
+  const reason = credentialDeny("Bash", { command });
+  assert.match(reason, /credential files/);
+  await assert.rejects(run(plugin.before, "bash", { command }), { message: reason });
+});
+
+for (const command of [
+  "cat .env*",
+  "{ cat; } < .env",
+  "x=$(<.env)",
+  "while read l; do echo $l; done < .env",
+]) {
+  test(`bash \`${command}\` is refused`, async () => {
+    await assert.rejects(run(plugin.before, "bash", { command }), {
+      message: credentialDeny("Bash", { command }),
+    });
+  });
+}
+
+const credentialPaths = JSON.parse(process.env.CREDENTIAL_PATHS);
+assert.ok(credentialPaths.length > 0, "CREDENTIAL_PATHS must be set");
+for (const entry of credentialPaths) {
+  // A glob entry stands for any concrete name it matches.
+  const filePath = `/work/x/${entry.replaceAll("*", "local")}`;
+  test(`read of ${filePath} is refused`, async () => {
+    await assert.rejects(run(plugin.before, "read", { filePath }), {
+      message: credentialDeny("Read", { file_path: filePath }),
+    });
+  });
+}
+
+test("read of a non-credential file is untouched", async () => {
+  const args = { filePath: "/etc/hostname", offset: 1 };
+  assert.deepEqual(await run(plugin.before, "read", args), { filePath: "/etc/hostname", offset: 1 });
+});
+
+// A guard without jq exits 0 and allows, so the plugin must probe jq itself.
+// Bun resolves a child's executable from the PATH it started with, so each case
+// is a fresh runtime whose whole PATH is the jq-less (or jq-broken) directory.
+const jqDir = (script) => {
+  const dir = mkdtempSync(join(tmpdir(), "jq-"));
+  if (script !== undefined) {
+    writeFileSync(join(dir, "jq"), script);
+    chmodSync(join(dir, "jq"), 0o755);
+  }
+  return dir;
+};
+const probe = join(mkdtempSync(join(tmpdir(), "probe-")), "probe.mjs");
+writeFileSync(
+  probe,
+  `const mod = await import(process.argv[2]);
+const hooks = await Object.values(mod)[0]({}, {});
+try {
+  await hooks["tool.execute.before"]({ tool: process.argv[3] }, { args: { command: "true", filePath: "/etc/hostname" } });
+  console.log("ALLOWED");
+} catch (err) {
+  console.log(err.message);
+}
+`,
+);
+const sh = execFileSync("bash", ["-c", "command -v bash"], { encoding: "utf8" }).trim();
+for (const [label, dir] of [
+  ["absent", jqDir()],
+  ["broken", jqDir(`#!${sh}\nexit 1\n`)],
+]) {
+  for (const tool of ["bash", "read"]) {
+    test(`${label} jq refuses a ${tool} call`, async () => {
+      const ran = spawnSync(process.execPath, [probe, pathToFileURL(process.env.PLUGIN).href, tool], {
+        encoding: "utf8",
+        env: { ...process.env, BUN_BE_BUN: "1", PATH: dir },
+      });
+      assert.match(ran.stdout, /no working jq.*refusing the call/, ran.stderr);
+    });
+  }
+}
 
 test("long output is bounded to a tail with the full log on disk", async () => {
   const command = "seq 1 2000; exit 3";
@@ -159,7 +249,10 @@ for (const [label, env] of [
   test(`${label} hooks fail closed`, async () => {
     const bad = await load(process.env[env]);
     await assert.rejects(run(bad.before, "bash", { command: "true" }), /refusing the call/);
-    await run(bad.before, "read", { filePath: "x" });
+    // Only the credential hook guards read, and silence from it is "allow".
+    const readCall = run(bad.before, "read", { filePath: "x" });
+    if (label === "missing" || label === "garbage") await assert.rejects(readCall, /refusing the call/);
+    else await readCall;
   });
 
   // The call already ran, so a broken summary hook must not fail it. Skipped for
