@@ -21,7 +21,10 @@ let
   # differently named Provider its API key is under (string -> string,
   # default {}). assertShape checks it via authContentErrors.
   # credentials is a list of rules (possibly empty), shape-checked by
-  # credentialRuleErrors.
+  # credentialRuleErrors. A rule's optional keys are modelPrefix, setupCommand,
+  # labels (env name after the first -> human label for its fallback prompt;
+  # needs setupCommand) and setupHint (a note beside the setupCommand offer;
+  # needs setupCommand).
   # configFiles (home-relative path -> content, baked by lib/image.nix) is
   # optional and unvalidated. So is `subagents` (default true): false marks a
   # Driver that provisions no subagent yet (read by lib/mkHarness.nix). Also
@@ -67,12 +70,29 @@ let
   # misspelt optional key cannot silently vanish.
   credentialRuleKeys = [
     "env"
+    "labels"
     "modelPrefix"
     "remedy"
     "setupCommand"
+    "setupHint"
   ];
   isNonEmptyStringList =
     v: builtins.isList v && v != [ ] && lib.all (s: builtins.isString s && s != "") v;
+  # Quickstart shows a label only on the fallback prompt for a variable after
+  # Env[0], reached once the setup command is declined; a label anywhere else
+  # would never be shown, so it is refused rather than silently ignored.
+  labelsOk =
+    rule:
+    let
+      inherit (rule) labels;
+      fallbackEnv = if builtins.isList (rule.env or null) then lib.drop 1 rule.env else [ ];
+    in
+    rule ? setupCommand
+    && builtins.isAttrs labels
+    && labels != { }
+    && lib.all (k: lib.elem k fallbackEnv && builtins.isString labels.${k} && labels.${k} != "") (
+      builtins.attrNames labels
+    );
   credentialRuleErrors =
     rule:
     if !builtins.isAttrs rule then
@@ -93,6 +113,13 @@ let
       ++ lib.optional (
         rule ? setupCommand && !isNonEmptyStringList rule.setupCommand
       ) "setupCommand must be a non-empty list of non-empty strings when present"
+      ++ lib.optional (
+        rule ? setupHint
+        && !(builtins.isString rule.setupHint && rule.setupHint != "" && rule ? setupCommand)
+      ) "setupHint must be a non-empty string, and is only valid alongside setupCommand"
+      ++
+        lib.optional (rule ? labels && !labelsOk rule)
+          "labels must be a non-empty attribute set of non-empty strings keyed by names in env after the first, and is only valid alongside setupCommand"
       ++ lib.optional (unknownKeys != [ ]) "unknown key(s): ${lib.concatStringsSep ", " unknownKeys}";
 
   # Refuses "", "." and ".." segments, which also covers a leading, trailing
