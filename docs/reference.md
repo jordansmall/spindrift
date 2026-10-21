@@ -1243,7 +1243,8 @@ What the Driver carries:
   which the bridge's scrub hook below enforces on every `bash` call. A
   Provider outside the eight gets no preflight check and its key is not
   forwarded into the Box. GitHub Copilot, which has no API key, takes
-  `PI_AUTH_CONTENT` instead; see [pi Driver: github-copilot Provider
+  `PI_AUTH_CONTENT` instead, which must hold a `github-copilot` OAuth entry;
+  see [pi Driver: github-copilot Provider
   credential](#pi-driver-github-copilot-provider-credential).
 - **Hooks through a bridge extension (issue #5482).** pi has no hook config,
   so claude's five tool hooks (credential deny on `read` and `bash`, env
@@ -1277,7 +1278,8 @@ heartbeat header and the Record's Pass efforts.
 <a id="pi-known-limits"></a>
 **Known limits.**
 
-- `PI_AUTH_CONTENT` accepts OAuth only for `github-copilot`. Providers that
+- `PI_AUTH_CONTENT` accepts OAuth only for `github-copilot`, and a
+  `github-copilot/` model requires that OAuth entry. Providers that
   rotate the refresh token on each use (Anthropic Pro/Max, ChatGPT
   subscriptions) must use API keys, since pi refreshes inside the Box and the
   host would keep a spent token. Host-side refresh is not supported yet.
@@ -1393,7 +1395,9 @@ Driver entry declares:
   an OAuth entry in it. Optional. It renders into the Driver Descriptor,
   and preflight's `driver-credentials` row rejects any other OAuth entry,
   naming the Provider and its API-key variable where spindrift has one,
-  else saying the Provider is unsupported. `apiKeyProviders` (string to
+  else saying the Provider is unsupported. It also requires an OAuth entry
+  for each `oauthProviders` Provider whenever a model tier targets that
+  Provider's `<provider>/` prefix. `apiKeyProviders` (string to
   string, default `{}`) maps an OAuth Provider id to the differently
   named Provider its API key is under. pi declares
   `{ env = "PI_AUTH_CONTENT"; oauthProviders = [ "github-copilot" ];
@@ -2271,12 +2275,14 @@ it drifts from them:
   `GEMINI_API_KEY` (`google/`), `OPENROUTER_API_KEY` (`openrouter/`),
   `GROQ_API_KEY` (`groq/`), `XAI_API_KEY` (`xai/`), `MISTRAL_API_KEY`
   (`mistral/`), `DEEPSEEK_API_KEY` (`deepseek/`), `PI_AUTH_CONTENT`
-  (`github-copilot/`). A miss is an error only
-  when `MODEL` or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`,
-  `SCOUT_MODEL`, `FILER_MODEL`) uses that Provider. Like opencode, the
-  lookup still runs for each key that has no value (a tier baked into the
-  image may select it), a miss for a Provider no tier visibly uses is
-  ignored, and a hit is passed into the Box anyway.
+  (`github-copilot/`), which must hold a `github-copilot` OAuth entry (see
+  [pi Driver: github-copilot Provider
+  credential](#pi-driver-github-copilot-provider-credential)). A miss is an
+  error only when `MODEL` or a per-tier `*_MODEL` (`REVIEW_MODEL`,
+  `WORKER_MODEL`, `SCOUT_MODEL`, `FILER_MODEL`) uses that Provider. Like
+  opencode, the lookup still runs for each key that has no value (a tier
+  baked into the image may select it), a miss for a Provider no tier visibly
+  uses is ignored, and a hit is passed into the Box anyway.
 - `opencode`: `OPENCODE_AUTH_CONTENT`. A miss is an error only when `MODEL`
   or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
   `FILER_MODEL`) is `github-copilot/<model>`. When no tier visibly needs it
@@ -2449,7 +2455,10 @@ generated config, completions or the `dispatch_start` knobs, and it is in the
 Bash scrub list (`agent/credential-vars`). The written file is on the
 credential-deny list (`lib/credential-paths.nix`), so the agent's own `read`
 and `bash` calls cannot open it. Preflight requires it only when
-`DRIVER=pi` and some model tier is `github-copilot/<model>`.
+`DRIVER=pi` and some model tier is `github-copilot/<model>`, and then it must
+hold a `github-copilot` entry of `"type":"oauth"`: `{}`, or entries that are
+all `api_key`-typed, fail with "holds no OAuth entry for the github-copilot
+Provider".
 
 **Why only Copilot OAuth.** pi refreshes an expired OAuth access token itself,
 inside the Box, and writes the new tokens back to the Box's `auth.json`. For
@@ -2465,8 +2474,8 @@ instead`). A ChatGPT-subscription `openai-codex` entry, whose Provider id
 differs from the one its API key is under, maps through
 `authContent.apiKeyProviders` and gets `set OPENAI_API_KEY for openai
 instead`. `api_key` entries in `PI_AUTH_CONTENT` are accepted for any
-Provider. Host-side refresh for rotating Providers is a later decision (ADR
-0009's pi amendment).
+Provider, but never satisfy the `github-copilot/` requirement above. Host-side
+refresh for rotating Providers is a later decision (ADR 0009's pi amendment).
 
 ### Advanced tuning
 
