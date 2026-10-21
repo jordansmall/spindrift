@@ -637,7 +637,9 @@ func TestGitClient_Merge_TimesOutOnHangingMerge(t *testing.T) {
 // Merge must not wait on it, and git's own exit 0 still means the merge landed.
 func TestGitClient_Merge_SucceedsWhenGrandchildHoldsOutputPipe(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	installGitShim(t, "merge", "sleep 5 &")
+	// The grandchild outlives the ceiling below by a wide margin: Merge's own
+	// clone, fetch, WaitDelay, and push take seconds on a loaded CI builder.
+	installGitShim(t, "merge", "sleep 60 &")
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	start := time.Now()
@@ -647,7 +649,7 @@ func TestGitClient_Merge_SucceedsWhenGrandchildHoldsOutputPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if elapsed > 5*time.Second {
+	if elapsed > 30*time.Second {
 		t.Fatalf("Merge took %s to return, want it not to wait on a grandchild holding the output pipe", elapsed)
 	}
 
