@@ -13,14 +13,14 @@ import (
 // and fj is only baked into a Forgejo-backend image. A failed fj aborts the
 // Box, as it did under the entrypoint's `set -e`.
 func configureCLI(b backendkit.BoxCLI) error {
-	token := b.Getenv("FORGEJO_TOKEN")
+	token := b.Getenv(ForgejoTokenEnv)
 	if token == "" {
 		return nil
 	}
 	if _, err := b.LookPath("fj"); err != nil {
 		return nil
 	}
-	base := b.Getenv("FORGEJO_BASE_URL")
+	base := b.Getenv(ForgejoBaseURLEnv)
 	if base == "" {
 		base = defaultForgejoBaseURL
 	}
