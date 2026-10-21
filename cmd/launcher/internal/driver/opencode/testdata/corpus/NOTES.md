@@ -36,6 +36,10 @@ line. Each log holds the whole run, so its other passes' lines carry
 The last four cases were captured after #5331, #5332 and #5348 landed.
 `real-driver-crash` comes from the #5349 session cache regression (#5387).
 
+The real cases' result goldens follow #5354's last-message rule, and
+`TestDecode_CorpusLines` pins the `part.messageID` on every real text event
+that the rule groups by, which the one-part-per-message goldens cannot.
+
 `subagent-task-fixture` is synthetic. It covers a `task` call to the reviewer
 subagent whose result renders tagged `[reviewer]`, the form the legacy-loop
 verdict scan reads.
