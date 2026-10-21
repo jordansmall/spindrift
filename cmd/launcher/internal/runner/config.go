@@ -15,6 +15,20 @@ const (
 	NetworkModeHost NetworkMode = "host"
 )
 
+// NetworkModes returns every non-zero NETWORK_MODE value, in the schema's
+// choice order, in a fresh slice the caller may modify; a launcher test pins
+// it to the schema. The zero value "" is not a choice: a directly built
+// Config may leave it empty and each family renders it exactly as it renders
+// open.
+func NetworkModes() []NetworkMode {
+	return []NetworkMode{
+		NetworkModeOpen,
+		NetworkModeNoHostLoopback,
+		NetworkModeNone,
+		NetworkModeHost,
+	}
+}
+
 // DeniesHostLoopback reports whether m denies a Box the host-loopback
 // route: pasta without --map-gw blocks it, and "none" has no network at all.
 func (m NetworkMode) DeniesHostLoopback() bool {
