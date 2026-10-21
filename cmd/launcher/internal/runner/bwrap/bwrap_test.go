@@ -1354,14 +1354,14 @@ func TestResolvedRunEnv_ForwardsAllOffArgvKeys(t *testing.T) {
 		"ISSUE_TEXT":                "issue-text-value",
 	}
 	// Driver credential keys are generated into the runner package and not
-	// exported, so take them from OffArgvKeys itself; the explicit keys above
+	// exported, so take them from the OffArgvKeys() set; the explicit keys above
 	// must each be among them.
 	for k := range boxEnv {
-		if !runner.OffArgvKeys[k] {
-			t.Fatalf("fixture key %q is not an OffArgvKeys entry", k)
+		if !runner.IsOffArgvKey(k) {
+			t.Fatalf("fixture key %q is not in the OffArgvKeys() set", k)
 		}
 	}
-	for k := range runner.OffArgvKeys {
+	for _, k := range runner.OffArgvKeys() {
 		if _, ok := boxEnv[k]; !ok {
 			boxEnv[k] = k + "-value"
 		}

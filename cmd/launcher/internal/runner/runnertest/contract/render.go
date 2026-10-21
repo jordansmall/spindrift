@@ -337,7 +337,7 @@ func checkRow(t *testing.T, h RenderingHarness, r row) error {
 		return fmt.Errorf("row %s: launch has no Box.Name", r.name)
 	}
 	for k := range l.Box.Env {
-		if runner.OffArgvKeys[k] {
+		if runner.IsOffArgvKey(k) {
 			return fmt.Errorf("row %s: env key %s is off-argv by design", r.name, k)
 		}
 	}
