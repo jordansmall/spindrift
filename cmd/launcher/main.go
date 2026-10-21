@@ -1203,10 +1203,11 @@ func checkReadOnlyCapabilityGate(c config) error {
 }
 
 // checkNetworkModeRuntimeGate backstops two NETWORK_MODE combinations
-// mkHarness's asserts cannot see, since NETWORK_MODE, PODMAN_NETWORK and
-// BWRAP_UNSHARE_NET are all runtime-overridable: a mode the runner family's
-// row does not list (issue #2562), and a non-open mode beside a raw knob,
-// which hits runner.Config.OCINetwork's raw-wins full egress.
+// mkHarness's asserts cannot see, since NETWORK_MODE and the raw network
+// knobs are all runtime-overridable: a mode the runner family's row does not
+// list (issue #2562), and a non-open mode beside a raw network knob any
+// registered family reports (Strategy.RawNetworkKnobs), which hits
+// runner.Config.OCINetwork's raw-wins full egress.
 func checkNetworkModeRuntimeGate(c config) error {
 	// Keys on runnerKind, never runtime: RUNNER_KIND=bwrap/RUNTIME=podman is a
 	// supported pairing, and keying on runtime would miss that pairing and let
@@ -1219,16 +1220,24 @@ func checkNetworkModeRuntimeGate(c config) error {
 	}
 	// Only the detectable subset: Go sees the resolved value alone, so an
 	// explicit NETWORK_MODE=open beside a raw knob is left to raw-wins.
-	podmanNetwork, _ := c.knobLookup("PODMAN_NETWORK")
-	unshareNet := c.knobBool("BWRAP_UNSHARE_NET")
-	if c.runnerNetworkMode() != runner.NetworkModeOpen && c.runnerNetworkMode() != "" && (podmanNetwork != "" || unshareNet) {
-		var rawKnobs []string
-		if podmanNetwork != "" {
-			rawKnobs = append(rawKnobs, "PODMAN_NETWORK")
+	if c.runnerNetworkMode() == runner.NetworkModeOpen || c.runnerNetworkMode() == "" {
+		return nil
+	}
+	// Every registered family is read whatever RUNNER_KIND, through its own
+	// reader, matching mkHarness's assert.
+	var rawKnobs []string
+	for _, name := range runner.Names() {
+		s, _ := runner.Lookup(name) // cannot fail: name came from Names()
+		if s.RawNetworkKnobs == nil {
+			continue
 		}
-		if unshareNet {
-			rawKnobs = append(rawKnobs, "BWRAP_UNSHARE_NET")
+		names, err := s.RawNetworkKnobs(c.knobLookup)
+		if err != nil {
+			return newLaunchGateConfigError("%s", err)
 		}
+		rawKnobs = append(rawKnobs, names...)
+	}
+	if len(rawKnobs) > 0 {
 		return newLaunchGateConfigError("NETWORK_MODE=%s is set alongside raw network knob(s) %s -- there is no precedence rule between a runtime-overridden NETWORK_MODE and a raw knob; set only one", c.networkMode, strings.Join(rawKnobs, ", "))
 	}
 	return nil

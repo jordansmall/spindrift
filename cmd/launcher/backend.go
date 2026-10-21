@@ -105,13 +105,6 @@ func (c config) hostTokenValue(env string) string {
 	return os.Getenv(env)
 }
 
-// knobBool reports whether the row knob env resolved to a non-empty value;
-// bool row knobs are presence-style, like the field loader's.
-func (c config) knobBool(env string) bool {
-	v, _ := c.knobLookup(env)
-	return v != ""
-}
-
 // setRowKnob stores a row knob's resolved value. It copies the map first so a
 // config copied by value never shares writes with the original.
 func (c *schemaConfig) setRowKnob(env, value string) {
