@@ -1,15 +1,20 @@
 {
   "lastSwept": "83a1cabf4ff78784f74efac40220cad607bc44ef",
   "cursor": "cmd/launcher/internal/ecosystem/testdata/corpus/npm/scoped-before-unscoped/classification.golden.txt",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-20T23:49:41.428929375-04:00"
+  },
   "usage": {
-    "input_tokens": 60,
-    "output_tokens": 10201,
-    "cache_read_input_tokens": 1942689,
-    "cache_creation_input_tokens": 85556,
-    "total_cost_usd": 1.2772458000000004,
-    "duration_ms": 117400,
-    "duration_api_ms": 115217,
-    "num_turns": 33
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
