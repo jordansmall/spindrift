@@ -177,14 +177,14 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 
 // warnEach prints one prefixed warning line per error an errors.Join value
 // carries, since its own message is newline-separated. Each line is
-// sanitized (statsLabel), which is why every warning site goes through it.
+// sanitized (statsWarnText), which is why every warning site goes through it.
 func warnEach(stderr io.Writer, prefix string, err error) {
 	errs := []error{err}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		errs = joined.Unwrap()
 	}
 	for _, e := range errs {
-		fmt.Fprintf(stderr, "warning: %s: %s\n", prefix, statsLabel(e.Error()))
+		fmt.Fprintf(stderr, "warning: %s: %s\n", prefix, statsWarnText(e.Error()))
 	}
 }
 
@@ -346,7 +346,7 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 	for _, row := range rows {
 		n := float64(row.Passes)
 		fmt.Fprintf(tw, "%s\t%d\t$%.2f\t$%.2f\t%.1f\t%d\t%s\n",
-			statsLabel(row.Role), row.Passes, row.USD, row.USD/n, (time.Duration(row.DurationMs)*time.Millisecond).Minutes()/n, row.APICalls, row.BlockRate())
+			statsKeyText(row.Role), row.Passes, row.USD, row.USD/n, (time.Duration(row.DurationMs)*time.Millisecond).Minutes()/n, row.APICalls, row.BlockRate())
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -365,21 +365,33 @@ func renderAgentTable(w io.Writer, records []dispatchrecord.Record) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "AGENT\tPASSES\tAPI_CALLS\tINPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE")
 	for _, row := range rows {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", statsLabel(row.Agent), row.Passes, row.APICalls,
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", statsKeyText(row.Agent), row.Passes, row.APICalls,
 			row.InputTokens, row.OutputTokens, row.CacheReadInputTokens, row.CacheCreationInputTokens)
 	}
 	return tw.Flush()
 }
 
-// statsLabelSpaces maps the separators SanitizeLine would delete outright, so a
-// name keeps its word breaks and cannot split a tabwriter cell.
-var statsLabelSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
+// statsWarnSpaces keeps a warning's word breaks, which SanitizeLine would
+// delete outright.
+var statsWarnSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
 
-// statsLabel makes untrusted single-line text (a group label such as role,
-// model or a Box-authored subagent_type, or a warning's error text) safe to
-// print: it could otherwise forge table rows or drive the terminal. --json
-// keeps a label's raw value; warnings are sanitized regardless. Not
-// console.SanitizeControlSequences: it keeps \t and \n, which forge cells.
-func statsLabel(s string) string {
-	return driverkit.SanitizeLine(statsLabelSpaces.Replace(s))
+// statsWarnText sanitizes a warning's error text. Not
+// console.SanitizeControlSequences: it keeps \n, which would let error text
+// forge extra warning lines.
+func statsWarnText(s string) string {
+	return driverkit.SanitizeLine(statsWarnSpaces.Replace(s))
+}
+
+// statsKeyText makes an untrusted record-derived key (role, agent, model, a
+// Box-authored subagent_type) safe to print in text output: it prints as
+// recorded unless empty, edged by a space, or Go quoting would escape
+// something, then Go-quoted; --json keeps the raw value. The bare form is
+// non-empty with no '"' and the quoted form starts with one, so distinct keys
+// never print as the same string.
+func statsKeyText(s string) string {
+	q := strconv.Quote(s)
+	if s != "" && s[0] != ' ' && s[len(s)-1] != ' ' && q[1:len(q)-1] == s {
+		return s
+	}
+	return q
 }
