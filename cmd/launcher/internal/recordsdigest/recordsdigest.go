@@ -61,7 +61,8 @@ type Input struct {
 	// Now is the claim time.
 	Now    time.Time
 	Limits Limits
-	// Prior holds each prior finding as ParsePrior read it.
+	// Prior holds each prior finding as ParsePrior read it; WithPrior hands a
+	// Render the typed slice instead and nils this field.
 	Prior []any
 	// Merged is nil without a merge reader.
 	Merged MergeLookup
@@ -91,7 +92,8 @@ type Strategy struct {
 	Anchors func(digest string) map[string]bool
 	// ParsePrior reads a prior finding into the Chore's own form. Nil means
 	// the Chore takes no prior findings, and the adapter does not query the
-	// backlog.
+	// backlog. Set it with WithPrior, which pairs it with Render; set by hand,
+	// nothing checks the two agree.
 	ParsePrior func(settle.PriorFinding) any
 	// Validate applies the Chore's own settle rules, beyond the adapter's cite
 	// check, to a filed intent against the stored digest the Box was served,
@@ -106,6 +108,25 @@ type Strategy struct {
 	// body, from the stored digest and the finding's cites; "" appends nothing.
 	// Nil means the Chore appends no block.
 	Evidence func(digest string, cites []string) string
+}
+
+// WithPrior sets s's ParsePrior and Render from a pair that share the prior
+// type P, so the compiler checks they agree; the one type assertion lives here.
+// Render skips a prior of another type: the adapter fills Input.Prior only from
+// ParsePrior, so only a hand-built Input can hold one.
+func WithPrior[P any](s Strategy, parse func(settle.PriorFinding) P, render func(Input, []P) Output) Strategy {
+	s.ParsePrior = func(f settle.PriorFinding) any { return parse(f) }
+	s.Render = func(in Input) Output {
+		prior := make([]P, 0, len(in.Prior))
+		for _, v := range in.Prior {
+			if p, ok := v.(P); ok {
+				prior = append(prior, p)
+			}
+		}
+		in.Prior = nil
+		return render(in, prior)
+	}
+	return s
 }
 
 // Knobs reads the Chore's row-owned settings; a Chore with no ReadKnobs owns
