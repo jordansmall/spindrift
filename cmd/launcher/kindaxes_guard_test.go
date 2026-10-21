@@ -178,10 +178,27 @@ var kindAxisForbiddenPatterns = sync.OnceValue(func() []kindAxisForbidden {
 })
 
 // kindNameWhy explains namesKind's finding; Default is not in its pattern.
-const kindNameWhy = "names one kind -- read the axis from the descriptor in hand, walk dispatchkind.All, or use dispatchkind.Default for an unset kind; only an entry point selecting its own verb's kind may name it"
+const kindNameWhy = "names one kind -- read the axis from the descriptor in hand, walk dispatchkind.All, or use dispatchkind.Default for an unset kind; only an entry point selecting its own verb's kind, or a listed work-kind fact, may name it"
 
 // pickerFile is the one file allowed to bind a per-verb Kind<Verb> alias.
 const pickerFile = "internal/console/pick.go"
+
+// workKindFacts lists, per file, the exact source lines allowed to name Work,
+// each with the number of sites it covers there: they state a fact about the
+// work kind itself (only work Dispatches land code; frozen old-log shapes,
+// like the pre-#734 implementing verb, are work's), not an unset kind, so
+// re-pointing Default must not move them (issue #5729). The allowance matches
+// line text, so TestWorkKindFactsSites pins the counts: a new line sharing an
+// allowed text still fails.
+var workKindFacts = map[string]map[string]int{
+	"internal/tuning/tuning.go": {
+		`if k, _ := dispatchkind.ByName(r.Kind); k == dispatchkind.Work {`: 1,
+	},
+	"internal/dispatchrecord/dispatchrecord.go": {
+		`case announced != "" && announcedDesc != dispatchkind.Work:`: 1,
+		`kind = dispatchkind.Work.Name`:                               2,
+	},
+}
 
 var (
 	kindNameRef       = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\bdispatchkind\.` + kindVarAlternation() + `\b`) })
@@ -191,13 +208,17 @@ var (
 
 // namesKind reports whether line, read from path, names one kind outside an
 // entry point selecting its own verb's kind: package main's bootstrap calls,
-// and the console picker's per-verb aliases, each bound to its own verb.
+// and the console picker's per-verb aliases, each bound to its own verb. The
+// workKindFacts lines are also exempt, matched whole at their own path.
 func namesKind(path, line string) bool {
 	if !kindNameRef().MatchString(line) {
 		return false
 	}
 	p := filepath.ToSlash(path)
 	if !strings.Contains(p, "/") && kindBootstrapCall.MatchString(line) {
+		return false
+	}
+	if _, ok := workKindFacts[p][strings.TrimSpace(line)]; ok {
 		return false
 	}
 	m := kindPickerAlias.FindStringSubmatch(line)
@@ -388,6 +409,12 @@ func TestKindAxesGuardEntryPoints(t *testing.T) {
 		bootstrapCall = `lc, err := bootstrap(stdout, true, dispatchkind.Work, false)`
 		applyCall     = `rc := applyDispatchKind(lc.config, dispatchkind.Research)`
 		workAlias     = `KindWork     = dispatchkind.Work`
+
+		tuningFile       = "internal/tuning/tuning.go"
+		recordFile       = "internal/dispatchrecord/dispatchrecord.go"
+		tuningLine       = `if k, _ := dispatchkind.ByName(r.Kind); k == dispatchkind.Work {`
+		announcedLine    = `case announced != "" && announcedDesc != dispatchkind.Work:`
+		workFallbackLine = `kind = dispatchkind.Work.Name`
 	)
 	for _, tc := range []struct {
 		path, line string
@@ -402,6 +429,15 @@ func TestKindAxesGuardEntryPoints(t *testing.T) {
 		{pickerFile, `KindWork = dispatchkind.Butler`, true},
 		{"internal/console/launcher.go", workAlias, true},
 		{pickerFile, `kind := dispatchkind.Work`, true},
+		{tuningFile, tuningLine, false},
+		{recordFile, announcedLine, false},
+		{recordFile, "\t\t" + workFallbackLine + "  ", false},
+		{recordFile, tuningLine, true},
+		{"internal/daemon/x.go", tuningLine, true},
+		{tuningFile, announcedLine, true},
+		{tuningFile, `kind := dispatchkind.Work`, true},
+		{tuningFile, strings.Replace(tuningLine, "Work", "Research", 1), true},
+		{recordFile, strings.Replace(workFallbackLine, "Work", "Research", 1), true},
 	} {
 		if got := slices.Contains(kindAxisViolations(tc.path, tc.line), kindNameWhy); got != tc.want {
 			t.Errorf("%s: %s flagged = %v, want %v", tc.path, tc.line, got, tc.want)
