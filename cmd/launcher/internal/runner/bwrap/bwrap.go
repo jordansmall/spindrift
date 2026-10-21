@@ -131,7 +131,7 @@ type bwrapAdapter struct {
 }
 
 // Strategy is the bwrap family's entry in the runner registry.
-var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild, Prerequisites: Prerequisites, PrepareHotSwap: SnapshotGeneration}
+var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild, Prerequisites: Prerequisites, PrepareHotSwap: SnapshotGeneration, RawNetworkKnobs: RawNetworkKnobs}
 
 // New constructs a bwrap adapter for the run command from cfg, the family
 // knobs read through l (the error is a malformed family knob), and pwd (the

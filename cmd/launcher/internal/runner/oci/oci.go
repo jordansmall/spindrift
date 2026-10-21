@@ -48,7 +48,7 @@ type ociAdapter struct {
 
 // Strategy is the oci family's entry in the runner registry; its build
 // command constructs the same adapter as its run command.
-var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Prerequisites: Prerequisites}
+var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Prerequisites: Prerequisites, RawNetworkKnobs: RawNetworkKnobs}
 
 // New constructs an OCI adapter from cfg and the family knobs read through l;
 // the error is a malformed family knob. pwd is the working directory the
