@@ -4,7 +4,31 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner"
 )
+
+func TestNetworkModes_MatchSchemaChoices(t *testing.T) {
+	var choices []string
+	found := false
+	for _, f := range schemaFlags {
+		if f.env == "NETWORK_MODE" {
+			choices, found = f.choices, true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("NETWORK_MODE not found in schemaFlags")
+	}
+	modes := runner.NetworkModes()
+	got := make([]string, len(modes))
+	for i, m := range modes {
+		got[i] = string(m)
+	}
+	if !reflect.DeepEqual(got, choices) {
+		t.Fatalf("runner.NetworkModes() = %v, schema NETWORK_MODE choices = %v", got, choices)
+	}
+}
 
 func TestSplitChoiceKnobRegistry_PreservesOrderWithinGroups(t *testing.T) {
 	registry := []choiceKnobRow{
