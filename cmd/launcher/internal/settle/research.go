@@ -7,7 +7,6 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 )
@@ -17,6 +16,9 @@ import (
 // watch, no fix passes, no merge, no usage comment.
 type ResearchSettle struct {
 	it forge.IssueTracker
+	// findingLabel is the label a filed research finding wears, read from the
+	// dispatched kind's row.
+	findingLabel string
 	// landing is it's optional LandingRecorder (ADR 0029), non-nil only for the
 	// local adapter, so it doubles as this Settle's "is local" test (ADR 0032,
 	// issue #1692): a local Box has no in-box tracker client, so its verdict
@@ -44,17 +46,17 @@ var _ Settler = (*ResearchSettle)(nil)
 // NewResearchSettle constructs a ResearchSettle for the read-write (default)
 // BOX_FORGE_AND_ISSUE_ACCESS path. verdictRelayed forces the SPINDRIFT_COMMENT
 // relay even here, so a missing verdict comment must fail.
-func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool) *ResearchSettle {
+func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, verdicts: verdicts, verdictRelayed: verdictRelayed}
+	return &ResearchSettle{it: it, landing: landing, findingLabel: findingLabel, verdicts: verdicts, verdictRelayed: verdictRelayed}
 }
 
 // NewResearchSettleReadOnly constructs a ResearchSettle for a Dispatch under
 // BOX_FORGE_AND_ISSUE_ACCESS=read-only (issue #1917): the Box has no write
 // token, so this Settle posts the relayed comment before the verdict label.
-func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool) *ResearchSettle {
+func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, readOnly: true, verdicts: verdicts, verdictRelayed: verdictRelayed}
+	return &ResearchSettle{it: it, landing: landing, findingLabel: findingLabel, readOnly: true, verdicts: verdicts, verdictRelayed: verdictRelayed}
 }
 
 // Settle drives num to its terminal research label: a parsed verdict applies
@@ -75,7 +77,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		return
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
-	filed := fileIssueIntentsDetailed(r.it, num, result, dispatchkind.MustBySettle(dispatchkind.SettleVerdict).FindingLabel, backlink)
+	filed := fileIssueIntentsDetailed(r.it, num, result, r.findingLabel, backlink)
 	// Reported right after filing, not at the function's tail: the comment-post
 	// and verdict-apply branches below both return early, and filing has already
 	// happened by then, so the tally must still print (issue #3608).

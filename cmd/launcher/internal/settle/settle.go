@@ -27,6 +27,10 @@ type Config struct {
 	// CompleteLabel is the label verifyMerged checks for on the tripwire path.
 	CompleteLabel string
 
+	// FindingLabel is the label review findings are filed under, read from
+	// the dispatched kind's row.
+	FindingLabel string
+
 	MergePollInterval int
 	MergePollTimeout  int
 	MaxFixAttempts    int

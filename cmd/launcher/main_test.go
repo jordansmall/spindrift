@@ -4306,6 +4306,70 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	}
 }
 
+// settleConfig takes the finding label from the dispatched kind's row, so a
+// work or recover run's relayed findings are filed under agent-review-finding
+// rather than a blank label.
+func TestSettleConfig_FindingLabelFromKind(t *testing.T) {
+	fc := forge.NewFake()
+	for _, k := range []*dispatchkind.Descriptor{dispatchkind.Work, dispatchkind.Recover} {
+		c := minimalValidConfig()
+		c.dispatchKind = k
+		sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
+		if sc.FindingLabel != "agent-review-finding" {
+			t.Errorf("settleConfig(%s).FindingLabel = %q, want %q", k.Name, sc.FindingLabel, "agent-review-finding")
+		}
+	}
+
+	// A row declaring its own label must win, which a read of the package
+	// default (or a literal) would not satisfy.
+	own := *dispatchkind.Recover
+	own.FindingLabel = "own-row-label"
+	c := minimalValidConfig()
+	c.dispatchKind = &own
+	sc := settleConfig(c, localloop.Wire(localloopConfig(c), fc), fc, forge.Capabilities{})
+	if sc.FindingLabel != "own-row-label" {
+		t.Errorf("settleConfig(custom row).FindingLabel = %q, want %q", sc.FindingLabel, "own-row-label")
+	}
+}
+
+// newSettle hands the research settle the research row's finding label, so an
+// issue intent a research run relays (read-only or read-write) is filed as
+// agent-research-finding rather than under a blank label.
+func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
+	for _, access := range []string{"read-only", "read-write"} {
+		t.Run(access, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.dispatchKind = dispatchkind.Research
+			c.boxForgeAndIssueAccess = access
+
+			fc := forge.NewFake(forge.ResearchDispatchLabels())
+			fc.VerdictLabels = forge.ResearchVerdictLabels()
+			fc.PostIssueURL = "https://example.com/issues/501"
+			fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+
+			s := newSettle(c, fc.AsIssueFiler(), nil, nil, forge.Capabilities{})
+			result := dispatch.Result{
+				Resolved: outcome.Resolved{
+					Found:   true,
+					Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+				},
+				Comment:           "**Verdict** — recommend",
+				CommentFound:      true,
+				IssueIntentsFound: true,
+				IssueIntents:      []string{`{"title":"first bug","body":"first body"}`},
+			}
+			s.Settle(dispatch.NewFake(), "42", 0, result)
+
+			if len(fc.PostIssueCalls) != 1 {
+				t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+			}
+			if got := fc.PostIssueCalls[0].Labels; !slices.Contains(got, "agent-research-finding") {
+				t.Errorf("labels = %v, want agent-research-finding", got)
+			}
+		})
+	}
+}
+
 // A Jira research run with the Filer off still relays its verdict (the Box
 // cannot write the tracker, issue #5245), so newSettle must build a settle
 // that fails a run whose relayed comment never arrived.

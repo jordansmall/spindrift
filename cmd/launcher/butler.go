@@ -355,6 +355,8 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		Zone:              settings.window.Location(),
 		PromotionMaxFiles: lc.config.butlerPromotionMaxFiles,
 		PromotionLabel:    lc.config.workLabel,
+		FindingLabel:      lc.config.kind().FindingLabel,
+		PatchLabel:        lc.config.kind().PatchLabel,
 		PatchPaths:        lc.config.butlerPatchPaths,
 		PatchMaxFiles:     lc.config.butlerPatchMaxFiles,
 		PatchMaxLines:     lc.config.butlerPatchMaxLines,

@@ -200,7 +200,7 @@ func TestResearchSettle_Fail_CarriesNoteIntoSettledRecord(t *testing.T) {
 	fc := newResearchFake("42")
 	result := dispatch.Result{Resolved: outcome.Resolved{Found: false}}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	recs := readRecords()
@@ -226,7 +226,7 @@ func TestResearchSettle_Recommend_EmitsSettledRecordWithVerdictNote(t *testing.T
 		},
 	}
 
-	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
 
 	recs := readRecords()

@@ -12,7 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
@@ -66,6 +65,10 @@ type settleRun struct {
 	// hidden-marker term from them.
 	labels []string
 
+	// kindLabels are the butler row's finding and patch provenance labels,
+	// handed in by the launcher rather than looked up here.
+	kindLabels kindLabels
+
 	// patch backs the patch rung (ADR 0057, issue #4074) -- see Runner.run
 	// for how patch.forge's presence gates it.
 	patch patchRung
@@ -88,6 +91,11 @@ type patchRung struct {
 	gate  PatchGate
 }
 
+// kindLabels carries the butler kind row's finding and patch labels.
+type kindLabels struct {
+	finding, patch string
+}
+
 // patchLanding pairs one landed patch's finding issue number with its PR
 // URL -- the two things settle's post-Finish gate calls need (issue #4076).
 type patchLanding struct {
@@ -107,8 +115,8 @@ type patchLanding struct {
 // host-side auto-promotion gate (issue #3880); its zero value never
 // promotes anything. patch backs the patch rung (ADR 0057); see Runner.run
 // for how patch.forge's presence gates it. out receives the status lines.
-func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung, out io.Writer) *settleRun {
-	return &settleRun{out: out, it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
+func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung, labels kindLabels, out io.Writer) *settleRun {
+	return &settleRun{out: out, kindLabels: labels, it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
@@ -163,7 +171,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if s.records != nil {
 		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.records.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.records.knobs.Cooldown)}
 	}
-	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
+	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, s.kindLabels.finding, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
 		// of the day's shared promotion room. room.Promotions is Sweep's own
 		// snapshot, handed down rather than re-walked here (issue #3994): a
@@ -233,7 +241,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				} else {
 					return settle.Decoration{
 						Backlink:    backlink,
-						ExtraLabels: s.extraLabels(dispatchkind.MustBySettle(dispatchkind.SettleLedger).PatchLabel),
+						ExtraLabels: s.extraLabels(s.kindLabels.patch),
 						// Spend the slot, push, and open the PR only in
 						// OnFiled, after PostIssue succeeds -- a failed post
 						// must not push a branch or open a PR for an issue

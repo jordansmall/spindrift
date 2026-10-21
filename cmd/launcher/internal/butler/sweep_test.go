@@ -51,6 +51,8 @@ func testPolicy() Policy {
 		ClaimTimeout: time.Hour,
 		Budgets:      chore.Budgets{},
 		Zone:         time.UTC,
+		FindingLabel: testKindLabels.finding,
+		PatchLabel:   testKindLabels.patch,
 	}
 }
 
