@@ -79,7 +79,7 @@ var Strategy = recordsdigest.Strategy{
 // zero cooldown is legal (a not-planned close then never suppresses a
 // refile); only a negative one is rejected.
 func readKnobs(l recordsdigest.Lookup) (recordsdigest.Knobs, error) {
-	k, err := ReadKnobs(Lookup(l))
+	k, err := ReadKnobs(l)
 	if err != nil {
 		return recordsdigest.Knobs{}, err
 	}

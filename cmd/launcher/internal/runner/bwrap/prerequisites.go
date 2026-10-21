@@ -89,7 +89,7 @@ func Prerequisites(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite
 // through l. New and Prerequisites share it so the doctor check inspects the
 // decision the adapter renders.
 func network(cfg runner.Config, l runner.KnobLookup) (runner.BwrapNetwork, error) {
-	k, err := ReadKnobs(Lookup(l))
+	k, err := ReadKnobs(l)
 	if err != nil {
 		return runner.BwrapNetwork{}, err
 	}

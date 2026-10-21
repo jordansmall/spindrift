@@ -39,10 +39,10 @@ func TestRowKnobsKeysAreDeclaredByARow(t *testing.T) {
 	if _, err := git.ReadKnobs(rec); err != nil {
 		t.Errorf("git.ReadKnobs: %v", err)
 	}
-	if _, err := oci.ReadKnobs(oci.Lookup(rec)); err != nil {
+	if _, err := oci.ReadKnobs(rec); err != nil {
 		t.Errorf("oci.ReadKnobs: %v", err)
 	}
-	if _, err := bwrap.ReadKnobs(bwrap.Lookup(rec)); err != nil {
+	if _, err := bwrap.ReadKnobs(rec); err != nil {
 		t.Errorf("bwrap.ReadKnobs: %v", err)
 	}
 	for key := range c.rowKnobs {

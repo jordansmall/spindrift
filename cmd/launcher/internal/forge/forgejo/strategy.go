@@ -24,7 +24,7 @@ var Strategy = backendkit.Strategy{
 		return fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`, MergeStyle(s.MergeMethod))
 	},
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
@@ -37,21 +37,21 @@ var Strategy = backendkit.Strategy{
 		}), nil
 	},
 	NewCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, it forge.IssueTracker) (forge.CodeForge, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
 		return NewForgejoCodeForge(codeForgeConfig(s, k), it), nil
 	},
 	NewReadOnlyCodeForge: func(s backendkit.Shared, l backendkit.Lookup, _ forge.SanitizedParent, it forge.IssueTracker) (forge.CodeForge, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
 		return NewReadOnlyForgejoCodeForge(codeForgeConfig(s, k), it), nil
 	},
 	NewLedger: func(s backendkit.Shared, l backendkit.Lookup) (backendkit.LedgerSite, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return backendkit.LedgerSite{}, err
 		}
@@ -63,7 +63,7 @@ var Strategy = backendkit.Strategy{
 	// so the codeberg default here agrees with identityBase treating blank as
 	// no identity.
 	CloneURL: func(s backendkit.Shared, l backendkit.Lookup, _ string) (string, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return "", err
 		}
@@ -116,7 +116,7 @@ func identityBase(l backendkit.Lookup) string {
 	if v, ok := l("FORGEJO_BASE_URL"); ok && v == "" {
 		return ""
 	}
-	k, err := ReadKnobs(Lookup(l))
+	k, err := ReadKnobs(l)
 	if err != nil {
 		return ""
 	}
@@ -133,7 +133,7 @@ func validate(axis string) func(backendkit.Shared, backendkit.Lookup) error {
 		if v, ok := l("FORGEJO_BASE_URL"); ok && v == "" {
 			return errBaseURLRequired(axis)
 		}
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return err
 		}

@@ -11,14 +11,14 @@ import (
 var Strategy = backendkit.Strategy{
 	Descriptor: backend.Jira,
 	ValidateTracker: func(_ backendkit.Shared, l backendkit.Lookup) error {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return err
 		}
 		return ValidateJiraEnv(k.JiraBaseURL, k.JiraProjectKey, k.JiraToken, k.JiraStatusMapping)
 	},
 	NewIssueTracker: func(s backendkit.Shared, l backendkit.Lookup) (forge.IssueTracker, error) {
-		k, err := ReadKnobs(Lookup(l))
+		k, err := ReadKnobs(l)
 		if err != nil {
 			return nil, err
 		}
