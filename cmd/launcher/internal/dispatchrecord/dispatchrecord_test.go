@@ -409,18 +409,19 @@ func outcomeLine(status string, extra ...string) string {
 	return strings.Join(append([]string{"SPINDRIFT_OUTCOME issue=42 landing=x status=" + status}, extra...), " ") + "\n"
 }
 
-func TestParseLogKindFromOutcomeStatus(t *testing.T) {
-	t.Parallel()
+type kindCase struct {
+	name     string
+	lines    []string
+	wantKind string
+}
+
+func kindCases() []kindCase {
 	start := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
 	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
 	roleless := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
 	researching := "==> claude researching issue #42\n"
 	implementing := "==> claude implementing issue #42 on agent/issue-42\n"
-	tests := []struct {
-		name     string
-		lines    []string
-		wantKind string
-	}{
+	return []kindCase{
 		{"blocked research log is research by its announce", []string{researching, res, outcomeLine("blocked")}, "research"},
 		{"blocked research log with role-less pass_start", []string{researching, roleless, res, outcomeLine("blocked")}, "research"},
 		{"announce alone infers research (no outcome, no pass_start)", []string{researching, res}, "research"},
@@ -440,7 +441,26 @@ func TestParseLogKindFromOutcomeStatus(t *testing.T) {
 		{"no pass_start and no status", []string{res}, KindUnknown},
 		{"no pass_start and synthetic-only status", []string{res, outcomeLine("ready", "synthetic=true")}, KindUnknown},
 	}
-	for _, tc := range tests {
+}
+
+func TestParseLogKindFromOutcomeStatus(t *testing.T) {
+	t.Parallel()
+	assertParseLogKinds(t, kindCases())
+}
+
+// The legacy log rules (the pre-#734 "implementing" verb, the role-only and
+// blocked fallbacks) describe work runs, so re-pointing Default must not move
+// them. Not parallel: it mutates the package-level Default.
+func TestParseLogLegacyKindRulesIgnoreDefault(t *testing.T) {
+	old := dispatchkind.Default
+	t.Cleanup(func() { dispatchkind.Default = old })
+	dispatchkind.Default = dispatchkind.Research
+	assertParseLogKinds(t, kindCases())
+}
+
+func assertParseLogKinds(t *testing.T, cases []kindCase) {
+	t.Helper()
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...))
 			if err != nil {

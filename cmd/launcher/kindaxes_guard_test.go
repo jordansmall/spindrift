@@ -445,6 +445,26 @@ func TestKindAxesGuardEntryPoints(t *testing.T) {
 	}
 }
 
+// TestWorkKindFactsSites pins how many lines in each file read each
+// workKindFacts entry, keeping the by-text allowance to its granted sites.
+func TestWorkKindFactsSites(t *testing.T) {
+	for path, lines := range workKindFacts {
+		src, err := os.ReadFile(filepath.FromSlash(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int{}
+		for _, l := range strings.Split(string(src), "\n") {
+			got[strings.TrimSpace(l)]++
+		}
+		for line, want := range lines {
+			if got[line] != want {
+				t.Errorf("%s: %d lines read %q, want %d", path, got[line], line, want)
+			}
+		}
+	}
+}
+
 // TestKindAxesGuardFindingLabels plants every registered kind's FindingLabel
 // as a literal and checks the guard flags it under settle, and only there.
 func TestKindAxesGuardFindingLabels(t *testing.T) {
