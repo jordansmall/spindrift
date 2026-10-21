@@ -32,28 +32,12 @@
   ],
   "SummedByModel": [
     {
-      "CacheReadInputTokens": 40,
+      "CacheReadInputTokens": 120,
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 0,
-      "Model": "stub/stub-model:high",
-      "OutputTokens": 35,
-      "UncachedInputTokens": 121
-    },
-    {
-      "CacheReadInputTokens": 0,
-      "CacheWrite1hTokens": 0,
-      "CacheWrite5mTokens": 0,
-      "Model": "stub/stub-model:low",
-      "OutputTokens": 7,
-      "UncachedInputTokens": 53
-    },
-    {
-      "CacheReadInputTokens": 80,
-      "CacheWrite1hTokens": 0,
-      "CacheWrite5mTokens": 0,
-      "Model": "stub/stub-model:off",
-      "OutputTokens": 60,
-      "UncachedInputTokens": 160
+      "Model": "stub/stub-model",
+      "OutputTokens": 102,
+      "UncachedInputTokens": 334
     }
   ],
   "Totals": {

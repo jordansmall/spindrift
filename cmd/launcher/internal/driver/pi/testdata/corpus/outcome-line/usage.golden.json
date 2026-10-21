@@ -19,7 +19,7 @@
       "CacheReadInputTokens": 40,
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 0,
-      "Model": "stub/stub-model:off",
+      "Model": "stub/stub-model",
       "OutputTokens": 30,
       "UncachedInputTokens": 80
     }

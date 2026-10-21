@@ -570,3 +570,30 @@ func TestFormatCountLineZeroTrackingSortsEveryKind(t *testing.T) {
 		t.Errorf("zero tracking = %q, want %q", got, want)
 	}
 }
+
+// The role header shows the effort in force (`model:effort`) while OnModel keeps
+// the bare model id; an effort change re-headers without re-firing OnModel.
+func TestHeartbeatWriterHeaderCarriesEffortOnModelStaysBare(t *testing.T) {
+	table := map[string][]Event{
+		"m1": {{Kind: KindModel, Model: "p/m", Effort: "high"}},
+		"t1": {{Kind: KindText, Text: "one."}},
+		"m2": {{Kind: KindModel, Model: "p/m", Effort: "low"}},
+		"t2": {{Kind: KindText, Text: "two."}},
+	}
+	var raw, out bytes.Buffer
+	var calls []modelCall
+	w := NewHeartbeatWriter(&raw, "7", &out, fakeDecoder(table), "top").OnModel(func(m, r string) {
+		calls = append(calls, modelCall{m, r})
+	})
+	if _, err := w.Write([]byte("m1\nt1\nm2\nt2\n")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []modelCall{{"p/m", "top"}}; !reflect.DeepEqual(calls, want) {
+		t.Errorf("OnModel calls = %v, want %v", calls, want)
+	}
+	for _, label := range []string{"p/m:high", "p/m:low"} {
+		if got := strings.Count(out.String(), label); got != 1 {
+			t.Errorf("header label %q appears %d times, want 1:\n%s", label, got, out.String())
+		}
+	}
+}

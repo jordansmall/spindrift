@@ -2,7 +2,7 @@
   "lines": [],
   "onModel": [
     {
-      "model": "stub/stub-model:off",
+      "model": "stub/stub-model",
       "role": ""
     }
   ]

@@ -4,19 +4,19 @@
   ],
   "onModel": [
     {
-      "model": "stub/stub-model:off",
+      "model": "stub/stub-model",
       "role": ""
     },
     {
-      "model": "stub/stub-model:low",
+      "model": "stub/stub-model",
       "role": "auditor"
     },
     {
-      "model": "stub/stub-model:high",
+      "model": "stub/stub-model",
       "role": "scout"
     },
     {
-      "model": "stub/stub-model:off",
+      "model": "stub/stub-model",
       "role": ""
     }
   ]

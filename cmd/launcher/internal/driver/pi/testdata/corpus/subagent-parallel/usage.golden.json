@@ -24,20 +24,12 @@
   ],
   "SummedByModel": [
     {
-      "CacheReadInputTokens": 0,
-      "CacheWrite1hTokens": 0,
-      "CacheWrite5mTokens": 0,
-      "Model": "stub/stub-model:high",
-      "OutputTokens": 12,
-      "UncachedInputTokens": 94
-    },
-    {
       "CacheReadInputTokens": 80,
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 0,
-      "Model": "stub/stub-model:off",
-      "OutputTokens": 60,
-      "UncachedInputTokens": 160
+      "Model": "stub/stub-model",
+      "OutputTokens": 72,
+      "UncachedInputTokens": 254
     }
   ],
   "Totals": {

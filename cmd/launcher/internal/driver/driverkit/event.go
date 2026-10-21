@@ -57,11 +57,10 @@ const (
 	KindUsage Kind = "usage"
 
 	// KindModel reports a model id observed. Fills Model, MessageID,
-	// Timestamp, Role. The heartbeat writer reports a change of Model.
+	// Timestamp, Role, and Effort when known. The heartbeat writer reports a
+	// change of Model and, when Effort is set, shows `model:effort` in the
+	// role header.
 	KindModel Kind = "model"
-
-	// KindEffort reports an effort level observed. Fills Effort, Role.
-	KindEffort Kind = "effort"
 
 	// KindError is an error the CLI reported inside its grammar. Text keeps the
 	// error's raw text, because the classifier matches transient markers on
@@ -141,7 +140,7 @@ type Event struct {
 	// grammar does not name one.
 	Model string
 
-	// Effort is the effort level for KindUsage and KindEffort, "" when unknown.
+	// Effort is the effort level for KindUsage and KindModel, "" when unknown.
 	Effort string
 
 	// ToolID, ToolName, ToolInput and IsError describe tool events.
