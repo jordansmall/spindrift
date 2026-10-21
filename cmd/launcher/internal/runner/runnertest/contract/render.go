@@ -2,7 +2,10 @@ package contract
 
 import (
 	"bytes"
+	"cmp"
+	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -21,7 +24,7 @@ type Mount struct {
 // Decoded is what a decoder recovers from one recorded launch argv.
 type Decoded struct {
 	Name     string
-	Env      map[string]string // every on-argv env entry, baked ones included
+	Env      map[string]string // every on-argv env entry, baked ones included; build it with PutEnv
 	Mounts   []Mount           // every bind, baked ones included
 	AddHosts []string          // hosts mapped to host-gateway
 	Network  runner.NetworkMode
@@ -37,6 +40,21 @@ type Launch struct {
 	Network runner.NetworkMode
 }
 
+// BakedSet names what an adapter renders whatever its Box.
+type BakedSet struct {
+	EnvKeys, MountTargets []string
+}
+
+// PutEnv records k=v in env, the way every decoder must: a key a launch
+// renders twice is an error, not a silent overwrite.
+func PutEnv(env map[string]string, k, v string) error {
+	if _, dup := env[k]; dup {
+		return fmt.Errorf("env %s rendered twice", k)
+	}
+	env[k] = v
+	return nil
+}
+
 // RenderingHarness is what an adapter supplies to run the rendering contract.
 type RenderingHarness interface {
 	// Family is the harness's runner family: runner.KindOCI or runner.KindBwrap.
@@ -49,6 +67,12 @@ type RenderingHarness interface {
 	Render(t *testing.T, l Launch) []string
 	// Decode parses argv from Render back into what it rendered.
 	Decode(t *testing.T, argv []string) Decoded
+	// Baked lists the env keys and mount targets the adapter renders for l
+	// regardless of its Box. The contract subtracts each listed entry
+	// exactly once before comparing, so a duplicate of one still fails. They
+	// are keyed by env key and mount target because their values vary per
+	// closure generation and per run.
+	Baked(l Launch) BakedSet
 }
 
 const (
@@ -180,8 +204,9 @@ var table = []row{
 		&familyOnly{runner.KindBwrap, "OCI has no host-netns rendering; Config.OCINetwork treats host as open"}},
 }
 
-// facets compare what a decoder recovered against only what the spec asks
-// for, so baked env and mounts never pollute the verdict.
+// facets compare what a decoder recovered against the spec exactly, after
+// checkRow subtracts the harness's baked set, so a stray or repeated entry
+// fails.
 var facets = map[string]func(d Decoded, l Launch) error{
 	"Name": func(d Decoded, l Launch) error {
 		if d.Name != l.Box.Name {
@@ -189,14 +214,7 @@ var facets = map[string]func(d Decoded, l Launch) error{
 		}
 		return nil
 	},
-	"Env": func(d Decoded, l Launch) error {
-		for k, want := range l.Box.Env {
-			if got, ok := d.Env[k]; !ok || got != want {
-				return fmt.Errorf("env %s = %q (present=%v), want %q", k, got, ok, want)
-			}
-		}
-		return nil
-	},
+	"Env": launchWide,
 	"Output": func(_ Decoded, l Launch) error {
 		buf, ok := l.Box.Output.(*bytes.Buffer)
 		if !ok {
@@ -207,15 +225,11 @@ var facets = map[string]func(d Decoded, l Launch) error{
 		}
 		return nil
 	},
-	"DriverCacheDir": func(d Decoded, l Launch) error {
-		return wantMountOrNone(d, l.Box.DriverCacheDir, runnertest.DriverSessionCacheTarget)
-	},
-	"OutboxDir": func(d Decoded, l Launch) error {
-		return wantMountOrNone(d, l.Box.OutboxDir, outboxTarget)
-	},
-	"Sockets":       socketsAndAddHosts,
-	"RegistryProxy": socketsAndAddHosts,
-	"SignalSocket":  socketsAndAddHosts,
+	"DriverCacheDir": launchWide,
+	"OutboxDir":      launchWide,
+	"Sockets":        addHosts,
+	"RegistryProxy":  addHosts,
+	"SignalSocket":   addHosts,
 	"ClosureGeneration": func(d Decoded, l Launch) error {
 		want, got := l.Box.ClosureGeneration, d.ClosureGeneration
 		if (want == nil) != (got == nil) || (want != nil && *want != *got) {
@@ -237,36 +251,104 @@ var facets = map[string]func(d Decoded, l Launch) error{
 	},
 }
 
-func wantMount(d Decoded, m Mount) error {
-	if !slices.Contains(d.Mounts, m) {
-		return fmt.Errorf("no mount %+v in %+v", m, d.Mounts)
+// launchWide is the facet of a field whose whole rendering is env or mounts:
+// checkRow's whole-launch env and mount equality is its check.
+func launchWide(Decoded, Launch) error { return nil }
+
+func isLaunchWide(f func(Decoded, Launch) error) bool {
+	return reflect.ValueOf(f).Pointer() == reflect.ValueOf(launchWide).Pointer()
+}
+
+func env(d Decoded, l Launch) error {
+	if !maps.Equal(d.Env, l.Box.Env) {
+		return fmt.Errorf("env = %v, want %v", d.Env, l.Box.Env)
 	}
 	return nil
 }
 
-// wantMountOrNone wants source bound at target when the Box sets source, and
-// nothing at target when it does not.
-func wantMountOrNone(d Decoded, source, target string) error {
-	if source != "" {
-		return wantMount(d, Mount{Source: source, Target: target})
+// ownedMounts is every bind the spec asks for, none of them read-only.
+func ownedMounts(b runner.Box) []Mount {
+	var want []Mount
+	if b.DriverCacheDir != "" {
+		want = append(want, Mount{b.DriverCacheDir, runnertest.DriverSessionCacheTarget, false})
 	}
-	for _, m := range d.Mounts {
-		if m.Target == target {
-			return fmt.Errorf("unset field still renders mount %+v", m)
+	if b.OutboxDir != "" {
+		want = append(want, Mount{b.OutboxDir, outboxTarget, false})
+	}
+	for _, s := range b.Sockets {
+		want = append(want, Mount{s.Source, s.Target, false})
+	}
+	return want
+}
+
+func compareMounts(a, b Mount) int {
+	return cmp.Or(
+		cmp.Compare(a.Target, b.Target),
+		cmp.Compare(a.Source, b.Source),
+		cmp.Compare(boolInt(a.ReadOnly), boolInt(b.ReadOnly)),
+	)
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// mounts wants the launch's binds to be exactly the ones the spec asks for,
+// in any order.
+func mounts(d Decoded, l Launch) error {
+	got := slices.SortedFunc(slices.Values(d.Mounts), compareMounts)
+	want := slices.SortedFunc(slices.Values(ownedMounts(l.Box)), compareMounts)
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("mounts = %+v, want %+v", got, want)
+	}
+	return nil
+}
+
+// subtractBaked returns d without the harness's baked env and mounts, one
+// mount per baked target. A baked entry the launch lacks is an error: the
+// harness's declaration is stale.
+func subtractBaked(d Decoded, baked BakedSet) (Decoded, error) {
+	d.Env = maps.Clone(d.Env)
+	for _, k := range baked.EnvKeys {
+		if _, ok := d.Env[k]; !ok {
+			return d, fmt.Errorf("baked env %s is not rendered: stale Baked declaration", k)
+		}
+		delete(d.Env, k)
+	}
+	d.Mounts = slices.Clone(d.Mounts)
+	for _, target := range baked.MountTargets {
+		i := slices.IndexFunc(d.Mounts, func(m Mount) bool { return m.Target == target })
+		if i < 0 {
+			return d, fmt.Errorf("baked mount %s is not rendered: stale Baked declaration", target)
+		}
+		d.Mounts = slices.Delete(d.Mounts, i, i+1)
+	}
+	return d, nil
+}
+
+// bakedCollision rejects a row whose spec names an env key or mount target
+// the harness bakes, which subtraction would otherwise mask.
+func bakedCollision(l Launch, baked BakedSet) error {
+	for k := range l.Box.Env {
+		if slices.Contains(baked.EnvKeys, k) {
+			return fmt.Errorf("env key %s collides with a baked env key", k)
+		}
+	}
+	for _, m := range ownedMounts(l.Box) {
+		if slices.Contains(baked.MountTargets, m.Target) {
+			return fmt.Errorf("mount target %s collides with a baked mount target", m.Target)
 		}
 	}
 	return nil
 }
 
-// socketsAndAddHosts serves the three fields whose rendering is a socket
-// bind, a host-gateway mapping, or both: which one a row exercises follows
-// from what its Box carries.
-func socketsAndAddHosts(d Decoded, l Launch) error {
-	for _, s := range l.Box.Sockets {
-		if err := wantMount(d, Mount{Source: s.Source, Target: s.Target}); err != nil {
-			return err
-		}
-	}
+// addHosts serves the three fields whose rendering is a socket bind, a
+// host-gateway mapping, or both. The binds are checkRow's to pin, so this
+// pins the mappings, and the empty ones on rows that carry none.
+func addHosts(d Decoded, l Launch) error {
 	// Registry proxy then Signal socket, as oci's addHostTargets orders them.
 	// They share one transport verdict, so the normal TCP case maps one host.
 	var want []string
@@ -359,8 +441,20 @@ func checkRow(t *testing.T, h RenderingHarness, r row) error {
 			return fmt.Errorf("row %s: env key %s is off-argv by design", r.name, k)
 		}
 	}
-	d := h.Decode(t, h.Render(t, l))
-	err := facets[r.field](d, l)
+	baked := h.Baked(l)
+	if err := bakedCollision(l, baked); err != nil {
+		return fmt.Errorf("row %s: %w", r.name, err)
+	}
+	d, err := subtractBaked(h.Decode(t, h.Render(t, l)), baked)
+	if err != nil {
+		return fmt.Errorf("row %s: %w", r.name, err)
+	}
+	// No guard covers env or mounts, so every row owes the whole-launch
+	// equality: a stray or repeated entry fails whichever field the row probes.
+	if err := errors.Join(env(d, l), mounts(d, l)); err != nil {
+		return fmt.Errorf("row %s: %w", r.name, err)
+	}
+	err = facets[r.field](d, l)
 	if r.only != nil && r.only.Family != h.Family() {
 		if err == nil {
 			return fmt.Errorf("stale guard: %s renders %s though the row says only %s (%s); remove the guard",

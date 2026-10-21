@@ -23,6 +23,9 @@ type ociRenderingHarness struct{}
 
 func (ociRenderingHarness) Family() string { return runner.KindOCI }
 
+// Baked is empty: the image carries its own env and mounts, so nothing rides argv.
+func (ociRenderingHarness) Baked(contract.Launch) contract.BakedSet { return contract.BakedSet{} }
+
 func (ociRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	t.Helper()
 	// Inspect misses, the run prints the marker, and the post-success reap's
@@ -81,7 +84,9 @@ func (ociRenderingHarness) Decode(t *testing.T, argv []string) contract.Decoded 
 			if !ok {
 				t.Fatalf("-e %q has no KEY=VALUE separator: %v", kv, argv)
 			}
-			d.Env[k] = v
+			if err := contract.PutEnv(d.Env, k, v); err != nil {
+				t.Fatalf("%v: %v", err, argv)
+			}
 			i++
 		case arg == "-v":
 			spec := flagValue(i)

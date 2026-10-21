@@ -31,6 +31,23 @@ type bwrapRenderingHarness struct{}
 
 func (bwrapRenderingHarness) Family() string { return runner.KindBwrap }
 
+// Baked is what a launch renders whatever the Box: the closure env, the store
+// and identity files, nix.conf, and the agent home. The adapter binds nix.conf
+// only when nixConfigFile is set and resolv.conf only when statResolvConf finds
+// one and the network is not isolated without pasta (mode none); Render sets
+// the former and stubs the latter, so both are baked here. Values vary per
+// generation and run, so only keys and targets are named.
+func (bwrapRenderingHarness) Baked(l contract.Launch) contract.BakedSet {
+	baked := contract.BakedSet{
+		EnvKeys:      []string{"HOME", "PATH", "PREFETCH", "SSL_CERT_FILE", "GIT_SSL_CAINFO"},
+		MountTargets: []string{"/nix/store", "/etc/passwd", "/etc/group", "/etc/nix/nix.conf", "/agent", "/home-agent-staged"},
+	}
+	if l.Network != runner.NetworkModeNone {
+		baked.MountTargets = append(baked.MountTargets, "/etc/resolv.conf")
+	}
+	return baked
+}
+
 func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	t.Helper()
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: contract.Stdout})
@@ -119,7 +136,9 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 		case "--setenv":
 			v := arg(i, 2)
 			i += 2
-			d.Env[v[0]] = v[1]
+			if err := contract.PutEnv(d.Env, v[0], v[1]); err != nil {
+				t.Fatalf("%v: %v", err, argv)
+			}
 			if v[0] == "PATH" {
 				agentEnvPath = v[1]
 			}
