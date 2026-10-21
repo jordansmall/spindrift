@@ -127,3 +127,76 @@ func TestPiAPIKeyProvidersResolveToNamedVariable(t *testing.T) {
 		})
 	}
 }
+
+func store(v string) func(string) string {
+	return func(env string) string {
+		if env == "PI_AUTH_CONTENT" {
+			return v
+		}
+		return ""
+	}
+}
+
+func TestCheckClosedCredentials(t *testing.T) {
+	tests := []struct {
+		name   string
+		driver string
+		models []string
+		store  string
+		want   []string // substrings of the error; nil means no error
+	}{
+		{"pi unlisted", "pi", []string{"cerebras/x"}, "", []string{"no credential covers the cerebras Provider under the pi Driver", "PI_AUTH_CONTENT", "anthropic/"}},
+		{"pi listed", "pi", []string{"openai/gpt-5"}, "", nil},
+		{"pi store entry", "pi", []string{"cerebras/x"}, `{"cerebras":{"type":"api_key","key":"k"}}`, nil},
+		{"pi other store entry", "pi", []string{"cerebras/x"}, `{"cohere":{"type":"api_key","key":"k"}}`, []string{"cerebras"}},
+		{"pi non-api_key store entry", "pi", []string{"cerebras/x"}, `{"cerebras":{"type":"apikey","key":"k"}}`, []string{"cerebras"}},
+		{"pi oauth store entry", "pi", []string{"cerebras/x"}, `{"cerebras":{"type":"oauth"}}`, []string{"cerebras"}},
+		{"pi empty Provider", "pi", []string{"/x"}, "", []string{`model "/x" names no Provider before the "/"`, "write it as <provider>/<model>", "anthropic/"}},
+		{"pi bare and empty", "pi", []string{"", "bare-model"}, "", nil},
+		{"opencode open-ended", "opencode", []string{"cerebras/x"}, "", nil},
+		{"claude open-ended", "claude", []string{"cerebras/x"}, "", nil},
+		{"unknown driver", "nope", []string{"cerebras/x"}, "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := CheckClosedCredentials(tt.driver, tt.models, store(tt.store))
+			if tt.want == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q missing %q", err, w)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckClosedCredentialsReportsEachProviderOnce(t *testing.T) {
+	err := CheckClosedCredentials("pi", []string{"cerebras/x", "cohere/y", "cerebras/z"}, func(string) string { return "" })
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if n := strings.Count(err.Error(), "covers the cerebras Provider"); n != 1 {
+		t.Errorf("cerebras reported %d times: %v", n, err)
+	}
+	if !strings.Contains(err.Error(), "covers the cohere Provider") {
+		t.Errorf("cohere not reported: %v", err)
+	}
+}
+
+func TestCheckClosedCredentialsLeavesUnparseableStoreToCheck(t *testing.T) {
+	for _, content := range []string{"not json", "null", `["x"]`} {
+		t.Run(content, func(t *testing.T) {
+			if err := CheckClosedCredentials("pi", []string{"cerebras/x"}, store(content)); err != nil {
+				t.Errorf("unparseable store reported here as well as by AuthContent.Check: %v", err)
+			}
+		})
+	}
+}

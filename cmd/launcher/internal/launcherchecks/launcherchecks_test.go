@@ -390,9 +390,32 @@ func TestRequiredKnobChecks_DriverCredentials_PiReportsEveryMissingProvider(t *t
 	}
 }
 
-func TestRequiredKnobChecks_DriverCredentials_PiUnlistedProviderPasses(t *testing.T) {
-	if err := piCredentialProbe(t, []string{"cohere/command"}, nil); err != nil {
-		t.Errorf("driver-credentials Probe() unexpected error for a Provider with no rule: %v", err)
+// pi authenticates only the Providers its rules name, plus any holding an
+// auth-store entry; an unlisted one must fail here rather than mid-run.
+func TestRequiredKnobChecks_DriverCredentials_PiUnlistedProviderFails(t *testing.T) {
+	models := []string{"anthropic/claude-x", "", "cerebras/x", "", "cerebras/y"}
+	err := piCredentialProbe(t, models, map[string]string{"ANTHROPIC_API_KEY": "k"})
+	if err == nil {
+		t.Fatal("driver-credentials Probe() passed for a Provider with no rule and no auth-store entry")
+	}
+	for _, want := range []string{"cerebras", "PI_AUTH_CONTENT", "openai/"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("driver-credentials Probe() = %v, want it to name %q", err, want)
+		}
+	}
+	if n := strings.Count(err.Error(), "the cerebras Provider"); n != 1 {
+		t.Errorf("driver-credentials Probe() names cerebras %d times, want once", n)
+	}
+}
+
+func TestRequiredKnobChecks_DriverCredentials_PiUnlistedProviderInAuthStorePasses(t *testing.T) {
+	models := []string{"anthropic/claude-x", "", "cerebras/x", "", ""}
+	creds := map[string]string{
+		"ANTHROPIC_API_KEY": "k",
+		"PI_AUTH_CONTENT":   `{"cerebras":{"type":"api_key","key":"k"}}`,
+	}
+	if err := piCredentialProbe(t, models, creds); err != nil {
+		t.Errorf("driver-credentials Probe() unexpected error with a cerebras auth-store entry: %v", err)
 	}
 }
 
