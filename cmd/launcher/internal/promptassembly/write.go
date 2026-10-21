@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
+
+	"spindrift.dev/launcher/internal/driver"
 )
 
 // Passthrough is the Handoff fields Assemble never sets: the caller layers
@@ -74,6 +77,14 @@ func WriteAssembly(env Env, reg Registry, markers []ValidateMarkerRow, p Passthr
 	result.Handoff.Model = p.Model
 	result.Handoff.Effort = p.Effort
 	result.Handoff.Driver = p.Driver
+	// A Driver whose effort rides on the model lets its effort flag beat a
+	// model-suffix level, so a REVIEW_MODEL level suffix must set the reviewer
+	// effort too, unless REVIEW_EFFORT is explicit (issue #5625).
+	if env.ReviewEffortOverride == "" {
+		if level, ok := effortSuffixLevel(env.ReviewModelOverride, p.Driver); ok {
+			result.Handoff.ReviewEffort = level
+		}
+	}
 	result.Handoff.DriverBin = p.DriverBin
 	result.Handoff.DriverFlags = p.DriverFlags
 	result.Handoff.Devshell = p.Devshell
@@ -130,4 +141,16 @@ func ScanSkillsFound(dir string) string {
 		}
 	}
 	return strings.Join(found, ", ")
+}
+
+// effortSuffixLevel returns the trailing ":<level>" of model when level is one
+// of the Driver's effort-on-model levels, splitting at the last colon like
+// lib/effort-on-model.nix.
+func effortSuffixLevel(model, driverName string) (string, bool) {
+	i := strings.LastIndexByte(model, ':')
+	if i < 0 {
+		return "", false
+	}
+	level := model[i+1:]
+	return level, slices.Contains(driver.EffortOnModelLevels(driverName), level)
 }

@@ -242,3 +242,48 @@ func TestScanSkillsFound(t *testing.T) {
 		t.Errorf("ScanSkillsFound(empty) = %q, want empty", got)
 	}
 }
+
+// Issue #5625: pi's --thinking beats a model-suffix level, so a REVIEW_MODEL
+// override ending in a level must pull ReviewEffort along unless REVIEW_EFFORT
+// is set.
+func TestWriteAssemblyReviewModelSuffixSetsReviewEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		driver     string
+		baked      string
+		model      string
+		effort     string
+		wantModel  string
+		wantEffort string
+	}{
+		{"pi suffix beats baked effort", "pi", "high", "github-copilot/m:low", "", "github-copilot/m:low", "low"},
+		{"pi suffix fills an empty baked effort", "pi", "", "github-copilot/m:low", "", "github-copilot/m:low", "low"},
+		{"pi splits at the last colon", "pi", "high", "host:8080/m:xhigh", "", "host:8080/m:xhigh", "xhigh"},
+		{"pi non-level suffix is left alone", "pi", "high", "ollama/llama:8b", "", "ollama/llama:8b", "high"},
+		{"pi model without a suffix is left alone", "pi", "high", "github-copilot/m", "", "github-copilot/m", "high"},
+		{"explicit REVIEW_EFFORT beats the suffix", "pi", "high", "github-copilot/m:low", "medium", "github-copilot/m:low", "medium"},
+		{"claude has no levels", "claude", "high", "m:low", "", "m:low", "high"},
+		{"opencode has no levels", "opencode", "high", "p/m:low", "", "p/m:low", "high"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"` + tt.baked + `"}}`
+			env.ReviewModelOverride = tt.model
+			env.ReviewEffortOverride = tt.effort
+			p := testPassthrough()
+			p.Driver = tt.driver
+
+			result, err := WriteAssembly(env, loadTestRegistry(t), testValidateMarkerRows(), p, writeTestOutputs(t), &strings.Builder{})
+			if err != nil {
+				t.Fatalf("WriteAssembly: %v", err)
+			}
+			if result.Handoff.ReviewModel != tt.wantModel {
+				t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, tt.wantModel)
+			}
+			if result.Handoff.ReviewEffort != tt.wantEffort {
+				t.Errorf("Handoff.ReviewEffort = %q, want %q", result.Handoff.ReviewEffort, tt.wantEffort)
+			}
+		})
+	}
+}

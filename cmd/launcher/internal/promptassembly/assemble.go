@@ -742,7 +742,8 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// Dispatch-time overrides (issue #3171) bind last, over both extraction
 	// paths above: dispatch env beats a baked roster entry beats the
 	// coordinator-model fallback. They apply even when the roster opted the
-	// reviewer out, because the review pass always runs.
+	// reviewer out, because the review pass always runs. WriteAssembly then
+	// lets a REVIEW_MODEL level suffix fill ReviewEffort (issue #5625).
 	if e.ReviewModelOverride != "" {
 		result.Handoff.ReviewModel = e.ReviewModelOverride
 	}
