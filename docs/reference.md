@@ -7275,11 +7275,21 @@ output is the main loop's alone and subagent rows show 0 output; subagents'
 output is recorded nowhere, neither in the agent rows nor in the totals.
 
 Text output prints the role and agent table cells, and every `--by` group key,
-with tabs and line breaks turned into spaces and other control characters and
-terminal escape sequences removed, since a label such as a subagent role comes
-from the Box; `--json` keeps the recorded value. The `warning:` lines
-`spindrift stats` writes to stderr get the same treatment, with or without
-`--json`, since a log path or git's own stderr can carry any byte.
+as recorded unless the label is empty, starts or ends with a space, or holds a
+character that needs escaping (a control character, terminal escape sequence,
+non-printable rune, invalid UTF-8, `"` or `\`), since a label such as a
+subagent role comes from the Box. Such a label prints as a Go double-quoted
+string with escapes (`"\x1b[2J"`, `"a\tb"`, `""`), so distinct group keys
+never print as the same string. Quoting cannot split values that grouping has
+already merged, though: a Box-authored agent named literally `main` or
+`(none)` shares a row with the main loop or with Passes that ran no agent, and
+under `--by knob:<NAME>` a recorded value of literally `(none)` or `(empty)`
+shares a group with the absent or empty knob. Printable look-alikes (a
+combining mark, say) still print as recorded; `--json` keeps the recorded
+value. The `warning:` lines `spindrift stats` writes to stderr instead get
+tabs and line breaks turned into spaces and other control characters and
+terminal escape sequences removed, with or without `--json`, since a log path
+or git's own stderr can carry any byte.
 
 A landed key is a distinct (kind, Dispatch key) pair with at least one
 Record settled `complete` with reason `merged`: a PR left open (`manual`,

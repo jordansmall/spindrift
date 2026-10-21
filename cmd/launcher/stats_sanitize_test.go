@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -54,7 +55,7 @@ func statsHostileRecords() []dispatchrecord.Record {
 	}}
 }
 
-func TestRenderStats_SanitizesRecordDerivedLabels(t *testing.T) {
+func TestRenderStats_QuotesRecordDerivedLabels(t *testing.T) {
 	var buf bytes.Buffer
 	if err := renderStats(&buf, statsHostileRecords()); err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func TestRenderStats_SanitizesRecordDerivedLabels(t *testing.T) {
 		if len(rows) != 2 {
 			t.Fatalf("agent table = %d lines, want header and one row:\n%s", len(rows), strings.Join(rows, "\n"))
 		}
-		if want := "evil agent FAKE 9 9 9 9 9 9"; !strings.HasPrefix(rows[1], want) {
+		if want := strconv.Quote(statsHostileAgent) + "  1"; !strings.HasPrefix(rows[1], want) {
 			t.Errorf("agent row = %q, want prefix %q", rows[1], want)
 		}
 	})
@@ -77,21 +78,21 @@ func TestRenderStats_SanitizesRecordDerivedLabels(t *testing.T) {
 		if len(rows) != 2 {
 			t.Fatalf("role table = %d lines, want header and one row:\n%s", len(rows), strings.Join(rows, "\n"))
 		}
-		if want := "implement X FAKE"; !strings.HasPrefix(rows[1], want) {
+		if want := strconv.Quote(statsHostileRole) + "  1"; !strings.HasPrefix(rows[1], want) {
 			t.Errorf("role row = %q, want prefix %q", rows[1], want)
 		}
 	})
 }
 
-func TestRenderStatsGroups_SanitizesGroupHeader(t *testing.T) {
+func TestRenderStatsGroups_QuotesGroupHeader(t *testing.T) {
 	records := statsHostileRecords()
 	for _, tc := range []struct {
 		name string
 		by   statsBy
 		want string
 	}{
-		{"model", statsBy{dim: statsByModel}, "model = m X Y"},
-		{"knob", statsBy{dim: statsByKnob, arg: "TIMEOUT"}, "knob:TIMEOUT = v A B"},
+		{"model", statsBy{dim: statsByModel}, "model = " + strconv.Quote(statsHostileModel)},
+		{"knob", statsBy{dim: statsByKnob, arg: "TIMEOUT"}, "knob:TIMEOUT = " + strconv.Quote(statsHostileKnob)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dims := []statsBy{tc.by}
@@ -102,6 +103,96 @@ func TestRenderStatsGroups_SanitizesGroupHeader(t *testing.T) {
 			statsAssertPlainText(t, buf.String())
 			if header, _, _ := strings.Cut(buf.String(), "\n"); header != tc.want {
 				t.Errorf("group header = %q, want %q", header, tc.want)
+			}
+		})
+	}
+}
+
+// statsAgentRecord builds a one-Pass Record with Dispatch key key whose model
+// and agent are both name.
+func statsAgentRecord(key, name string) dispatchrecord.Record {
+	return dispatchrecord.Record{
+		Kind: "work", DispatchKey: key,
+		Passes: []dispatchrecord.Pass{{
+			Role: "implement", Models: []string{name}, USD: 1,
+			Agents: []dispatchrecord.PassAgent{{Agent: name, APICalls: 1}},
+		}},
+	}
+}
+
+func TestRenderStats_ControlOnlyAgentIsVisible(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderStats(&buf, []dispatchrecord.Record{statsAgentRecord("1", "\x1b[2J")}); err != nil {
+		t.Fatal(err)
+	}
+	statsAssertPlainText(t, buf.String())
+	rows := statsTableFrom(t, buf.String(), "AGENT")
+	if want := `"\x1b[2J"  1`; len(rows) != 2 || !strings.HasPrefix(rows[1], want) {
+		t.Errorf("agent rows = %q, want a row starting %q", rows, want)
+	}
+}
+
+func TestRenderStats_DistinctKeysStayDistinct(t *testing.T) {
+	records := []dispatchrecord.Record{statsAgentRecord("1", "a\tb"), statsAgentRecord("2", "a b")}
+
+	t.Run("agent table", func(t *testing.T) {
+		var buf bytes.Buffer
+		if err := renderStats(&buf, records); err != nil {
+			t.Fatal(err)
+		}
+		statsAssertPlainText(t, buf.String())
+		rows := statsTableFrom(t, buf.String(), "AGENT")
+		if len(rows) != 3 {
+			t.Fatalf("agent table = %d lines, want header and two rows:\n%s", len(rows), strings.Join(rows, "\n"))
+		}
+		for _, key := range []string{`"a\tb"`, "a b"} {
+			found := false
+			for _, row := range rows[1:] {
+				if rest, ok := strings.CutPrefix(row, key+" "); ok && strings.Fields(rest)[0] == "1" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("table lacks a row keyed %q with 1 Pass:\n%s", key, strings.Join(rows, "\n"))
+			}
+		}
+	})
+
+	t.Run("group headers", func(t *testing.T) {
+		dims := []statsBy{{dim: statsByModel}}
+		var buf bytes.Buffer
+		if err := renderStatsGroups(&buf, groupStats(records, dims), dims); err != nil {
+			t.Fatal(err)
+		}
+		statsAssertPlainText(t, buf.String())
+		for _, want := range []string{"model = \"a\\tb\"\n", "model = a b\n"} {
+			if !strings.Contains(buf.String(), want) {
+				t.Errorf("missing header %q:\n%s", want, buf.String())
+			}
+		}
+	})
+}
+
+func TestStatsKey(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"ordinary", "implement", "implement"},
+		{"spaces", "a b", "a b"},
+		{"printable non-ASCII", "café", "café"},
+		{"empty", "", `""`},
+		{"control only", "\x1b[2J", `"\x1b[2J"`},
+		{"tab", "a\tb", `"a\tb"`},
+		{"newline", "a\nb", `"a\nb"`},
+		{"leading quote", `"x`, `"\"x"`},
+		{"embedded quote", `a"b`, `"a\"b"`},
+		{"backslash", `a\b`, `"a\\b"`},
+		{"invalid UTF-8", "a\xffb", `"a\xffb"`},
+		{"C1 control", "a\u009bb", `"a\u009bb"`},
+		{"trailing space", "a ", `"a "`},
+		{"leading space", " a", `" a"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := statsKeyText(tc.in); got != tc.want {
+				t.Errorf("statsKeyText(%q) = %s, want %s", tc.in, got, tc.want)
 			}
 		})
 	}

@@ -251,7 +251,7 @@ func renderStatsGroups(w io.Writer, groups []statsGroup, dims []statsBy) error {
 		}
 		pairs := make([]string, len(dims))
 		for j, d := range dims {
-			pairs[j] = d.String() + " = " + statsLabel(g.keys[j])
+			pairs[j] = d.String() + " = " + statsKeyText(g.keys[j])
 		}
 		if _, err := fmt.Fprintln(w, strings.Join(pairs, ", ")); err != nil {
 			return err
