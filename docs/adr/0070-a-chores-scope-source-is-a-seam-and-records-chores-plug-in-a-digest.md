@@ -38,7 +38,10 @@ Chore is planned, so the hook is built now rather than on a trigger.
    Record ID it covers. `Anchors`, also required, lists what a finding may
    cite in a digest it rendered. Its other functions are optional, and a
    nil one means the Chore does without it:
-   - `ParsePrior`, which reads a prior finding;
+   - `ParsePrior`, which reads a prior finding, set with `Render` through
+     `WithPrior`, which checks at compile time that the type it returns and
+     the one `Render` takes agree (issue #5783); a Strategy that sets the two
+     by hand gets no such check;
    - `Validate`, which applies the Chore's own settle rules, such as tuning's
      sample floor and its `evidence-gap` exemption;
    - `DedupTerms`, which supplies the Chore's dedup pattern terms;

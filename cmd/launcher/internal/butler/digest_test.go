@@ -42,14 +42,13 @@ func init() {
 		},
 		Anchors: func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
 	})
-	recordsdigest.Register(recordsdigest.Strategy{
-		Name: withPriorChore,
-		Render: func(in recordsdigest.Input) recordsdigest.Output {
-			return recordsdigest.Output{Text: fmt.Sprint("prior: ", in.Prior), Latest: "latest"}
-		},
-		Anchors:    func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
-		ParsePrior: func(f settle.PriorFinding) any { return f.Issue.Number },
-	})
+	recordsdigest.Register(recordsdigest.WithPrior(recordsdigest.Strategy{
+		Name:    withPriorChore,
+		Anchors: func(string) map[string]bool { return map[string]bool{noPriorAnchor: true} },
+	}, func(f settle.PriorFinding) string { return f.Issue.Number },
+		func(in recordsdigest.Input, prior []string) recordsdigest.Output {
+			return recordsdigest.Output{Text: fmt.Sprint("prior: ", prior), Latest: "latest"}
+		}))
 	recordsdigest.Register(recordsdigest.Strategy{
 		Name: evidenceChore,
 		Render: func(in recordsdigest.Input) recordsdigest.Output {
