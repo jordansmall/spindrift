@@ -94,6 +94,26 @@ const (
 type familyOnly struct {
 	Family string
 	Reason string
+	// Otherwise rewrites the row's launch into what every other family
+	// renders instead: the field absent, or the mode it aliases to. The row's
+	// own facet then pins that rendering, so a wrong one is not mistaken for
+	// the absence the guard promises. A stale guard fails too: the facet must
+	// NOT hold for the row's own launch on any other family.
+	Otherwise func(Launch) Launch
+}
+
+func absentName(l Launch) Launch { l.Box.Name = ""; return l }
+
+func noAddHost(l Launch) Launch {
+	l.Box.RegistryProxy.TCPAddHost = false
+	l.Box.SignalSocket.TCPAddHost = false
+	return l
+}
+
+func noClosureGeneration(l Launch) Launch { l.Box.ClosureGeneration = nil; return l }
+
+func rendersAs(m runner.NetworkMode) func(Launch) Launch {
+	return func(l Launch) Launch { l.Network = m; return l }
 }
 
 type row struct {
@@ -101,8 +121,7 @@ type row struct {
 	field string // a runner.Box field name, or networkField
 	// launch builds the row's input; every Box it returns has a Name.
 	launch func(t *testing.T) Launch
-	// only restricts the row to one family. For any other family the kit
-	// asserts the facet does NOT hold, so a stale guard fails.
+	// only restricts the row to one family; see familyOnly.Otherwise.
 	only *familyOnly
 }
 
@@ -139,12 +158,16 @@ func sockets(pairs ...[2]string) func(*testing.T, *runner.Box) {
 var (
 	tcpHost = registrymanifest.NewTCPEndpoint("host.docker.internal", "8080")
 
-	ociOnlyAddHost = &familyOnly{runner.KindOCI, "bwrap's registry transport is always unix (RegistryProxyTransport returns a unix endpoint), and the Signal socket takes that same verdict (dispatch/box.go passes it to startSignalSocket), so bwrap never needs a host-gateway mapping"}
+	ociOnlyAddHost = &familyOnly{
+		Family:    runner.KindOCI,
+		Reason:    "bwrap's registry transport is always unix (RegistryProxyTransport returns a unix endpoint), and the Signal socket takes that same verdict (dispatch/box.go passes it to startSignalSocket), so bwrap never needs a host-gateway mapping",
+		Otherwise: noAddHost,
+	}
 )
 
 var table = []row{
 	{"Name", "Name", withBox(func(*testing.T, *runner.Box) {}),
-		&familyOnly{runner.KindOCI, "bwrap keys a Box by its cgroup dir and running map, never argv"}},
+		&familyOnly{Family: runner.KindOCI, Reason: "bwrap keys a Box by its cgroup dir and running map, never argv", Otherwise: absentName}},
 	{"Env/plain", "Env", withBox(func(_ *testing.T, b *runner.Box) {
 		b.Env = map[string]string{envKey: "one", envKey + "_2": "two"}
 	}), nil},
@@ -193,15 +216,15 @@ var table = []row{
 			NixConfigFile: "/nix/store/contract-nix-conf",
 			Generation:    "contract-gen-1",
 		}
-	}), &familyOnly{runner.KindBwrap, "OCI boots a baked image and never binds a closure generation"}},
+	}), &familyOnly{Family: runner.KindBwrap, Reason: "OCI boots a baked image and never binds a closure generation", Otherwise: noClosureGeneration}},
 	{"Network/open", networkField, network(runner.NetworkModeOpen),
-		&familyOnly{runner.KindOCI, "bwrap's pasta namespace always runs --no-map-gw (ADR 0042), so open renders identically to no-host-loopback"}},
+		&familyOnly{Family: runner.KindOCI, Reason: "bwrap's pasta namespace always runs --no-map-gw (ADR 0042), so open renders identically to no-host-loopback", Otherwise: rendersAs(runner.NetworkModeNoHostLoopback)}},
 	{"Network/zero", networkField, network(""),
-		&familyOnly{runner.KindOCI, "bwrap isolates every mode but host, the zero value included (BwrapNetwork), so pasta's --no-map-gw renders it identically to no-host-loopback"}},
+		&familyOnly{Family: runner.KindOCI, Reason: "bwrap isolates every mode but host, the zero value included (BwrapNetwork), so pasta's --no-map-gw renders it identically to no-host-loopback", Otherwise: rendersAs(runner.NetworkModeNoHostLoopback)}},
 	{"Network/no-host-loopback", networkField, network(runner.NetworkModeNoHostLoopback), nil},
 	{"Network/none", networkField, network(runner.NetworkModeNone), nil},
 	{"Network/host", networkField, network(runner.NetworkModeHost),
-		&familyOnly{runner.KindBwrap, "OCI has no host-netns rendering; Config.OCINetwork treats host as open"}},
+		&familyOnly{Family: runner.KindBwrap, Reason: "OCI has no host-netns rendering; Config.OCINetwork treats host as open", Otherwise: rendersAs(runner.NetworkModeOpen)}},
 }
 
 // facets compare what a decoder recovered against the spec exactly, after
@@ -386,9 +409,10 @@ func rendering(t *testing.T, h RenderingHarness, rows []row, unrendered map[stri
 	}
 }
 
-// validate fails on a malformed table: a guard without a reason, a row for
-// an unknown field, a Box field no row and no unrendered entry covers, or a
-// network mode (the zero value included) no networkField row covers.
+// validate fails on a malformed table: a guard without a reason or an
+// Otherwise, a guard on a launch-wide field, a row for an unknown field, a Box
+// field no row and no unrendered entry covers, or a network mode (the zero
+// value included) no networkField row covers.
 func validate(t *testing.T, rows []row, unrendered map[string]string) error {
 	boxType := reflect.TypeOf(runner.Box{})
 	covered := map[string]bool{}
@@ -397,8 +421,15 @@ func validate(t *testing.T, rows []row, unrendered map[string]string) error {
 		if r.only != nil && r.only.Reason == "" {
 			return fmt.Errorf("row %s: only(%s) carries no Reason", r.name, r.only.Family)
 		}
-		if _, ok := facets[r.field]; !ok {
+		if r.only != nil && r.only.Otherwise == nil {
+			return fmt.Errorf("row %s: only(%s) carries no Otherwise", r.name, r.only.Family)
+		}
+		facet, ok := facets[r.field]
+		if !ok {
 			return fmt.Errorf("row %s: no facet for field %q", r.name, r.field)
+		}
+		if r.only != nil && isLaunchWide(facet) {
+			return fmt.Errorf("row %s: only(%s) guards %s, whose env and mounts checkRow compares for every family", r.name, r.only.Family, r.field)
 		}
 		covered[r.field] = true
 		if r.field == networkField {
@@ -449,8 +480,9 @@ func checkRow(t *testing.T, h RenderingHarness, r row) error {
 	if err != nil {
 		return fmt.Errorf("row %s: %w", r.name, err)
 	}
-	// No guard covers env or mounts, so every row owes the whole-launch
-	// equality: a stray or repeated entry fails whichever field the row probes.
+	// validate rejects a guard on a launch-wide field, so every row owes the
+	// whole-launch equality: a stray or repeated entry fails whichever field
+	// the row probes.
 	if err := errors.Join(env(d, l), mounts(d, l)); err != nil {
 		return fmt.Errorf("row %s: %w", r.name, err)
 	}
@@ -459,6 +491,10 @@ func checkRow(t *testing.T, h RenderingHarness, r row) error {
 		if err == nil {
 			return fmt.Errorf("stale guard: %s renders %s though the row says only %s (%s); remove the guard",
 				h.Family(), r.name, r.only.Family, r.only.Reason)
+		}
+		if err := facets[r.field](d, r.only.Otherwise(l)); err != nil {
+			return fmt.Errorf("row %s: %s renders it neither as the row asks nor as the guard says it does instead: %w",
+				r.name, h.Family(), err)
 		}
 		return nil
 	}
