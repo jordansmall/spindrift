@@ -30,6 +30,7 @@ let
   # `packageLinks` (home-relative path -> path inside the Driver's package):
   # lib/image.nix symlinks each into the home layout, failing the build when the
   # package has no such path.
+  # `closedCredentials` (default false) is a bool, checked by assertShape.
   # Every optional attribute is listed in optionalAttrs below.
   requiredAttrs = [
     "name"
@@ -51,6 +52,7 @@ let
     "agentFilesDirRelative"
     "authContent"
     "bashTimeoutEnv"
+    "closedCredentials"
     "configFiles"
     "effortOnModelLevels"
     "envCommon"
@@ -234,6 +236,7 @@ let
           ++
             lib.optional (shapeErrors == [ ] && !(lib.elem entry.authContent.env declaredEnvs))
               "Driver '${driverName}' authContent.env '${entry.authContent.env}' is not the env of any envFiles entry or credentials rule";
+      closedCredentialsBad = entry ? closedCredentials && !builtins.isBool entry.closedCredentials;
       errors =
         lib.optional (
           missing != [ ]
@@ -247,6 +250,7 @@ let
           else
             "a ${builtins.typeOf entry.sessionCacheDirRelative}"
         }"
+        ++ lib.optional closedCredentialsBad "Driver '${driverName}' closedCredentials must be a bool"
         ++ envFilesErrors
         ++ authContentErrs
         ++ lib.optionals (!(lib.elem "credentials" missing)) credentialsErrors;

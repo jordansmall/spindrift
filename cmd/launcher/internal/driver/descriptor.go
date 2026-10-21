@@ -13,6 +13,11 @@ type Descriptor struct {
 	// ProviderNamespacedModels is set when the Driver's model ids are
 	// <provider>/<model>.
 	ProviderNamespacedModels bool
+	// ClosedCredentials is set when Credentials name every Provider the
+	// Driver can authenticate from env, so a model whose <provider>/ prefix
+	// matches no rule is authenticated only by an AuthContent entry for that
+	// Provider.
+	ClosedCredentials bool
 	// Credentials are the rules by which the Driver is authenticated; a run
 	// is authenticated when every rule that applies to its models is met.
 	Credentials []CredentialRule

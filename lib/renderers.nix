@@ -779,6 +779,7 @@ rec {
       rowFields = [
         (required "name" "Name")
         (optional "providerNamespacedModels" "ProviderNamespacedModels" false)
+        (optional "closedCredentials" "ClosedCredentials" false)
         (required "credentials" "Credentials")
         (optional "authContent" "AuthContent" null)
       ];
