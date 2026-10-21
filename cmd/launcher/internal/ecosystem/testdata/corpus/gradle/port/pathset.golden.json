@@ -1,0 +1,18 @@
+{
+  "derived": null,
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/maven2"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "gradle",
+          "path": "/maven2"
+        }
+      ],
+      "matchHost": "repo.acme.test",
+      "upstream": "https://repo.acme.test"
+    }
+  ]
+}

@@ -1,7 +1,6 @@
 package ecosystem
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 
@@ -104,23 +103,8 @@ gradle.projectsEvaluated {
 	}
 }
 
-// TestGradleInitScript_PortInterpolated derives want from a known-good render
-// rather than restating the golden, which TestGradleInitScript_ExactContent
-// already pins. A misplaced or mistyped %d verb still shows as a mismatch here.
-func TestGradleInitScript_PortInterpolated(t *testing.T) {
-	base := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
-	for _, port := range []int{9999, 12345} {
-		got := GradleInitScript(port, "r0", gradleDeclaredRoutes())
-		want := strings.Replace(base, "27182", strconv.Itoa(port), 1)
-		if got != want {
-			t.Errorf("GradleInitScript(%d, %q) = %q, want %q", port, "r0", got, want)
-		}
-	}
-}
-
-// TestGradleInitScript_PrefixInterpolated mirrors the port test for the route
-// prefix (issue #3142), proving the prefix, not just the port, reaches the
-// rendered spindriftMavenUrl.
+// TestGradleInitScript_PrefixInterpolated proves the route prefix (issue
+// #3142), not just the port, reaches the rendered spindriftMavenUrl.
 func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
 	base := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	for _, prefix := range []string{"artifactory-gradle", "r1"} {
@@ -137,6 +121,9 @@ func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
 // "gradle", so a route with no declared gradle path renders an inert script
 // rather than a bare-route-root redirect, which would 404 against the
 // Forwarder's path-set enforcement.
+//
+// No test feeds an unknown ecosystem's block: ParseRows refuses one before it
+// reaches the renderer, and a real neighbour's block is a corpus case.
 func TestGradleInitScript_NoDeclaredPathIsInert(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
 	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "spindriftMavenUrl", "repos.clear", "repos.maven"} {
@@ -149,43 +136,6 @@ func TestGradleInitScript_NoDeclaredPathIsInert(t *testing.T) {
 	}
 	if strings.TrimSpace(got) == "" {
 		t.Error("path-less GradleInitScript is empty, want a minimal valid (but inert) init script")
-	}
-}
-
-// TestGradleInitScript_GradlePathIsFullRedirect pins the other half of issue
-// #3259: an operator-declared gradle path renders the real redirect script,
-// with spindriftMavenUrl carrying the full declared path, not the route root.
-func TestGradleInitScript_GradlePathIsFullRedirect(t *testing.T) {
-	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
-		Prefix: "r0",
-		Ecosystems: registryvocab.RouteEcosystems{
-			"npm":    registryvocab.RouteDeclaration{"path": "/npm"},
-			"gradle": registryvocab.RouteDeclaration{"path": "/some/path"},
-		},
-	}})
-	const wantURL = `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/some/path/"`
-	if !strings.Contains(got, wantURL) {
-		t.Errorf("GradleInitScript with a declared gradle path = %q, want it to contain %q", got, wantURL)
-	}
-	if !strings.Contains(got, "def spindriftPersistentRedirect = { repos ->") {
-		t.Error("GradleInitScript with a declared gradle path must still contain the real redirect logic (spindriftPersistentRedirect)")
-	}
-	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "repos.clear", "repos.maven"} {
-		if !strings.Contains(got, marker) {
-			t.Errorf("GradleInitScript with a declared gradle path must still contain %q", marker)
-		}
-	}
-}
-
-// TestGradleInitScript_OtherEcosystemBlockIsInert pins that the renderer
-// ignores a block naming an ecosystem it does not know rather than failing.
-func TestGradleInitScript_OtherEcosystemBlockIsInert(t *testing.T) {
-	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{
-		Prefix:     "r0",
-		Ecosystems: registryvocab.RouteEcosystems{"pypi": registryvocab.RouteDeclaration{"path": "/pypi"}},
-	}})
-	if want := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}}); got != want {
-		t.Errorf("GradleInitScript with only a pypi block = %q, want the inert script %q", got, want)
 	}
 }
 

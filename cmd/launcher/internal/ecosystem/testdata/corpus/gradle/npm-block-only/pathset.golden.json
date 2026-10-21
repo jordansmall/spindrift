@@ -1,0 +1,33 @@
+{
+  "derived": [
+    {
+      "Host": "repo.acme.test",
+      "Origin": "https://repo.acme.test",
+      "Subtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/npm"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/npm"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/npm"
+        },
+        {
+          "ecosystem": "npm",
+          "path": "/npm"
+        }
+      ],
+      "matchHost": "repo.acme.test",
+      "upstream": "https://repo.acme.test"
+    }
+  ]
+}
