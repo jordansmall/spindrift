@@ -398,3 +398,37 @@ func TestScrubKeepsSubagentUsageAndBlanksItsText(t *testing.T) {
 		t.Errorf("Scrub left private text: %s", out)
 	}
 }
+
+func TestScrubBlanksPiSubagentTaskText(t *testing.T) {
+	shapes := []struct{ name, args string }{
+		{"single", `{"agent":"scout","task":"private brief"}`},
+		{"parallel", `{"tasks":[{"agent":"scout","task":"private brief"}]}`},
+		{"chain", `{"chain":[{"agent":"scout","task":"private brief"}]}`},
+	}
+	for _, c := range shapes {
+		t.Run(c.name, func(t *testing.T) {
+			partial := strings.ReplaceAll(c.args, `"`, `\"`)
+			msg := `{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"subagent",` +
+				`"arguments":` + c.args + `,"partialArgs":"` + partial + `"}]}}`
+			if got := at(decode(t, Scrub([]byte(msg+"\n"))), "message", "content", 0, "partialArgs"); got != "[REDACTED:file-body]" {
+				t.Errorf("partialArgs = %v, want the file-body placeholder", got)
+			}
+			for _, ev := range []string{
+				msg,
+				`{"type":"tool_execution_start","toolCallId":"c1","toolName":"subagent","args":` + c.args + `}`,
+				`{"type":"tool_execution_update","toolCallId":"c1","toolName":"subagent","args":` + c.args + `}`,
+			} {
+				out := Scrub([]byte(ev + "\n"))
+				if bytes.Contains(out, []byte("private")) {
+					t.Errorf("Scrub left private task text: %s", out)
+				}
+				if !bytes.Contains(out, []byte(`"scout"`)) {
+					t.Errorf("Scrub dropped the agent name: %s", out)
+				}
+				if again := Scrub(out); !bytes.Equal(again, out) {
+					t.Errorf("second Scrub changed the line:\n%s\n%s", out, again)
+				}
+			}
+		})
+	}
+}

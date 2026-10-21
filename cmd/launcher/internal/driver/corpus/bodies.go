@@ -35,6 +35,7 @@ var fileBodyKeys = map[string]bool{
 	"newText":    true,
 	"new_source": true,
 	"prompt":     true,
+	"task":       true,
 }
 
 // taskTextKeys carry a subagent's brief, report or state patch on claude's
@@ -239,6 +240,7 @@ func (r *redactor) walk(v any) {
 		switch x["type"] {
 		case "toolCall": // a pi tool call
 			r.inputs(x["arguments"])
+			r.blank(x, "partialArgs", fileBody) // a JSON-encoded copy of arguments
 		case "tool_result":
 			r.blank(x, "content", toolOutput)
 		case "tool_use":
