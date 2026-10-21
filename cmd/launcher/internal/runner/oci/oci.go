@@ -45,6 +45,9 @@ type ociAdapter struct {
 	memoryLimit string            // --memory value; empty disables the flag
 }
 
+// execCommand is the test seam for the host `nix build` EnsureReady runs.
+var execCommand = exec.Command
+
 // Strategy is the oci family's entry in the runner registry; its build
 // command constructs the same adapter as its run command.
 var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Prerequisites: Prerequisites, RawNetworkKnobs: RawNetworkKnobs}
@@ -144,7 +147,7 @@ func (a *ociAdapter) EnsureReady() error {
 
 	// Tee stderr so a failure is both visible and inspectable below.
 	var hostStderr bytes.Buffer
-	nixBuild := runner.ExecCommand("nix", "build", a.imageDrv+"^*", "--no-link")
+	nixBuild := execCommand("nix", "build", a.imageDrv+"^*", "--no-link")
 	nixBuild.Stdout = os.Stdout
 	nixBuild.Stderr = io.MultiWriter(os.Stderr, &hostStderr)
 	if err := nixBuild.Run(); err == nil {

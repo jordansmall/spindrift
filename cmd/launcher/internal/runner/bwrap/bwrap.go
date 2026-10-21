@@ -18,6 +18,10 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// execCommand is the test seam for every binary this package execs: bwrap (or
+// the wrapped program), sqlite3, the overlay-validate probe, and host nix.
+var execCommand = exec.Command
+
 // statResolvConf is the test seam for buildArgs' "does the host have
 // /etc/resolv.conf to bind" check, so the resolv.conf-bind assertions do not
 // depend on the test machine having that file (some nix build sandboxes do not).
@@ -778,7 +782,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	// A func, not a value: exec.Cmd.Start is one-shot, and the CLONE_INTO_CGROUP
 	// attempt below may need a fresh Cmd for its fallback.
 	newCmd := func() *exec.Cmd {
-		cmd := runner.ExecCommand(program, execArgs...)
+		cmd := execCommand(program, execArgs...)
 		// Pdeathsig kills this direct child (bwrap or pasta) the moment the launcher
 		// dies, so a crashed launcher never leaves an orphaned Box. Separate from
 		// bwrap's own --die-with-parent, which only protects bwrap against ITS
@@ -1248,7 +1252,7 @@ func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations 
 // realize runs `nix build <drv>^* --no-link` for a single closure, wrapping
 // any failure with label so the caller can tell which closure failed.
 func (a *bwrapBuildAdapter) realize(label, drv string) error {
-	cmd := runner.ExecCommand("nix", "build", drv+"^*", "--no-link")
+	cmd := execCommand("nix", "build", drv+"^*", "--no-link")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

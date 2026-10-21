@@ -2,6 +2,7 @@ package runner
 
 import "os/exec"
 
-// ExecCommand is the test seam for hardcoded-binary orchestration (nix, bwrap,
-// sqlite3) that has no configurable CLI field to intercept.
-var ExecCommand = exec.Command
+// execCommand is the test seam for the core nix helpers, which exec a
+// hardcoded binary with no configurable CLI field to intercept. Each exec-ing
+// subpackage (oci, bwrap) keeps its own.
+var execCommand = exec.Command

@@ -20,15 +20,15 @@ import (
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// Run must go through the package-level ExecCommand seam, not a hardcoded
+// Run must go through the package-level execCommand seam, not a hardcoded
 // exec.Command("bwrap", ...). networkMode="host" keeps the exec target bare
 // bwrap; TestBwrapRun_PastaIsTopLevelProgramByDefault covers the pasta default.
 func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotName string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -37,7 +37,7 @@ func TestBwrapRun_LaunchesViaSeamAndSurfacesFailure(t *testing.T) {
 	err := a.Run(runner.Box{Env: map[string]string{}})
 
 	if gotName != "bwrap" {
-		t.Errorf("ExecCommand called with %q, want %q", gotName, "bwrap")
+		t.Errorf("execCommand called with %q, want %q", gotName, "bwrap")
 	}
 	if err == nil {
 		t.Error("expected error from scripted bwrap failure, got nil")
@@ -70,10 +70,10 @@ func TestBwrapRegistryProxyTransport_AlwaysSocketCapable(t *testing.T) {
 // (zero-value) networkMode must make pasta the top-level program.
 func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotName string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -84,7 +84,7 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 	}
 
 	if gotName != "pasta" {
-		t.Errorf("ExecCommand called with %q, want %q", gotName, "pasta")
+		t.Errorf("execCommand called with %q, want %q", gotName, "pasta")
 	}
 }
 
@@ -138,15 +138,15 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 // Nothing else writes a resolv.conf into the bwrap sandbox (unlike the OCI
 // runner, where podman writes its own), so Run must synthesize
 // <etcDir>/resolv.conf pointing at pastaDNSForwardAddr. The content is read
-// inside the ExecCommand seam, before Start/Wait, because Run's deferred
+// inside the execCommand seam, before Start/Wait, because Run's deferred
 // os.RemoveAll(etcDir) has already fired by the time Run returns.
 func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotResolvConf []byte
 	var readErr error
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		for i, arg := range args {
 			if arg == "--ro-bind" && i+2 < len(args) && args[i+2] == "/etc/resolv.conf" {
 				gotResolvConf, readErr = os.ReadFile(args[i+1])
@@ -179,10 +179,10 @@ func TestBwrapRun_WritesSynthesizedResolvConfForPastaPath(t *testing.T) {
 // pins that this does not widen the ambient-leak guarantee.
 func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -208,9 +208,9 @@ func TestBwrapRun_PastaChildEnvCarriesPathToFindBwrap(t *testing.T) {
 // type instead of a raw *exec.ExitError.
 func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 137})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -231,10 +231,10 @@ func TestBwrapRun_ExitCodeSurfacedAsRunError(t *testing.T) {
 
 func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotName string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(script, args...)
 	}
@@ -243,7 +243,7 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 	err := a.EnsureReady()
 
 	if gotName != "nix" {
-		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
 	}
 	if err == nil {
 		t.Fatal("expected error from scripted nix build failure, got nil")
@@ -257,9 +257,9 @@ func TestBwrapBuildEnsureReady_NixBuildFailureWrapsError(t *testing.T) {
 // (issue #2663).
 func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -283,9 +283,9 @@ func TestBwrapBuildEnsureReady_NixBuildSuccessReturnsNil(t *testing.T) {
 // stop before the group-file closure runs (issue #2663).
 func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -308,9 +308,9 @@ func TestBwrapBuildEnsureReady_PasswdFileFailureWrapsErrorAndStops(t *testing.T)
 // The group-file realization is the fourth and final closure (issue #2663).
 func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -332,7 +332,7 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 
 // With nixConfigFileDrv set, EnsureReady realizes a fifth closure and then
 // snapshots the host nix store DB with one "sqlite3 ... VACUUM INTO" call
-// through the same seam, so 6 ExecCommand invocations in all. The argv
+// through the same seam, so 6 execCommand invocations in all. The argv
 // assertion pins the quoted destination, so a dest containing a space would
 // round-trip correctly. VACUUM INTO targets a temp sibling of dest, never dest
 // itself (issue #4817).
@@ -341,13 +341,13 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
 	var gotNames []string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -370,7 +370,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 		t.Errorf("callCount = %d, want 6", got)
 	}
 	if len(gotNames) != 6 {
-		t.Fatalf("ExecCommand invoked %d times, want 6: %v", len(gotNames), gotNames)
+		t.Fatalf("execCommand invoked %d times, want 6: %v", len(gotNames), gotNames)
 	}
 	for i := 0; i < 5; i++ {
 		if gotNames[i] != "nix" {
@@ -411,8 +411,8 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
@@ -421,7 +421,7 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 	snapshotDir := filepath.Join(root, "gen-a")
 	lockPath := SnapshotLockPath(snapshotDir)
 	probed := false
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "sqlite3" {
 			probed = true
 			lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
@@ -452,7 +452,7 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 		t.Fatalf("EnsureReady() = %v, want nil", err)
 	}
 	if !probed {
-		t.Fatal("sqlite3 ExecCommand fake never invoked; probe never ran")
+		t.Fatal("sqlite3 execCommand fake never invoked; probe never ran")
 	}
 }
 
@@ -585,8 +585,8 @@ func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
 // that happens to have a real host nix db.
 func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statCalled := false
@@ -595,7 +595,7 @@ func TestBwrapBuildEnsureReady_SkipsSnapshotWhenNixConfigDrvEmpty(t *testing.T) 
 		return nil
 	}
 	var gotNames []string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -634,12 +634,12 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 1},
 	)
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -668,13 +668,13 @@ func TestBwrapBuildEnsureReady_SnapshotFailureWrapsError(t *testing.T) {
 // is 5, not 0.
 func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return errors.New("no such file or directory") }
 	var gotNames []string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -706,9 +706,9 @@ func TestBwrapBuildEnsureReady_MissingHostNixDBFailsBeforeAnySqlite3Call(t *test
 // sets no cgroup fields and leaves cgroupFSRoot untouched, so IsRunning
 // have no cgroup to query and Kill is the only observable path.
 func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -749,9 +749,9 @@ func TestBwrapKill_TerminatesRunningProcess(t *testing.T) {
 // so a later reclaim can tell the generation is still in use. Once Run
 // returns the lock must be released so reclaim can proceed.
 func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -817,9 +817,9 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 // protect, so Run must not create a lock file at all.
 func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -852,9 +852,9 @@ func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
 // a regression that drops the fmt.Printf (issue #2680 review finding).
 func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -892,9 +892,9 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 // exec'ing bwrap against a mountpoint that no longer exists.
 func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -935,13 +935,13 @@ func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing
 }
 
 // Run must release the shared lock when cmd.Start() itself fails, not leak it
-// (issue #2680 review finding). ExecCommand points at a nonexistent absolute
+// (issue #2680 review finding). execCommand points at a nonexistent absolute
 // path so exec.Command skips its own LookPath, which resolves bare names
 // only, and the failure comes from cmd.Start() itself.
 func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(filepath.Join(t.TempDir(), "no-such-binary"), args...)
 	}
 
@@ -982,9 +982,9 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 // would fail with "no longer exists".
 func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1039,9 +1039,9 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 // NixConfigFile override, the way AgentFiles/AgentEnv already do.
 func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1085,12 +1085,12 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 // AgentGeneration.Generation always name the same thing.
 func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1124,12 +1124,12 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 // The unlocked sibling generation here is exactly what reclaim would sweep.
 func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1300,10 +1300,10 @@ func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
 func TestResolvedRunEnv_DropsUndeclaredAmbientVariable(t *testing.T) {
 	t.Setenv("SOME_UNDECLARED_SECRET", "leaked-value")
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1439,10 +1439,10 @@ func TestResolvedRunEnv_IssueTextAbsentOrEmpty(t *testing.T) {
 func TestBwrapRun_SandboxGHTokenReflectsBoxEnvOverride(t *testing.T) {
 	t.Setenv("GH_TOKEN", "launcher-token")
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1477,10 +1477,10 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 	t.Setenv("OPENCODE_AUTH_CONTENT", sentinel)
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1516,10 +1516,10 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "registry-proxy-tcp-secret-sentinel-value"
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1555,10 +1555,10 @@ func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "signal-socket-secret-sentinel-value"
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1594,10 +1594,10 @@ func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 	const sentinel = "forgejo-token-sentinel-value"
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1636,10 +1636,10 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 	t.Setenv("ISSUE_TEXT", decoy)
 
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -1676,9 +1676,9 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 // and print a warning saying why containment is unavailable.
 func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -1710,12 +1710,12 @@ func TestBwrapRun_NoCgroupDelegationWarnsAndProceeds(t *testing.T) {
 // With a writable delegated subtree, Run writes pids.max and memory.max into
 // the per-Box cgroup dir before launching and removes that dir once Run
 // returns (ADR 0042's strictly-ephemeral posture). The content is read inside
-// the ExecCommand seam, before Start/Wait, because Run's cleanup has already
+// the execCommand seam, before Start/Wait, because Run's cleanup has already
 // removed the dir by the time Run returns.
 func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
 
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -1727,7 +1727,7 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 
 	wantDir := filepath.Join(cgroupFSRoot, "spindrift-test-box")
 	var gotPidsMax, gotMemoryMax []byte
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
 		return exec.Command(script, args...)
@@ -1756,14 +1756,14 @@ func TestBwrapRun_CgroupDelegationWritesLimitsAndCleansUp(t *testing.T) {
 // the limits at the anchored path means a wrong anchor cannot pass silently.
 func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
 
 	userService, scope := systemdUserSessionFixture(t, "memory pids")
 
 	wantDir := filepath.Join(userService, "spindrift-anchored-box")
 	var gotPidsMax, gotMemoryMax []byte
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		gotMemoryMax, _ = os.ReadFile(filepath.Join(wantDir, "memory.max"))
 		return exec.Command(script, args...)
@@ -1812,8 +1812,8 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 // (ADR 0042 warn-and-proceed) rather than erroring.
 func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
 
 	origSelf := readSelfCgroup
 	t.Cleanup(func() { readSelfCgroup = origSelf })
@@ -1833,7 +1833,7 @@ func TestBwrapRun_CgroupDegradedFallbackWhenNoAncestorQualifies(t *testing.T) {
 
 	wantDir := filepath.Join(selfDir, "spindrift-fallback-box")
 	var gotPidsMax []byte
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotPidsMax, _ = os.ReadFile(filepath.Join(wantDir, "pids.max"))
 		return exec.Command(script, args...)
 	}
@@ -1892,9 +1892,9 @@ func TestBwrapAnchoredCgroup_StaysDiscoverable(t *testing.T) {
 func runCgroupDelegatedBoxWithFailingLimit(t *testing.T, a *bwrapAdapter, failingLimit string) {
 	t.Helper()
 
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("sleep", "5")
 	}
 
@@ -2550,7 +2550,7 @@ func TestBwrapListRunning_TrueAcrossDifferentLauncherInvocations(t *testing.T) {
 
 // stubCgroupSeams points cgroupFSRoot at a fresh empty dir standing in for
 // the host cgroup v2 tree and returns it. A non-nil self also stubs
-// readSelfCgroup, and a non-nil newCmd stubs ExecCommand; each is left alone
+// readSelfCgroup, and a non-nil newCmd stubs execCommand; each is left alone
 // when nil, so a test only stubs the seams it actually exercises. All swaps
 // are restored on t.Cleanup.
 func stubCgroupSeams(t *testing.T, self func() (string, error), newCmd func(string, ...string) *exec.Cmd) string {
@@ -2566,9 +2566,9 @@ func stubCgroupSeams(t *testing.T, self func() (string, error), newCmd func(stri
 		readSelfCgroup = self
 	}
 	if newCmd != nil {
-		origExec := runner.ExecCommand
-		t.Cleanup(func() { runner.ExecCommand = origExec })
-		runner.ExecCommand = newCmd
+		origExec := execCommand
+		t.Cleanup(func() { execCommand = origExec })
+		execCommand = newCmd
 	}
 	return cgroupFSRoot
 }
@@ -2814,10 +2814,10 @@ func TestBwrapListRunning_EmptyWhenSelfCgroupDirMissing(t *testing.T) {
 // Run still succeeds and prints a warning rather than failing the launch.
 func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -2856,10 +2856,10 @@ func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
 // read the compiled BPF filter from.
 func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
 	var gotCmd *exec.Cmd
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotCmd = exec.Command(script, args...)
 		return gotCmd
 	}
@@ -3386,7 +3386,7 @@ func TestSweepOrphanedLock_DoesNotRemoveLockWithSwappedIdentity(t *testing.T) {
 
 // End-to-end acceptance for "reclaiming never removes a snapshot a running
 // Box holds open" (issue #2680): a stale generation is seeded with its
-// sibling ".lock" held or not, EnsureReady runs end to end with ExecCommand
+// sibling ".lock" held or not, EnsureReady runs end to end with execCommand
 // faked, and a locked stale generation must survive while an unlocked one is
 // reclaimed alongside the newly-snapshotted current generation.
 func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) {
@@ -3414,12 +3414,12 @@ func TestBwrapBuildEnsureReady_ReclaimSkipsGenerationWithLiveLock(t *testing.T) 
 				runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 				runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 			)
-			orig := runner.ExecCommand
-			t.Cleanup(func() { runner.ExecCommand = orig })
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
 			origStat := statHostNixDB
 			t.Cleanup(func() { statHostNixDB = origStat })
 			statHostNixDB = func() error { return nil }
-			runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+			execCommand = func(name string, args ...string) *exec.Cmd {
 				return exec.Command(script, args...)
 			}
 
@@ -3476,12 +3476,12 @@ func TestBwrapBuildEnsureReady_EmptyGenerationDoesNotSweepSiblings(t *testing.T)
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -3655,7 +3655,7 @@ func setenvValue(t *testing.T, args []string, key string) string {
 
 // reclaimFixture stubs the cgroup seams for a Run of "leftover-box" and
 // pre-creates the leftover per-Box dir a crashed launcher would have left,
-// seeded with procs as its cgroup.procs content. The ExecCommand seam snapshots
+// seeded with procs as its cgroup.procs content. The execCommand seam snapshots
 // pids.max/memory.max into gotPidsMax/gotMemoryMax, since Run's cleanup has
 // removed a reclaimed dir by the time Run returns.
 type reclaimFixture struct {
@@ -3822,7 +3822,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 		t.Fatalf("Run: %v", runErr)
 	}
 	if !probed {
-		t.Fatal("ExecCommand seam never ran with the cgroup dir provisioned")
+		t.Fatal("execCommand seam never ran with the cgroup dir provisioned")
 	}
 	if reclaimed {
 		t.Error("reclaimLeftoverCgroupDir removed a dir inside a live Run's launch window")
@@ -3849,10 +3849,10 @@ func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
 			t.Setenv(name, sentinel)
 
 			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-			orig := runner.ExecCommand
-			t.Cleanup(func() { runner.ExecCommand = orig })
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
 			var gotCmd *exec.Cmd
-			runner.ExecCommand = func(_ string, args ...string) *exec.Cmd {
+			execCommand = func(_ string, args ...string) *exec.Cmd {
 				gotCmd = exec.Command(script, args...)
 				return gotCmd
 			}

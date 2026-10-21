@@ -130,7 +130,7 @@ func CallCount(t *testing.T, dir string) int {
 	return len(matches)
 }
 
-// StubExec routes the exec seam (e.g. runner.ExecCommand) to a fake CLI that
+// StubExec routes the exec seam (e.g. a package's execCommand) to a fake CLI that
 // replays call, restoring the seam when the test ends.
 func StubExec(t *testing.T, seam *func(string, ...string) *exec.Cmd, call Call) {
 	t.Helper()

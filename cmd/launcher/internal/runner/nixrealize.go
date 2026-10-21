@@ -18,7 +18,7 @@ func (NixRealizer) Start(pwd, rev, attr string) (func() error, error) {
 	// nix build wants the derivation attr itself, not its output path, so there
 	// is no ".outPath" suffix here, unlike NixEvaluator.Eval's ref.
 	ref := hermeticFlakeRef(pwd, rev, attr)
-	cmd := ExecCommand("nix", "build", ref, "--no-link")
+	cmd := execCommand("nix", "build", ref, "--no-link")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stderr := &BoundedWriter{}
 	cmd.Stderr = stderr

@@ -11,22 +11,21 @@ import (
 	"syscall"
 	"testing"
 
-	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-// fakeVacuumInto stubs ExecCommand so a sqlite3 call writes content to the temp
+// fakeVacuumInto stubs execCommand so a sqlite3 call writes content to the temp
 // path named in its VACUUM INTO statement and exits with code; every other
 // command is the scripted fake. onVacuum, if non-nil, runs before the write
 // with the parsed temp path.
 func fakeVacuumInto(t *testing.T, script, content string, code int, onVacuum func(tmp string)) {
 	t.Helper()
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name != "sqlite3" {
 			return exec.Command(script, args...)
 		}
@@ -213,8 +212,8 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	fakeVacuumInto(t, script, "partial", 1, nil)
 	vacuums := 0
-	inner := runner.ExecCommand
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	inner := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "sqlite3" {
 			vacuums++
 		}
@@ -276,14 +275,14 @@ func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testi
 // host nix store DB into that generation's own dir.
 func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
 
 	var gotNames []string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotNames = append(gotNames, name)
 		return exec.Command(script, args...)
 	}
@@ -295,7 +294,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
-		t.Errorf("ExecCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
+		t.Errorf("execCommand invoked with %v, want exactly one call to %q", gotNames, "sqlite3")
 	}
 	if got := runnertest.CallCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1", got)
@@ -324,12 +323,12 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 // 0043 forbids, so a repeat call must skip the vacuum entirely.
 func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 
@@ -355,9 +354,9 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 // launcher already installed dest, which makes SnapshotGeneration skip the vacuum.
 func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = orig })
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(script, args...)
 	}
 

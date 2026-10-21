@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -49,16 +48,16 @@ func TestEnsureReady_LockHeldByAnother_BlocksThenObservesPresentWithoutRebuildin
 	// releases — scripted present, standing in for "the winner finished".
 	cliScript, cliDir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}, runnertest.Call{Exit: 0})
 
-	origExec := runner.ExecCommand
+	origExec := execCommand
 	nixInvoked := false
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		// Never actually reached in the passing case (the loser must not
 		// build at all); if a regression does reach it, run a harmless
 		// no-op rather than a real "nix build" against a fake .drv path.
 		nixInvoked = true
 		return exec.Command("true")
 	}
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	t.Cleanup(func() { execCommand = origExec })
 
 	a := &ociAdapter{cli: cliScript, image: image, imageDrv: "/nix/store/fake.drv"}
 
@@ -117,13 +116,13 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 	)
 
 	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
+	origExec := execCommand
 	var gotName string
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		gotName = name
 		return exec.Command(nixScript, args...)
 	}
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	t.Cleanup(func() { execCommand = origExec })
 
 	a := &ociAdapter{
 		cli:          cliScript,
@@ -137,7 +136,7 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 		t.Fatalf("EnsureReady: unexpected error: %v", err)
 	}
 	if gotName != "nix" {
-		t.Errorf("ExecCommand called with %q, want %q", gotName, "nix")
+		t.Errorf("execCommand called with %q, want %q", gotName, "nix")
 	}
 	if got := runnertest.CallCount(t, cliDir); got != 4 {
 		t.Errorf("fake CLI callCount = %d, want 4 (two inspects, load, tag)", got)
@@ -168,11 +167,11 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 	)
 
 	nixScript, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := runner.ExecCommand
-	runner.ExecCommand = func(name string, args ...string) *exec.Cmd {
+	origExec := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command(nixScript, args...)
 	}
-	t.Cleanup(func() { runner.ExecCommand = origExec })
+	t.Cleanup(func() { execCommand = origExec })
 
 	a := &ociAdapter{
 		cli:          cliScript,

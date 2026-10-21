@@ -36,9 +36,9 @@ func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: contract.Stdout})
 
 	// Whichever program Run picks (bwrap, or pasta wrapping bwrap) runs the fake.
-	origExec := runner.ExecCommand
-	t.Cleanup(func() { runner.ExecCommand = origExec })
-	runner.ExecCommand = func(_ string, args ...string) *exec.Cmd { return exec.Command(script, args...) }
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	execCommand = func(_ string, args ...string) *exec.Cmd { return exec.Command(script, args...) }
 
 	// An erroring self-cgroup read makes provisionCgroup warn and skip, so Run
 	// never touches the real cgroupfs or attempts CLONE_INTO_CGROUP.
