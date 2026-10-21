@@ -3,8 +3,9 @@
 // credentials, accept backgrounded work and reach credential files. This runs
 // the very same baked hooks on each call, so the guard logic, its messages, and
 // the credential list (credential-vars) stay single-sourced rather than
-// re-implemented here. A throw here precedes opencode's permission check, so no
-// Target-repo opencode.json allow rule can widen a refusal.
+// re-implemented here; its one policy of its own is the bash timeout cap. A
+// throw here precedes opencode's permission check, so no Target-repo
+// opencode.json allow rule can widen a refusal.
 // Plain ESM with node: builtins only: opencode's background `npm install` into
 // this directory fails offline, so nothing here may import a package.
 import { execFileSync } from "node:child_process";
@@ -83,10 +84,20 @@ function runHook(script, toolName, args, onFailure = "") {
   return parsed.hookSpecificOutput ?? {};
 }
 
+// Ceiling-only parity with Claude Code's BASH_MAX_TIMEOUT_MS (issue #5381):
+// opencode lets the model's per-call timeout exceed the configured one. Read on
+// each call, digits only like the Box's own export rule; null means no cap.
+function bashTimeoutCap() {
+  const cap = process.env.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS;
+  return /^[0-9]+$/.test(cap) && Number(cap) > 0 ? Number(cap) : null;
+}
+
 export const SpindriftGuards = async () => ({
   "tool.execute.before": async (input, output) => {
     if (unmappedMessage) throw new Error(unmappedMessage);
     if (!Object.hasOwn(CLAUDE_TOOLS, input.tool)) return;
+    const cap = input.tool === "bash" ? bashTimeoutCap() : null;
+    if (cap !== null && output.args.timeout > cap) output.args.timeout = cap;
     requireJq();
     for (const { script, tools, rewrites } of HOOKS) {
       if (!tools.includes(input.tool)) continue;

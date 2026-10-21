@@ -5,9 +5,10 @@
 // hooks that exit 0 printing nothing), PLUGIN_SILENT_TEE (the real hooks,
 // except a tee that exits 0 printing nothing), CREDENTIAL_PATHS (the JSON of
 // lib/credential-paths.nix), PLUGIN_UNMAPPED (a hook row naming an unmapped
-// tool), HOOKS_DIR. The summary hook reads BASH_OUTPUT_SUMMARY_TAIL_BYTES from
-// this env; the test takes the bound from there, never from a constant of its
-// own.
+// tool), HOOKS_DIR, BASH_TIMEOUT_CAP_ENV (the opencode registry's
+// bashTimeoutEnv name, which the timeout-cap cases set). The summary hook reads
+// BASH_OUTPUT_SUMMARY_TAIL_BYTES from this env; the test takes the bound from
+// there, never from a constant of its own.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -94,6 +95,45 @@ test("backgrounding is refused with the reject hook's message", async () => {
     message: hookDeny("reject-background-bash.sh", bgCmd),
   });
   assert.match(hookDeny("reject-background-bash.sh", bgCmd), /^Bash commands that self-background/);
+});
+
+// The cap is read from the env on each call, so a case sets it for its own run.
+const withCap = async (value, fn) => {
+  const key = process.env.BASH_TIMEOUT_CAP_ENV;
+  assert.ok(key, "BASH_TIMEOUT_CAP_ENV must name the cap var");
+  const saved = process.env[key];
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+  try {
+    return await fn();
+  } finally {
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+  }
+};
+
+test("a bash timeout above the configured cap is clamped to it", async () => {
+  const args = await withCap("1000", () => run(plugin.before, "bash", { command: "true", timeout: 600000 }));
+  assert.equal(args.timeout, 1000);
+});
+
+test("a bash timeout at or below the cap is kept", async () => {
+  for (const timeout of [1000, 400]) {
+    const args = await withCap("1000", () => run(plugin.before, "bash", { command: "true", timeout }));
+    assert.equal(args.timeout, timeout);
+  }
+});
+
+test("an unset bash timeout stays unset under a cap", async () => {
+  const args = await withCap("1000", () => run(plugin.before, "bash", { command: "true" }));
+  assert.ok(!("timeout" in args));
+});
+
+test("no cap applies when the knob is unset or not a positive integer", async () => {
+  for (const cap of [undefined, "", "abc", "0", "-5", "1.5", "10s"]) {
+    const args = await withCap(cap, () => run(plugin.before, "bash", { command: "true", timeout: 600000 }));
+    assert.equal(args.timeout, 600000, `cap ${JSON.stringify(cap)} must not clamp`);
+  }
 });
 
 test("other tools are untouched", async () => {
