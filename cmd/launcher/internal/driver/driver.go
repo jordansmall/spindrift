@@ -134,6 +134,15 @@ func ProviderNamespacedModels(name string) bool {
 	return d.ProviderNamespacedModels
 }
 
+// EffortOnModelLevels returns the levels the named Driver reads from a model
+// id's `:<level>` suffix, from its generated Descriptor; nil for a Driver whose
+// effort does not ride on the model, and for unknown and empty names. It is the
+// Go mirror of the Nix effortOnModelLevels fact (issue #5625).
+func EffortOnModelLevels(name string) []string {
+	d, _ := descriptor(name)
+	return d.EffortOnModelLevels
+}
+
 // CredentialRules returns the named Driver's credential rules from its
 // generated Descriptor. An empty name defaults to "claude", as New does; ok is
 // false for an unknown Driver.

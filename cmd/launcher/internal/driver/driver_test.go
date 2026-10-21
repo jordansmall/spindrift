@@ -31,6 +31,21 @@ func TestProviderNamespacedModels(t *testing.T) {
 	}
 }
 
+// TestEffortOnModelLevels pins the Go mirror of the Nix effortOnModelLevels
+// fact: only a Driver that reads effort from a model id's `:<level>` suffix
+// carries levels (issue #5625).
+func TestEffortOnModelLevels(t *testing.T) {
+	want := []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
+	if got := EffortOnModelLevels("pi"); !slices.Equal(got, want) {
+		t.Errorf("EffortOnModelLevels(pi) = %v, want %v", got, want)
+	}
+	for _, name := range []string{"claude", "opencode", "", "nope"} {
+		if got := EffortOnModelLevels(name); got != nil {
+			t.Errorf("EffortOnModelLevels(%q) = %v, want nil", name, got)
+		}
+	}
+}
+
 func TestCredentialRulesClaudeAlwaysApplies(t *testing.T) {
 	rules, ok := CredentialRules("claude")
 	if !ok || len(rules) != 1 {
