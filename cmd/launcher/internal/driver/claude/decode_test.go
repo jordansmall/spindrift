@@ -286,6 +286,34 @@ func TestDecodeToolFields(t *testing.T) {
 	}
 }
 
+func TestDecodeToolTargetPerTool(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"Task", `{"subagent_type":"reviewer","file_path":"x"}`, "reviewer"},
+		{"Agent", `{"subagent_type":"reviewer"}`, "reviewer"},
+		{"Read", `{"file_path":"/a/b.go"}`, "/a/b.go"},
+		{"Edit", `{"file_path":"/a/b.go","command":"x"}`, "/a/b.go"},
+		{"Write", `{"file_path":"/a/c.go"}`, "/a/c.go"},
+		{"NotebookEdit", `{"file_path":"/a/n.ipynb"}`, "/a/n.ipynb"},
+		{"Grep", `{"pattern":"foo.*","path":"/a"}`, "foo.*"},
+		{"Glob", `{"pattern":"**/*.go"}`, "**/*.go"},
+		{"Bash", `{"command":"ls -l"}`, "ls -l"},
+		{"WebFetch", `{"url":"https://example.com"}`, "https://example.com"},
+		{"WebSearch", `{"query":"go generics"}`, "go generics"},
+		{"Mystery", `{"command":"ls","file_path":"x"}`, ""},
+		{"Bash", `{"command":42}`, ""},
+		{"Bash", `{"file_path":"x"}`, ""},
+	} {
+		line := `{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"` + tc.name + `","input":` + tc.input + `}]}}`
+		evs := newDecoderAt(decodeNow)(line)
+		if evs[2].Kind != driverkit.KindToolCall || evs[2].ToolName != tc.name {
+			t.Fatalf("%s: evs[2] = %v %q, want the tool call", tc.name, evs[2].Kind, evs[2].ToolName)
+		}
+		if got := evs[2].ToolTarget; got != tc.want {
+			t.Errorf("%s %s: ToolTarget = %q, want %q", tc.name, tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestDecodeToolBlocksOnlyInTheirOwnTurnType(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	evs := d(`{"type":"user","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"reviewer"}}]}}`)
