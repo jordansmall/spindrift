@@ -2522,30 +2522,69 @@ var envSchemaSecretTrueRe = regexp.MustCompile(`^\s*secret\s*=\s*true;\s*(#.*)?$
 
 // countEnvSchemaSecrets counts `secret = true;` entries across the folded
 // schema's sources: lib/env-schema.nix plus every row file of each registry
-// lib/row-knobs.nix folds in (today lib/backends/<name>.nix, excluding the
-// registry file default.nix), since row knobs carry their own `secret` flag.
-// It counts the attribute lib/renderers.nix's renderHarnessEnvExample filters
-// on to generate templates/default/harness.env.example. The count is
+// lib/row-knob-registries.nix lists, since row knobs carry their own `secret`
+// flag. It counts the attribute lib/renderers.nix's renderHarnessEnvExample
+// filters on to generate templates/default/harness.env.example. The count is
 // independent and upstream: a stanza dropped whole from the generated fixture
 // leaves it unchanged, so comparing the two catches what scanning the fixture
 // cannot.
 func countEnvSchemaSecrets(t *testing.T) int {
 	t.Helper()
+	return countEnvSchemaSecretsIn(t, filepath.Join("..", "..", ".."))
+}
 
-	rowFiles, err := filepath.Glob(filepath.Join("..", "..", "..", "lib", "backends", "*.nix"))
+// registrySourceRe extracts each registry's `source = "<dir>";` value from
+// lib/row-knob-registries.nix; registrySourceKeyRe matches any `source =`
+// line, so a source the strict form misses (a path or expression, say) fails
+// loudly instead of dropping its registry from the count.
+var (
+	registrySourceRe    = regexp.MustCompile(`(?m)^\s*source\s*=\s*"([^"]+)";`)
+	registrySourceKeyRe = regexp.MustCompile(`(?m)^\s*source\s*=`)
+)
+
+// countEnvSchemaSecretsIn is countEnvSchemaSecrets over the tree rooted at
+// root. A registry directory also holds non-row files (default.nix, and
+// index.nix under lib/runners), which are skipped.
+func countEnvSchemaSecretsIn(t *testing.T, root string) int {
+	t.Helper()
+
+	registries, err := os.ReadFile(filepath.Join(root, "lib", "row-knob-registries.nix"))
 	if err != nil {
-		t.Fatalf("globbing registry row files: %v", err)
+		t.Fatalf("reading lib/row-knob-registries.nix: %v", err)
 	}
+	matches := registrySourceRe.FindAllStringSubmatch(string(registries), -1)
+	if len(matches) == 0 {
+		t.Fatalf("expected lib/row-knob-registries.nix to list at least one `source = \"...\";` registry, found none — the regex or the file's wording drifted")
+	}
+	if keys := len(registrySourceKeyRe.FindAllString(string(registries), -1)); keys != len(matches) {
+		t.Fatalf("expected every `source =` line in lib/row-knob-registries.nix to be a string literal `source = \"<dir>\";`, but only %d of %d are", len(matches), keys)
+	}
+
 	sources := []string{filepath.Join("lib", "env-schema.nix")}
-	for _, path := range rowFiles {
-		if filepath.Base(path) != "default.nix" {
-			sources = append(sources, filepath.Join("lib", "backends", filepath.Base(path)))
+	for _, m := range matches {
+		dir := filepath.FromSlash(m[1])
+		rowFiles, err := filepath.Glob(filepath.Join(root, dir, "*.nix"))
+		if err != nil {
+			t.Fatalf("globbing registry row files under %s: %v", dir, err)
+		}
+		before := len(sources)
+		for _, path := range rowFiles {
+			if base := filepath.Base(path); base != "default.nix" && base != "index.nix" {
+				sources = append(sources, filepath.Join(dir, base))
+			}
+		}
+		if len(sources) == before {
+			t.Fatalf("expected registry source %s to hold at least one row file, found none — the directory moved or its `source` drifted", dir)
 		}
 	}
 
 	count := 0
 	for _, source := range sources {
-		for _, line := range strings.Split(readRepoFile(t, source), "\n") {
+		body, err := os.ReadFile(filepath.Join(root, source))
+		if err != nil {
+			t.Fatalf("reading %s: %v", source, err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
 			if envSchemaSecretTrueRe.MatchString(line) {
 				count++
 			}
@@ -2555,6 +2594,39 @@ func countEnvSchemaSecrets(t *testing.T) int {
 		t.Fatalf("expected to find at least one `secret = true;` entry in %v, found none — the regex or the schema's field wording drifted", sources)
 	}
 	return count
+}
+
+// Pins that countEnvSchemaSecretsIn follows lib/row-knob-registries.nix
+// rather than a fixed directory: a secret in a non-backend registry (runner
+// and Chore knobs) counts, while non-row files and unlisted files do not.
+func TestCountEnvSchemaSecretsIn_FollowsRegistryList(t *testing.T) {
+	root := t.TempDir()
+	const secret = "{\n  secret = true;\n}\n"
+	files := map[string]string{
+		"lib/env-schema.nix":            secret,
+		"lib/row-knob-registries.nix":   "[\n  {\n    source = \"lib/backends\";\n  }\n  {\n    source = \"lib/chores\";\n  }\n  {\n    source = \"lib/runners\";\n  }\n]\n",
+		"lib/backends/a.nix":            secret,
+		"lib/backends/default.nix":      secret,
+		"lib/chores/c.nix":              secret,
+		"lib/runners/r.nix":             secret,
+		"lib/runners/default.nix":       secret,
+		"lib/runners/index.nix":         secret,
+		"lib/row-knob-fixture.nix":      secret,
+		"lib/unlisted/not-a-source.nix": secret,
+	}
+	for rel, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got, want := countEnvSchemaSecretsIn(t, root), 4; got != want {
+		t.Errorf("expected %d secrets (env-schema.nix, lib/backends/a.nix, lib/chores/c.nix, lib/runners/r.nix), got %d", want, got)
+	}
 }
 
 // readHarnessEnvExampleLines reads and splits
