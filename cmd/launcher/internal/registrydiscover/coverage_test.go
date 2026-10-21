@@ -107,9 +107,8 @@ func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
 
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
-	stores := map[string][]string{synthetic.Row.Name: nil, twin.Name: nil}
 
-	routes, _, err := DiscoverRows(dir, rows, nil, stores, lookup, probe)
+	routes, _, err := DiscoverRows(dir, rows, nil, lookup, probe)
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}

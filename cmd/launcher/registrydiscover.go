@@ -20,7 +20,7 @@ import (
 // would fail registryroutes.Parse. rows is the ecosystem table to discover
 // over: production passes ecosystem.Table, tests a synthetic row.
 func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Row, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
-	routes, report, err := registrydiscover.DiscoverRows(repoDir, rows, stores, ecosystem.CredentialStores(rows), lookup, probe)
+	routes, report, err := registrydiscover.DiscoverRows(repoDir, rows, stores, lookup, probe)
 	if err != nil {
 		// An Extract error carries a zero Report, which prints nothing:
 		// every printRegistryDiscoverReport section is guarded by len > 0.
