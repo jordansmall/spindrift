@@ -16,8 +16,6 @@ let
   runnerNames = map (row: row.name) (import ../../lib/runners/index.nix { }).rows;
   driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
   adapterGoTestAttr = prefix: name: "${prefix}-${name}-go-test";
-  driverGoTestAttr = adapterGoTestAttr "drivers";
-  runnerGoTestAttr = adapterGoTestAttr "runners";
   launcherDir = ../../cmd/launcher;
   allDriverDirs = map driverDir driverNames;
   # Everything that links the Driver bundle: the root package, its testdata,
@@ -339,6 +337,84 @@ let
     files = launcherDir;
     names = runnerNames;
   };
+  # The two registry-row checks every adapter registry shares. `testsFor` is the
+  # registry's `{ files, names }` go test builder.
+  #
+  # A registry row yields its go test derivation with no other edit (issues
+  # #5508, #5637, #5688). Only attr names are forced: building the stub's
+  # derivation would fail on its missing package directory.
+  #
+  # With `independence = { dirFor, noun; }` (`dirFor name` the adapter's
+  # directory, `noun` what the assert messages call an adapter), editing one
+  # adapter leaves every other adapter's go test derivation path, and the core
+  # launcher-go-test's, unchanged (issues #5508, #5545, #5688): coreFiles strips
+  # the adapter directories, so no vendor tree or source is shared. Each adapter
+  # in turn has one file removed; the sensitivity assert keeps the check from
+  # passing vacuously.
+  adapterRegistryChecks =
+    {
+      prefix,
+      testsFor,
+      names,
+      independence ? null,
+    }:
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        filterAttrs
+        optionalAttrs
+        ;
+      stubName = "${prefix}-go-test-stub-row-yields-derivation";
+      independentName = "${prefix}-go-test-independent";
+      baseline = testsFor {
+        files = launcherDir;
+        inherit names;
+      };
+      drv = set: n: set.${adapterGoTestAttr prefix n}.drvPath;
+      # The pattern rejects an `independence` missing either key at the call,
+      # not later when a failing assert first builds its message.
+      independent =
+        { dirFor, noun }:
+        p:
+        let
+          file = builtins.head (
+            builtins.attrNames (filterAttrs (_: t: t == "regular") (builtins.readDir (dirFor p)))
+          );
+          edited = fs.difference launcherDir (dirFor p + "/${file}");
+          after = testsFor {
+            files = edited;
+            inherit names;
+          };
+          moved = builtins.filter (n: n != p && drv baseline n != drv after n) names;
+          core = launcherGoTestFor edited;
+        in
+        assertMsg (drv baseline p != drv after p)
+          "removing ${file} from the ${p} ${noun} did not change its own go test derivation; the perturbation is inert"
+        && assertMsg (
+          moved == [ ]
+        ) "editing the ${p} ${noun} changed the go test derivation of: ${concatStringsSep ", " moved}"
+        && assertMsg (
+          core.drvPath == (launcherGoTestFor launcherDir).drvPath
+        ) "editing the ${p} ${noun} changed launcher-go-test";
+    in
+    {
+      ${stubName} =
+        let
+          stubbed = builtins.attrNames (testsFor {
+            files = launcherDir;
+            names = names ++ [ "stub" ];
+          });
+        in
+        assert assertMsg (builtins.elem "${prefix}-stub-go-test" stubbed)
+          "a stub registry row must yield ${prefix}-stub-go-test, got: ${concatStringsSep ", " stubbed}";
+        pkgs.runCommand stubName { } "touch $out";
+    }
+    // optionalAttrs (independence != null) {
+      ${independentName} =
+        assert builtins.all (independent independence) names;
+        pkgs.runCommand independentName { } "touch $out";
+    };
   # go test guards config-parsing regressions (#112). docs/, .github/,
   # .forgejo/, templates/, agent/, README.md (if present) and lib/ are copied
   # beside cmd/launcher, mirroring the repo layout, so the tests resolve their relative
@@ -423,6 +499,29 @@ in
 driverGoTests
 // backendGoTests
 // runnerGoTests
+// adapterRegistryChecks {
+  prefix = "drivers";
+  testsFor = driverGoTestsFor;
+  names = driverNames;
+  independence = {
+    dirFor = driverDir;
+    noun = "Driver";
+  };
+}
+// adapterRegistryChecks {
+  prefix = "backends";
+  testsFor = backendGoTestsFor;
+  names = backendNames;
+}
+// adapterRegistryChecks {
+  prefix = "runners";
+  testsFor = runnerGoTestsFor;
+  names = runnerNames;
+  independence = {
+    dirFor = runnerDir;
+    noun = "runner family";
+  };
+}
 // {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     unformatted=$(gofmt -l ${../../cmd/launcher})
@@ -602,114 +701,9 @@ driverGoTests
       "bundleMains ++ bundleFixtureDirs (nix/checks/go.nix) must equal the module + \"/<dir>\" entries of bundleBinaries and bundleFixtures (internal/driver/bundle_guard_test.go); go.nix has: ${concatStringsSep ", " listed}; the guard has: ${concatStringsSep ", " guarded}";
     pkgs.runCommand "bundle-binaries-match-guard" { } "touch $out";
 
-  # A registry row yields its per-Driver go test derivation with no other edit
-  # (issue #5508). Only attr names are forced: building the stub's derivation
-  # would fail on its missing package directory.
-  drivers-go-test-stub-row-yields-derivation =
-    let
-      names = builtins.attrNames (driverGoTestsFor {
-        files = ../../cmd/launcher;
-        names = driverNames ++ [ "stub" ];
-      });
-    in
-    assert pkgs.lib.assertMsg (builtins.elem "drivers-stub-go-test" names)
-      "a stub registry row must yield drivers-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
-    pkgs.runCommand "drivers-go-test-stub-row-yields-derivation" { } "touch $out";
-
-  # A backend registry row yields its per-backend go test derivation with no
-  # other edit (issue #5637); attr names only, as for the Drivers.
-  backends-go-test-stub-row-yields-derivation =
-    let
-      names = builtins.attrNames (backendGoTestsFor {
-        files = ../../cmd/launcher;
-        names = backendNames ++ [ "stub" ];
-      });
-    in
-    assert pkgs.lib.assertMsg (builtins.elem "backends-stub-go-test" names)
-      "a stub registry row must yield backends-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
-    pkgs.runCommand "backends-go-test-stub-row-yields-derivation" { } "touch $out";
-
-  # Editing one Driver leaves every other Driver's go test derivation path, and
-  # the core launcher-go-test's, unchanged (issues #5508, #5545): a vendor tree
-  # or source shared across them would move them all. Each registry Driver in
-  # turn has one file removed; the sensitivity assert keeps the check from
-  # passing vacuously.
-  drivers-go-test-independent =
-    let
-      inherit (pkgs.lib) assertMsg concatStringsSep filterAttrs;
-      drv = set: n: set.${driverGoTestAttr n}.drvPath;
-      independent =
-        p:
-        let
-          file = builtins.head (
-            builtins.attrNames (filterAttrs (_: t: t == "regular") (builtins.readDir (driverDir p)))
-          );
-          after = driverGoTestsFor {
-            files = fs.difference ../../cmd/launcher (driverDir p + "/${file}");
-            names = driverNames;
-          };
-          moved = builtins.filter (n: n != p && drv driverGoTests n != drv after n) driverNames;
-          core = launcherGoTestFor (fs.difference launcherDir (driverDir p + "/${file}"));
-        in
-        assertMsg (drv driverGoTests p != drv after p)
-          "removing ${file} from the ${p} Driver did not change its own go test derivation; the perturbation is inert"
-        && assertMsg (
-          moved == [ ]
-        ) "editing the ${p} Driver changed the go test derivation of: ${concatStringsSep ", " moved}"
-        && assertMsg (
-          core.drvPath == (launcherGoTestFor launcherDir).drvPath
-        ) "editing the ${p} Driver changed launcher-go-test";
-    in
-    assert builtins.all independent driverNames;
-    pkgs.runCommand "drivers-go-test-independent" { } "touch $out";
-
-  # A runner family row yields its per-family go test derivation with no other
-  # edit (issue #5688); attr names only, as for the Drivers.
-  runners-go-test-stub-row-yields-derivation =
-    let
-      names = builtins.attrNames (runnerGoTestsFor {
-        files = ../../cmd/launcher;
-        names = runnerNames ++ [ "stub" ];
-      });
-    in
-    assert pkgs.lib.assertMsg (builtins.elem "runners-stub-go-test" names)
-      "a stub registry row must yield runners-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
-    pkgs.runCommand "runners-go-test-stub-row-yields-derivation" { } "touch $out";
-
-  # Editing one runner family leaves every other family's go test derivation
-  # path, and the core launcher-go-test's, unchanged (issue #5688): coreFiles
-  # strips the family directories, so no vendor tree or source is shared. Each
-  # family in turn has one file removed; the sensitivity assert keeps the check
-  # from passing vacuously.
-  runners-go-test-independent =
-    let
-      inherit (pkgs.lib) assertMsg concatStringsSep filterAttrs;
-      drv = set: n: set.${runnerGoTestAttr n}.drvPath;
-      independent =
-        p:
-        let
-          file = builtins.head (
-            builtins.attrNames (filterAttrs (_: t: t == "regular") (builtins.readDir (runnerDir p)))
-          );
-          after = runnerGoTestsFor {
-            files = fs.difference ../../cmd/launcher (runnerDir p + "/${file}");
-            names = runnerNames;
-          };
-          moved = builtins.filter (n: n != p && drv runnerGoTests n != drv after n) runnerNames;
-          core = launcherGoTestFor (fs.difference launcherDir (runnerDir p + "/${file}"));
-        in
-        assertMsg (drv runnerGoTests p != drv after p)
-          "removing ${file} from the ${p} runner family did not change its own go test derivation; the perturbation is inert"
-        && assertMsg (
-          moved == [ ]
-        ) "editing the ${p} runner family changed the go test derivation of: ${concatStringsSep ", " moved}"
-        && assertMsg (
-          core.drvPath == (launcherGoTestFor launcherDir).drvPath
-        ) "editing the ${p} runner family changed launcher-go-test";
-    in
-    assert builtins.all independent runnerNames;
-    pkgs.runCommand "runners-go-test-independent" { } "touch $out";
-
+  # Stands in for adapterRegistryChecks' independence half, which cannot hold
+  # for backends: the core backends live in launcher-go-test.
+  #
   # No backend's go test source holds another backend's directory, bar the git
   # backend's for `local` and forgejo (issue #5637). A fileset check for the
   # backend-to-backend leaks, since a core backend edit still moves every
