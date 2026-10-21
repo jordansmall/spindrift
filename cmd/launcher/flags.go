@@ -75,9 +75,9 @@ func doctorFlagArgs(args []string) (opts doctorOptions, badArg string, ok bool) 
 		switch a {
 		case "--verbose", "-v":
 			opts.verbose = true
-		case "--butler":
+		case butlerDoctorFlag:
 			opts.butler = true
-		case "--research":
+		case researchDoctorFlag:
 			opts.research = true
 		default:
 			return doctorOptions{}, a, false

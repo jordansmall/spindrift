@@ -6,8 +6,6 @@
 // forge back would cycle.
 package dispatchkind
 
-import "fmt"
-
 // AnnouncePrefix begins the Box start line that stats inference reads back.
 const AnnouncePrefix = "==> claude "
 
@@ -220,28 +218,4 @@ func ByVerb(verb string) (*Descriptor, bool) {
 		}
 	}
 	return nil, false
-}
-
-// BySettle returns the first row in All whose Settle strategy is s -- the
-// strategy's own descriptor, for code inside the package a Settle tag selects
-// and so cannot hold the dispatched kind. Rows sharing a strategy (recover
-// settles through SettleMerge like work) must agree on the axes read this
-// way; the first in All order is returned.
-func BySettle(s Settle) (*Descriptor, bool) {
-	for _, d := range All {
-		if d.Settle == s {
-			return d, true
-		}
-	}
-	return nil, false
-}
-
-// MustBySettle is BySettle for a strategy every shipped row set carries; it
-// panics on an unregistered one, a wiring bug rather than a runtime condition.
-func MustBySettle(s Settle) *Descriptor {
-	d, ok := BySettle(s)
-	if !ok {
-		panic(fmt.Sprintf("dispatchkind: no row settles with strategy %d", int(s)))
-	}
-	return d
 }

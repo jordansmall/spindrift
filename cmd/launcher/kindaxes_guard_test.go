@@ -170,6 +170,7 @@ var kindAxisForbiddenPatterns = sync.OnceValue(func() []kindAxisForbidden {
 		// The line cannot show the switch subject, so this also flags the same
 		// literal in a switch on some other string; the message says so.
 		{pattern: regexp.MustCompile(`\bcase\s+("[^"]*",\s*)*"(` + strings.Join(keyingWireValues(), "|") + `)"`), why: "spells a DISPATCH_KEYING wire value -- use dispatchkind.<Const>.String(); in a switch on some other string, name the value as a const instead"},
+		{pattern: regexp.MustCompile(`\bdispatchkind\.(Must)?BySettle\(`), why: "looks a kind up by its settle strategy -- read the axis off the descriptor in hand or walk dispatchkind.All"},
 		{pattern: regexp.MustCompile(`SelfContainedBase\s*!=\s*""`), why: "tests prompt-file presence as a kind test -- read Tracker instead"},
 		// == "" is legitimate only as the --self-contained capability check,
 		// which always pairs it with the non-negated selfContained flag.
@@ -332,6 +333,8 @@ func guardHits(line string) bool {
 // silently passing or spuriously failing walk.
 func TestKindAxesGuardPatterns(t *testing.T) {
 	forbidden := []string{
+		`x := dispatchkind.MustBySettle(dispatchkind.SettleLedger).FindingLabel`,
+		`d, _ := dispatchkind.BySettle(s)`,
 		`if c.kind().Settle == dispatchkind.SettleVerdict {`,
 		`if dispatchkind.SettleVerdict == c.kind().Settle {`,
 		`if d.Settle != dispatchkind.SettleMerge {`,
