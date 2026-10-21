@@ -57,8 +57,9 @@ func (d *decoder) decode(line string) []driverkit.Event {
 	if line == "" {
 		return nil
 	}
-	evs := d.decodeLine(line)
-	if ts, ok := topLevelTimestamp(line); ok {
+	top := parseTopLevel(line)
+	evs := d.decodeLine(line, top)
+	if ts, ok := topLevelTimestamp(line, top); ok {
 		for i := range evs {
 			evs[i].Timestamp = ts
 		}
@@ -66,38 +67,77 @@ func (d *decoder) decode(line string) []driverkit.Event {
 	return evs
 }
 
+// topLevel is the one top-level parse of a line that the host-op probe,
+// classifyTurn and topLevelTimestamp share (issue #5438). Type is typed because
+// every probe needs it as a string; the other fields stay raw so each probe
+// decodes only its own, and a mistyped field fails only the probe that reads
+// it. A struct, not a map, keeps encoding/json's case-insensitive key matching.
+// Unlike per-probe decodes, a repeated raw key keeps only its last copy; the
+// claude CLI never writes one.
+type topLevel struct {
+	Type        string          `json:"type"`
+	SpindriftOp json.RawMessage `json:"spindrift_op"`
+	Error       json.RawMessage `json:"error"`
+	Message     json.RawMessage `json:"message"`
+	Timestamp   json.RawMessage `json:"timestamp"`
+}
+
+// parseTopLevel returns nil when line does not decode into a topLevel. JSON
+// null decodes into an empty one, which no probe matches.
+func parseTopLevel(line string) *topLevel {
+	var top topLevel
+	if json.Unmarshal([]byte(line), &top) != nil {
+		return nil
+	}
+	return &top
+}
+
+// decodeField decodes one raw top-level field into v; an absent field leaves v
+// at its zero value and succeeds.
+func decodeField(raw json.RawMessage, v any) bool {
+	return len(raw) == 0 || json.Unmarshal(raw, v) == nil
+}
+
+// hostOp returns the host-written op on a type:"spindrift_op" line, else nil.
+func hostOp(top *topLevel) *hostop.SpindriftOp {
+	if top == nil {
+		return nil
+	}
+	var op *hostop.SpindriftOp
+	if top.Type != hostop.TypeSpindriftOp || !decodeField(top.SpindriftOp, &op) {
+		return nil
+	}
+	return op
+}
+
 // topLevelTimestamp returns the epoch milliseconds of the line's top-level
 // "timestamp". A line with no top-level type is ignored, and a timestamp
 // nested inside tool_result content is never read, so the usage reader's event
 // span covers exactly the lines claude stamps as events.
-func topLevelTimestamp(line string) (int64, bool) {
-	if !strings.Contains(line, `"timestamp"`) {
+func topLevelTimestamp(line string, top *topLevel) (int64, bool) {
+	if top == nil || !strings.Contains(line, `"timestamp"`) {
 		return 0, false
 	}
-	var ts struct {
-		Type      string `json:"type"`
-		Timestamp string `json:"timestamp"`
-	}
-	if json.Unmarshal([]byte(line), &ts) != nil || ts.Type == "" || ts.Timestamp == "" {
+	var stamp string
+	if top.Type == "" || !decodeField(top.Timestamp, &stamp) || stamp == "" {
 		return 0, false
 	}
-	t, err := time.Parse(time.RFC3339Nano, ts.Timestamp)
+	t, err := time.Parse(time.RFC3339Nano, stamp)
 	if err != nil {
 		return 0, false
 	}
 	return t.UnixMilli(), true
 }
 
-func (d *decoder) decodeLine(line string) []driverkit.Event {
+func (d *decoder) decodeLine(line string, top *topLevel) []driverkit.Event {
 	// Host-written; knob values and the settle note are operator or Box text:
 	// scanning them could turn a terminal failure into retries.
-	var op hostop.Event
-	if json.Unmarshal([]byte(line), &op) == nil && op.Type == hostop.TypeSpindriftOp && op.SpindriftOp != nil {
-		d.topRole = nextActiveTopLevelRole(d.topRole, op.SpindriftOp)
-		return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op.SpindriftOp}}
+	if op := hostOp(top); op != nil {
+		d.topRole = nextActiveTopLevelRole(d.topRole, op)
+		return []driverkit.Event{{Kind: driverkit.KindHostOp, HostOp: op}}
 	}
 
-	content, synthetic := classifyTurn(line)
+	content, synthetic := classifyTurn(top)
 	switch {
 	case content:
 		// The agent's own content can quote rate-limit markers verbatim; the

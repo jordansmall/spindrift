@@ -43,7 +43,7 @@ func TestClassifyTurn_NonStringError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content, synth := classifyTurn(tt.line)
+			content, synth := classifyTurn(parseTopLevel(tt.line))
 			if content != tt.wantContent || synth != tt.wantSynth {
 				t.Errorf("classifyTurn = (%v, %v), want (%v, %v)", content, synth, tt.wantContent, tt.wantSynth)
 			}
