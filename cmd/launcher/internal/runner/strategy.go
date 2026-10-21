@@ -7,10 +7,11 @@ import (
 )
 
 // KnobLookup resolves one knob's env name to its already-resolved value (after
-// any _CMD resolution) and whether it is set; os.LookupEnv has this shape. A
-// family hands it to its generated ReadKnobs, so its own knobs never widen
-// Config (ADR 0068 decision 3).
-type KnobLookup func(env string) (value string, ok bool)
+// any _CMD resolution) and whether it is set. A family hands it to its
+// generated ReadKnobs, so its own knobs never widen Config (ADR 0068 decision
+// 3). An alias of os.LookupEnv's unnamed func type, identical to each generated
+// Lookup.
+type KnobLookup = func(env string) (value string, ok bool)
 
 // Strategy is one runner family's entry in the registry (ADR 0069 decision 2;
 // CONTEXT.md "Runner Strategy"). Name is the family's RUNNER_KIND string.

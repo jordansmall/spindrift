@@ -19,10 +19,9 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// Lookup resolves one knob's env name to its already-resolved value;
-// os.LookupEnv's shape. Each backend converts it to its generated Lookup type
-// (e.g. forgejo.Lookup(l)) for ReadKnobs.
-type Lookup func(env string) (value string, ok bool)
+// Lookup resolves one knob's env name to its already-resolved value. An alias
+// of os.LookupEnv's unnamed func type, identical to each generated Lookup.
+type Lookup = func(env string) (value string, ok bool)
 
 // Shared carries the cross-backend values every Strategy closure may read; a
 // backend's own knobs come through Lookup and its generated ReadKnobs, never a

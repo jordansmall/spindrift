@@ -40,8 +40,9 @@ type Limits struct {
 	MaxBytes int
 }
 
-// Lookup resolves a row-owned knob's env name, in os.LookupEnv's shape.
-type Lookup func(env string) (value string, ok bool)
+// Lookup resolves a row-owned knob's env name. An alias of os.LookupEnv's
+// unnamed func type, identical to each generated Lookup.
+type Lookup = func(env string) (value string, ok bool)
 
 // Knobs are the row-owned settings a Digest reads itself.
 type Knobs struct {
