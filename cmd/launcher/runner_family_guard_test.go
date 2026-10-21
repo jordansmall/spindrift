@@ -124,6 +124,13 @@ func outOfScopeDir(dir string, famDirs []string) bool {
 	return false
 }
 
+// outOfScopeFile reports whether the .go file at path is exempt by structure:
+// not scanned at all. Generated files are not exempt here; they are walked and
+// quieted by ast.IsGenerated.
+func outOfScopeFile(path string) bool {
+	return strings.HasSuffix(path, "_test.go")
+}
+
 // runnerFamilyViolations parses src as the file at path (slash-separated) and
 // returns one "path:line: why\n\t<source line>" per comparison that spells a
 // runtime/family name, reference to a family constant, or import of a family
@@ -242,7 +249,13 @@ func runnerFamilyViolations(t testing.TB, path string, src []byte, names, idents
 // family name compared, a family constant referenced, or a family package
 // imported, outside the family packages and the Bundle: core reads the
 // Descriptor row or the Strategy instead of re-deriving a family fact from its
-// name, and only the Bundle links a family in. Test files are not scanned.
+// name, and only the Bundle links a family in.
+//
+// Two structural skips are deliberate policy: _test.go files, since a test
+// asserts per-family outcomes and sets fixtures rather than branching
+// production behavior; and internal/runner/runnertest/**, the test-only
+// contract kit, which names a family on purpose to scope a contract row
+// (ADR 0069).
 func TestRunnerFamilyGuard(t *testing.T) {
 	names := familyNames()
 	idents := familyIdents(t, familiesGen)
@@ -264,8 +277,8 @@ func TestRunnerFamilyGuard(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil // tests pin runtime spellings as fixtures
+		if !strings.HasSuffix(path, ".go") || outOfScopeFile(path) {
+			return nil
 		}
 		src, readErr := os.ReadFile(path)
 		if readErr != nil {
@@ -377,7 +390,7 @@ func TestRunnerFamilyGuardPlanted(t *testing.T) {
 	}
 }
 
-// TestRunnerFamilyGuardScope pins the directories the walk skips.
+// TestRunnerFamilyGuardScope pins the directories and files the walk skips.
 func TestRunnerFamilyGuardScope(t *testing.T) {
 	fam := []string{"internal/runner/oci", "internal/runner/bwrap"}
 	for dir, want := range map[string]bool{
@@ -396,6 +409,16 @@ func TestRunnerFamilyGuardScope(t *testing.T) {
 	} {
 		if got := outOfScopeDir(dir, fam); got != want {
 			t.Errorf("outOfScopeDir(%q) = %v, want %v", dir, got, want)
+		}
+	}
+	for path, want := range map[string]bool{
+		"x_test.go":                        true,
+		"internal/runner/strategy_test.go": true,
+		"x.go":                             false,
+		"internal/runner/families_gen.go":  false, // generated files stay walked; TestRunnerFamilyGuardPlanted pins their quieting
+	} {
+		if got := outOfScopeFile(path); got != want {
+			t.Errorf("outOfScopeFile(%q) = %v, want %v", path, got, want)
 		}
 	}
 }
