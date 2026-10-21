@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -444,5 +446,28 @@ func TestDecodeResultMistypedModelUsageKeepsTotals(t *testing.T) {
 	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"ok","num_turns":2,"modelUsage":"oops"}`)
 	if len(evs[0].Models) != 0 || evs[0].NoTotals || evs[0].NumTurns != 2 {
 		t.Errorf("event = %+v, want no Models and intact totals", evs[0])
+	}
+}
+
+// BenchmarkDecode runs a fresh decoder over every corpus pass log, so the
+// per-line decode cost stays measurable (issue #5438).
+func BenchmarkDecode(b *testing.B) {
+	paths, err := filepath.Glob(filepath.Join("testdata", "corpus", "*", "pass.jsonl"))
+	if err != nil || len(paths) == 0 {
+		b.Fatalf("corpus pass logs: %v (found %d)", err, len(paths))
+	}
+	var lines []string
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			b.Fatal(err)
+		}
+		lines = append(lines, strings.Split(string(data), "\n")...)
+	}
+	for b.Loop() {
+		d := newDecoderAt(decodeNow)
+		for _, line := range lines {
+			d(line)
+		}
 	}
 }
