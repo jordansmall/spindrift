@@ -1198,7 +1198,7 @@ func reclaimStaleSnapshots(root, keepGeneration string) error {
 			fmt.Printf("==> bwrap runner: warning: could not open nix-var snapshot lock %s (%v); leaving stale generation %s in place\n", lockPath, err, name)
 			continue
 		}
-		LockRaceWindowHook()
+		lockRaceWindowHook()
 		if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 			// A live Box holds the shared lock, so leave this generation alone.
 			lf.Close()
@@ -1234,7 +1234,7 @@ func sweepOrphanedLock(root, entryName, keepGeneration string, knownGenerations 
 	if err != nil {
 		return
 	}
-	LockRaceWindowHook()
+	lockRaceWindowHook()
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		// Still referenced (Run may be mid-race, about to discover its
 		// generation dir is gone); leave it for a later reclaim pass.
