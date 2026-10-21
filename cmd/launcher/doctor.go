@@ -59,6 +59,26 @@ func doctorResearchVerdicts(c config) forge.VerdictLabels {
 	return vl
 }
 
+// The doctor flags that select a kind's preflight tier. Each is declared on a
+// kind row's Preflight axis; doctorFlagArgs parses them and kindForDoctorFlag
+// maps either back to its row (TestKindForDoctorFlag pins them to the rows).
+const (
+	butlerDoctorFlag   = "--butler"
+	researchDoctorFlag = "--research"
+)
+
+// kindForDoctorFlag returns the row whose Preflight axis declares flag. It
+// panics when none does: a flag constant out of step with the rows is a wiring
+// bug, not a runtime condition.
+func kindForDoctorFlag(flag string) *dispatchkind.Descriptor {
+	for _, d := range dispatchkind.All {
+		if d.Preflight.Flag(true) == flag {
+			return d
+		}
+	}
+	panic("doctor: no kind row declares preflight flag " + flag)
+}
+
 // requiredLabels names the labels, beyond the four work-tier ones, that the
 // selected kinds need the repo to carry, so a daemon preflight fails before a
 // kind that cannot file its labels starts. Research and butler labels stay
@@ -77,7 +97,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 		labels = append(labels, doctor.ResearchLabelNamesFor(doctorResearchVerdicts(c))...)
 	}
 	if opts.butler {
-		butlerKind := dispatchkind.MustBySettle(dispatchkind.SettleLedger)
+		butlerKind := kindForDoctorFlag(butlerDoctorFlag)
 		labels = append(labels, butlerKind.FindingLabel)
 		// The patch rung never applies its label while the daily cap is 0 or
 		// while this tracker/forge pair cannot land patches at all.
@@ -91,7 +111,7 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 	// A read-only work Box relays review findings for the host to file, so the
 	// label is part of what the work kind needs whichever flags are set.
 	if c.boxForgeAndIssueAccess == "read-only" && resolveAgentPresenceSignals(c.driver).filerEnabled {
-		labels = append(labels, dispatchkind.MustBySettle(dispatchkind.SettleMerge).FindingLabel)
+		labels = append(labels, dispatchkind.Default.FindingLabel)
 	}
 	return labels
 }

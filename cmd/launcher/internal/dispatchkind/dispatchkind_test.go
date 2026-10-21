@@ -414,25 +414,28 @@ func TestPromptsShape(t *testing.T) {
 	}
 }
 
-func TestBySettle(t *testing.T) {
-	for _, s := range []Settle{SettleMerge, SettleVerdict, SettleLedger} {
-		d, ok := BySettle(s)
-		if !ok || d.Settle != s {
-			t.Fatalf("BySettle(%v) = %v, %v", s, d, ok)
-		}
-		for _, o := range All {
-			if o.Settle == s && (o.FindingLabel != d.FindingLabel || o.PatchLabel != d.PatchLabel) {
-				t.Errorf("rows sharing Settle %v disagree on FindingLabel/PatchLabel: %s vs %s", s, o.Name, d.Name)
-			}
+// doctor's requiredLabels requires only Default's FindingLabel for the
+// review findings every merge-gate row files, so those rows must agree on it.
+func TestMergeGateRowsShareLabels(t *testing.T) {
+	for _, d := range All {
+		if d.Settle == Default.Settle && (d.FindingLabel != Default.FindingLabel || d.PatchLabel != Default.PatchLabel) {
+			t.Errorf("%s settles like Default but disagrees on FindingLabel/PatchLabel", d.Name)
 		}
 	}
-	if _, ok := BySettle(Settle(-1)); ok {
-		t.Error("BySettle found a row for an unknown strategy")
-	}
-	defer func() {
-		if recover() == nil {
-			t.Error("MustBySettle did not panic for an unknown strategy")
+}
+
+// kindForDoctorFlag walks All and takes the first match, so a flag two rows
+// declare would silently shadow the second.
+func TestPreflightFlagsUnique(t *testing.T) {
+	seen := map[string]string{}
+	for _, d := range All {
+		f := d.Preflight.Flag(true)
+		if f == "" {
+			continue
 		}
-	}()
-	MustBySettle(Settle(-1))
+		if prev, dup := seen[f]; dup {
+			t.Errorf("preflight flag %q declared by both %s and %s", f, prev, d.Name)
+		}
+		seen[f] = d.Name
+	}
 }

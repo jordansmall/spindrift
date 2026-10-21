@@ -862,3 +862,20 @@ func TestCmdDoctor_UnregisteredBackend_ExitsTwoWithFullConfigReport(t *testing.T
 		})
 	}
 }
+
+func TestKindForDoctorFlag(t *testing.T) {
+	if got := kindForDoctorFlag(butlerDoctorFlag).FindingLabel; got != "agent-butler-finding" {
+		t.Errorf("kindForDoctorFlag(%q).FindingLabel = %q, want agent-butler-finding", butlerDoctorFlag, got)
+	}
+	for _, flag := range []string{butlerDoctorFlag, researchDoctorFlag} {
+		if got := kindForDoctorFlag(flag).Preflight.Flag(true); got != flag {
+			t.Errorf("kindForDoctorFlag(%q) resolved a row declaring %q", flag, got)
+		}
+	}
+	defer func() {
+		if recover() == nil {
+			t.Error("kindForDoctorFlag did not panic for a flag no row declares")
+		}
+	}()
+	kindForDoctorFlag("--no-such-flag")
+}
