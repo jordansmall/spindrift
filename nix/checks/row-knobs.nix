@@ -113,6 +113,45 @@ let
       if row ? knobs && !builtins.pathExists (../.. + "/${path}") then [ path ] else [ ]
     ) registry.rows
   ) registries;
+  # Existence is not ownership: regen creates a Chore's dir, and existing
+  # internal packages such as settle are names a Chore could collide with.
+  # Pinning a name here is the human decision that the dir is its own.
+  ownedChorePackages = [ "tuning" ];
+  # The same test lib/row-knob-readers.nix's hasKnobs uses to emit a reader.
+  knobBearing = row: (row.knobs or { }) != { };
+  foreignPackageDirs =
+    owned: registry:
+    builtins.concatMap (
+      row:
+      let
+        dir = registry.goPackageDir row.name;
+      in
+      if knobBearing row && !builtins.elem row.name owned && builtins.pathExists (../.. + "/${dir}") then
+        [ "${registry.source}/${row.name}.nix -> ${dir}" ]
+      else
+        [ ]
+    ) registry.rows;
+  choreRegistries = builtins.filter (r: r.source == "lib/chores") registries;
+  choreRegistry =
+    assert assertMsg (
+      builtins.length choreRegistries == 1
+    ) "row-knobs: lib/row-knob-registries.nix must hold exactly one lib/chores registry";
+    builtins.head choreRegistries;
+  foreignChoreDirs = foreignPackageDirs ownedChorePackages choreRegistry;
+  stalePins = builtins.filter (
+    name: !builtins.any (row: row.name == name && knobBearing row) choreRegistry.rows
+  ) ownedChorePackages;
+  settleStub = builtins.concatStringsSep "\n" (
+    foreignPackageDirs [ ] {
+      inherit (choreRegistry) source goPackageDir;
+      rows = [
+        {
+          name = "settle";
+          knobs.stubKnob = stubKnob;
+        }
+      ];
+    }
+  );
   messages = args: builtins.concatStringsSep "\n" (rowKnobs.collisions args);
   rowKnobsOf =
     name:
@@ -212,6 +251,13 @@ in
       "row-knobs: a pinned knob is missing from its row or has the wrong env name (or is absent from the folded schema); offenders: ${builtins.concatStringsSep ", " unowned}";
     assert assertMsg (rowsMissingFile == [ ])
       "row-knobs: a registry row carrying knobs must have a file at <source>/<name>.nix; missing: ${builtins.concatStringsSep ", " rowsMissingFile}";
+    assert assertMsg (
+      hasInfix "lib/chores/settle.nix" settleStub && hasInfix "cmd/launcher/internal/settle" settleStub
+    ) "row-knobs: a knob-bearing Chore named after an unowned existing package dir must be an offender";
+    assert assertMsg (foreignChoreDirs == [ ])
+      "row-knobs: a knob-bearing Chore's name collides with an existing unrelated Go package dir; rename the Chore or, if the dir is its own, pin it in ownedChorePackages; offenders: ${builtins.concatStringsSep ", " foreignChoreDirs}";
+    assert assertMsg (stalePins == [ ])
+      "row-knobs: ownedChorePackages pins a name that is no knob-bearing Chore; drop it: ${builtins.concatStringsSep ", " stalePins}";
     assert assertMsg (
       realSchema ? label && realSchema.label.env == "LABEL"
     ) "row-knobs: lib/env-schema.nix must still export its entries through the fold";
