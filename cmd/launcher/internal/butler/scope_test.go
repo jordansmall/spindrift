@@ -329,12 +329,55 @@ func TestRecordsSnapshotLoadsRowStoredBeforeTheChoreKeyedTable(t *testing.T) {
 	}
 }
 
+// An unset, empty or absent lookup takes the row default, the very value the
+// row's generated reader resolves.
+func TestNewRecordsSourceTakesTheRowDefaultMinRecords(t *testing.T) {
+	t.Parallel()
+	env := chore.MinRecordsKnob("tuning")
+	for name, knobs := range map[string]recordsdigest.Lookup{
+		"no lookup": nil,
+		"unset":     mapKnobs(nil),
+		"empty":     mapKnobs(map[string]string{env: ""}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p := tuningPolicy(t.TempDir(), 1)
+			p.Knobs = knobs
+			r := New(ledger.Local{Repo: ledgertest.NewRepo(t)}, fakeTree{}, forge.NewFake().AsIssueFiler(), nil, p, func() time.Time { return tuningNow })
+			src, err := newRecordsSource(r, "tuning", "head1", tuningNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := knobs
+			if read == nil {
+				read = mapKnobs(nil)
+			}
+			want, err := tuning.ReadKnobs(read)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if src.minRecords != 20 || src.minRecords != want.ButlerTuningMinRecords {
+				t.Errorf("minRecords = %d, want 20 and ReadKnobs' %d", src.minRecords, want.ButlerTuningMinRecords)
+			}
+		})
+	}
+}
+
+// A malformed value fails both readers with the very same message.
+func TestMinRecordsAndReadKnobsRejectAMalformedValueAlike(t *testing.T) {
+	t.Parallel()
+	lookup := mapKnobs(map[string]string{chore.MinRecordsKnob("tuning"): "many"})
+	_, err := chore.MinRecords("tuning", lookup)
+	_, readErr := tuning.ReadKnobs(lookup)
+	if err == nil || readErr == nil || err.Error() != readErr.Error() {
+		t.Fatalf("MinRecords err = %v, ReadKnobs err = %v; want the same error", err, readErr)
+	}
+}
+
 func TestNewRecordsSourceErrorsOnAnUnresolvableKnob(t *testing.T) {
 	t.Parallel()
 	env := chore.MinRecordsKnob("tuning")
 	for name, knobs := range map[string]recordsdigest.Lookup{
-		"no lookup":       nil,
-		"unset":           mapKnobs(nil),
 		"not an int":      mapKnobs(map[string]string{env: "many"}),
 		"bad digest knob": mapKnobs(map[string]string{env: "1", "BUTLER_TUNING_COOLDOWN": "-1h"}),
 	} {
