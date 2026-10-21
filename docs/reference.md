@@ -1266,9 +1266,13 @@ where pi reads them. pi always runs with `--no-approve`, so it ignores the
 Target repo's project-local `.pi/` (settings, extensions, MCP servers, skills,
 prompts), while `AGENTS.md` and `CLAUDE.md` are still read (pi loads context
 files regardless of trust). A PR adding a `.pi/` path is still merge-guarded
-(see [Merge guard](#merge-guard)). Heartbeat lines and Dispatch Records report the
-observed model as `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix
-notation, so the effort in force shows next to the model.
+(see [Merge guard](#merge-guard)). Dispatch Records and usage report the
+observed model as the bare `<provider>/<model>`, matching the configured model;
+the observed thinking level is its own `efforts` field on each Pass. Heartbeat
+role headers still show `<provider>/<model>:<thinkingLevel>`, pi's own
+model-suffix notation, so the effort in force shows next to the model. The
+live status and report model carries the bare id only; the effort shows in the
+heartbeat header and the Record's Pass efforts.
 
 <a id="pi-known-limits"></a>
 **Known limits.**
@@ -1562,9 +1566,8 @@ that recognises a `result` line echoing a marker the agent already quoted.
 | `reasoning` | `Text` | classifier (progress) only, never narration or result |
 | `tool_call` | `ToolID`, `ToolName`, `ToolInput`, `ToolTarget` | transcript; heartbeat (first call per message, counted and phased only with a `HeartbeatTracking` `Kind` hook); classifier (progress) |
 | `tool_result` | `ToolID`, `ToolName`, `ToolTarget`, `ToolOutput`, `IsError`, `Subagent` | transcript; classifier (progress) |
-| `usage` | `Tokens`, `Model`, `Effort` | usage (not progress) |
-| `model` | `Model` | heartbeat (model change) |
-| `effort` | `Effort` | none yet |
+| `usage` | `Tokens`, `Model`, `Effort` | usage (not progress); Pass tallies read `Effort` |
+| `model` | `Model`, and `Effort` when the Driver sets it | heartbeat (model change; the role header shows `model:effort` when `Effort` is set) |
 | `error` | `Text`, `ResetAt` | classifier (transient markers) |
 | `unparsed` | `Text` | classifier (terminal markers only) |
 | `result` | `Text`, session totals (`Tokens`, `DurationMs`, `DurationAPIMs`, `NumTurns`) | result (replaces text so far); usage, summed under `SessionTotals`; heartbeat (flushes counts and, once a turn count is known, prints the turn line; a result with no decodable turn count is dropped) |
@@ -6990,7 +6993,7 @@ Record until it gains output.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 13. Version 2 added the `verdict_text` and
+own. The current schema is version 14. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. An older store opens, migrates, and keeps
 its rows; the migrations also mark every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
@@ -7019,7 +7022,10 @@ and never pushed, since the Ledger carries only the Record ID and hash.
 Version 12 adds the `pass_agents` table of per-pass, per-agent usage.
 Version 13 replaces `tuning_snapshots` with a `snapshots` table keyed by Chore
 and Record ID, so every records Chore stores the digest it was served;
-tuning's rows carry over.
+tuning's rows carry over. Version 14 adds the `efforts` column to passes and
+re-reads every log still on disk, so pi's Pass models become bare ids; a
+Record whose log was already pruned keeps its suffixed ids, so `stats by model`
+can still mix suffixed and bare ids for that history.
 The store uses WAL journaling, so another process can read it while `stats`
 writes. Because Records are kept in the database, they survive deleting the
 logs they came from. Deleting the database instead loses every Record whose
@@ -7304,8 +7310,10 @@ reported it), and `box_status`, and, once filled, `reverted`, `churn_14d`
 and, on stamped Records only
 (omitted when inferred), `revision`, `driver`, `driver_version`,
 `role_models`, `knobs`, and `prompt_hashes` (omitted when no Box reported
-any). Each pass carries `ordinal`, `role`, `models`, `efforts` (the observed reasoning-effort levels, sorted; empty when the Driver reports none), `usd`, `input_tokens`,
-`output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`,
+any). Each pass carries `ordinal`, `role`, `models`, `efforts` (the observed
+reasoning-effort levels, sorted; empty when the Driver's per-call usage
+events carry none), `usd`,
+`input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`,
 `api_calls`, `turns`, `duration_ms`, `api_duration_ms`, (when present)
 `verdict`, `log`, the base name of the log file it was read from, and
 (when not empty) `agents`, an array of `{agent, api_calls, input_tokens,

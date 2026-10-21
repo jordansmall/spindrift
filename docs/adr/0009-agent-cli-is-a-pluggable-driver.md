@@ -465,7 +465,9 @@ session resume under issue #5481, the hook bridge under issue #5482 and
   own.
 - Heartbeat lines and Dispatch Records report pi's observed model as
   `<provider>/<model>:<thinkingLevel>`, pi's own model-suffix notation, which
-  is how the effort in force surfaces next to the model.
+  is how the effort in force surfaces next to the model. (Amended by issue
+  #5592: Dispatch Records and usage now carry the bare id; see the amendment
+  below.)
 
 ## Amendment (issue #5483): pi ships the roster
 
@@ -562,3 +564,19 @@ it from Nix rather than a Go literal. pi lists `github-copilot` alone;
 preflight refuses any other OAuth entry and names that Provider's API-key
 variable where spindrift has one, else says the Provider is unsupported.
 `api_key` entries in the auth store are not restricted.
+
+## Amendment (issue #5592): pi's observed model is the bare id, effort is its own field
+
+Issue #5592 amends the observed-model bullet in the #5479 amendment. Dispatch
+Records and usage report pi's observed model as the bare `<provider>/<model>`,
+and the observed thinking level rides separately on the event and lands in
+each Pass's `efforts`. An id that changes with the thinking
+level fragmented per-model accounting (`SummedByModel`, `stats by model`, the
+tuning `ModelKey`): a mid-Pass level change, or a same-model subagent at
+another effort, produced two ids, and neither matched the configured
+`<provider>/<model>`. Heartbeat role headers keep the `:<thinkingLevel>`
+suffix, so the effort in force still shows next to the model; the live status
+and report model carries the bare id only. Pass logs ingested before this
+change are re-read once (store migration 14) to pick up bare ids and efforts;
+a Record whose log was already pruned keeps its suffixed ids, so `stats by
+model` can still mix suffixed and bare ids for that history.
