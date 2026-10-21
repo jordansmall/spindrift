@@ -272,3 +272,29 @@ func TestReadPassesWriteTracking(t *testing.T) {
 		t.Error("an empty WriteTool tracked a write")
 	}
 }
+
+func TestReadPassesPerCallEffortsSortedDedupedPerSegment(t *testing.T) {
+	call := func(id, effort string) []Event {
+		return []Event{{Kind: KindUsage, MessageID: id, Model: "p/m", Effort: effort}}
+	}
+	got := readPasses(t, PassOptions{Totals: PerCallTotals}, "", nil,
+		call("m1", "low"), call("m2", "high"), call("m3", "low"), call("m4", ""),
+		[]Event{{Kind: KindModel, Model: "p/m", Effort: "medium"}},
+		[]Event{passStartEv()},
+		call("m5", "medium"),
+		[]Event{passStartEv()},
+		call("m6", ""),
+	)
+	if len(got) != 3 {
+		t.Fatalf("segments = %d", len(got))
+	}
+	if want := []string{"high", "low"}; !reflect.DeepEqual(got[0].Efforts, want) {
+		t.Errorf("Efforts = %q, want %q (empty skipped, KindModel not counted)", got[0].Efforts, want)
+	}
+	if want := []string{"medium"}; !reflect.DeepEqual(got[1].Efforts, want) {
+		t.Errorf("second Efforts = %q, want %q", got[1].Efforts, want)
+	}
+	if len(got[2].Efforts) != 0 {
+		t.Errorf("third Efforts = %q, want none", got[2].Efforts)
+	}
+}

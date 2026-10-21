@@ -7345,7 +7345,7 @@ reported it), and `box_status`, and, once filled, `reverted`, `churn_14d`
 and, on stamped Records only
 (omitted when inferred), `revision`, `driver`, `driver_version`,
 `role_models`, `knobs`, and `prompt_hashes` (omitted when no Box reported
-any). Each pass carries `ordinal`, `role`, `models`, `usd`, `input_tokens`,
+any). Each pass carries `ordinal`, `role`, `models`, `efforts` (the observed reasoning-effort levels, sorted; empty when the Driver reports none), `usd`, `input_tokens`,
 `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`,
 `api_calls`, `turns`, `duration_ms`, `api_duration_ms`, (when present)
 `verdict`, `log`, the base name of the log file it was read from, and

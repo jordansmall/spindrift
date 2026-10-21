@@ -137,6 +137,7 @@ func TestStoreMigratesV11DatabaseGainsPassAgents(t *testing.T) {
 	}
 	for _, q := range []string{
 		"DROP TABLE pass_agents",
+		"ALTER TABLE passes DROP COLUMN efforts",
 		"DROP TABLE snapshots",
 		"CREATE TABLE tuning_snapshots (record_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, rendered TEXT NOT NULL, created_at INTEGER NOT NULL)",
 		"PRAGMA user_version = 11",
@@ -167,5 +168,63 @@ func TestStoreMigratesV11DatabaseGainsPassAgents(t *testing.T) {
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil || n != want {
 			t.Fatalf("%s rows = %d, want %d, err %v", table, n, want, err)
 		}
+	}
+}
+
+func effortCall(id, effort string) string {
+	return seamtest.Line(driverkit.Event{Kind: driverkit.KindUsage, MessageID: id, Model: "p/m", Effort: effort})
+}
+
+func ingestedEfforts(t *testing.T, calls ...string) []string {
+	t.Helper()
+	root := t.TempDir()
+	lines := append([]string{driverStamp(altDriver), opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}, calls...)
+	putLog(t, root, "issue-42.log", lines...)
+	s := openStore(t, root)
+	ingest(t, s)
+	recs := records(t, s)
+	if len(recs) != 1 || len(recs[0].Passes) != 1 {
+		t.Fatalf("records = %+v", recs)
+	}
+	return recs[0].Passes[0].Efforts
+}
+
+func TestStoreRoundTripsPassEfforts(t *testing.T) {
+	t.Parallel()
+	got := ingestedEfforts(t, effortCall("m1", "low"), effortCall("m2", "high"), effortCall("m3", "low"))
+	if want := []string{"high", "low"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("efforts = %#v, want %v", got, want)
+	}
+	if got := ingestedEfforts(t, usageCall("m1", "p/m", 1, 1, 0, 0, 0)); !reflect.DeepEqual(got, []string{}) {
+		t.Errorf("efforts without any = %#v, want empty non-nil", got)
+	}
+}
+
+// Rows parsed before v14 hold no efforts, so the migration must force a re-read.
+func TestStoreMigratesV13DatabaseGainsPassEfforts(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", driverStamp(altDriver), opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}), effortCall("m1", "high"))
+	old, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, old)
+	for _, q := range []string{"ALTER TABLE passes DROP COLUMN efforts", "PRAGMA user_version = 13"} {
+		if _, err := old.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := openStore(t, root)
+	if n := ingest(t, s); n == 0 {
+		t.Fatal("the migrated file was not re-read")
+	}
+	recs := records(t, s)
+	if len(recs) != 1 || !reflect.DeepEqual(recs[0].Passes[0].Efforts, []string{"high"}) {
+		t.Fatalf("records = %+v", recs)
 	}
 }

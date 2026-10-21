@@ -66,6 +66,7 @@ type Pass struct {
 	Ordinal                  int      `json:"ordinal"`
 	Role                     string   `json:"role"`
 	Models                   []string `json:"models"`
+	Efforts                  []string `json:"efforts"`
 	USD                      float64  `json:"usd"`
 	InputTokens              int      `json:"input_tokens"`
 	OutputTokens             int      `json:"output_tokens"`
@@ -214,14 +215,13 @@ func mergePasses(shells []*passShell, tallies []driverkit.PassTally, log string)
 			ordinal = passes[n-1].Ordinal + 1
 		}
 		p := Pass{
-			Ordinal: ordinal, Role: sh.role, Models: t.Models, Verdict: sh.verdict, Log: log,
+			Ordinal: ordinal, Role: sh.role, Models: t.Models, Efforts: t.Efforts, Verdict: sh.verdict, Log: log,
 			USD: t.Usage.TotalCostUSD, InputTokens: t.Usage.InputTokens, OutputTokens: t.Usage.OutputTokens,
 			CacheReadInputTokens: t.Usage.CacheReadInputTokens, CacheCreationInputTokens: t.Usage.CacheCreationInputTokens,
 			APICalls: t.APICalls, Turns: t.Usage.NumTurns, DurationMs: t.Usage.DurationMs, APIDurationMs: t.Usage.DurationApiMs,
 		}
-		if p.Models == nil {
-			p.Models = []string{}
-		}
+		p.Models = nonNil(p.Models)
+		p.Efforts = nonNil(p.Efforts)
 		for _, a := range t.Agents {
 			p.Agents = append(p.Agents, PassAgent{Agent: a.Agent, APICalls: a.APICalls, InputTokens: a.UncachedInputTokens,
 				OutputTokens: a.OutputTokens, CacheReadInputTokens: a.CacheReadInputTokens, CacheCreationInputTokens: a.CacheCreationInputTokens})
@@ -543,3 +543,11 @@ func announcedKind(s string) string {
 // (permissions, I/O) and skipped; the rest of the root was still ingested, so
 // it is a warning, unlike a store failure.
 var ErrUnreadableLog = errors.New("dispatchrecord: unreadable log")
+
+// nonNil keeps an empty list encoding as [] rather than null.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
