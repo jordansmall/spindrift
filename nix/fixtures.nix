@@ -375,12 +375,33 @@ let
   };
 
   # Proves mkHarness bakes fj (forgejo-cli) into the image only for a
-  # forgejo-backend harness (issue #1963). Eval-only, consumed by the
+  # forgejo-backend harness (issue #1963), whichever axis names forgejo and
+  # once when both do (issue #5768). Eval-only, consumed by the
   # forgejo-cli-baked-only-for-forgejo-backend image check.
   forgejoHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     defaults = {
       issueTracker = "forgejo";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  # forgejo on the code-forge axis alone; the tracker keeps its github
+  # default.
+  forgejoForgeHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      codeForge = "forgejo";
+    };
+    packages = p: [ p.hello ];
+  };
+
+  # forgejo on both axes, so the union must dedupe to a single fj.
+  forgejoBothHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    defaults = {
+      issueTracker = "forgejo";
+      codeForge = "forgejo";
     };
     packages = p: [ p.hello ];
   };
@@ -645,6 +666,8 @@ in
     filerOnlyHarness
     workerOnlyHarness
     forgejoHarness
+    forgejoForgeHarness
+    forgejoBothHarness
     opencodeHarness
     piHarness
     piHarnessWith
