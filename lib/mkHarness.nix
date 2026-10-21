@@ -1672,6 +1672,7 @@ else
         agentPathsPreambleFile
         runInputDocumentFile
         backendBundleDirs
+        backendCLIPackages
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;
