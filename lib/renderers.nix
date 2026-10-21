@@ -2029,8 +2029,9 @@ rec {
     + "}\n";
 
   # A typed knob reader for one row (ADR 0068 decision 3, issue #5636): a
-  # `Knobs` struct with a field per knob and `ReadKnobs(lookup)`, which applies
-  # each knob's default and kind (string, int, bool, choices). Generic over
+  # `Knobs` struct with a field per knob, an exported `<Field>Env` constant
+  # naming each knob's env var, and `ReadKnobs(lookup)`, which applies each
+  # knob's default and kind (string, int, bool, choices). Generic over
   # whatever owns the knobs: it takes a Go package name, the repo path it is
   # generated from, and a knobs attrset keyed by env-schema key. Emits unaligned
   # Go; gofmt owns column alignment. Extra attrs (a lib/row-knob-readers.nix
@@ -2075,6 +2076,7 @@ rec {
         else
           builtins.toJSON d;
       field = key: upperFirst key;
+      envConst = key: "${field key}Env";
       usesKind = kinds: builtins.any (key: builtins.elem (kindOf knobs.${key}) kinds) keys;
       needsStrconv = usesKind [ "int" ];
       needsFmt = usesKind [
@@ -2090,12 +2092,19 @@ rec {
       structFields = concatStrings (
         map (key: "\t// ${field key} is ${knobs.${key}.env}.\n\t${field key} ${goType knobs.${key}}\n") keys
       );
+      envConsts = concatStrings (
+        map (
+          key:
+          "\t// ${envConst key} names ${field key}'s env var.\n"
+          + "\t${envConst key} = ${builtins.toJSON knobs.${key}.env}\n"
+        ) keys
+      );
       defaultLines = concatStrings (map (key: "\t\t${field key}: ${goDefault knobs.${key}},\n") keys);
       readBlock =
         key:
         let
           e = knobs.${key};
-          env = builtins.toJSON e.env;
+          env = envConst key;
           kind = kindOf e;
           f = field key;
           setting = emptyIsSetting e;
@@ -2161,6 +2170,11 @@ rec {
     + "package ${package}\n"
     + "\n"
     + importBlock
+    + "// The env name each knob is read from.\n"
+    + "const (\n"
+    + envConsts
+    + ")\n"
+    + "\n"
     + "// Knobs holds the typed value of each knob the row declares.\n"
     + "type Knobs struct {\n"
     + structFields

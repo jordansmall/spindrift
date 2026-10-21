@@ -152,3 +152,23 @@ func TestReadKnobs_SecretErrorOmitsValue(t *testing.T) {
 		t.Errorf("error = %q, want %q", err, want)
 	}
 }
+
+// The Env constants are the single source of each knob's env name; the
+// literals here stay an independent oracle for the generated values.
+func TestEnvConstantsNameEachKnob(t *testing.T) {
+	for _, tc := range []struct{ got, want string }{
+		{fixture.FixtureBudgetEnv, "FIXTURE_BUDGET"},
+		{fixture.FixtureCountEnv, "FIXTURE_COUNT"},
+		{fixture.FixtureEnabledEnv, "FIXTURE_ENABLED"},
+		{fixture.FixtureLimitEnv, "FIXTURE_LIMIT"},
+		{fixture.FixtureModeEnv, "FIXTURE_MODE"},
+		{fixture.FixtureNameEnv, "FIXTURE_NAME"},
+		{fixture.FixtureNoteEnv, "FIXTURE_NOTE"},
+		{fixture.FixtureTierEnv, "FIXTURE_TIER"},
+		{fixture.FixtureTokenEnv, "FIXTURE_TOKEN"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("env constant = %q, want %q", tc.got, tc.want)
+		}
+	}
+}

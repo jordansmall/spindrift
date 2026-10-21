@@ -6,6 +6,28 @@ import (
 	"strconv"
 )
 
+// The env name each knob is read from.
+const (
+	// FixtureBudgetEnv names FixtureBudget's env var.
+	FixtureBudgetEnv = "FIXTURE_BUDGET"
+	// FixtureCountEnv names FixtureCount's env var.
+	FixtureCountEnv = "FIXTURE_COUNT"
+	// FixtureEnabledEnv names FixtureEnabled's env var.
+	FixtureEnabledEnv = "FIXTURE_ENABLED"
+	// FixtureLimitEnv names FixtureLimit's env var.
+	FixtureLimitEnv = "FIXTURE_LIMIT"
+	// FixtureModeEnv names FixtureMode's env var.
+	FixtureModeEnv = "FIXTURE_MODE"
+	// FixtureNameEnv names FixtureName's env var.
+	FixtureNameEnv = "FIXTURE_NAME"
+	// FixtureNoteEnv names FixtureNote's env var.
+	FixtureNoteEnv = "FIXTURE_NOTE"
+	// FixtureTierEnv names FixtureTier's env var.
+	FixtureTierEnv = "FIXTURE_TIER"
+	// FixtureTokenEnv names FixtureToken's env var.
+	FixtureTokenEnv = "FIXTURE_TOKEN"
+)
+
 // Knobs holds the typed value of each knob the row declares.
 type Knobs struct {
 	// FixtureBudget is FIXTURE_BUDGET.
@@ -52,55 +74,55 @@ func ReadKnobs(lookup Lookup) (Knobs, error) {
 		FixtureTier:    "",
 		FixtureToken:   0,
 	}
-	if v, ok := lookup("FIXTURE_BUDGET"); ok {
+	if v, ok := lookup(FixtureBudgetEnv); ok {
 		k.FixtureBudget = 0
 		if v != "" {
 			parsed, err := strconv.Atoi(v)
 			if err != nil {
-				return Knobs{}, fmt.Errorf("%s: %q is not an integer", "FIXTURE_BUDGET", v)
+				return Knobs{}, fmt.Errorf("%s: %q is not an integer", FixtureBudgetEnv, v)
 			}
 			k.FixtureBudget = parsed
 		}
 	}
-	if v, ok := lookup("FIXTURE_COUNT"); ok && v != "" {
+	if v, ok := lookup(FixtureCountEnv); ok && v != "" {
 		parsed, err := strconv.Atoi(v)
 		if err != nil {
-			return Knobs{}, fmt.Errorf("%s: %q is not an integer", "FIXTURE_COUNT", v)
+			return Knobs{}, fmt.Errorf("%s: %q is not an integer", FixtureCountEnv, v)
 		}
 		k.FixtureCount = parsed
 	}
-	if v, ok := lookup("FIXTURE_ENABLED"); ok {
+	if v, ok := lookup(FixtureEnabledEnv); ok {
 		k.FixtureEnabled = v != ""
 	}
-	if v, ok := lookup("FIXTURE_LIMIT"); ok {
+	if v, ok := lookup(FixtureLimitEnv); ok {
 		k.FixtureLimit = v
 	}
-	if v, ok := lookup("FIXTURE_MODE"); ok && v != "" {
+	if v, ok := lookup(FixtureModeEnv); ok && v != "" {
 		switch v {
 		case "fast", "safe":
 			k.FixtureMode = v
 		default:
-			return Knobs{}, fmt.Errorf("%s: %q is not one of %s", "FIXTURE_MODE", v, "fast, safe")
+			return Knobs{}, fmt.Errorf("%s: %q is not one of %s", FixtureModeEnv, v, "fast, safe")
 		}
 	}
-	if v, ok := lookup("FIXTURE_NAME"); ok && v != "" {
+	if v, ok := lookup(FixtureNameEnv); ok && v != "" {
 		k.FixtureName = v
 	}
-	if v, ok := lookup("FIXTURE_NOTE"); ok && v != "" {
+	if v, ok := lookup(FixtureNoteEnv); ok && v != "" {
 		k.FixtureNote = v
 	}
-	if v, ok := lookup("FIXTURE_TIER"); ok {
+	if v, ok := lookup(FixtureTierEnv); ok {
 		switch v {
 		case "", "gold", "silver":
 			k.FixtureTier = v
 		default:
-			return Knobs{}, fmt.Errorf("%s: %q is not one of %s", "FIXTURE_TIER", v, "gold, silver")
+			return Knobs{}, fmt.Errorf("%s: %q is not one of %s", FixtureTierEnv, v, "gold, silver")
 		}
 	}
-	if v, ok := lookup("FIXTURE_TOKEN"); ok && v != "" {
+	if v, ok := lookup(FixtureTokenEnv); ok && v != "" {
 		parsed, err := strconv.Atoi(v)
 		if err != nil {
-			return Knobs{}, fmt.Errorf("%s is not an integer", "FIXTURE_TOKEN")
+			return Knobs{}, fmt.Errorf("%s is not an integer", FixtureTokenEnv)
 		}
 		k.FixtureToken = parsed
 	}

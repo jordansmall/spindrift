@@ -6,6 +6,18 @@ import (
 	"strconv"
 )
 
+// The env name each knob is read from.
+const (
+	// ButlerTuningCooldownEnv names ButlerTuningCooldown's env var.
+	ButlerTuningCooldownEnv = "BUTLER_TUNING_COOLDOWN"
+	// ButlerTuningDigestBytesEnv names ButlerTuningDigestBytes's env var.
+	ButlerTuningDigestBytesEnv = "BUTLER_TUNING_DIGEST_BYTES"
+	// ButlerTuningMinRecordsEnv names ButlerTuningMinRecords's env var.
+	ButlerTuningMinRecordsEnv = "BUTLER_TUNING_MIN_RECORDS"
+	// ButlerTuningMinSampleEnv names ButlerTuningMinSample's env var.
+	ButlerTuningMinSampleEnv = "BUTLER_TUNING_MIN_SAMPLE"
+)
+
 // Knobs holds the typed value of each knob the row declares.
 type Knobs struct {
 	// ButlerTuningCooldown is BUTLER_TUNING_COOLDOWN.
@@ -34,27 +46,27 @@ func ReadKnobs(lookup Lookup) (Knobs, error) {
 		ButlerTuningMinRecords:  20,
 		ButlerTuningMinSample:   15,
 	}
-	if v, ok := lookup("BUTLER_TUNING_COOLDOWN"); ok && v != "" {
+	if v, ok := lookup(ButlerTuningCooldownEnv); ok && v != "" {
 		k.ButlerTuningCooldown = v
 	}
-	if v, ok := lookup("BUTLER_TUNING_DIGEST_BYTES"); ok && v != "" {
+	if v, ok := lookup(ButlerTuningDigestBytesEnv); ok && v != "" {
 		parsed, err := strconv.Atoi(v)
 		if err != nil {
-			return Knobs{}, fmt.Errorf("%s: %q is not an integer", "BUTLER_TUNING_DIGEST_BYTES", v)
+			return Knobs{}, fmt.Errorf("%s: %q is not an integer", ButlerTuningDigestBytesEnv, v)
 		}
 		k.ButlerTuningDigestBytes = parsed
 	}
-	if v, ok := lookup("BUTLER_TUNING_MIN_RECORDS"); ok && v != "" {
+	if v, ok := lookup(ButlerTuningMinRecordsEnv); ok && v != "" {
 		parsed, err := strconv.Atoi(v)
 		if err != nil {
-			return Knobs{}, fmt.Errorf("%s: %q is not an integer", "BUTLER_TUNING_MIN_RECORDS", v)
+			return Knobs{}, fmt.Errorf("%s: %q is not an integer", ButlerTuningMinRecordsEnv, v)
 		}
 		k.ButlerTuningMinRecords = parsed
 	}
-	if v, ok := lookup("BUTLER_TUNING_MIN_SAMPLE"); ok && v != "" {
+	if v, ok := lookup(ButlerTuningMinSampleEnv); ok && v != "" {
 		parsed, err := strconv.Atoi(v)
 		if err != nil {
-			return Knobs{}, fmt.Errorf("%s: %q is not an integer", "BUTLER_TUNING_MIN_SAMPLE", v)
+			return Knobs{}, fmt.Errorf("%s: %q is not an integer", ButlerTuningMinSampleEnv, v)
 		}
 		k.ButlerTuningMinSample = parsed
 	}
