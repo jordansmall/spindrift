@@ -1326,10 +1326,27 @@ Driver entry declares:
   and the registry's cross-Driver guards); and every derivation built from
   the whole `cmd/launcher` tree or from the launcher binaries, such as the
   binary packages (and so the image, the image-derived checks and the bats
-  shards), `launcher-go-fmt`, `launcher-go-vet`, `launcher-go-seam-test`,
-  `launcher-console-isolation` and the cross-build. It never reruns the core
-  `launcher-go-test` or another Driver's check, which
-  `drivers-go-test-independent` pins. If
+  shards), `launcher-go-seam-test`, `launcher-runner-family-isolation` and
+  the cross-build.
+  `launcher-go-seam-test` stays whole-tree because its seam fixtures name the
+  image built from the bundle-linking box binary, and several of its
+  integration-tagged packages (the root, `box`, `driver-exec`, the runner
+  families and `internal/forge/forgejo`) lie outside the core fileset. A
+  runner-family (`internal/runner/<name>`) or bundled-backend
+  (`internal/forge/<name>`) edit reruns the same set, with that adapter's
+  `runners-<name>-go-test` or `backends-<name>-go-test` in place of the
+  Driver's check. None of the three reruns the core checks
+  (`launcher-go-test`, `launcher-go-fmt`, `launcher-go-vet` and
+  `launcher-console-isolation`), which `drivers-go-test-independent`,
+  `runners-go-test-independent` and `backends-go-test-independent` pin.
+  Those build from a source without any Driver, runner family, bundled
+  backend, bundle or binary, and each adapter's check gofmts and vets its own
+  package instead. A
+  Driver, runner-family or bundled-backend edit never reruns another
+  Driver's, family's or bundled backend's check either (the backends that
+  build on another, `local` and `forgejo`, build on the core `git`
+  backend), and a runner-family edit never reruns a backend check, which
+  `backends-go-test-independent` also pins. If
   the tests import an internal package missing from that check's fileset, add
   it to `driverGoTestShared` in `nix/checks/go.nix`. The check vendors from a
   source without any Driver directory under the launcher's `launcherVendorHash`,
