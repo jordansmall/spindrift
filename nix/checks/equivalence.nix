@@ -2147,6 +2147,7 @@ in
         "imageAttrName"
         "runInputDocumentFile"
         "backendBundleDirs"
+        "backendCLIPackages"
         "roster"
         "launcherCurrencyFileset"
         "directFileFragmentRows"
