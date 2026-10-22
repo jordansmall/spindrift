@@ -129,3 +129,86 @@ tests fall in or out of the synthetic-row move as follows.
   already tested in-process on the synthetic row
   (`box/registry_test.go`), so the golden stays the one integration
   smoke over the production table.
+
+## Amendment (2026-10-22 registry kit review): an ecosystem is a package behind a conformance kit
+
+The decision above rejected one Go package per ecosystem. The
+ecosystems never call each other, so the seam would contain nothing,
+and registration order would hide the precedence order. Two things
+have changed since:
+
+- The 2026-10-18 amendment gave every row a corpus that `ecosystemtest`
+  replays through all six pipeline stages. The Go test check is one
+  derivation over the whole package, so an edit to yarn reruns cargo's
+  corpus. Drivers had the same problem, and ADR 0066 decision 5 solved
+  it with one test derivation per package. Ecosystems now carry enough
+  per-row tests to need the same fix.
+- A seventh ecosystem, NuGet, is planned. It is the first one added
+  since the corpora landed, so it should only add a new package and its
+  corpus, and change nothing that already exists.
+
+Neither trigger above fired. This amendment replaces the "Considered
+option" instead.
+
+1. **One package per ecosystem, the driverkit shape.** Each ecosystem
+   moves under `internal/ecosystem/<name>` and exports a Strategy. The
+   Strategy is today's Row, renamed, with its nil-able hook fields
+   unchanged. `internal/ecosystem` keeps the type, the registry and the
+   accessors (`EnvExportRowsOf`, `CredentialStores`, and so on). The
+   packages are `cargo`, `npmfamily`, `gomod` and `gradle`. `go` is a Go
+   keyword, so the go ecosystem's package is `gomod`, but its Strategy is
+   still named `"go"`.
+2. **The npm family is one package with three Strategies.** npm, yarn
+   and pnpm share `npmFamilyBinding`, the YAML scalar helpers and the
+   tarball rewrite. In one package that sharing is internal, not a
+   cross-row dependency. ADR 0069's runner families set the precedent.
+3. **The kit holds only what no ecosystem owns.** A new
+   `internal/ecosystem/ecosystemkit` takes the response-rewrite helpers
+   with no ecosystem in them (`repointRegistryURL`,
+   `decodeOneJSONObject`, `normalizeHostPort`) and `httpAbsoluteURL`.
+   Anything that names an ecosystem's file format stays in that
+   ecosystem's package. `ecosystemtest` stays the conformance kit. The
+   synthetic row becomes a synthetic Strategy.
+4. **Precedence is one ordered list in the Bundle.** A new
+   `internal/driver/bundle/ecosystems.go` makes one call,
+   `ecosystem.Register(cargo.Strategy, npmfamily.Npm, npmfamily.Yarn,
+   npmfamily.Pnpm, gomod.Strategy, gradle.Strategy)`, with the order in
+   the argument list. A second call panics. Lockfile precedence and the
+   env-export line order are read from that one visible list, not from
+   import or `init` order, which answers the objection above. New
+   ecosystems append to the end unless their lockfiles collide with an
+   existing row's.
+5. **No Nix row.** Unlike a Driver's or a backend's facts, no ecosystem
+   fact crosses into Nix: classification, the reference docs (#5663) and
+   the export order (#5662) are all read in Go. The per-ecosystem test
+   derivations map over `builtins.readDir` of `internal/ecosystem`, so
+   no ecosystem is named in Nix by hand. *Reopen trigger:* the first
+   ecosystem fact the image has to bake in, such as a Box-side package
+   one ecosystem needs. That fact becomes a Nix row rendered into a
+   generated Descriptor, the way backends do it.
+6. **Two stages.**
+   - **Stage 1:** the moves, the kit, the Bundle's `ecosystems.go`, and the
+     per-package derivations. `ecosystem.Table` becomes the registered
+     list. The `Table`-default wrappers in `registrypathset`,
+     `bindregistry`, `registryroutes` and `registrydiscover` read the
+     registry, so no caller changes.
+   - **Stage 2:** delete those wrappers. The five binary call sites
+     (`main.go`, `bootstrap.go`, `box/registry.go`, `driver-exec` and
+     `dispatch/box.go`) pass the registered Strategies, so libraries
+     only take rows as arguments.
+
+   Since #5653 gave every stage a `...Rows` variant, stage 2 only deletes
+   code. A new ecosystem waits for stage 1 only.
+
+Consequences:
+
+- The containment scan (#5661) now reads: only an ecosystem's own
+  package and the Bundle's `ecosystems.go` name that ecosystem.
+- The orchestrator imports no ecosystem today and still imports none.
+  `ecosystems.go` is left out of its fileset, as `backends.go` is
+  (issue #5738), and kept in the Box's and `driver-exec`'s, since both
+  bind registries.
+- Adding an ecosystem takes a package, its corpus, and one argument in
+  `ecosystems.go`.
+- Upstream host products are a separate axis, covered by ADR 0071, not
+  by any ecosystem.
