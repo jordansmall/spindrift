@@ -291,12 +291,15 @@
                 # need passt's `pasta` binary for the pasta-wrapped default
                 # network isolation path (issue #2666). The egress test also
                 # needs iproute2's `ip` to inspect the namespace's tap
-                # interface and routes. Without these, the tests that need
-                # them skip rather than exercise anything real.
+                # interface and routes, and the in-box nix tests need sqlite3
+                # for the store-db snapshot. Without these, the tests that
+                # need them skip rather than exercise anything real, unless
+                # SPINDRIFT_REQUIRE_BWRAP is set, as CI sets it.
                 ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
                   pkgs.bubblewrap
                   pkgs.passt
                   pkgs.iproute2
+                  pkgs.sqlite
                 ];
               };
             }
