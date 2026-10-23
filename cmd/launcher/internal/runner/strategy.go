@@ -29,8 +29,9 @@ type Strategy struct {
 	// PrepareHotSwap prepares a realized store-closure (a /nix/store path) before
 	// a hot-swap binds it as the new agent generation; core calls it only for a
 	// nixInBox Consumer. nil means the family needs no preparation (ADR 0069
-	// decision 2).
-	PrepareHotSwap func(pwd, closure string) error
+	// decision 2). cfg carries the daemon's startup-config artifacts a hot-swapped
+	// Box still mounts, which the family must keep alive alongside closure.
+	PrepareHotSwap func(cfg Config, pwd, closure string) error
 	// RawNetworkKnobs returns the env names of the family's raw network knobs
 	// set in l, read through the family's own reader; core refuses a non-open
 	// NETWORK_MODE beside any of them. nil means the family has none.
