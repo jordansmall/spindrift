@@ -23,6 +23,15 @@ let
     promptFile = "fixture-prompt.md";
     prompt = null;
   };
+  # Shared by the spawns checks: tools that map to subagent, and the spawn
+  # target the reviewer fixtures name.
+  spawnerTools = [
+    "Read"
+    "Agent"
+  ];
+  axis = piFixtureEntry // {
+    name = "review-axis";
+  };
   renderers = import ../../../lib/renderers.nix;
   effortLib = import ../../../lib/effort-on-model.nix { inherit (pkgs) lib; };
 in
@@ -97,11 +106,14 @@ in
     assert assertMsg (
       entry.agentsJsonTemplate { roster = [ ]; } == ""
     ) "pi Driver has no --agents equivalent, so agentsJsonTemplate must render \"\"";
-    assert assertMsg (
-      builtins.attrNames (entry.agentFilesTemplate { roster = [ ]; }) == [
-        ".pi/agent/extensions/spindrift-hooks.js"
-      ]
-    ) "pi Driver's agent files for an empty roster must be only the hook bridge (issue #5482)";
+    assert assertMsg
+      (
+        builtins.attrNames (entry.agentFilesTemplate { roster = [ ]; }) == [
+          ".pi/agent/extensions/spindrift-hooks.js"
+          ".pi/agent/spindrift-spawns.json"
+        ]
+      )
+      "pi Driver's agent files for an empty roster must be only the hook bridge and the spawns policy (issues #5482, #5809)";
     assert assertMsg (
       (entry.agentFilesTemplate { roster = [ ]; }).".pi/agent/extensions/spindrift-hooks.js"
       == builtins.readFile ../../../agent/pi-hook-bridge.js
@@ -374,16 +386,96 @@ in
     ) "an opted-out filer must stay dropped under pi, got roster: ${builtins.toJSON names}";
     pkgs.runCommand "drivers-pi-opt-out-role-drops-its-effort" { } "touch $out";
 
-  # Issue #5368: `spawns` scopes opencode's task permission only; pi's rendered
-  # agent files must be unchanged when an entry carries it.
+  # Issue #5368: pi's per-agent files are unaffected by `spawns`; enforcement
+  # lives in the separate spindrift-spawns.json policy file (issue #5809).
   drivers-pi-agent-files-ignore-spawns =
     let
-      render = e: entry.agentFilesTemplate { roster = [ e ]; };
+      render =
+        e:
+        pkgs.lib.filterAttrs (n: _: pkgs.lib.hasPrefix ".pi/agent/agents/" n) (
+          entry.agentFilesTemplate { roster = [ e ]; }
+        );
     in
     assert assertMsg (
       render piFixtureEntry == render (piFixtureEntry // { spawns = [ "fixture" ]; })
-    ) "pi agentFilesTemplate must render identically when an entry carries spawns";
+    ) "pi agentFilesTemplate must render identical agent files when an entry carries spawns";
     pkgs.runCommand "drivers-pi-agent-files-ignore-spawns" { } "touch $out";
+
+  # Issue #5809: the hook bridge reads this file to gate which agents a
+  # roster entry's subagent tool may spawn; an entry absent from it is
+  # unrestricted, and the file is always written so the bridge can fail closed
+  # when it is missing.
+  drivers-pi-spawns-policy =
+    let
+      policyPath = ".pi/agent/spindrift-spawns.json";
+      policy = roster: (entry.agentFilesTemplate { inherit roster; }).${policyPath} or "<absent>";
+      reviewer = piFixtureEntry // {
+        name = "reviewer";
+        spawns = [ "review-axis" ];
+        tools = spawnerTools;
+      };
+    in
+    assert assertMsg (
+      policy [
+        reviewer
+        axis
+      ] == ''{"reviewer":["review-axis"]}''
+    ) "pi spawns policy must map each entry declaring spawns to its list and omit the rest";
+    assert assertMsg (
+      policy [
+        axis
+        (removeAttrs reviewer [ "spawns" ])
+      ] == "{}"
+    ) "pi spawns policy must render {} when no entry declares spawns, not be absent";
+    assert assertMsg (
+      policy [ (reviewer // { spawns = [ ]; }) ] == ''{"reviewer":[]}''
+    ) "pi spawns policy must keep an empty spawns list (spawn nothing), not drop it as unrestricted";
+    pkgs.runCommand "drivers-pi-spawns-policy" { } "touch $out";
+
+  # A spawns target absent from the roster must fail eval, as under opencode;
+  # an entry that cannot call subagent has no spawn to check. pi hands a
+  # subagent its identity only through a non-empty body, so spawns on an entry
+  # with a blank description could never be enforced.
+  drivers-pi-spawns-policy-throws =
+    let
+      renders =
+        roster:
+        let
+          r = entry.agentFilesTemplate { inherit roster; };
+        in
+        (builtins.tryEval (builtins.deepSeq r r)).success;
+      parent = piFixtureEntry // {
+        name = "parent";
+        spawns = [ "review-axis" ];
+        tools = [ "Agent" ];
+      };
+    in
+    assert assertMsg (renders [
+      parent
+      axis
+    ]) "pi spawns control (target in roster) must render";
+    assert assertMsg (
+      !(renders [ parent ])
+    ) "pi must throw when spawns names an entry absent from the roster";
+    assert assertMsg (
+      !(renders [ (removeAttrs parent [ "tools" ]) ])
+    ) "pi must throw on an absent spawns target when the entry has no tools key (full tool set)";
+    assert assertMsg (renders [
+      (parent // { tools = [ "Read" ]; })
+    ]) "pi must not throw on an absent spawns target when no tool maps to subagent";
+    assert assertMsg (
+      !(renders [
+        (parent // { description = "  \n"; })
+        axis
+      ])
+    ) "pi must throw when an entry declares spawns but has a blank description";
+    assert assertMsg (
+      !(renders [
+        (removeAttrs parent [ "description" ])
+        axis
+      ])
+    ) "pi must throw when an entry declares spawns but has no description";
+    pkgs.runCommand "drivers-pi-spawns-policy-throws" { } "touch $out";
 
   # Issue #5811: a model already ending in a known `:<level>` keeps that
   # suffix and the role's effort is dropped, so no `:low:high` doubling.
