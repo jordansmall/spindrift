@@ -313,6 +313,12 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return exitConfigInvalid
 	}
+	// config.kind() would silently resolve a nil kind to work's, filing findings
+	// under the wrong label.
+	if lc.config.dispatchKind == nil {
+		fmt.Fprintln(stderr, "butler: no dispatch kind set; refusing to file findings under another kind's label")
+		return exitConfigInvalid
+	}
 	budgets := butlerBudgets(lc.config)
 
 	// Unlike internal/daemon/lock.go and status.go, which fall back to
@@ -355,8 +361,8 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		Zone:              settings.window.Location(),
 		PromotionMaxFiles: lc.config.butlerPromotionMaxFiles,
 		PromotionLabel:    lc.config.workLabel,
-		FindingLabel:      lc.config.kind().FindingLabel,
-		PatchLabel:        lc.config.kind().PatchLabel,
+		FindingLabel:      lc.config.dispatchKind.FindingLabel,
+		PatchLabel:        lc.config.dispatchKind.PatchLabel,
 		PatchPaths:        lc.config.butlerPatchPaths,
 		PatchMaxFiles:     lc.config.butlerPatchMaxFiles,
 		PatchMaxLines:     lc.config.butlerPatchMaxLines,
