@@ -49,25 +49,54 @@ let
   runnerDir = name: launcherDir + "/internal/runner/${name}";
   bundleDir = launcherDir + "/internal/driver/bundle";
   allRunnerDirs = map runnerDir runnerNames;
+  # One Ecosystem package per directory beneath internal/ecosystem, so a new
+  # ecosystem yields its go test derivation with no hand-pinned attr. The kit
+  # (ecosystemkit) is shared library code, not an ecosystem; testdata is the
+  # core ecosystem package's own corpus.
+  ecosystemDir = launcherDir + "/internal/ecosystem";
+  ecosystemKitDir = "ecosystemkit";
+  ecosystemNamesIn =
+    listing:
+    builtins.attrNames (
+      pkgs.lib.filterAttrs (
+        n: t:
+        t == "directory"
+        && !builtins.elem n [
+          ecosystemKitDir
+          "testdata"
+        ]
+      ) listing
+    );
+  ecosystemNames = ecosystemNamesIn (builtins.readDir ecosystemDir);
+  ecosystemPkgDirs = map (n: ecosystemDir + "/${n}") ecosystemNames;
+  # internal/ecosystem as the core ecosystem package and the kit: every
+  # ecosystem package's directory removed, so editing one never moves a
+  # derivation that merely compiles the core package.
+  ecosystemCoreFiles = fs.difference ecosystemDir (fs.unions ecosystemPkgDirs);
   # `files` without the Drivers (and so their corpora), the runner families,
-  # the bundled backends, the bundle and the binaries.
+  # the Ecosystem packages, the bundled backends, the bundle and the binaries.
   coreFiles =
     files:
     fs.difference files (
       fs.unions (
-        allDriverDirs ++ allRunnerDirs ++ bundledBackendDirs ++ [ bundleDir ] ++ bundleBinaryDirs
+        allDriverDirs
+        ++ allRunnerDirs
+        ++ ecosystemPkgDirs
+        ++ bundledBackendDirs
+        ++ [ bundleDir ]
+        ++ bundleBinaryDirs
       )
     );
   # The vendor tree is re-derived from a source without any Driver, runner
-  # family, bundled backend, bundle or binary, so editing one Driver, family or
-  # bundled backend never changes another's drvPath nor the core go test's (a
-  # plain launcherGoModules would, its src being the whole tree). Fixed-output
-  # with the same vendorHash, so its outPath equals launcherGoModules' and
-  # nothing is fetched twice. `go mod vendor -e` tolerates the packages that
-  # import the absent directories.
-  # Gotcha: a Driver, runner family, bundled backend or main importing a
-  # third-party module no other package uses changes the vendored set, and the
-  # narrowed derivation then mismatches launcherVendorHash.
+  # family, Ecosystem package, bundled backend, bundle or binary, so editing one
+  # Driver, family, ecosystem or bundled backend never changes another's
+  # drvPath nor the core go test's (a plain launcherGoModules would, its src
+  # being the whole tree). Fixed-output with the same vendorHash, so its
+  # outPath equals launcherGoModules' and nothing is fetched twice. `go mod
+  # vendor -e` tolerates the packages that import the absent directories.
+  # Gotcha: a Driver, runner family, ecosystem, bundled backend or main
+  # importing a third-party module no other package uses changes the vendored
+  # set, and the narrowed derivation then mismatches launcherVendorHash.
   vendorFor =
     files:
     launcherGoModules.overrideAttrs (_: {
@@ -128,7 +157,8 @@ let
     "usage"
   ];
   # One go test derivation per adapter of any registry (ADR 0066 decision 5,
-  # ADR 0068 decision 7), keyed by registry name so a new row yields one with
+  # ADR 0068 decision 7) or Ecosystem package, keyed by registry name (for the
+  # ecosystems, the directory name) so a new row or directory yields one with
   # no hand-pinned attr: `${prefix}-${name}-go-test`. `pkgFor name` is the
   # adapter's package directory under cmd/launcher; `sharedFor name` the extra
   # packages its tests reach. `files` is the cmd/launcher fileset every source
@@ -295,7 +325,6 @@ let
       "dispatchrecord"
       "doctor"
       "driver/driverkit"
-      "ecosystem"
       "flock"
       "freshness"
       "gitexec"
@@ -325,6 +354,7 @@ let
       "unixsocket"
       "usage"
     ]
+    ++ [ ecosystemCoreFiles ]
     ++ rootGoFiles (internalDir + "/forge")
     ++ rootGoFiles (internalDir + "/driver")
     ++ rootGoFiles (internalDir + "/runner");
@@ -345,6 +375,59 @@ let
     files = launcherDir;
     names = runnerNames;
   };
+  # Packages an ecosystem's tests reach (go list -deps -test over every
+  # ecosystem package): hand-listed like driverGoTestShared, and a stale list
+  # fails the build loudly. The kit and the core ecosystem package's non-test
+  # files, never another ecosystem's directory, so one ecosystem's edit leaves
+  # every other's derivation alone while a kit edit reruns them all.
+  ecosystemGoTestShared =
+    map (p: internalDir + "/${p}") [
+      "bindregistry"
+      "connlimit"
+      "credresolver"
+      "ecosystem/${ecosystemKitDir}"
+      "ecosystemtest"
+      "golden"
+      "panicguard"
+      "registrydiscover"
+      "registrymanifest"
+      "registrypathset"
+      "registryproxy"
+      "registryroutes"
+      "registryvocab"
+      "unixsocket"
+    ]
+    ++ rootGoFiles ecosystemDir;
+  ecosystemGoTestsFor =
+    { files, names }:
+    adapterGoTests {
+      inherit files names;
+      prefix = "ecosystems";
+      pkgFor = name: "internal/ecosystem/${name}";
+      sharedFor = _: ecosystemGoTestShared;
+      nativeBuildInputs = goTestInputs;
+    };
+  ecosystemGoTests = ecosystemGoTestsFor {
+    files = launcherDir;
+    names = ecosystemNames;
+  };
+  # Directories under internal/ecosystem holding Go files, the kit apart: each
+  # is a package and needs its go test derivation. Filtered separately from
+  # ecosystemNames, though both read the same listing: on the real tree the
+  # every-directory check fails only if a package directory is excluded from
+  # ecosystemNames; the stub case proves the check can fail at all.
+  ecosystemPackageDirs = builtins.attrNames (
+    pkgs.lib.filterAttrs (
+      n: t:
+      t == "directory"
+      && n != ecosystemKitDir
+      && builtins.any (f: pkgs.lib.hasSuffix ".go" f) (
+        builtins.attrNames (builtins.readDir (ecosystemDir + "/${n}"))
+      )
+    ) (builtins.readDir ecosystemDir)
+  );
+  ecosystemsLackingDerivation =
+    dirs: set: builtins.filter (d: !(set ? ${adapterGoTestAttr "ecosystems" d})) dirs;
   # The two registry-row checks every adapter registry shares. `testsFor` is the
   # registry's `{ files, names }` go test builder.
   #
@@ -358,13 +441,15 @@ let
   # check's, unchanged (issues #5508, #5545, #5562, #5688): coreFiles strips
   # the adapter directories, so no vendor tree or source is shared. Each adapter
   # in turn has one file removed; the sensitivity assert keeps the check from
-  # passing vacuously.
+  # passing vacuously. `others` lists further `{ prefix, testsFor, names }`
+  # registries whose derivations the edit must not move either.
   adapterRegistryChecks =
     {
       prefix,
       testsFor,
       names,
       independence ? null,
+      others ? [ ],
     }:
     let
       inherit (pkgs.lib)
@@ -396,6 +481,22 @@ let
           };
           moved = builtins.filter (n: n != p && drv baseline n != drv after n) names;
           coreMoved = coreChecksMovedBy edited;
+          othersMoved = pkgs.lib.concatMap (
+            o:
+            let
+              at =
+                files:
+                o.testsFor {
+                  inherit files;
+                  inherit (o) names;
+                };
+              before = at launcherDir;
+              now = at edited;
+            in
+            builtins.filter (attr: before.${attr}.drvPath != now.${attr}.drvPath) (
+              map (adapterGoTestAttr o.prefix) o.names
+            )
+          ) others;
         in
         assertMsg (drv baseline p != drv after p)
           "removing ${file} from the ${p} ${noun} did not change its own go test derivation; the perturbation is inert"
@@ -404,7 +505,10 @@ let
         ) "editing the ${p} ${noun} changed the go test derivation of: ${concatStringsSep ", " moved}"
         && assertMsg (
           coreMoved == [ ]
-        ) "editing the ${p} ${noun} changed: ${concatStringsSep ", " coreMoved}";
+        ) "editing the ${p} ${noun} changed: ${concatStringsSep ", " coreMoved}"
+        && assertMsg (
+          othersMoved == [ ]
+        ) "editing the ${p} ${noun} changed: ${concatStringsSep ", " othersMoved}";
     in
     {
       ${stubName} =
@@ -482,6 +586,12 @@ let
       for held in ${pkgs.lib.concatStringsSep " " runnerNames}; do
         if [ -e "src/cmd/launcher/internal/runner/$held" ]; then
           echo "launcher-go-test's source holds internal/runner/$held" >&2
+          exit 1
+        fi
+      done
+      for held in ${pkgs.lib.concatStringsSep " " ecosystemNames}; do
+        if [ -e "src/cmd/launcher/internal/ecosystem/$held" ]; then
+          echo "launcher-go-test's source holds internal/ecosystem/$held" >&2
           exit 1
         fi
       done
@@ -597,6 +707,7 @@ in
 driverGoTests
 // backendGoTests
 // runnerGoTests
+// ecosystemGoTests
 // adapterRegistryChecks {
   prefix = "drivers";
   testsFor = driverGoTestsFor;
@@ -620,7 +731,85 @@ driverGoTests
     noun = "runner family";
   };
 }
+// adapterRegistryChecks {
+  prefix = "ecosystems";
+  testsFor = ecosystemGoTestsFor;
+  names = ecosystemNames;
+  independence = {
+    dirFor = name: ecosystemDir + "/${name}";
+    noun = "ecosystem";
+  };
+  others = [
+    {
+      prefix = "drivers";
+      testsFor = driverGoTestsFor;
+      names = driverNames;
+    }
+    {
+      prefix = "backends";
+      testsFor = backendGoTestsFor;
+      names = backendNames;
+    }
+    {
+      prefix = "runners";
+      testsFor = runnerGoTestsFor;
+      names = runnerNames;
+    }
+  ];
+}
 // {
+  # Every Ecosystem package directory has its go test derivation. The stub
+  # case proves the check fails for a directory without one.
+  ecosystems-go-test-every-package-has-derivation =
+    let
+      lacking = ecosystemsLackingDerivation ecosystemPackageDirs ecosystemGoTests;
+    in
+    assert pkgs.lib.assertMsg (
+      ecosystemPackageDirs != [ ]
+    ) "no Ecosystem package directory found under internal/ecosystem; the check would pass vacuously";
+    assert pkgs.lib.assertMsg (lacking == [ ])
+      "Ecosystem package directories without an ecosystems-<dir>-go-test derivation: ${pkgs.lib.concatStringsSep ", " lacking}";
+    assert pkgs.lib.assertMsg (
+      ecosystemNamesIn {
+        stub = "directory";
+        ${ecosystemKitDir} = "directory";
+        testdata = "directory";
+        "doc.go" = "regular";
+      } == [ "stub" ]
+    ) "ecosystemNamesIn did not reduce a directory listing to its ecosystem package names";
+    assert pkgs.lib.assertMsg (
+      ecosystemsLackingDerivation (ecosystemPackageDirs ++ [ "stub" ]) ecosystemGoTests == [ "stub" ]
+    ) "a package directory without a derivation was not reported";
+    pkgs.runCommand "ecosystems-go-test-every-package-has-derivation" { } "touch $out";
+
+  # The kit is shared by every ecosystem: removing a file from it must move
+  # every ecosystem package's derivation.
+  ecosystems-go-test-kit-edit-reruns-every-package =
+    let
+      kitFile = builtins.head (
+        builtins.attrNames (
+          pkgs.lib.filterAttrs (_: t: t == "regular") (
+            builtins.readDir (ecosystemDir + "/${ecosystemKitDir}")
+          )
+        )
+      );
+      after = ecosystemGoTestsFor {
+        files = fs.difference launcherDir (ecosystemDir + "/${ecosystemKitDir}/${kitFile}");
+        names = ecosystemNames;
+      };
+      unmoved = builtins.filter (
+        n:
+        ecosystemGoTests.${adapterGoTestAttr "ecosystems" n}.drvPath
+        == after.${adapterGoTestAttr "ecosystems" n}.drvPath
+      ) ecosystemNames;
+    in
+    assert pkgs.lib.assertMsg (
+      ecosystemNames != [ ]
+    ) "no Ecosystem package found; the kit check would pass vacuously";
+    assert pkgs.lib.assertMsg (unmoved == [ ])
+      "editing ecosystemkit/${kitFile} left these ecosystem go test derivations unchanged: ${pkgs.lib.concatStringsSep ", " unmoved}";
+    pkgs.runCommand "ecosystems-go-test-kit-edit-reruns-every-package" { } "touch $out";
+
   dashboard-go-fmt = pkgs.runCommand "dashboard-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     ${gofmtCheck ../../dashboard}
     touch $out
