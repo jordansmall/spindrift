@@ -43,7 +43,11 @@ const CLAUDE_TOOLS = {
 };
 
 // Every tool a generated hook names must be mapped: the handler skips unmapped
-// tools, which would leave one silently unguarded.
+// tools, which would leave one silently unguarded. Throwing here is safe, unlike
+// in opencode (agent/opencode-guards.js): pi records an extension's load error
+// as a startup diagnostic and exits 1 before the session starts (as read in
+// pi-coding-agent 1.1.0's loadExtension and hasRuntimeErrors; a later pi may move
+// them). TestPiHooksUnmappedToolRefusesStart, not this citation, tracks it.
 for (const { script, tools } of HOOKS) {
   for (const tool of tools) {
     if (!Object.hasOwn(CLAUDE_TOOLS, tool)) {
