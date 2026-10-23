@@ -3,6 +3,8 @@ package passmachine
 import (
 	"reflect"
 	"testing"
+
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 func TestRoleIsReview(t *testing.T) {
@@ -138,6 +140,63 @@ var transitionTestCases = []struct {
 		in: Input{
 			PassJustExecuted: KindImplement,
 			HasOutcome:       true,
+		},
+		want: Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached},
+	},
+	{
+		name: "implement: premature status=ready before APPROVE enters review pass",
+		in: Input{
+			PassJustExecuted: KindImplement,
+			HasOutcome:       true,
+			OutcomeStatus:    outcome.StatusReady,
+		},
+		want: Decision{Continue: true, Reason: prematureReadyReason + ", entering review pass", NextPass: KindReview},
+	},
+	{
+		name: "fix: premature status=ready before APPROVE enters review pass",
+		in: Input{
+			PassJustExecuted: KindFix,
+			HasOutcome:       true,
+			OutcomeStatus:    outcome.StatusReady,
+			LastVerdict:      VerdictBlock,
+		},
+		want: Decision{Continue: true, Reason: prematureReadyReason + ", entering review pass", NextPass: KindReview},
+	},
+	{
+		name: "implement: premature status=ready with max slices hit commits terminal land",
+		in: Input{
+			PassJustExecuted: KindImplement,
+			HasOutcome:       true,
+			OutcomeStatus:    outcome.StatusReady,
+			Pass:             4,
+			Caps:             Caps{MaxSlices: 4},
+		},
+		want: Decision{
+			Continue:  true,
+			Reason:    prematureReadyReason + "; max slices reached; running terminal land pass",
+			NextPass:  KindLand,
+			LandPhase: LandPhaseTerminalCommitted,
+			Cap:       StopMaxSlicesReached,
+			CapFired:  "max slices reached",
+		},
+	},
+	{
+		name: "land: status=ready after APPROVE stops on outcome reached",
+		in: Input{
+			PassJustExecuted: KindLand,
+			HasOutcome:       true,
+			OutcomeStatus:    outcome.StatusReady,
+			LastVerdict:      VerdictApprove,
+		},
+		want: Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached},
+	},
+	{
+		name: "terminal land: status=ready stops on outcome reached",
+		in: Input{
+			PassJustExecuted: KindLand,
+			HasOutcome:       true,
+			OutcomeStatus:    outcome.StatusReady,
+			LandPhase:        LandPhaseTerminalCommitted,
 		},
 		want: Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached},
 	},
@@ -604,6 +663,26 @@ var transitionTestCases = []struct {
 	},
 }
 
+// TestTransitionTerminalStatusesStopAfterImplementFix pins that only a
+// premature status=ready is waved through to review (issue #5972): every other
+// terminal status, and an outcome line with an empty or unknown status, still
+// stops the loop.
+func TestTransitionTerminalStatusesStopAfterImplementFix(t *testing.T) {
+	statuses := []string{outcome.StatusBlocked, outcome.StatusAmbiguous, outcome.StatusAlreadyResolved, "", "bogus"}
+	for _, pk := range []PassKind{KindImplement, KindFix} {
+		for _, st := range statuses {
+			in := Input{PassJustExecuted: pk, HasOutcome: true, OutcomeStatus: st}
+			if pk == KindFix {
+				in.LastVerdict = VerdictBlock
+			}
+			want := Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
+			if got := Transition(in); got != want {
+				t.Errorf("Transition(%+v) = %+v, want %+v", in, got, want)
+			}
+		}
+	}
+}
+
 func TestTransition(t *testing.T) {
 	for _, tt := range transitionTestCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -623,6 +702,7 @@ func TestTransition(t *testing.T) {
 func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	verdicts := []Verdict{VerdictNone, VerdictBlock, VerdictApprove}
 	hasOutcomes := []bool{true, false}
+	outcomeStatuses := []string{"", outcome.StatusReady, outcome.StatusBlocked}
 	landPhases := []LandPhase{LandPhaseActive, LandPhaseTerminalCommitted}
 	lastVerdicts := []Verdict{VerdictNone, VerdictBlock, VerdictApprove}
 
@@ -653,26 +733,29 @@ func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	for _, pk := range Kinds {
 		for _, v := range verdicts {
 			for _, ho := range hasOutcomes {
-				for _, lp := range landPhases {
-					for _, lv := range lastVerdicts {
-						for _, caps := range capsScenarios {
-							for _, bl := range budgetLevels {
-								in := Input{
-									PassJustExecuted: pk,
-									Verdict:          v,
-									HasOutcome:       ho,
-									Pass:             bl.pass,
-									ReviewRounds:     bl.reviewRounds,
-									Caps:             caps,
-									LandPhase:        lp,
-									LastVerdict:      lv,
-									CumulativeTokens: bl.tokens,
-									CumulativeUSD:    bl.usd,
-								}
-								got := Transition(in)
-								count++
-								if got.Reason == "" {
-									t.Errorf("Transition(%+v) returned empty Reason (Decision=%+v)", in, got)
+				for _, st := range outcomeStatuses {
+					for _, lp := range landPhases {
+						for _, lv := range lastVerdicts {
+							for _, caps := range capsScenarios {
+								for _, bl := range budgetLevels {
+									in := Input{
+										PassJustExecuted: pk,
+										Verdict:          v,
+										HasOutcome:       ho,
+										OutcomeStatus:    st,
+										Pass:             bl.pass,
+										ReviewRounds:     bl.reviewRounds,
+										Caps:             caps,
+										LandPhase:        lp,
+										LastVerdict:      lv,
+										CumulativeTokens: bl.tokens,
+										CumulativeUSD:    bl.usd,
+									}
+									got := Transition(in)
+									count++
+									if got.Reason == "" {
+										t.Errorf("Transition(%+v) returned empty Reason (Decision=%+v)", in, got)
+									}
 								}
 							}
 						}
