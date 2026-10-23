@@ -1,4 +1,4 @@
-package ecosystem
+package bundle_test
 
 import (
 	"bufio"
@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -24,12 +25,12 @@ type ecosystemLiteral struct {
 }
 
 // scanForEcosystemLiterals returns one finding per string literal in dir's
-// .go files, test files included, whose entire unquoted value equals a Table
-// Strategy Name.
+// .go files, test files included, whose entire unquoted value is in forbidden
+// (lower-cased Strategy names), except in skipFiles (base names).
 // Equality is whole-literal, so the scan skips "cargo config.json" and prose,
 // and walking the AST skips comments. It reads dir's own files only;
 // deriveEcosystemImporters lists every package directory separately.
-func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
+func scanForEcosystemLiterals(t *testing.T, dir string, forbidden map[string]bool, skipFiles ...string) []ecosystemLiteral {
 	t.Helper()
 
 	// A missing dir fails the test loudly rather than scanning zero files: a
@@ -42,17 +43,10 @@ func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 	var files []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") {
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || slices.Contains(skipFiles, name) {
 			continue
 		}
 		files = append(files, filepath.Join(dir, name))
-	}
-
-	// Names come from Table itself, never a hardcoded list, so a Strategy added
-	// to Table is covered by every existing caller with no edit here.
-	names := make(map[string]bool, len(Table))
-	for _, row := range Table {
-		names[strings.ToLower(row.Name)] = true
 	}
 
 	var findings []ecosystemLiteral
@@ -71,7 +65,7 @@ func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 			if err != nil {
 				return true
 			}
-			if !names[strings.ToLower(value)] {
+			if !forbidden[strings.ToLower(value)] {
 				return true
 			}
 			pos := fset.Position(lit.Pos())
@@ -102,15 +96,10 @@ func lineOf(t *testing.T, src, needle string) int {
 // containment or comments, and the subpackage and the unparseable testdata
 // file prove the scan never descends into either.
 func TestScanForEcosystemLiterals_FixtureDetectsViolation(t *testing.T) {
-	// The fixture draws its names from Table, so deleting a Strategy cannot fail
-	// this test for a reason unrelated to the scanner.
-	if len(Table) < 4 {
-		t.Fatalf("fixture needs 4 distinct ecosystem names, Table has %d rows", len(Table))
-	}
-	violatingName := Table[0].Name
-	containedName := Table[1].Name
-	testFileName := Table[2].Name
-	subpkgName := Table[3].Name
+	// The fixture draws its names from the registered Strategies, so deleting a
+	// Strategy cannot fail this test for a reason unrelated to the scanner.
+	names := registeredNames(t, 4)
+	violatingName, containedName, testFileName, subpkgName := names[0], names[1], names[2], names[3]
 
 	dir := t.TempDir()
 
@@ -154,7 +143,7 @@ var routed = %q
 
 	testutil.WriteFixture(t, filepath.Join(dir, "testdata"), "broken.go", "this is not go source {{")
 
-	findings := scanForEcosystemLiterals(t, dir)
+	findings := scanForEcosystemLiterals(t, dir, nameSet(names))
 	want := []ecosystemLiteral{
 		{File: filepath.Join(dir, "fixture_test.go"), Line: lineOf(t, testSrc, testFileName), Value: testFileName},
 		{File: filepath.Join(dir, "violating.go"), Line: lineOf(t, violatingSrc, violatingName), Value: violatingName},
@@ -258,9 +247,10 @@ func packageDirs(t *testing.T, root string) []string {
 // package yet must not re-name an ecosystem either).
 //
 // Direct imports only: a package that merely passes a registrymanifest along
-// opaquely, as the runners do, never sees a name. This package is skipped by
-// path, since it imports registryvocab to build Table and is where the names
-// live. Its testdata corpora are pruned by packageDirs.
+// opaquely, as the runners do, never sees a name. The ecosystem tree (the core
+// package and the ecosystem packages beneath it) is skipped by path, since it
+// is where the names live; ecosystemTreeFindings scans it against each
+// package's own names. Testdata corpora are pruned by packageDirs.
 func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []string {
 	t.Helper()
 	ecosystemImport := moduleName + "/internal/ecosystem"
@@ -269,7 +259,7 @@ func deriveEcosystemImporters(t *testing.T, moduleRoot, moduleName string) []str
 	var importers []string
 	ecosystemDir := filepath.Join(moduleRoot, "internal", "ecosystem")
 	for _, dir := range packageDirs(t, moduleRoot) {
-		if dir == ecosystemDir {
+		if dir == ecosystemDir || strings.HasPrefix(dir, ecosystemDir+string(filepath.Separator)) {
 			continue
 		}
 		imports := nonTestImports(t, dir)
@@ -344,12 +334,11 @@ func buildSyntheticEcosystemModule(t *testing.T, plantedReader, plantedRoot, pla
 // sibling imports nothing, so listing every directory would include it. The
 // stub ecosystem imports registryvocab and holds a planted literal, so it
 // would be selected as a vocab importer were it not skipped by path; the
-// skip is what keeps the Table's own names out of the scan.
+// skip is what keeps the ecosystem packages out of the importer scan, where an
+// owning package's own names would be findings rather than allowed.
 func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T) {
-	if len(Table) < 1 {
-		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
-	}
-	plantedName := Table[0].Name
+	names := registeredNames(t, 1)
+	plantedName := names[0]
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
 
 	derived := deriveEcosystemImporters(t, root, moduleName)
@@ -360,7 +349,7 @@ func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T)
 			if !slices.Contains(derived, dir) {
 				t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", root, derived, dir)
 			}
-			findings := scanForEcosystemLiterals(t, dir)
+			findings := scanForEcosystemLiterals(t, dir, nameSet(names))
 			if len(findings) != 1 || findings[0].Value != plantedName {
 				t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", dir, findings, plantedName)
 			}
@@ -385,10 +374,8 @@ func TestDeriveEcosystemImporters_NewImporterPickedUpAutomatically(t *testing.T)
 // main package does import internal/ecosystem today, but the second assertion
 // relies only on the unconditional inclusion, not on that import staying true.
 func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T) {
-	if len(Table) < 1 {
-		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
-	}
-	plantedName := Table[0].Name
+	names := registeredNames(t, 1)
+	plantedName := names[0]
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
 
 	derived := deriveEcosystemImporters(t, root, moduleName)
@@ -396,12 +383,11 @@ func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T
 		t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include the module root %s", root, derived, root)
 	}
 
-	findings := scanForEcosystemLiterals(t, root)
+	findings := scanForEcosystemLiterals(t, root, nameSet(names))
 	if len(findings) != 1 || findings[0].Value != plantedName {
 		t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", root, findings, plantedName)
 	}
 
-	const realModuleRoot = "../.."
 	realModuleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	realDerived := deriveEcosystemImporters(t, realModuleRoot, realModuleName)
 	if !slices.Contains(realDerived, realModuleRoot) {
@@ -415,14 +401,11 @@ func TestDeriveEcosystemImporters_MainPackageCoveredUnconditionally(t *testing.T
 // registry layer; registryvocab sits below ecosystem itself), and that a
 // planted ecosystem name in either is found.
 func TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally(t *testing.T) {
-	if len(Table) < 1 {
-		t.Fatalf("fixture needs 1 ecosystem name, Table has %d rows", len(Table))
-	}
-	plantedName := Table[0].Name
+	names := registeredNames(t, 1)
+	plantedName := names[0]
 	root, moduleName := buildSyntheticEcosystemModule(t, plantedName, plantedName, plantedName)
 	derived := deriveEcosystemImporters(t, root, moduleName)
 
-	const realModuleRoot = "../.."
 	realModuleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
 	realDerived := deriveEcosystemImporters(t, realModuleRoot, realModuleName)
 
@@ -433,7 +416,7 @@ func TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally(t *testin
 				t.Fatalf("deriveEcosystemImporters(%s) = %v, want it to include %s", root, derived, dir)
 			}
 
-			findings := scanForEcosystemLiterals(t, dir)
+			findings := scanForEcosystemLiterals(t, dir, nameSet(names))
 			if len(findings) != 1 || findings[0].Value != plantedName {
 				t.Fatalf("scanForEcosystemLiterals(%s) = %+v, want a single finding of %q", dir, findings, plantedName)
 			}
@@ -446,28 +429,186 @@ func TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally(t *testin
 	}
 }
 
-// TestEcosystemNamesStayInTheTable enforces that ecosystem names live only in
-// Table: every direct importer of this package or of the registryvocab leaf
-// (whose string fields names travel in), and registryvocab itself, reaches an
-// ecosystem fact through its Table Strategy and never re-names the ecosystem as a
-// bare literal. Targets come from deriveEcosystemImporters, so the set tracks
-// imports with no edit here. internal/registryproxy, which ADR 0047 forbids
-// importing this package, is covered through its registryvocab import.
-func TestEcosystemNamesStayInTheTable(t *testing.T) {
-	const moduleRoot = "../.."
-	moduleName := readModuleName(t, filepath.Join(moduleRoot, "go.mod"))
-	targets := deriveEcosystemImporters(t, moduleRoot, moduleName)
+func nameSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, n := range names {
+		set[strings.ToLower(n)] = true
+	}
+	return set
+}
+
+// registeredNames returns the registered Strategies' names in registration
+// order, failing if there are fewer than atLeast so a fixture cannot run short.
+func registeredNames(t *testing.T, atLeast int) []string {
+	t.Helper()
+	var names []string
+	for _, s := range ecosystem.Registered() {
+		names = append(names, s.Name)
+	}
+	if len(names) < atLeast {
+		t.Fatalf("fixture needs %d ecosystem names, the Bundle registered %d", atLeast, len(names))
+	}
+	return names
+}
+
+// ecosystemOwners maps each registered Strategy name, lower-cased, to the
+// directory of the package declaring it: the core ecosystem directory or one
+// ecosystem package beneath it. names and the Bundle's Register arguments are
+// both in registration order, which is how a name finds its declaring package.
+func ecosystemOwners(t *testing.T, moduleRoot, moduleName, registerFile string, names []string) map[string]string {
+	t.Helper()
+	ecosystemImport := moduleName + "/internal/ecosystem"
+	args := registerArgs(t, registerFile, ecosystemImport)
+	if len(args) != len(names) {
+		t.Fatalf("%s registers %d Strategies, the Bundle holds %d", registerFile, len(args), len(names))
+	}
+	owners := make(map[string]string, len(names))
+	for i, a := range args {
+		if a.ImportPath != ecosystemImport && !strings.HasPrefix(a.ImportPath, ecosystemImport+"/") {
+			t.Fatalf("%s: Strategy %s is declared outside internal/ecosystem", registerFile, a)
+		}
+		owners[strings.ToLower(names[i])] = filepath.Join(moduleRoot, filepath.FromSlash(strings.TrimPrefix(a.ImportPath, moduleName+"/")))
+	}
+	return owners
+}
+
+// containmentFindings returns every ecosystem-name literal outside the places
+// allowed to hold it. A name lives in the package that declares its Strategy
+// and in registerFile (the Bundle's ecosystems file, which wires every one);
+// anywhere else, another ecosystem's package and the core package included, it
+// is a finding. The ecosystem tree is scanned in full, so a package added
+// beneath it is covered with no edit here.
+func containmentFindings(t *testing.T, moduleRoot, moduleName, registerFile string, names []string) []ecosystemLiteral {
+	t.Helper()
+	owners := ecosystemOwners(t, moduleRoot, moduleName, registerFile, names)
+	all := make(map[string]bool, len(owners))
+	for n := range owners {
+		all[n] = true
+	}
+	registerDir, registerBase := filepath.Dir(registerFile), filepath.Base(registerFile)
 
 	var findings []ecosystemLiteral
-	for _, target := range targets {
-		findings = append(findings, scanForEcosystemLiterals(t, target)...)
+	for _, dir := range deriveEcosystemImporters(t, moduleRoot, moduleName) {
+		var skip []string
+		if dir == registerDir {
+			skip = append(skip, registerBase)
+		}
+		findings = append(findings, scanForEcosystemLiterals(t, dir, all, skip...)...)
 	}
+	for _, dir := range packageDirs(t, filepath.Join(moduleRoot, "internal", "ecosystem")) {
+		forbidden := make(map[string]bool, len(all))
+		for n := range all {
+			if owners[n] != dir {
+				forbidden[n] = true
+			}
+		}
+		findings = append(findings, scanForEcosystemLiterals(t, dir, forbidden)...)
+	}
+	return findings
+}
+
+// TestEcosystemNamesStayInTheirOwnPackage enforces that an ecosystem's name
+// lives in its own Strategy's package: every direct importer of the core
+// package or of the registryvocab leaf (whose string fields names travel in),
+// and registryvocab itself, reaches an ecosystem fact through its Strategy and
+// never re-names the ecosystem as a bare literal, and within internal/ecosystem
+// each package holds only its own Strategies' names. Only the Bundle's
+// ecosystems file may name them all. Targets come from
+// deriveEcosystemImporters, so the set tracks imports with no edit here.
+// internal/registryproxy, which ADR 0047 forbids importing the core package, is
+// covered through its registryvocab import.
+//
+// This lives in the Bundle's tests because only here is every Strategy
+// registered: core's own tests cannot link an ecosystem package.
+func TestEcosystemNamesStayInTheirOwnPackage(t *testing.T) {
+	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
+	registerFile := filepath.Join(realModuleRoot, "internal", "driver", "bundle", "ecosystems.go")
+	findings := containmentFindings(t, realModuleRoot, moduleName, registerFile, registeredNames(t, 1))
 
 	if len(findings) > 0 {
 		lines := make([]string, 0, len(findings))
 		for _, f := range findings {
-			lines = append(lines, fmt.Sprintf("%s:%d: literal %q matches an ecosystem.Table row name", f.File, f.Line, f.Value))
+			lines = append(lines, fmt.Sprintf("%s:%d: literal %q names an ecosystem outside its own package", f.File, f.Line, f.Value))
 		}
-		t.Errorf("found %d ecosystem-name literal(s) outside ecosystem.Table:\n%s", len(findings), strings.Join(lines, "\n"))
+		t.Errorf("found %d ecosystem-name literal(s) outside their owning package:\n%s", len(findings), strings.Join(lines, "\n"))
+	}
+}
+
+// containmentModule writes a module holding three Strategies, one in the core
+// package (corename) and one in each of two ecosystem packages (subname,
+// othername), wired by a Bundle ecosystems file that names all three. With
+// extra overlaid (path relative to the module root), the findings are
+// returned as "<relative file>:<value>".
+func containmentModule(t *testing.T, extra map[string]string) []string {
+	t.Helper()
+	const mod = "example.com/fixturemodule"
+	eco := mod + "/internal/ecosystem"
+	files := map[string]string{
+		"go.mod":                                 "module " + mod + "\n\ngo 1.24\n",
+		"internal/ecosystem/ecosystem.go":        "package ecosystem\n\nvar Core = \"corename\"\n",
+		"internal/ecosystem/sub/sub.go":          "package sub\n\nimport _ \"" + eco + "\"\n\nvar S = \"subname\"\n",
+		"internal/ecosystem/other/other.go":      "package other\n\nimport _ \"" + eco + "\"\n\nvar O = \"othername\"\n",
+		"internal/ecosystem/ecosystemkit/kit.go": "package ecosystemkit\n\nvar K = \"unrelated\"\n",
+		"internal/registryvocab/vocab.go":        "package registryvocab\n\nvar V = \"unrelated\"\n",
+		"internal/credresolver/cred.go":          "package credresolver\n\nvar C = \"unrelated\"\n",
+		"internal/reader/reader.go":              "package reader\n\nimport _ \"" + eco + "\"\n\nvar R = \"unrelated\"\n",
+		"internal/driver/bundle/bundle.go":       "package bundle\n\nimport _ \"" + eco + "\"\n",
+		"internal/driver/bundle/ecosystems.go": "package bundle\n\nimport (\n\t\"" + eco + "\"\n\t\"" + eco + "/sub\"\n\t\"" + eco + "/other\"\n)\n\n" +
+			"var wired = []string{\"corename\", \"subname\", \"othername\"}\n\nfunc init() { ecosystem.Register(ecosystem.Core, sub.S, other.O) }\n",
+	}
+	for p, body := range extra {
+		files[p] = body
+	}
+	root := t.TempDir()
+	for p, body := range files {
+		testutil.WriteFixture(t, root, p, body)
+	}
+	found := containmentFindings(t, root, mod, filepath.Join(root, "internal", "driver", "bundle", "ecosystems.go"), []string{"corename", "subname", "othername"})
+	var out []string
+	for _, f := range found {
+		rel, err := filepath.Rel(root, f.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, filepath.ToSlash(rel)+":"+f.Value)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestContainmentFindingsClassifiesPlantedLiterals(t *testing.T) {
+	const eco = "example.com/fixturemodule/internal/ecosystem"
+	plant := func(pkg, name string) string {
+		return "package " + pkg + "\n\nimport _ \"" + eco + "\"\n\nvar Planted = \"" + name + "\"\n"
+	}
+	for _, tc := range []struct {
+		name  string
+		extra map[string]string
+		want  []string
+	}{
+		{"each name in its own package and the Bundle's ecosystems file passes", nil, nil},
+		{"own name in the owner's test file passes", map[string]string{"internal/ecosystem/sub/sub_test.go": plant("sub_test", "subname")}, nil},
+		{"a name in an unrelated importer fails", map[string]string{"internal/reader/planted.go": plant("reader", "subname")},
+			[]string{"internal/reader/planted.go:subname"}},
+		{"a name in another ecosystem's package fails", map[string]string{"internal/ecosystem/other/planted.go": plant("other", "subname")},
+			[]string{"internal/ecosystem/other/planted.go:subname"}},
+		{"another ecosystem's name in a package's test file fails", map[string]string{"internal/ecosystem/sub/planted_test.go": plant("sub_test", "othername")},
+			[]string{"internal/ecosystem/sub/planted_test.go:othername"}},
+		{"a package's name in the core package fails", map[string]string{"internal/ecosystem/planted.go": plant("ecosystem", "subname")},
+			[]string{"internal/ecosystem/planted.go:subname"}},
+		{"the core package's own name in an ecosystem package fails", map[string]string{"internal/ecosystem/sub/planted.go": plant("sub", "corename")},
+			[]string{"internal/ecosystem/sub/planted.go:corename"}},
+		{"a name in ecosystemkit fails", map[string]string{"internal/ecosystem/ecosystemkit/planted.go": "package ecosystemkit\n\nvar Planted = \"subname\"\n"},
+			[]string{"internal/ecosystem/ecosystemkit/planted.go:subname"}},
+		{"a name in another Bundle file fails", map[string]string{"internal/driver/bundle/planted.go": plant("bundle", "subname")},
+			[]string{"internal/driver/bundle/planted.go:subname"}},
+		{"a name in the module root fails", map[string]string{"main.go": "package main\n\nvar Planted = \"subname\"\n"},
+			[]string{"main.go:subname"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := containmentModule(t, tc.extra); !slices.Equal(got, tc.want) {
+				t.Fatalf("findings = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
