@@ -1,4 +1,4 @@
-package ecosystem_test
+package bundle_test
 
 import (
 	"fmt"
@@ -13,10 +13,10 @@ import (
 )
 
 // The Strategies live only in Go, so docs/reference.md's spans over them are
-// rendered here rather than by a Nix renderer. This lives in a _test.go file
-// because containment_test.go scans non-test sources for ecosystem literals.
+// rendered here rather than by a Nix renderer. It holds no ecosystem-name
+// literal, since containment_test.go scans this package's test files too.
 
-const regenHint = "regenerate with `nix run .#regen-goldens`, or `UPDATE_GOLDENS=1 go test -run '^TestReferenceDocs_GeneratedSpans$' ./internal/ecosystem` from cmd/launcher"
+const regenHint = "regenerate with `nix run .#regen-goldens`, or `UPDATE_GOLDENS=1 go test -run '^TestReferenceDocs_GeneratedSpans$' ./internal/driver/bundle` from cmd/launcher"
 
 type docSpan struct {
 	name   string
@@ -104,7 +104,7 @@ func spliceSpan(doc string, s docSpan, body string) (string, error) {
 }
 
 func TestReferenceDocs_GeneratedSpans(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "..", "docs", "reference.md")
+	path := filepath.Join("..", "..", "..", "..", "..", "docs", "reference.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read reference guide: %v", err)

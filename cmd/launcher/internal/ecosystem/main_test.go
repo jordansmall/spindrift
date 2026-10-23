@@ -8,7 +8,7 @@ import (
 // The Bundle owns the real Register call; the core package's own tests run
 // with it unlinked, so register the same Strategies here or Table is empty.
 func TestMain(m *testing.M) {
-	Register(Cargo, Npm, Yarn, Pnpm, Go, Gradle)
+	Register(Cargo, Npm, Yarn, Pnpm, Go)
 	os.Exit(m.Run())
 }
 

@@ -346,7 +346,7 @@ a sourceable env file (`-bindings-env-output`) — plus two direct home-level
 writes with no revert of their own: a user-level `$CARGO_HOME/config.toml`
 (`ecosystem.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
 Gradle init script under `$GRADLE_USER_HOME/init.d/`
-(`ecosystem.GradleInitScript`: `beforeSettings`/`projectsEvaluated`/
+(`gradle`'s `initScript`: `beforeSettings`/`projectsEvaluated`/
 `settingsEvaluated`, plus a plain top-level hook for buildscript classpath).
 In-tree mode (`bindregistry.ApplyInTree`, `bindregistry.RevertInTreeBindings`;
 the verb's `-intree-action=apply|revert`) is the only mode with a revert.
