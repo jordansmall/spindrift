@@ -9,7 +9,6 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -242,7 +241,7 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 	if resolved.SelfReportError != nil {
 		warn("self-report scan: %v", resolved.SelfReportError)
 	}
-	passes, passesErr := passmanifest.Read(filepath.Join(OutboxDirFor(d.pwd, d.number), passmanifest.FileName))
+	passes, passesErr := ReadPasses(d.pwd, d.number)
 	if passesErr != nil {
 		warn("pass-manifest scan: %v", passesErr)
 	}

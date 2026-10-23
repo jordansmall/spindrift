@@ -22,6 +22,7 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/panicguard"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/report"
@@ -164,6 +165,13 @@ func (d *Dispatch) conflictLogPath() string {
 // holding the Dispatch itself.
 func OutboxDirFor(pwd, number string) string {
 	return hostpaths.OutboxDir(pwd, number)
+}
+
+// ReadPasses reads number's pass manifest from its outbox: the one read both
+// a run's result and `spindrift recover` use. A missing manifest is not an
+// error (passmanifest.Read).
+func ReadPasses(pwd, number string) ([]passmanifest.Entry, error) {
+	return passmanifest.Read(filepath.Join(OutboxDirFor(pwd, number), passmanifest.FileName))
 }
 
 // HostLogDirFor returns the host-side log directory for a working dir, the
