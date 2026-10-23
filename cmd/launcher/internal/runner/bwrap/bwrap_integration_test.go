@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -95,8 +96,7 @@ func requireRealPasta(t *testing.T) {
 		t.Skip("pasta not found on PATH")
 	}
 	trueBin := resolveSandboxBin(t, "true")
-	probeArgs := append([]string{}, pastaHardenedFlags...)
-	probeArgs = append(probeArgs, "--dns-forward", pastaDNSForwardAddr, "-f", "--", trueBin)
+	probeArgs := append(pastaFlags(), "--", trueBin)
 	probe := exec.Command("pasta", probeArgs...)
 	if out, err := probe.CombinedOutput(); err != nil {
 		t.Skipf("pasta cannot create a network namespace/tap device here: %v: %s", err, out)
@@ -439,9 +439,10 @@ func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 
 // TestBwrapIntegration_PastaProvidesWorkingEgressInterface is a CI-safe proxy
 // for "pasta gave the sandbox working egress" that does not depend on real
-// internet reachability. It asserts pasta created a non-loopback interface
-// inside the namespace: before issue #2666 a Box asking for
-// isolation-with-egress reached buildArgs with no pasta wrapping at all.
+// internet reachability. It asserts the namespace's non-loopback interface is UP
+// with an IPv4 address and that a default route exists. Without --config-net the
+// pinned passt leaves the tap device DOWN with no address or route, so a bare
+// "an interface exists" check passes while the Box has no egress (issue #5981).
 func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	requireRealPasta(t)
 	bashBin := requireRealBwrap(t)
@@ -449,24 +450,71 @@ func TestBwrapIntegration_PastaProvidesWorkingEgressInterface(t *testing.T) {
 	a, etcDir := newIntegrationBwrapAdapterIsolated(t)
 
 	box := runner.Box{Env: map[string]string{}}
-	// "ip link show" talks to the kernel over an AF_NETLINK socket, so unlike
-	// /sys/class/net it needs neither /sys nor /proc mounted, both stripped
-	// from this probe's argv.
-	program, args := pastaProbeArgs(a, etcDir, box, bashBin, ipBin+" -o link show")
+	// ip talks to the kernel over an AF_NETLINK socket, so unlike /sys/class/net
+	// it needs neither /sys nor /proc mounted, both stripped from this probe's argv.
+	script := fmt.Sprintf("set -e; echo '#link'; %[1]s -o link show; echo '#addr'; %[1]s -o -4 addr show; echo '#route'; %[1]s -4 route show default", ipBin)
+	program, args := pastaProbeArgs(a, etcDir, box, bashBin, script)
 
 	out, err := exec.Command(program, args...).CombinedOutput()
 	if err != nil {
-		t.Fatalf("pasta+bwrap probe failed: %v: %s", err, out)
+		t.Fatalf("pasta+bwrap probe failed (an ip subcommand exited non-zero, or pasta/bwrap setup failed): %v: %s", err, out)
 	}
-	foundNonLoopback := false
+
+	sections := map[string][]string{}
+	var section string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" || strings.Contains(line, ": lo:") || strings.Contains(line, ": lo@") {
+		if strings.HasPrefix(line, "#") {
+			section = line
 			continue
 		}
-		foundNonLoopback = true
+		if line != "" {
+			sections[section] = append(sections[section], line)
+		}
 	}
-	if !foundNonLoopback {
-		t.Errorf("no non-loopback network interface found inside the pasta-wrapped sandbox (ip link show output: %q); pasta should have created a tap device", out)
+
+	// Link lines look like "2: tap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu ...";
+	// match UP as a whole comma-separated flag, not as a substring of LOWER_UP.
+	upIfaces := map[string]bool{}
+	for _, line := range sections["#link"] {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		name, _, _ := strings.Cut(strings.TrimSuffix(fields[1], ":"), "@")
+		flags := strings.Trim(fields[2], "<>")
+		if name == "lo" || !slices.Contains(strings.Split(flags, ","), "UP") {
+			continue
+		}
+		upIfaces[name] = true
+	}
+	if len(upIfaces) == 0 {
+		t.Errorf("no non-loopback interface is UP inside the pasta-wrapped sandbox; output: %q", out)
+	}
+
+	// Addr lines look like "2: tap0    inet 192.0.2.2/24 ...".
+	hasAddr := false
+	for _, line := range sections["#addr"] {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[2] == "inet" && upIfaces[strings.TrimSuffix(fields[1], ":")] {
+			hasAddr = true
+			break
+		}
+	}
+	if !hasAddr {
+		t.Errorf("no UP non-loopback interface has an IPv4 address inside the pasta-wrapped sandbox (--config-net missing?); output: %q", out)
+	}
+
+	// Route lines look like "default via 192.0.2.1 dev tap0 ...".
+	hasDefaultRoute := false
+	for _, line := range sections["#route"] {
+		fields := strings.Fields(line)
+		if i := slices.Index(fields, "dev"); fields[0] == "default" && i >= 0 && i+1 < len(fields) && upIfaces[fields[i+1]] {
+			hasDefaultRoute = true
+			break
+		}
+	}
+	if !hasDefaultRoute {
+		t.Errorf("no IPv4 default route via an UP interface inside the pasta-wrapped sandbox (--config-net missing?); output: %q", out)
 	}
 }
 

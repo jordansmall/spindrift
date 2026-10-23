@@ -289,11 +289,14 @@
                 # bubblewrap only builds on Linux. The runner integration tests
                 # (issue #576) need it on PATH to exercise a real sandbox, and
                 # need passt's `pasta` binary for the pasta-wrapped default
-                # network isolation path (issue #2666). Without both, those
-                # tests skip rather than exercise anything real.
+                # network isolation path (issue #2666). The egress test also
+                # needs iproute2's `ip` to inspect the namespace's tap
+                # interface and routes. Without these, the tests that need
+                # them skip rather than exercise anything real.
                 ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
                   pkgs.bubblewrap
                   pkgs.passt
+                  pkgs.iproute2
                 ];
               };
             }
