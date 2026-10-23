@@ -357,3 +357,39 @@ func TestReadSymlinkReturnsError(t *testing.T) {
 		t.Errorf("Read: got %+v, want nil entries alongside the error (not the symlink target's contents)", entries)
 	}
 }
+
+// UnreviewedReady keys on the last review-loop work pass (issue #5973): only
+// a land pass's own outcome, or a legacy resume after it, makes ready reviewed.
+func TestUnreviewedReady(t *testing.T) {
+	e := func(kind string, found bool) Entry { return Entry{Kind: kind, OutcomeFound: found} }
+	tests := []struct {
+		name    string
+		entries []Entry
+		want    bool
+	}{
+		{"implement ready, no later pass", []Entry{e("implement", true)}, true},
+		{"implement ready then crashed review", []Entry{e("implement", true), e("review", false)}, true},
+		{"implement, review approve, land ready", []Entry{e("implement", true), e("review", false), e("land", true)}, false},
+		{"cap-committed land after blocked reviews", []Entry{e("implement", true), e("review", false), e("fix", true), e("review", false), e("land", true)}, false},
+		{"fix ready, no land", []Entry{e("implement", true), e("review", false), e("fix", true)}, true},
+		{"legacy loop", []Entry{e("legacy", true), e("legacy", true)}, false},
+		{"legacy entry without outcome", []Entry{e("legacy", false)}, false},
+		{"empty", []Entry{}, false},
+		{"nil", nil, false},
+		{"empty and unknown kinds only", []Entry{e("", true), e("mystery", true)}, false},
+		{"delta-review after land", []Entry{e("implement", true), e("review", false), e("land", true), e("delta-review", false)}, false},
+		{"land crashed after approved review", []Entry{e("implement", true), e("review", false), e("land", false)}, true},
+		{"implement without outcome", []Entry{e("implement", false)}, true},
+		{"nudge resume after unreviewed implement ready", []Entry{e("implement", true), e("legacy", true)}, true},
+		{"land without outcome then legacy resume", []Entry{e("implement", true), e("review", false), e("land", false), e("legacy", true)}, false},
+		{"land outcome of any status counts as reported", []Entry{e("implement", true), e("review", false), e("land", true)}, false},
+		{"land ready then legacy host fix passes", []Entry{e("implement", true), e("review", false), e("land", true), e("legacy", true), e("legacy", true)}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := UnreviewedReady(tc.entries); got != tc.want {
+				t.Errorf("UnreviewedReady(%+v) = %v, want %v", tc.entries, got, tc.want)
+			}
+		})
+	}
+}
