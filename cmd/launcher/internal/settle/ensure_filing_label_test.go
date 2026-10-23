@@ -32,7 +32,8 @@ func createdNames(fc *forge.Fake) []string {
 // Issue #4400: GitHub rejects `gh issue create --label X` when X is missing, so
 // the provenance label of every kind must be ensure-created or each finding is
 // dropped. Each kind is driven through its real settle entry point. Once
-// created, a second intent in the same pass must not re-create it.
+// created, a second intent in the same pass must not re-create it. Issue
+// #5929: the same entry point built with an empty label files nothing.
 func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 	withIntents := func(r dispatch.Result) dispatch.Result {
 		w := twoIntents()
@@ -102,6 +103,16 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 			want := []forge.CreateLabelCall{{Name: tc.label, Description: tc.meta.Description, Color: tc.meta.Color}}
 			if !slices.Equal(fc.CreateLabelCalls, want) {
 				t.Errorf("CreateLabelCalls = %+v, want exactly %+v", fc.CreateLabelCalls, want)
+			}
+		})
+		t.Run(tc.name+"/empty_label", func(t *testing.T) {
+			fc := tc.newFC()
+			fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+			tc.file(fc, "")
+
+			if len(fc.PostIssueCalls) != 0 || len(fc.CreateLabelCalls) != 0 {
+				t.Errorf("PostIssueCalls = %+v, CreateLabelCalls = %+v, want none", fc.PostIssueCalls, fc.CreateLabelCalls)
 			}
 		})
 	}
@@ -188,5 +199,26 @@ func TestFileIssueIntentsDetailed_UnknownProvenanceLabelNotCreated(t *testing.T)
 	}
 	if len(fc.PostIssueCalls) != 2 || fc.PostIssueCalls[0].Labels[0] != "custom-provenance" {
 		t.Errorf("PostIssueCalls = %+v", fc.PostIssueCalls)
+	}
+}
+
+// Issue #5929: a settle built without its kind's finding label must refuse to
+// file rather than post findings under an empty provenance label.
+func TestFileIssueIntentsDetailed_EmptyProvenanceLabelRefusesFiling(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+
+	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", twoIntents(), "", "")
+
+	if tally := tallyFiled(detailed); tally.failed != 2 || tally.ok != 0 {
+		t.Fatalf("tally = %v, want both failed", tally)
+	}
+	for _, d := range detailed {
+		if !d.Failed || d.Body != "b" {
+			t.Errorf("filedIntent = %+v, want Failed with its body kept for inline degrade", d)
+		}
+	}
+	if len(fc.PostIssueCalls) != 0 || len(fc.CreateLabelCalls) != 0 {
+		t.Errorf("PostIssueCalls = %+v, CreateLabelCalls = %+v, want none", fc.PostIssueCalls, fc.CreateLabelCalls)
 	}
 }

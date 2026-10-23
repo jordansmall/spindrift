@@ -192,6 +192,25 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 	if !ok {
 		return nil
 	}
+	// A blank label means the settle was built without its kind's descriptor;
+	// filing under it would leave each finding outside the provenance label
+	// the dedup and triage queues key on. Failed with the body kept degrades
+	// the finding inline, like any other filing failure.
+	if provenanceLabel == "" {
+		var out []filedIntent
+		for _, raw := range result.IssueIntents {
+			in, rej := parseIssueIntent(raw)
+			if rej != nil {
+				fmt.Fprintf(os.Stderr, "    ?? #%s: skipping invalid issue-intent payload: %s\n", num, rej.Reason)
+				continue
+			}
+			out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
+		}
+		if len(out) > 0 {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: refusing to file %d issue intent(s): no provenance label (a construction bug: the settle was built without a dispatch kind's finding label)\n", num, len(out))
+		}
+		return out
+	}
 	// Hoisted out of the loop: N findings would otherwise cost N ListLabels
 	// round trips. A listErr is non-fatal: ensureLabel falls back to its own
 	// create-then-recheck path.
