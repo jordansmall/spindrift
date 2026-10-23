@@ -714,10 +714,12 @@ driverGoTests
 
   # The packages that link every Driver through the bundle (bundleBinaryDirs),
   # the bundle's own tests, the registry root's cross-Driver guard tests and the
-  # forge package's contract guard, which needs every backend directory; the
-  # whole tree is copied, so a Driver edit reruns this. It also gofmts and vets
-  # those packages (not the adapters', which their own go-test does), so
-  # launcher-go-fmt and launcher-go-vet need not see them.
+  # forge package's contract guard, which needs every backend directory, and
+  # the host-profile advisory guard, which needs package main's
+  # route-resolution file; the whole tree is copied, so a Driver edit reruns
+  # this. It also gofmts and vets those packages (not the adapters', which
+  # their own go-test does), so launcher-go-fmt and launcher-go-vet need not
+  # see them.
   launcher-binaries-go-test =
     let
       binaryPkgs = ". ${
@@ -743,6 +745,7 @@ driverGoTests
         go vet ${binaryPkgs}
         go test ${binaryPkgs}
         SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 go test ./internal/forge -run '^TestEveryBackendRunsItsContracts$'
+        SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 go test ./internal/hostprofile -run '^TestAdvisoryBoundaryHoldsOnRealTree$'
         touch $out
       '';
 
