@@ -4,9 +4,10 @@
 # sonnet" over a third of all runs. Arm names carry the factors:
 # c<M><E>-s<M><E>-w<M><E>-r<M><E> for coordinator, scout, worker, reviewer.
 
-# Prints TASK's runs as task, arm, resolved, cost, duration_ms, overall, with
-# overall empty when the run has no usable judge score. Columns are found by
-# header name, so either file may grow columns.
+# Prints TASK's runs as task, arm, resolved, cost, duration_ms, overall, peek,
+# with overall empty when the run has no usable judge score and peek 1 only
+# for a run the peek audit flagged. Columns are found by header name, so
+# either file may grow columns.
 analyze_rows() {
   local task="$1" dir="$2" scores="$2/judging/SCORES.tsv"
   [ -f "$scores" ] || scores=""
@@ -25,8 +26,9 @@ analyze_rows() {
     FNR == 1 { for (i = 1; i <= NF; i++) mc[$i] = i; next }
     {
       b = $mc["blind"]
+      p = ("peek" in mc && $mc["peek"] == 1) ? 1 : 0
       print task, $mc["arm"], $mc["resolved"] + 0, $mc["cost_usd"] + 0, \
-        $mc["duration_ms"] + 0, (b != "" && b in overall) ? overall[b] : ""
+        $mc["duration_ms"] + 0, (b != "" && b in overall) ? overall[b] : "", p
     }' "$dir/metrics.tsv"
 }
 
@@ -61,6 +63,11 @@ analyze_report() {
       RP["c"] = 1; RP["s"] = 5; RP["w"] = 9; RP["r"] = 13
     }
     {
+      if ($7 == 1) {
+        npeek++
+        if (!(($1 " " $2) in peekseen)) { peekseen[$1 " " $2] = 1; peeked = peeked (peeked == "" ? "" : ", ") $1 " " $2 }
+        next
+      }
       if ($2 !~ /^c[osh][lmhx]-s[osh][lmhx]-w[osh][lmhx]-r[osh][lmhx]$/) {
         nbad++
         if (!($2 in badseen)) { badseen[$2] = 1; bad = bad (bad == "" ? "" : ", ") $2 }
@@ -124,6 +131,10 @@ analyze_report() {
       if (nbad) {
         print ""
         printf "Excluded %d run(s) whose arm does not parse as `c<M><E>-s<M><E>-w<M><E>-r<M><E>`: %s.\n", nbad, bad
+      }
+      if (npeek) {
+        print ""
+        printf "Excluded %d run(s) the peek audit flagged as reaching for another run'"'"'s work: %s.\n", npeek, peeked
       }
       k = split(unscored, us, " ")
       for (i = 1; i <= k; i++) {

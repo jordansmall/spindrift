@@ -192,3 +192,13 @@ has() { grep -qxF -- "$1" "$T/analysis.md" || { echo "missing line: $1"; cat "$T
   [ "$top" = "1 cox-shh-wsm-rom 2 chx-som-wsm-rom 3 chh-som-wsm-rom 4 chm-som-wsm-rom 5 chl-som-wsm-rom 6 csx-som-wsm-rom 7 csh-som-wsm-rom 8 csm-som-wsm-rom 9 csl-som-wsm-rom 10 cox-som-wsm-rom" ]
   [ "$bottom" = "11 coh-som-wsm-rom 12 com-som-wsm-rom 13 col-som-wsm-rom" ]
 }
+
+@test "analyze: leaves out runs the peek audit flagged, and says which" {
+  awk -F'\t' -v OFS='\t' 'NR == 1 { print $0, "peek"; next } { print $0, 0 }' \
+    "$T/results/alpha/metrics.tsv" >"$T/m"
+  printf '%s\t1\n' "$(metric alpha coh-shm-wsh-roh 3 a8 1 90 90)" >>"$T/m"
+  mv "$T/m" "$T/results/alpha/metrics.tsv"
+  analyze
+  has '| alpha | 6 | 67% | 3.4 | 5 | 3.00 | 11.0 |'
+  grep -qF "Excluded 1 run(s) the peek audit flagged as reaching for another run's work: alpha coh-shm-wsh-roh." "$T/analysis.md"
+}

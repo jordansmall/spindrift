@@ -47,15 +47,16 @@
 # GIT_USER_NAME and GIT_USER_EMAIL, from the environment: source harness.env
 # or point BENCH_ENV_FILE at it.
 #
-# BENCH_LANES=N (default 1) runs N Boxes at once. Every lane needs a bench
-# repo of its own, since each run resets its remote: lane 1 is BENCH_REMOTE /
-# BENCH_PUSH_URL / BENCH_REPO_SLUG, and lane i defaults to the same with -i
-# appended to the repo name (spindrift-ab-2, spindrift-ab-3, ...). Override
-# them with space-separated BENCH_LANE_SLUGS, BENCH_LANE_REMOTES (a slug is
-# derived from each) and BENCH_LANE_PUSH_URLS, one entry per lane starting
-# at lane 1. Each lane's repo must already exist with CI set up like the
-# first, and both tokens must reach it. Lanes pull runs from the one
-# shuffled plan as they free up, and run the harness's committed HEAD (a
+# BENCH_LANES=N (default 1) runs N Boxes at once. Every lane uses the one
+# bench repo (BENCH_REMOTE / BENCH_PUSH_URL / BENCH_REPO_SLUG) unless
+# space-separated BENCH_LANE_SLUGS, BENCH_LANE_REMOTES (a slug is derived from
+# each) and BENCH_LANE_PUSH_URLS give lanes repos of their own, one entry per
+# lane starting at lane 1. A repo lanes share is reset once, before the first
+# run, and each run then deletes only its own branch; a lane's own repo is
+# reset before each of its runs. Lanes on a shared repo can see each other's
+# live branches and draft PRs, so every run records a peek audit (see
+# parse_peek) and `analyze` drops the runs it flags. Lanes pull runs from the
+# one shuffled plan as they free up, and run the harness's committed HEAD (a
 # dirty tree is refused), so harness_rev stays true while you keep editing.
 # With more than one lane, lane i dispatches the task under the key
 # <task>-l<i> (its issue slug, Box name and branch), since Box names share
@@ -88,7 +89,7 @@ for lib in "$(dirname "${BASH_SOURCE[0]}")"/bench/lib/*.sh; do
   . "$lib"
 done
 
-METRICS_HEADER=$'task\tarm\trep\tblind\toutcome\tresolved\tgrade\tchecks\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create\tturns\tduration_ms\tpasses\tverdicts\tdecision\tharness\tspec'
+METRICS_HEADER=$'task\tarm\trep\tblind\toutcome\tresolved\tgrade\tchecks\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create\tturns\tduration_ms\tpasses\tverdicts\tdecision\tharness\tspec\tpeek'
 
 # Sum every "type":"result" event: the orchestrator emits one per pass and the
 # launcher's own comment keeps only the last, so summing is the honest total.
@@ -111,6 +112,20 @@ parse_usage() {
 parse_passes()  { jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="pass_start"))|length' "$1" 2>/dev/null || echo 0; }
 parse_verdicts(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="verdict")|.spindrift_op.verdict)|join(",")' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 parse_decision(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="decision")|"\(.spindrift_op.decision):\(.spindrift_op.reason)")|last // ""' "$1" 2>/dev/null | tr -d '"' || echo ""; }
+
+# 1 when the agent itself (assistant text or a tool call's input, subagents
+# included) named another run's branch or listed every ref or PR, else 0.
+# Lanes sharing a repo can't hide sibling attempts from a Box's clone or
+# token, so this flags the runs that may have looked. Tool output, like a
+# fetch printing new branches, doesn't count. OWN is the run's branch prefix.
+parse_peek() {
+  local own="$2" hit=""
+  hit="$(jq -Rr 'fromjson? | select(.type == "assistant") | .message.content[]?
+      | (.text // empty), (.input // empty | tostring)' "$1" 2>/dev/null \
+    | grep -oE 'bench/[A-Za-z0-9_.-]+/r[0-9]+/|branch +(-a|-r|--all|--remotes)([^a-z-]|$)|log [^|;&"]*--all([^a-z-]|$)|ls-remote|for-each-ref|gh +pr +list|gh +search' \
+    | grep -vxF -- "$own" | head -1)" || true
+  if [ -n "$hit" ]; then echo 1; else echo 0; fi
+}
 
 parse_outcome() { # Prints the last SPINDRIFT_OUTCOME status, or none.
   local line
@@ -520,11 +535,9 @@ reset_remote() {
   [ ${#stale[@]} -eq 0 ] || git -C "$BENCH_SRC" push -q --no-verify "$url" --delete "${stale[@]}"
 }
 
-# repo with -N before any .git: acme/ab -> acme/ab-2, .../ab.git -> .../ab-2.git
-lane_suffixed() { sed -E "s#(\\.git)?\$#-$2\\1#" <<<"$1"; }
-
-# Fills LANE_SLUG and LANE_PUSH (indexed from 1) from BENCH_LANES and the
-# BENCH_LANE_* lists; see the header.
+# Fills LANE_SLUG, LANE_PUSH and LANE_SHARED (indexed from 1) from
+# BENCH_LANES and the BENCH_LANE_* lists; see the header. A lane is shared
+# when another lane resets the same push URL.
 load_lanes() {
   [[ "$BENCH_LANES" =~ ^[1-9][0-9]*$ ]] || die "BENCH_LANES must be a positive integer"
   local -a slugs=() remotes=() pushes=()
@@ -537,18 +550,32 @@ load_lanes() {
     [ "$n" -eq 0 ] || [ "$n" -ge "$BENCH_LANES" ] \
       || die "BENCH_LANE_$v has $n entries, fewer than BENCH_LANES=$BENCH_LANES"
   done
-  LANE_SLUG=() LANE_PUSH=() LANE_DIR=()
-  local l slug push
+  LANE_SLUG=() LANE_PUSH=() LANE_DIR=() LANE_SHARED=()
+  local l m slug push
   for ((l = 1; l <= BENCH_LANES; l++)); do
-    if [ "$l" -eq 1 ]; then
-      slug="$BENCH_REPO_SLUG" push="$BENCH_PUSH_URL"
-    else
-      slug="$BENCH_REPO_SLUG-$l" push="$(lane_suffixed "$BENCH_PUSH_URL" "$l")"
-    fi
+    slug="$BENCH_REPO_SLUG" push="$BENCH_PUSH_URL"
     [ ${#remotes[@]} -eq 0 ] || slug="$(slug_of "${remotes[l - 1]}")"
     [ ${#slugs[@]} -eq 0 ] || slug="${slugs[l - 1]}"
     [ ${#pushes[@]} -eq 0 ] || push="${pushes[l - 1]}"
-    LANE_SLUG[l]="$slug" LANE_PUSH[l]="$push" LANE_DIR[l]=.
+    LANE_SLUG[l]="$slug" LANE_PUSH[l]="$push" LANE_DIR[l]=. LANE_SHARED[l]=0
+  done
+  for ((l = 1; l <= BENCH_LANES; l++)); do
+    for ((m = 1; m <= BENCH_LANES; m++)); do
+      [ "$m" -ne "$l" ] && [ "${LANE_PUSH[m]}" = "${LANE_PUSH[l]}" ] && LANE_SHARED[l]=1
+    done
+  done
+  return 0
+}
+
+# Resets each push URL that lanes share, once, before any of them dispatches:
+# a per-run reset there would delete a sibling's live branch.
+reset_shared_remotes() {
+  local l m seen
+  for ((l = 1; l <= BENCH_LANES; l++)); do
+    [ "${LANE_SHARED[l]}" = 1 ] || continue
+    seen=0
+    for ((m = 1; m < l; m++)); do [ "${LANE_PUSH[m]}" = "${LANE_PUSH[l]}" ] && seen=1; done
+    [ "$seen" = 1 ] || reset_remote "${LANE_PUSH[l]}"
   done
 }
 
@@ -674,7 +701,7 @@ run_one() {
   cp "$TASK_DIR/issue.md" "$issues/$key.md"
   info "$task [$arm r$rep] $app${flags:+ $flags}"
   info "$task [$arm r$rep] lane $lane ($slug)"
-  reset_remote "$push"
+  [ "${LANE_SHARED[lane]}" = 1 ] || reset_remote "$push"
   local logs="$dir/.spindrift/logs"
   local host_log="$logs/issue-$key.log" outbox="$dir/.spindrift/outbox/$key" fx rc=0
   # A stale bundle would carry this rep's branch name if the rep is a rerun.
@@ -713,10 +740,11 @@ run_one() {
   local blind row
   blind="$(reserve_blind "$arm" "$rep" "$rundir/diff.patch")"
   cmd_breakdown "$log" >"$rundir/breakdown.tsv" 2>/dev/null || : >"$rundir/breakdown.tsv"
-  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
     "$task" "$arm" "$rep" "$blind" "$(parse_outcome "$log")" "$resolved" "$grade" "$checks" \
     "$(parse_usage "$log")" "$(parse_passes "$log")" "$(parse_verdicts "$log")" \
-    "$(parse_decision "$log")" "${HARNESS_REV:-$(harness_rev)}" "$app${flags:+ $flags}")"
+    "$(parse_decision "$log")" "${HARNESS_REV:-$(harness_rev)}" "$app${flags:+ $flags}" \
+    "$(parse_peek "$log" "$prefix")")"
   locked "$OUT/metrics.tsv.lock" append_line "$OUT/metrics.tsv" "$row"
   info "$task [$arm r$rep] grade=$grade checks=$checks resolved=$resolved"
 }
@@ -829,7 +857,11 @@ cmd_run() {
     else
       echo "  lanes       : $BENCH_LANES, running harness ${HARNESS_REV}"
       for ((l = 1; l <= BENCH_LANES; l++)); do
-        printf '  %-12s: %s (reset via %s)\n' "lane $l" "${LANE_SLUG[l]}" "${LANE_PUSH[l]}"
+        if [ "${LANE_SHARED[l]}" = 1 ]; then
+          printf '  %-12s: %s (shared, reset once via %s)\n' "lane $l" "${LANE_SLUG[l]}" "${LANE_PUSH[l]}"
+        else
+          printf '  %-12s: %s (reset via %s)\n' "lane $l" "${LANE_SLUG[l]}" "${LANE_PUSH[l]}"
+        fi
       done
     fi
     echo "  out dir     : $OUT"
@@ -838,7 +870,8 @@ cmd_run() {
     if [ "$BENCH_LANES" -eq 1 ]; then
       echo "  Before every run ${LANE_PUSH[1]} is force-reset: main becomes BASE and"
     else
-      echo "  Before every run its lane's push URL is force-reset: main becomes BASE and"
+      echo "  A lane's push URL is force-reset before each of its runs, or once before the"
+      echo "  first run when lanes share it: main becomes BASE and"
     fi
     echo "  every other branch and tag is DELETED."
   } >&2
@@ -852,6 +885,11 @@ cmd_run() {
   if [ -z "${BENCH_DRY_RUN:-}" ]; then
     mkdir -p "$OUT/runs" "$OUT/judging" "$OUT/logs"
     [ -f "$OUT/metrics.tsv" ] || printf '%s\n' "$METRICS_HEADER" >"$OUT/metrics.tsv"
+    # Results from before the peek audit gain its column, blank: never audited.
+    if [ "$(head -1 "$OUT/metrics.tsv")" = "${METRICS_HEADER%$'\t'peek}" ]; then
+      awk -F'\t' -v OFS='\t' 'NR == 1 { print $0, "peek"; next } { print $0, "" }' \
+        "$OUT/metrics.tsv" >"$OUT/metrics.tsv.tmp" && mv "$OUT/metrics.tsv.tmp" "$OUT/metrics.tsv"
+    fi
     cp "$TASK_DIR/issue.md" "$OUT/judging/ISSUE.md"
     ensure_grading_repo "$OUT/work.git"
     rm -rf "$OUT"/*.lock.d
@@ -877,6 +915,7 @@ cmd_run() {
     r=$((RANDOM % (j + 1)))
     tmp="${plan[j]}" plan[j]="${plan[r]}" plan[r]="$tmp"
   done
+  [ -n "${BENCH_DRY_RUN:-}" ] || reset_shared_remotes
   if [ -n "${BENCH_DRY_RUN:-}" ] && [ "$BENCH_LANES" -gt 1 ]; then
     for a in "${plan[@]}"; do run_one "$task" "${a%%:*}" "${a#*:}" auto; done
   elif [ "$BENCH_LANES" -eq 1 ]; then
@@ -966,6 +1005,14 @@ summarize() {
       done
     done
     [ ${#args[@]} -eq 0 ] || cmd_compare "${args[@]}"
+    local peeked
+    peeked="$(awk -F'\t' 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "peek") k = i; next }
+      k && $k == 1 { printf "%s%s r%s", (n++ ? ", " : ""), $2, $3 }' "$m")"
+    if [ -n "$peeked" ]; then
+      echo
+      echo "Peek audit: these runs reached for another run's branch or the PR list, so"
+      echo "\`analyze\` leaves them out: $peeked."
+    fi
     echo
     echo "Blind judging: score \`judging/*.patch\` against \`judging/ISSUE.md\` before reading \`judging/KEY.tsv\`."
   } >"$OUT/summary.md"

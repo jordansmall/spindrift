@@ -119,8 +119,16 @@ else
   sleep "${FAKE_SLEEP:-0}"
 fi
 cd "$cwd"
+# Every run's fetch output names another run's branch; the peek arms also
+# reach for other attempts in a command of their own.
+case "$app" in
+  *#peekall) peek='git branch -a' ;;
+  *#peeksib) peek='git diff origin/bench/good/r1/t1' ;;
+  *) peek='git fetch origin' ;;
+esac
 cat >"$log" <<EOF
-{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"$peek"}}],"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":" * [new branch] bench/other/r9/t1 -> origin/bench/other/r9/t1"}]}}
 {"type":"result","total_cost_usd":0.25,"num_turns":3,"duration_ms":60000,"usage":{"input_tokens":1000,"output_tokens":100}}
 SPINDRIFT_OUTCOME status=${FAKE_STATUS:-ready} landing=$prefix$slug
 EOF
@@ -389,6 +397,56 @@ remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; 
   grep -F '| good | 3 | 3/3 |' "$T/out/summary.md"
 }
 
+@test "lanes: lanes sharing one repo reset it once, so no lane wipes another's live branch" {
+  lanes_setup
+  unset BENCH_LANE_SLUGS BENCH_LANE_PUSH_URLS
+  cd "$T/cwd"
+  BENCH_LANES=3 FAKE_SLEEP=0.5 BENCH_REPS=3 run bench run t1 good bad
+  [ "$status" -eq 0 ]
+  [ "$(rows | wc -l)" -eq 6 ]
+  local a r g
+  a=$(col arm) r=$(col resolved) g=$(col grade)
+  [ "$(rows | awk -F'\t' -v a="$a" -v r="$r" -v g="$g" '$a=="good" && $r==1 && $g=="pass"' | wc -l)" -eq 3 ]
+  [ "$(rows | awk -F'\t' -v a="$a" -v r="$r" -v g="$g" '$a=="bad" && $r==0 && $g=="fail"' | wc -l)" -eq 3 ]
+  # Every run's branch was still on the remote when it was graded.
+  [[ "$output" != *"never reached the remote"* ]]
+  [ "$(awk '{ c += ($1 == "+") ? 1 : -1; if (c > m) m = c } END { print m }' "$T/trace.log")" -ge 2 ]
+  [ "$(cut -d' ' -f1 "$FAKE_LANES" | sort -u)" = "acme/bench" ]
+  [ "$(cut -d' ' -f4 "$FAKE_LANES" | sort -u | wc -l)" -ge 2 ]
+  # The mirror's stale branch was gone before the first dispatch; the repo
+  # ends holding only main at BASE.
+  [ -z "$(grep refs/heads/stale "$FAKE_SEEN")" ]
+  [ "$(git ls-remote --heads --tags "$T/remote.git" | awk '{print $2}')" = "refs/heads/main" ]
+  [ "$(git ls-remote "$T/remote.git" refs/heads/main | cut -f1)" = "$BASE" ]
+}
+
+@test "peek: a run whose agent reaches for another run's branch or the PR list is flagged" {
+  printf 'peekall .#peekall\npeeksib .#peeksib\n' >>"$T/arms"
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good peekall peeksib
+  [ "$status" -eq 0 ]
+  local a k
+  a=$(col arm) k=$(col peek)
+  [ -n "$k" ]
+  # good's log shows a fetch listing another run's branch, but only as tool
+  # output: what the agent itself typed is what counts.
+  [ "$(rows | awk -F'\t' -v a="$a" -v k="$k" '{print $a "=" $k}' | sort | tr '\n' ' ')" = "good=0 peekall=1 peeksib=1 " ]
+  grep -F 'peekall r1' "$T/out/summary.md"
+  grep -F 'peeksib r1' "$T/out/summary.md"
+}
+
+@test "peek: an older metrics.tsv without the peek column gains it, blank for old rows" {
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  awk -F'\t' -v OFS='\t' '{ NF--; print }' "$T/out/metrics.tsv" >"$T/m" && mv "$T/m" "$T/out/metrics.tsv"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  [ "$(head -1 "$T/out/metrics.tsv" | awk -F'\t' '{print $NF}')" = peek ]
+  awk -F'\t' 'NR == 1 { n = NF } NF != n { exit 1 }' "$T/out/metrics.tsv"
+  [ "$(rows | awk -F'\t' -v k="$(col peek)" '{print "[" $k "]"}' | tr '\n' ' ')" = "[] [0] " ]
+}
+
 @test "lanes: one lane (the default) runs in place exactly as before" {
   lanes_setup
   cd "$T/cwd"
@@ -433,7 +491,7 @@ remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; 
   for i in 1 2 3; do git ls-remote --heads "$(remote_git "$i")" | grep -q refs/heads/stale; done
 }
 
-@test "lanes: lane i defaults to the bench repo with -i appended, or takes BENCH_LANE_* lists" {
+@test "lanes: lanes default to sharing the one bench repo, or take BENCH_LANE_* lists" {
   lanes_setup
   unset BENCH_LANE_SLUGS BENCH_LANE_PUSH_URLS
   cd "$T/cwd"
@@ -441,9 +499,8 @@ remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; 
     BENCH_PUSH_URL=git@github.com:acme/ab.git run env -u BENCH_REPO_SLUG \
     bash "${BENCH_SH:-$BATS_TEST_DIRNAME/../bench.sh}" run t1 good
   [ "$status" -eq 0 ]
-  grep -F 'lane 1      : acme/ab (reset via git@github.com:acme/ab.git)' <<<"$output"
-  grep -F 'lane 2      : acme/ab-2 (reset via git@github.com:acme/ab-2.git)' <<<"$output"
-  grep -F 'lane 3      : acme/ab-3 (reset via git@github.com:acme/ab-3.git)' <<<"$output"
+  grep -F 'lane 1      : acme/ab (shared, reset once via git@github.com:acme/ab.git)' <<<"$output"
+  grep -F 'lane 3      : acme/ab (shared, reset once via git@github.com:acme/ab.git)' <<<"$output"
   BENCH_DRY_RUN=1 BENCH_LANES=2 BENCH_LANE_REMOTES="https://github.com/o/x.git https://github.com/o/y.git" \
     BENCH_LANE_PUSH_URLS="git@github.com:o/x.git git@github.com:o/y.git" run bench run t1 good
   [ "$status" -eq 0 ]
