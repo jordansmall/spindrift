@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"testing"
 
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -212,5 +213,99 @@ func TestRegisterGenerationRoot_OneFailedPathDoesNotUnrootTheRest(t *testing.T) 
 	}
 	if strings.Count(out, "warning") != 1 || !strings.Contains(out, "/nix/store/bad") {
 		t.Errorf("stdout = %q, want exactly one warning naming /nix/store/bad", out)
+	}
+}
+
+// swapStubs routes `nix` to the out-link recorder (failing when failRoot)
+// and every other command, i.e. the snapshot's sqlite3 VACUUM, to the scripted fake.
+func swapStubs(t *testing.T, failRoot bool) *[][]string {
+	t.Helper()
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+	nixCalls := stubNix(t, failRoot)
+	rec := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "nix" {
+			return rec(name, args...)
+		}
+		return exec.Command(script, args...)
+	}
+	return nixCalls
+}
+
+var swapCfg = runner.Config{
+	PasswdFile:        "/nix/store/ccc-passwd",
+	GroupFile:         "/nix/store/ddd-group",
+	SyscallFilterPath: "/nix/store/fff-filter.bpf",
+}
+
+func wantSwapRoot(pwd, closure string) [][]string {
+	return wantOutLinkCalls(
+		filepath.Join(pwd, ".spindrift", "nix-gcroots", ClosureGeneration(closure)),
+		closure, "/nix/store/ccc-passwd", "/nix/store/ddd-group", "/nix/store/fff-filter.bpf")
+}
+
+func TestSnapshotGeneration_RootsClosureAndStartupArtifacts(t *testing.T) {
+	calls := swapStubs(t, false)
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v", got, want)
+	}
+}
+
+func TestSnapshotGeneration_RootsWhenSnapshotAlreadyExists(t *testing.T) {
+	calls := swapStubs(t, false)
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v (an existing snapshot must still be rooted)", got, want)
+	}
+}
+
+func TestSnapshotGeneration_RootRegistrationHoldsSnapshotLock(t *testing.T) {
+	swapStubs(t, false)
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	lockPath := SnapshotLockPath(NixVarSnapshotDir(pwd, ClosureGeneration(closure)))
+	probed := assertOutLinkHoldsSnapshotLock(t, lockPath)
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if !*probed {
+		t.Fatal("out-link call never made; probe never ran")
+	}
+}
+
+func TestSnapshotGeneration_RootFailureWarnsAndSucceeds(t *testing.T) {
+	swapStubs(t, true)
+	pwd := t.TempDir()
+
+	var err error
+	out := runnertest.CaptureStdoutDuring(t, func() {
+		err = SnapshotGeneration(swapCfg, pwd, "/nix/store/abc-agent-closure")
+	})
+	if err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil (a root failure must not fail the swap)", err)
+	}
+	if !strings.Contains(out, "warning") {
+		t.Errorf("output = %q, want a warning naming the failed root", out)
 	}
 }

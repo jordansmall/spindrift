@@ -1963,7 +1963,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 					return drain()
 				}
 				if s.PrepareHotSwap != nil {
-					if err := s.PrepareHotSwap(pwd, res.TipTag); err != nil {
+					if err := s.PrepareHotSwap(runnerConfig(c), pwd, res.TipTag); err != nil {
 						fmt.Fprintf(stderr, "==> %s hot-swap: snapshot generation failed, draining instead: %v\n", art.Name, err)
 						return drain()
 					}

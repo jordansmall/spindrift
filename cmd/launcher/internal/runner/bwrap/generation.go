@@ -202,7 +202,12 @@ func UnlockSnapshot(lf *os.File) {
 // Box naming a generation with no directory. It skips the vacuum when db.sqlite
 // already exists, since a live Box may be reading it, and never reclaims: an
 // idle Dispatch holds no flock on a generation it will launch against again.
-func SnapshotGeneration(pwd, closurePath string) error {
+//
+// It also GC-roots what a Box on the swapped generation mounts: the closure's
+// files/env/nix-config/prefetch children, plus the passwd, group and syscall
+// filter the daemon booted with (issue #5995). The root is registered even when
+// db.sqlite already exists, so a re-swap onto a generation still roots it.
+func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	generation := ClosureGeneration(closurePath)
 	dir := NixVarSnapshotDir(pwd, generation)
 	root := NixVarSnapshotRoot(pwd)
@@ -211,12 +216,6 @@ func SnapshotGeneration(pwd, closurePath string) error {
 	// Sweep before the existence check: a temp leaked by a killed launcher would
 	// otherwise stay forever once a concurrent launcher has installed dest.
 	sweepStaleVacuumTemps(filepath.Dir(dest))
-	if _, err := os.Stat(dest); err == nil {
-		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
-		return nil
-	}
-
-	fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) for hot-swapped generation %s\n", generation)
 
 	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
@@ -225,9 +224,17 @@ func SnapshotGeneration(pwd, closurePath string) error {
 	if lockErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(dir), lockErr)
 	}
-	err := VacuumStoreDBInto(dir, InstallIfAbsent)
-	UnlockSnapshot(lf)
-	return err
+	defer UnlockSnapshot(lf)
+
+	registerMountedArtifactRoots(NixGCRootsRoot(pwd), generation, []string{closurePath}, cfg.PasswdFile, cfg.GroupFile, cfg.SyscallFilterPath)
+
+	if _, err := os.Stat(dest); err == nil {
+		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
+		return nil
+	}
+
+	fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) for hot-swapped generation %s\n", generation)
+	return VacuumStoreDBInto(dir, InstallIfAbsent)
 }
 
 // hostNixDBPath is the host's real, live nix store database, never a path inside

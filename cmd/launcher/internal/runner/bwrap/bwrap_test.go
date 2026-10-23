@@ -1099,7 +1099,7 @@ func TestSnapshotGeneration_ThenRunPassesStatGuard(t *testing.T) {
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 
-	if err := SnapshotGeneration(pwd, closure); err != nil {
+	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 
@@ -1150,7 +1150,7 @@ func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 	}
 
 	closure := "/nix/store/abc-agent-closure"
-	if err := SnapshotGeneration(pwd, closure); err != nil {
+	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 
