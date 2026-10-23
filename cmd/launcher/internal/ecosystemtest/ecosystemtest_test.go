@@ -18,7 +18,7 @@ import (
 )
 
 func TestCorpus(t *testing.T) {
-	Run(t, synthetic.Row, filepath.Join("testdata", "corpus"), twinLookup)
+	Run(t, synthetic.Strategy, filepath.Join("testdata", "corpus"), twinLookup)
 }
 
 // copyCase copies a corpus case into a temp dir so a test can mutate it,
@@ -54,7 +54,7 @@ func copyCase(t *testing.T, name string, keepGoldens bool) string {
 }
 
 func TestReplayCaseMissingGoldenFails(t *testing.T) {
-	if errs := replayCase(synthetic.Row, copyCase(t, "matched", true), false, nil); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, copyCase(t, "matched", true), false, nil); len(errs) != 0 {
 		t.Fatalf("intact case failed: %v", errs)
 	}
 	for _, s := range stages {
@@ -63,7 +63,7 @@ func TestReplayCaseMissingGoldenFails(t *testing.T) {
 			if err := os.Remove(filepath.Join(dir, s.golden)); err != nil {
 				t.Fatal(err)
 			}
-			errs := replayCase(synthetic.Row, dir, false, nil)
+			errs := replayCase(synthetic.Strategy, dir, false, nil)
 			if len(errs) != 1 || !strings.Contains(errs[0].Error(), s.name) {
 				t.Fatalf("errs = %v, want exactly one naming %q", errs, s.name)
 			}
@@ -76,14 +76,14 @@ func TestReplayCaseDriftedGoldenFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pathset.golden.json"), []byte("[]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if errs := replayCase(synthetic.Row, dir, false, nil); len(errs) != 1 {
+	if errs := replayCase(synthetic.Strategy, dir, false, nil); len(errs) != 1 {
 		t.Fatalf("errs = %v, want exactly the drifted path-set", errs)
 	}
 }
 
 func TestReplayCaseUpdateWritesEveryGolden(t *testing.T) {
 	dir := copyCase(t, "matched", false)
-	if errs := replayCase(synthetic.Row, dir, true, nil); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, dir, true, nil); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	for _, s := range stages {
@@ -102,7 +102,7 @@ func TestReplayCaseUpdateWritesEveryGolden(t *testing.T) {
 }
 
 func TestReplayCaseSkipsStageRowDoesNotTakePartIn(t *testing.T) {
-	// A bare row takes part in route resolution and path-set derivation alone.
+	// A bare Strategy takes part in route resolution and path-set derivation alone.
 	bare := ecosystem.Strategy{Name: "bare"}
 	// collided carries an operator routes file: with no parser, discovery proposes none.
 	dir := copyCase(t, "collided", false)
@@ -130,7 +130,7 @@ func TestReplayCaseSkipsStageRowDoesNotTakePartIn(t *testing.T) {
 
 func TestSyntheticTakesPartInEveryStage(t *testing.T) {
 	for _, s := range stages {
-		if !s.takesPart(synthetic.Row) {
+		if !s.takesPart(synthetic.Strategy) {
 			t.Errorf("synthetic row skips %s", s.name)
 		}
 	}
@@ -165,7 +165,7 @@ func TestRewritesGoldenShowsTheRewriteAndTheDeclinedForeignHost(t *testing.T) {
 }
 
 func TestStagesSkippedPerRow(t *testing.T) {
-	// The generic `path` route key needs no hook, so a row with no parser, no
+	// The generic `path` route key needs no hook, so a Strategy with no parser, no
 	// declaration hook, no bindings and no rewrite rows still resolves routes
 	// and has an enforced path-set.
 	var took []string
@@ -190,7 +190,7 @@ func TestPathSetGoldenHoldsDerivedAndEnforced(t *testing.T) {
 
 func TestRefusedRoutesFileSkipsLaterRouteStages(t *testing.T) {
 	dir := copyCase(t, "refused", true)
-	if errs := replayCase(synthetic.Row, dir, false, nil); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, dir, false, nil); len(errs) != 0 {
 		t.Fatalf("intact refused case failed: %v", errs)
 	}
 	if got := readGolden(t, "refused", "routes.golden.json"); !strings.Contains(got, `"refused"`) || !strings.Contains(got, "mirror-path") || !strings.Contains(got, "must be an absolute path") {
@@ -206,10 +206,10 @@ func TestRefusedRoutesFileSkipsLaterRouteStages(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if errs := replayCase(synthetic.Row, dir, false, nil); len(errs) != 1 {
+	if errs := replayCase(synthetic.Strategy, dir, false, nil); len(errs) != 1 {
 		t.Fatalf("errs = %v, want one stale-golden failure", errs)
 	}
-	if errs := replayCase(synthetic.Row, dir, true, nil); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, dir, true, nil); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
@@ -221,7 +221,7 @@ func TestDiscoveryFedParseErrorStaysAStageFailure(t *testing.T) {
 	// Discovery's own output is never an operator's mistake: its refusal is a
 	// stage failure, not a golden.
 	dir := copyCase(t, "matched", false)
-	row := synthetic.Row
+	row := synthetic.Strategy
 	row.ConfigParser = func(string) ([]ecosystem.Declaration, bool, error) {
 		return nil, false, errors.New("unparseable")
 	}
@@ -237,10 +237,10 @@ func TestDiscoveryFedParseErrorStaysAStageFailure(t *testing.T) {
 	}
 }
 
-// echoingSynthetic is synthetic.Row with an EnvExports that echoes a prior
+// echoingSynthetic is synthetic.Strategy with an EnvExports that echoes a prior
 // environment value, so a case's env.json is observable in its binding stage.
 func echoingSynthetic() ecosystem.Strategy {
-	row := synthetic.Row
+	row := synthetic.Strategy
 	base := row.EnvExports
 	row.EnvExports = func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		exports, warnings := base(port, prefix, getenv, routes)
@@ -309,14 +309,14 @@ func TestReplayCaseDriftedClassificationGoldenFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "classification.golden.txt"), []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	errs := replayCase(synthetic.Row, dir, false, nil)
+	errs := replayCase(synthetic.Strategy, dir, false, nil)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "lockfile classification") {
 		t.Fatalf("errs = %v, want exactly the drifted classification", errs)
 	}
 }
 
 func TestEnvJSONWithoutEnvExportsFails(t *testing.T) {
-	row := synthetic.Row
+	row := synthetic.Strategy
 	row.EnvExports = nil
 	errs := replayCase(row, copyCase(t, "env", false), true, nil)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "env.json") || !strings.Contains(errs[0].Error(), "EnvExports") {
@@ -325,7 +325,7 @@ func TestEnvJSONWithoutEnvExportsFails(t *testing.T) {
 }
 
 func TestNullEnvJSONWithoutEnvExportsFails(t *testing.T) {
-	row := synthetic.Row
+	row := synthetic.Strategy
 	row.EnvExports = nil
 	dir := copyCase(t, "env", false)
 	if err := os.WriteFile(filepath.Join(dir, "env.json"), []byte("null"), 0o644); err != nil {
@@ -364,7 +364,7 @@ func TestReplayCaseDriftedLockfileScanGoldenFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "lockfile-scan.golden.txt"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	errs := replayCase(synthetic.Row, dir, false, nil)
+	errs := replayCase(synthetic.Strategy, dir, false, nil)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "lockfile scan") {
 		t.Fatalf("errs = %v, want exactly the drifted lockfile scan", errs)
 	}
@@ -384,7 +384,7 @@ func TestBindingsSummaryWritesNoHomeUnderTheRealHome(t *testing.T) {
 	realHome := t.TempDir()
 	t.Setenv("HOME", realHome)
 	t.Setenv("SYNTHETIC_HOME", "")
-	if errs := replayCase(synthetic.Row, copyCase(t, "matched", true), false, nil); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, copyCase(t, "matched", true), false, nil); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	if entries, err := os.ReadDir(realHome); err != nil || len(entries) != 0 {
@@ -397,7 +397,7 @@ func TestReplayCaseDriftedSummaryGoldenFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "summary.golden.txt"), []byte("\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	errs := replayCase(synthetic.Row, dir, false, nil)
+	errs := replayCase(synthetic.Strategy, dir, false, nil)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "bindings summary") {
 		t.Fatalf("errs = %v, want exactly the drifted bindings summary", errs)
 	}
@@ -405,7 +405,7 @@ func TestReplayCaseDriftedSummaryGoldenFails(t *testing.T) {
 
 // twinLookup gives each twin its own <name>.lock lockfile and classifies as
 // <name>, so a case's classification and lockfile-scan goldens can only carry
-// the twin's lockfile and classification through the neighbour rows.
+// the twin's lockfile and classification through the neighbour Strategies.
 func twinLookup(name string) (ecosystem.Strategy, bool) {
 	r := synthetic.Twin(name)
 	r.LockfileNames = []string{name + ".lock"}
@@ -415,7 +415,7 @@ func twinLookup(name string) (ecosystem.Strategy, bool) {
 
 func TestNeighbourRowsDeclaredPathReachesTheEnforcedSet(t *testing.T) {
 	dir := copyCase(t, "neighbour", true)
-	if errs := replayCase(synthetic.Row, dir, false, twinLookup); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, dir, false, twinLookup); len(errs) != 0 {
 		t.Fatalf("intact neighbour case failed: %v", errs)
 	}
 	// The twin's own derived subtree also names /api/twin, so only the
@@ -478,7 +478,7 @@ func TestNamingThePrimaryRowFixesItsPosition(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &cfg); err != nil {
 			t.Fatal(err)
 		}
-		rows, err := cfg.resolveRows(synthetic.Row, twinLookup)
+		rows, err := cfg.resolveRows(synthetic.Strategy, twinLookup)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -507,7 +507,7 @@ func TestNamingThePrimaryRowFixesItsPosition(t *testing.T) {
 func TestCaseConfigFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
-		lookup     RowLookup
+		lookup     StrategyLookup
 		want       string
 	}{
 		{"unknown row", `{"rows": ["nope"]}`, func(string) (ecosystem.Strategy, bool) { return ecosystem.Strategy{}, false }, "not known"},
@@ -525,7 +525,7 @@ func TestCaseConfigFailures(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "case.json"), []byte(tc.body), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			errs := replayCase(synthetic.Row, dir, true, tc.lookup)
+			errs := replayCase(synthetic.Strategy, dir, true, tc.lookup)
 			if len(errs) != 1 || !strings.Contains(errs[0].Error(), "case.json") || !strings.Contains(errs[0].Error(), tc.want) {
 				t.Fatalf("errs = %v, want one case.json error containing %q", errs, tc.want)
 			}
@@ -538,7 +538,7 @@ func TestNeighbourRoutesFileIsRefusedWithoutTheNeighbourRow(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, "case.json")); err != nil {
 		t.Fatal(err)
 	}
-	if errs := replayCase(synthetic.Row, dir, true, nil); len(errs) != 0 {
+	if errs := replayCase(synthetic.Strategy, dir, true, nil); len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	if got := readFile(t, filepath.Join(dir, "routes.golden.json")); !strings.Contains(got, "refused") || !strings.Contains(got, "twin") {

@@ -21,9 +21,9 @@ func npmFamilyTaggedRoutes() []registrymanifest.Route {
 	}}
 }
 
-// npmFamilyCases pairs each npm-family row, whose name is also the ecosystem
+// npmFamilyCases pairs each npm-family Strategy, whose name is also the ecosystem
 // tag it reads, with the env var it binds. The strings are spelled out rather
-// than read from the rows so a rename of either side fails here.
+// than read from the Strategies so a rename of either side fails here.
 var npmFamilyCases = []struct {
 	row, envVar string
 }{
@@ -45,7 +45,7 @@ func rowExports(t *testing.T, name string, port int, prefix string, routes []reg
 	return row.EnvExports(port, prefix, stubGetenv(nil), routes)
 }
 
-// Each row binds its BindingEnvVar and nothing else, from its own tagged path
+// Each Strategy binds its BindingEnvVar and nothing else, from its own tagged path
 // (issue #3259): the other two ecosystems' paths never reach it.
 func TestNpmFamilyRows_BindOnlyOwnVarFromOwnTaggedPath(t *testing.T) {
 	for _, tc := range npmFamilyCases {
@@ -93,7 +93,7 @@ func TestNpmFamilyRows_DifferentPrefixDifferentURL(t *testing.T) {
 	}
 }
 
-// A route tagging only one ecosystem leaves the other two rows with no export
+// A route tagging only one ecosystem leaves the other two Strategies with no export
 // at all (AC3's fallback).
 func TestNpmFamilyRows_SingleTaggedPath(t *testing.T) {
 	for _, tc := range npmFamilyCases {
@@ -158,7 +158,7 @@ func TestNpmFamilyRows_ZeroTaggedPaths(t *testing.T) {
 }
 
 // Two or more same-tagged paths on the matched route leave no way to tell
-// which is the default registry, so the row's var gets no export and a
+// which is the default registry, so the Strategy's var gets no export and a
 // warning naming the ecosystem, the var, the ambiguous paths, and the prefix.
 func TestNpmFamilyRows_AmbiguousTaggedPaths(t *testing.T) {
 	for _, tc := range npmFamilyCases {
@@ -292,8 +292,8 @@ func TestNpmFamilyRows_EmptyPrefixRouteIsIgnored(t *testing.T) {
 	}
 }
 
-// Each row resolves its own tagged path, so distinct paths per ecosystem do
-// not bleed into one another and one row's ambiguity does not silence another.
+// Each Strategy resolves its own tagged path, so distinct paths per ecosystem do
+// not bleed into one another and one Strategy's ambiguity does not silence another.
 func TestNpmFamilyRows_IndependentPerEcosystem(t *testing.T) {
 	routes := taggedRoute("r0",
 		registryvocab.Subtree{Ecosystem: "npm", Path: "/npm-repo"},

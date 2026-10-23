@@ -9,10 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 )
 
-// scanRows are in a fixed order: the synthetic row, then a neutral row listing
-// several lockfile names, so the tests prove row order and basename matching.
+// scanRows are in a fixed order: the synthetic Strategy, then a neutral Strategy listing
+// several lockfile names, so the tests prove Strategy order and basename matching.
 var scanRows = []ecosystem.Strategy{
-	synthetic.Row,
+	synthetic.Strategy,
 	{Name: "beta", LockfileNames: []string{"beta.lock", "beta.sum"}},
 }
 
@@ -45,7 +45,7 @@ func TestScanLockfilesForForwarderRowsReportsTrackedLockfileNamingForwarder(t *t
 	}
 }
 
-// Every name a row lists is scanned, not only the first.
+// Every name a Strategy lists is scanned, not only the first.
 func TestScanLockfilesForForwarderRowsMatchesEachRowLockfileName(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -62,7 +62,7 @@ func TestScanLockfilesForForwarderRowsMatchesEachRowLockfileName(t *testing.T) {
 }
 
 // The beta hit's path sorts lexically before the synthetic hit's path, so this
-// fixture confirms row order (synthetic before beta) wins over lexical path order
+// fixture confirms Strategy order (synthetic before beta) wins over lexical path order
 // rather than the reverse.
 func TestScanLockfilesForForwarderRowsOrdersByRowThenPath(t *testing.T) {
 	dir := newTestRepo(t)
@@ -88,7 +88,7 @@ func TestScanLockfilesForForwarderRowsOrdersByRowThenPath(t *testing.T) {
 	}
 }
 
-// The scan reads only the rows it is handed.
+// The scan reads only the Strategies it is handed.
 func TestScanLockfilesForForwarderRowsUsesOnlyTheGivenRows(t *testing.T) {
 	dir := newTestRepo(t)
 
@@ -126,8 +126,8 @@ func TestScanLockfilesForForwarderRowsSkipsTrackedFileMissingFromWorkingTree(t *
 	}
 }
 
-// The scan filters by basename against the rows, so a tracked file that names
-// the Forwarder URL but has a basename no row lists produces no hit.
+// The scan filters by basename against the Strategies, so a tracked file that names
+// the Forwarder URL but has a basename no Strategy lists produces no hit.
 func TestScanLockfilesForForwarderRowsIgnoresNonLockfileTrackedFiles(t *testing.T) {
 	dir := newTestRepo(t)
 

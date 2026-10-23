@@ -76,7 +76,7 @@ func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
 	return out, sawDeclaration, nil
 }
 
-// isScopedNpmFamilyKey reports whether a key the row's own predicate already
+// isScopedNpmFamilyKey reports whether a key the Strategy's own predicate already
 // matched is a scope's ("@acme:registry") rather than the default registry.
 func isScopedNpmFamilyKey(key string) bool { return key != "registry" }
 
@@ -100,7 +100,7 @@ func addNpmFamilyDeclaration(out []Declaration, indexByURL map[string]int, d Dec
 // searching every route for the one unscoped path tagged with ecosystem and
 // binding that route's own prefix. Unlike BindHomes' routes[0] rule (#3142),
 // npm need not follow route order: the unscoped registry is identifiable once
-// scope is carried (#5720). Each row computes its own var independently
+// scope is carried (#5720). Each Strategy computes its own var independently
 // (issue #3259): a route's tagged paths can differ across npm, pnpm, and yarn.
 // Unscoped registries only; these bind packument requests, and
 // streamNpmPackument (#3401) re-points embedded tarball URLs.
@@ -123,7 +123,7 @@ func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, ecosyst
 	switch len(matches) {
 	case 0:
 		// Nothing unscoped and tagged for this ecosystem, so nothing to bind (AC3).
-		// A registry declared only in another row's config lands here
+		// A registry declared only in another Strategy's config lands here
 		// (a pnpm registry in .npmrc is tagged "npm"); the in-tree
 		// rewrite still covers that traffic.
 		return nil, nil

@@ -118,7 +118,7 @@ func TestCargoRouteRegistries_NilForNoCargoBlock(t *testing.T) {
 }
 
 // A nil RouteDeclaration means "no such notion", not "accept anything", so the
-// caller rejects every non-"path" key for a row with no hook. The loop compares
+// caller rejects every non-"path" key for a Strategy with no hook. The loop compares
 // against cargoRow.Name rather than a literal so a rename keeps this test honest.
 func TestOnlyCargoRowHasRouteDeclaration(t *testing.T) {
 	for _, row := range Table {

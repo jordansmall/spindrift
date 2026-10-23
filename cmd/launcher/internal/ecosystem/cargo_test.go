@@ -373,7 +373,7 @@ func TestCargoSourceReplacements_ReusesClaimingSourceName_AcrossSpellingVariants
 		},
 		{
 			// "sparse+" is a different source kind to cargo, not a spelling
-			// variant, so this row must mint rather than reuse.
+			// variant, so this Strategy must mint rather than reuse.
 			name:            "sparse+ differs keeps minted name",
 			registriesIndex: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/",
 			sourceRegistry:  "https://artifactory.example.test/artifactory/api/cargo/remote/index/",

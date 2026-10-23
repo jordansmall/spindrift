@@ -25,7 +25,7 @@ type ecosystemLiteral struct {
 
 // scanForEcosystemLiterals returns one finding per string literal in dir's
 // .go files, test files included, whose entire unquoted value equals a Table
-// row Name.
+// Strategy Name.
 // Equality is whole-literal, so the scan skips "cargo config.json" and prose,
 // and walking the AST skips comments. It reads dir's own files only;
 // deriveEcosystemImporters lists every package directory separately.
@@ -48,7 +48,7 @@ func scanForEcosystemLiterals(t *testing.T, dir string) []ecosystemLiteral {
 		files = append(files, filepath.Join(dir, name))
 	}
 
-	// Names come from Table itself, never a hardcoded list, so a row added
+	// Names come from Table itself, never a hardcoded list, so a Strategy added
 	// to Table is covered by every existing caller with no edit here.
 	names := make(map[string]bool, len(Table))
 	for _, row := range Table {
@@ -102,7 +102,7 @@ func lineOf(t *testing.T, src, needle string) int {
 // containment or comments, and the subpackage and the unparseable testdata
 // file prove the scan never descends into either.
 func TestScanForEcosystemLiterals_FixtureDetectsViolation(t *testing.T) {
-	// The fixture draws its names from Table, so deleting a row cannot fail
+	// The fixture draws its names from Table, so deleting a Strategy cannot fail
 	// this test for a reason unrelated to the scanner.
 	if len(Table) < 4 {
 		t.Fatalf("fixture needs 4 distinct ecosystem names, Table has %d rows", len(Table))
@@ -449,7 +449,7 @@ func TestDeriveEcosystemImporters_InternalLeavesCoveredUnconditionally(t *testin
 // TestEcosystemNamesStayInTheTable enforces that ecosystem names live only in
 // Table: every direct importer of this package or of the registryvocab leaf
 // (whose string fields names travel in), and registryvocab itself, reaches an
-// ecosystem fact through its Table row and never re-names the ecosystem as a
+// ecosystem fact through its Table Strategy and never re-names the ecosystem as a
 // bare literal. Targets come from deriveEcosystemImporters, so the set tracks
 // imports with no edit here. internal/registryproxy, which ADR 0047 forbids
 // importing this package, is covered through its registryvocab import.

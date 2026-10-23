@@ -24,7 +24,7 @@ func rowByName(t *testing.T, name string) Strategy {
 	return Strategy{}
 }
 
-// The go row must pass its getenv parameter into ComputeGoBindings rather
+// The go Strategy must pass its getenv parameter into ComputeGoBindings rather
 // than discard the snapshot it is handed.
 func TestGoRowEnvExports(t *testing.T) {
 	row := rowByName(t, "go")
@@ -48,8 +48,8 @@ func TestGoRowEnvExports(t *testing.T) {
 	}
 }
 
-// The pre-#3260 row discarded its routes parameter. A route declaring a go
-// path renders a full-path GOPROXY the row can only produce by passing
+// The pre-#3260 Strategy discarded its routes parameter. A route declaring a go
+// path renders a full-path GOPROXY the Strategy can only produce by passing
 // routes through to ComputeGoBindings.
 func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	row := rowByName(t, "go")
@@ -66,7 +66,7 @@ func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 	}
 }
 
-// A row that gains or loses EnvExports otherwise fails silently: it
+// A Strategy that gains or loses EnvExports otherwise fails silently: it
 // contributes nothing to the export file, or panics a caller.
 func TestTable_EnvExportsPresence(t *testing.T) {
 	want := map[string]bool{
@@ -111,7 +111,7 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 	}
 }
 
-// A single row's own EnvExports output cannot always be diffed against its
+// A single Strategy's own EnvExports output cannot always be diffed against its
 // BindingEnvVar: go's renderer emits its vars conditionally. So this checks
 // each BindingEnvVar against the whole export file, walking EnvExportRows()
 // the way bindings mode does.
@@ -157,8 +157,8 @@ func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	}
 }
 
-// The only caller reaches repo-aware rows by filtering HomeConfigRows(), so
-// a row setting RepoAwareHomeConfig with a nil HomeConfig never runs at all
+// The only caller reaches repo-aware Strategies by filtering HomeConfigRows(), so
+// a Strategy setting RepoAwareHomeConfig with a nil HomeConfig never runs at all
 // (issue #3201).
 func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 	for _, row := range Table {
@@ -169,7 +169,7 @@ func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
 }
 
 // BindHomes announces AnnounceBindingValue by reading the BindingEnvVar export,
-// so a row setting it without naming a var would announce nothing.
+// so a Strategy setting it without naming a var would announce nothing.
 func TestTable_AnnounceBindingValueRequiresBindingEnvVar(t *testing.T) {
 	for _, row := range Table {
 		if row.AnnounceBindingValue && row.BindingEnvVar == "" {
@@ -178,7 +178,7 @@ func TestTable_AnnounceBindingValueRequiresBindingEnvVar(t *testing.T) {
 	}
 }
 
-// Table order is the export-file order, so the stub's export-less row must be
+// Table order is the export-file order, so the stub's export-less Strategy must be
 // skipped without disturbing the rest.
 func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
 	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
@@ -235,7 +235,7 @@ func TestTable_NamesUnique(t *testing.T) {
 	}
 }
 
-// A row added without a classification would silently carry a blank nudge
+// A Strategy added without a classification would silently carry a blank nudge
 // string.
 func TestTable_ClassificationNonEmpty(t *testing.T) {
 	for _, row := range Table {
@@ -245,7 +245,7 @@ func TestTable_ClassificationNonEmpty(t *testing.T) {
 	}
 }
 
-// The want map covers the empty paths too, so a row added without a decision
+// The want map covers the empty paths too, so a Strategy added without a decision
 // on its in-tree registry-config path fails here rather than being silently
 // excluded or included wherever a consumer filters on the field.
 func TestTable_InTreeConfigPath(t *testing.T) {
@@ -269,7 +269,7 @@ func TestTable_InTreeConfigPath(t *testing.T) {
 	}
 }
 
-// The nudge takes the first matching row, so a reorder changes which
+// The nudge takes the first matching Strategy, so a reorder changes which
 // ecosystem a mixed repo classifies as. Catch that here, not in the Box.
 func TestTable_Order(t *testing.T) {
 	want := []string{"cargo", "npm", "yarn", "pnpm", "go", "gradle"}
@@ -284,7 +284,7 @@ func TestTable_Order(t *testing.T) {
 }
 
 // Nothing else in this package asserts on the collected slice's contents, so
-// a row the collector forgets to gather would fail silently: New would just
+// a Strategy the collector forgets to gather would fail silently: New would just
 // never see it.
 func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
 	rows := ResponseRewriteRows()
@@ -314,7 +314,7 @@ func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "npm packument", "npm")
 }
 
-// A row added to Table between cargo and gradle, or a reorder, must fail
+// A Strategy added to Table between cargo and gradle, or a reorder, must fail
 // here rather than pass silently.
 func TestHomeConfigRows_CargoThenGradle(t *testing.T) {
 	var got []string
@@ -332,7 +332,7 @@ func TestHomeConfigRows_CargoThenGradle(t *testing.T) {
 	}
 }
 
-// The cargo row's Render must be CargoConfigTOML itself, not a
+// The cargo Strategy's Render must be CargoConfigTOML itself, not a
 // reimplementation of it.
 func TestCargoRowHomeConfig(t *testing.T) {
 	row := rowByName(t, "cargo")
@@ -359,7 +359,7 @@ func TestCargoRowHomeConfig(t *testing.T) {
 	}
 }
 
-// The gradle row's Render must be GradleInitScript itself, not a
+// The gradle Strategy's Render must be GradleInitScript itself, not a
 // reimplementation of it.
 func TestGradleRowHomeConfig(t *testing.T) {
 	row := rowByName(t, "gradle")
@@ -386,7 +386,7 @@ func TestGradleRowHomeConfig(t *testing.T) {
 	}
 }
 
-// Only cargo and gradle write a home-level config. A row gaining or losing
+// Only cargo and gradle write a home-level config. A Strategy gaining or losing
 // one otherwise just changes HomeConfigRows' count silently.
 func TestTable_HomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
@@ -419,7 +419,7 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 	}
 }
 
-// allDeclaredRoutes declares a path for every ecosystem a row binds an env
+// allDeclaredRoutes declares a path for every ecosystem a Strategy binds an env
 // var for, so one route renders all four bindings at once. go declares its
 // path in the ecosystems block; the npm family declares theirs as tagged
 // enforced paths.
@@ -436,8 +436,8 @@ func allDeclaredRoutes() []registrymanifest.Route {
 	}}
 }
 
-// Some rows carry a retired top-level routes-file key (ADR 0047, issue
-// #3261) predating [routes.ecosystems.<name>] (issue #3403). A row gaining
+// Some Strategies carry a retired top-level routes-file key (ADR 0047, issue
+// #3261) predating [routes.ecosystems.<name>] (issue #3403). A Strategy gaining
 // or losing the key must fail here.
 func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 	want := map[string]string{
@@ -461,7 +461,7 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 
 // registryroutes.mergeRetiredRouteEcosystems resolves keys through this
 // lookup instead of hand-listing ecosystem names, so it must both resolve
-// every declared key and reject one no row declares.
+// every declared key and reject one no Strategy declares.
 func TestRowByRetiredRouteKey(t *testing.T) {
 	for key, wantName := range map[string]string{
 		"cargo-registries": "cargo",

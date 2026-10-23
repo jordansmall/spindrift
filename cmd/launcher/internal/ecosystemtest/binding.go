@@ -13,7 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// bindingOutput is the binding stage's golden. Parts the row does not render
+// bindingOutput is the binding stage's golden. Parts the Strategy does not render
 // are omitted.
 type bindingOutput struct {
 	// NoRoutePrefix is set instead of every other part when the manifest
@@ -53,7 +53,7 @@ func (c *replay) env() (env map[string]string, shipped bool, err error) {
 	return env, true, nil
 }
 
-// binding calls the row's renderers directly: the summary stage drives BindHomes
+// binding calls the Strategy's renderers directly: the summary stage drives BindHomes
 // through a ready gate, but this golden pins each rendering on its own, and
 // ApplyInTree needs a Gate that only a live Forwarder and manifest env build.
 // Like BindHomes, every renderer gets the first route's prefix.

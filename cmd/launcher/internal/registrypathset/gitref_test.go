@@ -14,7 +14,7 @@ import (
 
 func TestDeriveFromGitRef_CommittedConfigDerives(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		synthetic.Row.InTreeConfigPath: "a = https://host.example.com/repo\n",
+		synthetic.Strategy.InTreeConfigPath: "a = https://host.example.com/repo\n",
 	}, nil)
 
 	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
@@ -24,23 +24,23 @@ func TestDeriveFromGitRef_CommittedConfigDerives(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "host.example.com",
 		Origin:   "https://host.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveFromGitRefRows = %+v, want %+v", got, want)
 	}
 }
 
-// Both rows' config paths are nested, pinning that materialization creates
+// Both Strategies' config paths are nested, pinning that materialization creates
 // parent directories rather than only handling repo-root files.
 func TestDeriveFromGitRef_MultipleRowsMaterializeAndDerive(t *testing.T) {
 	twin := synthetic.Twin("synthetic-twin")
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
-		synthetic.Row.InTreeConfigPath: "a = https://first.example.com/repo/first\n",
-		twin.InTreeConfigPath:          "a = https://second.example.com/repo/second\n",
+		synthetic.Strategy.InTreeConfigPath: "a = https://first.example.com/repo/first\n",
+		twin.InTreeConfigPath:               "a = https://second.example.com/repo/second\n",
 	}, nil)
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Row, twin})
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Strategy, twin})
 	if err != nil {
 		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
@@ -66,17 +66,17 @@ func TestDeriveFromGitRef_MultipleRowsMaterializeAndDerive(t *testing.T) {
 func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 	twin := synthetic.Twin("synthetic-twin")
 	bare, src := testutil.BareRepoWithConfigs(t, "main",
-		map[string]string{synthetic.Row.InTreeConfigPath: "a = https://committed.example.com/repo\n"}, nil)
+		map[string]string{synthetic.Strategy.InTreeConfigPath: "a = https://committed.example.com/repo\n"}, nil)
 	testutil.WriteFixture(t, src, twin.InTreeConfigPath, "a = https://uncommitted.example.com/repo\n")
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Row, twin})
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Strategy, twin})
 	if err != nil {
 		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
 	want := []HostPathSet{{
 		Host:     "committed.example.com",
 		Origin:   "https://committed.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveFromGitRefRows = %+v, want only the committed host %+v", got, want)
@@ -95,8 +95,8 @@ func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 	testutil.GitRun(t, src, "commit", "-m", "main seed")
 
 	testutil.GitRun(t, src, "checkout", "-b", "other")
-	testutil.WriteFixture(t, src, synthetic.Row.InTreeConfigPath, "a = https://other-branch.example.com/repo\n")
-	testutil.GitRun(t, src, "add", synthetic.Row.InTreeConfigPath)
+	testutil.WriteFixture(t, src, synthetic.Strategy.InTreeConfigPath, "a = https://other-branch.example.com/repo\n")
+	testutil.GitRun(t, src, "add", synthetic.Strategy.InTreeConfigPath)
 	testutil.GitRun(t, src, "commit", "-m", "other branch config")
 
 	bare := filepath.Join(t.TempDir(), "accum.git")
@@ -163,7 +163,7 @@ func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 	}
 }
 
-// A row that is not in ecosystem.Table is walked end to end: materialized from
+// A Strategy that is not in ecosystem.Table is walked end to end: materialized from
 // the ref, parsed, and derived, proving the rows parameter reaches both stages.
 func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{

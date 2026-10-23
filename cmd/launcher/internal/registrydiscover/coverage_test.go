@@ -10,12 +10,12 @@ import (
 )
 
 // UncoveredHostsRows must surface Extract's error instead of swallowing it. The
-// synthetic parser never fails, so the row under test swaps in one that does;
+// synthetic parser never fails, so the Strategy under test swaps in one that does;
 // the real parsers' malformed-input errors are pinned in the ecosystem package.
 func TestUncoveredHostsRows_ExtractErrorReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "anything")
-	failing := synthetic.Row
+	failing := synthetic.Strategy
 	failing.ConfigParser = func(string) ([]ecosystem.Declaration, bool, error) {
 		return nil, false, errors.New("parse failed")
 	}
@@ -29,7 +29,7 @@ func TestUncoveredHostsRows_ExtractErrorReturnsError(t *testing.T) {
 	}
 }
 
-// Two config files (one per row) declaring the same host must produce one
+// Two config files (one per Strategy) declaring the same host must produce one
 // entry, the first occurrence. Discover's own loop applies the same dedup.
 func TestUncoveredHostsRows_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	dir := t.TempDir()
@@ -37,7 +37,7 @@ func TestUncoveredHostsRows_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	testutil.WriteFixture(t, dir, cfgPath, "a = https://registry.same.example.com/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "b = https://registry.same.example.com\n")
 
-	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Strategy{synthetic.Row, twin})
+	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Strategy{synthetic.Strategy, twin})
 	if err != nil {
 		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestUncoveredHostsRows_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpt
 	}
 }
 
-// A tree with none of the rows' config files, such as no checkout or a
+// A tree with none of the Strategies' config files, such as no checkout or a
 // checkout naming no registry, yields no uncovered hosts rather than an
 // error: nothing declared means nothing to be uncovered.
 func TestUncoveredHostsRows_NoDeclarations_ReturnsEmpty(t *testing.T) {
@@ -101,7 +101,7 @@ func TestUncoveredHostsRows_NoDeclarations_ReturnsEmpty(t *testing.T) {
 func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")
-	rows := []ecosystem.Strategy{synthetic.Row, twin}
+	rows := []ecosystem.Strategy{synthetic.Strategy, twin}
 	testutil.WriteFixture(t, dir, cfgPath, "mycorp = https://one.example.com/index/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "other = https://two.example.com/\n")
 

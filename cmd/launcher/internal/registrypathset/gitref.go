@@ -13,7 +13,7 @@ func DeriveFromGitRef(repoDir, ref string) ([]HostPathSet, error) {
 	return DeriveFromGitRefRows(repoDir, ref, ecosystem.Table)
 }
 
-// DeriveFromGitRefRows is DeriveFromGitRef over the given rows rather than
+// DeriveFromGitRefRows is DeriveFromGitRef over the given Strategies rather than
 // ecosystem.Table.
 func DeriveFromGitRefRows(repoDir, ref string, rows []ecosystem.Strategy) ([]HostPathSet, error) {
 	tmp, cleanup, err := registrydiscover.MaterializeRefRows(repoDir, ref, rows)

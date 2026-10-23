@@ -52,7 +52,7 @@ type Route struct {
 	UpstreamOrigin string
 	Credential     credresolver.Config
 	// Ecosystems is the route's per-ecosystem [routes.ecosystems.<name>]
-	// declaration block (issue #3403), keyed by ecosystem.Table row name. It
+	// declaration block (issue #3403), keyed by ecosystem.Table Strategy name. It
 	// holds every per-ecosystem declaration a route can make; downstream hops
 	// read them back out of this block, not through dedicated fields. Nil when
 	// the route declares nothing per-ecosystem, never an empty map.
@@ -94,7 +94,7 @@ type rawRoute struct {
 	// ecosystem name the operator wrote. Each block stays a bare map so the
 	// per-ecosystem key checks can run by hand against ecosystem.Table and name
 	// the offending route, name, and key; a fixed struct would only ever know
-	// about "path", never a row-specific key like cargo's "registries".
+	// about "path", never a Strategy-specific key like cargo's "registries".
 	Ecosystems map[string]map[string]any `toml:"ecosystems"`
 }
 
@@ -105,7 +105,7 @@ func Parse(data []byte) ([]Route, error) {
 	return ParseRows(data, ecosystem.Table)
 }
 
-// ParseRows is Parse over the given rows rather than ecosystem.Table.
+// ParseRows is Parse over the given Strategies rather than ecosystem.Table.
 func ParseRows(data []byte, rows []ecosystem.Strategy) ([]Route, error) {
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -245,8 +245,8 @@ var retiredRouteKeys = []struct {
 }
 
 // buildRouteEcosystems builds rr's Ecosystems block, validating each declared
-// block against the matching row. It walks the rows in order, then any name
-// the rows don't know, sorted, so an unknown name is reported
+// block against the matching Strategy. It walks the Strategies in order, then any name
+// the Strategies don't know, sorted, so an unknown name is reported
 // deterministically. The result is nil, not empty, when rr declares nothing
 // per-ecosystem (registryvocab.RouteEcosystems' "absent is nil" convention).
 func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Strategy) (registryvocab.RouteEcosystems, error) {
@@ -451,7 +451,7 @@ func mergeRetiredRouteEcosystems(label string, rr rawRoute) (map[string]map[stri
 		}
 		row, ok := ecosystem.RowByRetiredRouteKey(entry.key)
 		if !ok {
-			// Broken invariant (a row dropping its RetiredRouteKey), not
+			// Broken invariant (a Strategy dropping its RetiredRouteKey), not
 			// operator input: rr declared this key, so skipping it would
 			// silently drop it from the printed stanza.
 			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no ecosystem.Table row", entry.key))
@@ -562,7 +562,7 @@ func tomlKey(key string) string {
 // tomlValue renders one decoded free-form value back as TOML: a credential
 // value or an ecosystem declaration's, each a string or an array of them.
 // Anything else renders as a quoted Go rendering rather than being dropped
-// silently, since the row's own RouteDeclaration hook names it precisely once
+// silently, since the Strategy's own RouteDeclaration hook names it precisely once
 // the operator has migrated off the retired key; a credential value never gets
 // here, as ParseRows validates the credential before any stanza renders.
 func tomlValue(v any) string {

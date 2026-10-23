@@ -38,7 +38,7 @@ func TestClassify_TableOrderDecidesPrecedence(t *testing.T) {
 
 // Order is asserted, not just membership: the verb's apply/revert loop
 // iterates InTreeBindings() in whatever order it returns, so npm/yarn/pnpm
-// must match ecosystem.Table's own order (issue #3180, rows from issue
+// must match ecosystem.Table's own order (issue #3180, Strategies from issue
 // #2933). cargo is absent by design (issue #3201), pinned by
 // TestInTreeBindings_ExcludesCargo below.
 func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
@@ -63,7 +63,7 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 	}
 }
 
-// Cargo's ecosystem.Table row keeps a non-empty InTreeConfigPath for
+// Cargo's ecosystem.Table Strategy keeps a non-empty InTreeConfigPath for
 // host-side discovery but carries a non-nil RepoAwareHomeConfig, so
 // InTreeBindings' filter must exclude it (issue #3201). A regression would
 // dual-write the in-tree rewrite and cargo's source-replacement home config,

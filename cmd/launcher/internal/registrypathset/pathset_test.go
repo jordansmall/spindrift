@@ -22,14 +22,14 @@ func (s HostPathSet) admits(requestPath string) bool {
 	return roots.Admits(requestPath)
 }
 
-var syntheticRows = []ecosystem.Strategy{synthetic.Row}
+var syntheticRows = []ecosystem.Strategy{synthetic.Strategy}
 
-// deriveSynthetic writes body to the synthetic row's config path in a fresh dir
-// and derives over that row alone.
+// deriveSynthetic writes body to the synthetic Strategy's config path in a fresh dir
+// and derives over that Strategy alone.
 func deriveSynthetic(t *testing.T, body string) []HostPathSet {
 	t.Helper()
 	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, body)
+	testutil.WriteFixture(t, dir, synthetic.Strategy.InTreeConfigPath, body)
 	got, err := DeriveRows(dir, syntheticRows)
 	if err != nil {
 		t.Fatalf("DeriveRows: unexpected error: %v", err)
@@ -49,8 +49,8 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 		Host:   "artifacts.example.com",
 		Origin: "https://artifacts.example.com",
 		Subtrees: []registryvocab.Subtree{
-			{Ecosystem: synthetic.Row.Name, Path: "/artifactory/api/internal/index", RegistryName: "internal"},
-			{Ecosystem: synthetic.Row.Name, Path: "/artifactory/api/remote/index", RegistryName: "remote"},
+			{Ecosystem: synthetic.Strategy.Name, Path: "/artifactory/api/internal/index", RegistryName: "internal"},
+			{Ecosystem: synthetic.Strategy.Name, Path: "/artifactory/api/remote/index", RegistryName: "remote"},
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -68,8 +68,8 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 		Host:   "host.example.com",
 		Origin: "https://host.example.com",
 		Subtrees: []registryvocab.Subtree{
-			{Ecosystem: synthetic.Row.Name, Path: "/one", RegistryName: "a"},
-			{Ecosystem: synthetic.Row.Name, Path: "/two", RegistryName: "b"},
+			{Ecosystem: synthetic.Strategy.Name, Path: "/one", RegistryName: "a"},
+			{Ecosystem: synthetic.Strategy.Name, Path: "/two", RegistryName: "b"},
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
@@ -78,7 +78,7 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 }
 
 // The two hosts differ only in case deliberately: equivalent hosts but distinct
-// strings, so a row's byte-equal dedupe would pass both through and Derive's
+// strings, so a Strategy's byte-equal dedupe would pass both through and Derive's
 // own dedupe, over the registryvocab.HostKey-folded host, is what must collapse
 // them.
 func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
@@ -86,7 +86,7 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "x.example.com",
 		Origin:   "https://x.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveRows = %+v, want %+v", got, want)
@@ -101,7 +101,7 @@ func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "::1",
 		Origin:   "http://[::1]",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo", RegistryName: "a"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveRows = %+v, want %+v", got, want)
@@ -109,7 +109,7 @@ func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 }
 
 // Absence of declaration means absence of binding: neither an empty repo nor
-// one declaring only another row may derive a path for the synthetic row,
+// one declaring only another Strategy may derive a path for the synthetic Strategy,
 // because nothing in the snapshot names a registry for it.
 func TestDerive_NoDeclarationDerivesNoPaths(t *testing.T) {
 	t.Run("empty repo", func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "registry.example.com",
 		Origin:   "https://registry.example.com",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/", RegistryName: "a"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveRows = %+v, want %+v", got, want)
@@ -172,7 +172,7 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 	want := []HostPathSet{{
 		Host:     "host.example.com",
 		Origin:   "https://HOST.example.com:8443",
-		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/repo/index", RegistryName: "a"}},
+		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo/index", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DeriveRows = %+v, want %+v", got, want)
@@ -182,7 +182,7 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 // This test is acceptance criterion 3, over the shape the 2026-09-04 field run
 // hit: an internal and a remote registry on one Artifactory host. The derived
 // set must admit that run's real request paths and refuse the host's other API
-// endpoints. A real-row twin of this shape lives in the ecosystem corpus
+// endpoints. A real-Strategy twin of this shape lives in the ecosystem corpus
 // (replaced-source-two-registries), which also covers a source replacement.
 func TestDerive_TwoRegistriesOneHostAdmitsOnlyDeclaredSubtrees(t *testing.T) {
 	got := deriveSynthetic(t, `
@@ -232,17 +232,17 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 	}
 }
 
-// ecosystem.TestConfigParserMatchesInTreeConfigPath proves an in-tree row has a
-// parser; this one proves a row's declaration reaches a subtree. A row whose
+// ecosystem.TestConfigParserMatchesInTreeConfigPath proves an in-tree Strategy has a
+// parser; this one proves a Strategy's declaration reaches a subtree. A Strategy whose
 // config parses but derives no path would leave the proxy refusing every
-// request that row makes, with no other test failing. The ecosystem corpus
-// proves the same for each ecosystem.Table row.
+// request that Strategy makes, with no other test failing. The ecosystem corpus
+// proves the same for each ecosystem.Table Strategy.
 func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 	got := deriveSynthetic(t, "a = https://registry.example.com/repo/index\n")
 	found := false
 	for _, hps := range got {
 		for _, s := range hps.Subtrees {
-			if s.Ecosystem != synthetic.Row.Name {
+			if s.Ecosystem != synthetic.Strategy.Name {
 				continue
 			}
 			found = true
@@ -252,7 +252,7 @@ func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("DeriveRows = %+v, want a %s subtree", got, synthetic.Row.Name)
+		t.Errorf("DeriveRows = %+v, want a %s subtree", got, synthetic.Strategy.Name)
 	}
 }
 
@@ -261,9 +261,9 @@ func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 // this.
 func TestDerive_DeterministicOverSnapshot(t *testing.T) {
 	twin := synthetic.Twin("synthetic-twin")
-	rows := []ecosystem.Strategy{synthetic.Row, twin}
+	rows := []ecosystem.Strategy{synthetic.Strategy, twin}
 	dir := t.TempDir()
-	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, `
+	testutil.WriteFixture(t, dir, synthetic.Strategy.InTreeConfigPath, `
 zeta = https://artifacts.example.com/artifactory/api/zeta/index
 alpha = https://artifacts.example.com/artifactory/api/alpha/index
 a = https://one.example.com/repo
@@ -285,7 +285,7 @@ b = https://other.example.com/repo
 }
 
 // scopedRow reads `name url [scoped]` lines so a test can declare a scoped
-// registry, which the synthetic row's parser never does.
+// registry, which the synthetic Strategy's parser never does.
 var scopedRow = ecosystem.Strategy{
 	Name:             "scopedfake",
 	InTreeConfigPath: ".scopedfake/registries",

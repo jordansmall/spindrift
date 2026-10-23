@@ -93,8 +93,8 @@ func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 	}
 }
 
-// Both halves of the summary's skip rule: a BindingEnvVar row is named only when
-// the rendered exports carry its var, while a HomeConfig row is named
+// Both halves of the summary's skip rule: a BindingEnvVar Strategy is named only when
+// the rendered exports carry its var, while a HomeConfig Strategy is named
 // unconditionally because its file is always written.
 func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
 	rows := []ecosystem.Strategy{
@@ -177,9 +177,9 @@ func TestDropCollidedRoutes_SkipsCaseVariantOfCollidedUpstreamHost(t *testing.T)
 }
 
 // stubRouteBlock is a neutral per-ecosystem route declaration, standing in for
-// a real row's block where only the route's host matters.
+// a real Strategy's block where only the route's host matters.
 func stubRouteBlock(names ...string) registryvocab.RouteEcosystems {
 	return registryvocab.RouteEcosystems{
-		synthetic.Row.Name: registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue(names)},
+		synthetic.Strategy.Name: registryvocab.RouteDeclaration{"registries": registryvocab.StringsValue(names)},
 	}
 }

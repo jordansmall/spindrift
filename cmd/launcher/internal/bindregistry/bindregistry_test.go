@@ -9,9 +9,9 @@ import (
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 )
 
-// classifyRows are in precedence order: the synthetic row before a neutral second.
+// classifyRows are in precedence order: the synthetic Strategy before a neutral second.
 var classifyRows = []ecosystem.Strategy{
-	synthetic.Row,
+	synthetic.Strategy,
 	{Name: "second", LockfileNames: []string{"second.lock"}, Classification: "second-class"},
 }
 
@@ -30,9 +30,9 @@ func TestClassifyRows_NoLockfile(t *testing.T) {
 	}
 }
 
-// Row order decides the winner when several lockfiles are present, not
+// Strategy order decides the winner when several lockfiles are present, not
 // alphabetical or map iteration order: "second.lock" sorts before
-// "synthetic.lock" yet loses to it, and the reversed rows must flip the result.
+// "synthetic.lock" yet loses to it, and the reversed Strategies must flip the result.
 func TestClassifyRows_Precedence(t *testing.T) {
 	dir := t.TempDir()
 	writeEmpty(t, dir, "synthetic.lock")
@@ -77,7 +77,7 @@ func TestClassifyRows_IgnoresDirectory(t *testing.T) {
 	}
 }
 
-// ClassifyRows reads only the rows it is handed, so a row proves its own
+// ClassifyRows reads only the Strategies it is handed, so a Strategy proves its own
 // lockfile classification.
 func TestClassifyRows_UsesOnlyTheGivenRows(t *testing.T) {
 	dir := t.TempDir()

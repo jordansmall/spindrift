@@ -2,7 +2,7 @@ package ecosystem
 
 // Declaration is one registry declaration extracted from a committed config file.
 type Declaration struct {
-	Ecosystem       string // stamped by the walker from the matching Table row's Name
+	Ecosystem       string // stamped by the walker from the matching Table Strategy's Name
 	ConfigPath      string // repo-relative path it came from
 	Host            string // url.URL.Host (hostname, plus ":port" if present)
 	UpstreamBaseURL string // absolute http(s) URL, trailing "/" trimmed

@@ -31,7 +31,7 @@ func newProxy(t *testing.T, rows []registryvocab.RewriteRow, routes []Route) (ht
 // naming a real ecosystem.
 func newWithSyntheticRow(t *testing.T, routes ...Route) (http.Handler, []Route) {
 	t.Helper()
-	return newProxy(t, synthetic.Row.RewriteRows, routes)
+	return newProxy(t, synthetic.Strategy.RewriteRows, routes)
 }
 
 // syntheticRoute builds the registry.example.com Route that the synthetic row

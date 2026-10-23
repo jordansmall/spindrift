@@ -19,15 +19,15 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// These tests drive route resolution over the synthetic row and a twin of it,
-// so a host can declare two ecosystems at once; the real rows' declaration
+// These tests drive route resolution over the synthetic Strategy and a twin of it,
+// so a host can declare two ecosystems at once; the real Strategies' declaration
 // shapes are pinned by the ecosystem corpora under
 // internal/ecosystem/testdata/corpus.
 var (
 	twinRow     = synthetic.Twin("twin")
 	otherRow    = synthetic.Twin("other")
-	resolveRows = []ecosystem.Strategy{synthetic.Row, twinRow}
-	threeRows   = []ecosystem.Strategy{synthetic.Row, twinRow, otherRow}
+	resolveRows = []ecosystem.Strategy{synthetic.Strategy, twinRow}
+	threeRows   = []ecosystem.Strategy{synthetic.Strategy, twinRow, otherRow}
 )
 
 // Production reaches the read-error wrapper only through
@@ -127,7 +127,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_HAPPY_CRED" }
 // A [routes.ecosystems.<name>] block (ADR 0048, issue #3405) is read straight
 // onto the Route's Ecosystems block, the only place a per-ecosystem declaration
 // travels from here on (issues #3259, #3404): the generic path key and a key
-// only the row's own RouteDeclaration accepts.
+// only the Strategy's own RouteDeclaration accepts.
 func TestResolveRegistryRoutesFromFile_RouteDeclarationBlockReadIntoEcosystems(t *testing.T) {
 	path := writeRoutesFile(t, `
 [[routes]]
@@ -145,10 +145,10 @@ mirror-path = "/other"
 	if len(routes) != 1 {
 		t.Fatalf("resolveRegistryRoutesFromFile() = %d routes, want 1", len(routes))
 	}
-	if want := "/mirror"; routes[0].Ecosystems.Path(synthetic.Row.Name) != want {
-		t.Errorf("routes[0].Ecosystems.Path(synthetic) = %q, want %q", routes[0].Ecosystems.Path(synthetic.Row.Name), want)
+	if want := "/mirror"; routes[0].Ecosystems.Path(synthetic.Strategy.Name) != want {
+		t.Errorf("routes[0].Ecosystems.Path(synthetic) = %q, want %q", routes[0].Ecosystems.Path(synthetic.Strategy.Name), want)
 	}
-	if got, want := routes[0].Ecosystems[synthetic.Row.Name]["mirror-path"], "/other"; got != want {
+	if got, want := routes[0].Ecosystems[synthetic.Strategy.Name]["mirror-path"], "/other"; got != want {
 		t.Errorf("routes[0].Ecosystems[synthetic][mirror-path] = %v, want %q", got, want)
 	}
 }
@@ -187,7 +187,7 @@ mirror-path = "/other"
 	if routes[0].Prefix == "" {
 		t.Error("routes[0].Prefix is empty, want AssignPrefixes to have set it")
 	}
-	if got, want := routes[0].Ecosystems[synthetic.Row.Name]["mirror-path"], "/other"; got != want {
+	if got, want := routes[0].Ecosystems[synthetic.Strategy.Name]["mirror-path"], "/other"; got != want {
 		t.Errorf("routes[0].Ecosystems[synthetic][mirror-path] = %v, want %q", got, want)
 	}
 }
@@ -283,7 +283,7 @@ match-host = "host.example.com"
 // closed naming its own match-host.
 func TestBuildRegistryProxyRoutes_HostRooted_NoMatchingHost_FailsClosed(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://other.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://other.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -310,7 +310,7 @@ match-host = "host.example.com"
 
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstreamAndEnforcedPaths(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -349,7 +349,7 @@ func TestBuildRegistryProxyRoutes_HostRooted_DerivesUpstream_UnderGHHost(t *test
 	t.Setenv("GH_HOST", "ghe.example.com")
 
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -375,7 +375,7 @@ match-host = "host.example.com"
 // both the derived and the allow-declared path.
 func TestBuildRegistryProxyRoutes_HostRooted_AllowExtendsDerivedPaths(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -421,7 +421,7 @@ func TestBuildRegistryProxyRoutes_HostRooted_AllowPathForwardsLikeDerivedPath(t 
 
 	repoDir := t.TempDir()
 	upstreamHost := strings.TrimPrefix(strings.TrimPrefix(upstream.URL, "http://"), "https://")
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = http://"+upstreamHost+"/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = http://"+upstreamHost+"/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -485,7 +485,7 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 // must get its own tag.
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 	testutil.WriteFixture(t, repoDir, twinRow.InTreeConfigPath, "main = https://host.example.com/two\n")
 
 	origDir := registryRouteDriftRepoDirFn
@@ -511,7 +511,7 @@ match-host = "host.example.com"
 	}
 	got := routes[0].EnforcedSubtrees
 	want := []registryvocab.Subtree{
-		{Ecosystem: synthetic.Row.Name, Path: "/index"},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/index"},
 		{Ecosystem: twinRow.Name, Path: "/two"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -529,7 +529,7 @@ func TestApplyToRoute_TrimsTrailingSlashFromOrigin(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com/",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -552,8 +552,8 @@ func TestApplyToRoute_CarriesScopedIntoEnforcedSubtrees(t *testing.T) {
 			Host:   "host.example.com",
 			Origin: "https://host.example.com",
 			Subtrees: []registryvocab.Subtree{
-				{Ecosystem: synthetic.Row.Name, Path: "/scoped", Scoped: true},
-				{Ecosystem: synthetic.Row.Name, Path: "/plain"},
+				{Ecosystem: synthetic.Strategy.Name, Path: "/scoped", Scoped: true},
+				{Ecosystem: synthetic.Strategy.Name, Path: "/plain"},
 			},
 		},
 	}
@@ -563,8 +563,8 @@ func TestApplyToRoute_CarriesScopedIntoEnforcedSubtrees(t *testing.T) {
 		t.Fatalf("registrypathset.ApplyToRoute() error = %v, want nil", err)
 	}
 	want := []registryvocab.Subtree{
-		{Ecosystem: synthetic.Row.Name, Path: "/scoped", Scoped: true},
-		{Ecosystem: synthetic.Row.Name, Path: "/plain"},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/scoped", Scoped: true},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/plain"},
 	}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, want) {
 		t.Errorf("EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, want)
@@ -600,7 +600,7 @@ func TestApplyToRoute_AllowAppendsAfterDerivedPaths(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -622,7 +622,7 @@ func TestApplyToRoute_AllowDuplicatingDerivedPathIsNotRepeated(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -645,7 +645,7 @@ func TestApplyToRoute_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems(
 			Host:   "host.example.com",
 			Origin: "https://host.example.com",
 			Subtrees: []registryvocab.Subtree{
-				{Ecosystem: synthetic.Row.Name, Path: "/index-a"},
+				{Ecosystem: synthetic.Strategy.Name, Path: "/index-a"},
 				{Ecosystem: twinRow.Name, Path: "/index"},
 			},
 		},
@@ -658,7 +658,7 @@ func TestApplyToRoute_EnforcedSubtreesKeepsEveryEcosystemTagFromMixedEcosystems(
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/index-a", "/index"}) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedPaths = %v, want %v", got.EnforcedPaths, []string{"/index-a", "/index"})
 	}
-	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index-a"}, {Ecosystem: twinRow.Name, Path: "/index"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index-a"}, {Ecosystem: twinRow.Name, Path: "/index"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedSubtrees = %v, want %v", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -674,8 +674,8 @@ func TestApplyToRoute_EnforcedSubtreesTwoSameEcosystemSubtreesInDerivationOrder(
 			Host:   "host.example.com",
 			Origin: "https://host.example.com",
 			Subtrees: []registryvocab.Subtree{
-				{Ecosystem: synthetic.Row.Name, Path: "/index-a"},
-				{Ecosystem: synthetic.Row.Name, Path: "/index-b"},
+				{Ecosystem: synthetic.Strategy.Name, Path: "/index-a"},
+				{Ecosystem: synthetic.Strategy.Name, Path: "/index-b"},
 			},
 		},
 	}
@@ -684,7 +684,7 @@ func TestApplyToRoute_EnforcedSubtreesTwoSameEcosystemSubtreesInDerivationOrder(
 	if err != nil {
 		t.Fatalf("registrypathset.ApplyToRoute() error = %v, want nil", err)
 	}
-	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index-a"}, {Ecosystem: synthetic.Row.Name, Path: "/index-b"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index-a"}, {Ecosystem: synthetic.Strategy.Name, Path: "/index-b"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedSubtrees = %v, want %v", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -701,7 +701,7 @@ func TestApplyToRoute_EcosystemsBlockDeclaredPathLandsTaggedSubtree(t *testing.T
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -714,7 +714,7 @@ func TestApplyToRoute_EcosystemsBlockDeclaredPathLandsTaggedSubtree(t *testing.T
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
 	wantSubtrees := []registryvocab.Subtree{
-		{Ecosystem: synthetic.Row.Name, Path: "/index"},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/index"},
 		{Ecosystem: twinRow.Name, Path: "/declared"},
 	}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
@@ -732,7 +732,7 @@ func TestApplyToRoute_DeclaredPathCollidingWithAllowStillTagsSubtree(t *testing.
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -743,7 +743,7 @@ func TestApplyToRoute_DeclaredPathCollidingWithAllowStillTagsSubtree(t *testing.
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/index", "/mirror"}) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedPaths = %v, want %v (duplicate /mirror collapsed to one entry)", got.EnforcedPaths, []string{"/index", "/mirror"})
 	}
-	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}, {Ecosystem: twinRow.Name, Path: "/mirror"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}, {Ecosystem: twinRow.Name, Path: "/mirror"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedSubtrees = %v, want %v (declared path must still tag EnforcedSubtrees despite colliding with Allow)", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -758,7 +758,7 @@ func TestApplyToRoute_DeclaredPathCollidingWithDerivedSubtreeStillTagsSubtree(t 
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -769,7 +769,7 @@ func TestApplyToRoute_DeclaredPathCollidingWithDerivedSubtreeStillTagsSubtree(t 
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/index"}) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedPaths = %v, want %v (duplicate /index collapsed to one entry)", got.EnforcedPaths, []string{"/index"})
 	}
-	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}, {Ecosystem: twinRow.Name, Path: "/index"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}, {Ecosystem: twinRow.Name, Path: "/index"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedSubtrees = %v, want %v (declared path must still tag EnforcedSubtrees despite colliding with an already-derived path)", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -780,7 +780,7 @@ func TestApplyToRoute_DeclaredPathCollidingWithDerivedSubtreeStillTagsSubtree(t 
 // established one, landing in both EnforcedPaths and EnforcedSubtrees.
 func TestBuildRegistryProxyRoutes_HostRooted_DeclaredPathRidesAlongWithDerivedSubtree(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -812,7 +812,7 @@ path = "/mirror"
 		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
 	wantSubtrees := []registryvocab.Subtree{
-		{Ecosystem: synthetic.Row.Name, Path: "/index"},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/index"},
 		{Ecosystem: twinRow.Name, Path: "/mirror"},
 	}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
@@ -853,15 +853,15 @@ path = "/mirror"
 	if !strings.Contains(err.Error(), "ecosystems.twin.path") {
 		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to mention ecosystems.twin.path's limitation", err.Error())
 	}
-	wantAdvice := "declare a discoverable " + synthetic.Row.Name + "/" + twinRow.Name + " registry"
+	wantAdvice := "declare a discoverable " + synthetic.Strategy.Name + "/" + twinRow.Name + " registry"
 	if !strings.Contains(err.Error(), wantAdvice) {
 		t.Errorf("buildRegistryProxyRoutes() error = %q, want it to contain %q", err.Error(), wantAdvice)
 	}
 }
 
-// A route declaring no path for a row must leave EnforcedSubtrees free of any
-// entry tagged for that row, even with another row's declared path present. A
-// stray tag would make that row's binding renderer bind a registry the operator
+// A route declaring no path for a Strategy must leave EnforcedSubtrees free of any
+// entry tagged for that Strategy, even with another Strategy's declared path present. A
+// stray tag would make that Strategy's binding renderer bind a registry the operator
 // never asked for, aimed at another ecosystem's subtree.
 func TestApplyToRoute_UndeclaredRowTagsNoSubtree(t *testing.T) {
 	route := registryproxy.Route{MatchHost: "host.example.com", Ecosystems: registryvocab.RouteEcosystems{twinRow.Name: registryvocab.RouteDeclaration{"path": "/declared"}}}
@@ -869,7 +869,7 @@ func TestApplyToRoute_UndeclaredRowTagsNoSubtree(t *testing.T) {
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -884,8 +884,8 @@ func TestApplyToRoute_UndeclaredRowTagsNoSubtree(t *testing.T) {
 	}
 }
 
-// Two rows' declared paths serve unrelated ecosystems, so applying one must
-// never exclude the other. Their blocks land in row order, not declaration
+// Two Strategies' declared paths serve unrelated ecosystems, so applying one must
+// never exclude the other. Their blocks land in Strategy order, not declaration
 // order, because declaredPaths walks the rows slice in its own load-bearing
 // order.
 func TestApplyToRoute_TwoDeclaredPathsCoexistBothTaggedInRowOrder(t *testing.T) {
@@ -894,7 +894,7 @@ func TestApplyToRoute_TwoDeclaredPathsCoexistBothTaggedInRowOrder(t *testing.T) 
 		"host.example.com": {
 			Host:     "host.example.com",
 			Origin:   "https://host.example.com",
-			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}},
+			Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}},
 		},
 	}
 
@@ -907,7 +907,7 @@ func TestApplyToRoute_TwoDeclaredPathsCoexistBothTaggedInRowOrder(t *testing.T) 
 		t.Errorf("registrypathset.ApplyToRoute() EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
 	wantSubtrees := []registryvocab.Subtree{
-		{Ecosystem: synthetic.Row.Name, Path: "/index"},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/index"},
 		{Ecosystem: twinRow.Name, Path: "/declared"},
 		{Ecosystem: otherRow.Name, Path: "/other-mirror"},
 	}
@@ -916,14 +916,14 @@ func TestApplyToRoute_TwoDeclaredPathsCoexistBothTaggedInRowOrder(t *testing.T) 
 	}
 }
 
-// Issue #3403: one host-rooted route may declare several rows' blocks together,
-// applied in row order. A block carrying no path, only a row-specific key, adds
+// Issue #3403: one host-rooted route may declare several Strategies' blocks together,
+// applied in Strategy order. A block carrying no path, only a Strategy-specific key, adds
 // nothing to EnforcedPaths or EnforcedSubtrees and needs no origin of its own;
-// the key must still survive resolution. The real rows' non-path keys are pinned
+// the key must still survive resolution. The real Strategies' non-path keys are pinned
 // by the ecosystem corpora (cargo's registries-declared).
 func TestBuildRegistryProxyRoutes_HostRooted_DeclarationBlocksCoexist(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -962,7 +962,7 @@ mirror-path = "/keyed"
 		t.Errorf("routes[0].EnforcedPaths = %v, want %v", got.EnforcedPaths, wantPaths)
 	}
 	wantSubtrees := []registryvocab.Subtree{
-		{Ecosystem: synthetic.Row.Name, Path: "/index"},
+		{Ecosystem: synthetic.Strategy.Name, Path: "/index"},
 		{Ecosystem: twinRow.Name, Path: "/declared"},
 		{Ecosystem: otherRow.Name, Path: "/other-mirror"},
 	}
@@ -976,7 +976,7 @@ mirror-path = "/keyed"
 	if want := "/other-mirror"; got.Ecosystems.Path(otherRow.Name) != want {
 		t.Errorf("routes[0].Ecosystems.Path(other) = %q, want %q", got.Ecosystems.Path(otherRow.Name), want)
 	}
-	if gotKey, want := got.Ecosystems[synthetic.Row.Name]["mirror-path"], "/keyed"; gotKey != want {
+	if gotKey, want := got.Ecosystems[synthetic.Strategy.Name]["mirror-path"], "/keyed"; gotKey != want {
 		t.Errorf("routes[0].Ecosystems[synthetic][mirror-path] = %v, want %q", gotKey, want)
 	}
 }
@@ -985,7 +985,7 @@ mirror-path = "/keyed"
 // propagates Parse's retirement error unwrapped, so a routes file still spelling
 // a retired key never reaches buildRegistryProxyRoutes. The error must name the
 // route and the retired key. The retired per-ecosystem keys are fixed names of
-// real rows, so this uses enforce-allowlist; the ecosystem corpora's
+// real Strategies, so this uses enforce-allowlist; the ecosystem corpora's
 // retired-route-key cases pin the per-ecosystem ones.
 func TestResolveRegistryRoutesFromFile_RetiredRouteKeyRefusedAtLaunchGate(t *testing.T) {
 	path := writeRoutesFile(t, `
@@ -1254,7 +1254,7 @@ func minimalValidLocalConfigForRoutes(accumRepo string) config {
 // registryRouteDriftRepoDirFn is stubbed to t.Fatal, so a fallback to the
 // cwd-checkout branch fails loudly.
 func TestBuildRegistryProxyRoutes_HostRooted_Local_DerivesFromAccumulationRepo(t *testing.T) {
-	accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	orig := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) {
@@ -1298,8 +1298,8 @@ func TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored(t *
 		t.Fatalf("SeedAccumulationRepo() error = %v, want nil", err)
 	}
 
-	testutil.WriteFixture(t, checkout, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
-	mustRunGit(t, checkout, "add", synthetic.Row.InTreeConfigPath)
+	testutil.WriteFixture(t, checkout, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
+	mustRunGit(t, checkout, "add", synthetic.Strategy.InTreeConfigPath)
 	mustRunGit(t, checkout, "commit", "-m", "add registry config, never pushed to accum")
 
 	path := writeRoutesFile(t, `
@@ -1366,7 +1366,7 @@ match-host = "host.example.com"
 // origin wins while the derived subtrees stay as they were.
 func TestBuildRegistryProxyRoutes_UpstreamOrigin_OverridesDerivedOrigin(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://host.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -1397,7 +1397,7 @@ upstream-origin = "https://host.example.com:8443"
 	if !reflect.DeepEqual(got.EnforcedPaths, []string{"/index"}) {
 		t.Errorf("routes[0].EnforcedPaths = %v, want the derived %v", got.EnforcedPaths, []string{"/index"})
 	}
-	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Row.Name, Path: "/index"}}
+	wantSubtrees := []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/index"}}
 	if !reflect.DeepEqual(got.EnforcedSubtrees, wantSubtrees) {
 		t.Errorf("routes[0].EnforcedSubtrees = %+v, want %+v", got.EnforcedSubtrees, wantSubtrees)
 	}
@@ -1409,7 +1409,7 @@ upstream-origin = "https://host.example.com:8443"
 // outcome for a route that declares no path to admit.
 func TestBuildRegistryProxyRoutes_UpstreamOrigin_UndeclaredHost_ResolvesEmpty(t *testing.T) {
 	repoDir := t.TempDir()
-	testutil.WriteFixture(t, repoDir, synthetic.Row.InTreeConfigPath, "main = https://other.example.com/index\n")
+	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://other.example.com/index\n")
 
 	origDir := registryRouteDriftRepoDirFn
 	registryRouteDriftRepoDirFn = func() (string, error) { return repoDir, nil }
@@ -1540,7 +1540,7 @@ func TestApplyToRoute_DeclaredPathLandsUnscopedEvenBesideDerivedScopedDuplicate(
 		},
 	}
 
-	got, err := registrypathset.ApplyToRoute(route, sets, []ecosystem.Strategy{synthetic.Row, twinRow, otherRow})
+	got, err := registrypathset.ApplyToRoute(route, sets, []ecosystem.Strategy{synthetic.Strategy, twinRow, otherRow})
 	if err != nil {
 		t.Fatalf("registrypathset.ApplyToRoute() error = %v, want nil", err)
 	}

@@ -17,16 +17,16 @@ import (
 // the write site and the cleanup site cannot drift into two prefixes.
 const intreebindingTempFilePattern = ".intreebinding-*"
 
-// InTreeBindings is InTreeBindingsOf over ecosystem.Table, the production rows.
+// InTreeBindings is InTreeBindingsOf over ecosystem.Table, the production Strategies.
 func InTreeBindings() []ecosystem.Strategy { return InTreeBindingsOf(ecosystem.Table) }
 
-// InTreeBindingsOf returns every row whose registry pin lives in a tracked config
-// file rather than an env var (ADR 0044), in rows order: npm's .npmrc, yarn
+// InTreeBindingsOf returns every Strategy whose registry pin lives in a tracked config
+// file rather than an env var (ADR 0044), in Strategies order: npm's .npmrc, yarn
 // berry's .yarnrc.yml (issue #2856), and pnpm's pnpm-workspace.yaml (issue #2855).
 func InTreeBindingsOf(all []ecosystem.Strategy) []ecosystem.Strategy {
 	var rows []ecosystem.Strategy
 	for _, row := range all {
-		// A row with a RepoAwareHomeConfig binds by re-rendering that home config
+		// A Strategy with a RepoAwareHomeConfig binds by re-rendering that home config
 		// once the Target repo is on disk (issue #3201), and the two rewrites do
 		// not compose: once one swaps the index host away, the other has nothing
 		// left to key off. Cargo is that case, and keeps a non-empty
@@ -57,7 +57,7 @@ func isTracked(repoDir, relPath string) (bool, error) {
 
 // ApplyOutcome classifies why ApplyInTreeBinding did or did not rewrite
 // configPath. The verb layer decides two other conditions that suppress an
-// in-tree rewrite before any row is considered, so they have no value here: a
+// in-tree rewrite before any Strategy is considered, so they have no value here: a
 // registry proxy manifest (ADR 0045) carrying no route upstream host, and an
 // unreachable manifest endpoint (issue #3082).
 type ApplyOutcome int
@@ -218,16 +218,16 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostR
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
 
 	// Callers must not run ApplyInTreeBinding and RevertInTreeBinding
-	// concurrently for rows in the same repo: npm, yarn, and pnpm share the
-	// repo-root configDir, so one row's sweep would delete another row's
-	// in-flight temp file. applyInTree loops its rows sequentially.
+	// concurrently for Strategies in the same repo: npm, yarn, and pnpm share the
+	// repo-root configDir, so one Strategy's sweep would delete another Strategy's
+	// in-flight temp file. applyInTree loops its Strategies sequentially.
 	sweepOrphanedTempFiles(filepath.Dir(configPath))
 
 	// configPath may be a symlink, which git tracks as blob mode 120000. os.Stat
 	// and os.ReadFile follow it, matching `sed -i`, so a dangling link is ENOENT
 	// here and IsRegular below no-ops on a directory, fifo, or device: reading a
 	// fifo or /dev/zero hangs or OOMs (issue #2933). Hard-erroring on a symlink,
-	// as #2932 first did, aborted every row in the call.
+	// as #2932 first did, aborted every Strategy in the call.
 	info, statErr := os.Stat(configPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -473,8 +473,8 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Strategy) (reverted bool,
 	return true, nil
 }
 
-// RevertInTreeBindings reverts every row in rows, continuing past a per-row
-// error so one row's failure cannot strand the rest, and reports whether any
+// RevertInTreeBindings reverts every Strategy in rows, continuing past a per-Strategy
+// error so one Strategy's failure cannot strand the rest, and reports whether any
 // failed. Each outcome is narrated to w; who prefixes a failure line.
 func RevertInTreeBindings(workDir string, rows []ecosystem.Strategy, who string, w io.Writer) (failed bool) {
 	for _, row := range rows {

@@ -14,9 +14,9 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// Every drift test runs on the synthetic row, so none writes a real config
+// Every drift test runs on the synthetic Strategy, so none writes a real config
 // path or declares a real ecosystem's route block.
-var driftRows = []ecosystem.Strategy{synthetic.Row}
+var driftRows = []ecosystem.Strategy{synthetic.Strategy}
 
 // The check runs on the tempdir itself, not on a parent: t.TempDir() lives
 // outside any git checkout, so no walk up can find a ".git" entry.
@@ -284,9 +284,9 @@ func TestDoctorCheckSets_UnparsableRoutesFileExcludesRegistryRouteDriftRow(t *te
 func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 	repoDir := t.TempDir()
 	writeSyntheticRegistries(t, repoDir, "reg = https://host.example.com/\n")
-	// The synthetic parser never errors, so a copy of the row stands in for a
+	// The synthetic parser never errors, so a copy of the Strategy stands in for a
 	// config its parser cannot read.
-	failing := synthetic.Row
+	failing := synthetic.Strategy
 	failing.ConfigParser = func(string) ([]ecosystem.Declaration, bool, error) {
 		return nil, false, errors.New("unparsable config")
 	}
@@ -430,7 +430,7 @@ func TestRegistryRouteDriftCheckForRoutes_LocalForgeReadsFromAccumulationRepo(t 
 	t.Chdir(t.TempDir())
 
 	t.Run("drift", func(t *testing.T) {
-		accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
+		accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
@@ -453,7 +453,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_UNCOVERED" }
 	})
 
 	t.Run("no drift", func(t *testing.T) {
-		accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "reg = https://covered.example.com/\n")
+		accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "reg = https://covered.example.com/\n")
 		c := minimalValidLocalConfigForRoutes(accumRepo)
 		c.registryProxyRoutesFile = writeRoutesFile(t, `
 [[routes]]
@@ -493,7 +493,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_LOCAL_MISSING_ACCUM" }
 // ref it does not have also skips the row, rather than failing with a git
 // error where a checkout-availability skip belongs.
 func TestRegistryRouteDriftCheckForRoutes_LocalForgeUnresolvableRef_ReturnsNil(t *testing.T) {
-	accumRepo := mustLocalAccumulationRepo(t, synthetic.Row.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
+	accumRepo := mustLocalAccumulationRepo(t, synthetic.Strategy.InTreeConfigPath, "reg = https://uncovered.example.com/\n")
 	c := minimalValidLocalConfigForRoutes(accumRepo)
 	c.baseBranch = "does-not-exist"
 	c.registryProxyRoutesFile = writeRoutesFile(t, `
@@ -715,11 +715,11 @@ func TestRegistryRouteDriftRow_RemedyDerivesDiscoverSynopsis(t *testing.T) {
 	}
 }
 
-// writeSyntheticRegistries writes content to the synthetic row's in-tree
+// writeSyntheticRegistries writes content to the synthetic Strategy's in-tree
 // config path under dir.
 func writeSyntheticRegistries(t *testing.T, dir, content string) {
 	t.Helper()
-	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, content)
+	testutil.WriteFixture(t, dir, synthetic.Strategy.InTreeConfigPath, content)
 }
 
 // writeTwoRegistrySameHostFixture writes a synthetic config declaring two

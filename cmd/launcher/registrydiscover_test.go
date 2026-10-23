@@ -13,12 +13,12 @@ import (
 	"spindrift.dev/launcher/internal/registryroutes"
 )
 
-// These tests drive the discover command over the synthetic row alone; the
-// real rows' declaration shapes, store pairings and route files are pinned by
+// These tests drive the discover command over the synthetic Strategy alone; the
+// real Strategies' declaration shapes, store pairings and route files are pinned by
 // the ecosystem corpora under internal/ecosystem/testdata/corpus.
-var discoverRows = []ecosystem.Strategy{synthetic.Row}
+var discoverRows = []ecosystem.Strategy{synthetic.Strategy}
 
-// writeDiscoverDeclarations writes lines ("name = url") to the row's in-tree config.
+// writeDiscoverDeclarations writes lines ("name = url") to the Strategy's in-tree config.
 func writeDiscoverDeclarations(t *testing.T, dir string, row ecosystem.Strategy, lines ...string) {
 	t.Helper()
 	path := filepath.Join(dir, row.InTreeConfigPath)
@@ -32,14 +32,14 @@ func writeDiscoverDeclarations(t *testing.T, dir string, row ecosystem.Strategy,
 
 func discoverBearerProbe(string) string { return "bearer" }
 
-// discoverOver calls runRegistryDiscover over rows with the fixed "bearer" probe.
+// discoverOver calls runRegistryDiscover over Strategies with the fixed "bearer" probe.
 func discoverOver(rows []ecosystem.Strategy, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup) (code int, stdout, stderr string) {
 	var out, errOut strings.Builder
 	code = runRegistryDiscover(&out, &errOut, rows, repoDir, outPath, force, stores, lookup, discoverBearerProbe)
 	return code, out.String(), errOut.String()
 }
 
-// discoverSynthetic is discoverOver over the synthetic row alone.
+// discoverSynthetic is discoverOver over the synthetic Strategy alone.
 func discoverSynthetic(repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup) (code int, stdout, stderr string) {
 	return discoverOver(discoverRows, repoDir, outPath, force, stores, lookup)
 }
@@ -62,7 +62,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 	repoDir := t.TempDir()
 	const host = "artifactory.example.com"
 	twin := synthetic.Twin("twin")
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row,
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy,
 		"internal = https://"+host+"/artifactory/api/internal-repo/index",
 		"remote = https://"+host+"/artifactory/api/remote-repo/index")
 	writeDiscoverDeclarations(t, repoDir, twin, "other = https://other.example.com/")
@@ -72,7 +72,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 		return store.Name == "netrc" && d.Host == host, nil
 	}
 
-	code, stdout, stderr := discoverOver([]ecosystem.Strategy{synthetic.Row, twin}, repoDir, outPath, false, discoverNetrcStore(), lookup)
+	code, stdout, stderr := discoverOver([]ecosystem.Strategy{synthetic.Strategy, twin}, repoDir, outPath, false, discoverNetrcStore(), lookup)
 	if code != 0 {
 		t.Fatalf("runRegistryDiscover code = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -130,7 +130,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 
 func TestRunRegistryDiscover_EndToEnd_WritesParseableRoutesFile(t *testing.T) {
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	lookup := func(store registrydiscover.Store, _ ecosystem.Declaration) (bool, error) {
@@ -182,7 +182,7 @@ func TestRunRegistryDiscover_EndToEnd_WritesParseableRoutesFile(t *testing.T) {
 
 func TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint(t *testing.T) {
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	stores := []registrydiscover.Store{
@@ -219,7 +219,7 @@ func TestRunRegistryDiscover_UnmatchedHost_EnvPlaceholderAndHint(t *testing.T) {
 
 func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForce(t *testing.T) {
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 	sentinel := []byte("do-not-touch")
@@ -268,7 +268,7 @@ func TestRunRegistryDiscover_ExistingFile_RefusesWithoutForce_OverwritesWithForc
 // embedding resolved values instead of store references would leak it.
 func TestRunRegistryDiscover_NeverWritesCredentialValue(t *testing.T) {
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 
 	const sentinelSecret = "s3kr1t-password-do-not-leak"
 	netrcPath := filepath.Join(t.TempDir(), "netrc")
@@ -302,13 +302,13 @@ func TestRunRegistryDiscover_NeverWritesCredentialValue(t *testing.T) {
 func TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared(t *testing.T) {
 	repoDir := t.TempDir()
 	skipped := synthetic.Twin("skipped")
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 	// A named but non-http value, so the report must call the config skipped
 	// rather than "no registry declared".
 	writeDiscoverDeclarations(t, repoDir, skipped, "main = /local/path")
 
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
-	code, report, stderr := discoverOver([]ecosystem.Strategy{synthetic.Row, skipped}, repoDir, outPath, false, discoverNetrcStore(), discoverAlwaysMatch)
+	code, report, stderr := discoverOver([]ecosystem.Strategy{synthetic.Strategy, skipped}, repoDir, outPath, false, discoverNetrcStore(), discoverAlwaysMatch)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, report, stderr)
 	}
@@ -348,7 +348,7 @@ func TestCmdRegistryDiscover_ForceFlagAnyPosition_StillTwoPositionals(t *testing
 	t.Setenv("HOME", t.TempDir())
 
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	var out strings.Builder
@@ -368,7 +368,7 @@ func TestCmdRegistryDiscover_HomeDirUnavailable_ErrorsInsteadOfProceeding(t *tes
 	t.Setenv("HOME", "")
 
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://registry.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://registry.example.com/index")
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	var out strings.Builder
@@ -408,7 +408,7 @@ func TestRunRegistryDiscover_ZeroRoutes_RefusesToWriteAndNamesRepoDir(t *testing
 // only an unusable URL, not as declaring nothing at all.
 func TestRunRegistryDiscover_OnlyUnusableURLs_RefusesToWriteAndReportsSkipped(t *testing.T) {
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = /local/path")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = /local/path")
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
 
 	code, stdout, stderr := discoverSynthetic(repoDir, outPath, false, discoverNetrcStore(), discoverNoMatch)
@@ -430,7 +430,7 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	repoDir := t.TempDir()
 	empty := synthetic.Twin("empty")
 	unmatched := synthetic.Twin("unmatched")
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row, "main = https://matched.example.com/index")
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy, "main = https://matched.example.com/index")
 	writeDiscoverDeclarations(t, repoDir, empty, "")
 	writeDiscoverDeclarations(t, repoDir, unmatched, "main = https://unmatched.example.com")
 
@@ -438,7 +438,7 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	lookup := func(_ registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return d.Host == "matched.example.com", nil
 	}
-	code, report, stderr := discoverOver([]ecosystem.Strategy{synthetic.Row, empty, unmatched}, repoDir, outPath, false, discoverNetrcStore(), lookup)
+	code, report, stderr := discoverOver([]ecosystem.Strategy{synthetic.Strategy, empty, unmatched}, repoDir, outPath, false, discoverNetrcStore(), lookup)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, report, stderr)
 	}
@@ -484,7 +484,7 @@ func TestRunRegistryDiscover_DisambiguationBoundExhausted_StillPrintsReport(t *t
 	const matchedHost = "matched.example.com"
 
 	repoDir := t.TempDir()
-	writeDiscoverDeclarations(t, repoDir, synthetic.Row,
+	writeDiscoverDeclarations(t, repoDir, synthetic.Strategy,
 		"one = https://"+host1+"/",
 		"two = https://"+host2+"/",
 		"three = https://"+matchedHost+"/")

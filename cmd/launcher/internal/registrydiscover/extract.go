@@ -17,9 +17,9 @@ func Extract(repoDir string) ([]ecosystem.Declaration, []ecosystem.Note, error) 
 	return ExtractRows(repoDir, ecosystem.Table)
 }
 
-// ExtractRows owns every bit of I/O and stamping that a row's ConfigParser hook
-// must not do itself. rows is a parameter so a caller can pass a fake row
-// rather than mutate ecosystem.Table. Order is deterministic: row order, then
+// ExtractRows owns every bit of I/O and stamping that a Strategy's ConfigParser hook
+// must not do itself. rows is a parameter so a caller can pass a fake Strategy
+// rather than mutate ecosystem.Table. Order is deterministic: Strategy order, then
 // declaration order within a file (cargo's TOML map has no source order, so its
 // parser sorts by name).
 func ExtractRows(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declaration, []ecosystem.Note, error) {
@@ -27,7 +27,7 @@ func ExtractRows(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declara
 	var notes []ecosystem.Note
 
 	for _, row := range rows {
-		// A row that gains a path before its parser lands discovers nothing
+		// A Strategy that gains a path before its parser lands discovers nothing
 		// rather than failing the whole scan.
 		if row.InTreeConfigPath == "" || row.ConfigParser == nil {
 			continue

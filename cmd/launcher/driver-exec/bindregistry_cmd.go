@@ -50,7 +50,7 @@ func renderEnvExports(exports []ecosystem.EnvExport) string {
 }
 
 // runBindRegistryWithDeps is runBindRegistryWithRows over ecosystem.Table, the
-// production rows.
+// production Strategies.
 func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
 	return runBindRegistryWithRows(args, ecosystem.Table, stdout, probe, spawn, lookPath, timeout, pollInterval)
 }
@@ -85,8 +85,8 @@ func runBindRegistryWithRows(args []string, rows []ecosystem.Strategy, stdout io
 		return 1
 	}
 	// apply's repo-aware home-config render must be the last writer of a
-	// repo-aware row's HomeConfig file: bindings mode in the same invocation
-	// would re-render every HomeConfig row from the base template afterward and
+	// repo-aware Strategy's HomeConfig file: bindings mode in the same invocation
+	// would re-render every HomeConfig Strategy from the base template afterward and
 	// clobber apply's replacement stanzas. revert renders nothing, so revert
 	// plus bindings stays legal.
 	if *intreeAction == "apply" && *bindingsEnvOutput != "" {

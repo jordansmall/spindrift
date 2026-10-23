@@ -9,8 +9,8 @@ import (
 )
 
 // mergeRetiredRouteEcosystems panics on a key that resolves to no
-// ecosystem.Table row, so this test is what keeps that panic unreachable: only
-// a row dropping its RetiredRouteKey out from under retiredRouteKeys could
+// ecosystem.Table Strategy, so this test is what keeps that panic unreachable: only
+// a Strategy dropping its RetiredRouteKey out from under retiredRouteKeys could
 // trip it.
 func TestRetiredRouteKeysResolveToRows(t *testing.T) {
 	for _, entry := range retiredRouteKeys {
@@ -85,8 +85,8 @@ match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
 `
 
-// The retirement gate runs before any row is consulted, so a retired key is
-// refused as retired even when no row exists to look it up in, and detection is
+// The retirement gate runs before any Strategy is consulted, so a retired key is
+// refused as retired even when no Strategy exists to look it up in, and detection is
 // by presence: an empty value is as retired as a populated one.
 func TestRetiredRouteKeysFireBeforeRowsAreConsulted(t *testing.T) {
 	for key, field := range retiredKeyFields(t) {
@@ -125,7 +125,7 @@ func TestRetiredRouteKeysAcrossBothADRsNameAllInOneError(t *testing.T) {
 	}
 }
 
-// A retired key renders as its owning row's block, after the credential line,
+// A retired key renders as its owning Strategy's block, after the credential line,
 // beside whatever block the route declared itself. The base route has no allow,
 // so credential is the last top-level key the stanza renders.
 func TestRetiredRouteKeyStanzaCarriesRowBlockBesideDeclaredBlock(t *testing.T) {
@@ -156,7 +156,7 @@ func TestRetiredRouteKeyStanzaCarriesRowBlockBesideDeclaredBlock(t *testing.T) {
 }
 
 // The stanza an operator is told to paste must itself parse, and must carry a
-// block for every row whose retired key the route declared.
+// block for every Strategy whose retired key the route declared.
 func TestRetiredRouteStanzaRoundTripsThroughParse(t *testing.T) {
 	doc := retiredBaseRoute
 	for key, field := range retiredKeyFields(t) {

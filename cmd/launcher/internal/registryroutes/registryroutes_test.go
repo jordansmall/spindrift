@@ -16,11 +16,11 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// parse is Parse over the synthetic row alone: the generic route grammar is
+// parse is Parse over the synthetic Strategy alone: the generic route grammar is
 // pinned here without naming a real ecosystem, whose own declarations are
 // pinned by the ecosystem corpora.
 func parse(data []byte) ([]registryroutes.Route, error) {
-	return registryroutes.ParseRows(data, []ecosystem.Strategy{synthetic.Row})
+	return registryroutes.ParseRows(data, []ecosystem.Strategy{synthetic.Strategy})
 }
 
 // Pins the minimal valid routes file of ADR 0045 and its mapping onto
@@ -285,7 +285,7 @@ credential = { netrc = "~/.netrc" }
 }
 
 // Every refusal below is the shared validateDeclaredPath ban, so it holds for
-// any row's path key. The rejected shapes are:
+// any Strategy's path key. The rejected shapes are:
 //   - a leading slash is required;
 //   - whitespace (any Unicode space) and control characters, and "$", "`"
 //     and "\" which flow into shell-sourced exports and init-script string
@@ -1025,7 +1025,7 @@ credential = { netrc = "~/.netrc" }
 // The replacement stanza is built from the offending route's own remaining
 // keys, not a generic template: auth-scheme, allow and the credential (with its
 // companion key) survive. The retired per-ecosystem keys that become
-// [routes.ecosystems.<name>] blocks (ADR 0048) are pinned per row by the
+// [routes.ecosystems.<name>] blocks (ADR 0048) are pinned per Strategy by the
 // ecosystem corpora.
 func TestParse_RetiredUpstreamBaseURLStanzaEchoesDeclaredKeys(t *testing.T) {
 	const doc = `
@@ -1293,7 +1293,7 @@ func TestUpstreamOriginFor(t *testing.T) {
 	}
 }
 
-// The synthetic row's RouteDeclaration hook accepts only mirror-path, so any
+// The synthetic Strategy's RouteDeclaration hook accepts only mirror-path, so any
 // other key in its block is refused, naming the route and the key.
 func TestParse_EcosystemsKeyTheHookRejectsIsError(t *testing.T) {
 	_, err := parse([]byte(syntheticPathDoc(`widget = ["gizmo"]`)))
@@ -1308,7 +1308,7 @@ func TestParse_EcosystemsKeyTheHookRejectsIsError(t *testing.T) {
 	}
 }
 
-// An ecosystem is unknown when it has no row among those ParseRows was given.
+// An ecosystem is unknown when it has no Strategy among those ParseRows was given.
 func TestParse_EcosystemsUnknownEcosystemNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1340,7 +1340,7 @@ func TestParse_EcosystemsPathNotStringIsError(t *testing.T) {
 	}
 }
 
-// Drives ParseRows, the seam Parse wraps, with a fake row rather
+// Drives ParseRows, the seam Parse wraps, with a fake Strategy rather
 // than a real ecosystem, so the hook contract is tested without depending on
 // any shipped ecosystem's rules.
 func TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey(t *testing.T) {
@@ -1374,7 +1374,7 @@ widget = "gizmo"
 	}
 }
 
-// A nil RouteDeclaration hook means "this row's block accepts no key beyond
+// A nil RouteDeclaration hook means "this Strategy's block accepts no key beyond
 // path".
 func TestParseRoutes_FakeRowNilHookRejectsNonPathKey(t *testing.T) {
 	row := ecosystem.Strategy{Name: "fake"}
@@ -1428,7 +1428,7 @@ widget = "gizmo"
 // The stanza carries the route's [routes.ecosystems.<name>] blocks too, not
 // just its top-level keys: an operator who pastes back a stanza missing them
 // silently loses every per-ecosystem declaration the route had. The retirement
-// gate fires before any row validates a block, so a block no row accepts is
+// gate fires before any Strategy validates a block, so a block no Strategy accepts is
 // echoed all the same.
 func TestParse_RetiredKeyStanzaEchoesEcosystemBlocks(t *testing.T) {
 	const doc = `
@@ -1568,8 +1568,8 @@ mirror-path = "/mirror"
 
 // An empty block, and an empty list under a block, are both blocks the
 // operator wrote, so each is preserved exactly as declared rather than
-// collapsing to "declared nothing". A row accepting every key stands in for a
-// real one so the list shape is not at the mercy of any row's own rules.
+// collapsing to "declared nothing". A Strategy accepting every key stands in for a
+// real one so the list shape is not at the mercy of any Strategy's own rules.
 func TestParse_EcosystemsEmptyDeclarationShapes(t *testing.T) {
 	row := ecosystem.Strategy{
 		Name:             "fake",
