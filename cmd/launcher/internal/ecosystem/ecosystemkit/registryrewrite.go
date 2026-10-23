@@ -1,4 +1,4 @@
-package ecosystem
+package ecosystemkit
 
 import (
 	"bytes"
@@ -11,10 +11,10 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// decodeOneJSONObject decodes body as exactly one JSON object. UseNumber keeps
+// DecodeOneJSONObject decodes body as exactly one JSON object. UseNumber keeps
 // numeric fields as the exact digits they arrived with, so re-serialization
 // does not round-trip them through float64.
-func decodeOneJSONObject(body []byte) (map[string]any, bool) {
+func DecodeOneJSONObject(body []byte) (map[string]any, bool) {
 	var obj map[string]any
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
@@ -30,11 +30,11 @@ func decodeOneJSONObject(body []byte) (map[string]any, bool) {
 	return obj, true
 }
 
-// repointRegistryURL re-points one absolute URL from a registry response body at
+// RepointRegistryURL re-points one absolute URL from a registry response body at
 // the Forwarder, with the route's prefix re-inserted, so a later download built
 // from that value round-trips back through the same route. A foreign host is
 // declined rather than rewritten, returning ok=true with an empty To.
-func repointRegistryURL(value string, rc registryvocab.RewriteContext) (registryvocab.RewriteEdit, bool) {
+func RepointRegistryURL(value string, rc registryvocab.RewriteContext) (registryvocab.RewriteEdit, bool) {
 	u, err := url.Parse(value)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return registryvocab.RewriteEdit{}, false

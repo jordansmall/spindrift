@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
@@ -221,7 +222,7 @@ func flushNpmTo(out *bufio.Writer, rec *npmRecorder, off int64) error {
 // starts at the segment's first '"'.
 func writeNpmTarball(out *bufio.Writer, rec *npmRecorder, off int64, value string, rc registryvocab.RewriteContext, onEdit func(registryvocab.RewriteEdit)) error {
 	seg := rec.raw[rec.written-rec.base : off-rec.base]
-	edit, ok := repointRegistryURL(value, rc)
+	edit, ok := ecosystemkit.RepointRegistryURL(value, rc)
 	if !ok {
 		return flushNpmTo(out, rec, off)
 	}

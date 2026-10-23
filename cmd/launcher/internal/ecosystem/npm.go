@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -60,7 +61,7 @@ func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
 			continue
 		}
 		sawDeclaration = true
-		host, upstreamBaseURL, ok := httpAbsoluteURL(value)
+		host, upstreamBaseURL, ok := ecosystemkit.HTTPAbsoluteURL(value)
 		if !ok {
 			continue
 		}

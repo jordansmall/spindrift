@@ -3,6 +3,7 @@ package ecosystem
 import (
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -60,7 +61,7 @@ func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		}
 		sawDeclaration = true
 		value = unquoteYAMLScalar(stripYAMLTrailingComment(value))
-		host, upstreamBaseURL, ok := httpAbsoluteURL(value)
+		host, upstreamBaseURL, ok := ecosystemkit.HTTPAbsoluteURL(value)
 		if !ok {
 			continue
 		}

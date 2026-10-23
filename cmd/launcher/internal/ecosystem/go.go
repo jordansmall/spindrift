@@ -3,6 +3,7 @@ package ecosystem
 import (
 	"fmt"
 
+	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -69,7 +70,7 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 	// (registryroutes.go's validateDeclaredPath), so unlike npm's whole-host case
 	// this path can never normalize to "", and the URL below concatenates it
 	// as-is.
-	if path := declaredPath(routes, nameGo); path != "" {
+	if path := ecosystemkit.DeclaredPath(routes, nameGo); path != "" {
 		result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
 		goProxyBound = true
 	}
