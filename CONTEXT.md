@@ -318,6 +318,18 @@ operator's stores hold. `doctor` re-runs it in check mode and reports drift;
 the in-Box scan may *warn* that a host is uncovered, never add a route.
 _Avoid_: auto-configuration, zero-config, runtime discovery.
 
+**Host profile**:
+Advisory knowledge about an upstream registry host product such as
+Artifactory (ADR 0071): one value-only row per product, matched by host
+pattern, declared-URL path prefix, or probe response header, first row
+winning, carrying a default auth scheme, the `basic` username convention,
+per-ecosystem sibling paths, a credential-helper hint, and a note. Read only
+by Route discovery, which writes its advice into the proposed routes file, and
+`doctor`, which warns on drift; the Registry proxy, route parsing and route
+resolution never read it, so the routes file stays the only declaration
+surface. Not a Driver's Strategy, which is the agent CLI seam.
+_Avoid_: host strategy, host adapter, plugin.
+
 **Binding**:
 How a Project toolchain is pointed at the Registry proxy. The engine lives in
 `cmd/launcher/internal/bindregistry/bind.go`; box calls it in-process
