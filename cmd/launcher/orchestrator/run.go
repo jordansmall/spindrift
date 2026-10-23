@@ -411,9 +411,11 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		recordDecisions(cfg.decisionsPath, &state, decisionsPreSnapshot)
 		decisionsRoundLog.readAndAppendFresh(cfg.decisionsPath, &state.DecisionsPath, &state.DecisionsLogPath, &decisionsLogRounds, stdout)
 		// Only the review pass below holds verdict authority here, so this
-		// log is scanned for hasOutcome alone: any VERDICT-shaped text an
-		// implement/fix pass emits is not state.LastVerdict's source.
-		_, hasOutcome := scanPassLog(cfg.logPath, cfg.driver, passKind)
+		// log is scanned for the outcome alone: any VERDICT-shaped text an
+		// implement/fix pass emits is not state.LastVerdict's source. The
+		// outcome's status lets the machine tell a premature ready from a
+		// settled one (issue #5972).
+		passOut, hasOutcome := scanPassOutcome(cfg.logPath, cfg.driver)
 		// Folded in before the next driver-exec invocation truncates
 		// cfg.logPath (issue #2694). One scan feeds both values below.
 		report := passReport(cfg.logPath, cfg.driver)
@@ -442,6 +444,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 		}, passmachine.Input{
 			PassJustExecuted: passKind,
 			HasOutcome:       hasOutcome,
+			OutcomeStatus:    passOut.Status,
 			Pass:             pass,
 			Caps:             passmachine.Caps{MaxSlices: cfg.maxSlices, MaxReviewRounds: cfg.maxReviewRounds, MaxBudgetTokens: cfg.maxBudgetTokens, MaxBudgetUSD: cfg.maxBudgetUSD},
 			LandPhase:        landPhase(state.TerminalLand),
