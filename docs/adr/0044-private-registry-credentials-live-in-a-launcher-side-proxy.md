@@ -277,7 +277,7 @@ the artifact base path is registry-specific, not a fixed shape.
   verified by interactively running a real Gradle 8.14.4 against a local
   stand-in HTTP server outside this repo's own toolchain — no JDK/gradle
   dependency is added here, so a Go golden test
-  (`cmd/launcher/internal/bindregistry/gradlebinding_test.go`,
+  (`cmd/launcher/internal/ecosystem/gradle_test.go`,
   `TestGradleInitScript_ExactContent`) covers the generated init script's
   shape, and `tests/bind-registry-parity.bats` covers the entrypoint's
   control flow: the call site is one ecosystem-agnostic verb invocation
@@ -286,10 +286,16 @@ the artifact base path is registry-specific, not a fixed shape.
   rewrites config and reaches the Driver's child, not a bash
   reimplementation) proves the same seam gradle's row goes through, not an
   actual Gradle invocation; that the init script itself gets written to
-  `$GRADLE_USER_HOME/init.d/` is covered separately, at the Go level, by
+  `$GRADLE_USER_HOME/init.d/` is covered separately, at the Go level, in
+  two halves: `TestCorpus` (`cmd/launcher/internal/ecosystem/corpus_test.go`)
+  checks the gradle corpus cases' `binding.golden.json` files (e.g.
+  `cmd/launcher/internal/ecosystem/testdata/corpus/gradle/lockfile-settings-gradle-kts/binding.golden.json`),
+  which pin its `init.d/spindrift-registry-proxy.init.gradle` path under
+  `GRADLE_USER_HOME` without writing a file, and
   `cmd/launcher/driver-exec/bindregistry_cmd_test.go`'s
-  `TestRunBindRegistryWithDeps_*GradleInitScript*` cases, which assert the
-  file on disk — `TestGradleInitScript_ExactContent` only compares
+  `TestBindRegistry_HomeConfigsComeFromRowsWalk` asserts, on a stub row,
+  that a row's home config reaches the file on disk; no single test writes
+  gradle's own file — `TestGradleInitScript_ExactContent` only compares
   `GradleInitScript`'s returned string to a literal and never touches a
   filesystem.
   `-Dhttps.proxyHost`/`JAVA_TOOL_OPTIONS` were
