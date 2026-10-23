@@ -64,6 +64,16 @@ func hooksDir(t *testing.T) string {
 	return dst
 }
 
+// bridgeSource reads the bridge under test, which BridgeEnv can redirect.
+func bridgeSource(t *testing.T) string {
+	t.Helper()
+	src, err := os.ReadFile(envOr(BridgeEnv, filepath.Join(repoAgentDir(), "pi-hook-bridge.js")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(src)
+}
+
 // installBridge writes the bridge into the agent dir's extensions, pointing it
 // at hooksDir. The bridge keeps its hooks directory on one line so a test can
 // retarget it, the way the opencode guards check does.
@@ -73,11 +83,7 @@ func installBridge(t *testing.T, agentDir, hooks string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src, err := os.ReadFile(envOr(BridgeEnv, filepath.Join(repoAgentDir(), "pi-hook-bridge.js")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(string(src), "\n")
+	lines := strings.Split(bridgeSource(t), "\n")
 	var replaced bool
 	for i, line := range lines {
 		if strings.HasPrefix(line, "const HOOKS_DIR = ") {
@@ -304,6 +310,34 @@ func TestPiHooksSummaryFailsOpen(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The bridge's load-time throw is the only guard against a hook naming a tool it
+// cannot map, so pi must treat the failed load as fatal and not start without it.
+func TestPiHooksUnmappedToolRefusesStart(t *testing.T) {
+	src := bridgeSource(t)
+	const row = `{ script: "credential-deny.sh", tools: ["read", "bash"`
+	if !strings.Contains(src, row) {
+		t.Fatalf("bridge has no %q row to add an unmapped tool to", row)
+	}
+	mutated := strings.Replace(src, row, row+`, "no-such-tool"`, 1)
+	bridge := filepath.Join(t.TempDir(), "pi-hook-bridge.js")
+	if err := os.WriteFile(bridge, []byte(mutated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(BridgeEnv, bridge)
+
+	s := newStub(t, textReply("done"))
+	r := runPiWith(t, s, piOpts{hooks: hooksDir(t)}, "Say done.")
+	if r.err == nil {
+		t.Errorf("pi started with a bridge that failed to load\nstdout:\n%s", r.stdout)
+	}
+	if !strings.Contains(r.stderr, "no CLAUDE_TOOLS entry") {
+		t.Errorf("stderr does not carry the bridge's load error:\n%s", r.stderr)
+	}
+	if n := len(s.Requests()); n != 0 {
+		t.Errorf("model received %d requests, want 0", n)
 	}
 }
 
