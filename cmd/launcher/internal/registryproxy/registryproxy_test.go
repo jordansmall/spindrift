@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/unixsocket"
@@ -2564,22 +2564,39 @@ func TestNew_RejectsRewriteRowWithoutExactlyOneRewriter(t *testing.T) {
 	}
 }
 
+// routeNamesKey is a neutral declaration key: projection carries any key
+// through, so the test needs no real ecosystem's vocabulary.
+const routeNamesKey = "names"
+
+// routeBlock builds a route's ecosystems block under the synthetic Strategy's
+// name, so the test uses plain route vocabulary rather than a real ecosystem's
+// helpers.
+func routeBlock(names ...string) registryvocab.RouteEcosystems {
+	return registryvocab.RouteEcosystems{
+		synthetic.Strategy.Name: registryvocab.RouteDeclaration{routeNamesKey: registryvocab.StringsValue(names)},
+	}
+}
+
+func routeRegistries(blocks registryvocab.RouteEcosystems) []string {
+	return blocks.Strings(synthetic.Strategy.Name, routeNamesKey)
+}
+
 // TestManifestRoutes_ProjectsPrefixAndEcosystems verifies that
 // ManifestRoutes carries each route's own Prefix and whole Ecosystems
 // declaration block into the manifest Route (issue #3404): two routes with
-// distinct prefixes and cargo names each land on the matching entry, not
+// distinct prefixes and registry names each land on the matching entry, not
 // swapped or collapsed onto one shared value.
 func TestManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
 	routes := []Route{
 		{
 			Upstream:   "https://npm.example.com",
 			Prefix:     "npm-example-com",
-			Ecosystems: ecosystem.CargoRouteBlock("crates-io-mirror"),
+			Ecosystems: routeBlock("mirror"),
 		},
 		{
-			Upstream:   "https://cargo.example.com",
-			Prefix:     "cargo-example-com",
-			Ecosystems: ecosystem.CargoRouteBlock("internal", "vendor"),
+			Upstream:   "https://second.example.com",
+			Prefix:     "second-example-com",
+			Ecosystems: routeBlock("internal", "vendor"),
 		},
 	}
 
@@ -2591,14 +2608,14 @@ func TestManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
 	if got[0].Prefix != "npm-example-com" {
 		t.Errorf("got[0].Prefix = %q, want %q", got[0].Prefix, "npm-example-com")
 	}
-	if want := []string{"crates-io-mirror"}; !slices.Equal(ecosystem.CargoRouteRegistries(got[0].Ecosystems), want) {
-		t.Errorf("got[0] cargo registries = %v, want %v", ecosystem.CargoRouteRegistries(got[0].Ecosystems), want)
+	if want := []string{"mirror"}; !slices.Equal(routeRegistries(got[0].Ecosystems), want) {
+		t.Errorf("got[0] registries = %v, want %v", routeRegistries(got[0].Ecosystems), want)
 	}
-	if got[1].Prefix != "cargo-example-com" {
-		t.Errorf("got[1].Prefix = %q, want %q", got[1].Prefix, "cargo-example-com")
+	if got[1].Prefix != "second-example-com" {
+		t.Errorf("got[1].Prefix = %q, want %q", got[1].Prefix, "second-example-com")
 	}
-	if want := []string{"internal", "vendor"}; !slices.Equal(ecosystem.CargoRouteRegistries(got[1].Ecosystems), want) {
-		t.Errorf("got[1] cargo registries = %v, want %v", ecosystem.CargoRouteRegistries(got[1].Ecosystems), want)
+	if want := []string{"internal", "vendor"}; !slices.Equal(routeRegistries(got[1].Ecosystems), want) {
+		t.Errorf("got[1] registries = %v, want %v", routeRegistries(got[1].Ecosystems), want)
 	}
 }
 
