@@ -344,7 +344,7 @@ decision (`cmd/launcher/internal/toolchain`, issue #4297). Bindings mode
 typed exports — box sets them in its own environment, the verb writes them to
 a sourceable env file (`-bindings-env-output`) — plus two direct home-level
 writes with no revert of their own: a user-level `$CARGO_HOME/config.toml`
-(`ecosystem.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
+(`cargo`'s `cargoConfigTOML`, cargo's own mechanism, issue #2849) and a
 Gradle init script under `$GRADLE_USER_HOME/init.d/`
 (`gradle`'s `initScript`: `beforeSettings`/`projectsEvaluated`/
 `settingsEvaluated`, plus a plain top-level hook for buildscript classpath).

@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystem/cargo"
 	"spindrift.dev/launcher/internal/ecosystem/gomod"
 	"spindrift.dev/launcher/internal/ecosystem/gradle"
 )
@@ -14,5 +15,5 @@ import (
 func init() {
 	// The argument order is both the lockfile first-hit precedence and the
 	// env-export file's line order.
-	ecosystem.Register(ecosystem.Cargo, ecosystem.Npm, ecosystem.Yarn, ecosystem.Pnpm, gomod.Strategy, gradle.Strategy)
+	ecosystem.Register(cargo.Strategy, ecosystem.Npm, ecosystem.Yarn, ecosystem.Pnpm, gomod.Strategy, gradle.Strategy)
 }

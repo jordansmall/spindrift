@@ -1125,7 +1125,7 @@ remote — so it is accepted as the contract, not patched around: on such a
 repo, the crates-io route's own prefix may see no traffic, and the named
 registry route's credential and allowlist policy is what actually governs
 crates-io fetches. `TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRoute`
-in `cmd/launcher/internal/ecosystem/cargo_test.go` pins this as a
+in `cmd/launcher/internal/ecosystem/cargo/cargo_test.go` pins this as a
 contract.
 
 **What is unchanged.** A repo with no `[source.*]` claim on a declared
@@ -1259,7 +1259,7 @@ and the `sparse+` exception directly;
 `TestCargoSourceReplacements_ReusesClaimingSourceName_AcrossSpellingVariants`,
 `TestCargoRepoAwareConfig_DedupeSameIndexURL_CanonicalizedRendersOneSourceTable`,
 and `TestCargoRepoAwareConfig_ReusesClaimingSourceName_TrailingSlashDiffers`
-in `cmd/launcher/internal/ecosystem/cargo_test.go` pin the rendered outcome.
+in `cmd/launcher/internal/ecosystem/cargo/cargo_test.go` pin the rendered outcome.
 
 ## Amendment (issue #3467): the socket measurement was taken on an unshared path
 

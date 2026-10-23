@@ -124,7 +124,7 @@ func TestNpmFamilyRows_SingleTaggedPath(t *testing.T) {
 // Whole-host regression (issue #3259 review finding): a "/" tagged path,
 // registrypathset's whole-host marker, must render as the bare-root URL with
 // exactly one trailing slash. A double slash can 404 on a strict registry.
-// Mirrors cargo's ""-means-"no path" convention (see cargoIndexPath).
+// Mirrors the cargo package's ""-means-"no path" convention.
 func TestNpmFamilyRows_WholeHostTaggedPath(t *testing.T) {
 	for _, tc := range npmFamilyCases {
 		t.Run(tc.row, func(t *testing.T) {
