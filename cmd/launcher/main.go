@@ -1001,6 +1001,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 		MergeMode:         c.mergeMode,
 		MergeGuardPaths:   c.mergeGuardPaths,
 		CompleteLabel:     c.completeLabel,
+		DispatchLabel:     c.workLabel,
 		MergePollInterval: c.mergePollInterval,
 		MergePollTimeout:  c.mergePollTimeout,
 		MaxFixAttempts:    c.maxFixAttempts,
@@ -1506,24 +1507,45 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	if queue && res.Found {
 		return errRecoverIneligible
 	}
+	// A resolveErr is logged, not returned: the self-report walk runs
+	// alongside the genuine/synthetic tier (issue #2268), so an unparseable
+	// report must stay adoptable.
+	resolved, resolveErr := dispatch.ResolveFromLogs(pwd, iss.number, "")
+	if resolveErr != nil {
+		fmt.Fprintf(stderr, "    ?? #%s: resolve pass logs: %v\n", issueNum, resolveErr)
+	}
+	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
+		return fmt.Errorf("mkdir logs: %w", err)
+	}
+	// Passes feeds only the Situation: SettleRelayedBranch gets a result
+	// without them so a recover landing still clears the recorded
+	// landing pass rather than inheriting the run's.
+	passes, passesErr := dispatch.ReadPasses(pwd, iss.number)
+	if passesErr != nil {
+		fmt.Fprintf(stderr, "    ?? #%s: pass-manifest scan: %v\n", issueNum, passesErr)
+	}
+	sit := s.SituationFor(iss.number, res.Found, dispatch.Result{Resolved: resolved, Passes: passes})
+	declineUnreviewed := func() error {
+		note := settle.UnreviewedNote + "; needs human triage"
+		fmt.Fprintf(stdout, "    #%s  status=skipped  note=%s\n", issueNum, note)
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %s", issueNum, note), stdout, stderr)
+	}
+	// An open PR does not vouch for the run: a Box that opens its draft PR
+	// in-box can still have crashed before its land pass, and the adopt path
+	// below would mark that PR ready and merge it (issue #5973).
+	if res.Found && sit.Unreviewed {
+		return declineUnreviewed()
+	}
 	if !res.Found {
-		// A resolveErr is logged, not returned: the self-report walk runs
-		// alongside the genuine/synthetic tier (issue #2268), so an unparseable
-		// report must stay adoptable. SettleRelayedBranch is attempted even
-		// with no self-report at all, since for the local push-only shape a
-		// bundle sitting in the outbox is evidence enough (issue #2378).
-		resolved, resolveErr := dispatch.ResolveFromLogs(pwd, iss.number, "")
-		if resolveErr != nil {
-			fmt.Fprintf(stderr, "    ?? #%s: resolve pass logs: %v\n", issueNum, resolveErr)
-		}
-		if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
-			return fmt.Errorf("mkdir logs: %w", err)
-		}
+		// Attempted even with no self-report at all, since for the local
+		// push-only shape a bundle sitting in the outbox is evidence enough
+		// (issue #2378).
 		result := dispatch.Result{Resolved: resolved}
-		sit := s.SituationFor(iss.number, res.Found, result)
 		var rec recoverrecord.Record
 		if queue {
-			if !sit.BundlePresent || !sit.SelfReportSuccess {
+			// Unreviewed is silent too: settle already commented on the issue,
+			// and a skip line here would repeat on every daemon sweep.
+			if !sit.BundlePresent || !sit.SelfReportSuccess || sit.Unreviewed {
 				return errRecoverIneligible
 			}
 			bundleID, err := recoverrecord.BundleID(pwd, iss.number)
@@ -1640,11 +1662,11 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", issueNum, note)
 			return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, settleErr), stdout, stderr)
 		}
+		if sit.Unreviewed {
+			return declineUnreviewed()
+		}
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
-	}
-	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
-		return fmt.Errorf("mkdir logs: %w", err)
 	}
 	var d *dispatch.Dispatch
 	if !gate.Launch(iss.number, func() { d = f.New(iss.number, iss.title) }) {
@@ -1653,8 +1675,9 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	defer d.Close()
 	// This Dispatch adopts an already-open PR and never calls Run, so it does
 	// not get Run's quarantine-prior-run-logs guarantee for free.
-	// EnsureRunLineage establishes it once, before any pass log is read
-	// (issue #2575).
+	// EnsureRunLineage establishes it once (issue #2575). The pass logs and
+	// manifest were already read above, before this Dispatch existed; that can
+	// only make the Unreviewed check decline wrongly, never land a PR.
 	if err := d.EnsureRunLineage(); err != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 	}
