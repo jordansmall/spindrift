@@ -1,15 +1,20 @@
 {
   "lastSwept": "00fdf84f08b8c9d7c828a0d1ac3906e11de038e9",
   "cursor": "cmd/launcher/internal/ecosystemtest/testdata/corpus/port/rewrites.golden.json",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-23T16:52:42.462435084-04:00"
+  },
   "usage": {
-    "input_tokens": 40,
-    "output_tokens": 6813,
-    "cache_read_input_tokens": 946612,
-    "cache_creation_input_tokens": 66196,
-    "total_cost_usd": 0.8553103999999999,
-    "duration_ms": 82754,
-    "duration_api_ms": 81226,
-    "num_turns": 23
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
