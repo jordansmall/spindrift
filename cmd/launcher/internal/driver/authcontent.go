@@ -13,6 +13,9 @@ import (
 // OAuth login rather than an API key.
 const oauthEntryType = "oauth"
 
+// apiKeyEntryType is the "type" tag of an auth-store entry holding an API key.
+const apiKeyEntryType = "api_key"
+
 // AuthContent describes an env var holding a Provider-keyed auth store (a JSON
 // object keyed by Provider id) whose OAuth entries are limited to
 // OAuthProviders. It exists because the Driver refreshes an OAuth token inside
@@ -42,8 +45,8 @@ func AuthContentFor(name string) (a AuthContent, ok bool) {
 // every Provider holding an OAuth entry outside OAuthProviders. rules supply
 // the API-key env var each rejection points at. Errors never carry content.
 func (a AuthContent) Check(content string, rules []CredentialRule) error {
-	var store map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(content), &store); err != nil || store == nil {
+	store, ok := parseStore(content)
+	if !ok {
 		return fmt.Errorf("%s must be a JSON object keyed by Provider id", a.Env)
 	}
 	providers := make([]string, 0, len(store))
@@ -65,6 +68,16 @@ func (a AuthContent) Check(content string, rules []CredentialRule) error {
 			a.Env, p, strings.Join(a.OAuthProviders, ", "), a.apiKeyPointer(p, rules)))
 	}
 	return errors.Join(errs...)
+}
+
+// parseStore decodes an auth store. A JSON null decodes without error to a nil
+// map, so it is rejected here with every other non-object.
+func parseStore(content string) (map[string]json.RawMessage, bool) {
+	var store map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(content), &store); err != nil || store == nil {
+		return nil, false
+	}
+	return store, true
 }
 
 // entryType reads the exact "type" key. Decoding into a struct would match

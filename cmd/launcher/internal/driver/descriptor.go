@@ -1,6 +1,10 @@
 package driver
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -13,6 +17,11 @@ type Descriptor struct {
 	// ProviderNamespacedModels is set when the Driver's model ids are
 	// <provider>/<model>.
 	ProviderNamespacedModels bool
+	// ClosedCredentials is set when Credentials name every Provider the
+	// Driver can authenticate from env, so a model whose <provider>/ prefix
+	// matches no rule is authenticated only by an AuthContent entry for that
+	// Provider.
+	ClosedCredentials bool
 	// Credentials are the rules by which the Driver is authenticated; a run
 	// is authenticated when every rule that applies to its models is met.
 	Credentials []CredentialRule
@@ -78,4 +87,66 @@ func DescriptorNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// CheckClosedCredentials fails, for a Driver whose Descriptor sets
+// ClosedCredentials, every Provider that a model in models names but that is
+// authenticated by neither a credential rule nor an api_key entry in the
+// Driver's auth store (read through lookup), and every model with an empty
+// Provider. Without it such a model would pass the credential check and fail
+// only mid-run. Empty and bare (no "/") models are skipped; a Driver without
+// the fact stays open-ended and always returns nil. An unparseable store is
+// left to AuthContent.Check to report.
+func CheckClosedCredentials(name string, models []string, lookup func(string) string) error {
+	d, found := descriptor(orDefault(name))
+	if !found || !d.ClosedCredentials {
+		return nil
+	}
+	var prefixes []string
+	for _, r := range d.Credentials {
+		if r.ModelPrefix != "" && !slices.Contains(prefixes, r.ModelPrefix) {
+			prefixes = append(prefixes, r.ModelPrefix)
+		}
+	}
+	var stored map[string]json.RawMessage
+	storeEnv := ""
+	storeBroken := false
+	if d.AuthContent != nil {
+		storeEnv = d.AuthContent.Env
+		if content := lookup(storeEnv); content != "" {
+			var ok bool
+			stored, ok = parseStore(content)
+			storeBroken = !ok
+		}
+	}
+	var errs []error
+	var unknown []string
+	for _, m := range models {
+		provider, _, ok := strings.Cut(m, "/")
+		if !ok {
+			continue
+		}
+		if provider == "" {
+			errs = append(errs, fmt.Errorf("model %q names no Provider before the \"/\"; write it as <provider>/<model> with one of the supported prefixes (%s)",
+				m, strings.Join(prefixes, ", ")))
+			continue
+		}
+		if storeBroken || slices.Contains(unknown, provider) {
+			continue
+		}
+		matched := slices.ContainsFunc(d.Credentials, func(r CredentialRule) bool { return r.AppliesTo(m) })
+		if typ, _ := entryType(stored[provider]); !matched && typ != apiKeyEntryType {
+			unknown = append(unknown, provider)
+		}
+	}
+	sort.Strings(unknown)
+	for _, p := range unknown {
+		remedy := "pick a Provider the " + d.Name + " Driver supports"
+		if storeEnv != "" {
+			remedy += ", or add an api_key entry for " + p + " to " + storeEnv
+		}
+		errs = append(errs, fmt.Errorf("no credential covers the %s Provider under the %s Driver (supported prefixes: %s); %s",
+			p, d.Name, strings.Join(prefixes, ", "), remedy))
+	}
+	return errors.Join(errs...)
 }

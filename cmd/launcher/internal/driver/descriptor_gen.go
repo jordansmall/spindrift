@@ -19,6 +19,7 @@ var descriptors = []Descriptor{
 	{
 		Name:                     "pi",
 		ProviderNamespacedModels: true,
+		ClosedCredentials:        true,
 		Credentials: []CredentialRule{
 			{Env: []string{"ANTHROPIC_API_KEY"}, ModelPrefix: "anthropic/", Remedy: "set ANTHROPIC_API_KEY for the anthropic Provider under the pi Driver"},
 			{Env: []string{"OPENAI_API_KEY"}, ModelPrefix: "openai/", Remedy: "set OPENAI_API_KEY for the openai Provider under the pi Driver"},
@@ -36,4 +37,4 @@ var descriptors = []Descriptor{
 
 // descriptorRowFields lists the Descriptor fields the nix table renders, for
 // the struct-sync test; it is not read at runtime.
-var descriptorRowFields = []string{"Name", "ProviderNamespacedModels", "Credentials", "AuthContent"}
+var descriptorRowFields = []string{"Name", "ProviderNamespacedModels", "ClosedCredentials", "Credentials", "AuthContent"}

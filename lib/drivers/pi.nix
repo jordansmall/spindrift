@@ -135,6 +135,11 @@ in
   # #5331) and the bare-model eval failure (issue #5355) apply as for opencode.
   providerNamespacedModels = true;
 
+  # The credentials rules above name every Provider pi can authenticate from
+  # env, so a model whose provider prefix matches none is authenticated only
+  # by an authContent entry for that Provider.
+  closedCredentials = true;
+
   # The roster runs through pi's subagent extension, so scout, worker and filer
   # provision as under the other Drivers.
   subagents = true;

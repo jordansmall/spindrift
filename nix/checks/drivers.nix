@@ -522,6 +522,23 @@ mergeDisjoint (driverChecksFor { inherit (driverRegistry) entries; }) {
     assert assertMsg (!(throws ok)) "assertShape must accept a well-formed authContent";
     pkgs.runCommand "drivers-assert-shape-auth-content" { } "touch $out";
 
+  # assertShape validates closedCredentials when present: it must be a bool.
+  drivers-assert-shape-closed-credentials =
+    let
+      throws =
+        v:
+        !(builtins.tryEval (
+          driverRegistry.assertShape "stub" (stubDriverComplete // { closedCredentials = v; })
+        )).success;
+    in
+    assert assertMsg (
+      throws "yes" && throws 1 && throws null && throws [ ]
+    ) "assertShape must throw when closedCredentials is not a bool";
+    assert assertMsg (
+      !(throws true) && !(throws false)
+    ) "assertShape must accept a bool closedCredentials";
+    pkgs.runCommand "drivers-assert-shape-closed-credentials" { } "touch $out";
+
   # Issue #3348: assertShape also validates sessionCacheDirRelative's shape
   # when present (absence stays valid -- a Driver with no resumable session
   # state omits it): a non-empty

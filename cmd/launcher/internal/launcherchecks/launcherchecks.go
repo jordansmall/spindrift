@@ -143,11 +143,15 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 					_, err := driver.New(c.Driver)
 					return nil, err
 				}
+				lookup := func(env string) string { return c.Credentials[env] }
 				var errs []error
 				for _, r := range rules {
-					if r.AppliesTo(c.Models...) && !r.Satisfied(func(env string) string { return c.Credentials[env] }) {
+					if r.AppliesTo(c.Models...) && !r.Satisfied(lookup) {
 						errs = append(errs, errors.New(r.Remedy))
 					}
+				}
+				if err := driver.CheckClosedCredentials(c.Driver, c.Models, lookup); err != nil {
+					errs = append(errs, err)
 				}
 				if a, ok := driver.AuthContentFor(c.Driver); ok {
 					if content := c.Credentials[a.Env]; content != "" {
