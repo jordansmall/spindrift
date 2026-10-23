@@ -98,3 +98,23 @@ etc.) — those remain that ADR's job. This filter's contribution is the
 kernel-level syscalls namespace/mount isolation alone does not reach:
 `ptrace`, `mount`/`umount2`/`pivot_root`, module loading, raw device I/O, and
 time-of-day/log manipulation, per the list in `lib/seccomp.nix`.
+
+## Amendment (issue #5982): the filter reaches bwrap through pasta by path, not by fd
+
+The decision above hands the filter to bwrap as an inherited fd 3 through
+`cmd.ExtraFiles`. pasta closes every inherited fd before it execs its
+command, so on the pasta chain (the default network mode) the filter never
+arrived and every Box that had one died at startup with `bwrap: Can't read
+seccomp data: Bad file descriptor`. On the pasta chain, pasta's command is now
+a small `sh` trampoline that opens the filter path onto fd 3 and then execs
+bwrap with `--seccomp 3`, so the open happens after pasta has finished
+closing fds. The direct chain, with no pasta, is unchanged and still uses
+`cmd.ExtraFiles`.
+
+The launcher still opens the filter itself first and only emits the
+trampoline when that open succeeds. An unopenable filter therefore still
+degrades to a warning and no seccomp, as decided above, instead of reaching
+the trampoline's redirect, which would fail the whole launch. The trampoline
+reopens the path, so there is a small window where the file could vanish
+between the launcher's open and the trampoline's. We accept it: the filter is
+a nix store path, which does not change under a running launcher.
