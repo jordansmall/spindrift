@@ -164,8 +164,9 @@ option" instead.
    cross-row dependency. ADR 0069's runner families set the precedent.
 3. **The kit holds only what no ecosystem owns.** A new
    `internal/ecosystem/ecosystemkit` takes the response-rewrite helpers
-   with no ecosystem in them (`repointRegistryURL`,
-   `decodeOneJSONObject`, `normalizeHostPort`) and `httpAbsoluteURL`.
+   with no ecosystem in them (`RepointRegistryURL`,
+   `DecodeOneJSONObject`, `normalizeHostPort`), `HTTPAbsoluteURL`, and
+   the route helper `DeclaredPath`.
    Anything that names an ecosystem's file format stays in that
    ecosystem's package. `ecosystemtest` stays the conformance kit. The
    synthetic row becomes a synthetic Strategy.
