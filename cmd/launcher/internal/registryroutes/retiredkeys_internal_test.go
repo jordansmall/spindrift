@@ -1,22 +1,58 @@
 package registryroutes
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// mergeRetiredRouteEcosystems panics on a key that resolves to no
-// ecosystem.Table Strategy, so this test is what keeps that panic unreachable: only
-// a Strategy dropping its RetiredRouteKey out from under retiredRouteKeys could
-// trip it.
-func TestRetiredRouteKeysResolveToRows(t *testing.T) {
-	for _, entry := range retiredRouteKeys {
-		if _, ok := ecosystem.RowByRetiredRouteKey(entry.key); !ok {
-			t.Errorf("retiredRouteKeys key %q does not resolve to any ecosystem.Table row", entry.key)
+// Stand-ins owning the frozen retired keys. A core package may not import a
+// real ecosystem, so these exercise registryroutes' own retired-key mechanics;
+// the real owners' resolution and validation are pinned in internal/driver/bundle.
+var (
+	pathOwnerForGradleKey = synthetic.Twin("retired-gradle-key-owner")
+	pathOwnerForGoKey     = synthetic.Twin("retired-go-key-owner")
+	listOwnerForCargoKey  = synthetic.Twin("retired-cargo-key-owner")
+)
+
+func TestMain(m *testing.M) {
+	pathOwnerForGradleKey.RetiredRouteKey = ecosystem.GradleRetiredRouteKey
+	pathOwnerForGoKey.RetiredRouteKey = ecosystem.GoRetiredRouteKey
+	listOwnerForCargoKey.RetiredRouteKey = ecosystem.CargoRetiredRouteKey
+	listOwnerForCargoKey.RouteDeclaration = func(key string, value any) error {
+		if key != ecosystem.CargoRouteRegistriesKey {
+			return errors.New("is not a key the stand-in accepts")
 		}
+		names, _ := value.([]any)
+		if slices.Contains(names, any("")) {
+			return fmt.Errorf("names an empty string")
+		}
+		return nil
+	}
+	ecosystem.Register(pathOwnerForGradleKey, pathOwnerForGoKey, listOwnerForCargoKey)
+	os.Exit(m.Run())
+}
+
+// retiredRouteKeys is frozen vocabulary: the keys the routes file once spelled,
+// owned by the ecosystem package so this package never imports a real
+// ecosystem. That each one still resolves to a registered Strategy is pinned
+// where the Bundle's registration is linked (internal/driver/bundle).
+func TestRetiredRouteKeysAreTheFrozenVocabulary(t *testing.T) {
+	var got []string
+	for _, entry := range retiredRouteKeys {
+		got = append(got, entry.key)
+	}
+	want := []string{ecosystem.GradleRetiredRouteKey, ecosystem.GoRetiredRouteKey, ecosystem.CargoRetiredRouteKey}
+	if !slices.Equal(got, want) {
+		t.Errorf("retiredRouteKeys keys = %v, want %v", got, want)
 	}
 }
 
@@ -132,7 +168,7 @@ func TestRetiredRouteKeyStanzaCarriesRowBlockBesideDeclaredBlock(t *testing.T) {
 	for key, field := range retiredKeyFields(t) {
 		row, ok := ecosystem.RowByRetiredRouteKey(key)
 		if !ok {
-			t.Errorf("%s: no ecosystem.Table row owns the retired key", key)
+			t.Errorf("%s: no registered Strategy owns the retired key", key)
 			continue
 		}
 		doc := retiredBaseRoute + retiredDeclaration(t, key, field, false) + "\n\n[routes.ecosystems.unlisted]\nwidget = \"gizmo\"\n"
@@ -179,7 +215,7 @@ func TestRetiredRouteStanzaRoundTripsThroughParse(t *testing.T) {
 	for key := range retiredKeyFields(t) {
 		row, ok := ecosystem.RowByRetiredRouteKey(key)
 		if !ok {
-			t.Errorf("%s: no ecosystem.Table row owns the retired key", key)
+			t.Errorf("%s: no registered Strategy owns the retired key", key)
 			continue
 		}
 		if _, ok := routes[0].Ecosystems[row.Name]; !ok {
@@ -229,6 +265,13 @@ func TestRetiredRouteKeyWithMalformedCredentialFailsOnCredential(t *testing.T) {
 	}
 }
 
+// invalidClause is the carry-over refusal the error must name for a retired key
+// whose value its owner's replacement key refuses.
+func invalidClause(key string, owner ecosystem.Strategy, replacement, value, why string) string {
+	return fmt.Sprintf("%s cannot carry over, so the stanza omits it: %s %s", key,
+		registryvocab.RouteDeclarationKeyLabel(owner.Name, replacement)+" "+value, why)
+}
+
 // A retired key carrying a value its replacement key refuses must not reach the
 // printed stanza: the error names the key, gives the new key's own wording, and
 // the stanza it prints still parses.
@@ -239,10 +282,12 @@ func TestRetiredRouteInvalidValueIsOmittedFromStanzaAndNamed(t *testing.T) {
 		invalid string
 		clause  string
 	}{
-		{"go-relative", `go-path = "mirror"`, "mirror", `go-path cannot carry over, so the stanza omits it: ecosystems.go.path "mirror" must start with "/"`},
-		{"gradle-dotdot", `gradle-path = "/a/../b"`, "/a/../b", `gradle-path cannot carry over, so the stanza omits it: ecosystems.gradle.path "/a/../b" must not contain a ".." segment`},
-		{"cargo-bad-name", `cargo-registries = ["evil; rm"]`, "evil; rm", `cargo-registries cannot carry over, so the stanza omits it: ecosystems.cargo.registries name "evil; rm" must match ^[A-Za-z0-9_-]+$`},
-		{"cargo-empty-name", `cargo-registries = [""]`, `""`, `cargo-registries cannot carry over, so the stanza omits it: ecosystems.cargo.registries names an empty string`},
+		{"path-relative", ecosystem.GoRetiredRouteKey + ` = "mirror"`, "mirror",
+			invalidClause(ecosystem.GoRetiredRouteKey, pathOwnerForGoKey, "path", `"mirror"`, `must start with "/"`)},
+		{"path-dotdot", ecosystem.GradleRetiredRouteKey + ` = "/a/../b"`, "/a/../b",
+			invalidClause(ecosystem.GradleRetiredRouteKey, pathOwnerForGradleKey, "path", `"/a/../b"`, `must not contain a ".." segment`)},
+		{"list-empty-name", ecosystem.CargoRetiredRouteKey + ` = [""]`, `""`,
+			invalidClause(ecosystem.CargoRetiredRouteKey, listOwnerForCargoKey, ecosystem.CargoRouteRegistriesKey, "names", "an empty string")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n"), nil)
@@ -281,9 +326,9 @@ func TestRetiredRouteInvalidValueBesideExplicitBlockIsNotValidated(t *testing.T)
 		explicit string
 		invalid  string
 	}{
-		{"go-path", `go-path = "mirror"`, "[routes.ecosystems.go]\npath = \"/ok\"\n", "mirror"},
-		{"gradle-path", `gradle-path = "/a/../b"`, "[routes.ecosystems.gradle]\npath = \"/ok\"\n", "/a/../b"},
-		{"cargo-registries", `cargo-registries = ["evil; rm"]`, "[routes.ecosystems.cargo]\nregistries = [\"ok\"]\n", "evil; rm"},
+		{"path", ecosystem.GoRetiredRouteKey + ` = "mirror"`, "[routes.ecosystems." + pathOwnerForGoKey.Name + "]\npath = \"/ok\"\n", "mirror"},
+		{"path-dotdot", ecosystem.GradleRetiredRouteKey + ` = "/a/../b"`, "[routes.ecosystems." + pathOwnerForGradleKey.Name + "]\npath = \"/ok\"\n", "/a/../b"},
+		{"list", ecosystem.CargoRetiredRouteKey + ` = [""]`, "[routes.ecosystems." + listOwnerForCargoKey.Name + "]\n" + ecosystem.CargoRouteRegistriesKey + " = [\"ok\"]\n", `""`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+tc.explicit), nil)
@@ -309,31 +354,32 @@ func TestRetiredRouteInvalidValueBesideExplicitBlockIsNotValidated(t *testing.T)
 // echoed as written.
 func TestRetiredRouteInvalidValueBesideBlockLackingTheKeyIsRefused(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		decl     string
-		explicit string
-		header   string
-		invalid  string
-		clause   string
+		name    string
+		decl    string
+		owner   ecosystem.Strategy
+		key     string
+		invalid string
+		why     string
 	}{
-		{"go-path", `go-path = "mirror"`, "[routes.ecosystems.go]\n", "[routes.ecosystems.go]", "mirror", `go-path cannot carry over, so the stanza omits it: ecosystems.go.path "mirror" must start with "/"`},
-		{"gradle-path", `gradle-path = "/a/../b"`, "[routes.ecosystems.gradle]\n", "[routes.ecosystems.gradle]", "/a/../b", `gradle-path cannot carry over, so the stanza omits it: ecosystems.gradle.path "/a/../b" must not contain a ".." segment`},
+		{"path-relative", ecosystem.GoRetiredRouteKey + ` = "mirror"`, pathOwnerForGoKey, ecosystem.GoRetiredRouteKey, "mirror", `must start with "/"`},
+		{"path-dotdot", ecosystem.GradleRetiredRouteKey + ` = "/a/../b"`, pathOwnerForGradleKey, ecosystem.GradleRetiredRouteKey, "/a/../b", `must not contain a ".." segment`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+tc.explicit), nil)
+			header := "[routes.ecosystems." + tc.owner.Name + "]"
+			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+header+"\n"), nil)
 			if err == nil {
 				t.Fatal("expected a retirement error, got nil")
 			}
 			msg := err.Error()
-			if !strings.Contains(msg, tc.clause) {
-				t.Errorf("error lacks %q, got: %v", tc.clause, err)
+			if want := invalidClause(tc.key, tc.owner, "path", `"`+tc.invalid+`"`, tc.why); !strings.Contains(msg, want) {
+				t.Errorf("error lacks %q, got: %v", want, err)
 			}
 			_, stanza, ok := strings.Cut(msg, "replacement "+retiredStanzaSuffix)
 			if !ok {
 				t.Fatalf("expected a replacement stanza in the error, got: %v", err)
 			}
-			if !strings.Contains(stanza, tc.header) {
-				t.Errorf("stanza lacks the explicit block %s:\n%s", tc.header, stanza)
+			if !strings.Contains(stanza, header) {
+				t.Errorf("stanza lacks the explicit block %s:\n%s", header, stanza)
 			}
 			if strings.Contains(stanza, tc.invalid) {
 				t.Errorf("stanza echoes the invalid value %q:\n%s", tc.invalid, stanza)

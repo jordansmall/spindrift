@@ -11,7 +11,17 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 )
+
+// Decide classifies through the registered Strategies; per-ecosystem lockfile
+// classification is pinned in internal/ecosystem, so one stand-in suffices.
+func TestMain(m *testing.M) {
+	ecosystem.Register(synthetic.Strategy)
+	os.Exit(m.Run())
+}
 
 type nixCall struct {
 	dir  string
@@ -158,22 +168,14 @@ func TestDecide_Name(t *testing.T) {
 }
 
 func TestDecide_AndHint_Ecosystem(t *testing.T) {
-	const goHint = "==> hint: go mod project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
+	eco := synthetic.Strategy.Classification
+	hint := "==> hint: " + eco + " project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
 	tests := []struct {
-		file     string
-		wantEco  string
-		wantHint bool
+		file    string
+		wantEco string
 	}{
-		{"go.sum", "go mod", true},
-		{"build.gradle.kts", "gradle", true},
-		{"build.gradle", "gradle", true},
-		{"settings.gradle", "gradle", true},
-		{"settings.gradle.kts", "gradle", true},
-		{"gradle.lockfile", "gradle", true},
-		{"package-lock.json", "npm/pnpm/yarn", true},
-		{"yarn.lock", "npm/pnpm/yarn", true},
-		{"pnpm-lock.yaml", "npm/pnpm/yarn", true},
-		{"README.md", "", false},
+		{synthetic.Strategy.LockfileNames[0], eco},
+		{"README.md", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.file, func(t *testing.T) {
@@ -185,8 +187,8 @@ func TestDecide_AndHint_Ecosystem(t *testing.T) {
 				t.Fatalf("Ecosystem = %q, want %q", d.Ecosystem, tc.wantEco)
 			}
 			want := ""
-			if tc.wantHint {
-				want = "==> hint: " + tc.wantEco + " project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
+			if tc.wantEco != "" {
+				want = hint
 			}
 			if got := d.Hint(""); got != want {
 				t.Errorf("Hint(\"\") = %q, want %q", got, want)
@@ -196,9 +198,9 @@ func TestDecide_AndHint_Ecosystem(t *testing.T) {
 			}
 		})
 	}
-	d := Decision{Ecosystem: "go mod"}
-	if got := d.Hint(""); got != goHint {
-		t.Errorf("Hint = %q, want %q", got, goHint)
+	d := Decision{Ecosystem: eco}
+	if got := d.Hint(""); got != hint {
+		t.Errorf("Hint = %q, want %q", got, hint)
 	}
 }
 
@@ -325,11 +327,11 @@ func flakeDir(t *testing.T) string {
 func TestDecide_HintPrecedesProbingLine(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "flake.nix")
-	writeFile(t, dir, "go.sum")
+	writeFile(t, dir, synthetic.Strategy.LockfileNames[0])
 	var out strings.Builder
 	var calls []nixCall
 	Decide(context.Background(), &out, dir, "default", "300", "", fakeNix(&calls, nil))
-	want := "==> hint: go mod project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image\n" +
+	want := "==> hint: " + synthetic.Strategy.Classification + " project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image\n" +
 		"==> flake.nix found in cloned repo; probing for devShell\n"
 	if out.String() != want {
 		t.Errorf("stdout = %q, want %q", out.String(), want)
