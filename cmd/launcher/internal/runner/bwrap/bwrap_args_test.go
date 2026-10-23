@@ -352,8 +352,10 @@ func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box run
 	if !childExecsByName {
 		t.Error("execTarget childExecsByName = false, want true: pasta execvp's \"bwrap\" by bare name")
 	}
-	want := append([]string{}, pastaHardenedFlags...)
-	want = append(want, "--dns-forward", pastaDNSForwardAddr, "-f", "--", "bwrap")
+	want := []string{
+		"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw",
+		"--config-net", "--dns-forward", "169.254.2.2", "-f", "--", "bwrap",
+	}
 	want = append(want, bwrapArgs...)
 	if len(args) != len(want) {
 		t.Fatalf("execTarget args length = %d, want %d\ngot:  %v\nwant: %v", len(args), len(want), args, want)
@@ -559,7 +561,7 @@ func TestExecTarget_DefaultPastaArgvLiteral(t *testing.T) {
 
 	want := []string{
 		"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw",
-		"--dns-forward", "169.254.2.2", "-f", "--", "bwrap",
+		"--config-net", "--dns-forward", "169.254.2.2", "-f", "--", "bwrap",
 	}
 	if len(args) < len(want) || strings.Join(args[:len(want)], " ") != strings.Join(want, " ") {
 		t.Errorf("pasta argv prefix = %v, want %v", args, want)

@@ -120,8 +120,10 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 		if program != "pasta" {
 			t.Errorf("execTarget program = %q, want %q", program, "pasta")
 		}
-		wantArgs := append([]string{}, pastaHardenedFlags...)
-		wantArgs = append(wantArgs, "--dns-forward", pastaDNSForwardAddr, "-f", "--", "bwrap")
+		wantArgs := []string{
+			"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw",
+			"--config-net", "--dns-forward", "169.254.2.2", "-f", "--", "bwrap",
+		}
 		wantArgs = append(wantArgs, a.buildArgs("", runner.Box{Env: map[string]string{}})...)
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)

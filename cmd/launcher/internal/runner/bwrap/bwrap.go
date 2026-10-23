@@ -415,14 +415,7 @@ func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box) (string, []stri
 	if !a.network.Pasta {
 		program, args = "bwrap", bwrapArgs
 	} else {
-		pastaArgs := append([]string{}, pastaHardenedFlags...)
-		pastaArgs = append(pastaArgs, "--dns-forward", pastaDNSForwardAddr,
-			// -f/--foreground is load-bearing: pasta's default is to fork into
-			// the background and detach once the namespace is set up. Without
-			// it, cmd.Start()/cmd.Wait() would track pasta's short-lived
-			// detaching parent instead of the real bwrap child, breaking exit
-			// codes, output capture, and the a.running process map.
-			"-f", "--", "bwrap")
+		pastaArgs := append(pastaFlags(), "--", "bwrap")
 		pastaArgs = append(pastaArgs, bwrapArgs...)
 		program, args = "pasta", pastaArgs
 	}
@@ -430,11 +423,29 @@ func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box) (string, []stri
 	return program, args, childExecsByName
 }
 
-// pastaDNSForwardAddr is pasta's documented default IPv4 gateway address when it
-// creates a namespace with no host default route visible, always true in this
-// "run given command" unshare mode (pasta(1) NOTES). --dns-forward is a separate
-// always-on rule scoped to port 53/853 traffic to this address, independent of
-// --no-map-gw, so DNS works without reopening the host-loopback splice (ADR 0042).
+// pastaFlags returns every pasta flag that precedes the "--" and the wrapped
+// command, shared with the integration tests' pasta probe so it cannot drift from
+// production.
+func pastaFlags() []string {
+	flags := append([]string{}, pastaHardenedFlags...)
+	return append(flags,
+		// --config-net is namespace setup, not hardening: the pinned passt only
+		// brings the tap interface UP and gives it an address and default route
+		// when asked, otherwise the Box has no egress (issue #5981).
+		"--config-net",
+		"--dns-forward", pastaDNSForwardAddr,
+		// -f/--foreground is load-bearing: pasta's default is to fork into
+		// the background and detach once the namespace is set up. Without
+		// it, cmd.Start()/cmd.Wait() would track pasta's short-lived
+		// detaching parent instead of the real bwrap child, breaking exit
+		// codes, output capture, and the a.running process map.
+		"-f")
+}
+
+// pastaDNSForwardAddr is the address --dns-forward intercepts: pasta forwards
+// port 53/853 traffic sent to it to the host's resolver, an always-on rule
+// independent of --no-map-gw, so DNS works without reopening the host-loopback
+// splice (ADR 0042). The guest's /etc/resolv.conf names this address.
 const pastaDNSForwardAddr = "169.254.2.2"
 
 // seccompFilterFD is the file descriptor number bwrap's --seccomp flag names.
