@@ -19,6 +19,7 @@ import (
 // last genuine success self-report (issues #2223, #2224). The self-report is
 // unauthenticated input, so this trusts it only for a PR-shaped read-only forge
 // and returns false on any doubt, leaving the caller's blocked handling to run.
+// True means the issue is settled: adopted, abandoned, or failed unreviewed.
 func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
 	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil {
 		return false
@@ -29,6 +30,10 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 	if !sit.SelfReportSuccess {
 		return false
 	}
+	if sit.Unreviewed {
+		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
+		return true
+	}
 
 	return s.adoptAndGateLogged(d, num, gen, result, "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch")
 }
@@ -38,6 +43,7 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 // false, so no ADR 0036 backstop is stitched in and the Provenance gate there
 // never fires. gate.go's sole caller already sits inside the
 // !result.Resolved.Found branch, so no explicit guard for it is needed here.
+// True means the issue is settled, as in tryAdoptRelayedBranch.
 func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
 	if !s.readOnly || s.pr == nil {
 		return false
@@ -47,6 +53,10 @@ func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num strin
 	sit := s.situationFor(num, false, result)
 	if !sit.SelfReportSuccess {
 		return false
+	}
+	if sit.Unreviewed {
+		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
+		return true
 	}
 
 	return s.adoptAndGateLogged(d, num, gen, result, "no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch")
@@ -111,7 +121,8 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // opening its draft PR failed.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
 	defer s.flushSettled(d, num)
-	if sit.OpenPRFound {
+	// An unreviewed ready is not adoption evidence, push-only included (issue #5973).
+	if sit.OpenPRFound || sit.Unreviewed {
 		return false, nil
 	}
 	cf := s.cfForNum(num)
@@ -176,14 +187,20 @@ func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Resu
 // 0039) when either a genuine success self-report or a signal kill (#2378)
 // coincides with a bundle in the outbox, leaving the land itself to `spindrift
 // recover`. It only stats the outbox, so no local issue is ever
-// fast-forwarded on unauthenticated evidence alone.
-func (s *Settle) tryMarkRecoverable(num string, result dispatch.Result) bool {
+// fast-forwarded on unauthenticated evidence alone. A success self-report
+// that is unreviewed fails the issue instead, since recover would decline that
+// bundle (issue #5973). True means the issue is settled, Recoverable or Failed.
+func (s *Settle) tryMarkRecoverable(d dispatch.Dispatcher, num string, result dispatch.Result) bool {
 	cf := s.cfForNum(num)
 	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
 	if _, ok := cf.(forge.BundleRelay); !ok || s.pr != nil ||
 		(!selfReportOK && !result.KilledBySignal) ||
 		!s.bundlePresent(num) {
 		return false
+	}
+	if s.situationFor(num, false, result).Unreviewed {
+		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
+		return true
 	}
 	reason := "genuine success self-report"
 	if !selfReportOK {

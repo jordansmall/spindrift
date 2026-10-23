@@ -664,12 +664,12 @@ func settleHostLanded(t *testing.T, passes []passmanifest.Entry) *forge.Fake {
 	return fc
 }
 
-// implementThenFixPasses is the manifest of a run whose implement pass printed
-// no outcome and whose fix pass did.
-func implementThenFixPasses() []passmanifest.Entry {
+// implementThenLandPasses is the manifest of a run whose implement pass printed
+// no outcome and whose land pass did.
+func implementThenLandPasses() []passmanifest.Entry {
 	return []passmanifest.Entry{
 		{Pass: 1, Kind: "implement", OutcomeFound: false},
-		{Pass: 2, Kind: "fix", OutcomeFound: true},
+		{Pass: 2, Kind: "land", OutcomeFound: true},
 	}
 }
 
@@ -679,9 +679,9 @@ func implementThenFixPasses() []passmanifest.Entry {
 // alongside the host-derived landing, never off the Box's outcome line (issue
 // #5189).
 func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
-	fc := settleHostLanded(t, implementThenFixPasses())
+	fc := settleHostLanded(t, implementThenLandPasses())
 
-	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 2, Kind: "fix"}}
+	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 2, Kind: "land"}}
 	if !reflect.DeepEqual(fc.RecordLandingPassCalls, want) {
 		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, want)
 	}
@@ -693,12 +693,12 @@ func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
 // genuine in-pass marker.
 func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t *testing.T) {
 	fc := settleHostLanded(t, []passmanifest.Entry{
-		{Pass: 1, Kind: "implement", OutcomeFound: false},
-		{Pass: 2, Kind: "fix", OutcomeFound: false},
-		{Pass: 3, Kind: "verify", OutcomeFound: false},
+		{Pass: 1, Kind: "legacy", OutcomeFound: false},
+		{Pass: 2, Kind: "legacy", OutcomeFound: false},
+		{Pass: 3, Kind: "legacy", OutcomeFound: false},
 	})
 
-	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 3, Kind: "verify"}}
+	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 3, Kind: "legacy"}}
 	if !reflect.DeepEqual(fc.RecordLandingPassCalls, want) {
 		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, want)
 	}
@@ -710,7 +710,7 @@ func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t
 // degrade gracefully, not settle's to paper over.
 func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
 	fc := settleHostLanded(t, []passmanifest.Entry{
-		{Pass: 1, Kind: "implement", OutcomeFound: false},
+		{Pass: 1, Kind: "legacy", OutcomeFound: false},
 		{Pass: 2, Kind: "", OutcomeFound: true},
 	})
 
@@ -729,7 +729,7 @@ func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.RecordLandingPassErr = sentinel
 	s, result := hostLandedPassFixture(t, fc, []passmanifest.Entry{
-		{Pass: 1, Kind: "implement", OutcomeFound: true},
+		{Pass: 1, Kind: "land", OutcomeFound: true},
 	})
 
 	stderr := captureStderr(t, func() {
@@ -755,7 +755,7 @@ func TestSettle_RecordLandingPass_SkippedWhenRecordLandingFails(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.RecordLandingErr = sentinel
 	s, result := hostLandedPassFixture(t, fc, []passmanifest.Entry{
-		{Pass: 1, Kind: "implement", OutcomeFound: true},
+		{Pass: 1, Kind: "land", OutcomeFound: true},
 	})
 
 	stderr := captureStderr(t, func() {
@@ -827,7 +827,7 @@ func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *t
 			SelfReportFound: true,
 			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
-		Passes: []passmanifest.Entry{{Pass: 2, Kind: "fix", OutcomeFound: true}},
+		Passes: []passmanifest.Entry{{Pass: 2, Kind: "land", OutcomeFound: true}},
 	}
 	sit := s.situationFor(hostLandedIssue, false, landed)
 	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), hostLandedIssue, 0, sit, landed); !got || err != nil {
@@ -853,7 +853,7 @@ func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *t
 		t.Errorf("blocked run must not write a pass, got %+v", fc.RecordLandingPassCalls)
 	}
 	for _, call := range fc.RecordLandingPassCalls {
-		if want := (forge.RecordLandingPassCall{Num: hostLandedIssue, Pass: 2, Kind: "fix"}); call != want {
+		if want := (forge.RecordLandingPassCall{Num: hostLandedIssue, Pass: 2, Kind: "land"}); call != want {
 			t.Errorf("RecordLandingPass call = %+v, want only the landed run's %+v", call, want)
 		}
 	}
@@ -873,7 +873,7 @@ func TestSelfHeal_PushOnlyLanding_RecordsPassWithPlaceholder(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	branch := fc.AgentBranch("1")
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
-	passes := implementThenFixPasses()
+	passes := implementThenLandPasses()
 
 	s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
 
@@ -881,7 +881,7 @@ func TestSelfHeal_PushOnlyLanding_RecordsPassWithPlaceholder(t *testing.T) {
 	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
 		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
 	}
-	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "fix"}}
+	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "land"}}
 	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
 		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
 	}
@@ -927,7 +927,7 @@ func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T
 	fc := forge.NewFake(testDispatchLabels)
 	tracker := landingOnlyTracker{IssueTracker: fc.AsLocalShaped(), LandingRecorder: fc}
 	s, result := hostLandedPassFixtureOver(t, fc, tracker, []passmanifest.Entry{
-		{Pass: 1, Kind: "implement", OutcomeFound: true},
+		{Pass: 1, Kind: "land", OutcomeFound: true},
 	})
 
 	captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })

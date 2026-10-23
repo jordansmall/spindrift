@@ -53,8 +53,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// 0039): local has no PR-shaped adopt path (s.pr is always nil), so the
 		// call above always returns false here. tryMarkRecoverable checks the
 		// same fingerprint but promotes to Recoverable, leaving the land itself
-		// to `spindrift recover`.
-		if s.tryMarkRecoverable(num, result) {
+		// to `spindrift recover` (or settling Failed/unreviewed instead).
+		if s.tryMarkRecoverable(d, num, result) {
 			return
 		}
 		s.settleUnresolved(num, clsNote, "no outcome in log")
@@ -99,7 +99,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// left to tryMarkRecoverable because a genuine status=blocked is the
 		// driver's own authoritative outcome line, not the backstop this
 		// override exists to second-guess, so it must still park Failed below.
-		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.tryMarkRecoverable(num, result) {
+		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.tryMarkRecoverable(d, num, result) {
 			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
@@ -126,6 +126,12 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		s.postUsageComment(num, d)
 	case outcome.StatusReady:
+		// A ready the land pass did not report is not trusted (issue #5973):
+		// land nothing, and never reach selfHeal.
+		if passmanifest.UnreviewedReady(result.Passes) {
+			s.failUnreviewed(d, num, o.Landing)
+			return
+		}
 		pr := o.Landing
 		// A read-only PR-shaped Code Forge never opens its own PR in-box (issue
 		// #1919), so o.Landing carries the branch name, not a PR URL, and
@@ -618,4 +624,29 @@ func (s *Settle) closeResolvedIssue(num string) {
 	if closer, ok := s.it.(forge.IssueCloser); ok {
 		reportCloseErr(num, closer.CloseIssue(num))
 	}
+}
+
+// unreviewedLanding is the landing= value for an unreviewed fail: the outcome
+// line's own when there is one, else the issue's derived agent branch.
+func (s *Settle) unreviewedLanding(num string, result dispatch.Result) string {
+	if result.Resolved.Found {
+		return result.Resolved.Outcome.Landing
+	}
+	return s.cfForNum(num).AgentBranch(num)
+}
+
+// failUnreviewed settles num as agent-failed for a status=ready that did not
+// come from a land pass (issue #5973): nothing is landed and selfHeal never runs.
+func (s *Settle) failUnreviewed(d dispatch.Dispatcher, num, landing string) {
+	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, landing, UnreviewedNote)
+	s.transitionState(num, forge.InProgress, forge.Failed, UnreviewedNote, ReasonUnreviewed)
+	retry := "re-apply the dispatch label"
+	if s.cfg.DispatchLabel != "" {
+		retry = fmt.Sprintf("re-apply `%s`", s.cfg.DispatchLabel)
+	}
+	body := "The run reported `status=ready` from a review-loop pass other than its land pass, so the work was never reviewed and landed; nothing was landed. To re-run it, " + retry + "."
+	if err := s.it.Comment(num, body); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post unreviewed comment: %v\n", num, err)
+	}
+	s.postUsageComment(num, d)
 }

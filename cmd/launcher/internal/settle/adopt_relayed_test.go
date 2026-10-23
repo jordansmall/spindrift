@@ -774,7 +774,7 @@ func TestSettle_SettleRelayedBranch_AdoptRecordsPassWithAdoptedPR(t *testing.T) 
 			SelfReportFound: true,
 			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
 		},
-		Passes: implementThenFixPasses(),
+		Passes: implementThenLandPasses(),
 	}
 
 	c := baseConfig()
@@ -791,7 +791,7 @@ func TestSettle_SettleRelayedBranch_AdoptRecordsPassWithAdoptedPR(t *testing.T) 
 	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
 		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
 	}
-	wantPass := []forge.RecordLandingPassCall{{Num: issNum, Pass: 2, Kind: "fix"}}
+	wantPass := []forge.RecordLandingPassCall{{Num: issNum, Pass: 2, Kind: "land"}}
 	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
 		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
 	}
@@ -810,8 +810,8 @@ func TestSettle_SettleRelayedBranch_PushOnlyRecordsPassOrClearsIt(t *testing.T) 
 	}{
 		{
 			name:   "success self-report with passes",
-			passes: implementThenFixPasses(),
-			want:   forge.RecordLandingPassCall{Num: issNum, Pass: 2, Kind: "fix"},
+			passes: implementThenLandPasses(),
+			want:   forge.RecordLandingPassCall{Num: issNum, Pass: 2, Kind: "land"},
 		},
 		{
 			name: "recover-shaped result without passes clears the pass",
