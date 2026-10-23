@@ -80,7 +80,7 @@ func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
 // used to exempt; it no longer exists, so any one of the five retired knobs
 // aborts the launch on its own.
 func TestBootstrap_RetiredRegistryProxyCredentialEnv_NoUpstreamURL_WrapsErrConfigInvalid(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
@@ -214,7 +214,7 @@ func setMinimalLocalBootstrapEnv(t *testing.T, repoPath string) {
 // scalar knobs used (issue #3139): the value lands on
 // lc.config.registryProxyRoutes and the source env var is unset afterward.
 func TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
@@ -248,7 +248,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
 // lc.config.registryProxyRoutes, keeping the trailing-slash normalization
 // registryroutes.Parse applies.
 func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndUpstreamOrigin_Preserved(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
@@ -285,7 +285,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 // match-host. multiEntryNetrc puts a non-matching machine entry ahead of the
 // matching one, so "first entry wins" would fail this.
 func TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
@@ -318,7 +318,7 @@ credential = { netrc = "`+netrcPath+`" }
 // wins" would fail, and the token differs from the netrc test's so a
 // copy-paste between the two tests fails instead of passing silently.
 func TestBootstrap_RegistryProxyRoutesFile_CargoCredential_ResolvesByRegistryName(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
@@ -355,7 +355,7 @@ credential = { cargo-credentials = "`+credentialsPath+`", registry-name = "myreg
 // (issue #3139): with REGISTRY_PROXY_ROUTES_FILE unset, bootstrap() succeeds
 // with an empty route table and never touches credresolver.
 func TestBootstrap_NoRoutesFile_EmptyRoutes(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 	t.Chdir(checkout)
@@ -654,7 +654,7 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 // else calls lc.cleanup() and then reacquires, so this checks contention
 // before cleanup and a free lock after.
 func TestBootstrap_Success_HoldsAccumLockUntilCleanup(t *testing.T) {
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
@@ -761,7 +761,7 @@ body
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
-	// No stubExecutableOnPath(t, "pasta") here, unlike every other
+	// No stubPastaOnPath(t) here, unlike every other
 	// RUNNER_KIND=bwrap test in this file: PATH holds only a stub bwrap and
 	// git's directory, so pasta cannot resolve.
 	t.Setenv("PATH", pathWithoutPasta(t))
@@ -796,6 +796,22 @@ func stubExecutableOnPath(t *testing.T, name string) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// stubPastaScript is a pasta stub that passes bwrap.ValidatePasta's usability
+// probe, which requires pasta's output to carry a marker line. The literal
+// mirrors the unexported netnsProbeOK in internal/runner/bwrap.
+const stubPastaScript = "#!/bin/sh\necho 'spindrift-netns-probe: ok'\n"
+
+// stubPastaOnPath puts stubPastaScript on PATH as pasta.
+func stubPastaOnPath(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	script := filepath.Join(bin, "pasta")
+	if err := os.WriteFile(script, []byte(stubPastaScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // Runner selection keys off RUNNER_KIND, not a runtime-name comparison (issue
 // #2538). RUNTIME=podman is what the old `c.runtime == "bwrap"` check read as
 // "select OCI". bwrapAdapter's IsReady() never shells out, so a successful
@@ -803,7 +819,7 @@ func stubExecutableOnPath(t *testing.T, name string) {
 // `podman image inspect` and fail. The stub podman only satisfies LookPath.
 func TestBootstrap_RunnerKindBwrap_OverridesMismatchedRuntime(t *testing.T) {
 	stubExecutableOnPath(t, "podman")
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
