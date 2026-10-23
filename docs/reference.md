@@ -527,8 +527,8 @@ entry (issue #3447) that has no legacy model arg of its own — see
 subagents. Absent means no declared restriction; the default `reviewer`
 declares `[ "review-axis" ]`. Each element must be a valid entry name (a string
 matching `[a-z0-9-]+`), else eval fails with the `invalid-spawns-type`
-violation. An empty list is deliberate: the entry spawns nothing. Today only
-the opencode Driver enforces it; claude and pi ignore it.
+violation. An empty list is deliberate: the entry spawns nothing. The opencode
+and pi Drivers enforce it; claude ignores it.
 
 Every roster — explicit or default — passes through `lib/roster.nix`'s
 `normalizeRoster` before any Driver renders it, and `normalizeRoster` is
@@ -1209,6 +1209,22 @@ What the Driver carries:
   nothing. An unknown tool name
   fails evaluation, as does a non-empty `tools` list that maps to nothing,
   because an empty `tools` line would grant every tool.
+- **Spawns (issue #5809).** The extension spawns any agent by name, so the
+  hook bridge enforces `spawns` instead. The image bakes
+  `~/.pi/agent/spindrift-spawns.json`, mapping each entry that declares
+  `spawns` to its list, and the bridge refuses a `subagent` call from that
+  entry naming any other agent in `agent`, `tasks[]` or `chain[]`: the default
+  reviewer reaches `review-axis` but never `worker`. A child knows which entry
+  it is only from the `prompt-<name>.md` file the extension passes it, so the
+  coordinator and entries without `spawns` are unrestricted, and an unreadable
+  file blocks a declaring entry's calls. As under opencode, a target absent
+  from the roster fails evaluation for an entry that can call `subagent`; so
+  does `spawns` on such an entry with a blank `description`, because the
+  extension passes no prompt file for a blank body. The gate covers only the
+  `subagent` tool: an entry that keeps `bash` (the default reviewer does) can
+  still launch `pi` directly, or rewrite `~/.pi/agent/spindrift-spawns.json`
+  if home is writable, so this is least-privilege hardening, not a hard
+  boundary.
 - **Per-role model and effort.** A role's `effort` is sent as a suffix on the
   role's model, `model: "<provider>/<model>:<level>"`, because the extension
   forwards the coordinator's `--thinking` only to agents with no model. The
