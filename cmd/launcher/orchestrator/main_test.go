@@ -77,11 +77,12 @@ func TestMainRunReviewPassEnabledUsesReviewPassFormula(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
 	// passmachine.implementFixTransition has no "no verdict" fallback like the
-	// legacy loop's, so before an APPROVE it stops only on Input.HasOutcome.
+	// legacy loop's, so before an APPROVE a non-ready outcome is what stops it (a premature
+	// ready continues into review, issue #5972).
 	// The outcome must land in $DRIVER_LOG_PATH as a real stream-json line, not
 	// just on stdout, or pass 1 falls through to a review pass and then a land
 	// pass that needs a real prompt.txt on disk.
-	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")+`' | tee -a "$DRIVER_LOG_PATH"
+	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=stop nonce=abc")+`' | tee -a "$DRIVER_LOG_PATH"
 exit 0
 `)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))

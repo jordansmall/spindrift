@@ -3908,7 +3908,7 @@ esac
 exit 0
 `, callLog,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
-		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=stop nonce=abc"))
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -3981,7 +3981,7 @@ exit 0
 `, callLog, passSummaryPath,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
 		passSummaryPath, missingMarker,
-		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=stop nonce=abc"))
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 

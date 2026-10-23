@@ -520,3 +520,61 @@ func TestRunDeltaReviewGateBlockFailsVisibleWhenLogUnwritable(t *testing.T) {
 		t.Fatalf("run err = %v, want the corrective append's permission error surfaced", err)
 	}
 }
+
+// TestRunPrematureReadyOutcomeStillReviewsLandsAndDeltaReviews reproduces the
+// bench trace of issue #5972: the implement pass prints status=ready before any
+// reviewer has approved. That outcome is premature, so the loop must continue
+// into review, land, and delta-review, and the run's final outcome is the one
+// the land pass printed.
+func TestRunPrematureReadyOutcomeStillReviewsLandsAndDeltaReviews(t *testing.T) {
+	chdirToFreshGitRepo(t)
+	f := newDeltaReviewLoopFixture(t)
+	const prematureLine = "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=premature nonce=abc"
+	const landLine = "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=landed nonce=abc"
+	approve := streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none")
+	body := `: > "$DRIVER_LOG_PATH"
+n=$(wc -l < "` + f.callLog + `")
+case "$n" in
+  1) ` + teeStreamJSONStep(streamJSONFinalResult(prematureLine)) + ` ;;
+  2) ` + teeStreamJSONStep(approve) + ` ;;
+  3) printf 'landed content\n' > landed-file.txt && git add landed-file.txt && git commit -m "land" >/dev/null && ` + teeStreamJSONStep(streamJSONFinalResult(landLine)) + ` ;;
+  4) ` + teeStreamJSONStep(approve) + ` ;;
+esac
+exit 0
+`
+	writeFakeDriverExec(t, f.dir, f.callLog, body)
+	t.Setenv("PATH", f.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout bytes.Buffer
+	if _, err := run(f.config(10), &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var roles []string
+	var firstDecision *hostop.SpindriftOp
+	for _, op := range decodeSpindriftOps(t, stdout.String()) {
+		switch op.Op {
+		case "pass_start":
+			roles = append(roles, op.Role)
+		case "decision":
+			if firstDecision == nil {
+				firstDecision = &op
+			}
+		}
+	}
+	want := []string{
+		passmachine.KindImplement.String(),
+		passmachine.KindReview.String(),
+		passmachine.KindLand.String(),
+		passmachine.KindDeltaReview.String(),
+	}
+	if strings.Join(roles, ",") != strings.Join(want, ",") {
+		t.Errorf("pass_start roles = %v, want %v", roles, want)
+	}
+	if firstDecision == nil || !strings.Contains(firstDecision.Reason, "premature status=ready") {
+		t.Errorf("first decision op = %+v, want the premature-ready reason", firstDecision)
+	}
+	if got := f.finalOutcomeLine(t); got != landLine {
+		t.Errorf("log's final outcome = %q, want the land pass's %q", got, landLine)
+	}
+}
