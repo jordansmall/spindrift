@@ -4,13 +4,18 @@
 // hooks around each call, so the guard logic, its messages, and the credential
 // list (credential-vars) stay single-sourced rather than re-implemented here.
 // It also blocks a `subagent` call whose agentScope is not "user", keeping the
-// roster to the baked agents.
+// roster to the baked agents, and one that spawns an agent its caller's
+// `spawns` list does not name (issue #5809).
 // Plain ESM with node: builtins only, because the Box is offline and pi loads
 // the file as is.
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 // Baked for every Driver by lib/image.nix's homeLayoutScript.
 const HOOKS_DIR = "/home/agent/.claude/hooks";
+// Baked by lib/drivers/pi.nix's agentFilesTemplate: roster entry -> agents its
+// subagent tool may spawn. An entry absent from it is unrestricted.
+const SPAWNS_FILE = "/home/agent/.pi/agent/spindrift-spawns.json";
 // Bounds a hung guard like lib/image.nix's guardBound and opencode-guards.js:
 // Claude's own hook timeout is non-blocking, so unbounded it would let the call run.
 const GUARD_TIMEOUT_MS = 10_000;
@@ -78,13 +83,63 @@ function runHook(script, toolName, args, timeout, onFailure = "") {
   return parsed.hookSpecificOutput ?? {};
 }
 
+// A subagent child runs as its own pi process whose argv carries the prompt
+// file the subagent extension wrote for it (prompt-<name>.md). The env cannot
+// say who this is: children inherit the parent's. A top-level session has no
+// such argument and is unrestricted.
+function callerAgent() {
+  const i = process.argv.indexOf("--append-system-prompt");
+  if (i < 0) return undefined;
+  return /^prompt-(.+)\.md$/.exec(process.argv[i + 1]?.split("/").pop() ?? "")?.[1];
+}
+
+// A refusal reason, or undefined when the subagent call may proceed. Fails
+// closed: the policy being unreadable must not leave a known caller unrestricted.
+function spawnsRefusal(input) {
+  const caller = callerAgent();
+  if (caller === undefined) return;
+  let allowed;
+  try {
+    const policy = JSON.parse(readFileSync(SPAWNS_FILE, "utf8"));
+    if (typeof policy !== "object" || policy === null || Array.isArray(policy)) {
+      throw new Error("not an object");
+    }
+    allowed = Object.hasOwn(policy, caller) ? policy[caller] : undefined;
+  } catch (err) {
+    return `Refusing subagent: cannot read the spawns policy ${SPAWNS_FILE}: ${err.message}`;
+  }
+  if (allowed === undefined) return;
+  if (!Array.isArray(allowed)) {
+    return `Refusing subagent: the spawns policy for ${caller} is not a list`;
+  }
+  const targets = [
+    input?.agent,
+    ...(input?.tasks ?? []).map((t) => t?.agent),
+    ...(input?.chain ?? []).map((s) => s?.agent),
+  ];
+  const denied = targets.filter((t) => t !== undefined && !allowed.includes(t));
+  if (denied.length > 0) {
+    const may = allowed.length > 0 ? `only ${allowed.join(", ")}` : "none";
+    return `Refusing subagent ${denied.join(", ")}: roster agent ${caller} may spawn ${may}`;
+  }
+}
+
 export default function (pi) {
   pi.on("tool_call", async (event) => {
     // agentScope is model-supplied and the extension confirms project agents
     // only when a UI exists, which a Box lacks: "project" or "both" would let
     // the Target repo's .pi/agents override the baked roster.
-    if (event.toolName === "subagent" && (event.input?.agentScope ?? "user") !== "user") {
-      return { block: true, reason: "Refusing agentScope other than user: project-local agents are untrusted, since the Target repo is untrusted" };
+    if (event.toolName === "subagent") {
+      if ((event.input?.agentScope ?? "user") !== "user") {
+        return {
+          block: true,
+          reason:
+            "Refusing agentScope other than user: project-local agents are untrusted, " +
+            "since the Target repo is untrusted",
+        };
+      }
+      const reason = spawnsRefusal(event.input);
+      if (reason !== undefined) return { block: true, reason };
     }
     if (!Object.hasOwn(CLAUDE_TOOLS, event.toolName)) return;
     requireJq();
