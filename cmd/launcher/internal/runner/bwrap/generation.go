@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -46,6 +47,59 @@ func NixVarSnapshotDir(pwd, generation string) string {
 // .spindrift, home to unrelated siblings a sweep must never touch (issue #2680).
 func NixVarSnapshotRoot(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "nix-var-snapshot")
+}
+
+// NixGCRootsRoot is the directory holding one GC-root dir per closure
+// generation (issue #5995). A sibling of NixVarSnapshotRoot, never inside it:
+// reclaimStaleSnapshots treats every entry under the snapshot root as a
+// generation, and buildArgs binds the generation dir into the Box.
+func NixGCRootsRoot(pwd string) string {
+	return filepath.Join(pwd, ".spindrift", "nix-gcroots")
+}
+
+// registerGenerationRoot keeps storePaths from being garbage-collected while
+// generation is live, by building each with --out-link under
+// <rootsRoot>/<generation>/ (nix makes each link an indirect GC root). The
+// paths are otherwise only realized with --no-link, so a nix-collect-garbage
+// would free them from under a running Box. One build per path, so a single
+// invalid path leaves the rest rooted. An empty generation is the flat path,
+// which is never reclaimed, so a root there would leak forever. Never fails
+// the build: a root that did not register only risks a later GC.
+func registerGenerationRoot(rootsRoot, generation string, storePaths []string) {
+	if generation == "" || rootsRoot == "" {
+		return
+	}
+	var paths []string
+	for _, p := range storePaths {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	genDir := filepath.Join(rootsRoot, generation)
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not create GC-root dir %s for generation %s (%v); its store paths are not protected from garbage collection\n", genDir, generation, err)
+		return
+	}
+	for i, p := range paths {
+		link := filepath.Join(genDir, fmt.Sprintf("artifact-%d", i))
+		cmd := execCommand("nix", "build", "--out-link", link, "--", p)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not register GC root for %s in generation %s (%v); it is not protected from garbage collection\n", p, generation, err)
+		}
+	}
+}
+
+// registerMountedArtifactRoots roots everything a Box on generation mounts:
+// closureSide (the build path's per-file artifacts, or the hot-swap path's
+// whole closure, which contains them) plus the host-side passwd, group and
+// syscall filter. It names that host-side set once for both callers.
+func registerMountedArtifactRoots(rootsRoot, generation string, closureSide []string, passwdFile, groupFile, syscallFilterPath string) {
+	registerGenerationRoot(rootsRoot, generation, append(slices.Clone(closureSide), passwdFile, groupFile, syscallFilterPath))
 }
 
 // ClosureGeneration derives NixVarSnapshotDir's generation subdir from a

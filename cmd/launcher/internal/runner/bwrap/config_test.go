@@ -80,6 +80,7 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
 		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
 		nixVarGeneration:   ClosureGeneration(cfg.ImageTag),
+		nixGCRootsRoot:     NixGCRootsRoot("/pwd"),
 	}
 	if *a != want {
 		t.Errorf("NewBuild(cfg) fields = %+v, want %+v", *a, want)
