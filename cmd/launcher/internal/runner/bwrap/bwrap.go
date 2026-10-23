@@ -1073,6 +1073,16 @@ type bwrapBuildAdapter struct {
 	// from "the root itself" the way filepath.Dir/Base surgery could not be.
 	nixVarSnapshotRoot string
 	nixVarGeneration   string
+	// Realized output paths of the closures above, plus the root dir under
+	// which registerGenerationRoot pins them for this generation (issue #5995).
+	// Separate string fields keep the adapter comparable.
+	agentFiles        string
+	agentEnv          string
+	passwdFile        string
+	groupFile         string
+	nixConfigFile     string
+	syscallFilterPath string
+	nixGCRootsRoot    string
 }
 
 // NewBuild constructs a bwrap adapter for the build command from cfg and
@@ -1092,6 +1102,13 @@ func NewBuild(cfg runner.Config, _ runner.KnobLookup, pwd string) (runner.Runner
 		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, generation),
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixVarGeneration:   generation,
+		agentFiles:         cfg.AgentFiles,
+		agentEnv:           cfg.AgentEnv,
+		passwdFile:         cfg.PasswdFile,
+		groupFile:          cfg.GroupFile,
+		nixConfigFile:      cfg.NixConfigFile,
+		syscallFilterPath:  cfg.SyscallFilterPath,
+		nixGCRootsRoot:     NixGCRootsRoot(pwd),
 	}, nil
 }
 
@@ -1148,6 +1165,10 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		if lockErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(a.nixVarSnapshotDir), lockErr)
 		}
+		// Registered under the same lock, for the same reason: a concurrent
+		// build's reclaim must not drop this generation before its roots exist.
+		registerMountedArtifactRoots(a.nixGCRootsRoot, a.nixVarGeneration,
+			[]string{a.agentFiles, a.agentEnv, a.nixConfigFile}, a.passwdFile, a.groupFile, a.syscallFilterPath)
 		err := a.snapshotStoreDB()
 		UnlockSnapshot(lf)
 		if err != nil {
