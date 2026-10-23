@@ -432,6 +432,53 @@ in
     ) "pi spawns policy must keep an empty spawns list (spawn nothing), not drop it as unrestricted";
     pkgs.runCommand "drivers-pi-spawns-policy" { } "touch $out";
 
+  # Issue #5809: the bridge enforces the rendered policy at run time. The
+  # policy is the real one for a reviewer that may spawn review-axis and a scout
+  # that may spawn nothing; the bridge is staged with its SPAWNS_FILE pointed at
+  # it, as opencode-guards.nix does for HOOKS_DIR.
+  drivers-pi-hook-bridge-spawns-test =
+    let
+      withSpawns =
+        name: spawns:
+        piFixtureEntry
+        // {
+          inherit name spawns;
+          tools = spawnerTools;
+        };
+      policy = pkgs.writeText "spindrift-spawns.json" (
+        (entry.agentFilesTemplate {
+          roster = [
+            (withSpawns "reviewer" [ "review-axis" ])
+            (withSpawns "scout" [ ])
+            axis
+            (piFixtureEntry // { name = "worker"; })
+          ];
+        }).".pi/agent/spindrift-spawns.json"
+      );
+      # A caller's value that is not a list must be refused, not read as unrestricted.
+      badPolicy = pkgs.writeText "spindrift-spawns-bad.json" ''{"reviewer":"review-axis"}'';
+    in
+    pkgs.runCommand "drivers-pi-hook-bridge-spawns-test"
+      {
+        nativeBuildInputs = [
+          pkgs.gnugrep
+          pkgs.gnused
+        ];
+      }
+      ''
+        stage() {
+          sed "s|^const SPAWNS_FILE = .*|const SPAWNS_FILE = \"$2\";|" ${../../../agent/pi-hook-bridge.js} > "$1"
+          grep -qF "const SPAWNS_FILE = \"$2\";" "$1"
+        }
+        stage $TMPDIR/bridge.mjs ${policy}
+        stage $TMPDIR/bridge-missing.mjs $TMPDIR/no-such-policy.json
+        stage $TMPDIR/bridge-bad.mjs ${badPolicy}
+        BRIDGE=$TMPDIR/bridge.mjs BRIDGE_MISSING=$TMPDIR/bridge-missing.mjs \
+          BRIDGE_BAD=$TMPDIR/bridge-bad.mjs \
+          ${pkgs.nodejs}/bin/node ${../../../tests/pi-hook-bridge-spawns.test.mjs}
+        touch $out
+      '';
+
   # A spawns target absent from the roster must fail eval, as under opencode;
   # an entry that cannot call subagent has no spawn to check. pi hands a
   # subagent its identity only through a non-empty body, so spawns on an entry
