@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // Table order is the precedence that agent/entrypoint.sh's old if/elif chain
@@ -72,6 +73,29 @@ func TestInTreeBindings_ExcludesCargo(t *testing.T) {
 	for _, row := range bindregistry.InTreeBindings() {
 		if row.Name == "cargo" {
 			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", bindregistry.InTreeBindings())
+		}
+	}
+}
+
+// Every lockfile a Strategy declares classifies as that Strategy. The
+// toolchain hint names this classification, and toolchain's own tests run on a
+// stand-in, so this is where each real lockfile's spelling is held.
+func TestClassify_EachLockfileClassifiesAsItsStrategy(t *testing.T) {
+	registered := ecosystem.Registered()
+	if len(registered) == 0 {
+		t.Fatal("no Strategies registered")
+	}
+	for _, row := range registered {
+		for _, lockfile := range row.LockfileNames {
+			t.Run(row.Name+"/"+lockfile, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, lockfile), nil, 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+				if got := bindregistry.Classify(dir); got != row.Classification {
+					t.Errorf("Classify with %s = %q, want %q", lockfile, got, row.Classification)
+				}
+			})
 		}
 	}
 }

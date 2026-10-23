@@ -10,9 +10,9 @@ import (
 func TestExtract_NoConfigFilesYieldsEmptyResults(t *testing.T) {
 	dir := t.TempDir()
 
-	declared, notes, err := Extract(dir)
+	declared, notes, err := ExtractRows(dir, syntheticRows)
 	if err != nil {
-		t.Fatalf("Extract: unexpected error: %v", err)
+		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 	if len(declared) != 0 {
 		t.Errorf("declared = %+v, want none", declared)

@@ -114,7 +114,7 @@ func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 
 func TestDeriveFromGitRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := DeriveFromGitRef(missing, "main")
+	_, err := DeriveFromGitRefRows(missing, "main", syntheticRows)
 	if err == nil {
 		t.Fatal("DeriveFromGitRef: want error for a missing repo dir, got nil")
 	}
@@ -126,7 +126,7 @@ func TestDeriveFromGitRef_MissingRepoDirFails(t *testing.T) {
 // A plain directory must be rejected rather than read as an empty tree.
 func TestDeriveFromGitRef_NotAGitRepoFails(t *testing.T) {
 	dir := t.TempDir()
-	_, err := DeriveFromGitRef(dir, "main")
+	_, err := DeriveFromGitRefRows(dir, "main", syntheticRows)
 	if err == nil {
 		t.Fatal("DeriveFromGitRef: want error for a directory that is not a git repo, got nil")
 	}
@@ -139,7 +139,7 @@ func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 		".synthetic/registries": "a = https://host.example.com/repo\n",
 	}, nil)
 
-	_, err := DeriveFromGitRef(bare, "does-not-exist")
+	_, err := DeriveFromGitRefRows(bare, "does-not-exist", syntheticRows)
 	if err == nil {
 		t.Fatal("DeriveFromGitRef: want error for a ref that does not exist, got nil")
 	}
