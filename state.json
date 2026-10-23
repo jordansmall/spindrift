@@ -1,20 +1,15 @@
 {
-  "lastSwept": "0eb8b2f332283bdd0b7ba6ea538d9e537b7813bc",
-  "cursor": "cmd/launcher/internal/ecosystem/testdata/corpus/yarn/private-matched/pathset.golden.json",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-23T10:41:22.602380333-04:00"
-  },
+  "lastSwept": "851531613297af54ea48be042d6f25b7cb2ce2ef",
+  "cursor": "cmd/launcher/internal/ecosystem/testdata/corpus/yarn/scoped-registry/pathset.golden.json",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 24,
+    "output_tokens": 3309,
+    "cache_read_input_tokens": 446160,
+    "cache_creation_input_tokens": 43304,
+    "total_cost_usd": 0.50194,
+    "duration_ms": 38212,
+    "duration_api_ms": 37097,
+    "num_turns": 13
   }
 }
