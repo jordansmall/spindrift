@@ -10,14 +10,14 @@ import (
 // avoid a package initialization cycle.
 const nameGradle = "gradle"
 
-// GradleRetiredRouteKey is gradle's Row.RetiredRouteKey, exported because
+// GradleRetiredRouteKey is gradle's Strategy.RetiredRouteKey, exported because
 // registryroutes never spells the key itself.
 const GradleRetiredRouteKey = "gradle-path"
 
 // gradleRow binds entirely through HomeConfig.Render: Gradle auto-loads the
 // rendered init-script rather than reading an env var, so this row needs
 // neither EnvExports nor BindingEnvVar.
-var gradleRow = Row{
+var gradleRow = Strategy{
 	Name:             nameGradle,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	RetiredRouteKey:  GradleRetiredRouteKey,

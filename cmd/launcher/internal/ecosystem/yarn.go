@@ -15,7 +15,7 @@ const (
 )
 
 // yarnRow is the yarn ecosystem's Table entry.
-var yarnRow = Row{
+var yarnRow = Strategy{
 	Name:             nameYarn,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"yarn.lock"},

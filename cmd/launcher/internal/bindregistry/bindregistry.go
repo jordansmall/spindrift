@@ -19,7 +19,7 @@ func Classify(workDir string) string {
 
 // ClassifyRows is Classify over the given rows in order, so a row's corpus can
 // prove its classification without ecosystem.Table.
-func ClassifyRows(workDir string, rows []ecosystem.Row) string {
+func ClassifyRows(workDir string, rows []ecosystem.Strategy) string {
 	for _, row := range rows {
 		for _, name := range row.LockfileNames {
 			info, err := os.Stat(filepath.Join(workDir, name))

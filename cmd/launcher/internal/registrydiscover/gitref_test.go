@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	syntheticRows = []ecosystem.Row{synthetic.Row}
+	syntheticRows = []ecosystem.Strategy{synthetic.Row}
 	cfgPath       = synthetic.Row.InTreeConfigPath
 )
 
@@ -300,7 +300,7 @@ func TestMaterializeRef_MultiRowBatchParsing(t *testing.T) {
 	const twinContent = "twin = https://twin.example.com/registry\n"
 	twin := synthetic.Twin("synthetic-twin")
 	missing := synthetic.Twin("synthetic-missing")
-	rows := []ecosystem.Row{synthetic.Row, twin, missing}
+	rows := []ecosystem.Strategy{synthetic.Row, twin, missing}
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath + "/inner":    "anything",
 		twin.InTreeConfigPath: twinContent,

@@ -22,7 +22,7 @@ func Extract(repoDir string) ([]ecosystem.Declaration, []ecosystem.Note, error) 
 // rather than mutate ecosystem.Table. Order is deterministic: row order, then
 // declaration order within a file (cargo's TOML map has no source order, so its
 // parser sorts by name).
-func ExtractRows(repoDir string, rows []ecosystem.Row) ([]ecosystem.Declaration, []ecosystem.Note, error) {
+func ExtractRows(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declaration, []ecosystem.Note, error) {
 	var declared []ecosystem.Declaration
 	var notes []ecosystem.Note
 

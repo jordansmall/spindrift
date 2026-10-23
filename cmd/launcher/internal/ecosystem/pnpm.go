@@ -15,7 +15,7 @@ const (
 )
 
 // pnpmRow is the pnpm ecosystem's Table entry.
-var pnpmRow = Row{
+var pnpmRow = Strategy{
 	Name:             namePnpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"pnpm-lock.yaml"},

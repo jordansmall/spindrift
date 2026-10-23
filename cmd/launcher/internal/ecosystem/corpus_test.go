@@ -35,13 +35,13 @@ func TestCorpus(t *testing.T) {
 	}
 }
 
-func tableRow(name string) (ecosystem.Row, bool) {
+func tableRow(name string) (ecosystem.Strategy, bool) {
 	for _, row := range ecosystem.Table {
 		if row.Name == name {
 			return row, true
 		}
 	}
-	return ecosystem.Row{}, false
+	return ecosystem.Strategy{}, false
 }
 
 // TestCorpus_EveryInTreeRowDerivesAPath guards the Table against a row whose

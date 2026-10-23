@@ -60,7 +60,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 // be given alone or with another's. probe, spawn, timeout and pollInterval are
 // injected so tests can exercise the readiness paths without a real socat or
 // listener. Bindings and in-tree apply share one gate, so neither respawns (#3141).
-func runBindRegistryWithRows(args []string, rows []ecosystem.Row, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
+func runBindRegistryWithRows(args []string, rows []ecosystem.Strategy, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
 	fs := flag.NewFlagSet("bind-registry", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional; triggers bindings mode alone)")

@@ -169,7 +169,7 @@ func resolveGate(deps GateDeps) Gate {
 // so the two writes cannot drift (issue #3201). It returns ok == false, having
 // printed why, when both the row's home var and $HOME are unset: concatenation would
 // otherwise resolve under the cwd, or to "/.gradle", which MkdirAll creates as root.
-func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Row, getenv func(string) string) (string, bool) {
+func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Strategy, getenv func(string) string) (string, bool) {
 	hc := row.HomeConfig
 	home := getenv(hc.HomeEnvVar)
 	if home == "" {
@@ -203,7 +203,7 @@ func ReadyGate(manifest registrymanifest.Manifest) Gate {
 // since ecosystem tooling never needs to know which transport the manifest named
 // (issue #3141). getenv is the environment the renderers and home-path
 // resolution read, so a replay supplies its own rather than the process's.
-func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish PublishFunc, getenv func(string) string) bool {
+func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish PublishFunc, getenv func(string) string) bool {
 	switch gate.outcome {
 	case gateAbsent:
 		return true
@@ -283,7 +283,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Row, gate Gate, publish Publis
 
 // applyEachRow calls fn for every row, continuing past a per-row error so one row's
 // failure never blocks its siblings, and reports whether any row failed.
-func applyEachRow(rows []ecosystem.Row, fn func(ecosystem.Row) error) bool {
+func applyEachRow(rows []ecosystem.Strategy, fn func(ecosystem.Strategy) error) bool {
 	failed := false
 	for _, row := range rows {
 		if err := fn(row); err != nil {
@@ -397,7 +397,7 @@ func InTreeRoutes(routes []registrymanifest.Route, port int) (rewrites []HostRew
 // gate is closed or nothing repo-aware applies). The repo-aware half is skipped
 // when the in-tree apply failed. It returns false on any failure. Revert is
 // RevertInTreeBindings, which needs neither the manifest nor a Forwarder.
-func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Row, gate Gate, publish PublishFunc) bool {
+func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate, publish PublishFunc) bool {
 	if !applyInTree(stdout, workDir, rows, gate) {
 		return false
 	}
@@ -407,7 +407,7 @@ func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Row, gate Ga
 // applyInTree loops over every InTreeBindingsOf(rows) row (npm, yarn and pnpm
 // today, cargo retired from this loop by issue #3201), so a future table row
 // needs no change here.
-func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Row, gate Gate) bool {
+func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate) bool {
 	switch gate.outcome {
 	case gateAbsent:
 		// An unset REGISTRY_PROXY_MANIFEST means the launcher never enabled
@@ -434,7 +434,7 @@ func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Row, gate Ga
 		return true
 	}
 
-	failed := applyEachRow(InTreeBindingsOf(rows), func(row ecosystem.Row) error {
+	failed := applyEachRow(InTreeBindingsOf(rows), func(row ecosystem.Strategy) error {
 		outcome, err := ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.InTreeConfigPath+":", err)
@@ -487,7 +487,7 @@ func joinProse(names []string) string {
 	}
 }
 
-func rowNames(rows []ecosystem.Row) []string {
+func rowNames(rows []ecosystem.Strategy) []string {
 	names := make([]string, len(rows))
 	for i, row := range rows {
 		names[i] = row.Name
@@ -497,7 +497,7 @@ func rowNames(rows []ecosystem.Row) []string {
 
 // ecosystemFallbackNames renders every row's Name in rows order:
 // when the gate is closed, every known ecosystem falls back to the public registry.
-func ecosystemFallbackNames(rows []ecosystem.Row) string {
+func ecosystemFallbackNames(rows []ecosystem.Strategy) string {
 	return joinProse(rowNames(rows))
 }
 
@@ -506,7 +506,7 @@ func ecosystemFallbackNames(rows []ecosystem.Row) string {
 // actually carries its var, because a host-rooted route can render no export for
 // that ecosystem (issues #3259, #3260) and naming it would advertise a binding the
 // child process will not have. An empty result leaves the caller's bare line.
-func bindingSummaryProse(rows []ecosystem.Row, exports []ecosystem.EnvExport, homeConfigPaths map[string]string) string {
+func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExport, homeConfigPaths map[string]string) string {
 	var fragments []string
 	for _, row := range rows {
 		switch {
@@ -525,8 +525,8 @@ func bindingSummaryProse(rows []ecosystem.Row, exports []ecosystem.EnvExport, ho
 // repoAwareHomeConfigRows filters HomeConfigRowsOf(rows) rather than rows because the
 // renderer re-renders the row's own HomeConfig file; a non-nil RepoAwareHomeConfig
 // requires a non-nil HomeConfig, which makes the two equivalent.
-func repoAwareHomeConfigRows(rows []ecosystem.Row) []ecosystem.Row {
-	var out []ecosystem.Row
+func repoAwareHomeConfigRows(rows []ecosystem.Strategy) []ecosystem.Strategy {
+	var out []ecosystem.Strategy
 	for _, row := range ecosystem.HomeConfigRowsOf(rows) {
 		if row.RepoAwareHomeConfig != nil {
 			out = append(out, row)
@@ -540,7 +540,7 @@ func repoAwareHomeConfigRows(rows []ecosystem.Row) []ecosystem.Row {
 // re-rendering its whole home config against the repo's own un-rewritten in-tree
 // config, which bindings mode cannot read pre-clone. Collided routes are dropped as
 // applyInTree drops them, but it ran first and printed those warnings.
-func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosystem.Row, gate Gate, publish PublishFunc) bool {
+func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate, publish PublishFunc) bool {
 	switch gate.outcome {
 	case gateAbsent:
 		return true

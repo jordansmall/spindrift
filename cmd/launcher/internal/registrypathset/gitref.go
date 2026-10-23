@@ -15,7 +15,7 @@ func DeriveFromGitRef(repoDir, ref string) ([]HostPathSet, error) {
 
 // DeriveFromGitRefRows is DeriveFromGitRef over the given rows rather than
 // ecosystem.Table.
-func DeriveFromGitRefRows(repoDir, ref string, rows []ecosystem.Row) ([]HostPathSet, error) {
+func DeriveFromGitRefRows(repoDir, ref string, rows []ecosystem.Strategy) ([]HostPathSet, error) {
 	tmp, cleanup, err := registrydiscover.MaterializeRefRows(repoDir, ref, rows)
 	defer cleanup()
 	if err != nil {

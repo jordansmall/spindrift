@@ -43,7 +43,7 @@ func Derive(repoDir string) ([]HostPathSet, error) {
 }
 
 // DeriveRows is Derive over the given rows rather than ecosystem.Table.
-func DeriveRows(repoDir string, rows []ecosystem.Row) ([]HostPathSet, error) {
+func DeriveRows(repoDir string, rows []ecosystem.Strategy) ([]HostPathSet, error) {
 	declared, _, err := registrydiscover.ExtractRows(repoDir, rows)
 	if err != nil {
 		return nil, err

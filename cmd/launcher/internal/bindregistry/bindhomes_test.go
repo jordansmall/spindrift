@@ -11,14 +11,14 @@ import (
 
 // stub-a's renderer also emits stub-b's var, so stub-b binds without opting in
 // and the opt-out side of the announce assertion has a row to stay silent for.
-func bindHomesStubRows(announce bool) []ecosystem.Row {
+func bindHomesStubRows(announce bool) []ecosystem.Strategy {
 	render := func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		return []ecosystem.EnvExport{
 			{Name: "STUB_A_REGISTRY", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix},
 			{Name: "STUB_B_REGISTRY", Value: "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix + "-b"},
 		}, nil
 	}
-	return []ecosystem.Row{
+	return []ecosystem.Strategy{
 		{Name: "stub-a", EnvExports: render, BindingEnvVar: "STUB_A_REGISTRY", AnnounceBindingValue: announce},
 		{Name: "stub-b", BindingEnvVar: "STUB_B_REGISTRY"},
 	}

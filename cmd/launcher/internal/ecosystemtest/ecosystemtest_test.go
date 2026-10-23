@@ -103,7 +103,7 @@ func TestReplayCaseUpdateWritesEveryGolden(t *testing.T) {
 
 func TestReplayCaseSkipsStageRowDoesNotTakePartIn(t *testing.T) {
 	// A bare row takes part in route resolution and path-set derivation alone.
-	bare := ecosystem.Row{Name: "bare"}
+	bare := ecosystem.Strategy{Name: "bare"}
 	// collided carries an operator routes file: with no parser, discovery proposes none.
 	dir := copyCase(t, "collided", false)
 	if errs := replayCase(bare, dir, true, nil); len(errs) != 0 {
@@ -170,7 +170,7 @@ func TestStagesSkippedPerRow(t *testing.T) {
 	// and has an enforced path-set.
 	var took []string
 	for _, s := range stages {
-		if s.takesPart(ecosystem.Row{Name: "bare"}) {
+		if s.takesPart(ecosystem.Strategy{Name: "bare"}) {
 			took = append(took, s.name)
 		}
 	}
@@ -239,7 +239,7 @@ func TestDiscoveryFedParseErrorStaysAStageFailure(t *testing.T) {
 
 // echoingSynthetic is synthetic.Row with an EnvExports that echoes a prior
 // environment value, so a case's env.json is observable in its binding stage.
-func echoingSynthetic() ecosystem.Row {
+func echoingSynthetic() ecosystem.Strategy {
 	row := synthetic.Row
 	base := row.EnvExports
 	row.EnvExports = func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
@@ -406,7 +406,7 @@ func TestReplayCaseDriftedSummaryGoldenFails(t *testing.T) {
 // twinLookup gives each twin its own <name>.lock lockfile and classifies as
 // <name>, so a case's classification and lockfile-scan goldens can only carry
 // the twin's lockfile and classification through the neighbour rows.
-func twinLookup(name string) (ecosystem.Row, bool) {
+func twinLookup(name string) (ecosystem.Strategy, bool) {
 	r := synthetic.Twin(name)
 	r.LockfileNames = []string{name + ".lock"}
 	r.Classification = name
@@ -510,7 +510,7 @@ func TestCaseConfigFailures(t *testing.T) {
 		lookup     RowLookup
 		want       string
 	}{
-		{"unknown row", `{"rows": ["nope"]}`, func(string) (ecosystem.Row, bool) { return ecosystem.Row{}, false }, "not known"},
+		{"unknown row", `{"rows": ["nope"]}`, func(string) (ecosystem.Strategy, bool) { return ecosystem.Strategy{}, false }, "not known"},
 		{"port zero", `{"port": 0}`, twinLookup, "outside 1-65535"},
 		{"port too high", `{"port": 65536}`, twinLookup, "outside 1-65535"},
 		{"port negative", `{"port": -1}`, twinLookup, "outside 1-65535"},

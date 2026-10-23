@@ -74,7 +74,7 @@ func gitCheckoutRoot(dir string) string {
 // compare a future host-mediated backend would break. A host-mediated forge
 // reads the bare Accumulation repo at c.baseBranch, the same snapshot the
 // launch itself derives host-rooted routes from.
-func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, rows []ecosystem.Row) []doctor.Check {
+func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, rows []ecosystem.Strategy) []doctor.Check {
 	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
 		return registryRouteDriftCheckForRef(c.hostRepoDir(), c.baseBranch, routes, rows)
@@ -92,7 +92,7 @@ func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, r
 // ResolveRef runs eagerly, and it materializes nothing, so a fail-fast run
 // that never reaches the Probe leaks no snapshot dir. The Probe materializes
 // the ref itself and cleans up, at the cost of a repeated rev-parse.
-func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route, rows []ecosystem.Row) []doctor.Check {
+func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route, rows []ecosystem.Strategy) []doctor.Check {
 	if err := registrydiscover.ResolveRef(repoDir, ref); err != nil {
 		return nil
 	}
@@ -108,7 +108,7 @@ const registryRouteDriftCheckName = "registry-route-drift"
 
 // registryRouteDriftCheckFor builds the drift row for an already-resolved cwd
 // checkout, so a test can hand it a fixture dir directly.
-func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route, rows []ecosystem.Row) doctor.Check {
+func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route, rows []ecosystem.Strategy) doctor.Check {
 	return registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
 		return registrydiscover.UncoveredHostsRows(dir, covered, rows)
 	})

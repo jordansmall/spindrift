@@ -21,17 +21,17 @@ import (
 // keep the rows' own order. Which Table rows survive is pinned in the ecosystem
 // package's bindregistry_table_test.go.
 func TestInTreeBindingsOf_FiltersByRepoAwareHomeConfigAndConfigPath(t *testing.T) {
-	repoAware := ecosystem.Row{
+	repoAware := ecosystem.Strategy{
 		Name:             "repo-aware",
 		InTreeConfigPath: ".repo-aware/registries",
 		RepoAwareHomeConfig: func(int, string, []registrymanifest.Route, string) (string, []ecosystem.EnvExport, []string) {
 			return "", nil, nil
 		},
 	}
-	noPath := ecosystem.Row{Name: "no-path"}
-	second := ecosystem.Row{Name: "second", InTreeConfigPath: ".second-registries"}
+	noPath := ecosystem.Strategy{Name: "no-path"}
+	second := ecosystem.Strategy{Name: "second", InTreeConfigPath: ".second-registries"}
 
-	got := InTreeBindingsOf([]ecosystem.Row{synthetic.Row, repoAware, noPath, second})
+	got := InTreeBindingsOf([]ecosystem.Strategy{synthetic.Row, repoAware, noPath, second})
 
 	if len(got) != 2 || got[0].Name != synthetic.Row.Name || got[1].Name != second.Name {
 		t.Errorf("InTreeBindingsOf = %+v, want [%s %s] in input order", got, synthetic.Row.Name, second.Name)
@@ -145,13 +145,13 @@ func skipWorktreeSet(t *testing.T, dir, relPath string) bool {
 
 // synthetic.Row keeps its config in a subdirectory; rootBinding keeps its at
 // the repo root, a directory that exists even when the config does not.
-var rootBinding = ecosystem.Row{Name: "stub-root", InTreeConfigPath: ".stub-registries"}
+var rootBinding = ecosystem.Strategy{Name: "stub-root", InTreeConfigPath: ".stub-registries"}
 
 // ApplyInTree must walk the supplied rows, not the production row table: a row
 // only the caller knows about gets its in-tree config rewritten, which a call
 // site reaching for the Table-bound InTreeBindings() would never see.
 func TestApplyInTreeWalksSuppliedRows(t *testing.T) {
-	stub := ecosystem.Row{Name: "stub-ecosystem", InTreeConfigPath: ".stubrc"}
+	stub := ecosystem.Strategy{Name: "stub-ecosystem", InTreeConfigPath: ".stubrc"}
 	dir := newTestRepo(t)
 	writeConfig(t, dir, stub.InTreeConfigPath, "registry=https://upstream.example/stub/\n", true)
 
@@ -161,7 +161,7 @@ func TestApplyInTreeWalksSuppliedRows(t *testing.T) {
 		manifest: registrymanifest.Manifest{Routes: []registrymanifest.Route{{Prefix: "r0", UpstreamHost: "upstream.example"}}},
 	}
 	var stdout strings.Builder
-	if !ApplyInTree(&stdout, dir, []ecosystem.Row{stub}, gate, func([]ecosystem.EnvExport) bool { return true }) {
+	if !ApplyInTree(&stdout, dir, []ecosystem.Strategy{stub}, gate, func([]ecosystem.EnvExport) bool { return true }) {
 		t.Fatalf("ApplyInTree = false, want true (stdout=%q)", stdout.String())
 	}
 
@@ -1591,7 +1591,7 @@ func TestRevertInTreeBindingsNarratesAndContinuesPastFailure(t *testing.T) {
 	broken.InTreeConfigPath = "bad\x00path"
 
 	var out strings.Builder
-	failed := RevertInTreeBindings(dir, []ecosystem.Row{broken, synthetic.Row}, "who", &out)
+	failed := RevertInTreeBindings(dir, []ecosystem.Strategy{broken, synthetic.Row}, "who", &out)
 	if !failed {
 		t.Error("failed = false, want true after a row error")
 	}
@@ -1612,7 +1612,7 @@ func TestRevertInTreeBindingsNarratesAndContinuesPastFailure(t *testing.T) {
 	}
 
 	out.Reset()
-	if RevertInTreeBindings(dir, []ecosystem.Row{synthetic.Row}, "who", &out) || out.Len() != 0 {
+	if RevertInTreeBindings(dir, []ecosystem.Strategy{synthetic.Row}, "who", &out) || out.Len() != 0 {
 		t.Errorf("second revert: failed or wrote %q, want a silent no-op", out.String())
 	}
 }

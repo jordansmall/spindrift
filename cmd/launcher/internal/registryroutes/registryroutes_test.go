@@ -20,7 +20,7 @@ import (
 // pinned here without naming a real ecosystem, whose own declarations are
 // pinned by the ecosystem corpora.
 func parse(data []byte) ([]registryroutes.Route, error) {
-	return registryroutes.ParseRows(data, []ecosystem.Row{synthetic.Row})
+	return registryroutes.ParseRows(data, []ecosystem.Strategy{synthetic.Row})
 }
 
 // Pins the minimal valid routes file of ADR 0045 and its mapping onto
@@ -1346,7 +1346,7 @@ func TestParse_EcosystemsPathNotStringIsError(t *testing.T) {
 func TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey(t *testing.T) {
 	var gotKey string
 	var gotValue any
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name: "fake",
 		RouteDeclaration: func(key string, value any) error {
 			gotKey, gotValue = key, value
@@ -1361,7 +1361,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
+	routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1377,7 +1377,7 @@ widget = "gizmo"
 // A nil RouteDeclaration hook means "this row's block accepts no key beyond
 // path".
 func TestParseRoutes_FakeRowNilHookRejectsNonPathKey(t *testing.T) {
-	row := ecosystem.Row{Name: "fake"}
+	row := ecosystem.Strategy{Name: "fake"}
 	const doc = `
 [[routes]]
 match-host = "repo.example.com"
@@ -1386,7 +1386,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
+	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
 	if err == nil {
 		t.Fatal("expected error for a key a nil-hook row doesn't accept, got nil")
 	}
@@ -1399,7 +1399,7 @@ widget = "gizmo"
 // so the caller must wrap it with the block's own "ecosystems.<name>.<key>"
 // spelling.
 func TestParseRoutes_FakeRowHookErrorIsWrappedWithBlockSpelling(t *testing.T) {
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name: "fake",
 		RouteDeclaration: func(key string, value any) error {
 			return errors.New("boom")
@@ -1413,7 +1413,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
+	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1571,7 +1571,7 @@ mirror-path = "/mirror"
 // collapsing to "declared nothing". A row accepting every key stands in for a
 // real one so the list shape is not at the mercy of any row's own rules.
 func TestParse_EcosystemsEmptyDeclarationShapes(t *testing.T) {
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name:             "fake",
 		RouteDeclaration: func(string, any) error { return nil },
 	}
@@ -1591,7 +1591,7 @@ credential = { netrc = "~/.netrc" }
 
 [routes.ecosystems.fake]
 ` + tc.block + "\n"
-			routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Row{row})
+			routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

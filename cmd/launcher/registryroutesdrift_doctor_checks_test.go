@@ -16,7 +16,7 @@ import (
 
 // Every drift test runs on the synthetic row, so none writes a real config
 // path or declares a real ecosystem's route block.
-var driftRows = []ecosystem.Row{synthetic.Row}
+var driftRows = []ecosystem.Strategy{synthetic.Row}
 
 // The check runs on the tempdir itself, not on a parent: t.TempDir() lives
 // outside any git checkout, so no walk up can find a ".git" entry.
@@ -291,7 +291,7 @@ func TestRegistryRouteDriftCheckFor_ExtractErrorDegradesProbe(t *testing.T) {
 		return nil, false, errors.New("unparsable config")
 	}
 
-	ch := registryRouteDriftCheckFor(repoDir, nil, []ecosystem.Row{failing})
+	ch := registryRouteDriftCheckFor(repoDir, nil, []ecosystem.Strategy{failing})
 	_, err := ch.Probe()
 	if err == nil {
 		t.Fatal("Probe() succeeded, want an error for a config the row cannot parse")

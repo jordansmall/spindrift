@@ -14,28 +14,28 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// isRowType reports whether expr is the bare identifier Row, the type a
+// isStrategyType reports whether expr is the bare identifier Strategy, the type a
 // package-level row var's composite literal must carry to be counted.
-func isRowType(expr ast.Expr) bool {
+func isStrategyType(expr ast.Expr) bool {
 	id, ok := expr.(*ast.Ident)
-	return ok && id.Name == "Row"
+	return ok && id.Name == "Strategy"
 }
 
-// isRowSliceType reports whether expr is []Row, the type Table's own
+// isStrategySliceType reports whether expr is []Strategy, the type Table's own
 // composite literal must carry.
-func isRowSliceType(expr ast.Expr) bool {
+func isStrategySliceType(expr ast.Expr) bool {
 	at, ok := expr.(*ast.ArrayType)
-	return ok && at.Len == nil && isRowType(at.Elt)
+	return ok && at.Len == nil && isStrategyType(at.Elt)
 }
 
 // isRowValueExpr reports whether expr is a value a row var may hold: a
-// Row{...} literal, or a call to a func named in rowFuncs. rowFuncs must
+// Strategy{...} literal, or a call to a func named in rowFuncs. rowFuncs must
 // come from a prior pass over the same files, since `var fooRow =
 // newRow(...)` lets the func live in a different file than the var.
 func isRowValueExpr(expr ast.Expr, rowFuncs map[string]bool) bool {
 	switch v := expr.(type) {
 	case *ast.CompositeLit:
-		return isRowType(v.Type)
+		return isStrategyType(v.Type)
 	case *ast.CallExpr:
 		id, ok := v.Fun.(*ast.Ident)
 		return ok && rowFuncs[id.Name]
@@ -45,7 +45,7 @@ func isRowValueExpr(expr ast.Expr, rowFuncs map[string]bool) bool {
 }
 
 // collectRowFuncs returns the names of every package-level func across files
-// that returns exactly one Row. It excludes methods: a row var is never
+// that returns exactly one Strategy. It excludes methods: a row var is never
 // assigned from a method call without a receiver expression, which this
 // syntactic scan cannot resolve anyway.
 func collectRowFuncs(files []*ast.File) map[string]bool {
@@ -57,7 +57,7 @@ func collectRowFuncs(files []*ast.File) map[string]bool {
 				continue
 			}
 			results := fd.Type.Results
-			if results.NumFields() == 1 && len(results.List) == 1 && isRowType(results.List[0].Type) {
+			if results.NumFields() == 1 && len(results.List) == 1 && isStrategyType(results.List[0].Type) {
 				rowFuncs[fd.Name.Name] = true
 			}
 		}
@@ -66,7 +66,7 @@ func collectRowFuncs(files []*ast.File) map[string]bool {
 }
 
 // scanForUntabledRows returns, sorted, every package-level row var in dir
-// missing from `var Table = []Row{...}`. It does not recurse, because a row
+// missing from `var Table = []Strategy{...}`. It does not recurse, because a row
 // var and its Table entry always share a package directory, and it parses
 // rather than importing, so it still works mid-refactor when the package does
 // not build. A missing Table is fatal, so a rename cannot drop coverage.
@@ -107,7 +107,7 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 	tableFound := false
 
 	for _, file := range files {
-		// Only top-level decls, so a Row literal built inside a function body
+		// Only top-level decls, so a Strategy literal built inside a function body
 		// is never mistaken for a row awaiting a Table entry.
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -121,7 +121,7 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 				}
 
 				if len(vs.Names) == 1 && len(vs.Values) == 1 && vs.Names[0].Name == "Table" {
-					if lit, ok := vs.Values[0].(*ast.CompositeLit); ok && isRowSliceType(lit.Type) {
+					if lit, ok := vs.Values[0].(*ast.CompositeLit); ok && isStrategySliceType(lit.Type) {
 						tableFound = true
 						for _, elt := range lit.Elts {
 							if id, ok := elt.(*ast.Ident); ok {
@@ -133,8 +133,8 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 				}
 
 				if len(vs.Values) == 0 {
-					// Typed, uninitialized: var fooRow Row / var aRow, bRow Row.
-					if isRowType(vs.Type) {
+					// Typed, uninitialized: var fooRow Strategy / var aRow, bRow Strategy.
+					if isStrategyType(vs.Type) {
 						for _, n := range vs.Names {
 							rowVars[n.Name] = true
 						}
@@ -155,7 +155,7 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 	}
 
 	if !tableFound {
-		t.Fatalf("scanForUntabledRows: no `var Table = []Row{...}` declaration found in %s", dir)
+		t.Fatalf("scanForUntabledRows: no `var Table = []Strategy{...}` declaration found in %s", dir)
 	}
 
 	var missing []string
@@ -178,7 +178,7 @@ func TestScanForUntabledRows_FixtureDetectsViolation(t *testing.T) {
 
 	testutil.WriteFixture(t, dir, "rows.go", `package fixture
 
-type Row struct {
+type Strategy struct {
 	Name string
 }
 
@@ -186,30 +186,30 @@ type OtherThing struct {
 	Name string
 }
 
-// shape 1: var fooRow = Row{...}
-var taggedSimpleRow = Row{Name: "tagged simple"}
-var untabledSimpleRow = Row{Name: "untabled simple"}
+// shape 1: var fooRow = Strategy{...}
+var taggedSimpleRow = Strategy{Name: "tagged simple"}
+var untabledSimpleRow = Strategy{Name: "untabled simple"}
 
-// shape 2: var fooRow Row (assigned in init(), not at the declaration)
-var taggedNoValueRow Row
-var untabledNoValueRow Row
+// shape 2: var fooRow Strategy (assigned in init(), not at the declaration)
+var taggedNoValueRow Strategy
+var untabledNoValueRow Strategy
 
 func init() {
-	taggedNoValueRow = Row{Name: "tagged no value"}
-	untabledNoValueRow = Row{Name: "untabled no value"}
+	taggedNoValueRow = Strategy{Name: "tagged no value"}
+	untabledNoValueRow = Strategy{Name: "untabled no value"}
 }
 
-// shape 3: var fooRow Row = Row{...}
-var taggedTypedRow Row = Row{Name: "tagged typed"}
-var untabledTypedRow Row = Row{Name: "untabled typed"}
+// shape 3: var fooRow Strategy = Strategy{...}
+var taggedTypedRow Strategy = Strategy{Name: "tagged typed"}
+var untabledTypedRow Strategy = Strategy{Name: "untabled typed"}
 
-// shape 4: var aRow, bRow = Row{...}, Row{...}
-var taggedMultiA, taggedMultiB = Row{Name: "tagged multi a"}, Row{Name: "tagged multi b"}
-var untabledMultiA, untabledMultiB = Row{Name: "untabled multi a"}, Row{Name: "untabled multi b"}
+// shape 4: var aRow, bRow = Strategy{...}, Strategy{...}
+var taggedMultiA, taggedMultiB = Strategy{Name: "tagged multi a"}, Strategy{Name: "tagged multi b"}
+var untabledMultiA, untabledMultiB = Strategy{Name: "untabled multi a"}, Strategy{Name: "untabled multi b"}
 
-// shape 5: var aRow, bRow Row
-var taggedMultiNoValueA, taggedMultiNoValueB Row
-var untabledMultiNoValueA, untabledMultiNoValueB Row
+// shape 5: var aRow, bRow Strategy
+var taggedMultiNoValueA, taggedMultiNoValueB Strategy
+var untabledMultiNoValueA, untabledMultiNoValueB Strategy
 
 // shape 6: var fooRow = newRow(...), newRow declared in funcs.go
 var taggedFromFuncRow = newTaggedRow()
@@ -217,24 +217,24 @@ var untabledFromFuncRow = newUntabledRow()
 
 // shapes 1-3, grouped inside var ( ... )
 var (
-	taggedGroupedRow          = Row{Name: "tagged grouped"}
-	untabledGroupedRow        = Row{Name: "untabled grouped"}
-	taggedGroupedNoValueRow   Row
-	untabledGroupedNoValueRow Row
-	taggedGroupedTypedRow     Row = Row{Name: "tagged grouped typed"}
-	untabledGroupedTypedRow   Row = Row{Name: "untabled grouped typed"}
+	taggedGroupedRow          = Strategy{Name: "tagged grouped"}
+	untabledGroupedRow        = Strategy{Name: "untabled grouped"}
+	taggedGroupedNoValueRow   Strategy
+	untabledGroupedNoValueRow Strategy
+	taggedGroupedTypedRow     Strategy = Strategy{Name: "tagged grouped typed"}
+	untabledGroupedTypedRow   Strategy = Strategy{Name: "untabled grouped typed"}
 )
 
 // must never be counted as a row var
 var otherThingNotARow = OtherThing{Name: "not a row"}
 var otherThingFromFuncNotARow = newOtherThing()
 
-func buildLocalRow() Row {
-	localRow := Row{Name: "local, inside a function body"}
+func buildLocalRow() Strategy {
+	localRow := Strategy{Name: "local, inside a function body"}
 	return localRow
 }
 
-var Table = []Row{
+var Table = []Strategy{
 	taggedSimpleRow,
 	taggedNoValueRow,
 	taggedTypedRow,
@@ -251,12 +251,12 @@ var Table = []Row{
 
 	testutil.WriteFixture(t, dir, "funcs.go", `package fixture
 
-func newTaggedRow() Row {
-	return Row{Name: "tagged from func"}
+func newTaggedRow() Strategy {
+	return Strategy{Name: "tagged from func"}
 }
 
-func newUntabledRow() Row {
-	return Row{Name: "untabled from func"}
+func newUntabledRow() Strategy {
+	return Strategy{Name: "untabled from func"}
 }
 
 func newOtherThing() OtherThing {
@@ -286,7 +286,7 @@ func newOtherThing() OtherThing {
 
 // TestEveryDeclaredRowIsInTheTable is the parity half of
 // containment_test.go's ecosystem-name check: a package-level `var fooRow =
-// Row{...}` declaration must always be listed in Table.
+// Strategy{...}` declaration must always be listed in Table.
 func TestEveryDeclaredRowIsInTheTable(t *testing.T) {
 	missing := scanForUntabledRows(t, ".")
 	if len(missing) > 0 {

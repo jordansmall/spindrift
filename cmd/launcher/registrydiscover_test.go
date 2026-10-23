@@ -16,10 +16,10 @@ import (
 // These tests drive the discover command over the synthetic row alone; the
 // real rows' declaration shapes, store pairings and route files are pinned by
 // the ecosystem corpora under internal/ecosystem/testdata/corpus.
-var discoverRows = []ecosystem.Row{synthetic.Row}
+var discoverRows = []ecosystem.Strategy{synthetic.Row}
 
 // writeDiscoverDeclarations writes lines ("name = url") to the row's in-tree config.
-func writeDiscoverDeclarations(t *testing.T, dir string, row ecosystem.Row, lines ...string) {
+func writeDiscoverDeclarations(t *testing.T, dir string, row ecosystem.Strategy, lines ...string) {
 	t.Helper()
 	path := filepath.Join(dir, row.InTreeConfigPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -33,7 +33,7 @@ func writeDiscoverDeclarations(t *testing.T, dir string, row ecosystem.Row, line
 func discoverBearerProbe(string) string { return "bearer" }
 
 // discoverOver calls runRegistryDiscover over rows with the fixed "bearer" probe.
-func discoverOver(rows []ecosystem.Row, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup) (code int, stdout, stderr string) {
+func discoverOver(rows []ecosystem.Strategy, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup) (code int, stdout, stderr string) {
 	var out, errOut strings.Builder
 	code = runRegistryDiscover(&out, &errOut, rows, repoDir, outPath, force, stores, lookup, discoverBearerProbe)
 	return code, out.String(), errOut.String()
@@ -72,7 +72,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 		return store.Name == "netrc" && d.Host == host, nil
 	}
 
-	code, stdout, stderr := discoverOver([]ecosystem.Row{synthetic.Row, twin}, repoDir, outPath, false, discoverNetrcStore(), lookup)
+	code, stdout, stderr := discoverOver([]ecosystem.Strategy{synthetic.Row, twin}, repoDir, outPath, false, discoverNetrcStore(), lookup)
 	if code != 0 {
 		t.Fatalf("runRegistryDiscover code = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -308,7 +308,7 @@ func TestRunRegistryDiscover_ReportDistinguishesSkippedFromNoRegistryDeclared(t 
 	writeDiscoverDeclarations(t, repoDir, skipped, "main = /local/path")
 
 	outPath := filepath.Join(t.TempDir(), "routes.toml")
-	code, report, stderr := discoverOver([]ecosystem.Row{synthetic.Row, skipped}, repoDir, outPath, false, discoverNetrcStore(), discoverAlwaysMatch)
+	code, report, stderr := discoverOver([]ecosystem.Strategy{synthetic.Row, skipped}, repoDir, outPath, false, discoverNetrcStore(), discoverAlwaysMatch)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, report, stderr)
 	}
@@ -438,7 +438,7 @@ func TestRunRegistryDiscover_ReportNamesMatchedUnmatchedAndEmptyConfigSections(t
 	lookup := func(_ registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 		return d.Host == "matched.example.com", nil
 	}
-	code, report, stderr := discoverOver([]ecosystem.Row{synthetic.Row, empty, unmatched}, repoDir, outPath, false, discoverNetrcStore(), lookup)
+	code, report, stderr := discoverOver([]ecosystem.Strategy{synthetic.Row, empty, unmatched}, repoDir, outPath, false, discoverNetrcStore(), lookup)
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout=%s stderr=%s", code, report, stderr)
 	}

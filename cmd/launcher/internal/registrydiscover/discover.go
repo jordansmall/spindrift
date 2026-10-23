@@ -72,7 +72,7 @@ type Report struct {
 // matching credential. Each row's CredentialStores bound which stores are
 // queried for its declarations; a store outside a declaration's row is named
 // in StoresSearched but never queried.
-func DiscoverRows(repoDir string, rows []ecosystem.Row, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
+func DiscoverRows(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
 	storesByEcosystem := ecosystem.CredentialStores(rows)
 	declared, notes, err := ExtractRows(repoDir, rows)
 	if err != nil {

@@ -33,7 +33,7 @@ func MaterializeRef(repoDir, ref string) (dir string, cleanup func(), err error)
 
 // MaterializeRefRows is MaterializeRef over the given rows rather than
 // ecosystem.Table.
-func MaterializeRefRows(repoDir, ref string, rows []ecosystem.Row) (dir string, cleanup func(), err error) {
+func MaterializeRefRows(repoDir, ref string, rows []ecosystem.Strategy) (dir string, cleanup func(), err error) {
 	noop := func() {}
 
 	if err := ResolveRef(repoDir, ref); err != nil {
@@ -150,7 +150,7 @@ func ResolveRef(repoDir, ref string) error {
 // UncoveredHostsFromGitRefRows is UncoveredHostsRows for a ref inside a git repo
 // rather than a checkout on disk, so the result reflects what ref has committed
 // and nothing an uncommitted or divergent working tree might contribute.
-func UncoveredHostsFromGitRefRows(repoDir, ref string, covered []string, rows []ecosystem.Row) ([]string, error) {
+func UncoveredHostsFromGitRefRows(repoDir, ref string, covered []string, rows []ecosystem.Strategy) ([]string, error) {
 	dir, cleanup, err := MaterializeRefRows(repoDir, ref, rows)
 	defer cleanup()
 	if err != nil {

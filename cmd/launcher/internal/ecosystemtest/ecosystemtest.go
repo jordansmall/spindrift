@@ -1,7 +1,7 @@
 // Package ecosystemtest is the kit an ecosystem row's package calls from its
 // own tests: Run replays a corpus of Target-repo trees through the registry
 // pipeline's stages in order and checks each stage's output against the golden
-// beside the case (issue #5654). It takes an ecosystem.Row and a directory,
+// beside the case (issue #5654). It takes an ecosystem.Strategy and a directory,
 // never ecosystem.Table, so a row proves itself over its own corpus, plus the
 // neighbour rows a case names, which the caller resolves.
 //
@@ -78,31 +78,31 @@ type stage struct {
 	golden      string
 	asJSON      bool
 	afterRoutes bool
-	takesPart   func(row ecosystem.Row) bool
+	takesPart   func(row ecosystem.Strategy) bool
 	replay      func(c *replay) ([]byte, error)
 }
 
 // everyRow is the predicate of a stage no row can opt out of.
-func everyRow(ecosystem.Row) bool { return true }
+func everyRow(ecosystem.Strategy) bool { return true }
 
 // stages is the pipeline in order; each stage is one entry here and nowhere else.
 var stages = []stage{
 	{
 		name:      "lockfile classification",
 		golden:    "classification.golden.txt",
-		takesPart: func(row ecosystem.Row) bool { return len(row.LockfileNames) > 0 },
+		takesPart: func(row ecosystem.Strategy) bool { return len(row.LockfileNames) > 0 },
 		replay:    (*replay).classification,
 	},
 	{
 		name:      "lockfile scan",
 		golden:    "lockfile-scan.golden.txt",
-		takesPart: func(row ecosystem.Row) bool { return len(row.LockfileNames) > 0 },
+		takesPart: func(row ecosystem.Strategy) bool { return len(row.LockfileNames) > 0 },
 		replay:    (*replay).lockfileScan,
 	},
 	{
 		name:      "discovery",
 		golden:    "discovery.golden.toml",
-		takesPart: func(row ecosystem.Row) bool { return row.ConfigParser != nil },
+		takesPart: func(row ecosystem.Strategy) bool { return row.ConfigParser != nil },
 		replay:    (*replay).discovery,
 	},
 	{
@@ -127,8 +127,8 @@ var stages = []stage{
 		golden:      "binding.golden.json",
 		asJSON:      true,
 		afterRoutes: true,
-		takesPart: func(row ecosystem.Row) bool {
-			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindingsOf([]ecosystem.Row{row})) > 0
+		takesPart: func(row ecosystem.Strategy) bool {
+			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindingsOf([]ecosystem.Strategy{row})) > 0
 		},
 		replay: (*replay).binding,
 	},
@@ -136,7 +136,7 @@ var stages = []stage{
 		name:        "bindings summary",
 		golden:      "summary.golden.txt",
 		afterRoutes: true,
-		takesPart:   func(row ecosystem.Row) bool { return row.EnvExports != nil || row.HomeConfig != nil },
+		takesPart:   func(row ecosystem.Strategy) bool { return row.EnvExports != nil || row.HomeConfig != nil },
 		replay:      (*replay).bindingsSummary,
 	},
 	{
@@ -144,19 +144,19 @@ var stages = []stage{
 		golden:      "rewrites.golden.json",
 		asJSON:      true,
 		afterRoutes: true,
-		takesPart:   func(row ecosystem.Row) bool { return len(row.RewriteRows) > 0 },
+		takesPart:   func(row ecosystem.Strategy) bool { return len(row.RewriteRows) > 0 },
 		replay:      (*replay).rewrites,
 	},
 }
 
 // RowLookup resolves a neighbour row name from a case's case.json. A nil
 // RowLookup is allowed for a corpus whose cases name no neighbour.
-type RowLookup func(name string) (ecosystem.Row, bool)
+type RowLookup func(name string) (ecosystem.Strategy, bool)
 
 // Run replays every case under corpusDir against row: one subtest per case. A
 // corpusDir with no case fails. lookup resolves the neighbour row names a
 // case's case.json lists; it may be nil when no case names a neighbour.
-func Run(t *testing.T, row ecosystem.Row, corpusDir string, lookup RowLookup) {
+func Run(t *testing.T, row ecosystem.Strategy, corpusDir string, lookup RowLookup) {
 	t.Helper()
 	update := golden.Update()
 	for _, c := range caseDirs(t, corpusDir) {
@@ -192,7 +192,7 @@ func caseDirs(t testing.TB, corpusDir string) []string {
 // any other mismatch; update mode writes it instead. A case whose operator
 // routes file is refused skips the stages that consume the resolved routes;
 // classification, which reads the repo alone, still runs.
-func replayCase(row ecosystem.Row, dir string, update bool, lookup RowLookup) []error {
+func replayCase(row ecosystem.Strategy, dir string, update bool, lookup RowLookup) []error {
 	cfg, err := readCaseConfig(dir)
 	if err != nil {
 		return []error{err}
@@ -260,9 +260,9 @@ func readCaseConfig(dir string) (caseConfig, error) {
 // the primary row fixes its position among the neighbours, which matters where
 // production's ecosystem.Table order shows in a golden; left unnamed it comes
 // first. A row named twice would declare twice.
-func (cfg caseConfig) resolveRows(primary ecosystem.Row, lookup RowLookup) ([]ecosystem.Row, error) {
+func (cfg caseConfig) resolveRows(primary ecosystem.Strategy, lookup RowLookup) ([]ecosystem.Strategy, error) {
 	seen := map[string]bool{}
-	var rows []ecosystem.Row
+	var rows []ecosystem.Strategy
 	for _, name := range cfg.Rows {
 		if seen[name] {
 			return nil, fmt.Errorf("case.json: row %q is named twice", name)
@@ -272,7 +272,7 @@ func (cfg caseConfig) resolveRows(primary ecosystem.Row, lookup RowLookup) ([]ec
 			rows = append(rows, primary)
 			continue
 		}
-		var row ecosystem.Row
+		var row ecosystem.Strategy
 		ok := false
 		if lookup != nil {
 			row, ok = lookup(name)
@@ -283,7 +283,7 @@ func (cfg caseConfig) resolveRows(primary ecosystem.Row, lookup RowLookup) ([]ec
 		rows = append(rows, row)
 	}
 	if !seen[primary.Name] {
-		rows = append([]ecosystem.Row{primary}, rows...)
+		rows = append([]ecosystem.Strategy{primary}, rows...)
 	}
 	return rows, nil
 }
@@ -310,8 +310,8 @@ type replay struct {
 	// the bindings summary (BindHomes) and the rewrites stage's RewriteRows use
 	// it alone. allRows, which holds row, widens what the pipeline reads across
 	// rows, including the rewrites stage's proxy routes.
-	row     ecosystem.Row
-	allRows []ecosystem.Row
+	row     ecosystem.Strategy
+	allRows []ecosystem.Strategy
 	port    int
 	dir     string
 
@@ -322,7 +322,7 @@ type replay struct {
 }
 
 // primaryRows is what the stages that render only the case's own row see.
-func (c *replay) primaryRows() []ecosystem.Row { return []ecosystem.Row{c.row} }
+func (c *replay) primaryRows() []ecosystem.Strategy { return []ecosystem.Strategy{c.row} }
 
 func (c *replay) repo() string { return filepath.Join(c.dir, "repo") }
 

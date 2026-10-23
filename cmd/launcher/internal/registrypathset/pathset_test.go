@@ -22,7 +22,7 @@ func (s HostPathSet) admits(requestPath string) bool {
 	return roots.Admits(requestPath)
 }
 
-var syntheticRows = []ecosystem.Row{synthetic.Row}
+var syntheticRows = []ecosystem.Strategy{synthetic.Row}
 
 // deriveSynthetic writes body to the synthetic row's config path in a fresh dir
 // and derives over that row alone.
@@ -135,7 +135,7 @@ func TestDerive_NoDeclarationDerivesNoPaths(t *testing.T) {
 			t.Errorf("DeriveRows over the synthetic row = %+v, want no host path sets: only the twin declares", got)
 		}
 
-		got, err = DeriveRows(dir, []ecosystem.Row{twin})
+		got, err = DeriveRows(dir, []ecosystem.Strategy{twin})
 		if err != nil {
 			t.Fatalf("DeriveRows: unexpected error: %v", err)
 		}
@@ -261,7 +261,7 @@ func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 // this.
 func TestDerive_DeterministicOverSnapshot(t *testing.T) {
 	twin := synthetic.Twin("synthetic-twin")
-	rows := []ecosystem.Row{synthetic.Row, twin}
+	rows := []ecosystem.Strategy{synthetic.Row, twin}
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, synthetic.Row.InTreeConfigPath, `
 zeta = https://artifacts.example.com/artifactory/api/zeta/index
@@ -286,7 +286,7 @@ b = https://other.example.com/repo
 
 // scopedRow reads `name url [scoped]` lines so a test can declare a scoped
 // registry, which the synthetic row's parser never does.
-var scopedRow = ecosystem.Row{
+var scopedRow = ecosystem.Strategy{
 	Name:             "scopedfake",
 	InTreeConfigPath: ".scopedfake/registries",
 	ConfigParser: func(content string) ([]ecosystem.Declaration, bool, error) {
@@ -308,7 +308,7 @@ func deriveScoped(t *testing.T, body string) []HostPathSet {
 	t.Helper()
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, scopedRow.InTreeConfigPath, body)
-	got, err := DeriveRows(dir, []ecosystem.Row{scopedRow})
+	got, err := DeriveRows(dir, []ecosystem.Strategy{scopedRow})
 	if err != nil {
 		t.Fatalf("DeriveRows: unexpected error: %v", err)
 	}

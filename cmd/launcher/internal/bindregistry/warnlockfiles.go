@@ -23,7 +23,7 @@ func WarnStaleLockfiles(w io.Writer, workDir string) {
 
 // WarnStaleLockfilesRows is WarnStaleLockfiles over the given rows, so a
 // synthetic row can prove the scan without ecosystem.Table.
-func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Row, getenv func(string) string) {
+func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Strategy, getenv func(string) string) {
 	if _, err := registrymanifest.Parse(getenv(registrymanifest.EnvVar)); err != nil {
 		if errors.Is(err, registrymanifest.ErrAbsent) {
 			return
