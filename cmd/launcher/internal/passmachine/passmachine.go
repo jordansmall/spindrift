@@ -8,6 +8,8 @@ package passmachine
 import (
 	"fmt"
 	"strings"
+
+	"spindrift.dev/launcher/internal/outcome"
 )
 
 // PassKind names which pass shape just finished, or which one runs next.
@@ -128,7 +130,8 @@ const (
 	// StopNone means the loop is not stopping this pass.
 	StopNone StopReason = iota
 	// StopOutcomeReached fires when the pass that just ran reached its
-	// terminal SPINDRIFT_OUTCOME line.
+	// terminal SPINDRIFT_OUTCOME line. It does not fire on a premature
+	// status=ready before an APPROVE (issue #5972).
 	StopOutcomeReached
 	// StopNoVerdict fires on the legacy decision when the pass's log scanned
 	// out no verdict word, and as Decision.Cap on the review-pass decision
@@ -210,7 +213,9 @@ const (
 // I/O, so every case is exercisable from a table test alone.
 type Input struct {
 	// PassJustExecuted names which decision point this call is evaluating.
-	// KindImplement, KindFix and KindLand share one, treated identically.
+	// KindImplement, KindFix and KindLand share one decision point, except
+	// that a ready outcome before an APPROVE (only possible after implement or
+	// fix) does not stop it.
 	PassJustExecuted PassKind
 	// Verdict is the verdict word scanned from the pass that just ran.
 	// Meaningful for KindLegacy and KindReview only; an implement, fix or
@@ -219,6 +224,10 @@ type Input struct {
 	// HasOutcome is whether the pass that just ran reached its terminal
 	// SPINDRIFT_OUTCOME line. A review pass's decision never consults it.
 	HasOutcome bool
+	// OutcomeStatus is the status field of that outcome line, one of
+	// outcome.WorkStatuses or empty/unknown. Meaningful only with HasOutcome,
+	// and only a premature "ready" (see implementFixTransition) reads it.
+	OutcomeStatus string
 	// Pass is the 1-indexed count of passes run so far, including the one
 	// that just finished, compared against Caps.MaxSlices.
 	Pass int
@@ -322,13 +331,20 @@ func terminalLandTransition(in Input) Decision {
 	return Decision{Continue: false, Reason: "terminal land pass reached no outcome", Stop: StopTerminalLandNoOutcome}
 }
 
+const prematureReadyReason = "premature status=ready before APPROVE"
+
 // implementFixTransition is the in.LandPhase == LandPhaseActive half of the
 // implement/fix/land decision (issue #2548 AC2). It carries no terminal-land
 // case on purpose: Transition dispatches that to terminalLandTransition, so
 // this switch's case order can never reprioritize against it.
 func implementFixTransition(in Input) Decision {
+	// A ready outcome before any APPROVE claims completion the review pass has
+	// not vouched for (issue #5972), so it must not stop the loop. Only a pass
+	// after an APPROVE — the land pass — prints the genuine terminal ready.
+	premature := in.HasOutcome && in.OutcomeStatus == outcome.StatusReady &&
+		in.LastVerdict != VerdictApprove
 	switch {
-	case in.HasOutcome:
+	case in.HasOutcome && !premature:
 		return Decision{Continue: false, Reason: "outcome reached", Stop: StopOutcomeReached}
 	// After an APPROVE the land pass runs exactly once. The
 	// required_marker_gate session-resume nudge recovers a land pass cut off
@@ -338,14 +354,20 @@ func implementFixTransition(in Input) Decision {
 		return Decision{Continue: false, Reason: "land pass reached no terminal outcome after APPROVE", Stop: StopApproveNoOutcome}
 	// maxSlices is a hard ceiling on total driver-exec invocations (#2457).
 	case in.Caps.MaxSlices > 0 && in.Pass >= in.Caps.MaxSlices:
+		reason := "max slices reached; running terminal land pass"
+		if premature {
+			reason = prematureReadyReason + "; " + reason
+		}
 		return Decision{
 			Continue:  true,
-			Reason:    "max slices reached; running terminal land pass",
+			Reason:    reason,
 			NextPass:  KindLand,
 			LandPhase: LandPhaseTerminalCommitted,
 			Cap:       StopMaxSlicesReached,
 			CapFired:  "max slices reached",
 		}
+	case premature:
+		return Decision{Continue: true, Reason: prematureReadyReason + ", entering review pass", NextPass: KindReview}
 	}
 	return Decision{Continue: true, Reason: "no cap fired, entering review pass", NextPass: KindReview}
 }
