@@ -33,9 +33,9 @@ func Prerequisites(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite
 		overlayRemedy = "unset nixStoreWritable, or " + overlayRemedy
 	}
 
-	networkRemedy := "install pasta (the passt project) on PATH"
+	networkRemedy := "make pasta (the passt project) available on PATH and able to bring up a working network namespace on this host"
 	if !networkAdvisory {
-		networkRemedy += ", or set NETWORK_MODE=host to explicitly opt into the shared-network-namespace behaviour"
+		networkRemedy += ", or " + hostNetOptOut
 	}
 
 	return []runner.Prerequisite{
@@ -59,7 +59,8 @@ func Prerequisites(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite
 		},
 		{
 			// Launch refuses rather than silently share the host network
-			// namespace when pasta is missing (issue #2666).
+			// namespace when pasta is missing (issue #2666), or start a Box
+			// whose pasta namespace has no working network (issue #5983).
 			Name:     "bwrap-network-isolation",
 			Launch:   runner.LaunchGate,
 			Required: !networkAdvisory,

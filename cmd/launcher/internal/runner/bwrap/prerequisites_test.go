@@ -215,6 +215,12 @@ func TestPrerequisites_NetworkIsolationRemedyHint(t *testing.T) {
 	if !strings.Contains(req.Remedy, "set NETWORK_MODE=host") {
 		t.Errorf("Required Remedy should tell operator to set NETWORK_MODE=host, got: %s", req.Remedy)
 	}
+	// The probe also fails when pasta is installed but its namespace is
+	// unusable, so the fixed remedy must not tell the operator to install it
+	// (issue #5983).
+	if strings.Contains(req.Remedy, "install pasta") {
+		t.Errorf("Required Remedy should not tell operator to install pasta, got: %s", req.Remedy)
+	}
 }
 
 // The row must ask about exactly the controllers this config's limits make
@@ -258,12 +264,13 @@ func TestPrerequisites_ProbeWiring(t *testing.T) {
 }
 
 // pinPATH points PATH at a temp dir that holds an executable "pasta" or
-// nothing, so the real ValidatePasta does not depend on the runner's PATH.
+// nothing, so the real ValidatePasta does not depend on the runner's PATH. The
+// fake pasta stands in for one whose namespace is usable.
 func pinPATH(t *testing.T, pastaPresent bool) {
 	t.Helper()
 	dir := t.TempDir()
 	if pastaPresent {
-		if err := os.WriteFile(filepath.Join(dir, "pasta"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "pasta"), []byte("#!/bin/sh\necho "+netnsProbeOK+"\n"), 0o755); err != nil {
 			t.Fatalf("write fake pasta: %v", err)
 		}
 	}
@@ -320,5 +327,40 @@ func TestPrerequisites_LaunchChecksPastaBeforeOverlay(t *testing.T) {
 	}
 	if got != errPasta {
 		t.Errorf("first launch-gate error = %v, want %v", got, errPasta)
+	}
+}
+
+// Each probe outcome reaches the row's Probe through the validatePastaFn seam
+// with the real validatePastaWith behind it.
+func TestPrerequisites_NetworkIsolationProbeOutcomes(t *testing.T) {
+	notFound := func(string) (string, error) { return "", errors.New("not found") }
+	tests := []struct {
+		name    string
+		look    func(string) (string, error)
+		script  string
+		wantErr string
+	}{
+		{"usable namespace", lookPathOK, "echo " + netnsProbeOK, ""},
+		{"pasta missing", notFound, "exit 0", "pasta not found on PATH"},
+		{"namespace unconfigured", lookPathOK, "echo '" + netnsProbeMarker + " no IPv4 default route via an UP interface'", "unusable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var name string
+			var args []string
+			run := fakeRun(tt.script, &name, &args)
+			stubValidators(t, nil, func() error { return validatePastaWith(tt.look, run, pastaFlags()) }, nil)
+			row := prereqByName(t, runner.Config{NetworkMode: runner.NetworkModeOpen}, "bwrap-network-isolation")
+			_, err := row.Probe()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Probe() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Probe() = %v, want an error containing %q", err, tt.wantErr)
+			}
+		})
 	}
 }

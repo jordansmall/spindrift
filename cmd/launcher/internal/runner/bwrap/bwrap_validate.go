@@ -6,22 +6,52 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
-// ValidatePasta checks that pasta is on PATH, required whenever a bwrap Box
-// isolates its network namespace with working egress (issue #2666). Without
-// it the launcher must refuse to start rather than fall back to the weaker
-// shared-host-netns sandbox.
+// hostNetOptOut is the shared tail of every refusal that offers
+// NETWORK_MODE=host as the way out of the pasta requirement.
+const hostNetOptOut = "set NETWORK_MODE=host to explicitly opt into the shared-network-namespace behaviour"
+
+// ValidatePasta checks that pasta is on PATH, can create a network namespace
+// on this host, and leaves it with an UP interface, an IPv4 address and a
+// default route under the launcher's own pasta flags (issue #5983). The
+// launcher refuses to start otherwise rather than fall back to the weaker
+// shared-host-netns sandbox (issue #2666).
 func ValidatePasta() error {
-	return ValidatePastaWithLookup(exec.LookPath)
+	return validatePastaWith(exec.LookPath, execCommand, pastaFlags())
 }
 
-// ValidatePastaWithLookup is ValidatePasta with the PATH lookup injected.
-func ValidatePastaWithLookup(lookPath func(string) (string, error)) error {
+// validatePastaWith is ValidatePasta with its PATH lookup, exec and flag
+// seams injected. It re-executes this binary under pasta (see init in
+// netns_probe.go) so the check needs no host tool inside the namespace.
+func validatePastaWith(lookPath func(string) (string, error), run func(string, ...string) *exec.Cmd, flags []string) error {
 	if _, err := lookPath("pasta"); err != nil {
 		return fmt.Errorf("pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or set NETWORK_MODE=host to explicitly opt into the pre-#2666 shared-network-namespace behaviour")
 	}
-	return nil
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("pasta network namespace probe: cannot locate this executable to re-exec under pasta: %w", err)
+	}
+	cmd := run("pasta", append(append([]string{}, flags...), "--", exe, netnsProbeArg)...)
+	cmd.Env = append(os.Environ(), netnsProbeEnv+"=1")
+	out, runErr := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, netnsProbeMarker) {
+			continue
+		}
+		if line == netnsProbeOK {
+			return nil
+		}
+		reason := strings.TrimSpace(strings.TrimPrefix(line, netnsProbeMarker))
+		return fmt.Errorf("pasta created a network namespace for the bwrap Box but it is unusable (%s) — a bwrap Box launched here would have no egress to its Provider (issue #5981); use a pasta (passt) that honours the launcher's --config-net, or check the passt install, or "+hostNetOptOut, reason)
+	}
+	output := strings.TrimSpace(string(out))
+	if runErr == nil {
+		return fmt.Errorf("pasta exited without running the in-namespace network probe (output: %s) — check the passt install, or "+hostNetOptOut, output)
+	}
+	return fmt.Errorf("pasta could not create a network namespace to run the probe in (%v; output: %s) — either pasta rejected one of the launcher's flags (check the passt version) or this host or sandbox bars unprivileged user/network namespaces; run on a host that allows them, or "+hostNetOptOut, runErr, output)
 }
 
 // ValidateOverlay checks that the host kernel allows an unprivileged user
