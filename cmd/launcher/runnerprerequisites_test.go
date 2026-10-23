@@ -358,7 +358,7 @@ func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 	dir := t.TempDir()
 	stubs := map[string]string{"bwrap": fmt.Sprintf("#!/bin/sh\nexit %d\n", bwrapExit)}
 	if pasta {
-		stubs["pasta"] = "#!/bin/sh\nexit 0\n"
+		stubs["pasta"] = stubPastaScript
 	}
 	for name, body := range stubs {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {

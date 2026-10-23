@@ -447,7 +447,7 @@ func TestMainRun_Preview_WritesReportToInjectedStdout(t *testing.T) {
 // Returns the local issues dir so callers can seed issue files by ID.
 func setBootstrapReadyLocalEnv(t *testing.T) (issuesDir string) {
 	t.Helper()
-	stubExecutableOnPath(t, "pasta")
+	stubPastaOnPath(t)
 	checkout := mustSeedableCheckout(t)
 	issuesDir = t.TempDir()
 
