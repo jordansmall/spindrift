@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/landdelta"
+	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -27,9 +28,10 @@ const FileName = "manifest.json"
 // not a legitimate manifest.
 const maxManifestBytes = 4 * 1024 * 1024
 
-// Entry is one pass's advisory summary (issue #2983). It is Box-authored
-// evidence only: the launcher computes Resolved outcome tier selection and
-// every settle decision independently and never consults it.
+// Entry is one pass's summary (issue #2983). It is Box-authored evidence: the
+// launcher computes Resolved outcome tier selection independently, and only
+// UnreviewedReady's settle/recover backstop consults it. That guards model
+// mistakes, not an adversarial Box, which could forge entries.
 type Entry struct {
 	Pass         int         `json:"pass"`
 	Kind         string      `json:"kind"`
@@ -128,4 +130,42 @@ func Read(path string) ([]Entry, error) {
 		return nil, err
 	}
 	return entries, nil
+}
+
+// UnreviewedReady reports whether a run that reported status=ready got that
+// ready from a review-loop pass other than its land pass (issue #5973). The
+// caller has already established that the resolved self-report is ready, so a
+// land-pass outcome of any status settles the question: a blocked land makes
+// the resolved self-report blocked, and this is never consulted. The last
+// implement, fix or land entry (L) is the loop's last work pass; review,
+// delta-review and legacy entries never set it. No L (legacy loop, advise-only
+// kinds, older manifests) fails open. Implement or fix at L means the loop
+// stopped before land (true). Land at L is reviewed only if an outcome appears
+// at or after it: the land pass itself, or a legacy nudge resume or host fix
+// pass; otherwise land crashed and the ready is a stale earlier one.
+func UnreviewedReady(entries []Entry) bool {
+	land := passmachine.KindLand.ManifestKind()
+	work := map[string]bool{
+		passmachine.KindImplement.ManifestKind(): true,
+		passmachine.KindFix.ManifestKind():       true,
+		land:                                     true,
+	}
+	last := -1
+	for i, en := range entries {
+		if work[en.Kind] {
+			last = i
+		}
+	}
+	if last < 0 {
+		return false
+	}
+	if entries[last].Kind != land {
+		return true
+	}
+	for _, en := range entries[last:] {
+		if en.OutcomeFound {
+			return false
+		}
+	}
+	return true
 }
