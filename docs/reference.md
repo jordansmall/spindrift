@@ -102,7 +102,16 @@ row.
   operator visibility (these rows are informational only and never affect
   `spindrift doctor`'s exit code), except `bwrap-cgroup-delegation`, which
   is always Advisory since bwrap degrades gracefully without cgroup
-  delegation (ADR 0042, issue #2671).
+  delegation (ADR 0042, issue #2671). `bwrap-network-isolation` does not
+  stop at finding `pasta` on PATH: it starts pasta with the exact hardened
+  flags a Box launch uses and checks, inside the resulting namespace, for an
+  UP non-loopback interface with an IPv4 address carrying an IPv4 default
+  route (issue #5983). It fails distinctly when pasta is missing, when pasta
+  cannot run the probe in a network namespace at all (a passt that rejects
+  the launcher's flags, or a host or enclosing sandbox that bars
+  unprivileged user/network namespaces), and when the namespace comes up
+  with no usable network, each naming the
+  `NETWORK_MODE=host` opt-out; the launch gate runs the same probe.
 - For every non-bwrap runner kind (never under bwrap), a
   `podman-machine-memory` row, Required tier — unlike the bwrap rows above,
   which stay informational, this row's failure fails `spindrift doctor`
