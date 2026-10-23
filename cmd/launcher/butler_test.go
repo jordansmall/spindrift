@@ -392,6 +392,25 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	assertNoButlerLedgerClaims(t, repo)
 }
 
+// cmdButler refuses a config with no dispatch kind, rather than
+// letting config.kind()'s nil fallback file findings under the work label
+// (issue #5929), and does so before writing a Ledger claim.
+func TestCmdButler_RejectsUnsetDispatchKind(t *testing.T) {
+	t.Setenv("FILER_MODEL", "test-model")
+	withLoadedDoc(t, &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "bugs"}})
+	repo := ledgertest.NewRepo(t)
+	lc := testButlerLaunchContext(t, repo, "bugs")
+	var stderr bytes.Buffer
+	code := cmdButler(lc, "", &stderr)
+	if code != exitConfigInvalid {
+		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	}
+	if !strings.Contains(stderr.String(), "no dispatch kind set") {
+		t.Errorf("stderr = %q, want it to name the missing dispatch kind", stderr.String())
+	}
+	assertNoButlerLedgerClaims(t, repo)
+}
+
 // cmdButler exits exitConfigInvalid, not 1, for a malformed BUTLER_EVERY,
 // BUTLER_CLAIM_TIMEOUT, or DAEMON_AWAKE_WINDOW too, even though each fails
 // past butlerPreflight: all three parse inside resolveButlerSettings, the
