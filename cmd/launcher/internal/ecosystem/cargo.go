@@ -26,10 +26,6 @@ import (
 // separate concept that only coincides here.
 const nameCargo = "cargo"
 
-// CargoRetiredRouteKey is cargo's Strategy.RetiredRouteKey. Exported because
-// registryroutes never spells the key itself.
-const CargoRetiredRouteKey = "cargo-registries"
-
 // Cargo is exported only so the Bundle can register it, until a later ticket of
 // issue #5940 moves it into its own package.
 var Cargo = Strategy{
@@ -58,11 +54,6 @@ var Cargo = Strategy{
 	ConfigParser:     parseCargoRegistryConfig,
 	RouteDeclaration: validateCargoRouteDeclaration,
 }
-
-// CargoRouteRegistriesKey is the one key (besides "path") a
-// [routes.ecosystems.cargo] block may carry. Exported so no consumer outside
-// this package spells "cargo" or "registries" itself (ADR 0048).
-const CargoRouteRegistriesKey = "registries"
 
 // validateCargoRouteDeclaration is Cargo's RouteDeclaration hook (issue
 // #3403). Each name must match cargoBareKeyPattern and appear once: a name
@@ -648,14 +639,6 @@ func CargoRegistryEnvVarName(registryName string) string {
 	upper := strings.ToUpper(registryName)
 	upper = strings.ReplaceAll(upper, "-", "_")
 	return "CARGO_REGISTRIES_" + upper + "_TOKEN"
-}
-
-// RouteLocalURL renders a route's own local Forwarder URL from prefix, the
-// route's own Prefix field. The proxy listens on one port for every route,
-// but each route answers only its own prefix-scoped path (issue #3142), so
-// the rewrite target has to carry that prefix too.
-func RouteLocalURL(prefix string, port int) string {
-	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix
 }
 
 // cargoDLMarkers are the placeholders cargo substitutes in a registry's dl
