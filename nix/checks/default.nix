@@ -116,7 +116,8 @@ let
     // (import ./seam-fixtures.nix common)
     // (import ./event-stream-parity.nix common)
     // (import ./bare-bang-guard.nix common)
-    // (import ./backend-name-guard.nix common);
+    // (import ./backend-name-guard.nix common)
+    // (import ./eval-probe.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
