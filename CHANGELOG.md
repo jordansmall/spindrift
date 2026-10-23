@@ -1,5 +1,185 @@
 # Changelog
 
+## [0.30.0](https://github.com/jordansmall/spindrift/compare/v0.29.0...v0.30.0) (2026-10-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pi:** under the pi Driver, a roster that keeps the default reviewer (which spawns review-axis) but leaves out the review-axis entry now fails eval; drop the target from the reviewer's spawns or restore the entry. A spawns entry that can call subagent also needs a non-blank description.
+
+### Features
+
+* **checks:** expose the inbox checks as an attrset ([865f153](https://github.com/jordansmall/spindrift/commit/865f153362213ede8faedf7e106353cdf1b5ce79)), closes [#5862](https://github.com/jordansmall/spindrift/issues/5862)
+* **ci:** render an eval profile into a top-15 table ([5b1c004](https://github.com/jordansmall/spindrift/commit/5b1c004f7a1d3f22823a532afa72988a17d5086d)), closes [#5861](https://github.com/jordansmall/spindrift/issues/5861)
+* **ci:** render eval stats into a reviewer-facing Markdown table ([33749fb](https://github.com/jordansmall/spindrift/commit/33749fb7c89f9271b906db0224375afd098b4338)), closes [#5860](https://github.com/jordansmall/spindrift/issues/5860)
+* **dispatchrecord:** record each Pass's observed efforts ([dc1318b](https://github.com/jordansmall/spindrift/commit/dc1318b471bd91ea74c75be29cf927dfec957c93)), closes [#5592](https://github.com/jordansmall/spindrift/issues/5592)
+* **driver/pi:** report the observed model as a bare provider/model id ([47769ba](https://github.com/jordansmall/spindrift/commit/47769bad8ca054f99b289d3c1f716f63b70eb54f)), closes [#5592](https://github.com/jordansmall/spindrift/issues/5592)
+* **driver:** carry a Driver's effort-on-model levels into Go ([a251fcd](https://github.com/jordansmall/spindrift/commit/a251fcdef7385f557b8cbf099da547c7e201c1da)), closes [#5625](https://github.com/jordansmall/spindrift/issues/5625)
+* **drivers:** let a credential rule carry labels and a setup hint ([fb3371c](https://github.com/jordansmall/spindrift/commit/fb3371cb22b4d47178d28f8c72f4f7c05c56addd)), closes [#5531](https://github.com/jordansmall/spindrift/issues/5531)
+* **gate:** add a parallel-eval gate script ([9463907](https://github.com/jordansmall/spindrift/commit/9463907030fee212d59d8e0daf5c2646157c4a47)), closes [#5862](https://github.com/jordansmall/spindrift/issues/5862)
+* **gate:** run the gate as nix run .#gate in the dogfood Box ([7286efe](https://github.com/jordansmall/spindrift/commit/7286efec0af424b7c0484056625ad7a73624f150)), closes [#5862](https://github.com/jordansmall/spindrift/issues/5862)
+* **local:** resolve the Accumulation repo path in the Strategy ([ad44e44](https://github.com/jordansmall/spindrift/commit/ad44e44e9c4e9e9f0d365d29f55051201558d09f)), closes [#5796](https://github.com/jordansmall/spindrift/issues/5796)
+* **nix:** add a marginal-cost eval probe for harness instances ([5fdf002](https://github.com/jordansmall/spindrift/commit/5fdf0022dcefc922b6cef04c5a6df5d8e2c3fd04)), closes [#5860](https://github.com/jordansmall/spindrift/issues/5860)
+* **pi:** gate the subagent tool on the caller's spawns list ([e109d5c](https://github.com/jordansmall/spindrift/commit/e109d5c90ab82e6640a8adcb1ee58ff996c312c0)), closes [#5809](https://github.com/jordansmall/spindrift/issues/5809)
+* **pi:** render each roster entry's spawns as a policy file ([52e2873](https://github.com/jordansmall/spindrift/commit/52e2873354237628c9fc616ddc235457e7d31aaa)), closes [#5809](https://github.com/jordansmall/spindrift/issues/5809)
+* **quickstart:** word credential prompts from the rule's labels ([a828523](https://github.com/jordansmall/spindrift/commit/a828523d7392fa9b6b29a49733399ec690a366b3)), closes [#5531](https://github.com/jordansmall/spindrift/issues/5531)
+* **recordsdigest:** pair ParsePrior and Render through WithPrior ([5508e76](https://github.com/jordansmall/spindrift/commit/5508e7618358a7debc6aee96df944f0cec5dbbbf)), closes [#5783](https://github.com/jordansmall/spindrift/issues/5783)
+* **runner:** export the list of network modes ([7475392](https://github.com/jordansmall/spindrift/commit/74753923b10697fc1a8aa545a090f12de7ed5437)), closes [#5755](https://github.com/jordansmall/spindrift/issues/5755)
+* **runner:** let each family report its raw network knobs ([3d10d1d](https://github.com/jordansmall/spindrift/commit/3d10d1d85007ad36550fc61d78986b20f01b3103)), closes [#5772](https://github.com/jordansmall/spindrift/issues/5772)
+
+
+### Bug Fixes
+
+* **butler:** read min-records through the row's parse rule ([1485c4d](https://github.com/jordansmall/spindrift/commit/1485c4d22536ae19477ae7239ffb338dea024820)), closes [#5791](https://github.com/jordansmall/spindrift/issues/5791)
+* **butler:** refuse to sweep without a dispatch kind ([7100346](https://github.com/jordansmall/spindrift/commit/7100346a70fbcc95cb917cbf2e208ae005aea076)), closes [#5929](https://github.com/jordansmall/spindrift/issues/5929)
+* **bwrap:** unexport the lock race window test hook ([dca847d](https://github.com/jordansmall/spindrift/commit/dca847d7e3794738973622a54ba24a8d3dbca015)), closes [#5712](https://github.com/jordansmall/spindrift/issues/5712)
+* **checks:** cut the fmt, vet and console-isolation checks to coreFiles ([50e0d9d](https://github.com/jordansmall/spindrift/commit/50e0d9d31e595ceda6918d2e6d10afb455e98f65)), closes [#5562](https://github.com/jordansmall/spindrift/issues/5562)
+* **corpus:** blank pi subagent task briefs in tool-call arguments ([0b833d6](https://github.com/jordansmall/spindrift/commit/0b833d6dd4f87a4c54b3367cf14e4948b8f6761a)), closes [#5881](https://github.com/jordansmall/spindrift/issues/5881)
+* **credential-deny:** deny opencode's own auth.json in the hook ([10b3460](https://github.com/jordansmall/spindrift/commit/10b346002b8970889e9fed4dc9f07a79df1a61b1)), closes [#5370](https://github.com/jordansmall/spindrift/issues/5370)
+* **drivers:** refuse Driver row attributes outside a closed set ([bcca04b](https://github.com/jordansmall/spindrift/commit/bcca04ba461a67f65c59a2f1895a84764c58edc6)), closes [#5523](https://github.com/jordansmall/spindrift/issues/5523)
+* **ecosystemtest:** return gitCopy errors without nil cleanup panic ([42e936a](https://github.com/jordansmall/spindrift/commit/42e936a4b2fec11f066e8676608594d3660f7da9)), closes [#5847](https://github.com/jordansmall/spindrift/issues/5847)
+* **opencode:** cap a model-set bash timeout at the configured value ([b4d55e3](https://github.com/jordansmall/spindrift/commit/b4d55e307c94b31805436343ee6ee367d5e700f4)), closes [#5381](https://github.com/jordansmall/spindrift/issues/5381)
+* **opencode:** refuse every call when a hook names an unmapped tool ([347657d](https://github.com/jordansmall/spindrift/commit/347657d07feeb8ff3cb7deaa5d9dfc69761856ae)), closes [#5370](https://github.com/jordansmall/spindrift/issues/5370)
+* **opencode:** run credential-deny.sh on bash and read calls ([02dd710](https://github.com/jordansmall/spindrift/commit/02dd71024f823d86974ad2003520fe413cfacf18)), closes [#5370](https://github.com/jordansmall/spindrift/issues/5370)
+* **promptassembly:** let a REVIEW_MODEL level suffix set review effort ([a2ee231](https://github.com/jordansmall/spindrift/commit/a2ee231b46f6234c903c612f3858da99cdd67043)), closes [#5625](https://github.com/jordansmall/spindrift/issues/5625)
+* **runner:** give each exec-ing package its own exec seam ([0f65ec6](https://github.com/jordansmall/spindrift/commit/0f65ec6524a993ecc8487104487905fb0dcc1d0d)), closes [#5712](https://github.com/jordansmall/spindrift/issues/5712)
+* **runner:** hide the off-argv key set behind accessors ([1c1d0a0](https://github.com/jordansmall/spindrift/commit/1c1d0a0d8dd744f969545bce0918a5c899a0e5bf)), closes [#5712](https://github.com/jordansmall/spindrift/issues/5712)
+* **settle:** refuse to file findings under an empty provenance label ([1db060c](https://github.com/jordansmall/spindrift/commit/1db060cc0ef2983f671d3b5dc628c7e303810dfd)), closes [#5929](https://github.com/jordansmall/spindrift/issues/5929)
+
+
+### Performance Improvements
+
+* **claude:** share one top-level JSON decode across line probes ([565aa8e](https://github.com/jordansmall/spindrift/commit/565aa8e1b2e47342f412845bd172bd5c1e47e6c6)), closes [#5438](https://github.com/jordansmall/spindrift/issues/5438)
+* **harness:** reuse the corpus scan for forbidden markers ([fdc2caf](https://github.com/jordansmall/spindrift/commit/fdc2caff546e6afbcd215307f7dffc3c578cc39e)), closes [#5858](https://github.com/jordansmall/spindrift/issues/5858)
+* **harness:** scan removed fragment vars in one pass per source ([3e89c92](https://github.com/jordansmall/spindrift/commit/3e89c92b139d39cafdd861a40eeda76068b75e79)), closes [#5857](https://github.com/jordansmall/spindrift/issues/5857)
+* **harness:** scan the default prompt corpus once for removed vars ([ce6c10a](https://github.com/jordansmall/spindrift/commit/ce6c10a55856663b480074e73ecf0f6290f7b27f)), closes [#5858](https://github.com/jordansmall/spindrift/issues/5858)
+* **nix:** share the Harness core across harness instances ([191b253](https://github.com/jordansmall/spindrift/commit/191b25382baa0f649c74a96bb7234db0daba4835)), closes [#5859](https://github.com/jordansmall/spindrift/issues/5859)
+
+
+### Security
+
+* **stats:** quote control-character labels in text output ([a769c05](https://github.com/jordansmall/spindrift/commit/a769c051e9c7b8b846fc8782d0c02625b5a2048f)), closes [#5616](https://github.com/jordansmall/spindrift/issues/5616)
+
+
+### Documentation
+
+* add 0.29.1 release notes ([0eb8b2f](https://github.com/jordansmall/spindrift/commit/0eb8b2f332283bdd0b7ba6ea538d9e537b7813bc))
+* **adr:** note that DiscoverRows derives its own store map ([1d4d932](https://github.com/jordansmall/spindrift/commit/1d4d932335e704beed99154298d05d9f1647adb1)), closes [#5812](https://github.com/jordansmall/spindrift/issues/5812)
+* **adr:** record the runner-family guard's scope in ADR 0069 ([26db15e](https://github.com/jordansmall/spindrift/commit/26db15eb7e3ee0bc7dbc4560f0ba6903aea52275)), closes [#5803](https://github.com/jordansmall/spindrift/issues/5803)
+* **adr:** record the synthetic-row scope for the remaining tests ([c085b71](https://github.com/jordansmall/spindrift/commit/c085b7144b57007a9e1a7f636f03de83466feb76)), closes [#5741](https://github.com/jordansmall/spindrift/issues/5741)
+* **adr:** repoint ADR 0044's gradle test references ([06c3a36](https://github.com/jordansmall/spindrift/commit/06c3a362b623f6ef5023864eeaf77790e8a464f9)), closes [#5944](https://github.com/jordansmall/spindrift/issues/5944)
+* **contributing:** list the Ecosystem goldens regen-goldens rewrites ([2d37b0e](https://github.com/jordansmall/spindrift/commit/2d37b0e07a780d0d0d336c2767d0fe420d55a59b)), closes [#5708](https://github.com/jordansmall/spindrift/issues/5708)
+* **nix-checks:** make nix run .#gate the in-Box gate ([aba8464](https://github.com/jordansmall/spindrift/commit/aba84649b72c1902cc35e9dc93d56f57e7c83a56)), closes [#5862](https://github.com/jordansmall/spindrift/issues/5862)
+* **nix-checks:** say checks-inbox skips docs-edit-isolation ([c0951aa](https://github.com/jordansmall/spindrift/commit/c0951aacb2d6f5d67d7e4d3d80e418f27e1ec49b)), closes [#5849](https://github.com/jordansmall/spindrift/issues/5849)
+* **opencode:** note that the real captures pin messageID grouping ([46c1e76](https://github.com/jordansmall/spindrift/commit/46c1e76c0a88b2f695205324a28b78e5da11769f)), closes [#5389](https://github.com/jordansmall/spindrift/issues/5389)
+* **opencode:** say the guard plugin caps the bash timeout ([0184168](https://github.com/jordansmall/spindrift/commit/0184168c0e6baf5fb9de87ef2a901f596df6b2a2)), closes [#5381](https://github.com/jordansmall/spindrift/issues/5381)
+* **opencode:** shrink the credential-deny residuals to what stays open ([772eb1d](https://github.com/jordansmall/spindrift/commit/772eb1d9d098152da0d393bcf09c8eacc3cf3b57)), closes [#5370](https://github.com/jordansmall/spindrift/issues/5370)
+* **pi:** describe how the hook bridge enforces spawns ([6eca69c](https://github.com/jordansmall/spindrift/commit/6eca69c530c2fff1f33601e96f29b54693655c7f)), closes [#5809](https://github.com/jordansmall/spindrift/issues/5809)
+* **pi:** say why the hook bridge may throw at load ([eeba5dc](https://github.com/jordansmall/spindrift/commit/eeba5dc14c670fb5ca0222ebcbaf06a23e2ec0c1)), closes [#5910](https://github.com/jordansmall/spindrift/issues/5910)
+* **pi:** state how a REVIEW_MODEL level suffix sets the review effort ([3ab3de7](https://github.com/jordansmall/spindrift/commit/3ab3de75289c66186c6b128f77accf4ab40506b9)), closes [#5625](https://github.com/jordansmall/spindrift/issues/5625)
+* **pi:** stop documenting a model fallback for role effort ([e01aee9](https://github.com/jordansmall/spindrift/commit/e01aee9fa4e198a9c535339003c73c512e4cda75)), closes [#5626](https://github.com/jordansmall/spindrift/issues/5626)
+* record pi's bare observed model id and per-Pass efforts ([c89d49e](https://github.com/jordansmall/spindrift/commit/c89d49ee6cc24fdea325a4059f914ec61b88b201)), closes [#5592](https://github.com/jordansmall/spindrift/issues/5592)
+* **reference:** state what a Driver, family or backend edit reruns ([7280887](https://github.com/jordansmall/spindrift/commit/7280887cf23926344412adcd5aea94fd00292ca7)), closes [#5562](https://github.com/jordansmall/spindrift/issues/5562)
+
+
+### Code Refactoring
+
+* **backends:** mark core backends with a row fact ([ff7c9cd](https://github.com/jordansmall/spindrift/commit/ff7c9cde5ee0b6519a459cfa691aa11f928556a8)), closes [#5795](https://github.com/jordansmall/spindrift/issues/5795)
+* **butler:** print status lines through the Runner's writer ([80444f7](https://github.com/jordansmall/spindrift/commit/80444f731d0e28c97421ba3b1370cc522623170c)), closes [#5850](https://github.com/jordansmall/spindrift/issues/5850)
+* **checks:** share one stub-row and independence check ([1774f9d](https://github.com/jordansmall/spindrift/commit/1774f9d13f6ce2b4a9eb9adf7e0f32d8564992fa)), closes [#5779](https://github.com/jordansmall/spindrift/issues/5779)
+* **chore:** generate the min-records row default ([1c19f65](https://github.com/jordansmall/spindrift/commit/1c19f6543b4f7528e89336e6e182faee427756d5)), closes [#5791](https://github.com/jordansmall/spindrift/issues/5791)
+* **daemon:** drop the knobLookup alias ([b1ffb3a](https://github.com/jordansmall/spindrift/commit/b1ffb3a2c007fce90952f506b71bffb091d5855c)), closes [#5761](https://github.com/jordansmall/spindrift/issues/5761)
+* **dispatch:** give the socket-dir test seams neutral names ([035c044](https://github.com/jordansmall/spindrift/commit/035c0448b22849f5ee80d19c50043748c23d98b5)), closes [#5581](https://github.com/jordansmall/spindrift/issues/5581)
+* **dispatchkind:** drop the by-strategy kind lookup ([bc8a4c0](https://github.com/jordansmall/spindrift/commit/bc8a4c05c75e3cfc41fef3189df2d26bd6415b7e)), closes [#5730](https://github.com/jordansmall/spindrift/issues/5730)
+* **driver/claude:** decode tool targets via driverkit.ToolTarget ([25001f6](https://github.com/jordansmall/spindrift/commit/25001f63b85e3174be66b2410bc63ba7a5cb8252)), closes [#5879](https://github.com/jordansmall/spindrift/issues/5879)
+* **driver:** decode pi and opencode through driverkit helpers ([84ab554](https://github.com/jordansmall/spindrift/commit/84ab55425bc6747e18d124bb603b76c5926c3e65)), closes [#5593](https://github.com/jordansmall/spindrift/issues/5593)
+* **driverkit:** add shared tool-target and error-text helpers ([1ed2203](https://github.com/jordansmall/spindrift/commit/1ed22032585cd4b9b7bd7271180ce13ce3f19b08)), closes [#5593](https://github.com/jordansmall/spindrift/issues/5593)
+* **effort:** drop the unreachable coordinator-model fallback ([aeee421](https://github.com/jordansmall/spindrift/commit/aeee4217d089252ae98aebeaabf646cb0a90e3b7)), closes [#5626](https://github.com/jordansmall/spindrift/issues/5626)
+* **forgejo:** name env knobs via the generated constants ([77a42ba](https://github.com/jordansmall/spindrift/commit/77a42baca8c5748cd60f226e2a5339d2aa88b47c)), closes [#5902](https://github.com/jordansmall/spindrift/issues/5902)
+* **launcher:** alias the hand-written knob lookups to one shape ([0cc373a](https://github.com/jordansmall/spindrift/commit/0cc373aba0bd764dca25427a5cefdd9548f86a12)), closes [#5774](https://github.com/jordansmall/spindrift/issues/5774)
+* **launcher:** name Work for work-only landings and old log shapes ([85ddb34](https://github.com/jordansmall/spindrift/commit/85ddb34994f02bd44a1fd1519643a85794e920cd)), closes [#5729](https://github.com/jordansmall/spindrift/issues/5729)
+* **launcher:** read the Accumulation repo path via the Strategy ([a9be018](https://github.com/jordansmall/spindrift/commit/a9be01867d6c855d9817d0cb20b2dded2a787f9e)), closes [#5796](https://github.com/jordansmall/spindrift/issues/5796)
+* **launcher:** read the gate's network knobs via family readers ([0e7c864](https://github.com/jordansmall/spindrift/commit/0e7c8643c93e224a5fa164986d6399f3766a3753)), closes [#5772](https://github.com/jordansmall/spindrift/issues/5772)
+* **launcher:** resolve the host token through one config lookup ([2587cdc](https://github.com/jordansmall/spindrift/commit/2587cdc49d320b8015f945ebffd79dfcbe2dec87)), closes [#5765](https://github.com/jordansmall/spindrift/issues/5765)
+* **mkHarness:** move the revision-free binaries into a core file ([aec2c78](https://github.com/jordansmall/spindrift/commit/aec2c7860a01da66ad66380b36ad2683044badac)), closes [#5859](https://github.com/jordansmall/spindrift/issues/5859)
+* **nix:** narrow the runner-names-guard exemption to its one check ([32446a3](https://github.com/jordansmall/spindrift/commit/32446a36789d5c3d237317fcd8abecc50fcb35db)), closes [#5804](https://github.com/jordansmall/spindrift/issues/5804)
+* **regen:** emit an exported env-name constant per knob ([6edc01c](https://github.com/jordansmall/spindrift/commit/6edc01ccf3b2d87e312044ce6257f6515f8d2dec)), closes [#5892](https://github.com/jordansmall/spindrift/issues/5892)
+* **registrydiscover:** derive the store map inside DiscoverRows ([f989cc5](https://github.com/jordansmall/spindrift/commit/f989cc50e49a7229b78a4506275d8b84e6aea1e5)), closes [#5812](https://github.com/jordansmall/spindrift/issues/5812)
+* **registrydiscover:** drop the table-bound coverage wrappers ([b9d2b0b](https://github.com/jordansmall/spindrift/commit/b9d2b0b544c8d63869893663fc3c19c1433dc3a5)), closes [#5741](https://github.com/jordansmall/spindrift/issues/5741)
+* **registrypathset:** run production route projection in the kit ([8d9422e](https://github.com/jordansmall/spindrift/commit/8d9422e7b48d4f7acbfcac8a132e8be8bf9d994f)), closes [#5707](https://github.com/jordansmall/spindrift/issues/5707)
+* **registryproxy:** share the manifest route projection ([da947f1](https://github.com/jordansmall/spindrift/commit/da947f1cebff292a3ca4782b2386ae8af83321f7)), closes [#5707](https://github.com/jordansmall/spindrift/issues/5707)
+* **renderers:** emit the generated knob Lookup as a func alias ([11cbaf1](https://github.com/jordansmall/spindrift/commit/11cbaf16a5112168c3e78c1c161a3ae540583f77)), closes [#5774](https://github.com/jordansmall/spindrift/issues/5774)
+* **renderers:** share one row renderer across Descriptor tables ([ac8f1fe](https://github.com/jordansmall/spindrift/commit/ac8f1fecaa5139b068dac82817f8426e81c40500)), closes [#5523](https://github.com/jordansmall/spindrift/issues/5523)
+* **runner:** name network knobs via the generated constants ([a768815](https://github.com/jordansmall/spindrift/commit/a7688154394e4f1531b9c9d5b8690bc42ea69e97)), closes [#5892](https://github.com/jordansmall/spindrift/issues/5892)
+* **schema-drift:** add a shared gofmt-then-diff drift helper ([8ae079d](https://github.com/jordansmall/spindrift/commit/8ae079d44fde5ac6cf8dfc1141976fdfb1f2cdea)), closes [#5710](https://github.com/jordansmall/spindrift/issues/5710)
+* **schema-drift:** move the other Go drift checks onto the helper ([397254d](https://github.com/jordansmall/spindrift/commit/397254dc72fece89e2d34b77680ba644ad001b12)), closes [#5710](https://github.com/jordansmall/spindrift/issues/5710)
+* **settle:** take finding labels from the dispatched kind ([72997cf](https://github.com/jordansmall/spindrift/commit/72997cf38c1058b791034101ef969646c3a674c9)), closes [#5730](https://github.com/jordansmall/spindrift/issues/5730)
+* **tuning:** build the tuning Strategy with WithPrior ([cdddd61](https://github.com/jordansmall/spindrift/commit/cdddd61cceeb86daf60bd95e3e710672897fe533)), closes [#5783](https://github.com/jordansmall/spindrift/issues/5783)
+
+
+### Tests
+
+* **backend-name-guard:** catch split comparisons and named name lists ([be1bbf5](https://github.com/jordansmall/spindrift/commit/be1bbf5c4870d154f3f910b5dc19c12908f7f6bd)), closes [#5795](https://github.com/jordansmall/spindrift/issues/5795)
+* **backend-name-guard:** flag slices.Contains on a backend name ([ea0bb33](https://github.com/jordansmall/spindrift/commit/ea0bb334ac5d643d71b2814d586801a6f3e3be45)), closes [#5795](https://github.com/jordansmall/spindrift/issues/5795)
+* **backend-name-guard:** scan the dashboard's Go with an AST test ([f37b3c3](https://github.com/jordansmall/spindrift/commit/f37b3c3443892686d19b2ba4c87ff3962e5bd19b)), closes [#5795](https://github.com/jordansmall/spindrift/issues/5795)
+* **butler:** run the remaining global-free butler tests in parallel ([d57c187](https://github.com/jordansmall/spindrift/commit/d57c187f790add17e32aa2bb113b2ebb0b885d0d)), closes [#5850](https://github.com/jordansmall/spindrift/issues/5850)
+* **butler:** run the tuning and records tests in parallel ([0e08878](https://github.com/jordansmall/spindrift/commit/0e0887824206d508915fe6442e1e96995b5033c5)), closes [#5850](https://github.com/jordansmall/spindrift/issues/5850)
+* **checks:** gofmt and vet each adapter and the binaries in place ([4a6a62b](https://github.com/jordansmall/spindrift/commit/4a6a62ba23ef501b0d8f16043dbb206d8cafb22f)), closes [#5562](https://github.com/jordansmall/spindrift/issues/5562)
+* **ci:** cover the eval profile renderer with bats ([7c11d07](https://github.com/jordansmall/spindrift/commit/7c11d07870e159f70e1292e9478103a7f70724de)), closes [#5861](https://github.com/jordansmall/spindrift/issues/5861)
+* **claude:** benchmark the line decoder over the corpus ([d89d67b](https://github.com/jordansmall/spindrift/commit/d89d67b2b937cd21d5a4c5cbf17b5aa908b3f590)), closes [#5438](https://github.com/jordansmall/spindrift/issues/5438)
+* **claude:** pin per-probe strictness of the line decoder ([9d51006](https://github.com/jordansmall/spindrift/commit/9d5100679cfa34b538be72c3f56d310503c7d0f2)), closes [#5438](https://github.com/jordansmall/spindrift/issues/5438)
+* **contract:** compare env and mounts exactly after the baked set ([3c5297a](https://github.com/jordansmall/spindrift/commit/3c5297a7480ceb8040016ec91c6d722b55ba3c6d)), closes [#5756](https://github.com/jordansmall/spindrift/issues/5756)
+* **contract:** make a stale family guard pin what it renders instead ([622c8fa](https://github.com/jordansmall/spindrift/commit/622c8fa926630bd8c374654f9cce54c41a0399c9)), closes [#5756](https://github.com/jordansmall/spindrift/issues/5756)
+* **contract:** pin the prefetch content a swapped generation renders ([89a6afd](https://github.com/jordansmall/spindrift/commit/89a6afd801be2536bff0f81467443d12d83d43b1)), closes [#5757](https://github.com/jordansmall/spindrift/issues/5757)
+* **contract:** pin the zero network mode and require a row per mode ([3eb30aa](https://github.com/jordansmall/spindrift/commit/3eb30aa2fda6469a4752d1699d4cff89a9ca34a7)), closes [#5755](https://github.com/jordansmall/spindrift/issues/5755)
+* **daemon:** skip type-position selectors in the knob env guard ([dfafad4](https://github.com/jordansmall/spindrift/commit/dfafad4c927441fb856f3c5a93cb0fa035550a51)), closes [#5761](https://github.com/jordansmall/spindrift/issues/5761)
+* **dispatchrecord:** run the store tests in parallel ([a2aaa64](https://github.com/jordansmall/spindrift/commit/a2aaa6438df018515a34588d4132d51bc44b49b5)), closes [#5850](https://github.com/jordansmall/spindrift/issues/5850)
+* **driver/claude:** pin the tool target for every known tool ([1e78a44](https://github.com/jordansmall/spindrift/commit/1e78a4408f81b4bc47994576221f5dc0f0970bd7)), closes [#5879](https://github.com/jordansmall/spindrift/issues/5879)
+* **ecosystem:** drop GOTOOLCHAIN from the bound-GOPROXY comment ([8aa4502](https://github.com/jordansmall/spindrift/commit/8aa4502f999e1a40bb27e7a316e7f6011c1b0643)), closes [#5848](https://github.com/jordansmall/spindrift/issues/5848)
+* **ecosystem:** move cross-ecosystem and port tests onto the corpus ([b00fd45](https://github.com/jordansmall/spindrift/commit/b00fd45e0341be1868c859118e3cf1e9ed4bf6c0)), closes [#5723](https://github.com/jordansmall/spindrift/issues/5723)
+* **ecosystem:** scan registryvocab and its importers for ecosystem names ([018e1bd](https://github.com/jordansmall/spindrift/commit/018e1bdb0c53aede405cb05315d5010ce0d982eb)), closes [#5748](https://github.com/jordansmall/spindrift/issues/5748)
+* **ecosystemtest:** let a corpus case name neighbour rows and a port ([be98f6c](https://github.com/jordansmall/spindrift/commit/be98f6c99a87c6c4e0e91ede5271891e4fd8488b)), closes [#5723](https://github.com/jordansmall/spindrift/issues/5723)
+* **gate:** pin the liveness-before-read ordering deterministically ([ca30249](https://github.com/jordansmall/spindrift/commit/ca3024950279dc228639c9dae86941a66c5268df)), closes [#5868](https://github.com/jordansmall/spindrift/issues/5868)
+* **git:** widen the grandchild-output-pipe Merge timing margin ([04009b0](https://github.com/jordansmall/spindrift/commit/04009b0d16dcae461f77e612f16b36a4f6b018f9)), closes [#5796](https://github.com/jordansmall/spindrift/issues/5796)
+* **image:** cover the fj bake for forgejo on either or both axes ([edb139a](https://github.com/jordansmall/spindrift/commit/edb139a28f4e8f24e545826ad9c6f0ee9ed366e1)), closes [#5768](https://github.com/jordansmall/spindrift/issues/5768)
+* **launcher:** let the kind guard allow listed work-kind facts ([c4c5a69](https://github.com/jordansmall/spindrift/commit/c4c5a69687e2d0cb85a8803b0e3ef5f973ba18e1)), closes [#5729](https://github.com/jordansmall/spindrift/issues/5729)
+* **launcher:** name and pin the runner-family guard's test-file skip ([bf75c95](https://github.com/jordansmall/spindrift/commit/bf75c9543b2ccd9580884c1c141b80ad921192db)), closes [#5803](https://github.com/jordansmall/spindrift/issues/5803)
+* **launcher:** run the route-drift doctor tests on the synthetic row ([567f595](https://github.com/jordansmall/spindrift/commit/567f59557695f5edebd697e8f0c22ae02e02dd63)), closes [#5741](https://github.com/jordansmall/spindrift/issues/5741)
+* **launcher:** share the Descriptor struct-sync check via testutil ([93628da](https://github.com/jordansmall/spindrift/commit/93628dac972897568ef2598503a21f4badd39ad4)), closes [#5523](https://github.com/jordansmall/spindrift/issues/5523)
+* **ledgertest:** keep NewRepo's git identity in repo config ([f39fac5](https://github.com/jordansmall/spindrift/commit/f39fac5fdc496bc83a8f0696fc38c72b7077b851)), closes [#5850](https://github.com/jordansmall/spindrift/issues/5850)
+* **merge-guard:** check every row-knob registry is guarded ([81b6811](https://github.com/jordansmall/spindrift/commit/81b6811ca0bf246e6b53462ace6ff534d4c7c9dd)), closes [#5690](https://github.com/jordansmall/spindrift/issues/5690)
+* **mkHarness:** expose backendCLIPackages in internals ([dcd7af8](https://github.com/jordansmall/spindrift/commit/dcd7af8562a4621114ef0f1a05b7c0934a2355d7)), closes [#5768](https://github.com/jordansmall/spindrift/issues/5768)
+* **nix:** check that the evalProbe flake output still evaluates ([e4e30d1](https://github.com/jordansmall/spindrift/commit/e4e30d1363379773b49723e679d08568890b9bc3)), closes [#5864](https://github.com/jordansmall/spindrift/issues/5864)
+* **opencode:** pin messageID on the real corpus captures' text parts ([4b6cf80](https://github.com/jordansmall/spindrift/commit/4b6cf8099a2540314c5a4bef57794442f13620e3)), closes [#5389](https://github.com/jordansmall/spindrift/issues/5389)
+* **pi:** add a multi-role subagent corpus case ([90c78ec](https://github.com/jordansmall/spindrift/commit/90c78ec494d60962ea30a3f138c0388b9fde33dd)), closes [#5628](https://github.com/jordansmall/spindrift/issues/5628)
+* **pi:** re-scrub the subagent and tool-call corpus passes ([46de689](https://github.com/jordansmall/spindrift/commit/46de68907161dd791e9f2ebbf81d24944decbb48)), closes [#5881](https://github.com/jordansmall/spindrift/issues/5881)
+* **piseam:** drive a parallel subagent call across two roles ([49a83d1](https://github.com/jordansmall/spindrift/commit/49a83d19fa6e9545b9bcbb381bb8d78d6558e908)), closes [#5628](https://github.com/jordansmall/spindrift/issues/5628)
+* **piseam:** pin pi refusing to start on a bridge load error ([fd91aae](https://github.com/jordansmall/spindrift/commit/fd91aae50009ed0c847cf3a425ea965e0ab26db8)), closes [#5910](https://github.com/jordansmall/spindrift/issues/5910)
+* **prompts:** pin removed-var scan nesting and warning order ([b24b1d2](https://github.com/jordansmall/spindrift/commit/b24b1d27b29a32fc7b3bd94ae831a2471d82d262)), closes [#5857](https://github.com/jordansmall/spindrift/issues/5857)
+* **prompts:** pin removed-var scans of overridden prompt sources ([66929cc](https://github.com/jordansmall/spindrift/commit/66929ccffe049077e6aecfaf69141cd7f1d48d09)), closes [#5858](https://github.com/jordansmall/spindrift/issues/5858)
+* **quickstart:** count secrets across every knob registry ([28eda54](https://github.com/jordansmall/spindrift/commit/28eda54009ff2eecc6d9cd40550fb0f805c76eb9)), closes [#5794](https://github.com/jordansmall/spindrift/issues/5794)
+* **registrymanifest:** tag manifest fixtures with synthetic names ([114c4b6](https://github.com/jordansmall/spindrift/commit/114c4b6c4377d83afe23941562ae46840561a167)), closes [#5748](https://github.com/jordansmall/spindrift/issues/5748)
+* **registryvocab:** tag the scoped subtree fixture with a synthetic name ([d90456e](https://github.com/jordansmall/spindrift/commit/d90456e25416eed496df4d0d07cda6c82269906d)), closes [#5748](https://github.com/jordansmall/spindrift/issues/5748)
+* **row-knobs:** guard Chore package dirs against unrelated packages ([a2eeb94](https://github.com/jordansmall/spindrift/commit/a2eeb944cc77d5b706a2118dfabe68830dff5df2)), closes [#5792](https://github.com/jordansmall/spindrift/issues/5792)
+
+
+### Build System
+
+* **checks:** keep docs-edit-isolation out of checks-inbox ([6c007d7](https://github.com/jordansmall/spindrift/commit/6c007d7fdbfd2c9401d90e64278be44e5d5efa23)), closes [#5849](https://github.com/jordansmall/spindrift/issues/5849)
+* **regen-goldens:** regenerate the Ecosystem corpus goldens ([811b3fd](https://github.com/jordansmall/spindrift/commit/811b3fd679a449d43b2d022df57d9a5094f67c8a)), closes [#5708](https://github.com/jordansmall/spindrift/issues/5708)
+
+
+### Continuous Integration
+
+* add an on-demand eval profile workflow ([c9d3754](https://github.com/jordansmall/spindrift/commit/c9d3754555d47b608722b587d59c60a54ce57d52)), closes [#5863](https://github.com/jordansmall/spindrift/issues/5863)
+* post eval stats to the x86_64 job summary ([c814e9c](https://github.com/jordansmall/spindrift/commit/c814e9cb517c28d13794118c886b112f8b2c6d56)), closes [#5863](https://github.com/jordansmall/spindrift/issues/5863)
+* shorten repo paths in the eval profile table ([f55ab23](https://github.com/jordansmall/spindrift/commit/f55ab23dfcc54f9e8d8b108cf6d0043a853ad3c6)), closes [#5863](https://github.com/jordansmall/spindrift/issues/5863)
+
+
+### Miscellaneous Chores
+
+* **docs:** point stale mkHarness.nix pointers at harness-core.nix ([b20064c](https://github.com/jordansmall/spindrift/commit/b20064c79bc0cb0574902b168971edf2d05c53ca)), closes [#5872](https://github.com/jordansmall/spindrift/issues/5872)
+
 ## [0.29.0](https://github.com/jordansmall/spindrift/compare/v0.28.0...v0.29.0) (2026-10-20)
 
 
