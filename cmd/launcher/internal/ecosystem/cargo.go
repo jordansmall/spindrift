@@ -14,6 +14,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -145,7 +146,7 @@ func parseCargoRegistryConfig(content string) ([]Declaration, bool, error) {
 	for _, name := range names {
 		index := raw.Registries[name].Index
 		stripped := strings.TrimPrefix(index, "sparse+")
-		host, upstreamBaseURL, ok := httpAbsoluteURL(stripped)
+		host, upstreamBaseURL, ok := ecosystemkit.HTTPAbsoluteURL(stripped)
 		if !ok {
 			// Skip the entry rather than erroring the whole file; only the
 			// file's own TOML syntax is an error.
@@ -661,11 +662,11 @@ var cargoDLMarkers = []string{"{crate}", "{version}", "{prefix}", "{lowerprefix}
 
 // spliceCargoDLRawPath re-splices a dl template's path from the original's raw
 // bytes: url.Parse drops RawPath for a path with a literal brace, so
-// repointRegistryURL's re-encoding would escape the braces (cargo would then
-// send them unsubstituted) and normalise other escapes. Only a dl spelling a
-// marker literally is touched; query, fragment and bytes like a bare space are
-// copied verbatim, as cargo sends them upstream. LearnedPath narrows to just
-// above the first marker's segment.
+// ecosystemkit.RepointRegistryURL's re-encoding would escape the braces (cargo
+// would then send them unsubstituted) and normalise other escapes. Only a dl
+// spelling a marker literally is touched; query, fragment and bytes like a
+// bare space are copied verbatim, as cargo sends them upstream. LearnedPath
+// narrows to just above the first marker's segment.
 func spliceCargoDLRawPath(original string, edit registryvocab.RewriteEdit, rc registryvocab.RewriteContext) registryvocab.RewriteEdit {
 	rawPath := rawPathOf(pathPart(original))
 	cut := -1
@@ -682,7 +683,8 @@ func spliceCargoDLRawPath(original string, edit registryvocab.RewriteEdit, rc re
 	edit.To = rc.Forwarder.Scheme + "://" + rc.Forwarder.Host + "/" + rc.Prefix + rawPath + tail
 
 	// url.Parse already validated every escape in rawPath, so an unescape
-	// error is unreachable; keep repointRegistryURL's learned path if it hits.
+	// error is unreachable; keep ecosystemkit.RepointRegistryURL's learned
+	// path if it hits.
 	i := strings.LastIndex(rawPath[:cut], "/")
 	if learned, err := url.PathUnescape(strings.TrimRight(rawPath[:i], "/")); err == nil {
 		if learned == "" {
@@ -717,7 +719,7 @@ func pathPart(u string) string {
 // instead of going straight upstream. It does no I/O and no logging; the
 // caller logs from and to keyed off outcome.
 func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
-	obj, ok := decodeOneJSONObject(body)
+	obj, ok := ecosystemkit.DecodeOneJSONObject(body)
 	if !ok {
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
@@ -731,7 +733,7 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}
 
-	edit, ok := repointRegistryURL(dlStr, rc)
+	edit, ok := ecosystemkit.RepointRegistryURL(dlStr, rc)
 	if !ok {
 		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
 	}

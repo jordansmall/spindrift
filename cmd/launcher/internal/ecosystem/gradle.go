@@ -3,6 +3,7 @@ package ecosystem
 import (
 	"fmt"
 
+	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
@@ -44,7 +45,7 @@ var gradleRow = Strategy{
 // block (ADR 0045, ADR 0048, #3259, #3404); with none declared, this renders
 // an inert script.
 func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) string {
-	if path := declaredPath(routes, nameGradle); path != "" {
+	if path := ecosystemkit.DeclaredPath(routes, nameGradle); path != "" {
 		return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, path))
 	}
 	return "// spindrift: gradle has no discoverable per-registry path to redirect\n" +
