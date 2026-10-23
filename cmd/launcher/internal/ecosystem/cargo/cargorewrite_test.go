@@ -1,4 +1,4 @@
-package ecosystem
+package cargo
 
 import (
 	"encoding/json"
@@ -339,7 +339,7 @@ func TestRewriteCargoDL_EncodedMarkerNotATemplate(t *testing.T) {
 }
 
 func TestCargoRow_RewriteRows_ConfigJSONMatches(t *testing.T) {
-	rows := Cargo.RewriteRows
+	rows := Strategy.RewriteRows
 	if len(rows) != 1 {
 		t.Fatalf("len(rows) = %d, want 1", len(rows))
 	}

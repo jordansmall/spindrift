@@ -1,4 +1,4 @@
-package ecosystem
+package cargo
 
 import (
 	"fmt"
@@ -11,20 +11,33 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
+
+// cargoRouteBlock builds the ecosystems block a routes file's
+// [routes.ecosystems.cargo] table projects into. Names go through
+// registryvocab.StringsValue, so a hand-built block is identical to one a
+// TOML decode or a manifest JSON round trip produces.
+func cargoRouteBlock(names ...string) registryvocab.RouteEcosystems {
+	return registryvocab.RouteEcosystems{
+		nameCargo: registryvocab.RouteDeclaration{
+			ecosystem.CargoRouteRegistriesKey: registryvocab.StringsValue(names),
+		},
+	}
+}
 
 func TestParseCargoRegistryDecls_SingleRegistry(t *testing.T) {
 	content := `[registries.othercorp]
 index = "sparse+https://cargo.example.test/index/"
 `
-	want := []CargoRegistryDecl{{Name: "othercorp", Index: "sparse+https://cargo.example.test/index/"}}
+	want := []cargoRegistryDecl{{Name: "othercorp", Index: "sparse+https://cargo.example.test/index/"}}
 
-	got := ParseCargoRegistryDecls(content)
+	got := parseCargoRegistryDecls(content)
 
 	if len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, want)
+		t.Errorf("parseCargoRegistryDecls() = %+v, want %+v", got, want)
 	}
 }
 
@@ -34,9 +47,9 @@ func TestParseCargoRegistryDecls_NoIndexLine(t *testing.T) {
 	content := `[registries.othercorp]
 token = "irrelevant"
 `
-	got := ParseCargoRegistryDecls(content)
+	got := parseCargoRegistryDecls(content)
 	if len(got) != 0 {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want empty", got)
+		t.Errorf("parseCargoRegistryDecls() = %+v, want empty", got)
 	}
 }
 
@@ -47,9 +60,9 @@ func TestParseCargoRegistryDecls_HostileNameSkipped(t *testing.T) {
 	content := `[registries."evil; rm -rf /"]
 index = "sparse+https://cargo.example.test/index/"
 `
-	got := ParseCargoRegistryDecls(content)
+	got := parseCargoRegistryDecls(content)
 	if len(got) != 0 {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want empty (hostile name must be skipped)", got)
+		t.Errorf("parseCargoRegistryDecls() = %+v, want empty (hostile name must be skipped)", got)
 	}
 }
 
@@ -61,12 +74,12 @@ func TestParseCargoRegistryDecls_TrailingComment(t *testing.T) {
 	content := `[registries.othercorp]
 index = "sparse+https://cargo.example.test/index/" # note
 `
-	want := CargoRegistryDecl{Name: "othercorp", Index: "sparse+https://cargo.example.test/index/"}
+	want := cargoRegistryDecl{Name: "othercorp", Index: "sparse+https://cargo.example.test/index/"}
 
-	got := ParseCargoRegistryDecls(content)
+	got := parseCargoRegistryDecls(content)
 
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, []CargoRegistryDecl{want})
+		t.Errorf("parseCargoRegistryDecls() = %+v, want %+v", got, []cargoRegistryDecl{want})
 	}
 }
 
@@ -75,12 +88,12 @@ func TestParseCargoRegistryDecls_LiteralString(t *testing.T) {
 	content := `[registries.othercorp]
 index = 'sparse+https://cargo.example.test/index/'
 `
-	want := CargoRegistryDecl{Name: "othercorp", Index: "sparse+https://cargo.example.test/index/"}
+	want := cargoRegistryDecl{Name: "othercorp", Index: "sparse+https://cargo.example.test/index/"}
 
-	got := ParseCargoRegistryDecls(content)
+	got := parseCargoRegistryDecls(content)
 
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, []CargoRegistryDecl{want})
+		t.Errorf("parseCargoRegistryDecls() = %+v, want %+v", got, []cargoRegistryDecl{want})
 	}
 }
 
@@ -99,9 +112,9 @@ func TestParseCargoRegistryDecls_InvalidTOMLYieldsNothing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			content := "[registries.othercorp]\nindex = " + tc.value + "\n"
 
-			got := ParseCargoRegistryDecls(content)
+			got := parseCargoRegistryDecls(content)
 			if len(got) != 0 {
-				t.Errorf("ParseCargoRegistryDecls() = %+v, want empty", got)
+				t.Errorf("parseCargoRegistryDecls() = %+v, want empty", got)
 			}
 		})
 	}
@@ -114,8 +127,8 @@ func TestParseCargoRegistryDecls_DuplicateIndexKeyYieldsNothing(t *testing.T) {
 index = "sparse+https://first.example.test/index/"
 index = "sparse+https://second.example.test/index/"
 `
-	if got := ParseCargoRegistryDecls(content); len(got) != 0 {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want empty", got)
+	if got := parseCargoRegistryDecls(content); len(got) != 0 {
+		t.Errorf("parseCargoRegistryDecls() = %+v, want empty", got)
 	}
 }
 
@@ -123,7 +136,7 @@ index = "sparse+https://second.example.test/index/"
 // same at bind time.
 func TestParseCargoRegistryDecls_TOMLSpellings(t *testing.T) {
 	const idx = "sparse+https://crates.acme.test/index/"
-	want := CargoRegistryDecl{Name: "acme", Index: idx}
+	want := cargoRegistryDecl{Name: "acme", Index: idx}
 	for _, tc := range []struct{ name, content string }{
 		{"header trailing comment", "[registries.acme] # internal\nindex = \"" + idx + "\"\n"},
 		{"inline table", "[registries]\nacme = { index = \"" + idx + "\" }\n"},
@@ -133,9 +146,9 @@ func TestParseCargoRegistryDecls_TOMLSpellings(t *testing.T) {
 		{"quoted table name", "[registries.\"acme\"]\nindex = \"" + idx + "\"\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ParseCargoRegistryDecls(tc.content)
+			got := parseCargoRegistryDecls(tc.content)
 			if len(got) != 1 || got[0] != want {
-				t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, want)
+				t.Errorf("parseCargoRegistryDecls() = %+v, want %+v", got, want)
 			}
 		})
 	}
@@ -148,10 +161,10 @@ func TestParseCargoRegistryDecls_NoMisattributionAfterCommentedHeader(t *testing
 [registries.acme] # c
 index = "sparse+https://crates.acme.test/index/"
 `
-	want := CargoRegistryDecl{Name: "acme", Index: "sparse+https://crates.acme.test/index/"}
-	got := ParseCargoRegistryDecls(content)
+	want := cargoRegistryDecl{Name: "acme", Index: "sparse+https://crates.acme.test/index/"}
+	got := parseCargoRegistryDecls(content)
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want %+v", got, want)
+		t.Errorf("parseCargoRegistryDecls() = %+v, want %+v", got, want)
 	}
 }
 
@@ -163,9 +176,9 @@ index = "sparse+https://z.example.test/index/"
 [registries.alpha]
 index = "sparse+https://a.example.test/index/"
 `
-	got := ParseCargoRegistryDecls(content)
+	got := parseCargoRegistryDecls(content)
 	if len(got) != 2 || got[0].Name != "alpha" || got[1].Name != "zeta" {
-		t.Errorf("ParseCargoRegistryDecls() = %+v, want alpha then zeta", got)
+		t.Errorf("parseCargoRegistryDecls() = %+v, want alpha then zeta", got)
 	}
 }
 
@@ -173,12 +186,12 @@ func TestParseCargoSourceDecls_SingleStanza(t *testing.T) {
 	content := `[source.othercorp]
 registry = "sparse+https://cargo.example.test/index/"
 `
-	want := []CargoSourceDecl{{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}}
+	want := []cargoSourceDecl{{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}}
 
-	got := ParseCargoSourceDecls(content)
+	got := parseCargoSourceDecls(content)
 
 	if len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, want)
+		t.Errorf("parseCargoSourceDecls() = %+v, want %+v", got, want)
 	}
 }
 
@@ -188,9 +201,9 @@ func TestParseCargoSourceDecls_ReplaceWithOnlyNoDecl(t *testing.T) {
 	content := `[source.crates-io]
 replace-with = "artifactory-remote"
 `
-	got := ParseCargoSourceDecls(content)
+	got := parseCargoSourceDecls(content)
 	if len(got) != 0 {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want empty", got)
+		t.Errorf("parseCargoSourceDecls() = %+v, want empty", got)
 	}
 }
 
@@ -200,9 +213,9 @@ func TestParseCargoSourceDecls_HostileNameSkipped(t *testing.T) {
 	content := `[source."evil; rm -rf /"]
 registry = "sparse+https://cargo.example.test/index/"
 `
-	got := ParseCargoSourceDecls(content)
+	got := parseCargoSourceDecls(content)
 	if len(got) != 0 {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want empty (hostile name must be skipped)", got)
+		t.Errorf("parseCargoSourceDecls() = %+v, want empty (hostile name must be skipped)", got)
 	}
 }
 
@@ -210,12 +223,12 @@ func TestParseCargoSourceDecls_TrailingComment(t *testing.T) {
 	content := `[source.othercorp]
 registry = "sparse+https://cargo.example.test/index/" # note
 `
-	want := CargoSourceDecl{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}
+	want := cargoSourceDecl{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}
 
-	got := ParseCargoSourceDecls(content)
+	got := parseCargoSourceDecls(content)
 
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, []CargoSourceDecl{want})
+		t.Errorf("parseCargoSourceDecls() = %+v, want %+v", got, []cargoSourceDecl{want})
 	}
 }
 
@@ -223,12 +236,12 @@ func TestParseCargoSourceDecls_LiteralString(t *testing.T) {
 	content := `[source.othercorp]
 registry = 'sparse+https://cargo.example.test/index/'
 `
-	want := CargoSourceDecl{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}
+	want := cargoSourceDecl{Name: "othercorp", Registry: "sparse+https://cargo.example.test/index/"}
 
-	got := ParseCargoSourceDecls(content)
+	got := parseCargoSourceDecls(content)
 
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, []CargoSourceDecl{want})
+		t.Errorf("parseCargoSourceDecls() = %+v, want %+v", got, []cargoSourceDecl{want})
 	}
 }
 
@@ -241,14 +254,14 @@ registry = "sparse+https://first.example.test/index/"
 [source.othercorp]
 registry = "sparse+https://second.example.test/index/"
 `
-	if got := ParseCargoSourceDecls(content); len(got) != 0 {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want empty", got)
+	if got := parseCargoSourceDecls(content); len(got) != 0 {
+		t.Errorf("parseCargoSourceDecls() = %+v, want empty", got)
 	}
 }
 
 func TestParseCargoSourceDecls_TOMLSpellings(t *testing.T) {
 	const reg = "sparse+https://crates.acme.test/index/"
-	want := CargoSourceDecl{Name: "acme", Registry: reg}
+	want := cargoSourceDecl{Name: "acme", Registry: reg}
 	for _, tc := range []struct{ name, content string }{
 		{"header trailing comment", "[source.acme] # internal\nregistry = \"" + reg + "\"\n"},
 		{"inline table", "[source]\nacme = { registry = \"" + reg + "\" }\n"},
@@ -257,9 +270,9 @@ func TestParseCargoSourceDecls_TOMLSpellings(t *testing.T) {
 		{"bracket whitespace", "[ source.acme ]\nregistry = \"" + reg + "\"\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ParseCargoSourceDecls(tc.content)
+			got := parseCargoSourceDecls(tc.content)
 			if len(got) != 1 || got[0] != want {
-				t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, want)
+				t.Errorf("parseCargoSourceDecls() = %+v, want %+v", got, want)
 			}
 		})
 	}
@@ -270,10 +283,10 @@ func TestParseCargoSourceDecls_NoMisattributionAfterCommentedHeader(t *testing.T
 [source.acme] # c
 registry = "sparse+https://crates.acme.test/index/"
 `
-	want := CargoSourceDecl{Name: "acme", Registry: "sparse+https://crates.acme.test/index/"}
-	got := ParseCargoSourceDecls(content)
+	want := cargoSourceDecl{Name: "acme", Registry: "sparse+https://crates.acme.test/index/"}
+	got := parseCargoSourceDecls(content)
 	if len(got) != 1 || got[0] != want {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want %+v", got, want)
+		t.Errorf("parseCargoSourceDecls() = %+v, want %+v", got, want)
 	}
 }
 
@@ -284,9 +297,9 @@ func TestParseCargoSourceDecls_RegistriesTableNotMistaken(t *testing.T) {
 	content := `[registries.othercorp]
 index = "sparse+https://cargo.example.test/index/"
 `
-	got := ParseCargoSourceDecls(content)
+	got := parseCargoSourceDecls(content)
 	if len(got) != 0 {
-		t.Errorf("ParseCargoSourceDecls() = %+v, want empty", got)
+		t.Errorf("parseCargoSourceDecls() = %+v, want empty", got)
 	}
 }
 
@@ -311,13 +324,13 @@ replace-with = "artifactory-remote"
 registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
 	}
 	up := got[0].Upstreams[0]
 	if up.SourceName != "artifactory-remote" {
@@ -394,13 +407,13 @@ replace-with = "artifactory-remote"
 registry = "` + tc.sourceRegistry + `"
 `
 
-			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 			if len(warnings) != 0 {
 				t.Errorf("warnings = %v, want none", warnings)
 			}
 			if len(got) != 1 || len(got[0].Upstreams) != 1 {
-				t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+				t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
 			}
 			up := got[0].Upstreams[0]
 			if up.SourceName != tc.wantSourceName {
@@ -462,10 +475,10 @@ func TestCargoSourceReplacements_NoClaimingSourceKeepsMintedName(t *testing.T) {
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
-		t.Fatalf("CargoSourceReplacements() = %+v, want the minted name unchanged", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want the minted name unchanged", got)
 	}
 }
 
@@ -489,10 +502,10 @@ index = "sparse+https://cargo.example.test/index/"
 registry = "sparse+https://cargo.example.test/index/"
 `
 
-			got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 			if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
-				t.Fatalf("CargoSourceReplacements() = %+v, want the minted name (guard rejected %q)", got, guarded)
+				t.Fatalf("cargoSourceReplacements() = %+v, want the minted name (guard rejected %q)", got, guarded)
 			}
 		})
 	}
@@ -519,12 +532,12 @@ index = "sparse+https://cargo.example.test/b/"
 registry = "sparse+https://cargo.example.test/a/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 2 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want two replacements", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want two replacements", got)
 	}
 	names := map[string]bool{}
 	for _, rep := range got {
@@ -533,7 +546,7 @@ registry = "sparse+https://cargo.example.test/a/"
 		}
 	}
 	if !names["spindrift-upstream-a"] {
-		t.Errorf("CargoSourceReplacements() = %+v, want decl a to keep its minted name spindrift-upstream-a", got)
+		t.Errorf("cargoSourceReplacements() = %+v, want decl a to keep its minted name spindrift-upstream-a", got)
 	}
 
 	// The repo's own [source.spindrift-upstream-b] still collides on aURL with
@@ -541,9 +554,9 @@ registry = "sparse+https://cargo.example.test/a/"
 	// assertNoDuplicateCargoSourceTables's cross-file URL check (gotcha 1) would
 	// flag. That is not this fix's target. Its contract is narrower: the
 	// rendered home file alone must never carry the same [source.…] name twice.
-	rendered, _, warnings := CargoRepoAwareConfig(port, "r0", routes, repoConfig)
+	rendered, _, warnings := cargoRepoAwareConfig(port, "r0", routes, repoConfig)
 	if len(warnings) != 0 {
-		t.Errorf("CargoRepoAwareConfig() warnings = %v, want none", warnings)
+		t.Errorf("cargoRepoAwareConfig() warnings = %v, want none", warnings)
 	}
 	// A decode error here means a duplicate [source.*] table in one file.
 	decodeCargoSourceRegistries(t, "home", rendered)
@@ -559,13 +572,13 @@ func TestCargoSourceReplacements_SingleRegistry(t *testing.T) {
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
 	rep := got[0]
 	if rep.Prefix != "r1" {
@@ -596,7 +609,7 @@ func TestCargoSourceReplacements_DeclaredListRestrictsStanzas(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("declared-registry")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("declared-registry")},
 	}
 	repoConfig := `[registries.declared-registry]
 index = "sparse+https://cargo.example.test/declared-index/"
@@ -605,10 +618,10 @@ index = "sparse+https://cargo.example.test/declared-index/"
 index = "sparse+https://cargo.example.test/undeclared-index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-declared-registry" {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly the declared-registry upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly the declared-registry upstream", got)
 	}
 
 	want := `==> WARNING: cargo registry "undeclared-registry"`
@@ -631,16 +644,16 @@ func TestCargoSourceReplacements_DeclaredNameOnWrongHostWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("acme")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("acme")},
 	}
 	repoConfig := `[registries.acme]
 index = "sparse+https://moved.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 0 {
-		t.Errorf("CargoSourceReplacements() = %+v, want no replacements", got)
+		t.Errorf("cargoSourceReplacements() = %+v, want no replacements", got)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %v, want exactly one", warnings)
@@ -656,16 +669,16 @@ func TestCargoSourceReplacements_DeclaredNameAbsentWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("present", "absent")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("present", "absent")},
 	}
 	repoConfig := `[registries.present]
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-present" {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly the present upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly the present upstream", got)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %v, want exactly one", warnings)
@@ -681,16 +694,16 @@ func TestCargoSourceReplacements_DeclaredNameMalformedIndexWarns(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("acme")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("acme")},
 	}
 	repoConfig := `[registries.acme]
 index = "sparse+https://cargo.example.test/index/" garbage
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 0 {
-		t.Errorf("CargoSourceReplacements() = %+v, want no replacements", got)
+		t.Errorf("cargoSourceReplacements() = %+v, want no replacements", got)
 	}
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %v, want exactly one", warnings)
@@ -707,7 +720,7 @@ func TestCargoSourceReplacements_DeclaredNameDedupedIsNotAMiss(t *testing.T) {
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("first-name", "second-name")},
 	}
 	repoConfig := `[registries.first-name]
 index = "sparse+https://cargo.example.test/index/"
@@ -716,10 +729,10 @@ index = "sparse+https://cargo.example.test/index/"
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none (a deduped name still binds)", warnings)
@@ -728,14 +741,14 @@ index = "sparse+https://cargo.example.test/index/"
 
 // The two ways a route leaves its cargo registries unrestricted. The empty
 // list is the []any{} a TOML decode of `registries = []` yields, spelled out
-// because CargoRouteBlock() maps zero names to a nil value instead.
+// because cargoRouteBlock() maps zero names to a nil value instead.
 var unrestrictedCargoBlocks = []struct {
 	name   string
 	blocks registryvocab.RouteEcosystems
 }{
 	{"absent block", nil},
 	{"empty list", registryvocab.RouteEcosystems{
-		nameCargo: registryvocab.RouteDeclaration{CargoRouteRegistriesKey: []any{}},
+		nameCargo: registryvocab.RouteDeclaration{ecosystem.CargoRouteRegistriesKey: []any{}},
 	}},
 }
 
@@ -753,10 +766,10 @@ index = "sparse+https://moved.example.test/index/"
 				{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: tc.blocks},
 			}
 
-			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 			if len(got) != 0 {
-				t.Errorf("CargoSourceReplacements() = %+v, want no replacements", got)
+				t.Errorf("cargoSourceReplacements() = %+v, want no replacements", got)
 			}
 			if len(warnings) != 0 {
 				t.Errorf("warnings = %v, want none", warnings)
@@ -783,7 +796,7 @@ index = "sparse+https://cargo.example.test/second-index/"
 				{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: tc.blocks},
 			}
 
-			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 			if len(warnings) != 0 {
 				t.Errorf("warnings = %v, want none", warnings)
@@ -818,13 +831,13 @@ func TestCargoSourceReplacements_UnknownEcosystemBlockIgnored(t *testing.T) {
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
-		t.Fatalf("CargoSourceReplacements() = %+v, want the host-matching decl bound", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want the host-matching decl bound", got)
 	}
 }
 
@@ -844,10 +857,10 @@ index = "sparse+https://cargo.example.test/index/"
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
 	}
 	if got[0].Upstreams[0].SourceName != "spindrift-upstream-first-name" {
 		t.Errorf("SourceName = %q, want first by name %q", got[0].Upstreams[0].SourceName, "spindrift-upstream-first-name")
@@ -864,7 +877,7 @@ func TestCargoSourceReplacements_DedupeSameIndexURL_CanonicalizedAcrossTrailingS
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("first-name", "second-name")},
 	}
 	repoConfig := `[registries.first-name]
 index = "sparse+https://cargo.example.test/index/"
@@ -876,13 +889,13 @@ index = "sparse+https://cargo.example.test/index"
 registry = "sparse+https://cargo.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none (both declared names count as bound)", warnings)
 	}
 	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
 	}
 	if got[0].Upstreams[0].SourceName != "claimed-name" {
 		t.Errorf("SourceName = %q, want the reused claiming name %q", got[0].Upstreams[0].SourceName, "claimed-name")
@@ -900,7 +913,7 @@ func TestCargoSourceReplacements_DedupeSameIndexURL_CanonicalizedAcrossTrailingS
 	const port = 27182
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("first-name", "second-name")},
 	}
 	repoConfig := `[registries.first-name]
 index = "sparse+https://cargo.example.test/index/"
@@ -909,13 +922,13 @@ index = "sparse+https://cargo.example.test/index/"
 index = "sparse+https://cargo.example.test/index"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none (both declared names count as bound)", warnings)
 	}
 	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
 	}
 	up := got[0].Upstreams[0]
 	if up.SourceName != "spindrift-upstream-first-name" {
@@ -942,10 +955,10 @@ registry = "sparse+https://cargo.example.test/index/"
 `
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
-		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: CargoRouteBlock("first-name", "second-name")},
+		{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: cargoRouteBlock("first-name", "second-name")},
 	}
 
-	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+	got, _, warnings := cargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -953,7 +966,7 @@ registry = "sparse+https://cargo.example.test/index/"
 	assertNoDuplicateCargoSourceTables(t, repoConfig, got)
 
 	if n := strings.Count(got, "[source.claimed-name]"); n != 1 {
-		t.Errorf("CargoRepoAwareConfig() content declares [source.claimed-name] %d times, want exactly 1: %q", n, got)
+		t.Errorf("cargoRepoAwareConfig() content declares [source.claimed-name] %d times, want exactly 1: %q", n, got)
 	}
 }
 
@@ -970,10 +983,10 @@ func TestCargoSourceReplacements_HostileNameSkipped(t *testing.T) {
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 0 {
-		t.Errorf("CargoSourceReplacements() = %+v, want no replacements (hostile name skipped)", got)
+		t.Errorf("cargoSourceReplacements() = %+v, want no replacements (hostile name skipped)", got)
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -996,13 +1009,13 @@ index = "sparse+https://corp-a.example.test/index/"
 index = "sparse+https://corp-b.example.test/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 2 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want two replacements", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want two replacements", got)
 	}
 	if got[0].Prefix != "r1" || got[1].Prefix != "r2" {
 		t.Errorf("route order = [%q, %q], want [r1, r2] (manifest order)", got[0].Prefix, got[1].Prefix)
@@ -1022,13 +1035,13 @@ func TestCargoSourceReplacements_PortedUpstreamHostMatches(t *testing.T) {
 index = "sparse+https://cargo.example.test:8443/index/"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
 	if got[0].Prefix != "r1" {
 		t.Errorf("Prefix = %q, want %q", got[0].Prefix, "r1")
@@ -1052,19 +1065,19 @@ func TestCargoSourceReplacements_HostCaseInsensitiveBinding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			routes := []registrymanifest.Route{
 				{Prefix: "r0", UpstreamHost: "crates.io"},
-				{Prefix: "r1", UpstreamHost: tc.upstreamHost, Ecosystems: CargoRouteBlock("acme")},
+				{Prefix: "r1", UpstreamHost: tc.upstreamHost, Ecosystems: cargoRouteBlock("acme")},
 			}
 			repoConfig := `[registries.acme]
 index = "sparse+https://` + tc.indexHost + `/index/"
 `
 
-			got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+			got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 			if len(warnings) != 0 {
 				t.Errorf("warnings = %v, want none", warnings)
 			}
 			if len(got) != 1 || got[0].Prefix != "r1" {
-				t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement on r1", got)
+				t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement on r1", got)
 			}
 		})
 	}
@@ -1087,39 +1100,39 @@ index = "sparse+https://CARGO.example.test/index/"
 registry = "sparse+https://CARGO.example.test/index/"
 `
 
-	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-acme" {
-		t.Fatalf("CargoSourceReplacements() = %+v, want the minted name (guard rejected the reserved name)", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want the minted name (guard rejected the reserved name)", got)
 	}
 }
 
-// An empty replacements slice must return CargoConfigTOML's own output
+// An empty replacements slice must return cargoConfigTOML's own output
 // byte-for-byte, since that is the pre-#3201 render every existing caller and
 // test still pins.
 func TestCargoConfigTOMLWithReplacements_EmptyPlanPassthrough(t *testing.T) {
-	got := CargoConfigTOMLWithReplacements(27182, "r0", nil)
-	want := CargoConfigTOML(27182, "r0", nil)
+	got := cargoConfigTOMLWithReplacements(27182, "r0", nil)
+	want := cargoConfigTOML(27182, "r0", nil)
 	if got != want {
-		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q (byte-identical to CargoConfigTOML)", got, want)
+		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q (byte-identical to cargoConfigTOML)", got, want)
 	}
 }
 
 // The route's prefix differs from the crates-io prefix, so it mints its own
 // proxy source.
 func TestCargoConfigTOMLWithReplacements_OneNamedRegistry(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-othercorp", IndexURL: "sparse+https://cargo.example.test/index/"},
 			},
 		},
 	}
 
-	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
+	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
 
 	want := `[source.crates-io]
 replace-with = "spindrift-registry-proxy"
@@ -1141,26 +1154,26 @@ registry = "sparse+http://127.0.0.1:27182/r1/"
 index = "sparse+http://127.0.0.1:27182/r1/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q", got, want)
+		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q", got, want)
 	}
 }
 
 // The spindrift-registry-proxy [source....] stanza is already in
-// CargoConfigTOML's base render, so the replacement block must emit only its
+// cargoConfigTOML's base render, so the replacement block must emit only its
 // [registries....] entry, never a second [source.spindrift-registry-proxy].
 func TestCargoConfigTOMLWithReplacements_ReusedProxySource(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{
 			Prefix:        "r0",
 			ProxySource:   "spindrift-registry-proxy",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r0/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-othercorp", IndexURL: "sparse+https://cargo.example.test/index/"},
 			},
 		},
 	}
 
-	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
+	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
 
 	want := `[source.crates-io]
 replace-with = "spindrift-registry-proxy"
@@ -1179,10 +1192,10 @@ replace-with = "spindrift-registry-proxy"
 index = "sparse+http://127.0.0.1:27182/r0/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q", got, want)
+		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q", got, want)
 	}
 	if strings.Count(got, "[source.spindrift-registry-proxy]") != 1 {
-		t.Errorf("CargoConfigTOMLWithReplacements() contains %d [source.spindrift-registry-proxy] stanzas, want exactly 1", strings.Count(got, "[source.spindrift-registry-proxy]"))
+		t.Errorf("cargoConfigTOMLWithReplacements() contains %d [source.spindrift-registry-proxy] stanzas, want exactly 1", strings.Count(got, "[source.spindrift-registry-proxy]"))
 	}
 }
 
@@ -1190,19 +1203,19 @@ index = "sparse+http://127.0.0.1:27182/r0/"
 // [source.spindrift-upstream-…] stanza, but the [source.…]/[registries.…]
 // proxy pair is emitted once, after both upstreams.
 func TestCargoConfigTOMLWithReplacements_TwoUpstreamsOneProxySource(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-corp-a", IndexURL: "sparse+https://corp-a.example.test/index/"},
 				{SourceName: "spindrift-upstream-corp-b", IndexURL: "sparse+https://corp-b.example.test/index/"},
 			},
 		},
 	}
 
-	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
+	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
 
 	want := `[source.crates-io]
 replace-with = "spindrift-registry-proxy"
@@ -1228,19 +1241,19 @@ registry = "sparse+http://127.0.0.1:27182/r1/"
 index = "sparse+http://127.0.0.1:27182/r1/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q", got, want)
+		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q", got, want)
 	}
 }
 
 // Two named-registry routes each mint their own proxy source, and both blocks
 // appear in the replacements slice's order.
 func TestCargoConfigTOMLWithReplacements_TwoRoutes(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-corp-a", IndexURL: "sparse+https://corp-a.example.test/index/"},
 			},
 		},
@@ -1248,13 +1261,13 @@ func TestCargoConfigTOMLWithReplacements_TwoRoutes(t *testing.T) {
 			Prefix:        "r2",
 			ProxySource:   "spindrift-registry-proxy-r2",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r2/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-corp-b", IndexURL: "sparse+https://corp-b.example.test/index/"},
 			},
 		},
 	}
 
-	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
+	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
 
 	want := `[source.crates-io]
 replace-with = "spindrift-registry-proxy"
@@ -1286,41 +1299,41 @@ registry = "sparse+http://127.0.0.1:27182/r2/"
 index = "sparse+http://127.0.0.1:27182/r2/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q", got, want)
+		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q", got, want)
 	}
 }
 
 func TestCargoReplacementPlaceholders(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{Prefix: "r1", ProxySource: "spindrift-registry-proxy-r1"},
 		{Prefix: "r2", ProxySource: "spindrift-registry-proxy-r2"},
 	}
 
-	got := CargoReplacementPlaceholders(replacements)
+	got := cargoReplacementPlaceholders(replacements)
 
 	if len(got) != 2 {
-		t.Fatalf("CargoReplacementPlaceholders() = %+v, want two exports", got)
+		t.Fatalf("cargoReplacementPlaceholders() = %+v, want two exports", got)
 	}
-	if value, ok := ExportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN"); !ok || value != CargoPlaceholderToken {
-		t.Errorf("ExportValue(r1 token) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
+	if value, ok := ecosystem.ExportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_TOKEN"); !ok || value != cargoPlaceholderToken {
+		t.Errorf("ExportValue(r1 token) = (%q, %v), want (%q, true)", value, ok, cargoPlaceholderToken)
 	}
-	if value, ok := ExportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R2_TOKEN"); !ok || value != CargoPlaceholderToken {
-		t.Errorf("ExportValue(r2 token) = (%q, %v), want (%q, true)", value, ok, CargoPlaceholderToken)
+	if value, ok := ecosystem.ExportValue(got, "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R2_TOKEN"); !ok || value != cargoPlaceholderToken {
+		t.Errorf("ExportValue(r2 token) = (%q, %v), want (%q, true)", value, ok, cargoPlaceholderToken)
 	}
 }
 
 // Two replacements sharing one ProxySource (the reuse case) must yield the
 // placeholder export once, not twice.
 func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{Prefix: "r0", ProxySource: "spindrift-registry-proxy"},
 		{Prefix: "r1", ProxySource: "spindrift-registry-proxy"},
 	}
 
-	got := CargoReplacementPlaceholders(replacements)
+	got := cargoReplacementPlaceholders(replacements)
 
 	if len(got) != 1 {
-		t.Fatalf("CargoReplacementPlaceholders() = %+v, want one deduped export", got)
+		t.Fatalf("cargoReplacementPlaceholders() = %+v, want one deduped export", got)
 	}
 }
 
@@ -1368,7 +1381,7 @@ func cargoSourceIDCollisionKey(value string) string {
 // into cargoSourceConfig, as sorted name/registry decls. A decode failure is a
 // test error: go-toml rejects a table declared twice, which is the same-file
 // duplicate these helpers exist to catch.
-func decodeCargoSourceRegistries(t *testing.T, label, content string) []CargoSourceDecl {
+func decodeCargoSourceRegistries(t *testing.T, label, content string) []cargoSourceDecl {
 	t.Helper()
 
 	var raw cargoSourceConfig
@@ -1376,9 +1389,9 @@ func decodeCargoSourceRegistries(t *testing.T, label, content string) []CargoSou
 		t.Errorf("%s config is not valid TOML: %v", label, err)
 		return nil
 	}
-	var decls []CargoSourceDecl
+	var decls []cargoSourceDecl
 	for _, name := range slices.Sorted(maps.Keys(raw.Source)) {
-		decls = append(decls, CargoSourceDecl{Name: name, Registry: raw.Source[name].Registry})
+		decls = append(decls, cargoSourceDecl{Name: name, Registry: raw.Source[name].Registry})
 	}
 	return decls
 }
@@ -1440,7 +1453,7 @@ func TestCargoRepoAwareConfig_RepoClaimingSourceNameRendersMergeableConfig(t *te
 		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
 	}
 
-	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+	got, _, warnings := cargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -1466,14 +1479,14 @@ registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/
 index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/"
 `
 	if got != want {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want %q", got, want)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want %q", got, want)
 	}
 
 	// Redundant against the golden above on today's render, but stated as its
 	// own claim so a future golden churn cannot quietly reintroduce a minted
 	// stanza. The mint is the whole defect this issue fixes.
 	if strings.Contains(got, "spindrift-upstream-") {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want no spindrift-upstream- table at all", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want no spindrift-upstream- table at all", got)
 	}
 }
 
@@ -1491,12 +1504,12 @@ index = "sparse+https://cargo.example.test/other-index/"
 `
 	routes := []registrymanifest.Route{{Prefix: "r1", UpstreamHost: "cargo.example.test"}}
 
-	got, exports, _ := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+	got, exports, _ := cargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 
 	assertNoDuplicateCargoSourceTables(t, repoConfig, got)
 
 	if n := strings.Count(got, "[registries.spindrift-registry-proxy-r1-first]"); n != 1 {
-		t.Errorf("CargoRepoAwareConfig() content declares [registries.spindrift-registry-proxy-r1-first] %d times, want exactly 1: %q", n, got)
+		t.Errorf("cargoRepoAwareConfig() content declares [registries.spindrift-registry-proxy-r1-first] %d times, want exactly 1: %q", n, got)
 	}
 
 	// Both upstream stanzas still render: deduping the shared pair must not
@@ -1506,12 +1519,12 @@ index = "sparse+https://cargo.example.test/other-index/"
 		"[source.spindrift-upstream-second]\nregistry = \"sparse+https://cargo.example.test/other-index/\"\nreplace-with = \"spindrift-registry-proxy-r1-first\"\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("CargoRepoAwareConfig() content = %q, want it to contain %q", got, want)
+			t.Errorf("cargoRepoAwareConfig() content = %q, want it to contain %q", got, want)
 		}
 	}
 
 	if len(exports) != 1 || exports[0].Name != "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_FIRST_TOKEN" {
-		t.Errorf("CargoRepoAwareConfig() exports = %+v, want one export for the shared proxy source", exports)
+		t.Errorf("cargoRepoAwareConfig() exports = %+v, want one export for the shared proxy source", exports)
 	}
 }
 
@@ -1525,7 +1538,7 @@ func TestCargoRepoAwareConfig_NoDuplicateSourceTablesAcrossMerge(t *testing.T) {
 			{Prefix: "r0", UpstreamHost: "crates.io"},
 			{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
 		}
-		got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+		got, _, _ := cargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
 		assertNoDuplicateCargoSourceTables(t, cargoArtifactoryRepoConfig, got)
 	})
 
@@ -1537,7 +1550,7 @@ index = "sparse+https://cargo.example.test/index/"
 			{Prefix: "r0", UpstreamHost: "crates.io"},
 			{Prefix: "r1", UpstreamHost: "cargo.example.test"},
 		}
-		got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+		got, _, _ := cargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 		assertNoDuplicateCargoSourceTables(t, repoConfig, got)
 	})
 }
@@ -1565,7 +1578,7 @@ registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote
 		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
 	}
 
-	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+	got, _, warnings := cargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -1573,10 +1586,10 @@ registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote
 	assertNoDuplicateCargoSourceTables(t, repoConfig, got)
 
 	if n := strings.Count(got, "[source.artifactory-remote]"); n != 1 {
-		t.Errorf("CargoRepoAwareConfig() content declares [source.artifactory-remote] %d times, want exactly 1: %q", n, got)
+		t.Errorf("cargoRepoAwareConfig() content declares [source.artifactory-remote] %d times, want exactly 1: %q", n, got)
 	}
 	if strings.Contains(got, "spindrift-upstream-artifactory-remote") {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want no minted spindrift-upstream-artifactory-remote table (the reused name should win)", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want no minted spindrift-upstream-artifactory-remote table (the reused name should win)", got)
 	}
 }
 
@@ -1591,11 +1604,11 @@ func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRou
 		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
 	}
 
-	got, _, _ := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+	got, _, _ := cargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
 
 	// Link 1: the repo's own file overrides the home render's crates-io
 	// replace-with. Asserted on repoConfig, since that link is cargo's
-	// file-merge behavior, not something CargoRepoAwareConfig renders.
+	// file-merge behavior, not something cargoRepoAwareConfig renders.
 	if !strings.Contains(cargoArtifactoryRepoConfig, "[source.crates-io]\nreplace-with = \"artifactory-remote\"\n") {
 		t.Fatalf("repro repoConfig lost its crates-io override -- test fixture drifted")
 	}
@@ -1603,7 +1616,7 @@ func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRou
 	// Link 2: artifactory-remote (the reused name) replaces to the r1 proxy
 	// source, not the crates-io route's (spindrift-registry-proxy).
 	if !strings.Contains(got, "[source.artifactory-remote]\nregistry = \"sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/\"\nreplace-with = \"spindrift-registry-proxy-r1-artifactory-remote\"\n") {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want artifactory-remote to replace-with spindrift-registry-proxy-r1-artifactory-remote", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want artifactory-remote to replace-with spindrift-registry-proxy-r1-artifactory-remote", got)
 	}
 
 	// Link 3: the r1 proxy source's registry is r1's own Forwarder URL, not
@@ -1611,7 +1624,7 @@ func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRou
 	// argument). The bypass landing on the named-registry route's prefix is
 	// exactly the contract being pinned here.
 	if !strings.Contains(got, "[source.spindrift-registry-proxy-r1-artifactory-remote]\nregistry = \"sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/\"\n") {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want spindrift-registry-proxy-r1-artifactory-remote to terminate at the r1 Forwarder URL", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want spindrift-registry-proxy-r1-artifactory-remote to terminate at the r1 Forwarder URL", got)
 	}
 }
 
@@ -1619,7 +1632,7 @@ func TestCargoRepoAwareConfig_RepoCratesIOReplaceWithChainsToTheNamedRegistryRou
 // claiming [source.*] must render the pre-#3248 minted
 // spindrift-upstream-<name> output byte-for-byte. Other tests pin the plan and
 // pin this byte output from a hand-built plan; this is the missing link, the
-// same repoConfig run through the full CargoRepoAwareConfig entry point.
+// same repoConfig run through the full cargoRepoAwareConfig entry point.
 func TestCargoRepoAwareConfig_NoSourceClaimMintsUnchanged(t *testing.T) {
 	routes := []registrymanifest.Route{
 		{Prefix: "r0", UpstreamHost: "crates.io"},
@@ -1629,7 +1642,7 @@ func TestCargoRepoAwareConfig_NoSourceClaimMintsUnchanged(t *testing.T) {
 index = "sparse+https://cargo.example.test/index/"
 `
 
-	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+	got, _, warnings := cargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -1655,7 +1668,7 @@ registry = "sparse+http://127.0.0.1:27182/r1/index/"
 index = "sparse+http://127.0.0.1:27182/r1/index/"
 `
 	if got != want {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want %q", got, want)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want %q", got, want)
 	}
 }
 
@@ -1677,13 +1690,13 @@ index = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
 index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 2 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want two replacements (one per registry)", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want two replacements (one per registry)", got)
 	}
 
 	internal, remote := got[0], got[1]
@@ -1725,13 +1738,13 @@ func TestCargoSourceReplacements_NoIndexPathDegradesToRoutePrefixURL(t *testing.
 index = "sparse+https://cargo.example.test"
 `
 
-	got, warnings := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
 	if len(got) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
 	if got[0].LocalIndexURL != "sparse+http://127.0.0.1:27182/r1/" {
 		t.Errorf("LocalIndexURL = %q, want the pathless degrade %q", got[0].LocalIndexURL, "sparse+http://127.0.0.1:27182/r1/")
@@ -1752,10 +1765,10 @@ func TestCargoSourceReplacements_ReusesCratesIOSourceWhenLocalURLsCoincide(t *te
 index = "sparse+https://cargo.example.test"
 `
 
-	got, _ := CargoSourceReplacements(port, "r0", routes, repoConfig)
+	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
 	if len(got) != 1 {
-		t.Fatalf("CargoSourceReplacements() = %+v, want exactly one replacement", got)
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
 	if got[0].ProxySource != registryProxySourceName {
 		t.Errorf("ProxySource = %q, want reused %q", got[0].ProxySource, registryProxySourceName)
@@ -1765,12 +1778,12 @@ index = "sparse+https://cargo.example.test"
 // A route's two registries render two distinct proxy-source/registries stanza
 // pairs, one per registry, alongside their own upstream stanzas.
 func TestCargoConfigTOMLWithReplacements_TwoRegistries(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1-artifactory-internal",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-artifactory-internal", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"},
 			},
 		},
@@ -1778,15 +1791,15 @@ func TestCargoConfigTOMLWithReplacements_TwoRegistries(t *testing.T) {
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1-artifactory-remote",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/",
-			Upstreams: []CargoUpstreamSource{
+			Upstreams: []cargoUpstreamSource{
 				{SourceName: "spindrift-upstream-artifactory-remote", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"},
 			},
 		},
 	}
 
-	got := CargoConfigTOMLWithReplacements(27182, "r0", replacements)
+	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
 
-	want := CargoConfigTOML(27182, "r0", nil) + `
+	want := cargoConfigTOML(27182, "r0", nil) + `
 [registry]
 global-credential-providers = ["cargo:token"]
 
@@ -1811,7 +1824,7 @@ registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"
 index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOMLWithReplacements() = %q, want %q", got, want)
+		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q", got, want)
 	}
 }
 
@@ -1819,15 +1832,15 @@ index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"
 // sources must yield two distinct CARGO_REGISTRIES_<NAME>_TOKEN exports, not
 // the one folded export a shared local URL would have produced.
 func TestCargoReplacementPlaceholders_TwoRegistries(t *testing.T) {
-	replacements := []CargoSourceReplacement{
+	replacements := []cargoSourceReplacement{
 		{ProxySource: "spindrift-registry-proxy-r1-artifactory-internal"},
 		{ProxySource: "spindrift-registry-proxy-r1-artifactory-remote"},
 	}
 
-	got := CargoReplacementPlaceholders(replacements)
+	got := cargoReplacementPlaceholders(replacements)
 
 	if len(got) != 2 {
-		t.Fatalf("CargoReplacementPlaceholders() = %+v, want two exports", got)
+		t.Fatalf("cargoReplacementPlaceholders() = %+v, want two exports", got)
 	}
 	if got[0].Name != "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R1_ARTIFACTORY_INTERNAL_TOKEN" {
 		t.Errorf("got[0].Name = %q, want the internal proxy source's var name", got[0].Name)
@@ -1853,7 +1866,7 @@ index = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
 index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
 `
 
-	got, exports, warnings := CargoRepoAwareConfig(27182, "r0", routes, repoConfig)
+	got, exports, warnings := cargoRepoAwareConfig(27182, "r0", routes, repoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -1861,20 +1874,20 @@ index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
 	if !strings.Contains(got, `[source.spindrift-upstream-artifactory-internal]
 registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"
 replace-with = "spindrift-registry-proxy-r1-artifactory-internal"`) {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want the internal registry's own upstream/replace-with stanza", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want the internal registry's own upstream/replace-with stanza", got)
 	}
 	if !strings.Contains(got, `[source.spindrift-upstream-artifactory-remote]
 registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
 replace-with = "spindrift-registry-proxy-r1-artifactory-remote"`) {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want the remote registry's own upstream/replace-with stanza", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want the remote registry's own upstream/replace-with stanza", got)
 	}
 	if !strings.Contains(got, `[registries.spindrift-registry-proxy-r1-artifactory-internal]
 index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/"`) {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want the internal registry's own [registries.…] index", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want the internal registry's own [registries.…] index", got)
 	}
 	if !strings.Contains(got, `[registries.spindrift-registry-proxy-r1-artifactory-remote]
 index = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/"`) {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want the remote registry's own [registries.…] index", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want the remote registry's own [registries.…] index", got)
 	}
 	if len(exports) != 2 {
 		t.Errorf("exports = %+v, want two placeholder token exports (one per registry)", exports)
@@ -1891,7 +1904,7 @@ func TestCargoRepoAwareConfig_CratesIOChainStillComposes(t *testing.T) {
 		{Prefix: "r1", UpstreamHost: "artifactory.example.test"},
 	}
 
-	got, _, warnings := CargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
+	got, _, warnings := cargoRepoAwareConfig(27182, "r0", routes, cargoArtifactoryRepoConfig)
 
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
@@ -1899,16 +1912,16 @@ func TestCargoRepoAwareConfig_CratesIOChainStillComposes(t *testing.T) {
 	if !strings.Contains(got, `[source.artifactory-remote]
 registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote/index/"
 replace-with = "spindrift-registry-proxy-r1-artifactory-remote"`) {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want the repo-claimed source name to chain onto the minted per-registry proxy source", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want the repo-claimed source name to chain onto the minted per-registry proxy source", got)
 	}
 	if !strings.Contains(got, `[source.spindrift-registry-proxy-r1-artifactory-remote]
 registry = "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/index/"`) {
-		t.Errorf("CargoRepoAwareConfig() content = %q, want the minted proxy source to terminate at the registry's own local index URL", got)
+		t.Errorf("cargoRepoAwareConfig() content = %q, want the minted proxy source to terminate at the registry's own local index URL", got)
 	}
 }
 
 func TestCargoConfigTOML_ExactContent(t *testing.T) {
-	got := CargoConfigTOML(27182, "r0", nil)
+	got := cargoConfigTOML(27182, "r0", nil)
 	want := `[source.crates-io]
 replace-with = "spindrift-registry-proxy"
 
@@ -1916,13 +1929,13 @@ replace-with = "spindrift-registry-proxy"
 registry = "sparse+http://127.0.0.1:27182/r0/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOML(27182, %q) = %q, want %q", "r0", got, want)
+		t.Errorf("cargoConfigTOML(27182, %q) = %q, want %q", "r0", got, want)
 	}
 }
 
 func TestCargoConfigTOML_PortInterpolated(t *testing.T) {
 	for _, port := range []int{9999, 12345} {
-		got := CargoConfigTOML(port, "r0", nil)
+		got := cargoConfigTOML(port, "r0", nil)
 		want := fmt.Sprintf(`[source.crates-io]
 replace-with = "spindrift-registry-proxy"
 
@@ -1930,7 +1943,7 @@ replace-with = "spindrift-registry-proxy"
 registry = "sparse+http://127.0.0.1:%d/r0/"
 `, port)
 		if got != want {
-			t.Errorf("CargoConfigTOML(%d, %q) = %q, want %q", port, "r0", got, want)
+			t.Errorf("cargoConfigTOML(%d, %q) = %q, want %q", port, "r0", got, want)
 		}
 	}
 }
@@ -1938,7 +1951,7 @@ registry = "sparse+http://127.0.0.1:%d/r0/"
 // The route prefix, not just the port, lands in the rendered registry URL
 // (issue #3142).
 func TestCargoConfigTOML_PrefixInterpolated(t *testing.T) {
-	got := CargoConfigTOML(27182, "artifactory-cargo", nil)
+	got := cargoConfigTOML(27182, "artifactory-cargo", nil)
 	want := `[source.crates-io]
 replace-with = "spindrift-registry-proxy"
 
@@ -1946,7 +1959,7 @@ replace-with = "spindrift-registry-proxy"
 registry = "sparse+http://127.0.0.1:27182/artifactory-cargo/"
 `
 	if got != want {
-		t.Errorf("CargoConfigTOML(27182, %q) = %q, want %q", "artifactory-cargo", got, want)
+		t.Errorf("cargoConfigTOML(27182, %q) = %q, want %q", "artifactory-cargo", got, want)
 	}
 }
 
@@ -1970,9 +1983,9 @@ func TestCargoRegistryEnvVarName(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := CargoRegistryEnvVarName(tc.registryName)
+			got := cargoRegistryEnvVarName(tc.registryName)
 			if got != tc.want {
-				t.Errorf("CargoRegistryEnvVarName(%q) = %q, want %q", tc.registryName, got, tc.want)
+				t.Errorf("cargoRegistryEnvVarName(%q) = %q, want %q", tc.registryName, got, tc.want)
 			}
 		})
 	}
@@ -1983,7 +1996,7 @@ func TestParseCargoRegistryConfig_SingleRegistrySparseIndex(t *testing.T) {
 [registries.mycorp]
 index = "sparse+https://cargo.example.com/index/"
 `
-	decls, namedAny, err := Cargo.ConfigParser(content)
+	decls, namedAny, err := Strategy.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -1993,7 +2006,7 @@ index = "sparse+https://cargo.example.com/index/"
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
+	want := ecosystem.Declaration{Host: "cargo.example.com", UpstreamBaseURL: "https://cargo.example.com/index", RegistryName: "mycorp"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v", decls[0], want)
 	}
@@ -2006,7 +2019,7 @@ func TestParseCargoRegistryConfig_NoRegistryTableYieldsNamedAnyFalse(t *testing.
 [net]
 git-fetch-with-cli = true
 `
-	decls, namedAny, err := Cargo.ConfigParser(content)
+	decls, namedAny, err := Strategy.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2020,7 +2033,7 @@ git-fetch-with-cli = true
 
 // Unparseable TOML must come back as an error, not a silently empty result.
 func TestParseCargoRegistryConfig_MalformedTOMLIsError(t *testing.T) {
-	_, _, err := Cargo.ConfigParser("this is not [ valid toml")
+	_, _, err := Strategy.ConfigParser("this is not [ valid toml")
 	if err == nil {
 		t.Fatal("ConfigParser: expected error for malformed TOML, got nil")
 	}
@@ -2034,7 +2047,7 @@ func TestParseCargoRegistryConfig_FileSchemeIndexNamedButUnusable(t *testing.T) 
 [registries.mirror]
 index = "file:///srv/mirror"
 `
-	decls, namedAny, err := Cargo.ConfigParser(content)
+	decls, namedAny, err := Strategy.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2056,7 +2069,7 @@ index = "sparse+https://zeta.example.com/index/"
 [registries.alpha]
 index = "sparse+https://alpha.example.com/index/"
 `
-	decls, _, err := Cargo.ConfigParser(content)
+	decls, _, err := Strategy.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2075,7 +2088,7 @@ func TestParseCargoRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T)
 [registries.mycorp]
 index = "sparse+https://cargo.example.com/index/"
 `
-	decls, _, err := Cargo.ConfigParser(content)
+	decls, _, err := Strategy.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2092,7 +2105,7 @@ func TestParseCargoRegistryConfig_UnrelatedKeyIgnored(t *testing.T) {
 [registries.mycorp]
 token = "secret"
 `
-	decls, namedAny, err := Cargo.ConfigParser(content)
+	decls, namedAny, err := Strategy.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}

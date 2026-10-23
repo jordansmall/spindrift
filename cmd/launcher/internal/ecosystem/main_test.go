@@ -8,7 +8,7 @@ import (
 // The Bundle owns the real Register call; the core package's own tests run
 // with it unlinked, so register the same Strategies here or Table is empty.
 func TestMain(m *testing.M) {
-	Register(Cargo, Npm, Yarn, Pnpm)
+	Register(Npm, Yarn, Pnpm)
 	os.Exit(m.Run())
 }
 
@@ -18,7 +18,7 @@ func TestRegister_SecondCallPanics(t *testing.T) {
 			t.Error("second Register call did not panic")
 		}
 	}()
-	Register(Cargo)
+	Register(Npm)
 }
 
 func TestRegister_DuplicateNamePanics(t *testing.T) {
@@ -28,7 +28,7 @@ func TestRegister_DuplicateNamePanics(t *testing.T) {
 		}
 	}()
 	var fresh []Strategy
-	register(&fresh, []Strategy{Cargo, Npm, Cargo})
+	register(&fresh, []Strategy{Npm, Yarn, Npm})
 }
 
 func TestRegister_EmptyListPanics(t *testing.T) {

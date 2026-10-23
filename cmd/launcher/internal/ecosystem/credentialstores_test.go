@@ -15,9 +15,6 @@ func TestCredentialStoresPinsTodaysQueries(t *testing.T) {
 	}
 	for _, row := range Table {
 		want := []string{"gradle-properties", "netrc", "npmrc"}
-		if row.Name == nameCargo {
-			want = []string{"cargo-credentials", "gradle-properties", "netrc", "npmrc"}
-		}
 		stores := append([]string(nil), got[row.Name]...)
 		sort.Strings(stores)
 		if !reflect.DeepEqual(stores, want) {
@@ -41,8 +38,8 @@ func TestCredentialStoresAreStoreKinds(t *testing.T) {
 }
 
 func TestCredentialStoresReturnsCopies(t *testing.T) {
-	CredentialStores(Table)[nameCargo][0] = "mutated"
-	if CredentialStores(Table)[nameCargo][0] == "mutated" {
+	CredentialStores(Table)[Npm.Name][0] = "mutated"
+	if CredentialStores(Table)[Npm.Name][0] == "mutated" {
 		t.Fatal("mutating the returned slice reached Table")
 	}
 }

@@ -1,14 +1,15 @@
-package ecosystem
+package cargo
 
 import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 func TestCargoRowRouteDeclaration_AcceptsValidRegistriesList(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 	if row.RouteDeclaration == nil {
 		t.Fatal("cargo row has nil RouteDeclaration")
 	}
@@ -21,7 +22,7 @@ func TestCargoRowRouteDeclaration_AcceptsValidRegistriesList(t *testing.T) {
 // RouteDeclarationValidator's contract requires a bare noun phrase, so the error
 // must not echo the key: the caller prefixes the operator's own spelling of it.
 func TestCargoRowRouteDeclaration_RejectsUnknownKey(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 
 	err := row.RouteDeclaration("bogus", []any{"internal"})
 	if err == nil {
@@ -35,7 +36,7 @@ func TestCargoRowRouteDeclaration_RejectsUnknownKey(t *testing.T) {
 // go-toml decodes a scalar TOML value as a bare string, so the hook must reject
 // it rather than panic on the type assertion.
 func TestCargoRowRouteDeclaration_RejectsNonArrayValue(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 
 	err := row.RouteDeclaration("registries", "not-an-array")
 	if err == nil {
@@ -44,7 +45,7 @@ func TestCargoRowRouteDeclaration_RejectsNonArrayValue(t *testing.T) {
 }
 
 func TestCargoRowRouteDeclaration_RejectsNonStringElement(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 
 	err := row.RouteDeclaration("registries", []any{"internal", 42})
 	if err == nil {
@@ -53,7 +54,7 @@ func TestCargoRowRouteDeclaration_RejectsNonStringElement(t *testing.T) {
 }
 
 func TestCargoRowRouteDeclaration_RejectsEmptyName(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 
 	err := row.RouteDeclaration("registries", []any{""})
 	if err == nil {
@@ -67,7 +68,7 @@ func TestCargoRowRouteDeclaration_RejectsEmptyName(t *testing.T) {
 // cargoBareKeyPattern rejects a name outside [A-Za-z0-9_-] because the name
 // ends up in a CARGO_REGISTRIES_<NAME>_TOKEN shell env var.
 func TestCargoRowRouteDeclaration_RejectsBadCharsetName(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 
 	err := row.RouteDeclaration("registries", []any{"bad name!"})
 	if err == nil {
@@ -79,7 +80,7 @@ func TestCargoRowRouteDeclaration_RejectsBadCharsetName(t *testing.T) {
 }
 
 func TestCargoRowRouteDeclaration_RejectsDuplicateName(t *testing.T) {
-	row := rowByName(t, nameCargo)
+	row := Strategy
 
 	err := row.RouteDeclaration("registries", []any{"internal", "internal"})
 	if err == nil {
@@ -90,17 +91,17 @@ func TestCargoRowRouteDeclaration_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
-// CargoRouteRegistries is the one place a caller outside this package reads a
-// route's declared cargo registries, so no caller spells the keys itself (ADR 0048).
+// cargoRouteRegistries is the one place this package reads a route's declared
+// cargo registries, so no caller spells the keys itself (ADR 0048).
 func TestCargoRouteRegistries_ReadsBlockList(t *testing.T) {
 	blocks := registryvocab.RouteEcosystems{
-		nameCargo: registryvocab.RouteDeclaration{CargoRouteRegistriesKey: []any{"internal", "crates-remote"}},
+		nameCargo: registryvocab.RouteDeclaration{ecosystem.CargoRouteRegistriesKey: []any{"internal", "crates-remote"}},
 	}
 
-	got := CargoRouteRegistries(blocks)
+	got := cargoRouteRegistries(blocks)
 	want := []string{"internal", "crates-remote"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("CargoRouteRegistries(%v) = %v, want %v", blocks, got, want)
+		t.Errorf("cargoRouteRegistries(%v) = %v, want %v", blocks, got, want)
 	}
 }
 
@@ -108,28 +109,11 @@ func TestCargoRouteRegistries_ReadsBlockList(t *testing.T) {
 // registries key, and a route with no per-ecosystem declarations at all.
 func TestCargoRouteRegistries_NilForNoCargoBlock(t *testing.T) {
 	blocks := registryvocab.RouteEcosystems{nameCargo: registryvocab.RouteDeclaration{}}
-	if got := CargoRouteRegistries(blocks); got != nil {
-		t.Errorf("CargoRouteRegistries(empty cargo block) = %v, want nil", got)
+	if got := cargoRouteRegistries(blocks); got != nil {
+		t.Errorf("cargoRouteRegistries(empty cargo block) = %v, want nil", got)
 	}
 
-	if got := CargoRouteRegistries(nil); got != nil {
-		t.Errorf("CargoRouteRegistries(nil) = %v, want nil", got)
-	}
-}
-
-// A nil RouteDeclaration means "no such notion", not "accept anything", so the
-// caller rejects every non-"path" key for a Strategy with no hook. The loop compares
-// against Cargo.Name rather than a literal so a rename keeps this test honest.
-func TestOnlyCargoRowHasRouteDeclaration(t *testing.T) {
-	for _, row := range Table {
-		if row.Name == Cargo.Name {
-			if row.RouteDeclaration == nil {
-				t.Errorf("row %q: RouteDeclaration is nil, want cargo's validator", row.Name)
-			}
-			continue
-		}
-		if row.RouteDeclaration != nil {
-			t.Errorf("row %q: RouteDeclaration is non-nil, want nil (no key beyond \"path\" accepted)", row.Name)
-		}
+	if got := cargoRouteRegistries(nil); got != nil {
+		t.Errorf("cargoRouteRegistries(nil) = %v, want nil", got)
 	}
 }

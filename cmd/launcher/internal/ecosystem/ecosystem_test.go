@@ -28,10 +28,9 @@ func rowByName(t *testing.T, name string) Strategy {
 // contributes nothing to the export file, or panics a caller.
 func TestTable_EnvExportsPresence(t *testing.T) {
 	want := map[string]bool{
-		"cargo": false,
-		"npm":   true,
-		"yarn":  true,
-		"pnpm":  true,
+		"npm":  true,
+		"yarn": true,
+		"pnpm": true,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -45,14 +44,13 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
-// npm, pnpm and yarn bind the Forwarder through an env var; cargo binds
-// through a file and leaves the field empty.
+// npm, pnpm and yarn bind the Forwarder through an env var; a Strategy that
+// binds through a file leaves the field empty.
 func TestTable_BindingEnvVarPresence(t *testing.T) {
 	want := map[string]string{
-		"cargo": "",
-		"npm":   "npm_config_registry",
-		"yarn":  "YARN_NPM_REGISTRY_SERVER",
-		"pnpm":  "pnpm_config_registry",
+		"npm":  "npm_config_registry",
+		"yarn": "YARN_NPM_REGISTRY_SERVER",
+		"pnpm": "pnpm_config_registry",
 	}
 	for _, row := range Table {
 		wantVar, ok := want[row.Name]
@@ -87,15 +85,13 @@ func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	}
 }
 
-// Only cargo re-renders its home config once the Target repo is on disk
-// (issue #3201), because only cargo binds through source replacement keyed
-// off the repo's own un-rewritten registry declarations.
+// No core Strategy re-renders its home config once the Target repo is on disk
+// (issue #3201); a Strategy that does must fail here rather than pass silently.
 func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
-		"cargo": true,
-		"npm":   false,
-		"yarn":  false,
-		"pnpm":  false,
+		"npm":  false,
+		"yarn": false,
+		"pnpm": false,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -202,10 +198,9 @@ func TestTable_ClassificationNonEmpty(t *testing.T) {
 // excluded or included wherever a consumer filters on the field.
 func TestTable_InTreeConfigPath(t *testing.T) {
 	want := map[string]string{
-		"cargo": ".cargo/config.toml",
-		"npm":   ".npmrc",
-		"yarn":  ".yarnrc.yml",
-		"pnpm":  "pnpm-workspace.yaml",
+		"npm":  ".npmrc",
+		"yarn": ".yarnrc.yml",
+		"pnpm": "pnpm-workspace.yaml",
 	}
 	for _, row := range Table {
 		path, ok := want[row.Name]
@@ -222,19 +217,6 @@ func TestTable_InTreeConfigPath(t *testing.T) {
 // Nothing else in this package asserts on the collected slice's contents, so
 // a Strategy the collector forgets to gather would fail silently: New would just
 // never see it.
-func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
-	rows := ResponseRewriteRows()
-	if len(rows) == 0 {
-		t.Fatal("ResponseRewriteRows() = empty, want at least cargo's config.json row")
-	}
-	for _, row := range rows {
-		if row.Name == "cargo config.json" && row.Ecosystem == "cargo" {
-			return
-		}
-	}
-	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", "cargo")
-}
-
 // Without this pin, dropping Npm's RewriteRows shows up only indirectly,
 // as a proxy round-trip failure a package away from the cause.
 func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
@@ -250,59 +232,13 @@ func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "npm packument", "npm")
 }
 
-// Cargo is the only core Strategy with a home-level config; a second one must
-// fail here rather than pass silently.
-func TestHomeConfigRows_Cargo(t *testing.T) {
-	var got []string
-	for _, row := range HomeConfigRows() {
-		got = append(got, row.Name)
-	}
-	want := []string{"cargo"}
-	if len(got) != len(want) {
-		t.Fatalf("HomeConfigRows() = %v, want %v", got, want)
-	}
-	for i, name := range want {
-		if got[i] != name {
-			t.Errorf("row %d = %q, want %q", i, got[i], name)
-		}
-	}
-}
-
-// The cargo Strategy's Render must be CargoConfigTOML itself, not a
-// reimplementation of it.
-func TestCargoRowHomeConfig(t *testing.T) {
-	row := rowByName(t, "cargo")
-	if row.HomeConfig == nil {
-		t.Fatal("cargo row has nil HomeConfig")
-	}
-	hc := row.HomeConfig
-	if hc.HomeEnvVar != "CARGO_HOME" {
-		t.Errorf("HomeEnvVar = %q, want %q", hc.HomeEnvVar, "CARGO_HOME")
-	}
-	if hc.HomeRelativeDefault != ".cargo" {
-		t.Errorf("HomeRelativeDefault = %q, want %q", hc.HomeRelativeDefault, ".cargo")
-	}
-	if hc.ConfigPath != "config.toml" {
-		t.Errorf("ConfigPath = %q, want %q", hc.ConfigPath, "config.toml")
-	}
-	if hc.Render == nil {
-		t.Fatal("cargo row HomeConfig has nil Render")
-	}
-	got := hc.Render(27182, "r0", nil)
-	want := CargoConfigTOML(27182, "r0", nil)
-	if got != want {
-		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
-	}
-}
-
-// Only cargo writes a home-level config among the core Strategies. A Strategy
-// gaining or losing one otherwise just changes HomeConfigRows' count silently.
+// No core Strategy writes a home-level config. A Strategy gaining or losing one
+// otherwise just changes HomeConfigRows' count silently.
 func TestTable_HomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
-		"cargo": true,
-		"npm":   false,
-		"yarn":  false,
-		"pnpm":  false,
+		"npm":  false,
+		"yarn": false,
+		"pnpm": false,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -345,10 +281,9 @@ func allDeclaredRoutes() []registrymanifest.Route {
 // or losing the key must fail here.
 func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 	want := map[string]string{
-		"cargo": "cargo-registries",
-		"npm":   "",
-		"yarn":  "",
-		"pnpm":  "",
+		"npm":  "",
+		"yarn": "",
+		"pnpm": "",
 	}
 	for _, row := range Table {
 		wantKey, ok := want[row.Name]
@@ -365,22 +300,20 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 // lookup instead of hand-listing ecosystem names, so it must both resolve
 // every declared key and reject one no Strategy declares.
 func TestRowByRetiredRouteKey(t *testing.T) {
-	for key, wantName := range map[string]string{
-		"cargo-registries": "cargo",
-	} {
-		row, ok := RowByRetiredRouteKey(key)
-		if !ok {
-			t.Fatalf("RowByRetiredRouteKey(%q): ok = false, want true", key)
-		}
-		if row.Name != wantName {
-			t.Errorf("RowByRetiredRouteKey(%q).Name = %q, want %q", key, row.Name, wantName)
-		}
-	}
-
 	if _, ok := RowByRetiredRouteKey("npm-registry"); ok {
 		t.Error(`RowByRetiredRouteKey("npm-registry"): ok = true, want false`)
 	}
 	if _, ok := RowByRetiredRouteKey(""); ok {
 		t.Error(`RowByRetiredRouteKey(""): ok = true, want false`)
+	}
+}
+
+// A nil RouteDeclaration means "no such notion", not "accept anything", so the
+// caller rejects every non-"path" key for a Strategy with no hook.
+func TestTable_NoCoreStrategyHasRouteDeclaration(t *testing.T) {
+	for _, row := range Table {
+		if row.RouteDeclaration != nil {
+			t.Errorf("row %q: RouteDeclaration is non-nil, want nil (no key beyond \"path\" accepted)", row.Name)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystem/cargo"
 	"spindrift.dev/launcher/internal/ecosystem/gomod"
 	"spindrift.dev/launcher/internal/ecosystem/gradle"
 	"spindrift.dev/launcher/internal/registryroutes"
@@ -31,7 +32,7 @@ func TestEveryRetiredRouteKeyResolvesToARegisteredStrategy(t *testing.T) {
 	for key, owner := range map[string]ecosystem.Strategy{
 		ecosystem.GradleRetiredRouteKey: gradle.Strategy,
 		ecosystem.GoRetiredRouteKey:     gomod.Strategy,
-		ecosystem.CargoRetiredRouteKey:  ecosystem.Cargo,
+		ecosystem.CargoRetiredRouteKey:  cargo.Strategy,
 	} {
 		got, ok := ecosystem.RowByRetiredRouteKey(key)
 		if !ok {
@@ -63,9 +64,9 @@ func TestRetiredRouteInvalidValueNamesTheRealOwnersValidation(t *testing.T) {
 		{"gradle-dotdot", ecosystem.GradleRetiredRouteKey + ` = "/a/../b"`, "/a/../b",
 			carryOverClause(ecosystem.GradleRetiredRouteKey, gradle.Strategy.Name, "path", `"/a/../b" must not contain a ".." segment`)},
 		{"cargo-bad-name", ecosystem.CargoRetiredRouteKey + ` = ["evil; rm"]`, "evil; rm",
-			carryOverClause(ecosystem.CargoRetiredRouteKey, ecosystem.Cargo.Name, "registries", `name "evil; rm" must match ^[A-Za-z0-9_-]+$`)},
+			carryOverClause(ecosystem.CargoRetiredRouteKey, cargo.Strategy.Name, "registries", `name "evil; rm" must match ^[A-Za-z0-9_-]+$`)},
 		{"cargo-empty-name", ecosystem.CargoRetiredRouteKey + ` = [""]`, `""`,
-			carryOverClause(ecosystem.CargoRetiredRouteKey, ecosystem.Cargo.Name, "registries", "names an empty string")},
+			carryOverClause(ecosystem.CargoRetiredRouteKey, cargo.Strategy.Name, "registries", "names an empty string")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := registryroutes.Parse([]byte(base + tc.decl + "\n"))
