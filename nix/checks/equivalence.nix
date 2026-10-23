@@ -1725,6 +1725,62 @@ in
       touch $out
     '';
 
+  # Only the Box and driver-exec bind an ecosystem at runtime, so only their srcs
+  # carry bundle/ecosystems.go; the orchestrator's must not, or ecosystem churn
+  # would move its drvPath and vendor hash.
+  inbox-bins-register-ecosystems =
+    let
+      file = "internal/driver/bundle/ecosystems.go";
+      internals = nonRustHarness.internals;
+      guardTest = ../../cmd/launcher/internal/driver/bundle_guard_test.go;
+      bundleTree = ../../cmd/launcher/internal/driver/bundle;
+    in
+    pkgs.runCommand "inbox-bins-register-ecosystems" { } ''
+      fail=0
+      ${pkgs.lib.concatMapStrings
+        (p: ''
+          if [ ! -e ${p.bin.src}/${file} ]; then
+            echo "${p.name}.src lacks ${file}: it must register the ecosystems" >&2
+            fail=1
+          fi
+        '')
+        [
+          {
+            name = "boxBin";
+            bin = internals.boxBin;
+          }
+          {
+            name = "driverExecBin";
+            bin = internals.driverExecBin;
+          }
+        ]
+      }
+      if [ -e ${internals.orchestratorBin.src}/${file} ]; then
+        echo "orchestratorBin.src contains ${file}: the orchestrator must not link ecosystems" >&2
+        fail=1
+      fi
+      # The Go guard's orchestratorExcludedBundleFiles must name exactly the
+      # bundle files the orchestrator's src drops: its os.Stat check catches a
+      # stale name but not a missing one.
+      declared=$(grep '^var orchestratorExcludedBundleFiles = ' ${guardTest} | grep -o '"[^"]*"' | tr -d '"' | sort)
+      dropped=$(for f in ${bundleTree}/*.go; do
+        n=$(basename "$f")
+        case "$n" in *_test.go) continue ;; esac
+        [ -e ${internals.orchestratorBin.src}/internal/driver/bundle/"$n" ] || echo "$n"
+      done | sort)
+      if [ -z "$declared" ] || [ "$declared" != "$dropped" ]; then
+        echo "orchestratorExcludedBundleFiles in bundle_guard_test.go must equal the bundle files absent from orchestratorBin.src" >&2
+        echo "declared: $(echo $declared)" >&2
+        echo "dropped:  $(echo $dropped)" >&2
+        fail=1
+      fi
+      if [ "$fail" -ne 0 ]; then
+        echo "Tighten the filesets in lib/harness-core.nix (issue #5952)" >&2
+        exit 1
+      fi
+      touch $out
+    '';
+
   # The agent-image drvPath must be a pure function of flake content, not the
   # Consumer's host system (issue #597). ADR 0019's freshness probe compares a
   # fresh `.#packages.<linuxSystem>.agent-image.drvPath` against the baked

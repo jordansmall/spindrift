@@ -335,6 +335,7 @@ let
     "drivers:nix/checks/drivers" = "imports each Driver's check file by registry name";
     "equivalence:." = "harness flake fixtures' outPath";
     "equivalence:cmd/launcher" = "source-identity filesets";
+    "equivalence:cmd/launcher/internal/driver/bundle" = "lists its *.go names, never their text";
     "promptassembly:cmd/launcher/internal/promptassembly" = "greps its *.go";
     "quickstart-golden:." = "a flake fixture's outPath";
     "skills:." = "a harness flake fixture's outPath";

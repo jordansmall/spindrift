@@ -1,7 +1,10 @@
 package driver_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -248,5 +251,75 @@ func TestHostSideProblemsClassifiesPlantedReach(t *testing.T) {
 	want := []string{"box's closure reaches internal/dispatch", "box's closure reaches internal/dispatchrecord"}
 	if got := hostSideProblems("box", planted); !slices.Equal(got, want) {
 		t.Errorf("hostSideProblems = %q, want %q", got, want)
+	}
+}
+
+// orchestratorExcludedBundleFiles are the bundle files lib/harness-core.nix
+// driverTreeFiles drops from the orchestrator's source (the Box and
+// driver-exec add some back). The inbox-bins-register-ecosystems Nix check
+// fails unless this list equals the bundle files the orchestrator's src lacks.
+var orchestratorExcludedBundleFiles = []string{"runners.go", "backends.go", "ecosystems.go"}
+
+// ecosystemProblems names each package in deps that is internal/ecosystem or
+// lives under it.
+func ecosystemProblems(bin string, deps []string) []string {
+	root := module + "/internal/ecosystem"
+	var problems []string
+	for _, d := range deps {
+		if d == root || strings.HasPrefix(d, root+"/") {
+			problems = append(problems, fmt.Sprintf("%s's closure reaches %s", bin, strings.TrimPrefix(d, module+"/")))
+		}
+	}
+	return problems
+}
+
+// TestOrchestratorLinksNoEcosystem pins that the orchestrator never binds an
+// ecosystem, so ecosystem churn leaves its drvPath and vendor hash alone. The
+// full tree's orchestrator does link the bundle, and through it ecosystems.go;
+// Nix drops that file from the orchestrator's source, so the closure is taken
+// with the same files deleted through a go -overlay.
+func TestOrchestratorLinksNoEcosystem(t *testing.T) {
+	bundleDir, err := filepath.Abs("bundle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := map[string]string{}
+	for _, f := range orchestratorExcludedBundleFiles {
+		path := filepath.Join(bundleDir, f)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("orchestratorExcludedBundleFiles names %s: %v", f, err)
+		}
+		replace[path] = ""
+	}
+	overlay, err := json.Marshal(map[string]map[string]string{"Replace": replace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlayPath := filepath.Join(t.TempDir(), "overlay.json")
+	if err := os.WriteFile(overlayPath, overlay, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := strings.Fields(goList(t, "-overlay", overlayPath, "-deps", module+"/orchestrator"))
+	if !slices.Contains(deps, module+"/internal/driver/bundle") {
+		t.Fatal("orchestrator's closure lost the bundle; the overlay no longer models the Nix source")
+	}
+	for _, p := range ecosystemProblems("orchestrator", deps) {
+		t.Error(p)
+	}
+}
+
+func TestEcosystemProblemsClassifiesPlantedReach(t *testing.T) {
+	m := module
+	planted := []string{
+		"fmt", m + "/internal/ecosystem", m + "/internal/ecosystem/ecosystemtest",
+		m + "/internal/ecosystems", m + "/internal/registryvocab",
+	}
+	want := []string{
+		"orchestrator's closure reaches internal/ecosystem",
+		"orchestrator's closure reaches internal/ecosystem/ecosystemtest",
+	}
+	if got := ecosystemProblems("orchestrator", planted); !slices.Equal(got, want) {
+		t.Errorf("ecosystemProblems = %q, want %q", got, want)
 	}
 }
