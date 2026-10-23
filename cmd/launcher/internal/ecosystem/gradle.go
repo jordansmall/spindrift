@@ -7,7 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// GradleInitScript compares against this const rather than gradleRow.Name to
+// GradleInitScript compares against this const rather than Gradle.Name to
 // avoid a package initialization cycle.
 const nameGradle = "gradle"
 
@@ -15,10 +15,12 @@ const nameGradle = "gradle"
 // registryroutes never spells the key itself.
 const GradleRetiredRouteKey = "gradle-path"
 
-// gradleRow binds entirely through HomeConfig.Render: Gradle auto-loads the
-// rendered init-script rather than reading an env var, so this Strategy needs
-// neither EnvExports nor BindingEnvVar.
-var gradleRow = Strategy{
+// Gradle is exported only so the Bundle can register it, until a later
+// ticket of issue #5940 moves it into its own package. It binds entirely
+// through HomeConfig.Render: Gradle auto-loads the rendered init-script rather
+// than reading an env var, so this Strategy needs neither EnvExports nor
+// BindingEnvVar.
+var Gradle = Strategy{
 	Name:             nameGradle,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	RetiredRouteKey:  GradleRetiredRouteKey,

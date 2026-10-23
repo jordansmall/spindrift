@@ -19,7 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// nameCargo is cargoRow's Name. Cargo's rewrite rows tag themselves with it
+// nameCargo is Cargo's Name. Cargo's rewrite rows tag themselves with it
 // too: registryproxy matches a rewrite row only against subtrees tagged with
 // the Strategy's name, so the two spellings must never drift apart. Classification
 // below spells "cargo" as well, but that is the nudge's family grouping, a
@@ -30,7 +30,9 @@ const nameCargo = "cargo"
 // registryroutes never spells the key itself.
 const CargoRetiredRouteKey = "cargo-registries"
 
-var cargoRow = Strategy{
+// Cargo is exported only so the Bundle can register it, until a later ticket of
+// issue #5940 moves it into its own package.
+var Cargo = Strategy{
 	Name:             nameCargo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties", "cargo-credentials"},
 	RetiredRouteKey:  CargoRetiredRouteKey,
@@ -62,7 +64,7 @@ var cargoRow = Strategy{
 // this package spells "cargo" or "registries" itself (ADR 0048).
 const CargoRouteRegistriesKey = "registries"
 
-// validateCargoRouteDeclaration is cargoRow's RouteDeclaration hook (issue
+// validateCargoRouteDeclaration is Cargo's RouteDeclaration hook (issue
 // #3403). Each name must match cargoBareKeyPattern and appear once: a name
 // becomes a CARGO_REGISTRIES_<NAME>_TOKEN shell env var, so anything outside
 // [A-Za-z0-9_-] risks smuggling shell metadata into a sourced env file.
@@ -129,7 +131,7 @@ type rawCargoConfig struct {
 	} `toml:"registries"`
 }
 
-// parseCargoRegistryConfig is cargoRow's ConfigParser: it decodes a
+// parseCargoRegistryConfig is Cargo's ConfigParser: it decodes a
 // .cargo/config.toml for its [registries.<name>] entries. An index URL's
 // leading "sparse+" is stripped because that prefix is cargo's own marker for
 // the sparse protocol, not part of the URL the Forwarder or credential lookup

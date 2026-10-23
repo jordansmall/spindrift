@@ -7,8 +7,8 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// nameGo lets ComputeGoBindings name the ecosystem without reading goRow.Name,
-// which would make goRow depend on itself: its EnvExports closure calls
+// nameGo lets ComputeGoBindings name the ecosystem without reading Go.Name,
+// which would make Go depend on itself: its EnvExports closure calls
 // ComputeGoBindings, so the reference back closes an initialization cycle.
 const nameGo = "go"
 
@@ -19,7 +19,9 @@ const GoRetiredRouteKey = "go-path"
 // goToolchainLocal pins GOTOOLCHAIN to the one baked toolchain.
 const goToolchainLocal = "local"
 
-var goRow = Strategy{
+// Go is exported only so the Bundle can register it, until a later ticket of
+// issue #5940 moves it into its own package.
+var Go = Strategy{
 	Name:             nameGo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	RetiredRouteKey:  GoRetiredRouteKey,

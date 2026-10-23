@@ -185,20 +185,47 @@ func CredentialStores(rows []Strategy) map[string][]string {
 	return stores
 }
 
-// Table lists every known ecosystem in cargo, npm, yarn, pnpm, go, gradle
-// order. That order is load-bearing twice over: it encodes the first-hit
-// lockfile precedence entrypoint.sh's old if/elif chain had (issue #2930), and
-// it sets the env-export file's line order (EnvExportRows), so do not reorder
-// Strategies without checking every caller that stops at the first match.
-// Treat it as read-only; a consumer handing Strategies further out copies them.
-var Table = []Strategy{
-	cargoRow,
-	npmRow,
-	yarnRow,
-	pnpmRow,
-	goRow,
-	gradleRow,
+// registered holds the Strategies Register installed, in precedence order.
+var registered []Strategy
+
+// Register installs the ecosystems in precedence order; the Bundle's
+// ecosystems.go makes the one call. That order is load-bearing twice over: it
+// encodes the first-hit lockfile precedence entrypoint.sh's old if/elif chain
+// had (issue #2930), and it sets the env-export file's line order
+// (EnvExportRows), so do not reorder Strategies without checking every caller
+// that stops at the first match. It panics on a second call, a duplicate Name,
+// or an empty list, so a half-registered or silently shadowed table cannot run.
+func Register(strategies ...Strategy) {
+	register(&registered, strategies)
+	Table = registered
 }
+
+func register(into *[]Strategy, strategies []Strategy) {
+	if len(*into) > 0 {
+		panic("ecosystem: Register called twice")
+	}
+	if len(strategies) == 0 {
+		panic("ecosystem: Register called with no Strategies")
+	}
+	seen := make(map[string]bool, len(strategies))
+	for _, s := range strategies {
+		if seen[s.Name] {
+			panic("ecosystem: duplicate Strategy name " + s.Name)
+		}
+		seen[s.Name] = true
+	}
+	*into = append([]Strategy(nil), strategies...)
+}
+
+// Registered returns the Strategies Register installed, in precedence order.
+// It is empty until the Bundle (or a test's TestMain) has registered. Treat it
+// as read-only; a consumer handing Strategies further out copies them.
+func Registered() []Strategy { return registered }
+
+// Table is the stage-1 alias of the registered list that the wrappers below
+// and their callers still read; stage 2 of issue #5940 deletes it. Order comes
+// from the Register call in internal/driver/bundle/ecosystems.go.
+var Table []Strategy
 
 // RowByRetiredRouteKey returns the Strategy whose RetiredRouteKey equals key, so a
 // caller translating a retired routes-file key never hand-lists which

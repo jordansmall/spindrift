@@ -7,16 +7,17 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// nameYarn and yarnBindingEnvVar are consts because yarnRow's EnvExports cannot
-// read yarnRow.Name or yarnRow.BindingEnvVar without a package initialization
+// nameYarn and yarnBindingEnvVar are consts because Yarn's EnvExports cannot
+// read Yarn.Name or Yarn.BindingEnvVar without a package initialization
 // cycle. Sharing the const keeps BindingEnvVar and the exported var one name.
 const (
 	nameYarn          = "yarn"
 	yarnBindingEnvVar = "YARN_NPM_REGISTRY_SERVER"
 )
 
-// yarnRow is the yarn ecosystem's Table entry.
-var yarnRow = Strategy{
+// Yarn is exported only so the Bundle can register it, until a later ticket of
+// issue #5940 moves it into its own package.
+var Yarn = Strategy{
 	Name:             nameYarn,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"yarn.lock"},

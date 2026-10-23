@@ -339,7 +339,7 @@ func TestRewriteCargoDL_EncodedMarkerNotATemplate(t *testing.T) {
 }
 
 func TestCargoRow_RewriteRows_ConfigJSONMatches(t *testing.T) {
-	rows := cargoRow.RewriteRows
+	rows := Cargo.RewriteRows
 	if len(rows) != 1 {
 		t.Fatalf("len(rows) = %d, want 1", len(rows))
 	}

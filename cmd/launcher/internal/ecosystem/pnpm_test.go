@@ -10,7 +10,7 @@ registry: "https://pnpm.example.com/registry"
 catalog:
   "@myorg:registry": 'https://scoped-pnpm.example.com/registry/'
 `
-	decls, namedAny, err := pnpmRow.ConfigParser(content)
+	decls, namedAny, err := Pnpm.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ registry: https://pnpm.example.com/registry
 catalog:
   "@myorg:registry": https://pnpm.example.com/registry
 `
-	decls, _, err := pnpmRow.ConfigParser(content)
+	decls, _, err := Pnpm.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -47,7 +47,7 @@ catalog:
 }
 
 func TestParsePnpmRegistryConfig_NonRegistrySuffixKeyNotDeclared(t *testing.T) {
-	decls, namedAny, err := pnpmRow.ConfigParser("myregistry: https://sneaky.example.com\n")
+	decls, namedAny, err := Pnpm.ConfigParser("myregistry: https://sneaky.example.com\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestParsePnpmRegistryConfig_ListItemRegistryKeyNotDeclared(t *testing.T) {
 mirrors:
   - registry: https://listitem.example.com
 `
-	decls, namedAny, err := pnpmRow.ConfigParser(content)
+	decls, namedAny, err := Pnpm.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -82,7 +82,7 @@ packages:
   - "packages/*"
 # registry: https://commented-out.example.com/
 `
-	decls, namedAny, err := pnpmRow.ConfigParser(content)
+	decls, namedAny, err := Pnpm.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ packages:
 }
 
 func TestParsePnpmRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
-	decls, _, err := pnpmRow.ConfigParser("registry: https://pnpm.example.com/registry # our mirror\n")
+	decls, _, err := Pnpm.ConfigParser("registry: https://pnpm.example.com/registry # our mirror\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestParsePnpmRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 // The ConfigParser hook is pure: registrydiscover's walker stamps Ecosystem
 // and ConfigPath after the call returns, so the hook must leave both unset.
 func TestParsePnpmRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
-	decls, _, err := pnpmRow.ConfigParser("registry: https://pnpm.example.com/registry\n")
+	decls, _, err := Pnpm.ConfigParser("registry: https://pnpm.example.com/registry\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
