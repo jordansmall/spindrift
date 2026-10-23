@@ -9,6 +9,44 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.29.1 — 2026-10-21
+
+A hardening and speed patch: opencode's credential guard closes its gaps,
+and harness evaluation gets a lot cheaper.
+
+No breaking changes.
+
+- **opencode's credential guard actually holds.** opencode only matched its
+  deny rules against simple commands, so a glob, a redirect on a compound
+  command or a `$(<file)` read of a dotenv file got past them, and a Target
+  repo's own `opencode.json` could re-allow what the config denied. The
+  guard plugin now runs the same `credential-deny.sh` hook Claude Code uses
+  on every bash and read call, before opencode's permission check, so no
+  repo rule can widen it. opencode's own `auth.json` is on the deny list
+  too, and a misconfigured guard now refuses every call instead of quietly
+  switching itself off.
+- **opencode respects your bash timeout.** A model could pass its own longer
+  timeout and override `bashTimeoutMs`. The guard now clamps it to the
+  configured value, the same ceiling Claude Code enforces.
+- **Cheaper harness evaluation.** Harness instances on the shared nixpkgs
+  now share one core instead of each re-walking the launcher source, and
+  the prompt corpus is scanned once rather than per check. A second
+  harness instance costs about a fifth of the eval work it used to.
+- **pi model ids line up in stats.** pi used to report its model with the
+  thinking level tacked on, so it never matched the configured model and
+  one model could show up under two ids. The id is now bare, and each Pass
+  records the efforts it ran at separately. Existing Records are re-read
+  once on upgrade, so `spindrift stats` stops mixing old and new ids.
+- **`spindrift stats` can't be spoofed by odd labels.** A role or agent
+  label made of control characters, or one with a trailing space, used to
+  print as a blank or look-alike row. Those labels now print quoted, so two
+  different keys never look the same.
+- **Friendlier quickstart credential prompts.** The token step names the
+  credential it wants (with its env var in parentheses) and shows the
+  rule's setup hint again, instead of just a raw env var name.
+
+---
+
 ## 0.29.0 — 2026-10-20
 
 spindrift grows up: the driverkit pattern spreads to backends, runners,
