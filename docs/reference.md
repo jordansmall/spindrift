@@ -1387,6 +1387,15 @@ Driver entry declares:
   source without any Driver directory under the launcher's `launcherVendorHash`,
   so a Driver importing a third-party module no other launcher package uses
   makes that vendor derivation mismatch the hash.
+  An Ecosystem package (`internal/ecosystem/<name>`) works the same way: each
+  directory beneath `internal/ecosystem` other than `ecosystemkit` and
+  `testdata` yields an `ecosystems-<name>-go-test` derivation with no hand-named
+  attribute, and the core checks and every other adapter's check are cut from a
+  source without it, which `ecosystems-go-test-independent` pins. An
+  `ecosystemkit` edit reruns every ecosystem's check
+  (`ecosystems-go-test-kit-edit-reruns-every-package`), and
+  `ecosystems-go-test-every-package-has-derivation` fails for a package
+  directory without one.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row

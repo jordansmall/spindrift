@@ -182,7 +182,8 @@ option" instead.
 5. **No Nix row.** Unlike a Driver's or a backend's facts, no ecosystem
    fact crosses into Nix: classification, the reference docs (#5663) and
    the export order (#5662) are all read in Go. The per-ecosystem test
-   derivations map over `builtins.readDir` of `internal/ecosystem`, so
+   derivations map over `builtins.readDir` of `internal/ecosystem` (every
+   directory but the kit and `testdata`), so
    no ecosystem is named in Nix by hand. *Reopen trigger:* the first
    ecosystem fact the image has to bake in, such as a Box-side package
    one ecosystem needs. That fact becomes a Nix row rendered into a
