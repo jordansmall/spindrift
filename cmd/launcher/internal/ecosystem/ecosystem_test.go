@@ -70,12 +70,11 @@ func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
 // contributes nothing to the export file, or panics a caller.
 func TestTable_EnvExportsPresence(t *testing.T) {
 	want := map[string]bool{
-		"cargo":  false,
-		"npm":    true,
-		"yarn":   true,
-		"pnpm":   true,
-		"go":     true,
-		"gradle": false,
+		"cargo": false,
+		"npm":   true,
+		"yarn":  true,
+		"pnpm":  true,
+		"go":    true,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -89,16 +88,15 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
-// npm, pnpm, yarn and go bind the Forwarder through an env var; cargo and
-// gradle bind through a file and leave the field empty.
+// npm, pnpm, yarn and go bind the Forwarder through an env var; cargo binds
+// through a file and leaves the field empty.
 func TestTable_BindingEnvVarPresence(t *testing.T) {
 	want := map[string]string{
-		"cargo":  "",
-		"npm":    "npm_config_registry",
-		"yarn":   "YARN_NPM_REGISTRY_SERVER",
-		"pnpm":   "pnpm_config_registry",
-		"go":     "GOPROXY",
-		"gradle": "",
+		"cargo": "",
+		"npm":   "npm_config_registry",
+		"yarn":  "YARN_NPM_REGISTRY_SERVER",
+		"pnpm":  "pnpm_config_registry",
+		"go":    "GOPROXY",
 	}
 	for _, row := range Table {
 		wantVar, ok := want[row.Name]
@@ -138,12 +136,11 @@ func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 // off the repo's own un-rewritten registry declarations.
 func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
-		"cargo":  true,
-		"npm":    false,
-		"yarn":   false,
-		"pnpm":   false,
-		"go":     false,
-		"gradle": false,
+		"cargo": true,
+		"npm":   false,
+		"yarn":  false,
+		"pnpm":  false,
+		"go":    false,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -250,12 +247,11 @@ func TestTable_ClassificationNonEmpty(t *testing.T) {
 // excluded or included wherever a consumer filters on the field.
 func TestTable_InTreeConfigPath(t *testing.T) {
 	want := map[string]string{
-		"cargo":  ".cargo/config.toml",
-		"npm":    ".npmrc",
-		"yarn":   ".yarnrc.yml",
-		"pnpm":   "pnpm-workspace.yaml",
-		"go":     "",
-		"gradle": "",
+		"cargo": ".cargo/config.toml",
+		"npm":   ".npmrc",
+		"yarn":  ".yarnrc.yml",
+		"pnpm":  "pnpm-workspace.yaml",
+		"go":    "",
 	}
 	for _, row := range Table {
 		path, ok := want[row.Name]
@@ -300,14 +296,14 @@ func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "npm packument", "npm")
 }
 
-// A Strategy added to Table between cargo and gradle, or a reorder, must fail
-// here rather than pass silently.
-func TestHomeConfigRows_CargoThenGradle(t *testing.T) {
+// Cargo is the only core Strategy with a home-level config; a second one must
+// fail here rather than pass silently.
+func TestHomeConfigRows_Cargo(t *testing.T) {
 	var got []string
 	for _, row := range HomeConfigRows() {
 		got = append(got, row.Name)
 	}
-	want := []string{"cargo", "gradle"}
+	want := []string{"cargo"}
 	if len(got) != len(want) {
 		t.Fatalf("HomeConfigRows() = %v, want %v", got, want)
 	}
@@ -345,43 +341,15 @@ func TestCargoRowHomeConfig(t *testing.T) {
 	}
 }
 
-// The gradle Strategy's Render must be GradleInitScript itself, not a
-// reimplementation of it.
-func TestGradleRowHomeConfig(t *testing.T) {
-	row := rowByName(t, "gradle")
-	if row.HomeConfig == nil {
-		t.Fatal("gradle row has nil HomeConfig")
-	}
-	hc := row.HomeConfig
-	if hc.HomeEnvVar != "GRADLE_USER_HOME" {
-		t.Errorf("HomeEnvVar = %q, want %q", hc.HomeEnvVar, "GRADLE_USER_HOME")
-	}
-	if hc.HomeRelativeDefault != ".gradle" {
-		t.Errorf("HomeRelativeDefault = %q, want %q", hc.HomeRelativeDefault, ".gradle")
-	}
-	if hc.ConfigPath != "init.d/spindrift-registry-proxy.init.gradle" {
-		t.Errorf("ConfigPath = %q, want %q", hc.ConfigPath, "init.d/spindrift-registry-proxy.init.gradle")
-	}
-	if hc.Render == nil {
-		t.Fatal("gradle row HomeConfig has nil Render")
-	}
-	got := hc.Render(27182, "r0", nil)
-	want := GradleInitScript(27182, "r0", nil)
-	if got != want {
-		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
-	}
-}
-
-// Only cargo and gradle write a home-level config. A Strategy gaining or losing
-// one otherwise just changes HomeConfigRows' count silently.
+// Only cargo writes a home-level config among the core Strategies. A Strategy
+// gaining or losing one otherwise just changes HomeConfigRows' count silently.
 func TestTable_HomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
-		"cargo":  true,
-		"npm":    false,
-		"yarn":   false,
-		"pnpm":   false,
-		"go":     false,
-		"gradle": true,
+		"cargo": true,
+		"npm":   false,
+		"yarn":  false,
+		"pnpm":  false,
+		"go":    false,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -427,12 +395,11 @@ func allDeclaredRoutes() []registrymanifest.Route {
 // or losing the key must fail here.
 func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 	want := map[string]string{
-		"cargo":  "cargo-registries",
-		"npm":    "",
-		"yarn":   "",
-		"pnpm":   "",
-		"go":     "go-path",
-		"gradle": "gradle-path",
+		"cargo": "cargo-registries",
+		"npm":   "",
+		"yarn":  "",
+		"pnpm":  "",
+		"go":    "go-path",
 	}
 	for _, row := range Table {
 		wantKey, ok := want[row.Name]
@@ -451,7 +418,6 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 func TestRowByRetiredRouteKey(t *testing.T) {
 	for key, wantName := range map[string]string{
 		"cargo-registries": "cargo",
-		"gradle-path":      "gradle",
 		"go-path":          "go",
 	} {
 		row, ok := RowByRetiredRouteKey(key)

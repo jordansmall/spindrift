@@ -1,6 +1,9 @@
 package bundle
 
-import "spindrift.dev/launcher/internal/ecosystem"
+import (
+	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystem/gradle"
+)
 
 // Registers the bundled ecosystems' Strategies. Kept in its own file because
 // lib/harness-core.nix driverTreeFiles drops it from every in-box fileset and
@@ -10,5 +13,5 @@ import "spindrift.dev/launcher/internal/ecosystem"
 func init() {
 	// The argument order is both the lockfile first-hit precedence and the
 	// env-export file's line order.
-	ecosystem.Register(ecosystem.Cargo, ecosystem.Npm, ecosystem.Yarn, ecosystem.Pnpm, ecosystem.Go, ecosystem.Gradle)
+	ecosystem.Register(ecosystem.Cargo, ecosystem.Npm, ecosystem.Yarn, ecosystem.Pnpm, ecosystem.Go, gradle.Strategy)
 }

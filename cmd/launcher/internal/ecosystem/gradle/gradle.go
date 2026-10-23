@@ -1,29 +1,24 @@
-package ecosystem
+package gradle
 
 import (
 	"fmt"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// GradleInitScript compares against this const rather than Gradle.Name to
-// avoid a package initialization cycle.
-const nameGradle = "gradle"
+// initScript compares against this const rather than Strategy.Name to avoid a
+// package initialization cycle.
+const name = "gradle"
 
-// GradleRetiredRouteKey is gradle's Strategy.RetiredRouteKey, exported because
-// registryroutes never spells the key itself.
-const GradleRetiredRouteKey = "gradle-path"
-
-// Gradle is exported only so the Bundle can register it, until a later
-// ticket of issue #5940 moves it into its own package. It binds entirely
-// through HomeConfig.Render: Gradle auto-loads the rendered init-script rather
-// than reading an env var, so this Strategy needs neither EnvExports nor
-// BindingEnvVar.
-var Gradle = Strategy{
-	Name:             nameGradle,
+// Strategy binds entirely through HomeConfig.Render: Gradle auto-loads the
+// rendered init-script rather than reading an env var, so it needs neither
+// EnvExports nor BindingEnvVar.
+var Strategy = ecosystem.Strategy{
+	Name:             name,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
-	RetiredRouteKey:  GradleRetiredRouteKey,
+	RetiredRouteKey:  ecosystem.GradleRetiredRouteKey,
 	LockfileNames: []string{
 		"build.gradle",
 		"build.gradle.kts",
@@ -32,22 +27,22 @@ var Gradle = Strategy{
 		"gradle.lockfile",
 	},
 	Classification: "gradle",
-	HomeConfig: &HomeConfig{
+	HomeConfig: &ecosystem.HomeConfig{
 		HomeEnvVar:          "GRADLE_USER_HOME",
 		HomeRelativeDefault: ".gradle",
 		ConfigPath:          "init.d/spindrift-registry-proxy.init.gradle",
-		Render:              GradleInitScript,
+		Render:              initScript,
 	},
 }
 
-// GradleInitScript renders the Gradle init-script dropped into
+// initScript renders the Gradle init-script dropped into
 // $GRADLE_USER_HOME/init.d/. A JVM-wide proxy property cannot replace it:
 // Gradle resolves against whatever repositories{} its own scripts declare.
 // The path comes from the path key of routes[0]'s [routes.ecosystems.gradle]
 // block (ADR 0045, ADR 0048, #3259, #3404); with none declared, this renders
 // an inert script.
-func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) string {
-	if path := ecosystemkit.DeclaredPath(routes, nameGradle); path != "" {
+func initScript(port int, prefix string, routes []registrymanifest.Route) string {
+	if path := ecosystemkit.DeclaredPath(routes, name); path != "" {
 		return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, path))
 	}
 	return "// spindrift: gradle has no discoverable per-registry path to redirect\n" +
@@ -62,6 +57,9 @@ func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) 
 // !spindrift*Managed guards in the script are load-bearing: dropping the
 // first empties pluginManagement.repositories on Gradle 6.0+; dropping the
 // second makes builds using FAIL_ON_PROJECT_REPOS fail.
+//
+// The script text still says "GradleInitScript" (the pre-move name) in a
+// comment: the corpus goldens pin it byte-for-byte.
 func gradleRedirectScript(mavenURL string) string {
 	return fmt.Sprintf(`def spindriftMavenUrl = %q
 def spindriftSettingsManaged = false

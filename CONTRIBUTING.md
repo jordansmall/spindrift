@@ -192,7 +192,7 @@ settings mapping block predates the registry and is a deliberate exception,
 out of this migration's scope (see `lib/documented-facts.nix`). The other is
 `docs/reference.md`'s LOCKFILE CLASSIFICATION and REGISTRY DISCOVERY SOURCES
 spans: their rows live only in Go, so `TestReferenceDocs_GeneratedSpans` in
-`cmd/launcher/internal/ecosystem` renders them instead.
+`cmd/launcher/internal/driver/bundle` renders them instead.
 
 To exercise the whole loop end to end against a live repo, run the daemon
 (`nix run .#daemon`, or `nix run .#dogfood-bwrap-daemon` for spindrift's own
@@ -289,7 +289,7 @@ and in the in-box `box` program; the only bash left is the generated shim that
   to overwrite
   `cmd/launcher/testdata/golden/stats*.{txt,jsonl}`, the ecosystem doc test
   `TestReferenceDocs_GeneratedSpans` (in
-  `cmd/launcher/internal/ecosystem`) to rewrite its two spans in
+  `cmd/launcher/internal/driver/bundle`) to rewrite its two spans in
   `docs/reference.md`, and the Driver
   Pass-log corpus test (each Driver's `TestCorpus`) to overwrite the goldens
   under `cmd/launcher/internal/driver/<driver>/testdata/corpus/`, and the
@@ -297,9 +297,10 @@ and in the in-box `box` program; the only bash left is the generated shim that
   digestkit's `TestRunReplaysCorpusIntoGoldens`) to overwrite the goldens under
   `cmd/launcher/internal/*/testdata/digest/` and
   `cmd/launcher/internal/digestkit/testdata/corpus/`, and the Ecosystem corpus
-  tests (`TestCorpus` in `cmd/launcher/internal/ecosystem` and
-  `cmd/launcher/internal/ecosystemtest`) to overwrite the goldens under
-  `cmd/launcher/internal/ecosystem/testdata/corpus/` and
+  tests (`TestCorpus` in `cmd/launcher/internal/ecosystem`, each ecosystem
+  package and `cmd/launcher/internal/ecosystemtest`) to overwrite the goldens
+  under `cmd/launcher/internal/ecosystem/testdata/corpus/`,
+  `cmd/launcher/internal/ecosystem/<ecosystem>/testdata/corpus/` and
   `cmd/launcher/internal/ecosystemtest/testdata/corpus/` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a
   check when you add a guarantee.
