@@ -57,6 +57,9 @@
 # first, and both tokens must reach it. Lanes pull runs from the one
 # shuffled plan as they free up, and run the harness's committed HEAD (a
 # dirty tree is refused), so harness_rev stays true while you keep editing.
+# With more than one lane, lane i dispatches the task under the key
+# <task>-l<i> (its issue slug, Box name and branch), since Box names share
+# one namespace per host.
 
 set -euo pipefail
 
@@ -634,11 +637,16 @@ run_one() {
   local arm="${ARM_NAMES[i]}" app="${ARM_APPS[i]}" flags="${ARM_FLAGS[i]}"
   local rundir="$OUT/runs/$arm/r$rep"
   local prefix="bench/$arm/r$rep/"
-  local branch="$prefix$task" ref="refs/runs/$arm/r$rep"
-  local slug=@lane push="" dir=.
+  local slug=@lane push="" dir=. key="$task"
   if [ "$lane" != auto ]; then
     slug="${LANE_SLUG[lane]}" push="${LANE_PUSH[lane]}" dir="${LANE_DIR[lane]}"
   fi
+  # The launcher names a Box after its dispatch key, in one namespace for the
+  # whole host, and refuses a key whose Box is live; lane dirs don't separate
+  # them, so concurrent lanes each dispatch the task under their own key.
+  if [ "$BENCH_LANES" -gt 1 ]; then key="$task-l$lane"; fi
+  [ "$lane" = auto ] && [ "$BENCH_LANES" -gt 1 ] && key="$task-l@lane"
+  local branch="$prefix$key" ref="refs/runs/$arm/r$rep"
   local -a extra=() nb=()
   read -ra extra <<<"$flags"
   [ "$BENCH_NO_BUILD" = "1" ] && nb=(--no-build)
@@ -653,7 +661,7 @@ run_one() {
     --base-branch main --branch-prefix "$prefix"
     --merge-policy manual
     "${extra[@]}"
-    "$task"
+    "$key"
   )
   if [ -n "${BENCH_DRY_RUN:-}" ]; then
     if [ "$lane" = auto ]; then printf '   DRY-RUN (lane auto):' >&2; else printf '   DRY-RUN:' >&2; fi
@@ -663,18 +671,18 @@ run_one() {
 
   clear_stale_rep "$arm" "$rep" "$rundir"
   mkdir -p "$issues"
-  cp "$TASK_DIR/issue.md" "$issues/$task.md"
+  cp "$TASK_DIR/issue.md" "$issues/$key.md"
   info "$task [$arm r$rep] $app${flags:+ $flags}"
   info "$task [$arm r$rep] lane $lane ($slug)"
   reset_remote "$push"
   local logs="$dir/.spindrift/logs"
-  local host_log="$logs/issue-$task.log" outbox="$dir/.spindrift/outbox/$task" fx rc=0
+  local host_log="$logs/issue-$key.log" outbox="$dir/.spindrift/outbox/$key" fx rc=0
   # A stale bundle would carry this rep's branch name if the rep is a rerun.
-  rm -rf "$host_log" "$logs/issue-$task"-*.log "$outbox"
+  rm -rf "$host_log" "$logs/issue-$key"-*.log "$outbox"
   (cd "$dir" && exec "${cmd[@]}") >"$rundir/dispatch.out" 2>&1 || rc=$?
   info "$task [$arm r$rep] launcher exit=$rc"
   [ -f "$host_log" ] && cp "$host_log" "$rundir/box.log"
-  for fx in "$logs/issue-$task"-*.log; do
+  for fx in "$logs/issue-$key"-*.log; do
     [ -e "$fx" ] && cp "$fx" "$rundir/"
   done
   [ -f "$outbox/seam.bundle" ] && cp "$outbox/seam.bundle" "$rundir/"

@@ -54,9 +54,11 @@ shift
 echo "$app $*" >>"$FAKE_LOG"
 # Lane tests: FAKE_TRACE brackets each dispatch with +/- to measure overlap,
 # FAKE_PIDS lists dispatch pids, FAKE_SLEEP holds a dispatch open.
+on_exit=""
 if [ -n "${FAKE_TRACE:-}" ]; then
   echo + >>"$FAKE_TRACE"
-  trap 'echo - >>"$FAKE_TRACE"' EXIT
+  on_exit+='echo - >>"$FAKE_TRACE";'
+  trap "$on_exit" EXIT
 fi
 if [ -n "${FAKE_PIDS:-}" ]; then echo $$ >>"$FAKE_PIDS"; fi
 args=("$@"); slug="${args[-1]}"
@@ -74,7 +76,15 @@ remote="$FAKE_REMOTE"
 for pair in ${FAKE_REMOTES:-}; do
   if [ "${pair%%=*}" = "$repo" ]; then remote="${pair#*=}"; fi
 done
-if [ -n "${FAKE_LANES:-}" ]; then echo "$repo $prefix $PWD" >>"$FAKE_LANES"; fi
+# FAKE_BOXES is the container runtime's one namespace of Box names, which the
+# real launcher keys on the dispatch key: a second dispatch of a key whose Box
+# is still live fails (runner.ErrAlreadyRunning), whatever its cwd.
+if [ -n "${FAKE_BOXES:-}" ]; then
+  mkdir "$FAKE_BOXES/$slug" 2>/dev/null || { echo "Box spindrift-$slug is already running" >&2; exit 8; }
+  on_exit+="rmdir '$FAKE_BOXES/$slug';"
+  trap "$on_exit" EXIT
+fi
+if [ -n "${FAKE_LANES:-}" ]; then echo "$repo $prefix $PWD $slug" >>"$FAKE_LANES"; fi
 git ls-remote --heads "$remote" | awk '{printf "%s ", $2} END {print ""}' >>"$FAKE_SEEN"
 [ -f "$dir/$slug.md" ] || { echo "issue not staged" >&2; exit 9; }
 cwd=$PWD
@@ -323,8 +333,10 @@ lanes_setup() {
     git -C "$T/src" push -q "$T/remote-$i.git" "$FIX:refs/heads/main" "$FIX:refs/heads/stale"
     slugs+=" acme/bench-$i" pushes+=" file://$T/remote-$i.git" map+=" acme/bench-$i=file://$T/remote-$i.git"
   done
+  mkdir "$T/boxes"
   export BENCH_LANE_SLUGS="$slugs" BENCH_LANE_PUSH_URLS="$pushes" FAKE_REMOTES="$map" \
-    FAKE_LANES="$T/lanes.log" FAKE_TRACE="$T/trace.log" FAKE_PIDS="$T/pids.log"
+    FAKE_LANES="$T/lanes.log" FAKE_TRACE="$T/trace.log" FAKE_PIDS="$T/pids.log" \
+    FAKE_BOXES="$T/boxes"
 }
 
 remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; }
@@ -352,12 +364,14 @@ remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; 
   # Each dispatch saw only main, from its own lane dir, on its lane's remote.
   [ "$(wc -l <"$FAKE_SEEN")" -eq 6 ]
   [ "$(sort -u "$FAKE_SEEN")" = "refs/heads/main " ]
-  local repo prefix dir lane arm rep
-  while read -r repo prefix dir; do
+  local repo prefix dir key lane arm rep
+  while read -r repo prefix dir key; do
     arm=${prefix#bench/} arm=${arm%%/*} rep=${prefix#bench/"$arm"/r} rep=${rep%/}
     lane=1
     [[ "$repo" == acme/bench-* ]] && lane=${repo##*-}
     [ "$dir" = "$T/out/lanes/$lane" ] || { echo "dispatch $prefix ran in $dir, not lane $lane"; false; }
+    # Concurrent lanes share one Box namespace, so each dispatches its own key.
+    [ "$key" = "t1-l$lane" ] || { echo "lane $lane dispatched key $key"; false; }
     grep -F "t1 [$arm r$rep] lane $lane ($repo)" <<<"$output"
   done <"$FAKE_LANES"
   [ "$(cut -d' ' -f1 "$FAKE_LANES" | sort -u | wc -l)" -ge 2 ]
@@ -384,7 +398,7 @@ remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; 
   [ "$status" -eq 0 ]
   [ ! -e "$T/out/lanes" ]
   [ "$(grep -c '^\.#good ' "$FAKE_LOG")" -eq 2 ]
-  [ "$(cut -d' ' -f1,3 "$FAKE_LANES" | sort -u)" = "acme/bench $T/cwd" ]
+  [ "$(cut -d' ' -f1,3,4 "$FAKE_LANES" | sort -u)" = "acme/bench $T/cwd t1" ]
   [ ! -e .spindrift/outbox/t1 ]
 }
 
