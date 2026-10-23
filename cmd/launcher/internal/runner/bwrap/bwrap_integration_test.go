@@ -757,6 +757,46 @@ func TestBwrapIntegration_SyscallFilterDeniesKill(t *testing.T) {
 	}
 }
 
+// TestBwrapIntegration_PastaChainAppliesSyscallFilter is issue #5982's
+// guarantee that the filter still reaches bwrap on the pasta chain (see
+// seccompFilterFD), so this test attaches no ExtraFiles, as Run does there.
+func TestBwrapIntegration_PastaChainAppliesSyscallFilter(t *testing.T) {
+	requireRealPasta(t)
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapterIsolated(t)
+
+	filterPath := filepath.Join(t.TempDir(), "deny-kill.bpf")
+	if err := os.WriteFile(filterPath, buildDenySyscallFilterBPF(t, uint64(syscall.SYS_KILL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.syscallFilterPath = filterPath
+
+	box := runner.Box{Env: map[string]string{}}
+	// kill(2) failing with EPERM is the proof the filter is active.
+	script := "kill -0 $$"
+	program, args := pastaProbeArgs(a, etcDir, box, bashBin, script)
+	if program != "pasta" {
+		t.Fatalf("program = %q, want the pasta chain", program)
+	}
+	joined := strings.Join(args, "\x00")
+	for _, want := range []string{"sh\x00-c\x00", "--seccomp\x003\x00"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("pasta chain argv lacks %q (trampoline or --seccomp 3): %v", want, args)
+		}
+	}
+
+	out, runErr := exec.Command(program, args...).CombinedOutput()
+	if strings.Contains(string(out), "Can't read seccomp data") {
+		t.Fatalf("bwrap never received the filter through pasta: %s", out)
+	}
+	if runErr == nil {
+		t.Fatalf("expected kill(2) to fail under the syscall filter; output: %s", out)
+	}
+	if !strings.Contains(string(out), "Operation not permitted") {
+		t.Fatalf("expected an \"Operation not permitted\" failure, got: %s (%v)", out, runErr)
+	}
+}
+
 // TestBwrapIntegration_SyscallFilterAllowsNormalWork is the positive control
 // for TestBwrapIntegration_SyscallFilterDeniesKill: the same filter, attached
 // the same way, must not break an ordinary command that never touches the
