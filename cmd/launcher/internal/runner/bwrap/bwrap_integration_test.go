@@ -256,7 +256,7 @@ func nixProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, scrip
 // that nested argv, and swaps the nested tail for script. The returned program
 // is "pasta" whenever network.Pasta applies, matching what Run() would exec.
 func pastaProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) (string, []string) {
-	program, args, _ := a.execTarget(etcDir, box)
+	program, args, _ := a.execTarget(etcDir, box, a.syscallFilterPath != "")
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator

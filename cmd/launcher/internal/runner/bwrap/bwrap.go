@@ -103,9 +103,10 @@ type bwrapAdapter struct {
 
 	// syscallFilterPath is the baked store path to the compiled BPF syscall
 	// filter (issue #2670). When non-empty, buildArgs emits "--seccomp
-	// <seccompFilterFD>" and Run attaches the file via cmd.ExtraFiles. A failed
-	// open at Run time warns and proceeds without the filter rather than
-	// refusing to launch the Box (ADR 0042's degrade-don't-lie posture).
+	// <seccompFilterFD>"; see seccompFilterFD for how the file reaches that
+	// fd. A failed open at Run time warns and proceeds without the filter
+	// rather than refusing to launch the Box (ADR 0042's degrade-don't-lie
+	// posture).
 	syscallFilterPath string
 
 	// mu guards the maps below: running, the box-name to live-process map Kill
@@ -394,8 +395,8 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 		unshareFlags = append(unshareFlags, "--unshare-net")
 	}
 	args = append(args, unshareFlags...)
-	// --seccomp only ever names seccompFilterFD, the one fd Run's cmd.ExtraFiles
-	// attaches (issue #2670); an empty syscallFilterPath skips the flag.
+	// --seccomp only ever names seccompFilterFD, the one fd the filter is placed
+	// on (issue #2670, #5982); an empty syscallFilterPath skips the flag.
 	if a.syscallFilterPath != "" {
 		args = append(args, "--seccomp", strconv.Itoa(seccompFilterFD))
 	}
@@ -408,14 +409,26 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 // buildArgs' unshare-net comment). childExecsByName is true when that program
 // execs its own child by bare argv name via execvp, so Run must forward a PATH:
 // Go's exec.Command LookPath only ever resolves the top-level program itself.
-func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box) (string, []string, bool) {
+//
+// filterOpen is the Run-time fact that syscallFilterPath is set and opened.
+// buildArgs emits --seccomp from the path alone, so an unopened filter has the
+// flag stripped here, or bwrap reads a dead fd 3 and the launch fails (issue
+// #2670). On the pasta chain an open filter also adds the sh trampoline.
+func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box, filterOpen bool) (string, []string, bool) {
 	bwrapArgs := a.buildArgs(etcDir, box)
+	if !filterOpen {
+		bwrapArgs = removeSeccompFlag(bwrapArgs)
+	}
 	var program string
 	var args []string
 	if !a.network.Pasta {
 		program, args = "bwrap", bwrapArgs
 	} else {
-		pastaArgs := append(pastaFlags(), "--", "bwrap")
+		pastaArgs := append(pastaFlags(), "--")
+		if filterOpen {
+			pastaArgs = append(pastaArgs, "sh", "-c", pastaFilterTrampoline, "_", a.syscallFilterPath)
+		}
+		pastaArgs = append(pastaArgs, "bwrap")
 		pastaArgs = append(pastaArgs, bwrapArgs...)
 		program, args = "pasta", pastaArgs
 	}
@@ -450,16 +463,20 @@ const pastaDNSForwardAddr = "169.254.2.2"
 
 // seccompFilterFD is the file descriptor number bwrap's --seccomp flag names.
 // Go's exec.Cmd.ExtraFiles numbers extra fds from 3, and this is the only entry
-// the bwrap adapter ever adds, so the number is fixed. It survives the
-// pasta/bwrap exec chain: ExtraFiles produces a non-close-on-exec fd, preserved
-// across every execve in that chain, and the outer wrappers never touch fd 3.
+// the bwrap adapter ever adds, so the number is fixed. On the direct chain that
+// non-close-on-exec fd reaches bwrap. pasta closes every inherited fd before its
+// exec, so on the pasta chain execTarget's trampoline opens the path onto this
+// fd after pasta's exec instead (issue #5982).
 const seccompFilterFD = 3
 
+// pastaFilterTrampoline is the sh -c script run as pasta's COMMAND when the
+// filter is open: $1 is the filter path, the rest is bwrap's argv. sh opens the
+// filter onto seccompFilterFD itself (see there).
+var pastaFilterTrampoline = fmt.Sprintf(`f=$1; shift; exec "$@" %d<"$f"`, seccompFilterFD)
+
 // removeSeccompFlag strips a "--seccomp <fd>" pair back out of a flattened argv,
-// used by Run when a.syscallFilterPath is set but the file failed to open.
-// execTarget/buildArgs emit the flag from a.syscallFilterPath's emptiness alone
-// and cannot know the open failed, so Run reconciles argv afterwards rather than
-// threading the open result down through them.
+// used by execTarget when the filter is not open. buildArgs emits the flag from
+// a.syscallFilterPath's emptiness alone and cannot know the open failed.
 func removeSeccompFlag(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -767,29 +784,21 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	// at all.
 	cgroupDir := a.provisionCgroup(box)
 
-	// Opened before cmd is built: a failed open must also drop the "--seccomp"
-	// flag from argv, not just skip attaching ExtraFiles, or bwrap reads a
-	// nonexistent fd 3 at startup and the whole Box launch fails over a
-	// hardening nicety (issue #2670).
+	// The single point where a bad filter degrades, so it is opened here even on
+	// the pasta chain, whose trampoline reopens it: a failed redirect there would
+	// kill the Box after pasta exec'd, and a stray --seccomp fails it at bwrap's
+	// startup, both over a hardening nicety (issue #2670).
 	var syscallFilterFile *os.File
-	syscallFilterOpenFailed := false
 	if a.syscallFilterPath != "" {
 		f, err := os.Open(a.syscallFilterPath)
 		if err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not open syscall filter %s (%v); running box %q without seccomp hardening\n", a.syscallFilterPath, err, box.Name)
-			syscallFilterOpenFailed = true
 		} else {
 			syscallFilterFile = f
 			defer f.Close()
 		}
 	}
-	program, execArgs, childExecsByName := a.execTarget(etcDir, box)
-	if syscallFilterOpenFailed {
-		// Strip the pair from the flattened argv rather than mutate a shallow
-		// copy of *a: copying the struct copies its live sync.Mutex, which go
-		// vet's copylocks flags and Run's concurrency makes a real hazard.
-		execArgs = removeSeccompFlag(execArgs)
-	}
+	program, execArgs, childExecsByName := a.execTarget(etcDir, box, syscallFilterFile != nil)
 	// A func, not a value: exec.Cmd.Start is one-shot, and the CLONE_INTO_CGROUP
 	// attempt below may need a fresh Cmd for its fallback.
 	newCmd := func() *exec.Cmd {
@@ -809,7 +818,8 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 			// forwarding it does not widen resolvedRunEnv's no-ambient-leak guarantee.
 			cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
 		}
-		if syscallFilterFile != nil {
+		// Direct chain only; see seccompFilterFD.
+		if syscallFilterFile != nil && !a.network.Pasta {
 			cmd.ExtraFiles = []*os.File{syscallFilterFile}
 		}
 		cmd.Stdout = out

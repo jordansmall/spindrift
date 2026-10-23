@@ -96,7 +96,7 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 	t.Run("bare bwrap", func(t *testing.T) {
 		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "512"}
-		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}})
+		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}}, false)
 
 		if program != "bwrap" {
 			t.Errorf("execTarget program = %q, want %q", program, "bwrap")
@@ -115,7 +115,7 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 
 	t.Run("pasta", func(t *testing.T) {
 		a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
-		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}})
+		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}}, false)
 
 		if program != "pasta" {
 			t.Errorf("execTarget program = %q, want %q", program, "pasta")
@@ -2813,43 +2813,58 @@ func TestBwrapListRunning_EmptyWhenSelfCgroupDirMissing(t *testing.T) {
 
 // A syscallFilterPath pointing at a nonexistent file (issue #2670) is a
 // hardening gap, not a safety blocker (ADR 0042's degrade-don't-lie posture):
-// Run still succeeds and prints a warning rather than failing the launch.
+// Run still succeeds and prints a warning rather than failing the launch. On
+// the pasta chain the degrade must also leave no sh trampoline (see
+// seccompFilterFD): its failed redirect would kill the Box after pasta exec'd.
 func TestBwrapRun_MissingSyscallFilterWarnsAndProceeds(t *testing.T) {
-	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	origExec := execCommand
-	t.Cleanup(func() { execCommand = origExec })
-	var gotCmd *exec.Cmd
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		gotCmd = exec.Command(script, args...)
-		return gotCmd
+	tests := []struct {
+		name      string
+		mode      runner.NetworkMode
+		forbidden []string
+	}{
+		{"direct", runner.NetworkModeHost, []string{"--seccomp"}},
+		{"pasta", runner.NetworkModeOpen, []string{"--seccomp", "sh"}},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+			origExec := execCommand
+			t.Cleanup(func() { execCommand = origExec })
+			var gotCmd *exec.Cmd
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				gotCmd = exec.Command(script, args...)
+				return gotCmd
+			}
 
-	a := &bwrapAdapter{
-		agentFiles:        "/fake/agent",
-		agentEnv:          "/fake/env",
-		bakedPrefetch:     "echo ok",
-		network:           testNet(runner.NetworkModeHost),
-		syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
-	}
-	var runErr error
-	out := runnertest.CaptureStdoutDuring(t, func() {
-		runErr = a.Run(runner.Box{Name: "test-box", Env: map[string]string{}})
-	})
+			a := &bwrapAdapter{
+				agentFiles:        "/fake/agent",
+				agentEnv:          "/fake/env",
+				bakedPrefetch:     "echo ok",
+				network:           testNet(tc.mode),
+				syscallFilterPath: filepath.Join(t.TempDir(), "does-not-exist.bpf"),
+			}
+			var runErr error
+			out := runnertest.CaptureStdoutDuring(t, func() {
+				runErr = a.Run(runner.Box{Name: "test-box", Env: map[string]string{}})
+			})
 
-	if runErr != nil {
-		t.Fatalf("Run: %v", runErr)
-	}
-	if !strings.Contains(out, "warning") {
-		t.Errorf("Run output missing missing-syscall-filter warning: %q", out)
-	}
-	// A failed open must also drop "--seccomp" from argv, not just skip
-	// attaching ExtraFiles: otherwise bwrap tries to read a nonexistent fd 3
-	// at its own startup and the whole Box launch fails (issue #2670).
-	for _, arg := range gotCmd.Args {
-		if arg == "--seccomp" {
-			t.Errorf("gotCmd.Args = %v, want no --seccomp flag when the filter file failed to open", gotCmd.Args)
-			break
-		}
+			if runErr != nil {
+				t.Fatalf("Run: %v", runErr)
+			}
+			if !strings.Contains(out, "warning: could not open syscall filter") {
+				t.Errorf("Run output missing missing-syscall-filter warning: %q", out)
+			}
+			// A failed open must also drop "--seccomp" from argv, not just skip
+			// attaching ExtraFiles: otherwise bwrap tries to read a nonexistent fd 3
+			// at its own startup and the whole Box launch fails (issue #2670).
+			for _, arg := range gotCmd.Args {
+				for _, bad := range tc.forbidden {
+					if arg == bad {
+						t.Errorf("gotCmd.Args = %v, want no %q when the filter file failed to open", gotCmd.Args, bad)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -2893,6 +2908,46 @@ func TestBwrapRun_SyscallFilterAttachedAsExtraFile(t *testing.T) {
 		}
 	}
 	if !found {
+		t.Errorf("gotCmd.Args = %v, want \"--seccomp\" \"3\"", gotCmd.Args)
+	}
+}
+
+// On the pasta chain Run attaches no ExtraFiles; the sh trampoline opens the
+// filter instead (see seccompFilterFD).
+func TestBwrapRun_SyscallFilterOnPastaUsesTrampolineNotExtraFile(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	origExec := execCommand
+	t.Cleanup(func() { execCommand = origExec })
+	var gotCmd *exec.Cmd
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotCmd = exec.Command(script, args...)
+		return gotCmd
+	}
+
+	filterPath := filepath.Join(t.TempDir(), "filter.bpf")
+	if err := os.WriteFile(filterPath, []byte("fake-bpf-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		network:           testNet(runner.NetworkModeOpen),
+		syscallFilterPath: filterPath,
+	}
+	if err := a.Run(runner.Box{Env: map[string]string{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(gotCmd.ExtraFiles) != 0 {
+		t.Errorf("gotCmd.ExtraFiles = %v, want none on the pasta chain", gotCmd.ExtraFiles)
+	}
+	joined := strings.Join(gotCmd.Args, "\x00")
+	if !strings.Contains(joined, strings.Join([]string{"--", "sh", "-c", pastaFilterTrampoline, "_", filterPath, "bwrap"}, "\x00")) {
+		t.Errorf("gotCmd.Args = %v, want the sh trampoline naming %s", gotCmd.Args, filterPath)
+	}
+	if !strings.Contains(joined, "--seccomp\x003") {
 		t.Errorf("gotCmd.Args = %v, want \"--seccomp\" \"3\"", gotCmd.Args)
 	}
 }

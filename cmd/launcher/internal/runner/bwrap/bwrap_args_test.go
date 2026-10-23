@@ -2,6 +2,7 @@ package bwrap
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -344,7 +345,7 @@ func TestBwrapArgs_NetworkModeNoneUnsharesNet(t *testing.T) {
 func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box runner.Box) {
 	t.Helper()
 	bwrapArgs := a.buildArgs(etcDir, box)
-	program, args, childExecsByName := a.execTarget(etcDir, box)
+	program, args, childExecsByName := a.execTarget(etcDir, box, false)
 
 	if program != "pasta" {
 		t.Fatalf("execTarget program = %q, want %q", program, "pasta")
@@ -372,7 +373,7 @@ func assertPastaExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box run
 func assertBareBwrapExecTarget(t *testing.T, a *bwrapAdapter, etcDir string, box runner.Box) {
 	t.Helper()
 	bwrapArgs := a.buildArgs(etcDir, box)
-	program, args, childExecsByName := a.execTarget(etcDir, box)
+	program, args, childExecsByName := a.execTarget(etcDir, box, false)
 
 	if program != "bwrap" {
 		t.Fatalf("execTarget program = %q, want %q", program, "bwrap")
@@ -557,7 +558,7 @@ func TestExecTarget_NetworkModeUnsetWrapsWithPasta(t *testing.T) {
 // otherwise carry along silently.
 func TestExecTarget_DefaultPastaArgvLiteral(t *testing.T) {
 	a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
-	_, args, _ := a.execTarget("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
+	_, args, _ := a.execTarget("/tmp/fake-etc", runner.Box{Env: map[string]string{}}, false)
 
 	want := []string{
 		"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw",
@@ -984,8 +985,7 @@ func TestBwrapArgs_NonSecretOnArgv(t *testing.T) {
 	}
 }
 
-// Issue #2670: bwrap reads the compiled BPF filter off fd 3, the one entry the
-// adapter's Run ever adds to cmd.ExtraFiles.
+// Issue #2670: bwrap reads the compiled BPF filter off seccompFilterFD.
 func TestBwrapArgs_SyscallFilterFlagWhenSet(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -1013,5 +1013,79 @@ func TestBwrapArgs_NoSyscallFilterFlagWhenEmpty(t *testing.T) {
 		if arg == "--seccomp" {
 			t.Errorf("unexpected --seccomp in args when syscallFilterPath is empty: %v", args)
 		}
+	}
+}
+
+// On the pasta chain the filter reaches bwrap's fd 3 through an sh trampoline,
+// not cmd.ExtraFiles (see seccompFilterFD).
+func TestExecTarget_PastaWithOpenFilterUsesTrampoline(t *testing.T) {
+	a := &bwrapAdapter{
+		network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok",
+		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
+	}
+	box := runner.Box{Env: map[string]string{}}
+	program, args, childExecsByName := a.execTarget("/tmp/fake-etc", box, true)
+
+	if program != "pasta" {
+		t.Fatalf("program = %q, want pasta", program)
+	}
+	if !childExecsByName {
+		t.Error("childExecsByName = false, want true: pasta execvp's sh by bare name")
+	}
+	want := append(pastaFlags(), "--", "sh", "-c", pastaFilterTrampoline, "_", a.syscallFilterPath, "bwrap")
+	want = append(want, a.buildArgs("/tmp/fake-etc", box)...)
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("args = %v, want %v", args, want)
+	}
+	fd := strconv.Itoa(seccompFilterFD)
+	if !strings.Contains(pastaFilterTrampoline, fd+"<") {
+		t.Errorf("trampoline %q must open the filter onto fd %s", pastaFilterTrampoline, fd)
+	}
+	if !strings.Contains(strings.Join(args, "\x00"), "--seccomp\x00"+fd+"\x00") {
+		t.Errorf("args = %v, want \"--seccomp\" %q", args, fd)
+	}
+}
+
+// An unopenable filter must not get a trampoline: its failed 3< redirect would
+// kill the Box after pasta already exec'd (issue #2670 degrades, never fails).
+func TestExecTarget_PastaWithUnopenedFilterDegradesToPlainBwrap(t *testing.T) {
+	a := &bwrapAdapter{
+		network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok",
+		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
+	}
+	box := runner.Box{Env: map[string]string{}}
+	program, args, _ := a.execTarget("/tmp/fake-etc", box, false)
+
+	if program != "pasta" {
+		t.Fatalf("program = %q, want pasta", program)
+	}
+	for _, bad := range []string{"--seccomp", "sh", "-c", a.syscallFilterPath} {
+		if runnertest.ContainsArg(args, bad) {
+			t.Errorf("args contain %q, want none when the filter is not open: %v", bad, args)
+		}
+	}
+	prefix := strings.Join(append(pastaFlags(), "--", "bwrap"), " ")
+	if !strings.HasPrefix(strings.Join(args, " "), prefix) {
+		t.Errorf("args = %v, want prefix %q", args, prefix)
+	}
+}
+
+func TestExecTarget_DirectWithUnopenedFilterStripsSeccomp(t *testing.T) {
+	a := &bwrapAdapter{
+		network: testNet(runner.NetworkModeHost), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok",
+		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
+	}
+	box := runner.Box{Env: map[string]string{}}
+	_, withFilter, _ := a.execTarget("/tmp/fake-etc", box, true)
+	_, without, _ := a.execTarget("/tmp/fake-etc", box, false)
+
+	if !runnertest.ContainsArg(withFilter, "--seccomp") {
+		t.Errorf("open filter: args = %v, want --seccomp", withFilter)
+	}
+	if runnertest.ContainsArg(without, "--seccomp") {
+		t.Errorf("unopened filter: args = %v, want no --seccomp", without)
+	}
+	if runnertest.ContainsArg(withFilter, "sh") {
+		t.Errorf("direct chain must not use the trampoline: %v", withFilter)
 	}
 }
