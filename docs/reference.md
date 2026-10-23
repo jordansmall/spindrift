@@ -25,7 +25,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
-| `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
+| `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready` (from its land pass, if it ran a review loop), has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
 | `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, agent (subagent), prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
@@ -3801,6 +3801,18 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   the preserved bundle. A missing bundle, a wiring error, or a missing PR
   intent with no fallback still posts "merge blocked" and leaves the issue
   `agent-in-progress`.
+- **A ready that skipped the land pass never lands.** A review-loop run
+  whose `status=ready` did not come from its land pass never cleared
+  review: the pass manifest's last implement, fix, or land entry is not
+  `land`, or that land pass and every pass after it printed no outcome.
+  Settle swaps `agent-in-progress` → `agent-failed` with reason
+  `unreviewed`, lands nothing (no PR is marked ready or merged), and
+  comments that a human can re-apply `ready-for-agent` to re-run it; any
+  relayed bundle stays in the outbox. The relayed-branch adopt paths
+  decline it too, and recover skips it. Legacy-loop and advise-only runs
+  write no such entries and are unaffected, and a land pass reached by a
+  cap counts as reviewed. The manifest is Box-written, so this guards
+  against model mistakes, not an adversarial Box (issue #5973).
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
@@ -3862,7 +3874,8 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   [daemon](#daemon)'s `recover` kind, which runs bare `spindrift recover`
   (issue #4656). It touches only `agent-failed` issues, on evidence the label
   never supplied: a relayable outbox bundle, a genuine `status=ready`
-  self-report in the run's logs, no open PR, and the per-issue host claim as
+  self-report in the run's logs (from the land pass, when the run ran a
+  review loop), no open PR, and the per-issue host claim as
   its liveness proof (issues #4654, #4656; ADR 0029's amendment). A hand-run
   bare `spindrift recover` follows the same rules.
 - **A terminal recover failure never downgrades an already-successful issue.**
@@ -5396,8 +5409,17 @@ recover` finds and lands one such issue itself, moving it `agent-failed` →
 `CODE_FORGE=local`; a local Recoverable issue stays manual, `spindrift
 recover <n>` (ADR 0039).
 Eligibility reads the run's last driver self-report, the same evidence
-`recover <n>` trusts, so a run whose earlier pass reported ready and whose
-later pass crashed without reporting still qualifies.
+`recover <n>` trusts. A ready from a review-loop pass other than the land
+pass is not eligible, though: recover reads the run's pass manifest, the
+same evidence settle reads, rather than the persisted settle reason, and
+skips such a run silently before touching the bundle or the tracker (settle
+already commented on the issue). A hand-run `spindrift recover <n>` declines
+it too, whether or not its branch has an open PR, printing `status=skipped`
+and leaving the issue `agent-failed`. So a run whose land
+pass reported ready and whose later pass crashed still qualifies, while
+one whose implement pass reported a premature ready and whose review or
+land pass then crashed does not (issue #5973). A land pass reached by a
+cap still counts as reviewed.
 
 Queue mode keeps a per-issue attempt record beside the issue's log
 (`.spindrift/logs/issue-<n>.recover.json`): the failure count, the last
@@ -6977,7 +6999,8 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   contradicted; a read that keeps failing never produces it), `no-pr`
   (`status=merged` named a branch with no PR to verify), `box-failed` (the Box
   failed before settle), `research-failed`, `chore-failed`,
-  `ledger-finish-failed`, and `stopped`;
+  `ledger-finish-failed`, `stopped`, and `unreviewed` (a review-loop run's
+  `status=ready` did not come from its land pass, so nothing landed);
 - `ambiguous` and `recoverable` each name their own state.
 
 A Record's `outcome` comes only from that op, and `outcome_source` says so:
@@ -8755,8 +8778,9 @@ the label, the self-report and any open PR after it takes the host claim,
 and may exit 2, which records Ready 0 like any probed kind's empty child. A
 counted bundle can still be one the child declines (a green PR waiting on a
 `MERGE_MODE=manual` merge, a run still settling, a self-report that is not
-ready), so an exit 2 against a nonzero count backs `recover` off, doubling
-from `DAEMON_IDLE_FLOOR` toward `DAEMON_IDLE_CAP`, and a bundle the
+ready, a ready from a review-loop pass other than the land pass), so an
+exit 2 against a nonzero count backs `recover` off, doubling from
+`DAEMON_IDLE_FLOOR` toward `DAEMON_IDLE_CAP`, and a bundle the
 backoff has not seen lifts it at once: a rise in the count, or a new
 bundle (named by outbox key and bundle hash) replacing one that left,
 even when the count holds (issue #4705). A bundle whose give-up comment
