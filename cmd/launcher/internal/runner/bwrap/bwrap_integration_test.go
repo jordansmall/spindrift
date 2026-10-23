@@ -861,3 +861,31 @@ func TestBwrapIntegration_OverlayUpperNotSharedAcrossInvocations(t *testing.T) {
 		t.Errorf("marker written by the first bwrap invocation was visible in a second, independent invocation's overlay = %q, want ABSENT (each invocation should get its own fresh tmpfs upper)", got)
 	}
 }
+
+// TestBwrapIntegration_ValidatePastaRealNamespace runs the real probe end to
+// end: this test binary is re-exec'd under pasta with the launcher's flags and
+// must find a usable namespace (issue #5983).
+func TestBwrapIntegration_ValidatePastaRealNamespace(t *testing.T) {
+	requireRealPasta(t)
+	if err := ValidatePasta(); err != nil {
+		t.Fatalf("ValidatePasta() = %v, want nil on a host where pasta builds a usable namespace", err)
+	}
+}
+
+// TestBwrapIntegration_ValidatePastaRejectsMissingConfigNet is the negative
+// control for issue #5981: without --config-net the namespace comes up with no
+// configured interface, and the probe must report it unusable rather than ok.
+func TestBwrapIntegration_ValidatePastaRejectsMissingConfigNet(t *testing.T) {
+	requireRealPasta(t)
+	flags := slices.DeleteFunc(pastaFlags(), func(f string) bool { return f == "--config-net" })
+	if len(flags) == len(pastaFlags()) {
+		t.Fatal("pastaFlags() no longer contains --config-net; the negative control has nothing to remove")
+	}
+	err := validatePastaWith(exec.LookPath, execCommand, flags)
+	if err == nil {
+		t.Skip("this passt configures the namespace interface without --config-net, so the #5981 negative control cannot hold here")
+	}
+	if !strings.Contains(err.Error(), "unusable") {
+		t.Fatalf("validatePastaWith without --config-net = %v, want an \"unusable\" namespace error", err)
+	}
+}
