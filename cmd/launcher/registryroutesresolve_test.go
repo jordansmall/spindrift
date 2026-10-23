@@ -21,8 +21,8 @@ import (
 
 // These tests drive route resolution over the synthetic Strategy and a twin of it,
 // so a host can declare two ecosystems at once; the real Strategies' declaration
-// shapes are pinned by the ecosystem corpora under
-// internal/ecosystem/testdata/corpus.
+// shapes are pinned by the corpora under
+// internal/ecosystem and its ecosystem packages.
 var (
 	twinRow     = synthetic.Twin("twin")
 	otherRow    = synthetic.Twin("other")

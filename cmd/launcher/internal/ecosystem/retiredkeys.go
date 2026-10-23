@@ -4,3 +4,7 @@ package ecosystem
 // registryroutes never spells the key itself. It stays here, not in the gradle
 // package, so registryroutes can read it without importing a Strategy.
 const GradleRetiredRouteKey = "gradle-path"
+
+// GoRetiredRouteKey is go's Strategy.RetiredRouteKey, kept here for the same
+// reason as GradleRetiredRouteKey.
+const GoRetiredRouteKey = "go-path"

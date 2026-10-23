@@ -15,7 +15,7 @@ import (
 
 // These tests drive the discover command over the synthetic Strategy alone; the
 // real Strategies' declaration shapes, store pairings and route files are pinned by
-// the ecosystem corpora under internal/ecosystem/testdata/corpus.
+// the corpora under internal/ecosystem and its ecosystem packages.
 var discoverRows = []ecosystem.Strategy{synthetic.Strategy}
 
 // writeDiscoverDeclarations writes lines ("name = url") to the Strategy's in-tree config.

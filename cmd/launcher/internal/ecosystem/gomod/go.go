@@ -1,34 +1,30 @@
-package ecosystem
+package gomod
 
 import (
 	"fmt"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// nameGo lets ComputeGoBindings name the ecosystem without reading Go.Name,
-// which would make Go depend on itself: its EnvExports closure calls
-// ComputeGoBindings, so the reference back closes an initialization cycle.
+// nameGo lets computeBindings name the ecosystem without reading Strategy.Name,
+// which would make Strategy depend on itself: its EnvExports closure calls
+// computeBindings, so the reference back closes an initialization cycle.
 const nameGo = "go"
-
-// GoRetiredRouteKey is go's Strategy.RetiredRouteKey. Exported so registryroutes,
-// which still translates the retired spelling, never spells the key itself.
-const GoRetiredRouteKey = "go-path"
 
 // goToolchainLocal pins GOTOOLCHAIN to the one baked toolchain.
 const goToolchainLocal = "local"
 
-// Go is exported only so the Bundle can register it, until a later ticket of
-// issue #5940 moves it into its own package.
-var Go = Strategy{
+// Strategy keeps the Name "go" though the package is gomod: go is a keyword.
+var Strategy = ecosystem.Strategy{
 	Name:             nameGo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
-	RetiredRouteKey:  GoRetiredRouteKey,
+	RetiredRouteKey:  ecosystem.GoRetiredRouteKey,
 	LockfileNames:    []string{"go.sum"},
 	Classification:   "go mod",
-	EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
-		result := ComputeGoBindings(port, prefix, routes, GoBindingInput{
+	EnvExports: func(port int, prefix string, getenv func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+		result := computeBindings(port, prefix, routes, bindingInput{
 			GOTOOLCHAIN: getenv("GOTOOLCHAIN"),
 			GONOPROXY:   getenv("GONOPROXY"),
 			GOPRIVATE:   getenv("GOPRIVATE"),
@@ -41,10 +37,10 @@ var Go = Strategy{
 	AnnounceBindingValue: true,
 }
 
-// GoBindingInput is the environment subset ComputeGoBindings reads. The caller
-// passes it in rather than ComputeGoBindings calling os.Getenv, which keeps the
+// bindingInput is the environment subset computeBindings reads. The caller
+// passes it in rather than computeBindings calling os.Getenv, which keeps the
 // decision logic a pure function tests drive with struct literals.
-type GoBindingInput struct {
+type bindingInput struct {
 	GOTOOLCHAIN string
 	GONOPROXY   string
 	GOPRIVATE   string
@@ -52,20 +48,20 @@ type GoBindingInput struct {
 	GONOSUMDB   string
 }
 
-// GoBindings is what ComputeGoBindings decided: the env vars to export, in a
+// bindings is what computeBindings decided: the env vars to export, in a
 // stable order, and the warning lines to emit.
-type GoBindings struct {
-	Exports  []EnvExport
+type bindings struct {
+	Exports  []ecosystem.EnvExport
 	Warnings []string
 }
 
-// ComputeGoBindings points Go's module-fetch tooling at the local Forwarder on
+// computeBindings points Go's module-fetch tooling at the local Forwarder on
 // 127.0.0.1:port. GOPROXY is route-aware (issue #3260): it renders only when
 // routes[0]'s ecosystems block declares a go path (issue #3404), because a bare
 // route-root URL would point Go at an upstream nothing declared for it. That
 // export also gates GONOPROXY and GOSUMDB; GOTOOLCHAIN=local holds regardless.
-func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route, env GoBindingInput) GoBindings {
-	var result GoBindings
+func computeBindings(port int, prefix string, routes []registrymanifest.Route, env bindingInput) bindings {
+	var result bindings
 
 	goProxyBound := false
 	// Parse validation of the [routes.ecosystems.go] path key rejects a bare "/"
@@ -73,7 +69,7 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 	// this path can never normalize to "", and the URL below concatenates it
 	// as-is.
 	if path := ecosystemkit.DeclaredPath(routes, nameGo); path != "" {
-		result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
+		result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
 		goProxyBound = true
 	}
 
@@ -88,7 +84,7 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 			env.GOTOOLCHAIN, goToolchainLocal,
 		))
 	}
-	result.Exports = append(result.Exports, EnvExport{Name: "GOTOOLCHAIN", Value: goToolchainLocal})
+	result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GOTOOLCHAIN", Value: goToolchainLocal})
 
 	// A repo-set GOPRIVATE defaults GONOPROXY to itself, bypassing GOPROXY, and
 	// Go treats an empty GONOPROXY as unset, so "" does not close that bypass.
@@ -99,7 +95,7 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 		if env.GONOPROXY != "" || env.GOPRIVATE != "" {
 			result.Warnings = append(result.Warnings, "==> WARNING: overriding pre-existing GONOPROXY/GOPRIVATE with GONOPROXY=none — every module path, private or not, now routes through the Forwarder")
 		}
-		result.Exports = append(result.Exports, EnvExport{Name: "GONOPROXY", Value: "none"})
+		result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GONOPROXY", Value: "none"})
 	}
 
 	// A checksum-database lookup for a module that turns out to be private is
@@ -114,7 +110,7 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 				env.GOSUMDB,
 			))
 		}
-		result.Exports = append(result.Exports, EnvExport{Name: "GOSUMDB", Value: "off"})
+		result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GOSUMDB", Value: "off"})
 	}
 
 	return result
