@@ -2567,10 +2567,12 @@ rendered into the right per-runtime flag by the launcher:
 
 - **`open`** (default) — bwrap isolates into its own network namespace
   behind a hardened pasta helper (`pasta -t none -T none -u none -U none
-  --no-map-gw`, ADR 0042): general egress works, host loopback is blocked —
-  podman-rootless parity (issue #2666). OCI runtimes are unchanged: no
-  `--network` flag, so the runtime's own default network (podman/docker/
-  nerdctl bridge, general egress, no host-loopback isolation) applies.
+  --no-map-gw`, ADR 0042) configured with `--config-net` so the namespace
+  gets an address and default route: general egress works, host loopback
+  is blocked — podman-rootless parity (issue #2666). OCI runtimes are
+  unchanged: no `--network` flag, so the runtime's own default network
+  (podman/docker/nerdctl bridge, general egress, no host-loopback
+  isolation) applies.
 - **`host`** — bwrap-only documented opt-out. Deliberately restores the
   pre-#2666 behavior of sharing the host's network namespace as-is (no
   pasta helper, host loopback reachable). Has no OCI rendering — falls

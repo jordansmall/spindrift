@@ -64,6 +64,8 @@ The decision set:
   `-t none -T none -u none -U none --no-map-gw`, which is podman parity,
   and which finally makes the pre-existing `BWRAP_UNSHARE_NET` knob usable
   (on its own it leaves the Box with no DNS).
+  *Amended by issue #5981 (see the amendment below):* the five flags
+  alone were not podman parity and leave the namespace unconfigured.
 
 - **Resource containment is layered and best-effort, and never gates
   parallelism.** bwrap imposes no limits of its own, and `MEMORY_LIMIT`
@@ -408,3 +410,23 @@ the old best-effort migration, race included. A failed open of the
 directory also degrades straight to that path. Both ways onto the
 fallback print a warning, so a host that always refuses the clone is
 visible rather than silently racy.
+
+## Amendment (issue #5981): pasta configures the namespace only under --config-net
+
+The "podman parity" claim above was wrong. The five hardening flags
+(`-t none -T none -u none -U none --no-map-gw`) only close ports and the
+gateway mapping. They do not make pasta set up the namespace it creates,
+and the pinned passt release (2026_07_16) configures it only when asked
+with `--config-net`. Without that flag the tap interface stays DOWN with no
+address and no route. The Box had no egress, DNS through the
+`--dns-forward 169.254.2.2` forwarder failed, and a Driver never reached
+its Provider. Podman passes `--config-net` to pasta; the bwrap wrapper did
+not.
+
+`pastaFlags()` now passes `--config-net` alongside the hardened flags. It
+stays out of `pastaHardenedFlags` on purpose, because it is namespace
+configuration and not hardening, and that list still names exactly the five
+flags. On NixOS 26.11 with bubblewrap 0.12.0, bare `pasta -f -- sh` showed
+only `lo` configured. With `--config-net`, DNS resolves and HTTPS egress
+returns 200, while host loopback and the host's own address stay
+unreachable, so the isolation this ADR set out to keep is unchanged.
