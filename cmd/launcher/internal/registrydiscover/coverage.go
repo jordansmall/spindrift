@@ -6,7 +6,7 @@ import (
 )
 
 // UncoveredHostsRows returns each host declared under repoDir, read through the
-// given rows, that matches none of covered, deduped in first-occurrence order.
+// given Strategies, that matches none of covered, deduped in first-occurrence order.
 // Both sides normalize through registryvocab.HostKey so `spindrift doctor` and
 // `spindrift registry discover` agree (issue #3144 slice 2 AC5). registryproxy
 // routes by the path prefix derived from MatchHost, so comparing declared hosts

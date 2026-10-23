@@ -10,7 +10,7 @@ import (
 )
 
 // stub-a's renderer also emits stub-b's var, so stub-b binds without opting in
-// and the opt-out side of the announce assertion has a row to stay silent for.
+// and the opt-out side of the announce assertion has a Strategy to stay silent for.
 func bindHomesStubRows(announce bool) []ecosystem.Strategy {
 	render := func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		return []ecosystem.EnvExport{
@@ -30,8 +30,8 @@ func bindHomesManifest() registrymanifest.Manifest {
 
 func noEnv(string) string { return "" }
 
-// The announce line is row-generic: it names the row and var from the row, prints
-// after the Forwarder line, and only for a row that opted in.
+// The announce line is Strategy-generic: it names the Strategy and var from the Strategy, prints
+// after the Forwarder line, and only for a Strategy that opted in.
 func TestBindHomes_AnnouncesBindingValueOnlyForOptedInRow(t *testing.T) {
 	var out strings.Builder
 	if !BindHomes(&out, bindHomesStubRows(true), ReadyGate(bindHomesManifest()), nil, noEnv) {

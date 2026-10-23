@@ -167,7 +167,7 @@ func resolveGate(deps GateDeps) Gate {
 // resolveHomeConfigPath resolves row's HomeConfig to an on-disk path and creates its
 // parent directory, shared by BindHomes and repoAwareHomeConfigs
 // so the two writes cannot drift (issue #3201). It returns ok == false, having
-// printed why, when both the row's home var and $HOME are unset: concatenation would
+// printed why, when both the Strategy's home var and $HOME are unset: concatenation would
 // otherwise resolve under the cwd, or to "/.gradle", which MkdirAll creates as root.
 func resolveHomeConfigPath(stdout io.Writer, row ecosystem.Strategy, getenv func(string) string) (string, bool) {
 	hc := row.HomeConfig
@@ -195,7 +195,7 @@ func ReadyGate(manifest registrymanifest.Manifest) Gate {
 }
 
 // BindHomes is bindings mode: it computes the Go, npm, cargo and gradle env exports
-// from gate.port, hands them to publish, then writes each HomeConfig row's home config.
+// from gate.port, hands them to publish, then writes each HomeConfig Strategy's home config.
 // publish runs before the home writes because the verb's env file was always written
 // first, so a failing home write still leaves it behind; it is not called when the
 // gate is closed or the manifest carries no route prefix. It returns false on a failed
@@ -225,7 +225,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 	}
 	prefix := gate.manifest.Routes[0].Prefix
 
-	// Row-generic, so a future row with an EnvExports renderer needs no change
+	// Strategy-generic, so a future Strategy with an EnvExports renderer needs no change
 	// here.
 	var exports []ecosystem.EnvExport
 	var warnings []string
@@ -239,8 +239,8 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 		return false
 	}
 
-	// homeConfigPaths lets bindingSummaryProse name a HomeConfig row's binding
-	// path row-generically. Only rows with a non-nil HomeConfig land here, which
+	// homeConfigPaths lets bindingSummaryProse name a HomeConfig Strategy's binding
+	// path Strategy-generically. Only Strategies with a non-nil HomeConfig land here, which
 	// is exactly the set that summary looks up, so its lookup never misses.
 	homeConfigPaths := make(map[string]string)
 	for _, row := range ecosystem.HomeConfigRowsOf(rows) {
@@ -257,7 +257,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 
 	// These lines print only after every fallible write above has succeeded:
 	// printing earlier (issue #2931) would claim a binding even when a later
-	// write fails and the caller treats the run as "nothing applied". A row's
+	// write fails and the caller treats the run as "nothing applied". A Strategy's
 	// AnnounceBindingValue line reads its computed BindingEnvVar export rather
 	// than re-deriving the URL, which a host-rooted route (issue #3260) makes
 	// wrong or absent.
@@ -281,8 +281,8 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 	return true
 }
 
-// applyEachRow calls fn for every row, continuing past a per-row error so one row's
-// failure never blocks its siblings, and reports whether any row failed.
+// applyEachRow calls fn for every Strategy, continuing past a per-Strategy error so one Strategy's
+// failure never blocks its siblings, and reports whether any Strategy failed.
 func applyEachRow(rows []ecosystem.Strategy, fn func(ecosystem.Strategy) error) bool {
 	failed := false
 	for _, row := range rows {
@@ -359,7 +359,7 @@ func rewriteHostNames(rewrites []HostRewrite) string {
 	return strings.Join(hosts, ", ")
 }
 
-// dropCollidedRoutes removes every route whose UpstreamHost collided before a row's
+// dropCollidedRoutes removes every route whose UpstreamHost collided before a Strategy's
 // placeholder deriver sees it: buildIntreeHostRewrites already dropped that route's
 // rewrite, so nothing in the config points at its LocalURL.
 func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewriteCollision) []registrymanifest.Route {
@@ -404,8 +404,8 @@ func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 	return applyRepoAwareHomeConfigs(stdout, workDir, rows, gate, publish)
 }
 
-// applyInTree loops over every InTreeBindingsOf(rows) row (npm, yarn and pnpm
-// today, cargo retired from this loop by issue #3201), so a future table row
+// applyInTree loops over every InTreeBindingsOf(rows) Strategy (npm, yarn and pnpm
+// today, cargo retired from this loop by issue #3201), so a future table Strategy
 // needs no change here.
 func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate) bool {
 	switch gate.outcome {
@@ -461,7 +461,7 @@ func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 }
 
 // exportNames names the export vars for applyRepoAwareHomeConfigs' success line, the
-// only thing the row-generic renderer contract hands this verb that it can name
+// only thing the Strategy-generic renderer contract hands this verb that it can name
 // without an ecosystem-specific value of its own.
 func exportNames(exports []ecosystem.EnvExport) string {
 	names := make([]string, len(exports))
@@ -473,7 +473,7 @@ func exportNames(exports []ecosystem.EnvExport) string {
 
 // joinProse renders names as an English list with an Oxford comma. An empty list
 // yields "", which no caller reaches today: every list here comes from the
-// caller's rows, and an empty rows slice yields an empty name list.
+// caller's Strategies, and an empty rows slice yields an empty name list.
 func joinProse(names []string) string {
 	switch len(names) {
 	case 0:
@@ -495,14 +495,14 @@ func rowNames(rows []ecosystem.Strategy) []string {
 	return names
 }
 
-// ecosystemFallbackNames renders every row's Name in rows order:
+// ecosystemFallbackNames renders every Strategy's Name in Strategies order:
 // when the gate is closed, every known ecosystem falls back to the public registry.
 func ecosystemFallbackNames(rows []ecosystem.Strategy) string {
 	return joinProse(rowNames(rows))
 }
 
 // bindingSummaryProse renders the success summary's "<name> bound to it via <where>"
-// clauses in rows order. A BindingEnvVar row is named only when exports
+// clauses in Strategies order. A BindingEnvVar Strategy is named only when exports
 // actually carries its var, because a host-rooted route can render no export for
 // that ecosystem (issues #3259, #3260) and naming it would advertise a binding the
 // child process will not have. An empty result leaves the caller's bare line.
@@ -523,7 +523,7 @@ func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExpor
 }
 
 // repoAwareHomeConfigRows filters HomeConfigRowsOf(rows) rather than rows because the
-// renderer re-renders the row's own HomeConfig file; a non-nil RepoAwareHomeConfig
+// renderer re-renders the Strategy's own HomeConfig file; a non-nil RepoAwareHomeConfig
 // requires a non-nil HomeConfig, which makes the two equivalent.
 func repoAwareHomeConfigRows(rows []ecosystem.Strategy) []ecosystem.Strategy {
 	var out []ecosystem.Strategy
@@ -536,7 +536,7 @@ func repoAwareHomeConfigRows(rows []ecosystem.Strategy) []ecosystem.Strategy {
 }
 
 // applyRepoAwareHomeConfigs is the post-clone half of in-tree apply mode
-// (issue #3201): a row with a non-nil RepoAwareHomeConfig (cargo today) binds by
+// (issue #3201): a Strategy with a non-nil RepoAwareHomeConfig (cargo today) binds by
 // re-rendering its whole home config against the repo's own un-rewritten in-tree
 // config, which bindings mode cannot read pre-clone. Collided routes are dropped as
 // applyInTree drops them, but it ran first and printed those warnings.
@@ -550,8 +550,8 @@ func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosyste
 	}
 	port := gate.port
 
-	// The warning names the repo-aware rows from the supplied rows rather than a
-	// hardcoded list, so a second such row landing cannot leave it
+	// The warning names the repo-aware Strategies from the supplied Strategies rather than a
+	// hardcoded list, so a second such Strategy landing cannot leave it
 	// overstating the fallback.
 	repoAwareRows := repoAwareHomeConfigRows(rows)
 	if len(repoAwareRows) == 0 {

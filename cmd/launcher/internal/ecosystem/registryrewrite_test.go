@@ -8,7 +8,7 @@ import (
 )
 
 // TestRepointRegistryURL_PreservesQueryAndFragment covers what neither
-// row's own tests reach: a registry value carrying a query, a fragment or a
+// Strategy's own tests reach: a registry value carrying a query, a fragment or a
 // percent-escaped path segment keeps all three verbatim across the
 // re-point, since only the prefix goes on in front of the path.
 func TestRepointRegistryURL_PreservesQueryAndFragment(t *testing.T) {
@@ -54,7 +54,7 @@ func TestRepointRegistryURL_PreservesQueryAndFragment(t *testing.T) {
 }
 
 // TestDecodeOneJSONObject_NonObjectValues covers the top-level shapes no
-// row's own test body reaches: a well-formed JSON value that simply isn't
+// Strategy's own test body reaches: a well-formed JSON value that simply isn't
 // an object is refused outright, as is an empty body.
 func TestDecodeOneJSONObject_NonObjectValues(t *testing.T) {
 	for _, body := range []string{`[1,2,3]`, `"a string"`, `42`, `true`, ``} {

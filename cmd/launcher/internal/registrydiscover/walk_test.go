@@ -72,7 +72,7 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 	}
 }
 
-// A directory stands in for the nil-parser row's named file: if the walker read
+// A directory stands in for the nil-parser Strategy's named file: if the walker read
 // it anyway, os.ReadFile would fail and the test would see the error. An empty
 // path joins to repoDir, also a directory, so the same check catches it.
 func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
@@ -105,7 +105,7 @@ func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 }
 
 // The parser sets Ecosystem and ConfigPath to wrong values on purpose, so the
-// test can see the row's own stamp win.
+// test can see the Strategy's own stamp win.
 func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
@@ -252,7 +252,7 @@ func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 	}
 }
 
-// A directory sits where the row expects a file, which is portable across
+// A directory sits where the Strategy expects a file, which is portable across
 // platforms unlike a permission-bit trick. This is the read-error half of the
 // contract TestExtractRows_ParserErrorAbortsTheWalk pins for parse errors.
 func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {

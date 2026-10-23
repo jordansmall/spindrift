@@ -1,9 +1,9 @@
-// Package ecosystemtest is the kit an ecosystem row's package calls from its
+// Package ecosystemtest is the kit an ecosystem Strategy's package calls from its
 // own tests: Run replays a corpus of Target-repo trees through the registry
 // pipeline's stages in order and checks each stage's output against the golden
 // beside the case (issue #5654). It takes an ecosystem.Strategy and a directory,
-// never ecosystem.Table, so a row proves itself over its own corpus, plus the
-// neighbour rows a case names, which the caller resolves.
+// never ecosystem.Table, so a Strategy proves itself over its own corpus, plus the
+// neighbour Strategies a case names, which the caller resolves.
 //
 // A corpus directory holds one subdirectory per case:
 //
@@ -19,8 +19,8 @@
 //	                              environment the binding and bindings summary stages
 //	                              read (default empty)
 //	case.json                     optional JSON object, unknown keys refused: "rows", the
-//	                              names of neighbour rows replayed beside the primary row
-//	                              (naming the primary row too fixes its place in the order,
+//	                              names of neighbour Strategies replayed beside the primary Strategy
+//	                              (naming the primary Strategy too fixes its place in the order,
 //	                              as ecosystem.Table does in production; else it comes first),
 //	                              and "port", the Forwarder port the binding and rewrites
 //	                              stages render against (default bindregistry.ForwarderPort);
@@ -38,7 +38,7 @@
 //	summary.golden.txt            stage 7: what bindings mode prints for those routes
 //	rewrites.golden.json          stage 8: the proxy's responses for the upstream bodies
 //
-// A stage the row does not take part in has no golden and is skipped; a stale
+// A stage the Strategy does not take part in has no golden and is skipped; a stale
 // golden for one fails. Importing this package from non-test code pulls in
 // testing; only _test.go files should do so.
 package ecosystemtest
@@ -82,7 +82,7 @@ type stage struct {
 	replay      func(c *replay) ([]byte, error)
 }
 
-// everyRow is the predicate of a stage no row can opt out of.
+// everyRow is the predicate of a stage no Strategy can opt out of.
 func everyRow(ecosystem.Strategy) bool { return true }
 
 // stages is the pipeline in order; each stage is one entry here and nowhere else.
@@ -106,8 +106,8 @@ var stages = []stage{
 		replay:    (*replay).discovery,
 	},
 	{
-		// Every row: the generic `path` key needs no hook, and a route's declared
-		// path reaches the enforced path-set whatever the row.
+		// Every Strategy: the generic `path` key needs no hook, and a route's declared
+		// path reaches the enforced path-set whatever the Strategy.
 		name:      "route resolution",
 		golden:    "routes.golden.json",
 		asJSON:    true,
@@ -149,14 +149,14 @@ var stages = []stage{
 	},
 }
 
-// RowLookup resolves a neighbour row name from a case's case.json. A nil
-// RowLookup is allowed for a corpus whose cases name no neighbour.
-type RowLookup func(name string) (ecosystem.Strategy, bool)
+// StrategyLookup resolves a neighbour Strategy name from a case's case.json. A nil
+// StrategyLookup is allowed for a corpus whose cases name no neighbour.
+type StrategyLookup func(name string) (ecosystem.Strategy, bool)
 
 // Run replays every case under corpusDir against row: one subtest per case. A
-// corpusDir with no case fails. lookup resolves the neighbour row names a
+// corpusDir with no case fails. lookup resolves the neighbour Strategy names a
 // case's case.json lists; it may be nil when no case names a neighbour.
-func Run(t *testing.T, row ecosystem.Strategy, corpusDir string, lookup RowLookup) {
+func Run(t *testing.T, row ecosystem.Strategy, corpusDir string, lookup StrategyLookup) {
 	t.Helper()
 	update := golden.Update()
 	for _, c := range caseDirs(t, corpusDir) {
@@ -188,11 +188,11 @@ func caseDirs(t testing.TB, corpusDir string) []string {
 }
 
 // replayCase runs every stage over the case in dir and returns one error per
-// failing stage. A missing golden for a stage the row takes part in fails like
+// failing stage. A missing golden for a stage the Strategy takes part in fails like
 // any other mismatch; update mode writes it instead. A case whose operator
 // routes file is refused skips the stages that consume the resolved routes;
 // classification, which reads the repo alone, still runs.
-func replayCase(row ecosystem.Strategy, dir string, update bool, lookup RowLookup) []error {
+func replayCase(row ecosystem.Strategy, dir string, update bool, lookup StrategyLookup) []error {
 	cfg, err := readCaseConfig(dir)
 	if err != nil {
 		return []error{err}
@@ -256,11 +256,11 @@ func readCaseConfig(dir string) (caseConfig, error) {
 	return cfg, nil
 }
 
-// resolveRows is the case's rows in the order the pipeline reads them. Naming
-// the primary row fixes its position among the neighbours, which matters where
+// resolveRows is the case's Strategies in the order the pipeline reads them. Naming
+// the primary Strategy fixes its position among the neighbours, which matters where
 // production's ecosystem.Table order shows in a golden; left unnamed it comes
-// first. A row named twice would declare twice.
-func (cfg caseConfig) resolveRows(primary ecosystem.Strategy, lookup RowLookup) ([]ecosystem.Strategy, error) {
+// first. A Strategy named twice would declare twice.
+func (cfg caseConfig) resolveRows(primary ecosystem.Strategy, lookup StrategyLookup) ([]ecosystem.Strategy, error) {
 	seen := map[string]bool{}
 	var rows []ecosystem.Strategy
 	for _, name := range cfg.Rows {
@@ -306,10 +306,10 @@ func (m *memo[T]) get(f func() (T, error)) (T, error) {
 // replay is one case's state across stages: later stages consume earlier
 // stages' output.
 type replay struct {
-	// row is the primary row: the binding stage's renderers and in-tree gate,
+	// row is the primary Strategy: the binding stage's renderers and in-tree gate,
 	// the bindings summary (BindHomes) and the rewrites stage's RewriteRows use
 	// it alone. allRows, which holds row, widens what the pipeline reads across
-	// rows, including the rewrites stage's proxy routes.
+	// Strategies, including the rewrites stage's proxy routes.
 	row     ecosystem.Strategy
 	allRows []ecosystem.Strategy
 	port    int
@@ -321,7 +321,7 @@ type replay struct {
 	proxied  memo[[]registryproxy.Route]
 }
 
-// primaryRows is what the stages that render only the case's own row see.
+// primaryRows is what the stages that render only the case's own Strategy see.
 func (c *replay) primaryRows() []ecosystem.Strategy { return []ecosystem.Strategy{c.row} }
 
 func (c *replay) repo() string { return filepath.Join(c.dir, "repo") }
@@ -378,7 +378,7 @@ func (c *replay) parsedRoutes() ([]registryroutes.Route, error) {
 
 // refusedError is ParseRows rejecting an operator-written routes file, which a
 // case may pin as its outcome. Discovery's own output failing to parse is a
-// bug in the row, never a refusal, so it stays a plain error.
+// bug in the Strategy, never a refusal, so it stays a plain error.
 type refusedError struct{ error }
 
 func (e *refusedError) Unwrap() error { return e.error }
@@ -445,7 +445,7 @@ func (c *replay) pathSet() ([]byte, error) {
 
 // proxyRoutes is the proxy route table stages 4 to 6 run against: the
 // production projection (registrypathset.ApplyToRoute, then
-// registryproxy.AssignPrefixes) over the path sets derived from every row the
+// registryproxy.AssignPrefixes) over the path sets derived from every Strategy the
 // case names.
 // Credentials stay empty: no secret is resolved.
 func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {

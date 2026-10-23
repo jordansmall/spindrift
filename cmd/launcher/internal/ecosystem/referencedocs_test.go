@@ -12,7 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/golden"
 )
 
-// The rows live only in Go, so docs/reference.md's spans over them are
+// The Strategies live only in Go, so docs/reference.md's spans over them are
 // rendered here rather than by a Nix renderer. This lives in a _test.go file
 // because containment_test.go scans non-test sources for ecosystem literals.
 
@@ -34,8 +34,8 @@ var referenceSpans = []docSpan{
 	{"REGISTRY DISCOVERY SOURCES", renderRegistryDiscoverySources},
 }
 
-// renderLockfileClassification merges consecutive Table rows sharing a
-// Classification (npm, yarn and pnpm report one ecosystem). Only adjacent rows
+// renderLockfileClassification merges consecutive Table Strategies sharing a
+// Classification (npm, yarn and pnpm report one ecosystem). Only adjacent Strategies
 // merge, so the rendered order is always first-match precedence, i.e. Table
 // order.
 func renderLockfileClassification() string {

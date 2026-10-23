@@ -17,7 +17,7 @@ func alwaysMatch(Store, ecosystem.Declaration) (bool, error) { return true, nil 
 
 func probeAs(scheme string) Probe { return func(string) string { return scheme } }
 
-// discoverSynthetic runs DiscoverRows over the synthetic row alone.
+// discoverSynthetic runs DiscoverRows over the synthetic Strategy alone.
 func discoverSynthetic(t *testing.T, dir string, stores []Store, lookup Lookup, probe Probe) ([]Route, Report) {
 	t.Helper()
 	routes, report, err := DiscoverRows(dir, syntheticRows, stores, lookup, probe)
@@ -123,7 +123,7 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 		{Name: "other-store", Path: "/home/agent/other"},
 	}
 	// Both stores would report a match; earlier in the slice must win.
-	row := synthetic.Row
+	row := synthetic.Strategy
 	row.CredentialStores = []string{"netrc", "other-store"}
 	routes, report, err := DiscoverRows(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
 	if err != nil {
@@ -140,7 +140,7 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	}
 }
 
-// A store outside the declaration's row is never queried, so its lookup must
+// A store outside the declaration's Strategy is never queried, so its lookup must
 // not run for that declaration.
 func TestDiscover_StoreOutsideRowSkippedForDeclaration(t *testing.T) {
 	dir := t.TempDir()
@@ -195,7 +195,7 @@ func TestDiscover_OutsideRowOnlyStoreList_NamesStoreForDeclaration(t *testing.T)
 }
 
 // A declaration carrying a RegistryName must not widen which stores are
-// queried: the row's store set alone decides.
+// queried: the Strategy's store set alone decides.
 func TestFirstMatch_StoreOutsideRowSkippedForDeclarationWithRegistryName(t *testing.T) {
 	stores := []Store{
 		{Name: "outside-store", Path: "/home/agent/outside"},
@@ -207,7 +207,7 @@ func TestFirstMatch_StoreOutsideRowSkippedForDeclarationWithRegistryName(t *test
 		}
 		return false, nil
 	}
-	d := ecosystem.Declaration{Ecosystem: synthetic.Row.Name, Host: "registry.example.com", RegistryName: "myorg"}
+	d := ecosystem.Declaration{Ecosystem: synthetic.Strategy.Name, Host: "registry.example.com", RegistryName: "myorg"}
 
 	_, searched, found := firstMatch(stores, ecosystem.CredentialStores(syntheticRows), lookup, d)
 	if found {
@@ -218,8 +218,8 @@ func TestFirstMatch_StoreOutsideRowSkippedForDeclarationWithRegistryName(t *test
 	}
 }
 
-// The gate reads the injected row-to-store map, not a hardcoded rule: a store
-// the row leaves out is named but never queried, and an ecosystem with no row
+// The gate reads the injected Strategy-to-store map, not a hardcoded rule: a store
+// the Strategy leaves out is named but never queried, and an ecosystem with no Strategy
 // queries nothing.
 func TestFirstMatch_QueriesOnlyStoresInRowSet(t *testing.T) {
 	stores := []Store{
@@ -283,13 +283,13 @@ func TestDiscover_NoteFlowsToReportNoRegistry(t *testing.T) {
 	if len(routes) != 0 {
 		t.Errorf("routes = %+v, want none", routes)
 	}
-	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Row.Name}}
+	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Strategy.Name}}
 	if !slices.Equal(report.NoRegistry, want) {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
 }
 
-// A registry URL the row's parser rejects as unusable yields no route, and is
+// A registry URL the Strategy's parser rejects as unusable yields no route, and is
 // reported the way Extract reports any other unusable one. Discover has no
 // empty-MatchHost guard of its own: registryroutes.Parse rejects such a route
 // (see runRegistryDiscover's invariant in registrydiscover.go), so keeping it
@@ -302,7 +302,7 @@ func TestDiscover_UnusableURLYieldsNoRouteReportedAsSkipped(t *testing.T) {
 	if len(routes) != 0 {
 		t.Fatalf("routes = %+v, want none", routes)
 	}
-	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Row.Name, Skipped: true}}
+	want := []ecosystem.Note{{ConfigPath: cfgPath, Ecosystem: synthetic.Strategy.Name, Skipped: true}}
 	if !slices.Equal(report.NoRegistry, want) {
 		t.Errorf("report.NoRegistry = %+v, want %+v", report.NoRegistry, want)
 	}
@@ -600,7 +600,7 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
-	// Row order decides, so the first row's declaration wins for the shared host.
+	// Strategy order decides, so the first Strategy's declaration wins for the shared host.
 	if routes[0].UpstreamBaseURL != "https://shared.example.com/first" {
 		t.Errorf("routes[0].UpstreamBaseURL = %q, want the first row's URL", routes[0].UpstreamBaseURL)
 	}
@@ -623,7 +623,7 @@ func TestDiscover_MatchedStoreCompanionsComeFromKindStoreConfig(t *testing.T) {
 		t.Run(kind.SourceKey, func(t *testing.T) {
 			const path = "/home/agent/store"
 			stores := []Store{{Name: kind.SourceKey, Path: path}}
-			row := synthetic.Row
+			row := synthetic.Strategy
 			row.CredentialStores = []string{kind.SourceKey}
 			routes, _, err := DiscoverRows(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
 			if err != nil {
@@ -668,8 +668,8 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 	}
 }
 
-// The stub row's config path is in no Table row, so a route can only appear if
-// DiscoverRows walked the supplied rows rather than ecosystem.Table.
+// The stub Strategy's config path is in no Table Strategy, so a route can only appear if
+// DiscoverRows walked the supplied Strategies rather than ecosystem.Table.
 func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, "fake.cfg", "x")

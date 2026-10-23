@@ -9,7 +9,7 @@ type EnvExport struct {
 }
 
 // ExportValue returns the value bound to name in exports, and whether name was
-// present. A row's exports are conditional (a host-rooted route can leave GOPROXY
+// present. A Strategy's exports are conditional (a host-rooted route can leave GOPROXY
 // or the npm vars unrendered), so absent and empty are different answers.
 func ExportValue(exports []EnvExport, name string) (string, bool) {
 	for _, e := range exports {

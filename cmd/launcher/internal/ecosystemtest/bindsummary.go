@@ -39,7 +39,7 @@ func (c *replay) lockfileScan() ([]byte, error) {
 }
 
 // bindingsSummary is what BindHomes prints for the case's routes. A HomeConfig
-// row's home resolves to a fresh temp dir, since BindHomes writes the config
+// Strategy's home resolves to a fresh temp dir, since BindHomes writes the config
 // there, and the output names it as $<HomeEnvVar> so the golden is stable.
 func (c *replay) bindingsSummary() ([]byte, error) {
 	routes, err := c.manifestRoutes()

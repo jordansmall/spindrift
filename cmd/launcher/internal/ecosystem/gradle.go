@@ -15,7 +15,7 @@ const nameGradle = "gradle"
 const GradleRetiredRouteKey = "gradle-path"
 
 // gradleRow binds entirely through HomeConfig.Render: Gradle auto-loads the
-// rendered init-script rather than reading an env var, so this row needs
+// rendered init-script rather than reading an env var, so this Strategy needs
 // neither EnvExports nor BindingEnvVar.
 var gradleRow = Strategy{
 	Name:             nameGradle,

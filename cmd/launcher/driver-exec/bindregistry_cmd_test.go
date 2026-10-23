@@ -20,7 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// A hermetic $HOME with the synthetic and stub rows' home-directory env vars
+// A hermetic $HOME with the synthetic and stub Strategies' home-directory env vars
 // left unset (issue #3201): a run reaching a home-config write would otherwise land in the real
 // ambient one. Tests that t.Setenv their own HOME or home-directory var scope
 // back to this default at teardown.
@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("HOME", home)
 	for _, v := range []string{
-		synthetic.Row.HomeConfig.HomeEnvVar,
+		synthetic.Strategy.HomeConfig.HomeEnvVar,
 		"STUB_ECOSYSTEM_HOME", "STUB_HOME_ECOSYSTEM_HOME", "STUB_REPO_AWARE_HOME", "STUB_HOME_HOME",
 	} {
 		os.Unsetenv(v)
@@ -105,19 +105,19 @@ func clearManifestEnv(t *testing.T) {
 // declaration) rendered once for the exact-wording assertions below.
 var forwarderPortStr = strconv.Itoa(bindregistry.ForwarderPort)
 
-// runSyntheticBind is runBindRegistryWithRows over the kit's synthetic row
+// runSyntheticBind is runBindRegistryWithRows over the kit's synthetic Strategy
 // alone: the generic behaviour of the verb, with no real ecosystem's rendering
 // in the way.
 func runSyntheticBind(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
-	return runBindRegistryWithRows(args, []ecosystem.Strategy{synthetic.Row}, stdout, probe, spawn, lookPath, timeout, pollInterval)
+	return runBindRegistryWithRows(args, []ecosystem.Strategy{synthetic.Strategy}, stdout, probe, spawn, lookPath, timeout, pollInterval)
 }
 
-// rowsWith returns the synthetic row followed by the stub rows, in that order.
+// rowsWith returns the synthetic Strategy followed by the stub Strategies, in that order.
 func rowsWith(extra ...ecosystem.Strategy) []ecosystem.Strategy {
-	return append([]ecosystem.Strategy{synthetic.Row}, extra...)
+	return append([]ecosystem.Strategy{synthetic.Strategy}, extra...)
 }
 
-// exportStubRow is a row exporting each named var, valued at the route's local
+// exportStubRow is a Strategy exporting each named var, valued at the route's local
 // URL.
 func exportStubRow(name string, vars ...string) ecosystem.Strategy {
 	return ecosystem.Strategy{
@@ -132,27 +132,27 @@ func exportStubRow(name string, vars ...string) ecosystem.Strategy {
 	}
 }
 
-// syntheticHome points the synthetic row's home-directory var at a fresh
+// syntheticHome points the synthetic Strategy's home-directory var at a fresh
 // directory and returns it.
 func syntheticHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, dir)
+	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, dir)
 	return dir
 }
 
-// syntheticHomeConfigPath is where the synthetic row's home config lands under home.
+// syntheticHomeConfigPath is where the synthetic Strategy's home config lands under home.
 func syntheticHomeConfigPath(home string) string {
-	return filepath.Join(home, synthetic.Row.HomeConfig.ConfigPath)
+	return filepath.Join(home, synthetic.Strategy.HomeConfig.ConfigPath)
 }
 
-// syntheticHomeConfig is the synthetic row's home config for a route prefix at
-// the Forwarder's port, from the row's own renderer.
+// syntheticHomeConfig is the synthetic Strategy's home config for a route prefix at
+// the Forwarder's port, from the Strategy's own renderer.
 func syntheticHomeConfig(prefix string) string {
-	return synthetic.Row.HomeConfig.Render(bindregistry.ForwarderPort, prefix, nil)
+	return synthetic.Strategy.HomeConfig.Render(bindregistry.ForwarderPort, prefix, nil)
 }
 
-// syntheticExport is the line the synthetic row's env export renders to.
+// syntheticExport is the line the synthetic Strategy's env export renders to.
 func syntheticExport(prefix string) string {
 	return "export SYNTHETIC_REGISTRY='" + ecosystem.RouteLocalURL(prefix, bindregistry.ForwarderPort) + "'"
 }
@@ -167,7 +167,7 @@ func mountSocketManifest(t *testing.T, routes ...registrymanifest.Route) string 
 	return socketPath
 }
 
-// bindReady runs bindings mode over rows against a mounted socket whose probe
+// bindReady runs bindings mode over Strategies against a mounted socket whose probe
 // reports ready, returning the exit code, stdout and the env file's path.
 func bindReady(t *testing.T, rows []ecosystem.Strategy, routes ...registrymanifest.Route) (rc int, stdout, bindingsOut string) {
 	t.Helper()
@@ -391,8 +391,8 @@ func TestBindRegistry_AlreadyListeningWritesBindings(t *testing.T) {
 	}
 }
 
-// Issue #3181: bindings mode must collect exports by walking the rows, not by
-// naming individual ecosystems' renderers. A stub row's export reaching the
+// Issue #3181: bindings mode must collect exports by walking the Strategies, not by
+// naming individual ecosystems' renderers. A stub Strategy's export reaching the
 // written file proves the walk; a by-name call site would never see it.
 func TestBindRegistry_ExportsComeFromRowsWalk(t *testing.T) {
 	syntheticHome(t)
@@ -411,8 +411,8 @@ func TestBindRegistry_ExportsComeFromRowsWalk(t *testing.T) {
 	}
 }
 
-// Issue #3182, the same row-generic contract for home-level config writes: a
-// stub row's rendered file reaching disk proves the walk, where a call site
+// Issue #3182, the same Strategy-generic contract for home-level config writes: a
+// stub Strategy's rendered file reaching disk proves the walk, where a call site
 // naming one ecosystem directly would never write it.
 func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
@@ -446,14 +446,14 @@ func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 }
 
 // Issue #3185, for the success summary's per-ecosystem "bound to it via ..."
-// fragments. Two stub rows, one with a BindingEnvVar and one with only a
-// HomeConfig, prove both halves of the precedence a row-generic walk applies.
+// fragments. Two stub Strategies, one with a BindingEnvVar and one with only a
+// HomeConfig, prove both halves of the precedence a Strategy-generic walk applies.
 func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
 	t.Setenv("STUB_HOME_ECOSYSTEM_HOME", stubHome)
 	syntheticHome(t)
 	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
-	// The summary skips a BindingEnvVar row whose var went unexported, so the
+	// The summary skips a BindingEnvVar Strategy whose var went unexported, so the
 	// stub needs a renderer or it proves nothing about the walk.
 	envStub.BindingEnvVar = "STUB_ENV_REGISTRY"
 	rows := rowsWith(
@@ -487,7 +487,7 @@ func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 }
 
 // Issue #3185, for the gate-unusable fallback warning: the ecosystem list must
-// come from walking the rows, not a hand-maintained literal a new row could
+// come from walking the Strategies, not a hand-maintained literal a new Strategy could
 // silently be left out of.
 func TestBindRegistry_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
 	rows := rowsWith(ecosystem.Strategy{Name: "stub-ecosystem"})
@@ -551,14 +551,14 @@ func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 	return names
 }
 
-// The rendered file's line order is the rows' order, each row's exports staying
+// The rendered file's line order is the Strategies' order, each Strategy's exports staying
 // contiguous; the stub names sort opposite to their position so a sorted file
 // fails here.
 func TestBindRegistry_ExportOrderFollowsRows(t *testing.T) {
 	syntheticHome(t)
 	rows := []ecosystem.Strategy{
 		exportStubRow("stub-z", "STUB_Z_FIRST", "STUB_Z_SECOND"),
-		synthetic.Row,
+		synthetic.Strategy,
 		exportStubRow("stub-a", "STUB_A_ONLY"),
 	}
 
@@ -673,7 +673,7 @@ func TestBindRegistry_AlreadyListeningPrintsSuccessLines(t *testing.T) {
 	}
 }
 
-// The summary half of issues #3259 and #3260: a BindingEnvVar row whose var the
+// The summary half of issues #3259 and #3260: a BindingEnvVar Strategy whose var the
 // route leaves unexported must not appear in the summary, which would otherwise
 // claim a binding that does not exist.
 func TestBindRegistry_SummaryOmitsUnexportedBindingVars(t *testing.T) {
@@ -699,10 +699,10 @@ func TestBindRegistry_SummaryOmitsUnexportedBindingVars(t *testing.T) {
 
 // Covers the $HOME/<HomeRelativeDefault> fallback branch itself, not just the
 // both-unset guard around it: every other home-config test here either pins the
-// row's home var or empties both, so none runs the one branch every real
+// Strategy's home var or empties both, so none runs the one branch every real
 // deployment takes.
 func TestBindRegistry_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T) {
-	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
+	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, "")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -711,7 +711,7 @@ func TestBindRegistry_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T
 		t.Fatalf("bind-registry exit = %d, want 0 (stdout=%q)", rc, stdout)
 	}
 
-	got, err := os.ReadFile(syntheticHomeConfigPath(filepath.Join(home, synthetic.Row.HomeConfig.HomeRelativeDefault)))
+	got, err := os.ReadFile(syntheticHomeConfigPath(filepath.Join(home, synthetic.Strategy.HomeConfig.HomeRelativeDefault)))
 	if err != nil {
 		t.Fatalf("read home config: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestBindRegistry_EmptyHomeEnvVarFallsBackToHomeRelativeDefault(t *testing.T
 }
 
 // The home config write shares the env export write's all-or-nothing readiness
-// gate: a Forwarder that never becomes ready must leave the row's home
+// gate: a Forwarder that never becomes ready must leave the Strategy's home
 // directory untouched, not just bindings-env-output.
 func TestBindRegistry_TimeoutSkipsHomeConfig(t *testing.T) {
 	mountSocketManifest(t)
@@ -747,7 +747,7 @@ func TestBindRegistry_TimeoutSkipsHomeConfig(t *testing.T) {
 	}
 }
 
-// With a row's home var and $HOME both unset, bindings mode must fail loud
+// With a Strategy's home var and $HOME both unset, bindings mode must fail loud
 // rather than resolve the home to a path under the cwd or "/", which
 // MkdirAll/WriteFile happily create as root, claiming success while binding
 // nothing anyone will read. The bash this replaced ran under `set -u` and would
@@ -755,7 +755,7 @@ func TestBindRegistry_TimeoutSkipsHomeConfig(t *testing.T) {
 // claiming a binding or a live Forwarder when that later write failed (issue
 // #2931).
 func TestBindRegistry_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
-	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
+	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
 
 	envStub := exportStubRow("stub-env-ecosystem", "STUB_ENV_REGISTRY")
@@ -764,8 +764,8 @@ func TestBindRegistry_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
 	if rc == 0 {
 		t.Fatalf("bind-registry exit = 0, want non-zero when the home var and HOME are both empty (stdout=%q)", stdout)
 	}
-	if !strings.Contains(stdout, synthetic.Row.HomeConfig.HomeEnvVar) {
-		t.Errorf("stdout = %q, want it to mention %s", stdout, synthetic.Row.HomeConfig.HomeEnvVar)
+	if !strings.Contains(stdout, synthetic.Strategy.HomeConfig.HomeEnvVar) {
+		t.Errorf("stdout = %q, want it to mention %s", stdout, synthetic.Strategy.HomeConfig.HomeEnvVar)
 	}
 	if strings.Contains(stdout, "bound to it via") {
 		t.Errorf("stdout = %q, want it NOT to claim a binding when a later write (home resolve) failed", stdout)
@@ -775,10 +775,10 @@ func TestBindRegistry_EmptyHomeEnvVarAndHomeFailsLoud(t *testing.T) {
 	}
 }
 
-// Issue #2931 finding: a row's EnvExports warnings used to print before the
+// Issue #2931 finding: a Strategy's EnvExports warnings used to print before the
 // fallible writes, so stdout could claim an override that was never applied.
 func TestBindRegistry_HomeResolveFailureOmitsRowWarnings(t *testing.T) {
-	t.Setenv(synthetic.Row.HomeConfig.HomeEnvVar, "")
+	t.Setenv(synthetic.Strategy.HomeConfig.HomeEnvVar, "")
 	t.Setenv("HOME", "")
 	warnStub := exportStubRow("stub-warn-ecosystem", "STUB_WARN_REGISTRY")
 	inner := warnStub.EnvExports
@@ -1088,12 +1088,12 @@ func TestBindRegistry_TCPManifestNonNumericPortWarns(t *testing.T) {
 // apply modes and must probe/spawn the Forwarder exactly once across both. probe
 // always reports "not ready", so a gate resolved once per mode (the pre-#3141
 // shape) would call spawn twice. Issue #3201 split bindings mode out of this
-// invocation, so it is no longer folded in here. The repo-aware row is a stub:
-// the synthetic row has no repo-aware home config, and a row carrying one is
+// invocation, so it is no longer folded in here. The repo-aware Strategy is a stub:
+// the synthetic Strategy has no repo-aware home config, and a Strategy carrying one is
 // excluded from the in-tree rewrite.
 func TestBindRegistry_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, synthetic.Row.InTreeConfigPath, intreeRegistriesContent)
+	writeTrackedIntreeFile(t, dir, synthetic.Strategy.InTreeConfigPath, intreeRegistriesContent)
 
 	socketPath := shortUnixSocketPath(t)
 	listenOnFakeSocket(t, socketPath)
@@ -1120,7 +1120,7 @@ func TestBindRegistry_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *test
 		t.Errorf("stdout = %q, want the timeout warning exactly twice (once per mode -- in-tree rewrite, repo-aware home config -- from the one shared gate result), got %d", stdout.String(), got)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, synthetic.Row.InTreeConfigPath))
+	got, err := os.ReadFile(filepath.Join(dir, synthetic.Strategy.InTreeConfigPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1141,17 +1141,17 @@ func newIntreeTestRepo(t *testing.T) string {
 	return dir
 }
 
-// intreeRegistriesContent names upstream.example in the synthetic row's
+// intreeRegistriesContent names upstream.example in the synthetic Strategy's
 // `name = <url>` shape. ApplyInTreeBinding only string-replaces the upstream
-// host and never parses the file, so one line covers every in-tree row.
+// host and never parses the file, so one line covers every in-tree Strategy.
 const intreeRegistriesContent = "main = https://upstream.example/\n"
 
-// intreeRootRow is an in-tree row whose config sits at the repo root, beside
-// the synthetic row's nested one.
+// intreeRootRow is an in-tree Strategy whose config sits at the repo root, beside
+// the synthetic Strategy's nested one.
 var intreeRootRow = ecosystem.Strategy{Name: "stub-root", InTreeConfigPath: ".stub-registries"}
 
-// intreeSecondRow is a second in-tree row, so cross-row tests see more than one
-// sibling of the synthetic row.
+// intreeSecondRow is a second in-tree Strategy, so cross-Strategy tests see more than one
+// sibling of the synthetic Strategy.
 var intreeSecondRow = ecosystem.Strategy{Name: "stub-second", InTreeConfigPath: "stub-second.conf"}
 
 // intreeRepoAwareRow binds through a repo-aware home config, which excludes it
@@ -1222,7 +1222,7 @@ func listenOnFakeSocket(t *testing.T, socketPath string) {
 // the exact-match content assertions below account for.
 var intreeUpstreamRoute = registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"}
 
-// runIntree runs one in-tree action over rows with the default readiness
+// runIntree runs one in-tree action over Strategies with the default readiness
 // timings.
 func runIntree(action, dir string, rows []ecosystem.Strategy, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc) (rc int, stdout string) {
 	var out bytes.Buffer
@@ -1235,7 +1235,7 @@ func runIntree(action, dir string, rows []ecosystem.Strategy, probe bindregistry
 	return rc, out.String()
 }
 
-// applyReady runs in-tree apply over rows against a Forwarder already reporting
+// applyReady runs in-tree apply over Strategies against a Forwarder already reporting
 // ready, so it never spawns.
 func applyReady(dir string, rows []ecosystem.Strategy) (rc int, stdout string) {
 	return runIntree("apply", dir, rows,
@@ -1263,7 +1263,7 @@ func wantRewritten(t *testing.T, dir, relPath, when string) {
 // bit unset. No partial rewrite.
 func TestBindRegistry_IntreeApplyDeadForwarderLeavesFileUntouched(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	mountSocketManifest(t, intreeUpstreamRoute)
 
@@ -1291,7 +1291,7 @@ func TestBindRegistry_IntreeApplyDeadForwarderLeavesFileUntouched(t *testing.T) 
 
 func TestBindRegistry_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	mountSocketManifest(t, intreeUpstreamRoute)
 
@@ -1326,7 +1326,7 @@ func TestBindRegistry_IntreeApplyReadyRewritesAndHidesFromGit(t *testing.T) {
 // entry, and the valid route's rewrite still applies.
 func TestBindRegistry_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	mountSocketManifest(t, intreeUpstreamRoute, registrymanifest.Route{Prefix: "r1", UpstreamHost: ""})
 
@@ -1342,7 +1342,7 @@ func TestBindRegistry_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *testing.T) {
 // every rewrite candidate was filtered out.
 func TestBindRegistry_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	mountSocketManifest(t, registrymanifest.Route{Prefix: "r0", UpstreamHost: ""})
 
@@ -1363,7 +1363,7 @@ func TestBindRegistry_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *testing.T) {
 // it is just unusable for host-based rewriting.
 func TestBindRegistry_IntreeApplyDuplicateUpstreamHostWarnsAndSuppressesGenericWarning(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	mountSocketManifest(t,
 		registrymanifest.Route{Prefix: "r0", UpstreamHost: "upstream.example"},
@@ -1389,7 +1389,7 @@ func TestBindRegistry_IntreeApplyDuplicateUpstreamHostWarnsAndSuppressesGenericW
 // for the old empty -registry-proxy-socket no-op.
 func TestBindRegistry_IntreeApplyManifestAbsentIsNoOp(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	clearManifestEnv(t)
 
@@ -1419,7 +1419,7 @@ func TestBindRegistry_IntreeApplyManifestAbsentIsNoOp(t *testing.T) {
 // missing route upstream host warns rather than silently no-ops.
 func TestBindRegistry_IntreeApplyEmptyUpstreamHostWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	mountSocketManifest(t) // no routes at all
 
@@ -1442,7 +1442,7 @@ func TestBindRegistry_IntreeApplyEmptyUpstreamHostWarns(t *testing.T) {
 // to start" warning.
 func TestBindRegistry_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	socketPath := mountSocketManifest(t, intreeUpstreamRoute)
 
@@ -1481,7 +1481,7 @@ func TestBindRegistry_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *testing.T) 
 // spawnHTTPForwarder, never the injected socket-shaped spawn.
 func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "s3cr3t")
 	setTCPManifestEnv(t, "registry.example", "9443", intreeUpstreamRoute)
@@ -1532,7 +1532,7 @@ func TestBindRegistry_IntreeApplyTCPTransportRewritesFile(t *testing.T) {
 // intree-apply mode.
 func TestBindRegistry_IntreeApplyTCPTransportMissingSecretWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	t.Setenv("REGISTRY_PROXY_TCP_SECRET", "")
 	setTCPManifestEnv(t, "registry.example", "9443", intreeUpstreamRoute)
@@ -1566,11 +1566,11 @@ func TestBindRegistry_IntreeApplyTCPTransportMissingSecretWarns(t *testing.T) {
 // never consults REGISTRY_PROXY_MANIFEST or the probe/spawn deps.
 func TestBindRegistry_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	clearManifestEnv(t)
 
-	outcome, err := bindregistry.ApplyInTreeBinding(dir, synthetic.Row, []bindregistry.HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:" + forwarderPortStr}})
+	outcome, err := bindregistry.ApplyInTreeBinding(dir, synthetic.Strategy, []bindregistry.HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:" + forwarderPortStr}})
 	if err != nil || outcome != bindregistry.ApplyApplied {
 		t.Fatalf("ApplyInTreeBinding (setup) = (%v, %v), want (%v, nil)", outcome, err, bindregistry.ApplyApplied)
 	}
@@ -1592,16 +1592,16 @@ func TestBindRegistry_IntreeRevertRestoresAppliedFile(t *testing.T) {
 	}
 }
 
-// The multi-row happy path a review finding called out as missing: every other
-// intree test here exercises the first row only. A tracked repo-aware row's
-// config sits alongside three in-tree rows and must never be touched by any pass
-// (issue #3201: a repo-aware row does not participate in InTreeBindings at all).
+// The multi-Strategy happy path a review finding called out as missing: every other
+// intree test here exercises the first Strategy only. A tracked repo-aware Strategy's
+// config sits alongside three in-tree Strategies and must never be touched by any pass
+// (issue #3201: a repo-aware Strategy does not participate in InTreeBindings at all).
 func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 	dir := newIntreeTestRepo(t)
 	rows := rowsWith(intreeRootRow, intreeSecondRow, intreeRepoAwareRow)
 	repoAwareRel := intreeRepoAwareRow.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, repoAwareRel, intreeRegistriesContent)
-	relPaths := []string{synthetic.Row.InTreeConfigPath, intreeRootRow.InTreeConfigPath, intreeSecondRow.InTreeConfigPath}
+	relPaths := []string{synthetic.Strategy.InTreeConfigPath, intreeRootRow.InTreeConfigPath, intreeSecondRow.InTreeConfigPath}
 	for _, rel := range relPaths {
 		writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	}
@@ -1652,7 +1652,7 @@ func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 	assertRepoAwareUntouched()
 
 	// Re-apply pass (AC4): the revert/re-apply sequence around branch recovery must
-	// rewrite and re-tag every row, not just the apply/revert pair above.
+	// rewrite and re-tag every Strategy, not just the apply/revert pair above.
 	rc, stdout = applyReady(dir, rows)
 	if rc != 0 {
 		t.Fatalf("bind-registry re-apply exit = %d, want 0 (stdout=%q)", rc, stdout)
@@ -1660,12 +1660,12 @@ func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 	assertApplied("after re-apply")
 }
 
-// newIntreeUnmergedTestRepo leaves the synthetic row's config genuinely unmerged
+// newIntreeUnmergedTestRepo leaves the synthetic Strategy's config genuinely unmerged
 // (UU), the same fixture shape as bindregistry's own unexported
 // newUnmergedTestRepo in intreebinding_test.go, replicated here because that
 // helper is unexported in a different package. `git update-index
 // --skip-worktree` then fails with exit 128 on that file, giving
-// ApplyInTreeBinding a genuine per-row failure. The sibling rows' configs are
+// ApplyInTreeBinding a genuine per-Strategy failure. The sibling Strategies' configs are
 // tracked and clean.
 func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) string {
 	t.Helper()
@@ -1675,7 +1675,7 @@ func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) str
 		writeTrackedIntreeFile(t, dir, row.InTreeConfigPath, intreeRegistriesContent)
 	}
 
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	full := filepath.Join(dir, rel)
 	write := func(content string) {
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -1716,13 +1716,13 @@ func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) str
 }
 
 // Regression test for a review finding: the apply loop used to return as soon as
-// one row errored, aborting the rest. A genuinely failing row (the unmerged
+// one Strategy errored, aborting the rest. A genuinely failing Strategy (the unmerged
 // first one) must not stop the loop, and the overall apply must still report
 // failure.
 func TestBindRegistry_IntreeApplyPartialFailureDoesNotBlockSiblingRows(t *testing.T) {
 	siblings := []ecosystem.Strategy{intreeRootRow, intreeSecondRow}
 	dir := newIntreeUnmergedTestRepo(t, siblings...)
-	failingRel := synthetic.Row.InTreeConfigPath
+	failingRel := synthetic.Strategy.InTreeConfigPath
 	mountSocketManifest(t, intreeUpstreamRoute)
 
 	rc, stdout := applyReady(dir, rowsWith(siblings...))
@@ -1767,7 +1767,7 @@ func TestBindRegistry_IntreeApplyMissingConfigWarns(t *testing.T) {
 // before #3082.
 func TestBindRegistry_IntreeApplyNotRegularConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	if err := os.MkdirAll(filepath.Join(dir, synthetic.Row.InTreeConfigPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, synthetic.Strategy.InTreeConfigPath), 0o755); err != nil {
 		t.Fatalf("mkdir the config path as a directory: %v", err)
 	}
 	mountSocketManifest(t, intreeUpstreamRoute)
@@ -1787,7 +1787,7 @@ func TestBindRegistry_IntreeApplyNotRegularConfigWarns(t *testing.T) {
 // four other messages.
 func TestBindRegistry_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	full := filepath.Join(dir, synthetic.Row.InTreeConfigPath)
+	full := filepath.Join(dir, synthetic.Strategy.InTreeConfigPath)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1811,7 +1811,7 @@ func TestBindRegistry_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 // read differently from ApplyNoopContent's "nothing to do".
 func TestBindRegistry_IntreeApplySkipWorktreeAlreadySetWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	rel := synthetic.Row.InTreeConfigPath
+	rel := synthetic.Strategy.InTreeConfigPath
 	writeTrackedIntreeFile(t, dir, rel, intreeRegistriesContent)
 	runGitCmd(t, dir, "update-index", "--skip-worktree", "--", rel)
 	mountSocketManifest(t, intreeUpstreamRoute)
@@ -1831,7 +1831,7 @@ func TestBindRegistry_IntreeApplySkipWorktreeAlreadySetWarns(t *testing.T) {
 // that the registry pin lives outside this file.
 func TestBindRegistry_IntreeApplyNoopContentWarns(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	writeTrackedIntreeFile(t, dir, synthetic.Row.InTreeConfigPath, "main = https://other.example/\n")
+	writeTrackedIntreeFile(t, dir, synthetic.Strategy.InTreeConfigPath, "main = https://other.example/\n")
 	mountSocketManifest(t, intreeUpstreamRoute)
 
 	rc, stdout := applyReady(dir, rowsWith())
@@ -1865,8 +1865,8 @@ func renderRepoAware(port int, prefix string, routes []registrymanifest.Route, r
 }
 
 // repoAwareSetup is a fresh repo (with repoConfig tracked at the repo-aware
-// row's in-tree path unless empty), a ready manifest naming routes, and a home
-// directory for the row, returning the repo, the home and an env output path.
+// Strategy's in-tree path unless empty), a ready manifest naming routes, and a home
+// directory for the Strategy, returning the repo, the home and an env output path.
 func repoAwareSetup(t *testing.T, repoConfig string, routes ...registrymanifest.Route) (dir, home, envOut string) {
 	t.Helper()
 	dir = newIntreeTestRepo(t)
@@ -1880,7 +1880,7 @@ func repoAwareSetup(t *testing.T, repoConfig string, routes ...registrymanifest.
 	return dir, home, envOut
 }
 
-// applyRepoAware runs in-tree apply over the repo-aware row alone against a
+// applyRepoAware runs in-tree apply over the repo-aware Strategy alone against a
 // Forwarder already reporting ready.
 func applyRepoAware(dir, envOut string) (rc int, stdout string) {
 	var out bytes.Buffer
@@ -1906,7 +1906,7 @@ func readFileOrFail(t *testing.T, path string) string {
 	return string(got)
 }
 
-// The end-to-end proof the verb wiring reaches a row's RepoAwareHomeConfig at
+// The end-to-end proof the verb wiring reaches a Strategy's RepoAwareHomeConfig at
 // all: the rendered home config must match that renderer's own output for the
 // same inputs.
 func TestBindRegistry_IntreeApplyWritesRepoAwareHomeConfig(t *testing.T) {
@@ -1923,14 +1923,14 @@ func TestBindRegistry_IntreeApplyWritesRepoAwareHomeConfig(t *testing.T) {
 		t.Errorf("home config = %q, want %q", got, want)
 	}
 
-	// A repo-aware row binds through its home config, so the tracked repo file
+	// A repo-aware Strategy binds through its home config, so the tracked repo file
 	// stays untouched.
 	if repoConfig := readIntreeFile(t, dir, intreeRepoAwareRow.InTreeConfigPath); repoConfig != intreeRegistriesContent {
 		t.Errorf("%s = %q, want byte-for-byte unchanged", intreeRepoAwareRow.InTreeConfigPath, repoConfig)
 	}
 }
 
-// The other half of the same apply: the row's exports reach the env output.
+// The other half of the same apply: the Strategy's exports reach the env output.
 func TestBindRegistry_IntreeApplyWritesRepoAwareEnvOutput(t *testing.T) {
 	dir, _, envOut := repoAwareSetup(t, intreeRegistriesContent, intreeUpstreamRoute)
 
@@ -1945,7 +1945,7 @@ func TestBindRegistry_IntreeApplyWritesRepoAwareEnvOutput(t *testing.T) {
 	}
 }
 
-// The common case: a repo with no tracked config for the row still gets its home
+// The common case: a repo with no tracked config for the Strategy still gets its home
 // config rendered from empty content, and exports nothing.
 func TestBindRegistry_IntreeApplyNoRepoConfigWritesEmptyEnvOutputAndBaseConfig(t *testing.T) {
 	dir, home, envOut := repoAwareSetup(t, "", intreeUpstreamRoute)
@@ -1993,7 +1993,7 @@ func TestBindRegistry_IntreeApplyPassesEveryRouteToRepoAwareRenderer(t *testing.
 	}
 }
 
-// The row value only returns warning strings, so without an end-to-end
+// The Strategy value only returns warning strings, so without an end-to-end
 // assertion the print loop in bindregistry.ApplyInTree's repo-aware half could be
 // deleted and nothing would fail.
 func TestBindRegistry_IntreeApplyPrintsRepoAwareWarningsToStdout(t *testing.T) {
@@ -2010,8 +2010,8 @@ func TestBindRegistry_IntreeApplyPrintsRepoAwareWarningsToStdout(t *testing.T) {
 	}
 }
 
-// multiBlockRoute is one route carrying a declaration block for each row below,
-// plus a block no row in the run knows. Every assertion that uses it is an
+// multiBlockRoute is one route carrying a declaration block for each Strategy below,
+// plus a block no Strategy in the run knows. Every assertion that uses it is an
 // exact expected string, so the unknown block must change neither the exit code
 // nor a rendered byte.
 func multiBlockRoute() registrymanifest.Route {
@@ -2096,7 +2096,7 @@ func TestBindRegistry_IntreeApplyRepoAwareRowReadsItsOwnBlock(t *testing.T) {
 }
 
 // A non-ENOENT read error: a missing config means "this repo declares nothing
-// for the row", while an unreadable one means the plan was derived from nothing
+// for the Strategy", while an unreadable one means the plan was derived from nothing
 // and the run must fail. The unreadable file is a directory, since os.ReadFile
 // then returns EISDIR without depending on the test running as a non-root user,
 // which a Box does not guarantee.
@@ -2148,7 +2148,7 @@ func TestBindRegistry_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
 
 // Review finding on issue #3201: -intree-action=apply re-renders the repo-aware
 // home configs from the repo's own tracked config, and bindings mode would then
-// re-render the same rows from the base template in the same invocation,
+// re-render the same Strategies from the base template in the same invocation,
 // silently clobbering what apply just wrote. No caller combines the two flags
 // today; this guards against one starting to.
 func TestBindRegistry_IntreeApplyWithBindingsEnvOutputRejected(t *testing.T) {
@@ -2209,7 +2209,7 @@ func TestBindRegistry_IntreeFlagValidation(t *testing.T) {
 // Forwarder, unlike bindings and intree-apply mode.
 func TestBindRegistry_LockfileScanWarnsOnHit(t *testing.T) {
 	dir := newIntreeTestRepo(t)
-	lockfile := synthetic.Row.LockfileNames[0]
+	lockfile := synthetic.Strategy.LockfileNames[0]
 	writeTrackedIntreeFile(t, dir, lockfile, "source = \"http://127.0.0.1:"+forwarderPortStr+"/\"\n")
 	setUnixManifestEnv(t, shortUnixSocketPath(t))
 
@@ -2231,7 +2231,7 @@ func TestBindRegistry_LockfileScanWarnsOnHit(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("runSyntheticBind exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
-	want := "==> WARNING: " + synthetic.Row.Classification + " lockfile " + lockfile + " still names the registry proxy Forwarder URL 127.0.0.1:" + forwarderPortStr + " — this will ship in the PR (issue #3199)\n"
+	want := "==> WARNING: " + synthetic.Strategy.Classification + " lockfile " + lockfile + " still names the registry proxy Forwarder URL 127.0.0.1:" + forwarderPortStr + " — this will ship in the PR (issue #3199)\n"
 	if stdout.String() != want {
 		t.Errorf("stdout = %q, want %q", stdout.String(), want)
 	}

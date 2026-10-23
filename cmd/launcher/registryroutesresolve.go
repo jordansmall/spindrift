@@ -19,7 +19,7 @@ import (
 // here, not in the file parser, so every production table carries a Prefix
 // (issue #3142) while the parser stays testable on its own.
 // rows is the ecosystem table to resolve over: production passes
-// ecosystem.Table, tests a synthetic row.
+// ecosystem.Table, tests a synthetic Strategy.
 func buildRegistryProxyRoutes(c config, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	if c.registryProxyRoutesFile == "" {
 		return nil, nil

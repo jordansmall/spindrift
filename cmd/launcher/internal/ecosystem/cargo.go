@@ -20,7 +20,7 @@ import (
 
 // nameCargo is cargoRow's Name. Cargo's rewrite rows tag themselves with it
 // too: registryproxy matches a rewrite row only against subtrees tagged with
-// the row's name, so the two spellings must never drift apart. Classification
+// the Strategy's name, so the two spellings must never drift apart. Classification
 // below spells "cargo" as well, but that is the nudge's family grouping, a
 // separate concept that only coincides here.
 const nameCargo = "cargo"
@@ -581,7 +581,7 @@ func CargoConfigTOMLWithReplacements(port int, prefix string, replacements []Car
 	return b.String()
 }
 
-// CargoRepoAwareConfig is the cargo row's RepoAwareHomeConfigRenderer (issue
+// CargoRepoAwareConfig is the cargo Strategy's RepoAwareHomeConfigRenderer (issue
 // #3201): it plans source replacements from the cloned repo's own un-rewritten
 // .cargo/config.toml, renders $CARGO_HOME/config.toml around that plan, and
 // derives the placeholder exports cargo's credential lookup needs. A repo with

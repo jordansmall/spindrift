@@ -22,7 +22,7 @@ type LockfileHit struct {
 // whose content contains the literal "127.0.0.1:<port>". It matches lockfiles
 // by basename across every tracked path rather than checking only the repo
 // root, since lockfiles nest in workspace members and nested Go modules. Hits
-// come out in rows order, then path order within a row.
+// come out in Strategies order, then path order within a Strategy.
 func ScanLockfilesForForwarderRows(repoDir string, port int, rows []ecosystem.Strategy) ([]LockfileHit, error) {
 	needle := fmt.Sprintf("127.0.0.1:%d", port)
 

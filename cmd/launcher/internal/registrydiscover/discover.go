@@ -67,10 +67,10 @@ type Report struct {
 	NoRegistry []ecosystem.Note
 }
 
-// DiscoverRows extracts registry declarations from repoDir over the given rows
+// DiscoverRows extracts registry declarations from repoDir over the given Strategies
 // and proposes a route per unique host, searching stores in order for a
-// matching credential. Each row's CredentialStores bound which stores are
-// queried for its declarations; a store outside a declaration's row is named
+// matching credential. Each Strategy's CredentialStores bound which stores are
+// queried for its declarations; a store outside a declaration's Strategy is named
 // in StoresSearched but never queried.
 func DiscoverRows(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
 	storesByEcosystem := ecosystem.CredentialStores(rows)
@@ -207,7 +207,7 @@ func declarationFacts(d ecosystem.Declaration) credresolver.StoreFacts {
 
 // firstMatch searches stores in order and returns the first hit plus every
 // configured store name, so StoresSearched names even a store the declaration's
-// row does not read and never comes back empty. A lookup error counts as
+// Strategy does not read and never comes back empty. A lookup error counts as
 // not-found and the search continues: one unreachable store must never abort
 // discovery of the rest.
 func firstMatch(stores []Store, storesByEcosystem map[string][]string, lookup Lookup, d ecosystem.Declaration) (store Store, searched []string, found bool) {

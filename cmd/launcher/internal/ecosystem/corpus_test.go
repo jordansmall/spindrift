@@ -13,7 +13,7 @@ import (
 
 // TestCorpus replays each corpus directory through the ecosystemtest kit
 // (issues #5654, #5655): one subtest per directory, one per case beneath it.
-// It walks testdata/corpus rather than naming rows, so a directory added there
+// It walks testdata/corpus rather than naming Strategies, so a directory added there
 // is replayed without a second edit here.
 func TestCorpus(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join("testdata", "corpus"))
@@ -44,10 +44,10 @@ func tableRow(name string) (ecosystem.Strategy, bool) {
 	return ecosystem.Strategy{}, false
 }
 
-// TestCorpus_EveryInTreeRowDerivesAPath guards the Table against a row whose
+// TestCorpus_EveryInTreeRowDerivesAPath guards the Table against a Strategy whose
 // in-tree config parses but derives no path, which would leave the proxy
 // refusing every request that ecosystem makes, or one whose subtree admits no
-// path beneath itself. Rows with an empty InTreeConfigPath derive nothing by
+// path beneath itself. Strategies with an empty InTreeConfigPath derive nothing by
 // design and are excluded.
 func TestCorpus_EveryInTreeRowDerivesAPath(t *testing.T) {
 	for _, row := range ecosystem.Table {
@@ -99,8 +99,8 @@ func TestCorpus_EveryInTreeRowDerivesAPath(t *testing.T) {
 	}
 }
 
-// A name added to a row's LockfileNames without a case holding that file under
-// the row's corpus directory would go unclassified and unscanned, since each
+// A name added to a Strategy's LockfileNames without a case holding that file under
+// the Strategy's corpus directory would go unclassified and unscanned, since each
 // stage replays only what a case's repo/ holds.
 func TestCorpus_EveryLockfileNameHasACase(t *testing.T) {
 	for _, row := range ecosystem.Table {
@@ -119,8 +119,8 @@ func TestCorpus_EveryLockfileNameHasACase(t *testing.T) {
 }
 
 // The lockfile scan's golden is empty unless a lockfile names the Forwarder, so
-// a row whose cases all leave it empty proves nothing about the scan reaching
-// that row.
+// a Strategy whose cases all leave it empty proves nothing about the scan reaching
+// that Strategy.
 func TestCorpus_EveryLockfileRowHasAScanHit(t *testing.T) {
 	for _, row := range ecosystem.Table {
 		if len(row.LockfileNames) == 0 {

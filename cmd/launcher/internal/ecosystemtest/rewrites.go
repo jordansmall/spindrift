@@ -28,7 +28,7 @@ type exchange struct {
 // rewrites serves each upstream/<match-host>/ tree from a local server the
 // projected route points at, then sends GET /<prefix>/<path> through the
 // proxy for every file in it, so the golden holds what a client would receive
-// after the row's RewriteRows ran. A case with no upstream/ directory yields an
+// after the Strategy's RewriteRows ran. A case with no upstream/ directory yields an
 // empty list.
 func (c *replay) rewrites() ([]byte, error) {
 	exchanges := []exchange{}

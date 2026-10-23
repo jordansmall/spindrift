@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	syntheticRows = []ecosystem.Strategy{synthetic.Row}
-	cfgPath       = synthetic.Row.InTreeConfigPath
+	syntheticRows = []ecosystem.Strategy{synthetic.Strategy}
+	cfgPath       = synthetic.Strategy.InTreeConfigPath
 )
 
 const hostDecl = "main = https://host.example.com/registry\n"
@@ -293,14 +293,14 @@ func TestMaterializeRef_NotDirComponentSkips(t *testing.T) {
 	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
-// One batch reply per row: mis-consuming the first row's tree reply payload
-// would desync the blob reply after it. The third row stays absent so the
+// One batch reply per Strategy: mis-consuming the first Strategy's tree reply payload
+// would desync the blob reply after it. The third Strategy stays absent so the
 // "missing" reply is parsed in the same batch.
 func TestMaterializeRef_MultiRowBatchParsing(t *testing.T) {
 	const twinContent = "twin = https://twin.example.com/registry\n"
 	twin := synthetic.Twin("synthetic-twin")
 	missing := synthetic.Twin("synthetic-missing")
-	rows := []ecosystem.Strategy{synthetic.Row, twin, missing}
+	rows := []ecosystem.Strategy{synthetic.Strategy, twin, missing}
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath + "/inner":    "anything",
 		twin.InTreeConfigPath: twinContent,

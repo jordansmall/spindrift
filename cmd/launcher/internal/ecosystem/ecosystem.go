@@ -65,29 +65,29 @@ type Strategy struct {
 	LockfileNames []string
 
 	// Classification is not one-to-one with Name: npm, yarn and pnpm are
-	// separate rows with their own lockfiles and in-tree config paths, but the
+	// separate Strategies with their own lockfiles and in-tree config paths, but the
 	// nudge collapses all three into one "npm/pnpm/yarn" family, as
 	// entrypoint.sh's old lockfile chain did.
 	Classification string
 
 	// InTreeConfigPath is empty for an ecosystem with no in-tree registry
-	// config to rewrite (go, gradle); consumers exclude such rows by filtering
-	// on that emptiness, never via a second hand-maintained list.
+	// config to rewrite (go, gradle); consumers exclude such Strategies by
+	// filtering on that emptiness, never via a second hand-maintained list.
 	InTreeConfigPath string
 
 	EnvExports EnvExportRenderer
 
 	HomeConfig *HomeConfig
 
-	// RepoAwareHomeConfig is nil for every row but cargo's (issue #3201). Such
-	// a row keeps its InTreeConfigPath, which the renderer reads, but is
+	// RepoAwareHomeConfig is nil for every Strategy but cargo's (issue #3201). Such
+	// a Strategy keeps its InTreeConfigPath, which the renderer reads, but is
 	// excluded from the in-tree rewrite, since the two do not compose
 	// (bindregistry.InTreeBindings). It needs a non-nil HomeConfig: the only
-	// caller filters HomeConfigRows(), so a row setting one alone is skipped.
+	// caller filters HomeConfigRows(), so a Strategy setting one alone is skipped.
 	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
 
-	// BindingEnvVar names the one env var the row's binding lands in (npm,
-	// pnpm, yarn, go), the same name its EnvExports renders. A file-bound row
+	// BindingEnvVar names the one env var the Strategy's binding lands in (npm,
+	// pnpm, yarn, go), the same name its EnvExports renders. A file-bound Strategy
 	// (cargo, gradle) leaves it empty and names its HomeConfig path. Naming a var
 	// is no promise the run rendered it (issues #3259, #3260): confirm it against
 	// the exports (see ExportValue).
@@ -114,14 +114,14 @@ type Strategy struct {
 	// "cargo-registries". Empty for npm, yarn and pnpm, which never had one.
 	RetiredRouteKey string
 
-	// CredentialStores names, by credresolver source key, the stores this row's
+	// CredentialStores names, by credresolver source key, the stores this Strategy's
 	// declarations are looked up in. It is a set, not an order: search order
 	// comes from credresolver's StoreKinds. A store missing here is still named
-	// in an unmatched host's StoresSearched but never queried for this row.
+	// in an unmatched host's StoresSearched but never queried for this Strategy.
 	CredentialStores []string
 }
 
-// EnvExportRows returns the rows carrying an EnvExports renderer, in Table
+// EnvExportRows returns the Strategies carrying an EnvExports renderer, in Table
 // order, which is the rendered export file's line order.
 // The slice is fresh, but its Strategy copies share their LockfileNames backing
 // array with Table, which callers must not write through.
@@ -129,7 +129,7 @@ func EnvExportRows() []Strategy {
 	return EnvExportRowsOf(Table)
 }
 
-// EnvExportRowsOf is EnvExportRows over the given rows rather than Table. The
+// EnvExportRowsOf is EnvExportRows over the given Strategies rather than Table. The
 // slice is fresh, but its Strategy copies share their LockfileNames backing array
 // with in, which callers must not write through.
 func EnvExportRowsOf(in []Strategy) []Strategy {
@@ -143,14 +143,14 @@ func EnvExportRowsOf(in []Strategy) []Strategy {
 	return rows
 }
 
-// HomeConfigRows returns the rows carrying a non-nil HomeConfig, in Table
+// HomeConfigRows returns the Strategies carrying a non-nil HomeConfig, in Table
 // order. The slice is fresh, but its Strategy copies share their LockfileNames
 // backing array with Table, which callers must not write through.
 func HomeConfigRows() []Strategy {
 	return HomeConfigRowsOf(Table)
 }
 
-// HomeConfigRowsOf is HomeConfigRows over the given rows rather than Table. The
+// HomeConfigRowsOf is HomeConfigRows over the given Strategies rather than Table. The
 // slice is fresh, but its Strategy copies share their LockfileNames backing array
 // with in, which callers must not write through.
 func HomeConfigRowsOf(in []Strategy) []Strategy {
@@ -165,7 +165,7 @@ func HomeConfigRowsOf(in []Strategy) []Strategy {
 }
 
 // ResponseRewriteRows returns every rewrite row declared across Table, in
-// Table order, so registryproxy never has to know which rows declare them.
+// Table order, so registryproxy never has to know which Strategies declare them.
 func ResponseRewriteRows() []registryvocab.RewriteRow {
 	var rows []registryvocab.RewriteRow
 	for _, row := range Table {
@@ -174,8 +174,8 @@ func ResponseRewriteRows() []registryvocab.RewriteRow {
 	return rows
 }
 
-// CredentialStores returns each row's CredentialStores keyed by row Name, so
-// registrydiscover never has to know which row reads which store. The slices
+// CredentialStores returns each Strategy's CredentialStores keyed by Strategy Name, so
+// registrydiscover never has to know which Strategy reads which store. The slices
 // are copies; callers may write through them.
 func CredentialStores(rows []Strategy) map[string][]string {
 	stores := make(map[string][]string, len(rows))
@@ -189,8 +189,8 @@ func CredentialStores(rows []Strategy) map[string][]string {
 // order. That order is load-bearing twice over: it encodes the first-hit
 // lockfile precedence entrypoint.sh's old if/elif chain had (issue #2930), and
 // it sets the env-export file's line order (EnvExportRows), so do not reorder
-// rows without checking every caller that stops at the first match.
-// Treat it as read-only; a consumer handing rows further out copies them.
+// Strategies without checking every caller that stops at the first match.
+// Treat it as read-only; a consumer handing Strategies further out copies them.
 var Table = []Strategy{
 	cargoRow,
 	npmRow,
@@ -200,7 +200,7 @@ var Table = []Strategy{
 	gradleRow,
 }
 
-// RowByRetiredRouteKey returns the row whose RetiredRouteKey equals key, so a
+// RowByRetiredRouteKey returns the Strategy whose RetiredRouteKey equals key, so a
 // caller translating a retired routes-file key never hand-lists which
 // ecosystem it stood for. ok is false when nothing matches, including key ==
 // "": npm, yarn and pnpm all carry an empty RetiredRouteKey, so without the

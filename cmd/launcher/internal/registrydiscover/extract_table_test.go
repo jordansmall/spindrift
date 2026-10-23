@@ -9,10 +9,10 @@ import (
 )
 
 // TestExtract_ReadsEveryPathFromTable verifies Extract reads each config file
-// from wherever ecosystem.Table's row names it as InTreeConfigPath, rather than
+// from wherever ecosystem.Table's Strategy names it as InTreeConfigPath, rather than
 // a path hardcoded in registrydiscover itself -- the coupling this issue
 // (#3184) closes. A directory planted at the path makes the read fail, and the
-// failure names the path, so the check needs no row's config format.
+// failure names the path, so the check needs no Strategy's config format.
 func TestExtract_ReadsEveryPathFromTable(t *testing.T) {
 	for _, row := range ecosystem.Table {
 		if row.InTreeConfigPath == "" || row.ConfigParser == nil {

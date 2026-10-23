@@ -15,7 +15,7 @@ import (
 )
 
 // isStrategyType reports whether expr is the bare identifier Strategy, the type a
-// package-level row var's composite literal must carry to be counted.
+// package-level Strategy var's composite literal must carry to be counted.
 func isStrategyType(expr ast.Expr) bool {
 	id, ok := expr.(*ast.Ident)
 	return ok && id.Name == "Strategy"
@@ -28,7 +28,7 @@ func isStrategySliceType(expr ast.Expr) bool {
 	return ok && at.Len == nil && isStrategyType(at.Elt)
 }
 
-// isRowValueExpr reports whether expr is a value a row var may hold: a
+// isRowValueExpr reports whether expr is a value a Strategy var may hold: a
 // Strategy{...} literal, or a call to a func named in rowFuncs. rowFuncs must
 // come from a prior pass over the same files, since `var fooRow =
 // newRow(...)` lets the func live in a different file than the var.
@@ -45,7 +45,7 @@ func isRowValueExpr(expr ast.Expr, rowFuncs map[string]bool) bool {
 }
 
 // collectRowFuncs returns the names of every package-level func across files
-// that returns exactly one Strategy. It excludes methods: a row var is never
+// that returns exactly one Strategy. It excludes methods: a Strategy var is never
 // assigned from a method call without a receiver expression, which this
 // syntactic scan cannot resolve anyway.
 func collectRowFuncs(files []*ast.File) map[string]bool {
@@ -65,8 +65,8 @@ func collectRowFuncs(files []*ast.File) map[string]bool {
 	return rowFuncs
 }
 
-// scanForUntabledRows returns, sorted, every package-level row var in dir
-// missing from `var Table = []Strategy{...}`. It does not recurse, because a row
+// scanForUntabledRows returns, sorted, every package-level Strategy var in dir
+// missing from `var Table = []Strategy{...}`. It does not recurse, because a Strategy
 // var and its Table entry always share a package directory, and it parses
 // rather than importing, so it still works mid-refactor when the package does
 // not build. A missing Table is fatal, so a rename cannot drop coverage.
@@ -99,7 +99,7 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 	}
 
 	// This pass runs before the var pass rather than interleaved with it,
-	// because the func a row var calls may live in a different file.
+	// because the func a Strategy var calls may live in a different file.
 	rowFuncs := collectRowFuncs(files)
 
 	rowVars := make(map[string]bool)
@@ -108,7 +108,7 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 
 	for _, file := range files {
 		// Only top-level decls, so a Strategy literal built inside a function body
-		// is never mistaken for a row awaiting a Table entry.
+		// is never mistaken for a Strategy awaiting a Table entry.
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
 			if !ok || gd.Tok != token.VAR {
@@ -168,11 +168,11 @@ func scanForUntabledRows(t *testing.T, dir string) []string {
 	return missing
 }
 
-// TestScanForUntabledRows_FixtureDetectsViolation proves a row var missing
+// TestScanForUntabledRows_FixtureDetectsViolation proves a Strategy var missing
 // from Table trips the check in every shape the scan recognizes. Each shape
 // pairs a tagged var (listed in Table) with an untabled one, so a shape that
 // stopped being detected drops out of the result instead of passing silently.
-// The fixture spans two files because a row var's func may live in another.
+// The fixture spans two files because a Strategy var's func may live in another.
 func TestScanForUntabledRows_FixtureDetectsViolation(t *testing.T) {
 	dir := t.TempDir()
 
@@ -225,7 +225,7 @@ var (
 	untabledGroupedTypedRow   Strategy = Strategy{Name: "untabled grouped typed"}
 )
 
-// must never be counted as a row var
+// must never be counted as a Strategy var
 var otherThingNotARow = OtherThing{Name: "not a row"}
 var otherThingFromFuncNotARow = newOtherThing()
 

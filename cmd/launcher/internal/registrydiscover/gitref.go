@@ -31,7 +31,7 @@ func MaterializeRef(repoDir, ref string) (dir string, cleanup func(), err error)
 	return MaterializeRefRows(repoDir, ref, ecosystem.Table)
 }
 
-// MaterializeRefRows is MaterializeRef over the given rows rather than
+// MaterializeRefRows is MaterializeRef over the given Strategies rather than
 // ecosystem.Table.
 func MaterializeRefRows(repoDir, ref string, rows []ecosystem.Strategy) (dir string, cleanup func(), err error) {
 	noop := func() {}
@@ -40,8 +40,8 @@ func MaterializeRefRows(repoDir, ref string, rows []ecosystem.Strategy) (dir str
 		return "", noop, err
 	}
 
-	// Walking rows, the same rows ExtractRows walks, keeps the materialized
-	// file set from drifting from the scanned one: a config path added to a row
+	// Walking Strategies, the same Strategies ExtractRows walks, keeps the materialized
+	// file set from drifting from the scanned one: a config path added to a Strategy
 	// is picked up here with no second list to maintain.
 	var paths []string
 	var stdin bytes.Buffer

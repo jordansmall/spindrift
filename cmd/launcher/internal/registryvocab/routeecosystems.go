@@ -1,7 +1,7 @@
 package registryvocab
 
 // RouteEcosystems is a route's per-ecosystem declaration block, keyed by an
-// ecosystem.Table row's Name ("go", "gradle", "cargo", ...). The routes-file
+// ecosystem Strategy's Name ("go", "gradle", "cargo", ...). The routes-file
 // `[routes.ecosystems.<name>]` table and the manifest's projection of it
 // share this wire shape (issue #3403), so a block decoded from TOML and one
 // round-tripped through JSON must read back identically.
