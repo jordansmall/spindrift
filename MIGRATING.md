@@ -1,5 +1,16 @@
 # Migration Guide
 
+## The pi Driver enforces `spawns` (issue #5809)
+
+Under the pi Driver the hook bridge now refuses a `subagent` call naming an
+agent outside the caller's `spawns` list, so the default reviewer can no
+longer spawn `worker`. As under opencode, a `spawns` target missing from the
+roster now fails eval under pi for an entry that can call `subagent`, e.g. a
+roster that keeps the default reviewer but opts out `review-axis`; drop the
+target from `spawns` or restore it. Such an entry with a blank `description`
+also fails eval, since pi could not tell its subagent which entry it is; give
+it a description.
+
 ## Roster entries take an optional `spawns` key (issue #5368)
 
 A roster entry may now set `spawns`, a list of roster entry names it is

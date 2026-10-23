@@ -42,6 +42,27 @@ let
       throw "pi Driver: roster agent '${e.name}' lists no tool pi can grant, and an empty tools line would grant them all"
     else
       "tools: ${builtins.toJSON (lib.concatStringsSep ", " mapped)}\n";
+
+  # Eval-time guards for an entry's `spawns` (issue #5809), both only for an
+  # entry that can call subagent. A target absent from the roster throws as
+  # under opencode. pi passes a subagent's identity only as --append-system-prompt,
+  # which the extension sends only for a non-blank body, so spawns on a blank
+  # description could never be enforced.
+  checkSpawns =
+    rosterNames: e:
+    let
+      spawns = e.spawns or [ ];
+      canSpawn = !(e ? tools) || lib.any (t: lib.elem "subagent" (rosterToolNames.${t} or [ ])) e.tools;
+      missing = lib.optionals canSpawn (lib.filter (n: !(lib.elem n rosterNames)) spawns);
+    in
+    if missing != [ ] then
+      throw "pi Driver: roster agent '${e.name}' spawns ${lib.concatStringsSep ", " missing}, absent from the roster; add the entry or drop it from spawns"
+    else if
+      canSpawn && spawns != [ ] && builtins.match "[[:space:]]*" (e.description or "") != null
+    then
+      throw "pi Driver: roster agent '${e.name}' declares spawns but has no description; pi passes a subagent's identity only through a non-empty body, so its spawns could not be enforced"
+    else
+      e;
 in
 {
   name = "pi";
@@ -185,11 +206,21 @@ in
   # parent's --thinking only to agents without a model; `reasoningEffort`, which
   # the extension ignores, lets promptassembly's reviewer handoff read the effort
   # so driver-exec's --thinking matches the suffix. An entry with no `tools` gets
-  # no line, which keeps pi's full tool set.
+  # no line, which keeps pi's full tool set. spindrift-spawns.json maps each
+  # entry that declares `spawns` to its list; the bridge reads it to gate
+  # subagent targets (issue #5809), and an entry absent from it is unrestricted.
+  # It is written even as {} so the bridge can fail closed when it is missing.
   agentFilesTemplate =
     { roster }:
     {
       ".pi/agent/extensions/spindrift-hooks.js" = builtins.readFile ../../agent/pi-hook-bridge.js;
+      ".pi/agent/spindrift-spawns.json" = builtins.toJSON (
+        lib.listToAttrs (
+          map (e: lib.nameValuePair e.name e.spawns) (
+            lib.filter (e: e ? spawns) (map (checkSpawns (map (e: e.name) roster)) roster)
+          )
+        )
+      );
     }
     // lib.listToAttrs (
       map (
