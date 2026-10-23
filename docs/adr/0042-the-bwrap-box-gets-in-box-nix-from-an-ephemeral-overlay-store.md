@@ -109,8 +109,9 @@ remains the default.
 
 The snapshot is a point-in-time copy with no gcroot pinning it, so a host
 `nix-store --gc` during a run can remove paths the Box's database still
-believes are valid. This is accepted rather than solved; pinning would
-make a Box hold host disk it should be free to release.
+believes are valid. This is accepted rather than solved (narrowed by the issue #5995
+amendment below); pinning would make a Box hold host disk it should be
+free to release.
 
 Unprivileged bwrap maps exactly one uid, so a Box writes through its
 writable mounts as the operator's own uid — rootless podman would use a
@@ -430,3 +431,46 @@ flags. On NixOS 26.11 with bubblewrap 0.12.0, bare `pasta -f -- sh` showed
 only `lo` configured. With `--config-net`, DNS resolves and HTTPS egress
 returns 200, while host loopback and the host's own address stay
 unreachable, so the isolation this ADR set out to keep is unchanged.
+
+## Amendment (issue #5995): each closure generation's store artifacts are GC-rooted until the generation is reclaimed
+
+The body's "accepted rather than solved" stance on garbage collection was
+too broad. It holds for the paths the snapshot database merely references,
+but not for the artifacts the Box mounts and executes from. The bwrap build
+realizes the agent files, agent env, passwd, group, in-box `nix.conf` and
+syscall filter with `--no-link`, so nothing roots them. The launcher input
+document names them as plain strings, so the daemon's own GC root does not
+reach them, and Nix's runtime-root scan of each process's `environ` under
+`/proc` finds only the agent env (it is on the Box's `PATH`), never mapping
+the bind-mounted `/agent` back to its store path. On a dogfood host with a
+nightly `nix-collect-garbage --delete-older-than 30d`,
+`nix-store --gc --print-dead` listed the live revision's agent files,
+`nix.conf`, passwd and group while a Box ran from them. The OCI runner never
+had this exposure, because images live in the runtime's own storage.
+
+Each closure generation, the generation that scopes the nix-var snapshot
+(issue #2680), now has one GC root over those artifacts: out-links from a
+single `nix build --out-link` at
+`.spindrift/nix-gcroots/<generation>/artifact*`. The directory is a sibling
+of `.spindrift/nix-var-snapshot`, not inside it, because reclaim treats every
+entry there as a generation and the run adapter binds the generation
+directory into the Box.
+`launcher build` registers the root under the generation's shared snapshot
+lock. The Box-only staleness hot-swap (ADR 0043) registers it too, for the
+agent closure plus the passwd, group and syscall filter the daemon booted
+with, even when the snapshot already exists.
+
+Stale-generation reclaim drops the root together with the snapshot, under the
+same exclusive-flock liveness probe: never while a Box holds the generation's
+shared lock, and never for the current generation. A root directory with no
+snapshot, left by a crashed build, is reclaimed the same way. Removing the
+out-link drops the indirect root. A failure to register warns and degrades,
+like snapshot-lock degradation, and never fails the build.
+
+Only the mounted artifacts are rooted. Store paths the snapshot database
+references but the Box does not mount stay unrooted, so the point-in-time
+race in the paragraph above still applies to them. A per-Box root added at
+launch and removed at exit was rejected: it leaves the build-to-launch
+window unrooted and needs its own crash cleanup. The roots exist only where
+the generation directory and lock do, so a `nixInBox`-off deployment is not
+covered; that is a follow-up.
