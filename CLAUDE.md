@@ -35,9 +35,11 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   PR create exhausted the same retries (the bundle stays in the outbox;
   `spindrift recover <n>` relays and lands it, clearing this label; on a
   `github`/`forgejo` read-only deployment the daemon's recover kind lands it
-  itself when the bundle is relayable, the run self-reported ready, and the
-  host claim is free, with bounded attempts and one give-up comment naming
-  `spindrift recover <n>`); needs human triage,
+  itself when the bundle is relayable, the run self-reported ready from its
+  land pass, and the host claim is free, with bounded attempts and one give-up
+  comment naming `spindrift recover <n>`), or a review-loop run reported
+  `status=ready` from a pass other than its land pass (settled reason
+  `unreviewed`: nothing is landed, and recover skips it); needs human triage,
   re-label to retry.
 - `agent-ambiguous-spec` — the pre-implement gate found the issue internally
   contradictory and the Box halted on purpose (`status=ambiguous`), posting
