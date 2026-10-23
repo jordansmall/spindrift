@@ -9,7 +9,7 @@ npmScopes:
   myorg:
     npmRegistryServer: 'https://scoped-yarn.example.com/registry/'
 `
-	decls, namedAny, err := yarnRow.ConfigParser(content)
+	decls, namedAny, err := Yarn.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ npmScopes:
   myorg:
     npmRegistryServer: https://yarn.example.com
 `
-	decls, _, err := yarnRow.ConfigParser(content)
+	decls, _, err := Yarn.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -47,7 +47,7 @@ npmScopes:
 }
 
 func TestParseYarnRegistryConfig_NonHTTPRegistryIsSkippedButNamed(t *testing.T) {
-	decls, namedAny, err := yarnRow.ConfigParser("npmRegistryServer: /local/path\n")
+	decls, namedAny, err := Yarn.ConfigParser("npmRegistryServer: /local/path\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestParseYarnRegistryConfig_NonHTTPRegistryIsSkippedButNamed(t *testing.T) 
 }
 
 func TestParseYarnRegistryConfig_FullLineCommentYieldsNoDeclaration(t *testing.T) {
-	decls, namedAny, err := yarnRow.ConfigParser("# npmRegistryServer: https://commented-out.example.com/\n")
+	decls, namedAny, err := Yarn.ConfigParser("# npmRegistryServer: https://commented-out.example.com/\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestParseYarnRegistryConfig_FullLineCommentYieldsNoDeclaration(t *testing.T
 }
 
 func TestParseYarnRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
-	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com # our mirror\n")
+	decls, _, err := Yarn.ConfigParser("npmRegistryServer: https://yarn.example.com # our mirror\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestParseYarnRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 }
 
 func TestParseYarnRegistryConfig_TabBeforeTrailingInlineCommentStripped(t *testing.T) {
-	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com\t# our mirror\n")
+	decls, _, err := Yarn.ConfigParser("npmRegistryServer: https://yarn.example.com\t# our mirror\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestParseYarnRegistryConfig_TabBeforeTrailingInlineCommentStripped(t *testi
 }
 
 func TestParseYarnRegistryConfig_QuotedValueHashFragmentNotTreatedAsComment(t *testing.T) {
-	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: \"https://yarn.example.com/#frag\"\n")
+	decls, _, err := Yarn.ConfigParser("npmRegistryServer: \"https://yarn.example.com/#frag\"\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestParseYarnRegistryConfig_QuotedValueHashFragmentNotTreatedAsComment(t *t
 // The fixture's first "#" has no whitespace before it, so it is part of the
 // URL and not a comment marker. Only a whitespace-then-"#" starts a comment.
 func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped(t *testing.T) {
-	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com/#frag # our mirror\n")
+	decls, _, err := Yarn.ConfigParser("npmRegistryServer: https://yarn.example.com/#frag # our mirror\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped
 }
 
 func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTabTrailingCommentStripped(t *testing.T) {
-	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com/#frag\t# our mirror\n")
+	decls, _, err := Yarn.ConfigParser("npmRegistryServer: https://yarn.example.com/#frag\t# our mirror\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTabTrailingCommentStrip
 // ConfigParser is a pure hook: its caller stamps Ecosystem and ConfigPath, so
 // the hook itself must leave both unset.
 func TestParseYarnRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
-	decls, _, err := yarnRow.ConfigParser("npmRegistryServer: https://yarn.example.com\n")
+	decls, _, err := Yarn.ConfigParser("npmRegistryServer: https://yarn.example.com\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}

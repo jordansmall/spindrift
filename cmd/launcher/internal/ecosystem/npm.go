@@ -10,15 +10,17 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
-// nameNpm and npmBindingEnvVar are consts because npmRow's EnvExports cannot
-// read npmRow.Name or npmRow.BindingEnvVar without a package initialization
+// nameNpm and npmBindingEnvVar are consts because Npm's EnvExports cannot
+// read Npm.Name or Npm.BindingEnvVar without a package initialization
 // cycle. Sharing the const keeps BindingEnvVar and the exported var one name.
 const (
 	nameNpm          = "npm"
 	npmBindingEnvVar = "npm_config_registry"
 )
 
-var npmRow = Strategy{
+// Npm is exported only so the Bundle can register it, until a later ticket of
+// issue #5940 moves it into its own package.
+var Npm = Strategy{
 	Name:             nameNpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"package-lock.json"},

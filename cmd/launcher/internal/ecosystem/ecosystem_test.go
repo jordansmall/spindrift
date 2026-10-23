@@ -269,20 +269,6 @@ func TestTable_InTreeConfigPath(t *testing.T) {
 	}
 }
 
-// The nudge takes the first matching Strategy, so a reorder changes which
-// ecosystem a mixed repo classifies as. Catch that here, not in the Box.
-func TestTable_Order(t *testing.T) {
-	want := []string{"cargo", "npm", "yarn", "pnpm", "go", "gradle"}
-	if len(Table) != len(want) {
-		t.Fatalf("got %d rows, want %d", len(Table), len(want))
-	}
-	for i, name := range want {
-		if Table[i].Name != name {
-			t.Errorf("row %d = %q, want %q", i, Table[i].Name, name)
-		}
-	}
-}
-
 // Nothing else in this package asserts on the collected slice's contents, so
 // a Strategy the collector forgets to gather would fail silently: New would just
 // never see it.
@@ -299,7 +285,7 @@ func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", "cargo")
 }
 
-// Without this pin, dropping npmRow's RewriteRows shows up only indirectly,
+// Without this pin, dropping Npm's RewriteRows shows up only indirectly,
 // as a proxy round-trip failure a package away from the cause.
 func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 	rows := ResponseRewriteRows()

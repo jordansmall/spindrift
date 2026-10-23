@@ -330,7 +330,7 @@ registry=https://npm.example.com/
 # a comment
 ; another comment style
 `
-	decls, namedAny, err := npmRow.ConfigParser(content)
+	decls, namedAny, err := Npm.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -353,7 +353,7 @@ registry=https://npm.example.com/
 
 func TestParseNpmRegistryConfig_RepeatedURLDeduped(t *testing.T) {
 	content := "registry=https://npm.example.com/\n@myorg:registry=https://npm.example.com/\n"
-	decls, _, err := npmRow.ConfigParser(content)
+	decls, _, err := Npm.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestParseNpmRegistryConfig_RepeatedURLDeduped(t *testing.T) {
 // A credential in the URL's userinfo must never come back as a Declaration,
 // since that would persist it into a written routes file.
 func TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed(t *testing.T) {
-	decls, namedAny, err := npmRow.ConfigParser("registry=https://ci:s3cr3t@npm.example.com/\n")
+	decls, namedAny, err := Npm.ConfigParser("registry=https://ci:s3cr3t@npm.example.com/\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestParseNpmRegistryConfig_UserinfoURLIsSkippedButNamed(t *testing.T) {
 }
 
 func TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed(t *testing.T) {
-	decls, namedAny, err := npmRow.ConfigParser("registry=http://:8080/\n")
+	decls, namedAny, err := Npm.ConfigParser("registry=http://:8080/\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestParseNpmRegistryConfig_PortOnlyHostIsSkippedButNamed(t *testing.T) {
 // No registry key at all is distinct from named but unusable, so namedAny
 // must be false rather than true with zero declarations.
 func TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse(t *testing.T) {
-	decls, namedAny, err := npmRow.ConfigParser("# just a comment\n")
+	decls, namedAny, err := Npm.ConfigParser("# just a comment\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestParseNpmRegistryConfig_NoDeclarationYieldsNamedAnyFalse(t *testing.T) {
 // ConfigPath after the call returns, so a parser that set them itself would
 // fight the walker.
 func TestParseNpmRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
-	decls, _, err := npmRow.ConfigParser("registry=https://npm.example.com/\n")
+	decls, _, err := Npm.ConfigParser("registry=https://npm.example.com/\n")
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}

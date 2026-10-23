@@ -7,16 +7,17 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// namePnpm and pnpmBindingEnvVar are consts because pnpmRow's EnvExports cannot
-// read pnpmRow.Name or pnpmRow.BindingEnvVar without a package initialization
+// namePnpm and pnpmBindingEnvVar are consts because Pnpm's EnvExports cannot
+// read Pnpm.Name or Pnpm.BindingEnvVar without a package initialization
 // cycle. Sharing the const keeps BindingEnvVar and the exported var one name.
 const (
 	namePnpm          = "pnpm"
 	pnpmBindingEnvVar = "pnpm_config_registry"
 )
 
-// pnpmRow is the pnpm ecosystem's Table entry.
-var pnpmRow = Strategy{
+// Pnpm is exported only so the Bundle can register it, until a later ticket of
+// issue #5940 moves it into its own package.
+var Pnpm = Strategy{
 	Name:             namePnpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"pnpm-lock.yaml"},

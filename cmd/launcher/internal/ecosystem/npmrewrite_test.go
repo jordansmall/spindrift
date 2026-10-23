@@ -23,7 +23,7 @@ var npmRewriteContext = registryvocab.RewriteContext{
 }
 
 func TestNpmRow_RewriteRows_PackumentMatches(t *testing.T) {
-	rows := npmRow.RewriteRows
+	rows := Npm.RewriteRows
 	if len(rows) != 1 {
 		t.Fatalf("len(rows) = %d, want 1", len(rows))
 	}

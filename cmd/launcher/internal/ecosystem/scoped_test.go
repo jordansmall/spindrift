@@ -43,7 +43,7 @@ func TestParseNpmFamilyRegistryConfig_Scoped(t *testing.T) {
 		{"yarn top-level key after npmScopes block is unscoped", "yarn", "npmScopes:\n  org:\n    npmRegistryServer: " + a + "\nnpmRegistryServer: " + b + "\n",
 			[]Declaration{{Host: "a.example.com", UpstreamBaseURL: a, Scoped: true}, {Host: "b.example.com", UpstreamBaseURL: b}}},
 	}
-	rows := map[string]Strategy{"npm": npmRow, "pnpm": pnpmRow, "yarn": yarnRow}
+	rows := map[string]Strategy{"npm": Npm, "pnpm": Pnpm, "yarn": Yarn}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			decls, _, err := rows[tc.row].ConfigParser(tc.content)

@@ -29,7 +29,9 @@ let
   # Nothing in-box imports it (Driver packages call it from _test.go only).
   # bundle/runners.go registers the runner families, which no Box constructs;
   # bundle/backends.go registers the backends, which only the Box looks up (the
-  # Box adds it back through backendBundleFiles).
+  # Box adds it back through backendBundleFiles); bundle/ecosystems.go registers
+  # the ecosystems, which only the Box and driver-exec bind (both add it back
+  # through ecosystemBundleFile; the orchestrator never does).
   driverTreeFiles =
     lib.fileset.difference
       (lib.fileset.fileFilter (
@@ -40,8 +42,11 @@ let
           ../cmd/launcher/internal/driver/driverkit/conformance
           ../cmd/launcher/internal/driver/bundle/runners.go
           ../cmd/launcher/internal/driver/bundle/backends.go
+          ../cmd/launcher/internal/driver/bundle/ecosystems.go
         ]
       );
+
+  ecosystemBundleFile = ../cmd/launcher/internal/driver/bundle/ecosystems.go;
 
   # Only the Box links backend adapters: it calls backendkit.ByName at runtime
   # for the clone URL, CLI setup and the recovery PR query (ADR 0068 decision
@@ -97,6 +102,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/driver-exec)
         driverTreeFiles
+        ecosystemBundleFile
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
@@ -233,6 +239,7 @@ let
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/boxclone)
         driverTreeFiles
+        ecosystemBundleFile
         backendBundleFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name

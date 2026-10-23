@@ -2010,7 +2010,7 @@ func TestParseCargoRegistryConfig_SingleRegistrySparseIndex(t *testing.T) {
 [registries.mycorp]
 index = "sparse+https://cargo.example.com/index/"
 `
-	decls, namedAny, err := cargoRow.ConfigParser(content)
+	decls, namedAny, err := Cargo.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2033,7 +2033,7 @@ func TestParseCargoRegistryConfig_NoRegistryTableYieldsNamedAnyFalse(t *testing.
 [net]
 git-fetch-with-cli = true
 `
-	decls, namedAny, err := cargoRow.ConfigParser(content)
+	decls, namedAny, err := Cargo.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2047,7 +2047,7 @@ git-fetch-with-cli = true
 
 // Unparseable TOML must come back as an error, not a silently empty result.
 func TestParseCargoRegistryConfig_MalformedTOMLIsError(t *testing.T) {
-	_, _, err := cargoRow.ConfigParser("this is not [ valid toml")
+	_, _, err := Cargo.ConfigParser("this is not [ valid toml")
 	if err == nil {
 		t.Fatal("ConfigParser: expected error for malformed TOML, got nil")
 	}
@@ -2061,7 +2061,7 @@ func TestParseCargoRegistryConfig_FileSchemeIndexNamedButUnusable(t *testing.T) 
 [registries.mirror]
 index = "file:///srv/mirror"
 `
-	decls, namedAny, err := cargoRow.ConfigParser(content)
+	decls, namedAny, err := Cargo.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2083,7 +2083,7 @@ index = "sparse+https://zeta.example.com/index/"
 [registries.alpha]
 index = "sparse+https://alpha.example.com/index/"
 `
-	decls, _, err := cargoRow.ConfigParser(content)
+	decls, _, err := Cargo.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2102,7 +2102,7 @@ func TestParseCargoRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T)
 [registries.mycorp]
 index = "sparse+https://cargo.example.com/index/"
 `
-	decls, _, err := cargoRow.ConfigParser(content)
+	decls, _, err := Cargo.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
@@ -2119,7 +2119,7 @@ func TestParseCargoRegistryConfig_UnrelatedKeyIgnored(t *testing.T) {
 [registries.mycorp]
 token = "secret"
 `
-	decls, namedAny, err := cargoRow.ConfigParser(content)
+	decls, namedAny, err := Cargo.ConfigParser(content)
 	if err != nil {
 		t.Fatalf("ConfigParser: unexpected error: %v", err)
 	}
