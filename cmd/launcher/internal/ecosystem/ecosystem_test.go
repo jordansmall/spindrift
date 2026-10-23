@@ -24,48 +24,6 @@ func rowByName(t *testing.T, name string) Strategy {
 	return Strategy{}
 }
 
-// The go Strategy must pass its getenv parameter into ComputeGoBindings rather
-// than discard the snapshot it is handed.
-func TestGoRowEnvExports(t *testing.T) {
-	row := rowByName(t, "go")
-	if row.EnvExports == nil {
-		t.Fatal("go row has nil EnvExports")
-	}
-
-	overrideEnv := stubGetenv(map[string]string{"GOTOOLCHAIN": "auto"})
-	_, gotWarnings := row.EnvExports(27182, "r0", overrideEnv, allDeclaredRoutes())
-	if !containsWarningSubstring(gotWarnings, "GOTOOLCHAIN") {
-		t.Errorf("expected a GOTOOLCHAIN override warning, got %v", gotWarnings)
-	}
-
-	emptyEnv := stubGetenv(nil)
-	gotExports, gotWarnings2 := row.EnvExports(27182, "r0", emptyEnv, allDeclaredRoutes())
-	if len(gotWarnings2) != 0 {
-		t.Errorf("expected no warnings with an empty env snapshot, got %v", gotWarnings2)
-	}
-	if value, ok := ExportValue(gotExports, "GOPROXY"); !ok || value != "http://127.0.0.1:27182/r0/go" {
-		t.Errorf("GOPROXY export = (%q, %v), want (%q, true)", value, ok, "http://127.0.0.1:27182/r0/go")
-	}
-}
-
-// The pre-#3260 Strategy discarded its routes parameter. A route declaring a go
-// path renders a full-path GOPROXY the Strategy can only produce by passing
-// routes through to ComputeGoBindings.
-func TestGoRowEnvExports_ThreadsRoutes(t *testing.T) {
-	row := rowByName(t, "go")
-	routes := []registrymanifest.Route{{
-		Prefix:     "r0",
-		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/artifactory/api/go/go-local"}},
-	}}
-
-	gotExports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), routes)
-
-	want := "http://127.0.0.1:27182/r0/artifactory/api/go/go-local"
-	if value, ok := ExportValue(gotExports, "GOPROXY"); !ok || value != want {
-		t.Errorf("GOPROXY export = (%q, %v), want (%q, true)", value, ok, want)
-	}
-}
-
 // A Strategy that gains or loses EnvExports otherwise fails silently: it
 // contributes nothing to the export file, or panics a caller.
 func TestTable_EnvExportsPresence(t *testing.T) {
@@ -74,7 +32,6 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 		"npm":   true,
 		"yarn":  true,
 		"pnpm":  true,
-		"go":    true,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -88,7 +45,7 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 	}
 }
 
-// npm, pnpm, yarn and go bind the Forwarder through an env var; cargo binds
+// npm, pnpm and yarn bind the Forwarder through an env var; cargo binds
 // through a file and leaves the field empty.
 func TestTable_BindingEnvVarPresence(t *testing.T) {
 	want := map[string]string{
@@ -96,7 +53,6 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 		"npm":   "npm_config_registry",
 		"yarn":  "YARN_NPM_REGISTRY_SERVER",
 		"pnpm":  "pnpm_config_registry",
-		"go":    "GOPROXY",
 	}
 	for _, row := range Table {
 		wantVar, ok := want[row.Name]
@@ -110,7 +66,7 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 }
 
 // A single Strategy's own EnvExports output cannot always be diffed against its
-// BindingEnvVar: go's renderer emits its vars conditionally. So this checks
+// BindingEnvVar: a renderer may emit its vars conditionally. So this checks
 // each BindingEnvVar against the whole export file, walking EnvExportRows()
 // the way bindings mode does.
 func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
@@ -140,7 +96,6 @@ func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 		"npm":   false,
 		"yarn":  false,
 		"pnpm":  false,
-		"go":    false,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -251,7 +206,6 @@ func TestTable_InTreeConfigPath(t *testing.T) {
 		"npm":   ".npmrc",
 		"yarn":  ".yarnrc.yml",
 		"pnpm":  "pnpm-workspace.yaml",
-		"go":    "",
 	}
 	for _, row := range Table {
 		path, ok := want[row.Name]
@@ -349,7 +303,6 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 		"npm":   false,
 		"yarn":  false,
 		"pnpm":  false,
-		"go":    false,
 	}
 	for _, row := range Table {
 		wantPresent, ok := want[row.Name]
@@ -374,18 +327,15 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 }
 
 // allDeclaredRoutes declares a path for every ecosystem a Strategy binds an env
-// var for, so one route renders all four bindings at once. go declares its
-// path in the ecosystems block; the npm family declares theirs as tagged
-// enforced paths.
+// var for, so one route renders all three bindings at once. The npm family
+// declares their paths as tagged enforced paths.
 func allDeclaredRoutes() []registrymanifest.Route {
 	return []registrymanifest.Route{{
-		Prefix:     "r0",
-		Ecosystems: registryvocab.RouteEcosystems{"go": registryvocab.RouteDeclaration{"path": "/go"}},
+		Prefix: "r0",
 		EnforcedPaths: []registryvocab.Subtree{
 			{Ecosystem: "npm", Path: "/npm"},
 			{Ecosystem: "pnpm", Path: "/pnpm"},
 			{Ecosystem: "yarn", Path: "/yarn"},
-			{Ecosystem: "go", Path: "/go"},
 		},
 	}}
 }
@@ -399,7 +349,6 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 		"npm":   "",
 		"yarn":  "",
 		"pnpm":  "",
-		"go":    "go-path",
 	}
 	for _, row := range Table {
 		wantKey, ok := want[row.Name]
@@ -418,7 +367,6 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 func TestRowByRetiredRouteKey(t *testing.T) {
 	for key, wantName := range map[string]string{
 		"cargo-registries": "cargo",
-		"go-path":          "go",
 	} {
 		row, ok := RowByRetiredRouteKey(key)
 		if !ok {

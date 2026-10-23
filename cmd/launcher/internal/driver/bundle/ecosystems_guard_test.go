@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystem/gomod"
 	"spindrift.dev/launcher/internal/ecosystem/gradle"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -27,7 +28,7 @@ import (
 func TestRegisteredEcosystemOrderIsPinned(t *testing.T) {
 	want := []string{
 		ecosystem.Cargo.Name, ecosystem.Npm.Name, ecosystem.Yarn.Name,
-		ecosystem.Pnpm.Name, ecosystem.Go.Name, gradle.Strategy.Name,
+		ecosystem.Pnpm.Name, gomod.Strategy.Name, gradle.Strategy.Name,
 	}
 	var got []string
 	for _, s := range ecosystem.Registered() {
@@ -470,7 +471,7 @@ func coreResidentArgs(args []strategyRef, ecosystemImport string) (core, problem
 
 // The core package's tests cannot link the Bundle, so TestMain there hand-lists
 // the Strategies; that copy must not drift from the Bundle's own Register call.
-// A Strategy the Bundle takes from an ecosystem package of its own (gradle)
+// A Strategy the Bundle takes from an ecosystem package of its own (gradle, gomod)
 // is outside this copy, since core cannot import it.
 func TestCoreTestMainRegistersTheBundlesStrategies(t *testing.T) {
 	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
