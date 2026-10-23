@@ -23,7 +23,7 @@ type LockfileHit struct {
 // by basename across every tracked path rather than checking only the repo
 // root, since lockfiles nest in workspace members and nested Go modules. Hits
 // come out in rows order, then path order within a row.
-func ScanLockfilesForForwarderRows(repoDir string, port int, rows []ecosystem.Row) ([]LockfileHit, error) {
+func ScanLockfilesForForwarderRows(repoDir string, port int, rows []ecosystem.Strategy) ([]LockfileHit, error) {
 	needle := fmt.Sprintf("127.0.0.1:%d", port)
 
 	paths, err := trackedPaths(repoDir)

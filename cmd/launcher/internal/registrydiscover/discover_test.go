@@ -65,7 +65,7 @@ func TestDiscover_TwoHostsAcrossFilesTwoRoutes(t *testing.T) {
 	testutil.WriteFixture(t, dir, cfgPath, "main = https://first.example.com/index/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://second.example.com/\n")
 
-	rows := []ecosystem.Row{syntheticRows[0], twin}
+	rows := []ecosystem.Strategy{syntheticRows[0], twin}
 	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
 	routes, _, err := DiscoverRows(dir, rows, stores, noMatch, probeAs("bearer"))
 	if err != nil {
@@ -125,7 +125,7 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	// Both stores would report a match; earlier in the slice must win.
 	row := synthetic.Row
 	row.CredentialStores = []string{"netrc", "other-store"}
-	routes, report, err := DiscoverRows(dir, []ecosystem.Row{row}, stores, alwaysMatch, probeAs("bearer"))
+	routes, report, err := DiscoverRows(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
 	}
@@ -592,7 +592,7 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	testutil.WriteFixture(t, dir, cfgPath, "main = https://shared.example.com/first/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://shared.example.com/second/\n")
 
-	rows := []ecosystem.Row{syntheticRows[0], twin}
+	rows := []ecosystem.Strategy{syntheticRows[0], twin}
 	routes, _, err := DiscoverRows(dir, rows, nil, noMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: unexpected error: %v", err)
@@ -625,7 +625,7 @@ func TestDiscover_MatchedStoreCompanionsComeFromKindStoreConfig(t *testing.T) {
 			stores := []Store{{Name: kind.SourceKey, Path: path}}
 			row := synthetic.Row
 			row.CredentialStores = []string{kind.SourceKey}
-			routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, stores, alwaysMatch, probeAs("bearer"))
+			routes, _, err := DiscoverRows(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
 			if err != nil {
 				t.Fatalf("DiscoverRows: unexpected error: %v", err)
 			}
@@ -673,7 +673,7 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, "fake.cfg", "x")
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name:             "fake",
 		InTreeConfigPath: "fake.cfg",
 		ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
@@ -681,7 +681,7 @@ func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 		},
 	}
 
-	routes, _, err := DiscoverRows(dir, []ecosystem.Row{row}, nil, noMatch, probeAs("bearer"))
+	routes, _, err := DiscoverRows(dir, []ecosystem.Strategy{row}, nil, noMatch, probeAs("bearer"))
 	if err != nil {
 		t.Fatalf("DiscoverRows: %v", err)
 	}

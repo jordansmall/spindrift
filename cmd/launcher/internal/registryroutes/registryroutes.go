@@ -106,7 +106,7 @@ func Parse(data []byte) ([]Route, error) {
 }
 
 // ParseRows is Parse over the given rows rather than ecosystem.Table.
-func ParseRows(data []byte, rows []ecosystem.Row) ([]Route, error) {
+func ParseRows(data []byte, rows []ecosystem.Strategy) ([]Route, error) {
 	dec := toml.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 
@@ -249,7 +249,7 @@ var retiredRouteKeys = []struct {
 // the rows don't know, sorted, so an unknown name is reported
 // deterministically. The result is nil, not empty, when rr declares nothing
 // per-ecosystem (registryvocab.RouteEcosystems' "absent is nil" convention).
-func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (registryvocab.RouteEcosystems, error) {
+func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Strategy) (registryvocab.RouteEcosystems, error) {
 	blocks := make(registryvocab.RouteEcosystems)
 
 	handled := make(map[string]bool, len(rr.Ecosystems))
@@ -288,7 +288,7 @@ func buildRouteEcosystems(label string, rr rawRoute, rows []ecosystem.Row) (regi
 // (validateDeclaredPath), every other key via row's own RouteDeclaration hook,
 // a nil hook rejecting every such key. Keys are walked in sorted order so a
 // block declaring two problems always reports the same one first.
-func buildRouteDeclarationBlock(label string, row ecosystem.Row, raw map[string]any) (registryvocab.RouteDeclaration, error) {
+func buildRouteDeclarationBlock(label string, row ecosystem.Strategy, raw map[string]any) (registryvocab.RouteDeclaration, error) {
 	keys := make([]string, 0, len(raw))
 	for key := range raw {
 		keys = append(keys, key)

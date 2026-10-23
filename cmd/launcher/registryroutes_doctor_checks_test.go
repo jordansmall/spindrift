@@ -367,7 +367,7 @@ func checkNames(checks []doctor.Check) []string {
 
 // mustLoadRoutes parses file through the same loader doctorCheckSets uses, so
 // these tests exercise the production parse rather than hand-built Routes.
-func mustLoadRoutes(t *testing.T, file string, rows []ecosystem.Row) []registryroutes.Route {
+func mustLoadRoutes(t *testing.T, file string, rows []ecosystem.Strategy) []registryroutes.Route {
 	t.Helper()
 	routes, err := loadRegistryRoutes(file, rows)
 	if err != nil {

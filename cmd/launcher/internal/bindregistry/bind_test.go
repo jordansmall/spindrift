@@ -97,7 +97,7 @@ func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 // the rendered exports carry its var, while a HomeConfig row is named
 // unconditionally because its file is always written.
 func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
-	rows := []ecosystem.Row{
+	rows := []ecosystem.Strategy{
 		{Name: "stub-bound", BindingEnvVar: "STUB_BOUND_REGISTRY"},
 		{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"},
 		{Name: "stub-file", HomeConfig: &ecosystem.HomeConfig{}},
@@ -117,7 +117,7 @@ func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
 // The degenerate case the skip rule newly makes reachable: empty prose is what
 // lets the caller drop the separator rather than print a dangling one.
 func TestBindingSummaryProse_EmptyWhenNothingBound(t *testing.T) {
-	rows := []ecosystem.Row{{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"}}
+	rows := []ecosystem.Strategy{{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"}}
 
 	if got := bindingSummaryProse(rows, nil, nil); got != "" {
 		t.Errorf("bindingSummaryProse(nothing bound) = %q, want %q", got, "")

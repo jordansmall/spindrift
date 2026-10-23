@@ -11,14 +11,14 @@ import (
 // ComputeGoBindings, so the reference back closes an initialization cycle.
 const nameGo = "go"
 
-// GoRetiredRouteKey is go's Row.RetiredRouteKey. Exported so registryroutes,
+// GoRetiredRouteKey is go's Strategy.RetiredRouteKey. Exported so registryroutes,
 // which still translates the retired spelling, never spells the key itself.
 const GoRetiredRouteKey = "go-path"
 
 // goToolchainLocal pins GOTOOLCHAIN to the one baked toolchain.
 const goToolchainLocal = "local"
 
-var goRow = Row{
+var goRow = Strategy{
 	Name:             nameGo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	RetiredRouteKey:  GoRetiredRouteKey,

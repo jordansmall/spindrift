@@ -1,8 +1,8 @@
 // Package ecosystem is the single table of what the Harness knows about each
 // dependency ecosystem: lockfile names, toolchain-nudge classification, and
-// the env-export and home-level-config renderers (ADR 0045). Each row lives in
+// the env-export and home-level-config renderers (ADR 0045). Each Strategy lives in
 // its own file; this file holds the types, the ordered Table, and its
-// accessors. ADR 0048 pins that shape: a row gets its own package on a trigger.
+// accessors. ADR 0048 pins that shape: a Strategy gets its own package on a trigger.
 package ecosystem
 
 import (
@@ -37,18 +37,18 @@ type HomeConfig struct {
 	Render              HomeConfigRenderer
 }
 
-// RepoAwareHomeConfigRenderer re-renders a row's whole HomeConfig file once
-// the Target repo is on disk (issue #3201), keying off repoConfig, the row's
+// RepoAwareHomeConfigRenderer re-renders a Strategy's whole HomeConfig file once
+// the Target repo is on disk (issue #3201), keying off repoConfig, the Strategy's
 // in-tree config as the clone carries it ("" if absent). It returns the
 // placeholder EnvExports the rewrite needs bound, since a source-replacement
 // binding still needs one. A nil field means no such notion at all.
 type RepoAwareHomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route, repoConfig string) (content string, exports []EnvExport, warnings []string)
 
 // ConfigParser returns every registry declaration named in the content of a
-// row's InTreeConfigPath. It is pure: registrydiscover's walker reads the file
+// Strategy's InTreeConfigPath. It is pure: registrydiscover's walker reads the file
 // and stamps Declaration.Ecosystem and ConfigPath after the call returns.
 // namedAny separates "named nothing" from "named only unusable things". Nil
-// for a row with no committed config (go, gradle); a walk skips such a row.
+// for a Strategy with no committed config (go, gradle); a walk skips such a Strategy.
 type ConfigParser func(content string) (decls []Declaration, namedAny bool, err error)
 
 // RouteDeclarationValidator validates one key of a route's
@@ -58,9 +58,9 @@ type ConfigParser func(content string) (decls []Declaration, namedAny bool, err 
 // <key>: ". Nil means the caller must reject every key beyond "path".
 type RouteDeclarationValidator func(key string, value any) error
 
-// Row is one ecosystem's entry in Table. A nil hook field contributes nothing
+// Strategy is one ecosystem's entry in Table. A nil hook field contributes nothing
 // to a walk over Table.
-type Row struct {
+type Strategy struct {
 	Name          string
 	LockfileNames []string
 
@@ -123,17 +123,17 @@ type Row struct {
 
 // EnvExportRows returns the rows carrying an EnvExports renderer, in Table
 // order, which is the rendered export file's line order.
-// The slice is fresh, but its Row copies share their LockfileNames backing
+// The slice is fresh, but its Strategy copies share their LockfileNames backing
 // array with Table, which callers must not write through.
-func EnvExportRows() []Row {
+func EnvExportRows() []Strategy {
 	return EnvExportRowsOf(Table)
 }
 
 // EnvExportRowsOf is EnvExportRows over the given rows rather than Table. The
-// slice is fresh, but its Row copies share their LockfileNames backing array
+// slice is fresh, but its Strategy copies share their LockfileNames backing array
 // with in, which callers must not write through.
-func EnvExportRowsOf(in []Row) []Row {
-	rows := make([]Row, 0, len(in))
+func EnvExportRowsOf(in []Strategy) []Strategy {
+	rows := make([]Strategy, 0, len(in))
 	for _, row := range in {
 		if row.EnvExports == nil {
 			continue
@@ -144,17 +144,17 @@ func EnvExportRowsOf(in []Row) []Row {
 }
 
 // HomeConfigRows returns the rows carrying a non-nil HomeConfig, in Table
-// order. The slice is fresh, but its Row copies share their LockfileNames
+// order. The slice is fresh, but its Strategy copies share their LockfileNames
 // backing array with Table, which callers must not write through.
-func HomeConfigRows() []Row {
+func HomeConfigRows() []Strategy {
 	return HomeConfigRowsOf(Table)
 }
 
 // HomeConfigRowsOf is HomeConfigRows over the given rows rather than Table. The
-// slice is fresh, but its Row copies share their LockfileNames backing array
+// slice is fresh, but its Strategy copies share their LockfileNames backing array
 // with in, which callers must not write through.
-func HomeConfigRowsOf(in []Row) []Row {
-	rows := make([]Row, 0, len(in))
+func HomeConfigRowsOf(in []Strategy) []Strategy {
+	rows := make([]Strategy, 0, len(in))
 	for _, row := range in {
 		if row.HomeConfig == nil {
 			continue
@@ -177,7 +177,7 @@ func ResponseRewriteRows() []registryvocab.RewriteRow {
 // CredentialStores returns each row's CredentialStores keyed by row Name, so
 // registrydiscover never has to know which row reads which store. The slices
 // are copies; callers may write through them.
-func CredentialStores(rows []Row) map[string][]string {
+func CredentialStores(rows []Strategy) map[string][]string {
 	stores := make(map[string][]string, len(rows))
 	for _, row := range rows {
 		stores[row.Name] = append([]string(nil), row.CredentialStores...)
@@ -191,7 +191,7 @@ func CredentialStores(rows []Row) map[string][]string {
 // it sets the env-export file's line order (EnvExportRows), so do not reorder
 // rows without checking every caller that stops at the first match.
 // Treat it as read-only; a consumer handing rows further out copies them.
-var Table = []Row{
+var Table = []Strategy{
 	cargoRow,
 	npmRow,
 	yarnRow,
@@ -205,14 +205,14 @@ var Table = []Row{
 // ecosystem it stood for. ok is false when nothing matches, including key ==
 // "": npm, yarn and pnpm all carry an empty RetiredRouteKey, so without the
 // guard an empty key would resolve to whichever of them Table lists first.
-func RowByRetiredRouteKey(key string) (Row, bool) {
+func RowByRetiredRouteKey(key string) (Strategy, bool) {
 	if key == "" {
-		return Row{}, false
+		return Strategy{}, false
 	}
 	for _, row := range Table {
 		if row.RetiredRouteKey == key {
 			return row, true
 		}
 	}
-	return Row{}, false
+	return Strategy{}, false
 }

@@ -40,7 +40,7 @@ func TestDeriveFromGitRef_MultipleRowsMaterializeAndDerive(t *testing.T) {
 		twin.InTreeConfigPath:          "a = https://second.example.com/repo/second\n",
 	}, nil)
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Row{synthetic.Row, twin})
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Row, twin})
 	if err != nil {
 		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 		map[string]string{synthetic.Row.InTreeConfigPath: "a = https://committed.example.com/repo\n"}, nil)
 	testutil.WriteFixture(t, src, twin.InTreeConfigPath, "a = https://uncommitted.example.com/repo\n")
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Row{synthetic.Row, twin})
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Row, twin})
 	if err != nil {
 		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		"fake.cfg": "x",
 	}, nil)
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name:             "fake",
 		InTreeConfigPath: "fake.cfg",
 		ConfigParser: func(string) ([]ecosystem.Declaration, bool, error) {
@@ -177,7 +177,7 @@ func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
 		},
 	}
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Row{row})
+	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{row})
 	if err != nil {
 		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
 	}

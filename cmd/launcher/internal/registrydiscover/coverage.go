@@ -11,7 +11,7 @@ import (
 // `spindrift registry discover` agree (issue #3144 slice 2 AC5). registryproxy
 // routes by the path prefix derived from MatchHost, so comparing declared hosts
 // is the whole of coverage.
-func UncoveredHostsRows(repoDir string, covered []string, rows []ecosystem.Row) ([]string, error) {
+func UncoveredHostsRows(repoDir string, covered []string, rows []ecosystem.Strategy) ([]string, error) {
 	declared, _, err := ExtractRows(repoDir, rows)
 	if err != nil {
 		return nil, err

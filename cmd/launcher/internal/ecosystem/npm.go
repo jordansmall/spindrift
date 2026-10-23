@@ -17,7 +17,7 @@ const (
 	npmBindingEnvVar = "npm_config_registry"
 )
 
-var npmRow = Row{
+var npmRow = Strategy{
 	Name:             nameNpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"package-lock.json"},

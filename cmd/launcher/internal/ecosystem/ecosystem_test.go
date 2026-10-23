@@ -13,7 +13,7 @@ func stubGetenv(env map[string]string) func(string) string {
 	return func(key string) string { return env[key] }
 }
 
-func rowByName(t *testing.T, name string) Row {
+func rowByName(t *testing.T, name string) Strategy {
 	t.Helper()
 	for _, row := range Table {
 		if row.Name == name {
@@ -21,7 +21,7 @@ func rowByName(t *testing.T, name string) Row {
 		}
 	}
 	t.Fatalf("no row named %q", name)
-	return Row{}
+	return Strategy{}
 }
 
 // The go row must pass its getenv parameter into ComputeGoBindings rather
@@ -184,7 +184,7 @@ func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
 	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
 		return nil, nil
 	}
-	rows := []Row{
+	rows := []Strategy{
 		{Name: "first", EnvExports: renderer},
 		{Name: "no-exports"},
 		{Name: "second", EnvExports: renderer},
@@ -208,7 +208,7 @@ func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
 }
 
 func TestHomeConfigRowsOf_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
-	rows := []Row{
+	rows := []Strategy{
 		{Name: "b", HomeConfig: &HomeConfig{}},
 		{Name: "none"},
 		{Name: "a", HomeConfig: &HomeConfig{}},

@@ -10,7 +10,7 @@ import (
 )
 
 // classifyRows are in precedence order: the synthetic row before a neutral second.
-var classifyRows = []ecosystem.Row{
+var classifyRows = []ecosystem.Strategy{
 	synthetic.Row,
 	{Name: "second", LockfileNames: []string{"second.lock"}, Classification: "second-class"},
 }
@@ -41,7 +41,7 @@ func TestClassifyRows_Precedence(t *testing.T) {
 	if got := ClassifyRows(dir, classifyRows); got != "synthetic" {
 		t.Errorf("ClassifyRows = %q, want %q", got, "synthetic")
 	}
-	reversed := []ecosystem.Row{classifyRows[1], classifyRows[0]}
+	reversed := []ecosystem.Strategy{classifyRows[1], classifyRows[0]}
 	if got := ClassifyRows(dir, reversed); got != "second-class" {
 		t.Errorf("ClassifyRows(reversed rows) = %q, want %q", got, "second-class")
 	}
@@ -83,9 +83,9 @@ func TestClassifyRows_UsesOnlyTheGivenRows(t *testing.T) {
 	dir := t.TempDir()
 	writeEmpty(t, dir, "synthetic.lock")
 	writeEmpty(t, dir, "own.lock")
-	own := ecosystem.Row{Name: "own", LockfileNames: []string{"own.lock"}, Classification: "own"}
+	own := ecosystem.Strategy{Name: "own", LockfileNames: []string{"own.lock"}, Classification: "own"}
 
-	if got := ClassifyRows(dir, []ecosystem.Row{own}); got != "own" {
+	if got := ClassifyRows(dir, []ecosystem.Strategy{own}); got != "own" {
 		t.Errorf("ClassifyRows = %q, want %q", got, "own")
 	}
 	if got := ClassifyRows(dir, nil); got != "" {

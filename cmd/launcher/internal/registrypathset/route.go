@@ -14,7 +14,7 @@ import (
 // host-rooted Upstream carrying a path. A route naming a host absent from sets
 // and declaring no upstream-origin of its own is an error, never a route left
 // unenforced; one declaring an origin enforces only what it declares itself.
-func ApplyToRoute(route registryproxy.Route, sets map[string]HostPathSet, rows []ecosystem.Row) (registryproxy.Route, error) {
+func ApplyToRoute(route registryproxy.Route, sets map[string]HostPathSet, rows []ecosystem.Strategy) (registryproxy.Route, error) {
 	hp, ok := sets[registryvocab.HostKey(route.MatchHost)]
 	if !ok && route.UpstreamOrigin == "" {
 		if label := declaredPathAloneLabel(route, rows); label != "" {
@@ -71,7 +71,7 @@ type declaredPath struct {
 // declaredPaths walks rows in their own order (issue #3403), not
 // route.Ecosystems' map, because Go map iteration is random and both callers
 // need this enumeration deterministic.
-func declaredPaths(route registryproxy.Route, rows []ecosystem.Row) []declaredPath {
+func declaredPaths(route registryproxy.Route, rows []ecosystem.Strategy) []declaredPath {
 	var set []declaredPath
 	for _, row := range rows {
 		if path := route.Ecosystems.Path(row.Name); path != "" {
@@ -83,7 +83,7 @@ func declaredPaths(route registryproxy.Route, rows []ecosystem.Row) []declaredPa
 
 // declaredPathAloneLabel names route's declared paths by their
 // [routes.ecosystems.<name>] spelling, for ApplyToRoute's error message.
-func declaredPathAloneLabel(route registryproxy.Route, rows []ecosystem.Row) string {
+func declaredPathAloneLabel(route registryproxy.Route, rows []ecosystem.Strategy) string {
 	var labels []string
 	for _, d := range declaredPaths(route, rows) {
 		labels = append(labels, registryvocab.RouteDeclarationKeyLabel(d.ecosystem, registryvocab.RouteDeclarationPathKey))
@@ -94,7 +94,7 @@ func declaredPathAloneLabel(route registryproxy.Route, rows []ecosystem.Row) str
 // discoverableNames joins, in rows' order, the names of the rows whose in-tree
 // config registrydiscover.ExtractRows can read: the same filter, so the error
 // advice never names an ecosystem whose declaration would go undiscovered.
-func discoverableNames(rows []ecosystem.Row) string {
+func discoverableNames(rows []ecosystem.Strategy) string {
 	var names []string
 	for _, row := range rows {
 		if row.InTreeConfigPath == "" || row.ConfigParser == nil {

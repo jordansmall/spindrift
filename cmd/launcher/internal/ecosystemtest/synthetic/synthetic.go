@@ -21,7 +21,7 @@ import (
 // .synthetic/registries, binds through an env export, a home config and an
 // in-tree rewrite of that file, and rewrites the "download" URL of an
 // index.json response.
-var Row = ecosystem.Row{
+var Row = ecosystem.Strategy{
 	Name:             "synthetic",
 	LockfileNames:    []string{"synthetic.lock"},
 	Classification:   "synthetic",
@@ -53,7 +53,7 @@ var Row = ecosystem.Row{
 
 // Twin is Row under another name and config path, for tests that need a second
 // row to declare beside the first.
-func Twin(name string) ecosystem.Row {
+func Twin(name string) ecosystem.Strategy {
 	r := Row
 	r.Name = name
 	r.InTreeConfigPath = "." + name + "/registries"

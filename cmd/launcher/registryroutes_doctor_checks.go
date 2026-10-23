@@ -14,7 +14,7 @@ import (
 // registryProxyRoutesCheck word a read failure the same way. A ParseRows
 // failure passes through unwrapped: registryroutes.ParseRows's own
 // "registryroutes: ..." message already names what is wrong.
-func loadRegistryRoutes(file string, rows []ecosystem.Row) ([]registryroutes.Route, error) {
+func loadRegistryRoutes(file string, rows []ecosystem.Strategy) ([]registryroutes.Route, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", file, err)

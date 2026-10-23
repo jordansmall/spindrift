@@ -19,7 +19,7 @@ import (
 // lines mean a file was written. Zero routes is a failure: a header-only file
 // would fail registryroutes.Parse. rows is the ecosystem table to discover
 // over: production passes ecosystem.Table, tests a synthetic row.
-func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Row, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
+func runRegistryDiscover(stdout, stderr io.Writer, rows []ecosystem.Strategy, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup, probe registrydiscover.Probe) int {
 	routes, report, err := registrydiscover.DiscoverRows(repoDir, rows, stores, lookup, probe)
 	if err != nil {
 		// An Extract error carries a zero Report, which prints nothing:
@@ -106,7 +106,7 @@ func printRegistryDiscoverEnvHint(w io.Writer, routes []registrydiscover.Route) 
 // cmdRegistryDiscover is the `registry discover` subcommand: parse its args and
 // hand runRegistryDiscover rows plus the production stores, StoreLookup, and
 // HTTP probe (production passes ecosystem.Table).
-func cmdRegistryDiscover(rows []ecosystem.Row, args []string, stdout, stderr io.Writer) int {
+func cmdRegistryDiscover(rows []ecosystem.Strategy, args []string, stdout, stderr io.Writer) int {
 	force := false
 	var positional []string
 	for _, a := range args {

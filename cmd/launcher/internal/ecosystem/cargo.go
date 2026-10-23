@@ -25,11 +25,11 @@ import (
 // separate concept that only coincides here.
 const nameCargo = "cargo"
 
-// CargoRetiredRouteKey is cargo's Row.RetiredRouteKey. Exported because
+// CargoRetiredRouteKey is cargo's Strategy.RetiredRouteKey. Exported because
 // registryroutes never spells the key itself.
 const CargoRetiredRouteKey = "cargo-registries"
 
-var cargoRow = Row{
+var cargoRow = Strategy{
 	Name:             nameCargo,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties", "cargo-credentials"},
 	RetiredRouteKey:  CargoRetiredRouteKey,

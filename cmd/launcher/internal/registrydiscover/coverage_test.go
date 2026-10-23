@@ -20,7 +20,7 @@ func TestUncoveredHostsRows_ExtractErrorReturnsError(t *testing.T) {
 		return nil, false, errors.New("parse failed")
 	}
 
-	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Row{failing})
+	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Strategy{failing})
 	if err == nil {
 		t.Fatal("UncoveredHostsRows() succeeded, want the parser's error")
 	}
@@ -37,7 +37,7 @@ func TestUncoveredHostsRows_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	testutil.WriteFixture(t, dir, cfgPath, "a = https://registry.same.example.com/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "b = https://registry.same.example.com\n")
 
-	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Row{synthetic.Row, twin})
+	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Strategy{synthetic.Row, twin})
 	if err != nil {
 		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestUncoveredHostsRows_NoDeclarations_ReturnsEmpty(t *testing.T) {
 func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")
-	rows := []ecosystem.Row{synthetic.Row, twin}
+	rows := []ecosystem.Strategy{synthetic.Row, twin}
 	testutil.WriteFixture(t, dir, cfgPath, "mycorp = https://one.example.com/index/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "other = https://two.example.com/\n")
 

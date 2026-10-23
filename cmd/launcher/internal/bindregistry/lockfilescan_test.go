@@ -11,7 +11,7 @@ import (
 
 // scanRows are in a fixed order: the synthetic row, then a neutral row listing
 // several lockfile names, so the tests prove row order and basename matching.
-var scanRows = []ecosystem.Row{
+var scanRows = []ecosystem.Strategy{
 	synthetic.Row,
 	{Name: "beta", LockfileNames: []string{"beta.lock", "beta.sum"}},
 }

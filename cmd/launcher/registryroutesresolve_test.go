@@ -26,8 +26,8 @@ import (
 var (
 	twinRow     = synthetic.Twin("twin")
 	otherRow    = synthetic.Twin("other")
-	resolveRows = []ecosystem.Row{synthetic.Row, twinRow}
-	threeRows   = []ecosystem.Row{synthetic.Row, twinRow, otherRow}
+	resolveRows = []ecosystem.Strategy{synthetic.Row, twinRow}
+	threeRows   = []ecosystem.Strategy{synthetic.Row, twinRow, otherRow}
 )
 
 // Production reaches the read-error wrapper only through
@@ -1540,7 +1540,7 @@ func TestApplyToRoute_DeclaredPathLandsUnscopedEvenBesideDerivedScopedDuplicate(
 		},
 	}
 
-	got, err := registrypathset.ApplyToRoute(route, sets, []ecosystem.Row{synthetic.Row, twinRow, otherRow})
+	got, err := registrypathset.ApplyToRoute(route, sets, []ecosystem.Strategy{synthetic.Row, twinRow, otherRow})
 	if err != nil {
 		t.Fatalf("registrypathset.ApplyToRoute() error = %v, want nil", err)
 	}

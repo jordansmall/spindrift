@@ -109,18 +109,18 @@ var forwarderPortStr = strconv.Itoa(bindregistry.ForwarderPort)
 // alone: the generic behaviour of the verb, with no real ecosystem's rendering
 // in the way.
 func runSyntheticBind(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
-	return runBindRegistryWithRows(args, []ecosystem.Row{synthetic.Row}, stdout, probe, spawn, lookPath, timeout, pollInterval)
+	return runBindRegistryWithRows(args, []ecosystem.Strategy{synthetic.Row}, stdout, probe, spawn, lookPath, timeout, pollInterval)
 }
 
 // rowsWith returns the synthetic row followed by the stub rows, in that order.
-func rowsWith(extra ...ecosystem.Row) []ecosystem.Row {
-	return append([]ecosystem.Row{synthetic.Row}, extra...)
+func rowsWith(extra ...ecosystem.Strategy) []ecosystem.Strategy {
+	return append([]ecosystem.Strategy{synthetic.Row}, extra...)
 }
 
 // exportStubRow is a row exporting each named var, valued at the route's local
 // URL.
-func exportStubRow(name string, vars ...string) ecosystem.Row {
-	return ecosystem.Row{
+func exportStubRow(name string, vars ...string) ecosystem.Strategy {
+	return ecosystem.Strategy{
 		Name: name,
 		EnvExports: func(port int, prefix string, _ func(string) string, _ []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 			exports := make([]ecosystem.EnvExport, len(vars))
@@ -169,7 +169,7 @@ func mountSocketManifest(t *testing.T, routes ...registrymanifest.Route) string 
 
 // bindReady runs bindings mode over rows against a mounted socket whose probe
 // reports ready, returning the exit code, stdout and the env file's path.
-func bindReady(t *testing.T, rows []ecosystem.Row, routes ...registrymanifest.Route) (rc int, stdout, bindingsOut string) {
+func bindReady(t *testing.T, rows []ecosystem.Strategy, routes ...registrymanifest.Route) (rc int, stdout, bindingsOut string) {
 	t.Helper()
 	mountSocketManifest(t, routes...)
 	bindingsOut = filepath.Join(t.TempDir(), "bindings.env")
@@ -418,7 +418,7 @@ func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 	stubHome := t.TempDir()
 	t.Setenv("STUB_ECOSYSTEM_HOME", stubHome)
 	syntheticHome(t)
-	rows := rowsWith(ecosystem.Row{
+	rows := rowsWith(ecosystem.Strategy{
 		Name: "stub-ecosystem",
 		HomeConfig: &ecosystem.HomeConfig{
 			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
@@ -458,7 +458,7 @@ func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 	envStub.BindingEnvVar = "STUB_ENV_REGISTRY"
 	rows := rowsWith(
 		envStub,
-		ecosystem.Row{
+		ecosystem.Strategy{
 			Name: "stub-home-ecosystem",
 			HomeConfig: &ecosystem.HomeConfig{
 				HomeEnvVar:          "STUB_HOME_ECOSYSTEM_HOME",
@@ -490,7 +490,7 @@ func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 // come from walking the rows, not a hand-maintained literal a new row could
 // silently be left out of.
 func TestBindRegistry_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
-	rows := rowsWith(ecosystem.Row{Name: "stub-ecosystem"})
+	rows := rowsWith(ecosystem.Strategy{Name: "stub-ecosystem"})
 
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
@@ -520,7 +520,7 @@ func TestBindRegistry_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
 
 // Mirrors the above for the sibling no-route-prefix fallback warning.
 func TestBindRegistry_NoRoutePrefixFallbackNamesComeFromRowsWalk(t *testing.T) {
-	rows := rowsWith(ecosystem.Row{Name: "stub-ecosystem"})
+	rows := rowsWith(ecosystem.Strategy{Name: "stub-ecosystem"})
 
 	rc, stdout, _ := bindReady(t, rows) // no routes at all
 	if rc != 0 {
@@ -556,7 +556,7 @@ func exportNamesInFileOrder(t *testing.T, rendered string) []string {
 // fails here.
 func TestBindRegistry_ExportOrderFollowsRows(t *testing.T) {
 	syntheticHome(t)
-	rows := []ecosystem.Row{
+	rows := []ecosystem.Strategy{
 		exportStubRow("stub-z", "STUB_Z_FIRST", "STUB_Z_SECOND"),
 		synthetic.Row,
 		exportStubRow("stub-a", "STUB_A_ONLY"),
@@ -678,7 +678,7 @@ func TestBindRegistry_AlreadyListeningPrintsSuccessLines(t *testing.T) {
 // claim a binding that does not exist.
 func TestBindRegistry_SummaryOmitsUnexportedBindingVars(t *testing.T) {
 	home := syntheticHome(t)
-	unexported := ecosystem.Row{
+	unexported := ecosystem.Strategy{
 		Name:          "stub-unexported",
 		BindingEnvVar: "STUB_UNEXPORTED_REGISTRY",
 		EnvExports: func(int, string, func(string) string, []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
@@ -1148,15 +1148,15 @@ const intreeRegistriesContent = "main = https://upstream.example/\n"
 
 // intreeRootRow is an in-tree row whose config sits at the repo root, beside
 // the synthetic row's nested one.
-var intreeRootRow = ecosystem.Row{Name: "stub-root", InTreeConfigPath: ".stub-registries"}
+var intreeRootRow = ecosystem.Strategy{Name: "stub-root", InTreeConfigPath: ".stub-registries"}
 
 // intreeSecondRow is a second in-tree row, so cross-row tests see more than one
 // sibling of the synthetic row.
-var intreeSecondRow = ecosystem.Row{Name: "stub-second", InTreeConfigPath: "stub-second.conf"}
+var intreeSecondRow = ecosystem.Strategy{Name: "stub-second", InTreeConfigPath: "stub-second.conf"}
 
 // intreeRepoAwareRow binds through a repo-aware home config, which excludes it
 // from the in-tree rewrite loop even though it names an InTreeConfigPath.
-var intreeRepoAwareRow = ecosystem.Row{
+var intreeRepoAwareRow = ecosystem.Strategy{
 	Name:             "stub-repo-aware",
 	InTreeConfigPath: ".stub-repo-aware/registries",
 	HomeConfig: &ecosystem.HomeConfig{
@@ -1224,7 +1224,7 @@ var intreeUpstreamRoute = registrymanifest.Route{Prefix: "r0", UpstreamHost: "up
 
 // runIntree runs one in-tree action over rows with the default readiness
 // timings.
-func runIntree(action, dir string, rows []ecosystem.Row, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc) (rc int, stdout string) {
+func runIntree(action, dir string, rows []ecosystem.Strategy, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc) (rc int, stdout string) {
 	var out bytes.Buffer
 	rc = runBindRegistryWithRows([]string{
 		"-intree-action", action,
@@ -1237,7 +1237,7 @@ func runIntree(action, dir string, rows []ecosystem.Row, probe bindregistry.Prob
 
 // applyReady runs in-tree apply over rows against a Forwarder already reporting
 // ready, so it never spawns.
-func applyReady(dir string, rows []ecosystem.Row) (rc int, stdout string) {
+func applyReady(dir string, rows []ecosystem.Strategy) (rc int, stdout string) {
 	return runIntree("apply", dir, rows,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
@@ -1667,7 +1667,7 @@ func TestBindRegistry_IntreeApplyAndRevertAcrossRows(t *testing.T) {
 // --skip-worktree` then fails with exit 128 on that file, giving
 // ApplyInTreeBinding a genuine per-row failure. The sibling rows' configs are
 // tracked and clean.
-func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Row) string {
+func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Strategy) string {
 	t.Helper()
 	dir := newIntreeTestRepo(t)
 
@@ -1720,7 +1720,7 @@ func newIntreeUnmergedTestRepo(t *testing.T, siblings ...ecosystem.Row) string {
 // first one) must not stop the loop, and the overall apply must still report
 // failure.
 func TestBindRegistry_IntreeApplyPartialFailureDoesNotBlockSiblingRows(t *testing.T) {
-	siblings := []ecosystem.Row{intreeRootRow, intreeSecondRow}
+	siblings := []ecosystem.Strategy{intreeRootRow, intreeSecondRow}
 	dir := newIntreeUnmergedTestRepo(t, siblings...)
 	failingRel := synthetic.Row.InTreeConfigPath
 	mountSocketManifest(t, intreeUpstreamRoute)
@@ -1888,7 +1888,7 @@ func applyRepoAware(dir, envOut string) (rc int, stdout string) {
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
 		"-intree-bindings-env-output", envOut,
-	}, []ecosystem.Row{intreeRepoAwareRow}, &out,
+	}, []ecosystem.Strategy{intreeRepoAwareRow}, &out,
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
@@ -2030,7 +2030,7 @@ func multiBlockRoute() registrymanifest.Route {
 
 // pathEnvRow exports a var valued at the route's local URL plus the path its own
 // block declares.
-var pathEnvRow = ecosystem.Row{
+var pathEnvRow = ecosystem.Strategy{
 	Name: "stub-env",
 	EnvExports: func(port int, prefix string, _ func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		return []ecosystem.EnvExport{{Name: "STUB_ENV_REGISTRY", Value: ecosystem.RouteLocalURL(prefix, port) + routes[0].Ecosystems.Path("stub-env")}}, nil
@@ -2038,7 +2038,7 @@ var pathEnvRow = ecosystem.Row{
 }
 
 // pathHomeRow renders a home config naming the path its own block declares.
-var pathHomeRow = ecosystem.Row{
+var pathHomeRow = ecosystem.Strategy{
 	Name: "stub-home",
 	HomeConfig: &ecosystem.HomeConfig{
 		HomeEnvVar:          "STUB_HOME_HOME",

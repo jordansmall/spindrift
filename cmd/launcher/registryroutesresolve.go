@@ -20,7 +20,7 @@ import (
 // (issue #3142) while the parser stays testable on its own.
 // rows is the ecosystem table to resolve over: production passes
 // ecosystem.Table, tests a synthetic row.
-func buildRegistryProxyRoutes(c config, rows []ecosystem.Row) ([]registryproxy.Route, error) {
+func buildRegistryProxyRoutes(c config, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	if c.registryProxyRoutesFile == "" {
 		return nil, nil
 	}
@@ -40,7 +40,7 @@ func buildRegistryProxyRoutes(c config, rows []ecosystem.Row) ([]registryproxy.R
 // route declaring its own upstream-origin: that origin replaces the derived
 // origin, never the derived subtrees, so what a route enforces never depends
 // on whether a checkout was reachable. Every failure fails the launch closed.
-func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []ecosystem.Row) ([]registryproxy.Route, error) {
+func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	if len(routes) == 0 {
 		return routes, nil
 	}
@@ -74,7 +74,7 @@ func resolveHostRootedUpstreams(c config, routes []registryproxy.Route, rows []e
 // backend would miss. Such a forge derives from the Accumulation repo's
 // baseBranch ref (issue #3310), the one snapshot no in-Box agent can widen, and
 // skips checkoutIsTargetRepo, whose contract is remote-based identity.
-func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosystem.Row) ([]registrypathset.HostPathSet, error) {
+func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosystem.Strategy) ([]registrypathset.HostPathSet, error) {
 	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
 		accumDir := c.hostRepoDir()
@@ -114,7 +114,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosyst
 // order the routes appear in. One consequence: when both an env-sourced and
 // a non-env route would fail to resolve, the env route's failure always
 // surfaces first, because pass 1 runs to completion before pass 2 starts.
-func resolveRegistryRoutesFromFile(routesFile string, rows []ecosystem.Row) ([]registryproxy.Route, error) {
+func resolveRegistryRoutesFromFile(routesFile string, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	data, err := os.ReadFile(routesFile)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", routesFile, err)

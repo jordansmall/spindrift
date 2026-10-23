@@ -18,13 +18,13 @@ import (
 const intreebindingTempFilePattern = ".intreebinding-*"
 
 // InTreeBindings is InTreeBindingsOf over ecosystem.Table, the production rows.
-func InTreeBindings() []ecosystem.Row { return InTreeBindingsOf(ecosystem.Table) }
+func InTreeBindings() []ecosystem.Strategy { return InTreeBindingsOf(ecosystem.Table) }
 
 // InTreeBindingsOf returns every row whose registry pin lives in a tracked config
 // file rather than an env var (ADR 0044), in rows order: npm's .npmrc, yarn
 // berry's .yarnrc.yml (issue #2856), and pnpm's pnpm-workspace.yaml (issue #2855).
-func InTreeBindingsOf(all []ecosystem.Row) []ecosystem.Row {
-	var rows []ecosystem.Row
+func InTreeBindingsOf(all []ecosystem.Strategy) []ecosystem.Strategy {
+	var rows []ecosystem.Strategy
 	for _, row := range all {
 		// A row with a RepoAwareHomeConfig binds by re-rendering that home config
 		// once the Target repo is on disk (issue #3201), and the two rewrites do
@@ -191,7 +191,7 @@ func replaceAllFold(s, old, repl string) string {
 // says what one cannot (a per-scope .npmrc registry, .yarnrc.yml's npmScopes,
 // pnpm-workspace.yaml's registries; ADR 0044's yarn and pnpm updates), so the
 // value has to be edited into the tracked file itself.
-func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrite) (ApplyOutcome, error) {
+func ApplyInTreeBinding(repoDir string, row ecosystem.Strategy, rewrites []HostRewrite) (ApplyOutcome, error) {
 	// Internal-consistency guards, not operator-facing outcomes: the verb layer
 	// already drops any route with no upstream host or a host shared with
 	// another route (issue #3142, host-only matching cannot disambiguate
@@ -417,7 +417,7 @@ func sweepOrphanedTempFiles(configDir string) {
 // content, never from cross-call state (issue #2932 AC1/AC2). Every no-op case
 // (missing, untracked, already reverted, never applied) reports reverted=false
 // with a nil error, indistinguishably.
-func RevertInTreeBinding(repoDir string, row ecosystem.Row) (reverted bool, err error) {
+func RevertInTreeBinding(repoDir string, row ecosystem.Strategy) (reverted bool, err error) {
 	configPath := filepath.Join(repoDir, row.InTreeConfigPath)
 
 	// Sweep ahead of the missing and untracked early returns below, so a config
@@ -476,7 +476,7 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Row) (reverted bool, err 
 // RevertInTreeBindings reverts every row in rows, continuing past a per-row
 // error so one row's failure cannot strand the rest, and reports whether any
 // failed. Each outcome is narrated to w; who prefixes a failure line.
-func RevertInTreeBindings(workDir string, rows []ecosystem.Row, who string, w io.Writer) (failed bool) {
+func RevertInTreeBindings(workDir string, rows []ecosystem.Strategy, who string, w io.Writer) (failed bool) {
 	for _, row := range rows {
 		reverted, err := RevertInTreeBinding(workDir, row)
 		if err != nil {

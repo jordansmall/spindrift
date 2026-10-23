@@ -22,7 +22,7 @@ func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 	}
 
 	var gotContent string
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name:             "fake",
 		InTreeConfigPath: "nested/sub/fake.cfg",
 		ConfigParser: func(c string) ([]ecosystem.Declaration, bool, error) {
@@ -31,7 +31,7 @@ func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 		},
 	}
 
-	if _, _, err := ExtractRows(dir, []ecosystem.Row{row}); err != nil {
+	if _, _, err := ExtractRows(dir, []ecosystem.Strategy{row}); err != nil {
 		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
 	if gotContent != content {
@@ -41,7 +41,7 @@ func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 
 func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T) {
 	dir := t.TempDir()
-	missing := ecosystem.Row{
+	missing := ecosystem.Strategy{
 		Name:             "missing",
 		InTreeConfigPath: "does-not-exist.cfg",
 		ConfigParser: func(c string) ([]ecosystem.Declaration, bool, error) {
@@ -52,7 +52,7 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 	if err := os.WriteFile(filepath.Join(dir, "present.cfg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	present := ecosystem.Row{
+	present := ecosystem.Strategy{
 		Name:             "present",
 		InTreeConfigPath: "present.cfg",
 		ConfigParser: func(c string) ([]ecosystem.Declaration, bool, error) {
@@ -60,7 +60,7 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 		},
 	}
 
-	declared, notes, err := ExtractRows(dir, []ecosystem.Row{missing, present})
+	declared, notes, err := ExtractRows(dir, []ecosystem.Strategy{missing, present})
 	if err != nil {
 		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
@@ -81,18 +81,18 @@ func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	noPath := ecosystem.Row{
+	noPath := ecosystem.Strategy{
 		Name: "no-path",
 		ConfigParser: func(c string) ([]ecosystem.Declaration, bool, error) {
 			return []ecosystem.Declaration{{Host: "should-not-appear.example.com"}}, true, nil
 		},
 	}
-	noParser := ecosystem.Row{
+	noParser := ecosystem.Strategy{
 		Name:             "no-parser",
 		InTreeConfigPath: "a-directory",
 	}
 
-	declared, notes, err := ExtractRows(dir, []ecosystem.Row{noPath, noParser})
+	declared, notes, err := ExtractRows(dir, []ecosystem.Strategy{noPath, noParser})
 	if err != nil {
 		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	row := ecosystem.Row{
+	row := ecosystem.Strategy{
 		Name:             "fake",
 		InTreeConfigPath: "fake.cfg",
 		ConfigParser: func(c string) ([]ecosystem.Declaration, bool, error) {
@@ -119,7 +119,7 @@ func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 		},
 	}
 
-	declared, _, err := ExtractRows(dir, []ecosystem.Row{row})
+	declared, _, err := ExtractRows(dir, []ecosystem.Strategy{row})
 	if err != nil {
 		t.Fatalf("ExtractRows: unexpected error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		row := ecosystem.Row{
+		row := ecosystem.Strategy{
 			Name:             "fake",
 			InTreeConfigPath: "fake.cfg",
 			ConfigParser: func(c string) ([]ecosystem.Declaration, bool, error) {
@@ -146,7 +146,7 @@ func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 			},
 		}
 
-		declared, notes, err := ExtractRows(dir, []ecosystem.Row{row})
+		declared, notes, err := ExtractRows(dir, []ecosystem.Strategy{row})
 		if err != nil {
 			t.Fatalf("ExtractRows: unexpected error: %v", err)
 		}
@@ -182,7 +182,7 @@ func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
 		}
 	}
 
-	rows := []ecosystem.Row{
+	rows := []ecosystem.Strategy{
 		{Name: "r1", InTreeConfigPath: "r1.cfg", ConfigParser: declaring("a", "b")},
 		{Name: "r2", InTreeConfigPath: "r2.cfg", ConfigParser: noting(false)},
 		{Name: "r3", InTreeConfigPath: "r3.cfg", ConfigParser: declaring("c")},
@@ -224,7 +224,7 @@ func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "later.cfg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rows := []ecosystem.Row{
+	rows := []ecosystem.Strategy{
 		{
 			Name:             "bad",
 			InTreeConfigPath: "bad.cfg",
@@ -263,7 +263,7 @@ func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "later.cfg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rows := []ecosystem.Row{
+	rows := []ecosystem.Strategy{
 		{
 			Name:             "unreadable",
 			InTreeConfigPath: "not-a-file.cfg",
