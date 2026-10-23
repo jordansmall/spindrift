@@ -2975,7 +2975,7 @@ func TestReclaimStaleSnapshots_RemovesUnreferencedStaleGeneration(t *testing.T) 
 	}
 	preLock.Close()
 
-	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+	if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 		t.Fatalf("reclaimStaleSnapshots: %v", err)
 	}
 
@@ -3015,7 +3015,7 @@ func TestReclaimStaleSnapshots_SkipsGenerationWithLiveLock(t *testing.T) {
 	}
 	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
 
-	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+	if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 		t.Fatalf("reclaimStaleSnapshots: %v", err)
 	}
 
@@ -3033,7 +3033,7 @@ func TestReclaimStaleSnapshots_NeverRemovesKeepGeneration(t *testing.T) {
 		t.Fatalf("MkdirAll(%q): %v", keep, err)
 	}
 
-	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+	if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 		t.Fatalf("reclaimStaleSnapshots: %v", err)
 	}
 
@@ -3046,7 +3046,7 @@ func TestReclaimStaleSnapshots_NeverRemovesKeepGeneration(t *testing.T) {
 // is simply nothing to reclaim.
 func TestReclaimStaleSnapshots_NonexistentRootReturnsNil(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "does-not-exist")
-	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+	if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 		t.Errorf("reclaimStaleSnapshots(%q, ...) = %v, want nil", root, err)
 	}
 }
@@ -3063,7 +3063,7 @@ func TestReclaimStaleSnapshots_SweepsOrphanedLockWithNoGenerationDir(t *testing.
 		t.Fatalf("Create(%q): %v", orphanLock, err)
 	}
 
-	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+	if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 		t.Fatalf("reclaimStaleSnapshots: %v", err)
 	}
 
@@ -3088,7 +3088,7 @@ func TestReclaimStaleSnapshots_LeavesOrphanedLockStillHeld(t *testing.T) {
 	}
 	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
 
-	if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+	if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 		t.Fatalf("reclaimStaleSnapshots: %v", err)
 	}
 
@@ -3284,7 +3284,7 @@ func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testin
 
 	var reclaimErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		reclaimErr = reclaimStaleSnapshots(root, "gen-a")
+		reclaimErr = reclaimStaleSnapshots(root, t.TempDir(), "gen-a")
 	})
 
 	if reclaimErr != nil {
@@ -3323,7 +3323,7 @@ func TestReclaimStaleSnapshots_RemoveAllFailureWarnsButReturnsNilAndReleasesLock
 
 	var reclaimErr error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		reclaimErr = reclaimStaleSnapshots(root, "gen-a")
+		reclaimErr = reclaimStaleSnapshots(root, t.TempDir(), "gen-a")
 	})
 
 	if reclaimErr != nil {
@@ -3364,7 +3364,7 @@ func TestReclaimStaleSnapshots_DoesNotRemoveGenerationWithSwappedLockIdentity(t 
 			t.Fatalf("Create(%q): %v", lockPath, err)
 		}
 
-		if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 			t.Fatalf("reclaimStaleSnapshots(%q, %q) = %v, want nil", root, "gen-a", err)
 		}
 
@@ -3390,7 +3390,7 @@ func TestReclaimStaleSnapshots_DoesNotRemoveGenerationWithSwappedLockIdentity(t 
 		// identifies whatever now sits there.
 		installOnceInodeSwapHook(t, lockPath)
 
-		if err := reclaimStaleSnapshots(root, "gen-a"); err != nil {
+		if err := reclaimStaleSnapshots(root, t.TempDir(), "gen-a"); err != nil {
 			t.Fatalf("reclaimStaleSnapshots(%q, %q) = %v, want nil", root, "gen-a", err)
 		}
 
@@ -3929,5 +3929,151 @@ func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
 				t.Errorf("sandbox process env missing %s sentinel", name)
 			}
 		})
+	}
+}
+
+func mkGCRootDir(t *testing.T, gcRoots, name string) string {
+	t.Helper()
+	dir := filepath.Join(gcRoots, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", dir, err)
+	}
+	return dir
+}
+
+func holdSharedLock(t *testing.T, lockPath string) {
+	t.Helper()
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(%q): %v", lockPath, err)
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+		t.Fatalf("Flock(LOCK_SH): %v", err)
+	}
+	t.Cleanup(func() { lf.Close() })
+}
+
+// A stale generation's GC-root dir falls with its snapshot, but only under the
+// same liveness rule: a Box holding the shared lock keeps both.
+func TestReclaimStaleSnapshots_GCRootFollowsSnapshotLiveness(t *testing.T) {
+	root, gcRoots := t.TempDir(), t.TempDir()
+	stale := filepath.Join(root, "gen-b")
+	if err := os.MkdirAll(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleRoot := mkGCRootDir(t, gcRoots, "gen-b")
+	lf, err := os.OpenFile(stale+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_SH); err != nil {
+		t.Fatalf("Flock(LOCK_SH): %v", err)
+	}
+
+	if err := reclaimStaleSnapshots(root, gcRoots, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+	for _, p := range []string{stale, staleRoot} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("os.Stat(%q) while locked = %v, want nil", p, err)
+		}
+	}
+
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatalf("Flock(LOCK_UN): %v", err)
+	}
+	if err := reclaimStaleSnapshots(root, gcRoots, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+	for _, p := range []string{stale, staleRoot} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) after unlock = %v, want IsNotExist", p, err)
+		}
+	}
+}
+
+func TestReclaimStaleSnapshots_NeverRemovesKeepGenerationGCRoot(t *testing.T) {
+	root, gcRoots := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "gen-a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	keepRoot := mkGCRootDir(t, gcRoots, "gen-a")
+
+	if err := reclaimStaleSnapshots(root, gcRoots, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+	if _, err := os.Stat(keepRoot); err != nil {
+		t.Errorf("os.Stat(%q) = %v, want nil (keepGeneration's GC roots must survive)", keepRoot, err)
+	}
+}
+
+// A crashed build can register GC roots and then fail before its snapshot
+// exists; that leftover must fall to reclaim under the same liveness probe.
+func TestReclaimStaleSnapshots_ReclaimsOrphanGCRootDir(t *testing.T) {
+	root, gcRoots := t.TempDir(), t.TempDir()
+	orphan := mkGCRootDir(t, gcRoots, "gen-b")
+	keepRoot := mkGCRootDir(t, gcRoots, "gen-a")
+	holdSharedLock(t, filepath.Join(root, "gen-c.lock"))
+	lockedOrphan := mkGCRootDir(t, gcRoots, "gen-c")
+
+	if err := reclaimStaleSnapshots(root, gcRoots, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) = %v, want IsNotExist", orphan, err)
+	}
+	for _, p := range []string{keepRoot, lockedOrphan} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("os.Stat(%q) = %v, want nil", p, err)
+		}
+	}
+}
+
+func TestReclaimStaleSnapshots_MissingGCRootsRootIsNotAnError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "gen-b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := reclaimStaleSnapshots(root, filepath.Join(t.TempDir(), "absent"), "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "gen-b")); !os.IsNotExist(err) {
+		t.Errorf("stale snapshot not reclaimed: %v", err)
+	}
+}
+
+// A failed snapshot removal must leave the GC roots in place: a snapshot with
+// no root is the unsafe half-state, a root with no snapshot is merely stale.
+func TestReclaimGeneration_KeepsRootsWhenSnapshotRemovalFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so the snapshot dir cannot be made unremovable")
+	}
+	root, gcRoot := t.TempDir(), t.TempDir()
+	genDir := filepath.Join(root, "gen-old")
+	inner := filepath.Join(genDir, "inner")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inner, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// inner is unwritable, so unlinking its child fails.
+	if err := os.Chmod(inner, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(inner, 0o755) })
+	gcDir := filepath.Join(gcRoot, "gen-old")
+	if err := os.MkdirAll(gcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runnertest.CaptureStdoutDuring(t, func() { reclaimGeneration(root, gcRoot, "gen-old") })
+
+	if _, err := os.Stat(gcDir); err != nil {
+		t.Errorf("os.Stat(%q) = %v, want the GC-root dir kept after a failed snapshot removal", gcDir, err)
+	}
+	if !strings.Contains(out, "could not remove stale nix-var snapshot") {
+		t.Errorf("stdout = %q, want a snapshot-removal warning", out)
 	}
 }
