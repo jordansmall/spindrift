@@ -1057,10 +1057,11 @@ driverGoTests
 
   # Seam tests (issue #4280): the integration-tagged packages run against the
   # rendered fixtures the bats harness produces, handed over via
-  # SPINDRIFT_SEAM_FIXTURES_DIR since nix isn't callable in the sandbox; the
+  # SPINDRIFT_SEAM_FIXTURES_DIR since the sandbox can't build them; the
   # locked pi, its hook bridge and the baked hooks reach the piseam tests the
   # same way, via SPINDRIFT_PI_BIN, _BRIDGE and _HOOKS_DIR. The
-  # other integration tests self-skip without nix/bwrap/podman/docker. The
+  # other integration tests self-skip without bwrap/podman/docker. pkgs.nix is
+  # on PATH so the bwrap gcroots test runs against a chroot store. The
   # package list is derived from the tree, so a new tagged file is picked up.
   #
   # Unlike the core checks it copies the whole tree (issue #5562): the fixtures'
@@ -1077,6 +1078,8 @@ driverGoTests
           pkgs.git
           # The hook bridge's hooks parse their input with jq.
           pkgs.jq
+          # The bwrap GC-root test drives a throwaway chroot store with it.
+          pkgs.nix
         ];
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
         SPINDRIFT_PI_BIN = "${pkgs.pi-coding-agent}/bin/pi";
