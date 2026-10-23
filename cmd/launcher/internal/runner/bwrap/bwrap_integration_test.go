@@ -557,8 +557,10 @@ func TestBwrapIntegration_NixTrustsHostStorePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nix path-info failed inside the sandbox: %v: %s", err, out)
 	}
-	if !strings.Contains(string(out), bashBin) {
-		t.Errorf("nix path-info output = %q, want it to contain the resolved store path %q", out, bashBin)
+	// path-info resolves a path inside a store object to the object itself.
+	storePath := strings.Join(strings.SplitN(bashBin, "/", 5)[:4], "/")
+	if !slices.Contains(strings.Split(string(out), "\n"), storePath) {
+		t.Errorf("nix path-info output = %q, want a line naming the store path %q", out, storePath)
 	}
 	if strings.Contains(string(out), "will be fetched") || strings.Contains(string(out), "copying path") {
 		t.Errorf("nix path-info attempted to substitute/copy a path it should have trusted from the snapshot instead: %s", out)
