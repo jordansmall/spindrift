@@ -27,6 +27,10 @@ type Config struct {
 	// CompleteLabel is the label verifyMerged checks for on the tripwire path.
 	CompleteLabel string
 
+	// DispatchLabel is the configured work label an operator re-applies to retry
+	// an issue; the unreviewed comment names it. Empty falls back to the default.
+	DispatchLabel string
+
 	// FindingLabel is the label review findings are filed under, read from
 	// the dispatched kind's row.
 	FindingLabel string

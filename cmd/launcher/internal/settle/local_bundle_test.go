@@ -157,7 +157,7 @@ func TestSelfHeal_LocalForge_LandingRefUpgradeCarriesPass(t *testing.T) {
 	fc.LandingRefValue = "integration/1694@abc123"
 	branch := fc.AgentBranch("1")
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
-	passes := implementThenFixPasses()
+	passes := implementThenLandPasses()
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
 
@@ -168,7 +168,7 @@ func TestSelfHeal_LocalForge_LandingRefUpgradeCarriesPass(t *testing.T) {
 	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
 		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
 	}
-	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "fix"}, {Num: "1", Pass: 2, Kind: "fix"}}
+	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "land"}, {Num: "1", Pass: 2, Kind: "land"}}
 	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
 		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
 	}

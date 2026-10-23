@@ -36,11 +36,17 @@ const (
 	ReasonChoreFailed        = "chore-failed"
 	ReasonLedgerFinishFailed = "ledger-finish-failed"
 	ReasonStopped            = "stopped"
+	ReasonUnreviewed         = "unreviewed" // see UnreviewedNote
 
 	// States that name themselves.
 	ReasonAmbiguous   = "ambiguous"
 	ReasonRecoverable = "recoverable"
 )
+
+// UnreviewedNote is why a status=ready is not trusted (ReasonUnreviewed, issue
+// #5973): a review-loop pass other than the land pass reported it, so the
+// work was never reviewed and landed, and nothing was landed.
+const UnreviewedNote = "ready came from a review-loop pass other than the land pass, so the work was never reviewed and landed"
 
 // ReasonLeavesPROpen reports whether reason names a Complete settle that left
 // its PR open: nothing re-settles such a PR when it merges later, so
