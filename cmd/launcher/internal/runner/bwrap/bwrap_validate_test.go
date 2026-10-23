@@ -1,39 +1,111 @@
 package bwrap
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/runner"
 )
 
-func TestValidatePastaWithLookup_Found(t *testing.T) {
-	fakeLookPath := func(file string) (string, error) {
-		return "/usr/bin/" + file, nil
+func lookPathOK(file string) (string, error) { return "/usr/bin/" + file, nil }
+
+// fakeRun returns a run seam whose command is `sh -c script`, recording the
+// program and argv it was asked to exec.
+func fakeRun(script string, gotName *string, gotArgs *[]string) func(string, ...string) *exec.Cmd {
+	return func(name string, args ...string) *exec.Cmd {
+		*gotName, *gotArgs = name, args
+		return exec.Command("sh", "-c", script)
 	}
-	if err := ValidatePastaWithLookup(fakeLookPath); err != nil {
-		t.Errorf("ValidatePastaWithLookup() = %v, want nil when pasta resolves", err)
+}
+
+// The probe must hand pasta exactly the production flag set, then "--", then
+// this binary, never a copy of the flags.
+func TestValidatePastaWith_Usable(t *testing.T) {
+	var name string
+	var args []string
+	flags := pastaFlags()
+	run := fakeRun("echo "+netnsProbeOK, &name, &args)
+	if err := validatePastaWith(lookPathOK, run, flags); err != nil {
+		t.Fatalf("validatePastaWith() = %v, want nil when the namespace is usable", err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append(append([]string{}, flags...), "--", exe, netnsProbeArg)
+	if name != "pasta" || strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("probe ran %q %q, want pasta %q", name, args, want)
 	}
 }
 
 // The error must name both pasta and the NETWORK_MODE=host opt-out (issue
 // #2666), so the launcher refuses to start rather than silently falling back
 // to a shared host network namespace.
-func TestValidatePastaWithLookup_NotFound(t *testing.T) {
-	fakeLookPath := func(file string) (string, error) {
-		return "", fmt.Errorf("not found")
-	}
-	err := ValidatePastaWithLookup(fakeLookPath)
+func TestValidatePastaWith_NotFound(t *testing.T) {
+	notFound := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	var name string
+	var args []string
+	err := validatePastaWith(notFound, fakeRun("exit 0", &name, &args), nil)
 	if err == nil {
-		t.Fatal("ValidatePastaWithLookup() should error when pasta is absent from PATH")
+		t.Fatal("validatePastaWith() should error when pasta is absent from PATH")
 	}
-	if !strings.Contains(err.Error(), "pasta") {
-		t.Errorf("error = %q, want it to mention pasta", err.Error())
+	want := "pasta not found on PATH — required to give a bwrap Box its own network namespace with the host loopback blocked (issue #2666); install pasta (the passt project) on PATH, or set NETWORK_MODE=host to explicitly opt into the pre-#2666 shared-network-namespace behaviour"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
-	if !strings.Contains(err.Error(), "NETWORK_MODE=host") {
-		t.Errorf("error = %q, want it to mention NETWORK_MODE=host", err.Error())
+	if name != "" {
+		t.Errorf("probe ran %q despite pasta being missing", name)
+	}
+}
+
+// Pasta made a namespace but left it without an address or default route, the
+// shape of the missing --config-net (issue #5981).
+func TestValidatePastaWith_NamespaceUnconfigured(t *testing.T) {
+	var name string
+	var args []string
+	run := fakeRun("echo '"+netnsProbeMarker+" no IPv4 default route via an UP interface'", &name, &args)
+	err := validatePastaWith(lookPathOK, run, nil)
+	if err == nil {
+		t.Fatal("validatePastaWith() should error when the namespace has no default route")
+	}
+	for _, want := range []string{"no IPv4 default route via an UP interface", "NETWORK_MODE=host", "unusable", "#5981", "--config-net"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+	if errors.Is(err, runner.ErrDegraded) {
+		t.Error("an unusable namespace must be a hard error, not ErrDegraded")
+	}
+}
+
+// A pasta that cannot create the namespace at all (nested sandbox, host barring
+// unprivileged user/net namespaces) never reaches the in-namespace check.
+func TestValidatePastaWith_CannotCreateNamespace(t *testing.T) {
+	var name string
+	var args []string
+	run := fakeRun("echo 'Failed to create user namespace: Operation not permitted'; exit 1", &name, &args)
+	err := validatePastaWith(lookPathOK, run, nil)
+	if err == nil {
+		t.Fatal("validatePastaWith() should error when pasta cannot create the namespace")
+	}
+	for _, want := range []string{"Operation not permitted", "exit status 1", "NETWORK_MODE=host", "unprivileged user"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+	if !strings.Contains(err.Error(), "could not create a network namespace") {
+		t.Errorf("error = %q, want it to say pasta could not create the namespace", err.Error())
+	}
+	if strings.Contains(err.Error(), "unusable") {
+		t.Errorf("error = %q, must be distinct from the unusable-namespace message", err.Error())
+	}
+	if errors.Is(err, runner.ErrDegraded) {
+		t.Error("a namespace pasta cannot create must be a hard error, not ErrDegraded")
 	}
 }
 
@@ -45,6 +117,40 @@ func TestValidatePasta_NotOnPath(t *testing.T) {
 	}
 	if err := ValidatePasta(); err == nil {
 		t.Fatal("ValidatePasta() should error when pasta is absent from PATH")
+	}
+}
+
+func TestNetnsUnusable(t *testing.T) {
+	const hdr = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+	defRoute := func(iface, flags string) string {
+		return hdr + iface + "\t00000000\t0100A8C0\t" + flags + "\t0\t0\t0\t00000000\t0\t0\t0\n" +
+			iface + "\t0000A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n"
+	}
+	lo := netnsIface{Name: "lo", Up: true, Loopback: true, HasV4: true}
+	eth0 := netnsIface{Name: "eth0", Up: true, HasV4: true}
+	cases := []struct {
+		name   string
+		ifaces []netnsIface
+		routes string
+		want   string
+	}{
+		{"usable", []netnsIface{lo, eth0}, defRoute("eth0", "0003"), ""},
+		{"no interfaces", nil, defRoute("eth0", "0003"), "no non-loopback interface is UP"},
+		{"loopback only", []netnsIface{lo}, defRoute("lo", "0003"), "no non-loopback interface is UP"},
+		{"non-loopback down", []netnsIface{lo, {Name: "eth0", HasV4: true}}, defRoute("eth0", "0003"), "no non-loopback interface is UP"},
+		{"up without v4", []netnsIface{lo, {Name: "eth0", Up: true}}, defRoute("eth0", "0003"), "no UP non-loopback interface has an IPv4 address"},
+		{"no default route", []netnsIface{lo, eth0}, hdr + "eth0\t0000A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n", "no IPv4 default route via an UP interface with an IPv4 address"},
+		{"empty route table", []netnsIface{lo, eth0}, "", "no IPv4 default route via an UP interface with an IPv4 address"},
+		{"default route via non-UP iface", []netnsIface{lo, eth0, {Name: "eth1", HasV4: true}}, defRoute("eth1", "0003"), "no IPv4 default route via an UP interface with an IPv4 address"},
+		{"default route not RTF_UP", []netnsIface{lo, eth0}, defRoute("eth0", "0002"), "no IPv4 default route via an UP interface with an IPv4 address"},
+		{"route via address-less UP iface", []netnsIface{lo, eth0, {Name: "eth1", Up: true}}, defRoute("eth1", "0003"), "no IPv4 default route via an UP interface with an IPv4 address"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := netnsUnusable(tc.ifaces, tc.routes); got != tc.want {
+				t.Errorf("netnsUnusable() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -315,5 +421,68 @@ func TestValidateCgroupDelegation_AgreesWithResolveCgroupAnchor(t *testing.T) {
 	got, ok := resolveCgroupAnchor(systemdSelfCgroup, []string{"memory", "pids"})
 	if !ok || got != anchor {
 		t.Errorf("resolveCgroupAnchor = (%q, %v), want (%q, true)", got, ok, anchor)
+	}
+}
+
+// Re-executing the test binary with the probe env set must hit init's
+// in-namespace branch: one marker line, exit 0, whatever the host's netns is.
+func TestNetnsProbeInit_PrintsMarker(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, netnsProbeArg)
+	cmd.Env = append(os.Environ(), netnsProbeEnv+"=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("probe child = %v, output %q, want exit 0", err, out)
+	}
+	if line := strings.TrimSpace(string(out)); !strings.HasPrefix(line, netnsProbeMarker) || strings.Contains(line, "\n") {
+		t.Errorf("probe child output = %q, want one %q line", out, netnsProbeMarker)
+	}
+}
+
+// pasta exiting 0 without ever running the child is not a host that bars
+// namespaces; the message must not blame one.
+func TestValidatePastaWith_ExitsWithoutRunningProbe(t *testing.T) {
+	var name string
+	var args []string
+	err := validatePastaWith(lookPathOK, fakeRun("exit 0", &name, &args), nil)
+	if err == nil {
+		t.Fatal("validatePastaWith() should error when pasta exits 0 without the probe marker")
+	}
+	for _, want := range []string{"exited without running", "passt install", "NETWORK_MODE=host"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "unprivileged") {
+		t.Errorf("error = %q, must not blame the host's namespace policy", err.Error())
+	}
+	if errors.Is(err, runner.ErrDegraded) {
+		t.Error("a probe that never ran must be a hard error, not ErrDegraded")
+	}
+}
+
+// A stray netnsProbeEnv must not turn a normal launcher run into the probe.
+func TestNetnsProbeRequested(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		args []string
+		want bool
+	}{
+		{"env and arg", "1", []string{"x", netnsProbeArg}, true},
+		{"env only", "1", []string{"x"}, false},
+		{"env with other args", "1", []string{"x", "run"}, false},
+		{"extra args", "1", []string{"x", netnsProbeArg, "y"}, false},
+		{"arg only", "", []string{"x", netnsProbeArg}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := netnsProbeRequested(tc.env, tc.args); got != tc.want {
+				t.Errorf("netnsProbeRequested(%q, %q) = %v, want %v", tc.env, tc.args, got, tc.want)
+			}
+		})
 	}
 }
