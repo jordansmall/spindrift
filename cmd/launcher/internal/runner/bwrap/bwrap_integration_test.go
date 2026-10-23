@@ -20,6 +20,21 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// requireBwrapEnv turns the host-capability skips below into failures. CI sets
+// it: without it, a runner that loses unprivileged user namespaces goes green
+// with every sandbox test skipped, as ubuntu-24.04's AppArmor userns
+// restriction did.
+const requireBwrapEnv = "SPINDRIFT_REQUIRE_BWRAP"
+
+func skipUnlessRequired(t *testing.T, format string, args ...any) {
+	t.Helper()
+	msg := fmt.Sprintf(format, args...)
+	if os.Getenv(requireBwrapEnv) != "" {
+		t.Fatalf("%s is set, so this cannot skip: %s", requireBwrapEnv, msg)
+	}
+	t.Skip(msg)
+}
+
 // resolveSandboxBin resolves name to an absolute path reachable inside a bwrap
 // sandbox that only ro-binds /nix/store: a host FHS-compat symlink like
 // /bin/bash lives outside the mounted tree. A path already under /nix/store is
@@ -29,7 +44,7 @@ func resolveSandboxBin(t *testing.T, name string) string {
 	t.Helper()
 	p, err := exec.LookPath(name)
 	if err != nil {
-		t.Skipf("%s not found on PATH", name)
+		skipUnlessRequired(t, "%s not found on PATH", name)
 	}
 	if strings.HasPrefix(p, "/nix/store/") {
 		return p
@@ -52,12 +67,12 @@ func requireRealBwrap(t *testing.T) string {
 		t.Skip("bwrap integration test requires Linux")
 	}
 	if _, err := exec.LookPath("bwrap"); err != nil {
-		t.Skip("bwrap not found on PATH")
+		skipUnlessRequired(t, "bwrap not found on PATH")
 	}
 	bashBin := resolveSandboxBin(t, "bash")
 	probe := exec.Command("bwrap", "--ro-bind", "/nix/store", "/nix/store", "--unshare-user", "--uid", "1000", "--gid", "1000", "--tmpfs", "/tmp", "--", bashBin, "-c", "true")
 	if out, err := probe.CombinedOutput(); err != nil {
-		t.Skipf("bwrap cannot create an unprivileged user namespace here: %v: %s", err, out)
+		skipUnlessRequired(t, "bwrap cannot create an unprivileged user namespace here: %v: %s", err, out)
 	}
 	return bashBin
 }
@@ -66,7 +81,8 @@ func requireRealBwrap(t *testing.T) string {
 // nix resolves its own binary via /proc/self/exe. It unshares pid/ipc/uts to
 // match buildArgs' unshareFlags: a bare --proc/--dev probe without
 // --unshare-pid mounts fine in a nested sandbox that then fails to mount /proc
-// once a fresh pid namespace is layered on top. It skips rather than fails.
+// once a fresh pid namespace is layered on top. It skips rather than fails
+// unless requireBwrapEnv is set.
 func requireRealBwrapProc(t *testing.T) string {
 	t.Helper()
 	bashBin := requireRealBwrap(t)
@@ -77,7 +93,7 @@ func requireRealBwrapProc(t *testing.T) string {
 		"--unshare-pid", "--unshare-ipc", "--unshare-uts",
 		"--tmpfs", "/tmp", "--", bashBin, "-c", "true")
 	if out, err := probe.CombinedOutput(); err != nil {
-		t.Skipf("bwrap cannot mount --proc/--dev with a fresh pid namespace in this nested sandbox: %v: %s", err, out)
+		skipUnlessRequired(t, "bwrap cannot mount --proc/--dev with a fresh pid namespace in this nested sandbox: %v: %s", err, out)
 	}
 	return bashBin
 }
@@ -93,13 +109,13 @@ func requireRealPasta(t *testing.T) {
 		t.Skip("pasta integration test requires Linux")
 	}
 	if _, err := exec.LookPath("pasta"); err != nil {
-		t.Skip("pasta not found on PATH")
+		skipUnlessRequired(t, "pasta not found on PATH")
 	}
 	trueBin := resolveSandboxBin(t, "true")
 	probeArgs := append(pastaFlags(), "--", trueBin)
 	probe := exec.Command("pasta", probeArgs...)
 	if out, err := probe.CombinedOutput(); err != nil {
-		t.Skipf("pasta cannot create a network namespace/tap device here: %v: %s", err, out)
+		skipUnlessRequired(t, "pasta cannot create a network namespace/tap device here: %v: %s", err, out)
 	}
 }
 
@@ -182,13 +198,13 @@ func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
 func newIntegrationBwrapAdapterWithNix(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
 	if _, err := exec.LookPath("sqlite3"); err != nil {
-		t.Skip("sqlite3 not found on PATH")
+		skipUnlessRequired(t, "sqlite3 not found on PATH")
 	}
 	if _, err := os.Stat(hostNixDBPath); err != nil {
-		t.Skipf("host nix store db not found at %s", hostNixDBPath)
+		skipUnlessRequired(t, "host nix store db not found at %s", hostNixDBPath)
 	}
 	if _, err := exec.LookPath("nix"); err != nil {
-		t.Skip("nix not found on PATH")
+		skipUnlessRequired(t, "nix not found on PATH")
 	}
 
 	a, etcDir := newIntegrationBwrapAdapter(t)
@@ -418,12 +434,17 @@ func TestBwrapIntegration_PastaBlocksHostLoopback(t *testing.T) {
 	script := fmt.Sprintf("exec 3<>/dev/tcp/%s/%d && echo CONNECTED || echo BLOCKED", pastaDNSForwardAddr, port)
 	program, args := pastaProbeArgs(a, etcDir, box, bashBin, script)
 
-	out, err := exec.Command(program, args...).CombinedOutput()
+	// Stdout only: pasta warns about the host's routes and bash reports the
+	// failed connect on stderr, neither of which is the verdict.
+	cmd := exec.Command(program, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("pasta+bwrap probe failed to run: %v: %s", err, out)
+		t.Fatalf("pasta+bwrap probe failed to run: %v: %s", err, stderr.Bytes())
 	}
 	if got := strings.TrimSpace(string(out)); got != "BLOCKED" {
-		t.Errorf("guest connection to the host loopback via pasta's gateway address = %q, want BLOCKED (--no-map-gw should drop it)", got)
+		t.Errorf("guest connection to the host loopback via pasta's gateway address = %q (stderr: %q), want BLOCKED (--no-map-gw should drop it)", got, stderr.Bytes())
 	}
 
 	select {
