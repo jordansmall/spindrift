@@ -16,8 +16,8 @@
       "gradle": {
         "path": "/some/path"
       },
-      "npm": {
-        "path": "/npm"
+      "neighbour": {
+        "path": "/neighbour"
       }
     },
     "MatchHost": "repo.acme.test",

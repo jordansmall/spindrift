@@ -5,8 +5,8 @@
       "Origin": "https://repo.acme.test",
       "Subtrees": [
         {
-          "ecosystem": "npm",
-          "path": "/npm"
+          "ecosystem": "neighbour",
+          "path": "/neighbour"
         }
       ]
     }
@@ -14,17 +14,17 @@
   "enforced": [
     {
       "enforcedPaths": [
-        "/npm",
+        "/neighbour",
         "/some/path"
       ],
       "enforcedSubtrees": [
         {
-          "ecosystem": "npm",
-          "path": "/npm"
+          "ecosystem": "neighbour",
+          "path": "/neighbour"
         },
         {
-          "ecosystem": "npm",
-          "path": "/npm"
+          "ecosystem": "neighbour",
+          "path": "/neighbour"
         },
         {
           "ecosystem": "gradle",
