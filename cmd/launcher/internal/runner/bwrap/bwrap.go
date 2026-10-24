@@ -81,6 +81,11 @@ type bwrapAdapter struct {
 	// nixVarSnapshotRoot is the pwd-derived root snapshotDirFor joins a
 	// per-launch generation onto (box.ClosureGeneration, issue #2681).
 	nixVarSnapshotRoot string
+	// nixGCRootsRoot and generation locate the GC roots `launcher build`
+	// registered for the baked generation; Run re-registers them when a
+	// concurrent build's reclaim dropped them (issue #5996).
+	nixGCRootsRoot string
+	generation     string
 	// nixStoreWritable gives /nix/store the same overlay treatment as /nix/var
 	// (ADR 0042): an ephemeral tmpfs upper, so paths built in the Box vanish with
 	// the sandbox instead of touching host disk. buildArgs AND-gates it with
@@ -148,6 +153,7 @@ func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, err
 	if err != nil {
 		return nil, err
 	}
+	generation := ClosureGeneration(cfg.ImageTag)
 	return &bwrapAdapter{
 		agentFiles:         cfg.AgentFiles,
 		agentEnv:           cfg.AgentEnv,
@@ -155,8 +161,10 @@ func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, err
 		groupFile:          cfg.GroupFile,
 		bakedPrefetch:      cfg.BakedPrefetch,
 		nixConfigFile:      cfg.NixConfigFile,
-		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, ClosureGeneration(cfg.ImageTag)),
+		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, generation),
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
+		nixGCRootsRoot:     NixGCRootsRoot(pwd),
+		generation:         generation,
 		nixStoreWritable:   cfg.NixStoreWritable,
 		mountParams:        cfg.MountParams,
 		network:            net,
@@ -286,12 +294,50 @@ func (a *bwrapAdapter) prefetchFor(box runner.Box) string {
 // itself, which has no db.sqlite, and ".." escapes it. Joins onto
 // a.nixVarSnapshotRoot directly, since nixVarSnapshotDir would re-append it.
 func (a *bwrapAdapter) snapshotDirFor(box runner.Box) string {
-	if box.ClosureGeneration != nil {
-		if gen := runner.SafePathComponent(box.ClosureGeneration.Generation); gen != "" {
-			return filepath.Join(a.nixVarSnapshotRoot, gen)
-		}
+	if gen := a.generationFor(box); gen != "" {
+		return filepath.Join(a.nixVarSnapshotRoot, gen)
 	}
 	return a.nixVarSnapshotDir
+}
+
+// generationFor is the generation box launches under: its own override, else
+// the adapter's baked one (empty on the flat path). The snapshot dir, Run's
+// lock gate and root re-registration all key off it, so they cannot drift.
+func (a *bwrapAdapter) generationFor(box runner.Box) string {
+	if gen := boxGeneration(box); gen != "" {
+		return gen
+	}
+	return a.generation
+}
+
+// boxGeneration is box's safe per-launch generation override, empty when it
+// has none.
+func boxGeneration(box runner.Box) string {
+	if box.ClosureGeneration == nil {
+		return ""
+	}
+	return runner.SafePathComponent(box.ClosureGeneration.Generation)
+}
+
+// reRootIfReclaimed re-registers box's GC roots when none exist. A concurrent
+// build's reclaim can drop them between this generation's build and Run taking
+// its lock; Run holds the shared lock here, so reclaim cannot drop them again.
+// Best-effort like the build: an older launcher's generation has no roots dir.
+func (a *bwrapAdapter) reRootIfReclaimed(box runner.Box) {
+	gen := a.generationFor(box)
+	if gen == "" || a.nixGCRootsRoot == "" {
+		return
+	}
+	_, err := os.Stat(filepath.Join(a.nixGCRootsRoot, gen))
+	if err == nil {
+		return
+	}
+	if !os.IsNotExist(err) {
+		fmt.Printf("==> bwrap runner: warning: could not check GC roots for generation %s (%v); not re-registering\n", gen, err)
+		return
+	}
+	fmt.Printf("==> bwrap runner: GC roots for generation %s missing (reclaimed by a concurrent build?); re-registering\n", gen)
+	registerMountedArtifactRoots(a.nixGCRootsRoot, gen, []string{a.agentFilesFor(box), a.agentEnvFor(box)}, a.passwdFile, a.groupFile, a.syscallFilterPath)
 }
 
 // buildArgs constructs the bwrap command-line arguments for box. Secret env vars
@@ -832,25 +878,34 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	}
 
 	// A shared flock held for the life of the sandboxed process is how
-	// reclaimStaleSnapshots detects a live Box still reading this generation.
-	// Gated on nixConfigFile, the same condition buildArgs mounts the dir under.
-	// Reclaim can still win the gap between the open and the blocking acquire, so
-	// re-stat after locking: --overlay-src against a removed dir would not mount.
+	// reclaimStaleSnapshots detects a live Box still using this generation, its
+	// snapshot dir and GC roots both. Taken for every Box with a generation or
+	// nixConfigFile. The snapshot dir is mounted only under nixConfigFile, so
+	// only then re-stat after locking: --overlay-src against a removed dir would
+	// not mount. With nixInBox off, reclaim may have dropped the roots, so
+	// re-root them under the held lock.
 	var nixVarSnapshotLock *os.File
-	if a.nixConfigFile != "" {
-		// The same call buildArgs' --overlay-src bind uses, so the lock and stat
-		// guard the exact directory this launch mounts.
-		snapshotDir := a.snapshotDirFor(box)
+	// The same call buildArgs' --overlay-src bind uses, so the lock and stat
+	// guard the exact directory this launch mounts. Empty only for an adapter not
+	// built by New, where SnapshotLockPath would be a cwd-relative ".lock". The
+	// flat path with nixInBox off has no mount and no root, and reclaim never
+	// sweeps it, so a lock there would only leave litter.
+	if snapshotDir := a.snapshotDirFor(box); snapshotDir != "" && (a.nixConfigFile != "" || a.generationFor(box) != "") {
 		lf, err := LockSnapshotShared(snapshotDir)
 		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); reclaim cannot detect box %q is reading this generation\n", SnapshotLockPath(snapshotDir), err, box.Name)
-		} else if _, statErr := os.Stat(snapshotDir); statErr != nil {
-			UnlockSnapshot(lf)
-			if cgroupDir != "" {
-				_ = os.Remove(cgroupDir)
-			}
-			return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", snapshotDir, statErr)
+			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); reclaim cannot detect box %q is using this generation\n", SnapshotLockPath(snapshotDir), err, box.Name)
 		} else {
+			if a.nixConfigFile != "" {
+				if _, statErr := os.Stat(snapshotDir); statErr != nil {
+					UnlockSnapshot(lf)
+					if cgroupDir != "" {
+						_ = os.Remove(cgroupDir)
+					}
+					return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", snapshotDir, statErr)
+				}
+			} else {
+				a.reRootIfReclaimed(box)
+			}
 			nixVarSnapshotLock = lf
 		}
 	}
@@ -1153,41 +1208,47 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		}
 	}
 
-	if a.nixConfigFileDrv != "" {
+	var lf *os.File
+	// Guarded like Run: an adapter not built by NewBuild has no dir, and
+	// SnapshotLockPath("") would be a cwd-relative ".lock". Likewise no lock on
+	// the flat path with nixInBox off (nothing rooted, never swept).
+	if a.nixVarSnapshotDir != "" && (a.nixConfigFileDrv != "" || a.nixConfigFile != "" || a.nixVarGeneration != "") {
 		// MkdirAll first: LockSnapshotShared opens dir+".lock", a sibling of dir,
 		// so its parent must exist for O_CREATE, and on a fresh checkout the
 		// root does not exist yet. A failure here degrades like a lock failure.
 		if mkErr := os.MkdirAll(a.nixVarSnapshotRoot, 0o755); mkErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", a.nixVarSnapshotRoot, mkErr)
 		}
-		// Hold the same shared lock Run holds, here only for the write below: a
-		// concurrent `launcher build` skips only its OWN keepGeneration, so from
-		// its point of view this dir is one more stale generation and its
-		// exclusive probe would RemoveAll it mid-VACUUM (issue #2680). Failing to
-		// lock degrades only that protection; it must never fail the build.
-		lf, lockErr := LockSnapshotShared(a.nixVarSnapshotDir)
-		if lockErr != nil {
-			fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(a.nixVarSnapshotDir), lockErr)
+		// A concurrent build skips only its own keepGeneration, so its exclusive
+		// probe would drop this generation's roots (and, with nix-in-box,
+		// RemoveAll the snapshot mid-VACUUM, #2680). Failing to lock must never
+		// fail the build.
+		var lockErr error
+		if lf, lockErr = LockSnapshotShared(a.nixVarSnapshotDir); lockErr != nil {
+			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(a.nixVarSnapshotDir), lockErr)
 		}
-		// Registered under the same lock, for the same reason: a concurrent
-		// build's reclaim must not drop this generation before its roots exist.
-		registerMountedArtifactRoots(a.nixGCRootsRoot, a.nixVarGeneration,
-			[]string{a.agentFiles, a.agentEnv, a.nixConfigFile}, a.passwdFile, a.groupFile, a.syscallFilterPath)
-		err := a.snapshotStoreDB()
-		UnlockSnapshot(lf)
-		if err != nil {
-			return err
-		}
-		// An empty nixVarGeneration is the flat/legacy path: nixVarSnapshotDir IS
-		// the root, so there are no sibling generations to sweep, and reclaiming
-		// against the root would sweep unrelated siblings like .spindrift/accum.git.
-		if a.nixVarGeneration == "" {
-			fmt.Println("==> bwrap runner: nix-var snapshot is unscoped (no closure generation known); skipping stale-generation reclaim")
-		} else if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixGCRootsRoot, a.nixVarGeneration); err != nil {
-			// Best-effort: an unreclaimed old generation wastes disk but leaves
-			// the snapshot EnsureReady just produced perfectly usable.
-			fmt.Printf("==> bwrap runner: warning: could not reclaim stale nix-var snapshots under %s: %v\n", a.nixVarSnapshotRoot, err)
-		}
+	}
+	// Registered while lf, if taken, is held: a concurrent build's reclaim
+	// must not drop this generation before its roots exist.
+	registerMountedArtifactRoots(a.nixGCRootsRoot, a.nixVarGeneration,
+		[]string{a.agentFiles, a.agentEnv, a.nixConfigFile}, a.passwdFile, a.groupFile, a.syscallFilterPath)
+	var err error
+	if a.nixConfigFileDrv != "" {
+		err = a.snapshotStoreDB()
+	}
+	UnlockSnapshot(lf)
+	if err != nil {
+		return err
+	}
+	// An empty nixVarGeneration is the flat/legacy path: nixVarSnapshotDir IS
+	// the root, so there are no sibling generations to sweep, and reclaiming
+	// against the root would sweep unrelated siblings like .spindrift/accum.git.
+	if a.nixVarGeneration == "" {
+		fmt.Println("==> bwrap runner: no closure generation known; skipping stale-generation reclaim")
+	} else if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixGCRootsRoot, a.nixVarGeneration); err != nil {
+		// Best-effort: an unreclaimed old generation wastes disk but leaves
+		// the build's own output perfectly usable.
+		fmt.Printf("==> bwrap runner: warning: could not reclaim stale generations under %s: %v\n", a.nixVarSnapshotRoot, err)
 	}
 
 	fmt.Println("==> done: agent store closures realized")
@@ -1208,14 +1269,15 @@ func (a *bwrapBuildAdapter) snapshotStoreDB() error {
 // reclaimStaleSnapshots removes generation directories under root that are
 // neither keepGeneration nor still referenced by a live Box. Liveness is a
 // non-blocking exclusive Flock on the generation's sibling lock file, which
-// fails while any Box holds the shared lock Run takes. It never removes the lock
-// file itself; sweepOrphanedLock does that a pass later. Per-entry errors warn.
+// fails while any Box holds the shared lock Run takes. A snapshot dir's lock file
+// is left for sweepOrphanedLock a pass later. Per-entry errors warn.
 //
 // gcRootsRoot holds each generation's GC-root out-links (registerGenerationRoot)
 // and is passed explicitly rather than derived from root. A generation's dir
 // there drops with its snapshot, under the same lock; one with no snapshot (a
-// build that registered roots, then failed before snapshotting) is probed on the
-// lock it would have had. A missing gcRootsRoot is not an error.
+// nix-in-box-off build, or one that failed before snapshotting) is probed on the
+// lock it would have had, and takes that lock file with it. A missing
+// gcRootsRoot is not an error.
 func reclaimStaleSnapshots(root, gcRootsRoot, keepGeneration string) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -1243,7 +1305,7 @@ func reclaimStaleSnapshots(root, gcRootsRoot, keepGeneration string) error {
 		if name == keepGeneration {
 			continue
 		}
-		reclaimGeneration(root, gcRootsRoot, name)
+		reclaimGeneration(root, gcRootsRoot, name, keepLock)
 	}
 	rootEntries, err := os.ReadDir(gcRootsRoot)
 	if err != nil && !os.IsNotExist(err) {
@@ -1254,19 +1316,30 @@ func reclaimStaleSnapshots(root, gcRootsRoot, keepGeneration string) error {
 		if !entry.IsDir() || name == keepGeneration || knownGenerations[name] {
 			continue
 		}
-		reclaimGeneration(root, gcRootsRoot, name)
+		// sweepOrphanedLock already ran this pass, so a lock left here would sit
+		// stranded until the next one.
+		reclaimGeneration(root, gcRootsRoot, name, dropLock)
 	}
 	return nil
 }
 
+// lockDisposition says whether reclaimGeneration also removes the lock file.
+type lockDisposition bool
+
+const (
+	keepLock lockDisposition = false
+	dropLock lockDisposition = true
+)
+
 // reclaimGeneration removes a generation's snapshot dir and GC-root dir unless a
 // Box holds the generation's shared lock. Either dir may already be absent.
-func reclaimGeneration(root, gcRootsRoot, name string) {
+// dropLock also removes the lock file, under the lock, once the roots are gone.
+func reclaimGeneration(root, gcRootsRoot, name string, lock lockDisposition) {
 	genDir := filepath.Join(root, name)
 	lockPath := SnapshotLockPath(genDir)
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		fmt.Printf("==> bwrap runner: warning: could not open nix-var snapshot lock %s (%v); leaving stale generation %s in place\n", lockPath, err, name)
+		fmt.Printf("==> bwrap runner: warning: could not open generation lock %s (%v); leaving stale generation %s in place\n", lockPath, err, name)
 		return
 	}
 	lockRaceWindowHook()
@@ -1287,12 +1360,17 @@ func reclaimGeneration(root, gcRootsRoot, name string) {
 	}
 	// Dropping the out-links is enough: nix's indirect roots then dangle and
 	// stop counting.
-	if gcRootsRoot == "" {
-		return // filepath.Join would make gcDir cwd-relative
+	if gcRootsRoot != "" { // else filepath.Join would make gcDir cwd-relative
+		gcDir := filepath.Join(gcRootsRoot, name)
+		if err := os.RemoveAll(gcDir); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not remove stale nix GC roots %s: %v\n", gcDir, err)
+			return
+		}
 	}
-	gcDir := filepath.Join(gcRootsRoot, name)
-	if err := os.RemoveAll(gcDir); err != nil {
-		fmt.Printf("==> bwrap runner: warning: could not remove stale nix GC roots %s: %v\n", gcDir, err)
+	if lock == dropLock {
+		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("==> bwrap runner: warning: could not remove stale generation lock %s: %v\n", lockPath, err)
+		}
 	}
 }
 

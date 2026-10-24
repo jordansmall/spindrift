@@ -814,36 +814,80 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 	}
 }
 
-// The lock is gated on the same condition as the nixVarSnapshotDir mount
-// itself (nixConfigFile != ""): with nix-in-box off there is nothing to
-// protect, so Run must not create a lock file at all.
-func TestBwrapRun_NixConfigEmptySkipsLock(t *testing.T) {
-	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
+// The generation lock guards the GC roots too, so every Box holds it for the
+// life of its process, nix-in-box on or off. With nixConfigFile empty there is
+// no snapshot dir to require or mount, only the lock file.
+func TestBwrapRun_NixConfigEmptyStillHoldsLockWithoutSnapshotDir(t *testing.T) {
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
+	var bwrapArgs []string
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command(script, args...)
+		bwrapArgs = args
+		return exec.Command("sleep", "5")
 	}
 
-	snapshotDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "abc123-agent-closure")
-	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
+	snapshotRoot := filepath.Join(t.TempDir(), "nix-var-snapshot")
+	if err := os.MkdirAll(snapshotRoot, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
+	snapshotDir := filepath.Join(snapshotRoot, "abc123-agent-closure")
 	lockPath := snapshotDir + ".lock"
 
 	a := &bwrapAdapter{
-		agentFiles:        "/fake/agent",
-		agentEnv:          "/fake/env",
-		bakedPrefetch:     "echo ok",
-		nixConfigFile:     "",
-		nixVarSnapshotDir: snapshotDir,
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		bakedPrefetch:      "echo ok",
+		nixConfigFile:      "",
+		nixVarSnapshotDir:  snapshotDir,
+		nixVarSnapshotRoot: snapshotRoot,
+		generation:         "abc123-agent-closure",
 	}
-	if err := a.Run(runner.Box{Name: "agent-issue-10", Env: map[string]string{}}); err != nil {
-		t.Fatalf("Run: %v", err)
+	done := make(chan error, 1)
+	go func() { done <- a.Run(runner.Box{Name: "agent-issue-10", Env: map[string]string{}}) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.Lock()
+		_, tracked := a.running["agent-issue-10"]
+		a.mu.Unlock()
+		if tracked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run never tracked its process (a missing snapshot dir must not fail Run)")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Errorf("lock file %s: want not-exist (nixConfigFile empty), got err=%v", lockPath, err)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile lock: %v", err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		t.Error("exclusive Flock while Run in flight: want error (lock held), got nil")
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+	if slices.Contains(bwrapArgs, "--overlay-src") || slices.Contains(bwrapArgs, "/nix/var") {
+		t.Errorf("args %v mount a /nix/var snapshot overlay with nixConfigFile empty", bwrapArgs)
+	}
+
+	if err := a.Kill("agent-issue-10"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after Kill")
+	}
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("exclusive Flock after Run returned: want nil (lock released), got %v", err)
+	} else {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	}
+	if _, err := os.Stat(snapshotDir); !os.IsNotExist(err) {
+		t.Errorf("snapshot dir %s: want not-exist (Run must not create it), got err=%v", snapshotDir, err)
 	}
 }
 
@@ -882,7 +926,7 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("Run: want nil despite lock-acquire failure, got %v", runErr)
 	}
-	if !strings.Contains(out, "could not acquire nix-var snapshot lock") {
+	if !strings.Contains(out, "could not acquire generation lock") {
 		t.Errorf("Run output missing lock-acquire-failure warning: %q", out)
 	}
 }
@@ -3293,7 +3337,7 @@ func TestReclaimStaleSnapshots_OpenLockFailureLeavesGenerationAndWarns(t *testin
 	if _, err := os.Stat(stale); err != nil {
 		t.Errorf("os.Stat(%q) after reclaim = %v, want nil (generation must survive a lock-open failure)", stale, err)
 	}
-	if !strings.Contains(out, "could not open nix-var snapshot lock") {
+	if !strings.Contains(out, "could not open generation lock") {
 		t.Errorf("reclaimStaleSnapshots output missing lock-open-failure warning: %q", out)
 	}
 }
@@ -4072,12 +4116,54 @@ func TestReclaimGeneration_KeepsRootsWhenSnapshotRemovalFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := runnertest.CaptureStdoutDuring(t, func() { reclaimGeneration(root, gcRoot, "gen-old") })
+	out := runnertest.CaptureStdoutDuring(t, func() { reclaimGeneration(root, gcRoot, "gen-old", keepLock) })
 
 	if _, err := os.Stat(gcDir); err != nil {
 		t.Errorf("os.Stat(%q) = %v, want the GC-root dir kept after a failed snapshot removal", gcDir, err)
 	}
 	if !strings.Contains(out, "could not remove stale nix-var snapshot") {
 		t.Errorf("stdout = %q, want a snapshot-removal warning", out)
+	}
+}
+
+// A nix-in-box-off generation leaves no snapshot dir: its footprint is the GC
+// roots plus the lock file. One pass must drop both, never touching a
+// generation a Box holds, keepGeneration, or unrelated .spindrift siblings.
+func TestReclaimStaleSnapshots_LockOnlyGenerationDropsRootsAndLockInOnePass(t *testing.T) {
+	pwd := t.TempDir()
+	root, gcRoots := NixVarSnapshotRoot(pwd), NixGCRootsRoot(pwd)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleLock := filepath.Join(root, "gen-b.lock")
+	if err := os.WriteFile(staleLock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleRoot := mkGCRootDir(t, gcRoots, "gen-b")
+	keepLock := filepath.Join(root, "gen-a.lock")
+	if err := os.WriteFile(keepLock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keepRoot := mkGCRootDir(t, gcRoots, "gen-a")
+	liveLock := filepath.Join(root, "gen-c.lock")
+	holdSharedLock(t, liveLock)
+	liveRoot := mkGCRootDir(t, gcRoots, "gen-c")
+	sibling := filepath.Join(pwd, ".spindrift", "accum.git")
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reclaimStaleSnapshots(root, gcRoots, "gen-a"); err != nil {
+		t.Fatalf("reclaimStaleSnapshots: %v", err)
+	}
+	for _, p := range []string{staleLock, staleRoot} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) = %v, want IsNotExist after one pass", p, err)
+		}
+	}
+	for _, p := range []string{keepLock, keepRoot, liveLock, liveRoot, sibling} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("os.Stat(%q) = %v, want nil", p, err)
+		}
 	}
 }
