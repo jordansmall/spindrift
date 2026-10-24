@@ -463,17 +463,29 @@ with, even when the snapshot already exists.
 Stale-generation reclaim drops the root together with the snapshot, under the
 same exclusive-flock liveness probe: never while a Box holds the generation's
 shared lock, and never for the current generation. A root directory with no
-snapshot, left by a crashed build, is reclaimed the same way. Removing the
-out-link drops the indirect root. A failure to register warns and degrades,
-like snapshot-lock degradation, and never fails the build.
+snapshot, left by a crashed build or a nixInBox-off one, is reclaimed the same
+way. Removing the out-link drops the indirect root. A failure to register
+warns and degrades, like snapshot-lock degradation, and never fails the build.
 
 Only the mounted artifacts are rooted. Store paths the snapshot database
 references but the Box does not mount stay unrooted, so the point-in-time
 race in the paragraph above still applies to them. A per-Box root added at
 launch and removed at exit was rejected: it leaves the build-to-launch
-window unrooted and needs its own crash cleanup. The roots exist only where
-the generation directory and lock do, so a `nixInBox`-off deployment is not
-covered; that is a follow-up.
+window unrooted and needs its own crash cleanup.
+
+The lock and the root cover every bwrap Box, `nixInBox` on or off (issue
+#5996). With it off there is no snapshot dir and no `/nix/var` overlay, only
+the `<generation>.lock` file under `.spindrift/nix-var-snapshot` and the roots
+dir. `launcher build` takes the lock and registers the root either way, and
+only the store-DB snapshot stays `nixInBox`-only. Run holds the shared lock for
+the Box's whole life whatever the setting; only the snapshot-dir stat guard is
+`nixInBox`-only. With it off, Run re-registers the generation's roots under its
+held lock when a concurrent build's reclaim dropped them before Run locked
+(there is no snapshot dir to stat-guard). Reclaim drops a lock-only
+generation's roots and its lock file in the same pass. A `nixInBox`-off Box on
+the flat path, with no generation, takes no lock: it has no root to protect.
+The hot-swap hook (ADR 0069) now runs for `nixInBox`-off Consumers too,
+skipping only the `VACUUM`.
 
 ## Amendment (issue #6004): the bwrap root's /bin matches the OCI image
 
