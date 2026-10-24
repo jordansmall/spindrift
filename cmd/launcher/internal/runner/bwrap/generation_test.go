@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"testing"
 
-	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -225,7 +224,7 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 	closure := "/nix/store/abc-agent-closure"
 	dest := snapshotDest(pwd, closure)
 
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err == nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err == nil {
 		t.Fatal("SnapshotGeneration [1st] = nil, want error from scripted sqlite3 failure")
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
@@ -235,7 +234,7 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 		t.Errorf("leftover siblings after failure: %v, want none", left)
 	}
 
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err == nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err == nil {
 		t.Fatal("SnapshotGeneration [2nd] = nil, want the scripted failure again")
 	}
 	if vacuums != 2 {
@@ -257,7 +256,7 @@ func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testi
 		}
 	})
 
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -294,7 +293,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
@@ -342,13 +341,13 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) [1st] = %v, want nil", pwd, closure, err)
 	}
 
 	// The first call installs the (empty) temp as dest, so the second call
 	// finds an existing snapshot without any setup here.
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) [2nd] = %v, want nil", pwd, closure, err)
 	}
 
@@ -383,7 +382,7 @@ func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
 		}
 	}
 
-	if err := SnapshotGeneration(runner.Config{}, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {

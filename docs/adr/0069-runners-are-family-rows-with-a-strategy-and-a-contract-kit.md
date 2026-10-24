@@ -46,9 +46,9 @@ Runners get the backend kit of ADR 0068, keyed by family.
    This split lands first. `internal/runner` keeps the `Runner` interface,
    `Box`, the shared plan, the `Fake` and the kit. A Strategy may carry an
    optional hot-swap preparation hook: before a hot-swap binds a realized
-   closure for a nixInBox Consumer, core calls the active family's hook
-   (bwrap writes its store-DB snapshot generation). A nil hook means the
-   family needs no preparation.
+   closure, core calls the active family's hook (bwrap roots the generation
+   and, for a nixInBox Consumer, writes its store-DB snapshot). A nil hook
+   means the family needs no preparation.
 3. **The Box artifact is its own seam.** It has two adapters, `oci-image` and
    `store-closure`, owned by freshness. Each supplies how a tip build is
    identified and compared, the wording, the host-taint diagnostic, and
@@ -112,3 +112,7 @@ Runners get the backend kit of ADR 0068, keyed by family.
   behavior, as the backend, kind-axes and tuning guards also skip them).
 - Like ADR 0068, this ships incrementally, and each change leaves `main`
   releasable.
+- Since issue #5996 core calls the preparation hook on every store-closure
+  hot-swap, not only for a nixInBox Consumer: a bwrap family roots the
+  generation's mounted artifacts with nixInBox off too, and keys its
+  snapshot-only work off `Config.NixConfigFile`.

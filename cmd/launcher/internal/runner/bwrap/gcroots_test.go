@@ -286,6 +286,7 @@ func swapStubs(t *testing.T, failRoot bool) *[][]string {
 }
 
 var swapCfg = runner.Config{
+	NixConfigFile:     "/nix/store/eee-nix.conf",
 	PasswdFile:        "/nix/store/ccc-passwd",
 	GroupFile:         "/nix/store/ddd-group",
 	SyscallFilterPath: "/nix/store/fff-filter.bpf",
@@ -357,5 +358,40 @@ func TestSnapshotGeneration_RootFailureWarnsAndSucceeds(t *testing.T) {
 	}
 	if !strings.Contains(out, "warning") {
 		t.Errorf("output = %q, want a warning naming the failed root", out)
+	}
+}
+
+// With nixInBox off the Box mounts no nix-var snapshot, but the generation is
+// still locked and rooted (issue #5996): no snapshot dir, db.sqlite or VACUUM.
+func TestSnapshotGeneration_NixInBoxOff_RootsAndLocksWithoutSnapshot(t *testing.T) {
+	calls := swapStubs(t, false)
+	vacuumed := false
+	rec := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name != "nix" {
+			vacuumed = true
+		}
+		return rec(name, args...)
+	}
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	cfg := swapCfg
+	cfg.NixConfigFile = ""
+
+	if err := SnapshotGeneration(cfg, pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v", got, want)
+	}
+	dir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
+	if _, err := os.Stat(SnapshotLockPath(dir)); err != nil {
+		t.Errorf("snapshot lock file: want present, got err=%v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("snapshot dir %s: want absent with nixInBox off, got err=%v", dir, err)
+	}
+	if vacuumed {
+		t.Error("a non-nix command (the VACUUM) ran with nixInBox off")
 	}
 }
