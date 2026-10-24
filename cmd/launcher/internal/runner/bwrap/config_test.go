@@ -35,6 +35,7 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		t.Fatalf("New did not return *bwrapAdapter")
 	}
 	want := bwrapAdapter{
+		prepare:            newBuildAdapter(cfg, "/pwd"),
 		agentFiles:         cfg.AgentFiles,
 		agentEnv:           cfg.AgentEnv,
 		passwdFile:         cfg.PasswdFile,

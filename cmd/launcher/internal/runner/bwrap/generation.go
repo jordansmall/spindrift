@@ -57,6 +57,37 @@ func NixGCRootsRoot(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "nix-gcroots")
 }
 
+// RealizeLockPath is the lock concurrent cold starts on one snapshot root
+// serialize their snapshot write on. A sibling of root, never inside it:
+// reclaimStaleSnapshots sweeps any NAME.lock under root as a generation lock.
+// It is not a generation's SnapshotLockPath either, which a running Box holds
+// shared for its whole life. The file is never removed, so its inode is stable.
+func RealizeLockPath(root string) string {
+	return root + ".realize.lock"
+}
+
+// lockRealize takes the exclusive realize lock on root, calling onWait (if
+// non-nil) before it blocks behind a sibling launcher. Callers hold it only
+// around the snapshot write.
+func lockRealize(root string, onWait func()) (*os.File, error) {
+	lf, err := os.OpenFile(RealizeLockPath(root), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	err = syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	if errors.Is(err, syscall.EWOULDBLOCK) {
+		if onWait != nil {
+			onWait()
+		}
+		err = syscall.Flock(int(lf.Fd()), syscall.LOCK_EX)
+	}
+	if err != nil {
+		lf.Close()
+		return nil, err
+	}
+	return lf, nil
+}
+
 // registerGenerationRoot keeps storePaths from being garbage-collected while
 // generation is live, by building each with --out-link under
 // <rootsRoot>/<generation>/ (nix makes each link an indirect GC root). The
@@ -248,8 +279,8 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 }
 
 // hostNixDBPath is the host's real, live nix store database, never a path inside
-// a sandbox: snapshotStoreDB runs during `launcher build`, on the operator's own
-// machine. It is the one Go call site that reaches into live host store metadata.
+// a sandbox: snapshotStoreDB runs host-side, on both the build and run paths.
+// It is the one Go call site that reaches into live host store metadata.
 const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 
 // SnapshotInstall is how VacuumStoreDBInto lands the finished temp on db.sqlite.

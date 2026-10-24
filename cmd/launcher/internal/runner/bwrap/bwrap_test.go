@@ -1308,30 +1308,10 @@ func TestBwrapIsReady_NixConfigSetAndStatErrorOtherThanNotExistReturnsWrappedErr
 	}
 }
 
-// Issue #2664's other half: bootstrap only calls IsReady on the `--no-build`
-// path, so on the default run/dispatch path a missing nix-in-box snapshot
-// used to sail past EnsureReady's no-op and surface as a raw bwrap overlay
-// mount failure. EnsureReady must perform the same actionable check.
-func TestBwrapEnsureReady_DelegatesToIsReady(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "missing")
-	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: missing}
-	err := a.EnsureReady()
-	if err == nil {
-		t.Fatal("EnsureReady with missing snapshot dir: want error, got nil")
-	}
-	wantPath := filepath.Join(missing, "nix", "db", "db.sqlite")
-	if !strings.Contains(err.Error(), wantPath) {
-		t.Errorf("EnsureReady error %q: want it to mention the missing path %q", err.Error(), wantPath)
-	}
-	if !strings.Contains(err.Error(), "launcher build") {
-		t.Errorf("EnsureReady error %q: want it to hint at running `launcher build`", err.Error())
-	}
-}
-
-// Mirrors TestBwrapIsReady_NixConfigEmptySkipsSnapshotCheck: Consumers who
-// never use nix-in-box must not regress once EnsureReady delegates to IsReady
-// (issue #2664).
-func TestBwrapEnsureReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
+// Consumers who never use nix-in-box have nothing to prepare: a bare adapter is
+// trivially warm and EnsureReady touches neither exec nor the snapshot (issue
+// #2664).
+func TestBwrapEnsureReady_BareAdapterIsTriviallyWarm(t *testing.T) {
 	a := &bwrapAdapter{nixConfigFile: "", nixVarSnapshotDir: "/does/not/exist"}
 	if err := a.EnsureReady(); err != nil {
 		t.Errorf("EnsureReady with nixConfigFile empty: want nil, got %v", err)

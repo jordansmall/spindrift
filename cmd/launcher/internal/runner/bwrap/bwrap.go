@@ -63,9 +63,13 @@ var writeCgroupLimit = os.WriteFile
 const homeAgentStagingDir = "/home-agent-staged"
 
 // bwrapAdapter implements Runner for the daemonless bubblewrap sandbox.
-// EnsureReady delegates to IsReady rather than realizing anything itself, since
-// the build command realizes the store closures.
+// EnsureReady prepares a cold closure generation itself (via prepare) rather
+// than demanding `launcher build`; IsReady is the read-only check --no-build uses.
 type bwrapAdapter struct {
+	// prepare realizes this adapter's closure generation when EnsureReady finds
+	// it cold; it shares the build adapter's steps rather than duplicating them.
+	prepare bwrapBuildAdapter
+
 	agentFiles    string // baked nix store path for agent files (/agent/…)
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
 	passwdFile    string // baked nix store path for /etc/passwd
@@ -155,6 +159,7 @@ func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, err
 	}
 	generation := ClosureGeneration(cfg.ImageTag)
 	return &bwrapAdapter{
+		prepare:            newBuildAdapter(cfg, pwd),
 		agentFiles:         cfg.AgentFiles,
 		agentEnv:           cfg.AgentEnv,
 		passwdFile:         cfg.PasswdFile,
@@ -174,16 +179,37 @@ func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, err
 	}, nil
 }
 
-// EnsureReady builds nothing for bwrap run: `launcher build` realizes the store
-// closures first. It delegates to IsReady so the actionable snapshot-missing
-// error fires on the default run/dispatch path too, not only on `--no-build`
-// (issue #2664).
-func (a *bwrapAdapter) EnsureReady() error { return a.IsReady() }
+// unscopedGenerationLabel names a run whose nix-var snapshot has no generation.
+const unscopedGenerationLabel = "(unscoped)"
 
-// IsReady checks that the nix-in-box snapshot `launcher build` writes is present
-// when the Consumer's nixInBox knob is on (ADR 0042). Scoped to that one gap
-// (issue #2664): buildArgs conditions no other mount on absence, so without this
-// a missing snapshot surfaces only as a raw bwrap overlay mount failure.
+// EnsureReady prepares the closure generation this run needs, the way the OCI
+// adapter loads an image only when it is absent: a generation whose store paths
+// are on disk (and its snapshot too, when a nix-config drv is set; see
+// generationReady) is left alone with an "already realized" line and no
+// image_build pair, and a cold one is realized (and its snapshot written if
+// absent) under an image_build pair.
+// IsReady, not this, backs --no-build, which never prepares anything.
+func (a *bwrapAdapter) EnsureReady() error {
+	if a.prepare.generationReady() {
+		gen := a.prepare.nixVarGeneration
+		if gen == "" {
+			gen = unscopedGenerationLabel
+		}
+		fmt.Printf("==> bwrap runner: closure generation %s already realized\n", gen)
+		return nil
+	}
+	if err := a.prepare.ensureReady(InstallIfAbsent); err != nil {
+		return err
+	}
+	a.prepare.reclaimStale()
+	return nil
+}
+
+// IsReady checks that the nix-in-box snapshot (written by `launcher build` or
+// EnsureReady) is present when the Consumer's nixInBox knob is on (ADR 0042).
+// Scoped to that one gap (issue #2664): buildArgs conditions no other mount on
+// absence, so without this a missing snapshot surfaces only as a raw bwrap
+// overlay mount failure.
 func (a *bwrapAdapter) IsReady() error {
 	if a.nixConfigFile == "" {
 		return nil
@@ -1150,8 +1176,15 @@ type bwrapBuildAdapter struct {
 // The knob lookup is unused and the error always nil; both exist only for the
 // shared runner.Strategy signature.
 func NewBuild(cfg runner.Config, _ runner.KnobLookup, pwd string) (runner.Runner, error) {
+	b := newBuildAdapter(cfg, pwd)
+	return &b, nil
+}
+
+// newBuildAdapter is shared with New, whose run adapter prepares a cold
+// generation through the same steps.
+func newBuildAdapter(cfg runner.Config, pwd string) bwrapBuildAdapter {
 	generation := ClosureGeneration(cfg.ImageTag)
-	return &bwrapBuildAdapter{
+	return bwrapBuildAdapter{
 		agentFilesDrv:      cfg.AgentFilesDrv,
 		agentEnvDrv:        cfg.AgentEnvDrv,
 		passwdFileDrv:      cfg.PasswdFileDrv,
@@ -1168,7 +1201,7 @@ func NewBuild(cfg runner.Config, _ runner.KnobLookup, pwd string) (runner.Runner
 		nixConfigFile:      cfg.NixConfigFile,
 		syscallFilterPath:  cfg.SyscallFilterPath,
 		nixGCRootsRoot:     NixGCRootsRoot(pwd),
-	}, nil
+	}
 }
 
 // closureSpec pairs a human-readable label with the .drv path EnsureReady
@@ -1183,13 +1216,48 @@ type closureSpec struct {
 // set (nixInBox on) it also realizes the nix-config closure and snapshots the
 // host nix store DB (ADR 0042) for the run adapter's /nix/var overlay to mount.
 func (a *bwrapBuildAdapter) EnsureReady() error {
-	// Reported even when warm: realizing is idempotent and fast then, so the
-	// pair clears near-instantly, and a failure still clears via the defer.
+	if err := a.ensureReady(InstallReplace); err != nil {
+		return err
+	}
+	a.reclaimStale()
+
+	fmt.Println("==> done: agent store closures realized")
+	return nil
+}
+
+// reclaimStale drops old generations once this one is locked and rooted (and
+// its snapshot in place, with nixInBox on). Best-effort: an unreclaimed
+// generation wastes disk but leaves the one just prepared perfectly usable.
+func (a *bwrapBuildAdapter) reclaimStale() {
+	// An empty nixVarGeneration is the flat/legacy path: nixVarSnapshotDir IS
+	// the root, so there are no sibling generations to sweep, and reclaiming
+	// against the root would sweep unrelated siblings like .spindrift/accum.git.
+	if a.nixVarGeneration == "" {
+		fmt.Println("==> bwrap runner: closure generation is unscoped (none known); skipping stale-generation reclaim")
+		return
+	}
+	if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixGCRootsRoot, a.nixVarGeneration); err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not reclaim stale generations under %s: %v\n", a.nixVarSnapshotRoot, err)
+	}
+}
+
+// ensureReady is the preparation both adapters share: realize the closures,
+// lock and root the generation and, when nixInBox is on, write the snapshot
+// with mode. It reports the image_build pair even when everything is already
+// realized: nix is then fast and the pair clears near-instantly, and a failure
+// still clears via the defer.
+func (a *bwrapBuildAdapter) ensureReady(mode SnapshotInstall) error {
 	report.ImageBuild(report.ImageBuildStarted)
 	defer report.ImageBuild(report.ImageBuildFinished)
 
 	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
+	if err := a.realizeClosures(); err != nil {
+		return err
+	}
+	return a.publishSnapshot(mode)
+}
 
+func (a *bwrapBuildAdapter) realizeClosures() error {
 	closures := []closureSpec{
 		{"agent-files", a.agentFilesDrv},
 		{"agent-env", a.agentEnvDrv},
@@ -1207,8 +1275,14 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 			return err
 		}
 	}
+	return nil
+}
 
-	var lf *os.File
+// publishSnapshot locks and roots the generation's artifacts and, when nixInBox
+// is on, writes its store-DB snapshot (ADR 0042). With InstallIfAbsent an
+// existing db.sqlite is kept and not re-vacuumed, since a running Box may be
+// reading it.
+func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
 	// Guarded like Run: an adapter not built by NewBuild has no dir, and
 	// SnapshotLockPath("") would be a cwd-relative ".lock". Likewise no lock on
 	// the flat path with nixInBox off (nothing rooted, never swept).
@@ -1219,40 +1293,67 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 		if mkErr := os.MkdirAll(a.nixVarSnapshotRoot, 0o755); mkErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", a.nixVarSnapshotRoot, mkErr)
 		}
+		// Concurrent cold starts serialize their snapshot write here; the run
+		// path only, as a build owns its generation and replaces the snapshot
+		// regardless. A failed lock degrades to an unserialized write, which
+		// InstallIfAbsent keeps safe: the loser's link finds db.sqlite already
+		// installed.
+		if mode == InstallIfAbsent && a.nixConfigFileDrv != "" && a.nixVarSnapshotRoot != "" {
+			rl, rlErr := lockRealize(a.nixVarSnapshotRoot, func() {
+				fmt.Printf("==> bwrap runner: a sibling launcher is writing a nix-var snapshot under %s; waiting\n", a.nixVarSnapshotRoot)
+			})
+			if rlErr != nil {
+				fmt.Printf("==> bwrap runner: warning: could not acquire realize lock %s (%v); proceeding unlocked\n", RealizeLockPath(a.nixVarSnapshotRoot), rlErr)
+			}
+			defer UnlockSnapshot(rl)
+		}
 		// A concurrent build skips only its own keepGeneration, so its exclusive
 		// probe would drop this generation's roots (and, with nix-in-box,
 		// RemoveAll the snapshot mid-VACUUM, #2680). Failing to lock must never
 		// fail the build.
-		var lockErr error
-		if lf, lockErr = LockSnapshotShared(a.nixVarSnapshotDir); lockErr != nil {
+		lf, lockErr := LockSnapshotShared(a.nixVarSnapshotDir)
+		if lockErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(a.nixVarSnapshotDir), lockErr)
 		}
+		defer UnlockSnapshot(lf)
 	}
-	// Registered while lf, if taken, is held: a concurrent build's reclaim
-	// must not drop this generation before its roots exist.
+	// Registered while the lock, if taken, is held: a concurrent build's
+	// reclaim must not drop this generation before its roots exist.
 	registerMountedArtifactRoots(a.nixGCRootsRoot, a.nixVarGeneration,
 		[]string{a.agentFiles, a.agentEnv, a.nixConfigFile}, a.passwdFile, a.groupFile, a.syscallFilterPath)
-	var err error
-	if a.nixConfigFileDrv != "" {
-		err = a.snapshotStoreDB()
+	if a.nixConfigFileDrv == "" {
+		return nil
 	}
-	UnlockSnapshot(lf)
-	if err != nil {
-		return err
+	if mode == InstallIfAbsent {
+		if _, err := os.Stat(a.snapshotDBPath()); err == nil {
+			fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already written; skipping vacuum\n", a.nixVarGeneration)
+			return nil
+		}
 	}
-	// An empty nixVarGeneration is the flat/legacy path: nixVarSnapshotDir IS
-	// the root, so there are no sibling generations to sweep, and reclaiming
-	// against the root would sweep unrelated siblings like .spindrift/accum.git.
-	if a.nixVarGeneration == "" {
-		fmt.Println("==> bwrap runner: no closure generation known; skipping stale-generation reclaim")
-	} else if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixGCRootsRoot, a.nixVarGeneration); err != nil {
-		// Best-effort: an unreclaimed old generation wastes disk but leaves
-		// the build's own output perfectly usable.
-		fmt.Printf("==> bwrap runner: warning: could not reclaim stale generations under %s: %v\n", a.nixVarSnapshotRoot, err)
-	}
+	return a.snapshotStoreDB(mode)
+}
 
-	fmt.Println("==> done: agent store closures realized")
-	return nil
+func (a *bwrapBuildAdapter) snapshotDBPath() string {
+	return filepath.Join(a.nixVarSnapshotDir, "nix", "db", StoreDBName)
+}
+
+// generationReady reports whether every realized store path exists and, when
+// ensureReady would write a snapshot (a nix-config drv), its db.sqlite is a
+// file: the state the run adapter's EnsureReady treats as warm.
+func (a *bwrapBuildAdapter) generationReady() bool {
+	for _, p := range []string{a.agentFiles, a.agentEnv, a.passwdFile, a.groupFile, a.nixConfigFile, a.syscallFilterPath} {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err != nil {
+			return false
+		}
+	}
+	if a.nixConfigFileDrv == "" {
+		return true
+	}
+	info, err := os.Stat(a.snapshotDBPath())
+	return err == nil && !info.IsDir()
 }
 
 // snapshotStoreDB copies the host's live nix store database into
@@ -1261,9 +1362,9 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 // compacted size is what lands in the Box's tmpfs upper on first touch). VACUUM
 // INTO fills a temp the launcher itself created, so the snapshot is owned by the
 // invoking uid and no explicit chown is needed.
-func (a *bwrapBuildAdapter) snapshotStoreDB() error {
+func (a *bwrapBuildAdapter) snapshotStoreDB(mode SnapshotInstall) error {
 	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
-	return VacuumStoreDBInto(a.nixVarSnapshotDir, InstallReplace)
+	return VacuumStoreDBInto(a.nixVarSnapshotDir, mode)
 }
 
 // reclaimStaleSnapshots removes generation directories under root that are
