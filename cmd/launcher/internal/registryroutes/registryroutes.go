@@ -454,7 +454,7 @@ func mergeRetiredRouteEcosystems(label string, rr rawRoute) (map[string]map[stri
 			// Broken invariant (a Strategy dropping its RetiredRouteKey), not
 			// operator input: rr declared this key, so skipping it would
 			// silently drop it from the printed stanza.
-			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no ecosystem.Table row", entry.key))
+			panic(fmt.Sprintf("registryroutes: retired route key %q resolves to no registered Strategy", entry.key))
 		}
 		block, ok := merged[row.Name]
 		if ok && declaresAll(block, raw) {

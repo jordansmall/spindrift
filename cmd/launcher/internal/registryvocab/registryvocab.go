@@ -32,7 +32,7 @@ func HostKey(hostport string) string {
 // host apart when their index paths are interchangeable: cargo's
 // [registries.<name>] key, an npm scope, a uv index name, else "".
 type Subtree struct {
-	Ecosystem    string `json:"ecosystem"` // an ecosystem.Table row's Name: "cargo" | "npm" | "yarn" | "pnpm" | "go" | "gradle"
+	Ecosystem    string `json:"ecosystem"` // a registered Strategy's Name: "cargo" | "npm" | "yarn" | "pnpm" | "go" | "gradle"
 	Path         string `json:"path"`      // leading "/", no trailing "/"; "/" is the whole host
 	RegistryName string `json:"-"`
 	// Scoped marks a path only an npm-family scoped declaration (`@acme:registry=`)

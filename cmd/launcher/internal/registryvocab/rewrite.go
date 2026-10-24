@@ -68,7 +68,7 @@ var ErrRewriteAbandoned = errors.New("rewrite abandoned; remainder relayed uncha
 // runtime guard.
 type RewriteRow struct {
 	Name      string // shape name, used only in log lines (e.g. "cargo config.json")
-	Ecosystem string // an ecosystem.Table row's Name; matched against the route's tagged subtrees
+	Ecosystem string // a registered Strategy's Name; matched against the route's tagged subtrees
 	Method    string // must be body-bearing; the proxy runs a matching row against a HEAD response's empty body too
 	Matches   func(routeRelativePath, base string) bool
 	// Exactly one of Rewrite and RewriteStream is set.

@@ -29,7 +29,7 @@ func TestCorpus(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			row, ok := tableRow(name)
 			if !ok {
-				t.Fatalf("testdata/corpus/%s matches no ecosystem.Table row", name)
+				t.Fatalf("testdata/corpus/%s matches no registered Strategy", name)
 			}
 			ecosystemtest.Run(t, row, filepath.Join("testdata", "corpus", name), tableRow)
 		})

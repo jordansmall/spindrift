@@ -7,7 +7,7 @@
   launcherVendorHash = "sha256-quNchKKaDo3DJ/i1E1cHWydV7LEsHIhrYzTdlsJunxA=";
   driverExecVendorHash = "sha256-gfzDWSRqKKJ6aVY1Avir6yhaPgKAgkE6T6h9OX+afe8=";
   # Its own field because the orchestrator's fileset never pulled in go-toml
-  # the way driver-exec's did once the ecosystem rows took over the
+  # the way driver-exec's did once the ecosystem Strategies took over the
   # committed-config parsers.
   orchestratorVendorHash = "sha256-w4lYNd9mBgdxxGkE9OrA250zWOAK2DfsQslyFwiFoD0=";
   # Equal to driverExecVendorHash today (same vendored tree) but its own field:

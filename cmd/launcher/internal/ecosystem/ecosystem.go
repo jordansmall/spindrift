@@ -1,10 +1,11 @@
-// Package ecosystem is the single table of what the Harness knows about each
-// dependency ecosystem: lockfile names, toolchain-nudge classification, and
-// the env-export and home-level-config renderers (ADR 0045). Each Strategy
-// lives in its own package under internal/ecosystem and installs through
-// Register; this file holds the types, the registered Table, and its
-// accessors. ADR 0048 pins that shape: a Strategy gets its own package on a
-// trigger.
+// Package ecosystem is the core of the Ecosystem Strategy registry: the
+// Strategy type and its hook types, Register and the accessors over the
+// registered Strategies, and the route keys registryroutes reads without
+// importing a Strategy. What the Harness knows about each dependency
+// ecosystem (lockfile names, config readers, the env-export and
+// home-level-config renderers) lives in that ecosystem's own package under
+// internal/ecosystem, which installs its Strategy through Register (ADR
+// 0048's 2026-10-22 amendment). No ecosystem's file-format code lives here.
 package ecosystem
 
 import (
