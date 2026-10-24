@@ -1,12 +1,13 @@
-package ecosystem_test
+package npmfamily_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
-	"spindrift.dev/launcher/internal/testutil"
 )
 
 // Extract reads each registered Strategy's config from its own InTreeConfigPath
@@ -21,7 +22,9 @@ func TestExtract_ReadsEveryRegisteredPath(t *testing.T) {
 		checked++
 		t.Run(row.Name, func(t *testing.T) {
 			dir := t.TempDir()
-			testutil.WriteFixture(t, dir, row.InTreeConfigPath+"/placeholder", "")
+			if err := os.MkdirAll(filepath.Join(dir, row.InTreeConfigPath), 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
 
 			_, _, err := registrydiscover.Extract(dir)
 			if err == nil {

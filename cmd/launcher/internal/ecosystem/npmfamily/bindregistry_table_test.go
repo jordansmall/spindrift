@@ -1,4 +1,4 @@
-package ecosystem_test
+package npmfamily_test
 
 import (
 	"os"

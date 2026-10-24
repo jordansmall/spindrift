@@ -1,8 +1,10 @@
 // Package ecosystem is the single table of what the Harness knows about each
 // dependency ecosystem: lockfile names, toolchain-nudge classification, and
-// the env-export and home-level-config renderers (ADR 0045). Each Strategy lives in
-// its own file; this file holds the types, the ordered Table, and its
-// accessors. ADR 0048 pins that shape: a Strategy gets its own package on a trigger.
+// the env-export and home-level-config renderers (ADR 0045). Each Strategy
+// lives in its own package under internal/ecosystem and installs through
+// Register; this file holds the types, the registered Table, and its
+// accessors. ADR 0048 pins that shape: a Strategy gets its own package on a
+// trigger.
 package ecosystem
 
 import (

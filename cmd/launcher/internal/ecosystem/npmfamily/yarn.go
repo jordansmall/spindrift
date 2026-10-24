@@ -1,8 +1,9 @@
-package ecosystem
+package npmfamily
 
 import (
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
@@ -15,15 +16,14 @@ const (
 	yarnBindingEnvVar = "YARN_NPM_REGISTRY_SERVER"
 )
 
-// Yarn is exported only so the Bundle can register it, until a later ticket of
-// issue #5940 moves it into its own package.
-var Yarn = Strategy{
+// Yarn is the yarn Strategy, which the Bundle registers.
+var Yarn = ecosystem.Strategy{
 	Name:             nameYarn,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"yarn.lock"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".yarnrc.yml",
-	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		return npmFamilyBinding(port, routes, yarnBindingEnvVar, nameYarn)
 	},
 	BindingEnvVar: yarnBindingEnvVar,
@@ -35,9 +35,9 @@ var Yarn = Strategy{
 // indentation it tracks is whether a column-0 key opened the npmScopes block.
 // That covers the shapes yarn berry emits without a YAML library for one key;
 // adding one is an ADR 0048 promotion trigger, not a prohibition.
-func parseYarnRegistryConfig(content string) ([]Declaration, bool, error) {
+func parseYarnRegistryConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	indexByURL := make(map[string]int)
-	var out []Declaration
+	var out []ecosystem.Declaration
 	sawDeclaration := false
 	inScopes := false
 	for _, line := range strings.Split(content, "\n") {
@@ -60,7 +60,7 @@ func parseYarnRegistryConfig(content string) ([]Declaration, bool, error) {
 		if !ok {
 			continue
 		}
-		out = addNpmFamilyDeclaration(out, indexByURL, Declaration{
+		out = addNpmFamilyDeclaration(out, indexByURL, ecosystem.Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
 			Scoped:          inScopes,

@@ -1,6 +1,10 @@
-package ecosystem
+package npmfamily
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
+)
 
 func TestParsePnpmRegistryConfig_RegistryLine(t *testing.T) {
 	content := `
@@ -17,7 +21,7 @@ catalog:
 	if !namedAny {
 		t.Error("namedAny = false, want true")
 	}
-	want := []Declaration{
+	want := []ecosystem.Declaration{
 		{Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"},
 		{Host: "scoped-pnpm.example.com", UpstreamBaseURL: "https://scoped-pnpm.example.com/registry", Scoped: true},
 	}
@@ -102,7 +106,7 @@ func TestParsePnpmRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"}
+	want := ecosystem.Declaration{Host: "pnpm.example.com", UpstreamBaseURL: "https://pnpm.example.com/registry"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v", decls[0], want)
 	}
