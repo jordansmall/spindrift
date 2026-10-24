@@ -2,7 +2,6 @@ package bwrap
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -64,16 +63,15 @@ func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	readSelfCgroup = func() (string, error) { return "", errors.New("no cgroup in contract test") }
 	t.Cleanup(stubResolvConfPresent())
 
-	// Run stats and locks the snapshot dir of the generation it mounts.
+	// Run locks the snapshot dir of the generation it mounts and recreates a
+	// missing one, so each carries a db.sqlite.
 	snapshotRoot := t.TempDir()
 	dirs := []string{bakedGeneration}
 	if g := l.Box.ClosureGeneration; g != nil {
 		dirs = append(dirs, g.Generation)
 	}
 	for _, d := range dirs {
-		if err := os.Mkdir(filepath.Join(snapshotRoot, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		seedSnapshot(t, snapshotDBPath(filepath.Join(snapshotRoot, d)), "snapshot")
 	}
 
 	a := &bwrapAdapter{

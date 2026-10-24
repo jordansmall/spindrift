@@ -218,7 +218,7 @@ func (a *bwrapAdapter) IsReady() error {
 	// MkdirAlls <nixVarSnapshotDir>/nix/db before it writes db.sqlite, so a
 	// dir-only check would report ready on a dir left behind by a failed
 	// snapshot (issue #2664).
-	dbPath := filepath.Join(a.nixVarSnapshotDir, "nix", "db", StoreDBName)
+	dbPath := snapshotDBPath(a.nixVarSnapshotDir)
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -906,28 +906,30 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	// A shared flock held for the life of the sandboxed process is how
 	// reclaimStaleSnapshots detects a live Box still using this generation, its
 	// snapshot dir and GC roots both. Taken for every Box with a generation or
-	// nixConfigFile. The snapshot dir is mounted only under nixConfigFile, so
-	// only then re-stat after locking: --overlay-src against a removed dir would
-	// not mount. With nixInBox off, reclaim may have dropped the roots, so
+	// nixConfigFile. A launcher that passed readiness holds no lock until here,
+	// so reclaim can remove the generation first: under nixConfigFile, recreate
+	// the snapshot while holding the lock rather than fail, since --overlay-src
+	// against a removed dir would not mount and reclaim cannot run against a
+	// held lock. With nixInBox off, reclaim may have dropped the roots, so
 	// re-root them under the held lock.
 	var nixVarSnapshotLock *os.File
-	// The same call buildArgs' --overlay-src bind uses, so the lock and stat
-	// guard the exact directory this launch mounts. Empty only for an adapter not
-	// built by New, where SnapshotLockPath would be a cwd-relative ".lock". The
-	// flat path with nixInBox off has no mount and no root, and reclaim never
-	// sweeps it, so a lock there would only leave litter.
+	// The same call buildArgs' --overlay-src bind uses, so the lock and the
+	// recreate guard the exact directory this launch mounts. Empty only for an
+	// adapter not built by New, where SnapshotLockPath would be a cwd-relative
+	// ".lock". The flat path with nixInBox off has no mount and no root, and
+	// reclaim never sweeps it, so a lock there would only leave litter.
 	if snapshotDir := a.snapshotDirFor(box); snapshotDir != "" && (a.nixConfigFile != "" || a.generationFor(box) != "") {
 		lf, err := LockSnapshotShared(snapshotDir)
 		if err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); reclaim cannot detect box %q is using this generation\n", SnapshotLockPath(snapshotDir), err, box.Name)
 		} else {
 			if a.nixConfigFile != "" {
-				if _, statErr := os.Stat(snapshotDir); statErr != nil {
+				if recreateErr := a.recreateSnapshotIfGone(box, snapshotDir); recreateErr != nil {
 					UnlockSnapshot(lf)
 					if cgroupDir != "" {
 						_ = os.Remove(cgroupDir)
 					}
-					return fmt.Errorf("nix-var snapshot %s no longer exists (reclaimed by a concurrent build?): %w", snapshotDir, statErr)
+					return recreateErr
 				}
 			} else {
 				a.reRootIfReclaimed(box)
@@ -997,6 +999,31 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 		}()
 	}
 	return runner.AsRunError(cmd.Wait())
+}
+
+// recreateSnapshotIfGone rebuilds box's nix-var snapshot when a sibling's
+// reclaim removed it, and must be called with the generation's shared lock
+// held. It re-registers the GC roots reclaim dropped with the generation, then
+// writes db.sqlite write-if-absent, so a snapshot a sibling just installed is
+// never disturbed. It takes no realize lock: the held shared lock already
+// keeps reclaim out, and InstallIfAbsent covers a concurrent writer.
+func (a *bwrapAdapter) recreateSnapshotIfGone(box runner.Box, snapshotDir string) error {
+	if _, err := os.Stat(snapshotDBPath(snapshotDir)); err == nil {
+		return nil
+	}
+	fmt.Printf("==> bwrap runner: nix-var snapshot %s was reclaimed before box %q launched; recreating it\n", snapshotDir, box.Name)
+	closureSide := []string{a.agentFiles, a.agentEnv, a.nixConfigFile}
+	// Root the closure itself, as SnapshotGeneration does, so both writers keep
+	// one root set per generation. NewAgentGeneration makes AgentFiles a child
+	// of the closure.
+	if g := box.ClosureGeneration; boxGeneration(box) != "" && g.AgentFiles != "" {
+		closureSide = []string{filepath.Dir(g.AgentFiles)}
+	}
+	registerMountedArtifactRoots(a.nixGCRootsRoot, a.generationFor(box), closureSide, a.passwdFile, a.groupFile, a.syscallFilterPath)
+	if err := VacuumStoreDBInto(snapshotDir, InstallIfAbsent); err != nil {
+		return fmt.Errorf("recreate reclaimed nix-var snapshot %s: %w", snapshotDir, err)
+	}
+	return nil
 }
 
 // alreadyRunning reports whether a Box named name is live. A sibling Run still
@@ -1325,16 +1352,12 @@ func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
 		return nil
 	}
 	if mode == InstallIfAbsent {
-		if _, err := os.Stat(a.snapshotDBPath()); err == nil {
+		if _, err := os.Stat(snapshotDBPath(a.nixVarSnapshotDir)); err == nil {
 			fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already written; skipping vacuum\n", a.nixVarGeneration)
 			return nil
 		}
 	}
 	return a.snapshotStoreDB(mode)
-}
-
-func (a *bwrapBuildAdapter) snapshotDBPath() string {
-	return filepath.Join(a.nixVarSnapshotDir, "nix", "db", StoreDBName)
 }
 
 // generationReady reports whether every realized store path exists and, when
@@ -1352,7 +1375,7 @@ func (a *bwrapBuildAdapter) generationReady() bool {
 	if a.nixConfigFileDrv == "" {
 		return true
 	}
-	info, err := os.Stat(a.snapshotDBPath())
+	info, err := os.Stat(snapshotDBPath(a.nixVarSnapshotDir))
 	return err == nil && !info.IsDir()
 }
 

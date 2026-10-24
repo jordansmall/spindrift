@@ -52,7 +52,7 @@ func newReadyFixture(t *testing.T) readyFixture {
 	}
 	return readyFixture{
 		a:      &bwrapAdapter{prepare: b},
-		dbPath: filepath.Join(b.nixVarSnapshotDir, "nix", "db", StoreDBName),
+		dbPath: snapshotDBPath(b.nixVarSnapshotDir),
 		paths:  []string{b.agentFiles, b.agentEnv, b.passwdFile, b.groupFile, b.nixConfigFile, b.syscallFilterPath},
 	}
 }
