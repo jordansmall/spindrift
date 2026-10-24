@@ -474,3 +474,16 @@ launch and removed at exit was rejected: it leaves the build-to-launch
 window unrooted and needs its own crash cleanup. The roots exist only where
 the generation directory and lock do, so a `nixInBox`-off deployment is not
 covered; that is a follow-up.
+
+## Amendment (issue #6004): the bwrap root's /bin matches the OCI image
+
+The "knobs mirror the OCI path" parity extends to the root filesystem's
+`/bin`. The OCI image links `agentEnv`'s `/bin` into the image root
+(`buildEnv` `pathsToLink` in `lib/image.nix`) and sets `PATH=/bin`. The bwrap
+root had no `/bin` at all, so anything that hard-codes `/bin` failed there:
+`#!/bin/sh` shebangs such as the read-only `gh` shim and the push-guard hook,
+libc `system()`, and the `/bin/bash` login shell in passwd.
+
+The bwrap runner now read-only binds `agentEnv`'s `/bin` at `/bin`. It uses
+the same per-Box `agentEnv` value that supplies the Box's `PATH`, so a
+closure-generation swap moves both together and they cannot disagree.
