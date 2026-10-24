@@ -79,6 +79,8 @@ func createBranch(repoPath, branch, sha string) error {
 // with no merge commits (ADR 0033, issue #1889). It works through a throwaway
 // clone because a rebase needs a working tree the bare repo lacks. Any rebase
 // failure returns forge.ErrMergeConflict and leaves integrationBranch untouched.
+// A sibling land that moves integrationBranch mid-land returns
+// forge.ErrMergeTransient, so the caller re-lands from the fresh tip.
 func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string) error {
 	if branch == "" || strings.HasPrefix(branch, "-") {
 		return fmt.Errorf("local: invalid ref %q", branch)
@@ -130,10 +132,27 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 	if out, err := gitAt(repoPath, "fetch", dir, branchRefspec).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: fetch rebased %s: %w: %s", branch, err, out)
 	}
-	if out, err := exec.Command("git", "-C", repoPath, "update-ref", integrationRef, "refs/heads/"+branch, oldTip).CombinedOutput(); err != nil {
-		return fmt.Errorf("local: fast-forward %s: %w: %s", integrationBranch, err, out)
+	return fastForward(repoPath, integrationRef, "refs/heads/"+branch, oldTip)
+}
+
+// fastForward points integrationRef at newRef only while it still sits at
+// oldTip. update-ref exits 128 for a CAS mismatch and a bad SHA alike and only
+// its locale-dependent stderr tells them apart, so a failure is classified by
+// re-reading the ref: moved off oldTip means a concurrent land won the race.
+// Any failure with the ref moved is classed transient even if the race was not
+// the cause, which is harmless as settle's retries are bounded and each
+// re-reads the tip.
+func fastForward(repoPath, integrationRef, newRef, oldTip string) error {
+	out, err := exec.Command("git", "-C", repoPath, "update-ref", integrationRef, newRef, oldTip).CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	base := fmt.Errorf("local: fast-forward %s: %w: %s", integrationRef, err, out)
+	out, rerr := exec.Command("git", "-C", repoPath, "rev-parse", integrationRef).Output()
+	if cur := strings.TrimSpace(string(out)); rerr == nil && cur != oldTip {
+		return fmt.Errorf("%w: integration moved from %s to %s during the land: %w", base, oldTip, cur, forge.ErrMergeTransient)
+	}
+	return base
 }
 
 // landingRef resolves branch's tip in repoPath as "<branch>@<sha>", the
