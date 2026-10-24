@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -258,5 +259,96 @@ func TestLocalCodeForge_LandBundle_EndToEnd(t *testing.T) {
 	wantSHA := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
 	if want := IntegrationBranch(parent) + "@" + wantSHA; landing != want {
 		t.Errorf("LandingRef = %q, want %q", landing, want)
+	}
+}
+
+// twoBranchRepo is what twoBranchFixture seeds: the bare repo, the
+// integration branch name and its base tip, and the two relayed branch names.
+type twoBranchRepo struct {
+	bare, integration, baseTip string
+	b1, b2                     string
+}
+
+// twoBranchFixture seeds a bare repo whose integration branch sits at base,
+// with two relayed branches one commit ahead of it.
+func twoBranchFixture(t *testing.T) twoBranchRepo {
+	t.Helper()
+	setGitIdentityEnv(t)
+	integration := IntegrationBranch(ResolveParent("1694", ""))
+	repo := forgetest.NewGitRepoFixture(t, integration)
+	b1, b2 := "agent/issue-1", "agent/issue-2"
+	for i, b := range []string{b1, b2} {
+		outbox := t.TempDir()
+		seedBundleBranch(t, repo.Bare, integration, outbox, b, strconv.Itoa(i+1))
+		if err := relayBundle(repo.Bare, outbox, b); err != nil {
+			t.Fatalf("relayBundle %s: %v", b, err)
+		}
+	}
+	return twoBranchRepo{
+		bare:        repo.Bare,
+		integration: integration,
+		baseTip:     revParse(t, repo.Bare, "refs/heads/"+integration),
+		b1:          b1,
+		b2:          b2,
+	}
+}
+
+// A land that read oldTip, then lost the race to a sibling's land, must surface
+// as ErrMergeTransient so settle re-lands from the fresh tip.
+func TestFastForward_LostRaceIsTransient(t *testing.T) {
+	f := twoBranchFixture(t)
+	bare, integrationRef, staleTip := f.bare, "refs/heads/"+f.integration, f.baseTip
+	if err := fastForward(bare, integrationRef, "refs/heads/"+f.b1, staleTip); err != nil {
+		t.Fatalf("first fastForward: %v", err)
+	}
+	movedTip := revParse(t, bare, integrationRef)
+
+	err := fastForward(bare, integrationRef, "refs/heads/"+f.b2, staleTip)
+	if !errors.Is(err, forge.ErrMergeTransient) {
+		t.Fatalf("fastForward with stale oldTip: err = %v, want errors.Is ErrMergeTransient", err)
+	}
+	if got := revParse(t, bare, integrationRef); got != movedTip {
+		t.Errorf("integration = %s, want it left at %s", got, movedTip)
+	}
+}
+
+// An update-ref failure with the ref unmoved is not a lost race, so it must not
+// invite a retry.
+func TestFastForward_UnmovedFailureIsNotTransient(t *testing.T) {
+	f := twoBranchFixture(t)
+	err := fastForward(f.bare, "refs/heads/"+f.integration, "refs/heads/agent/does-not-exist", f.baseTip)
+	if err == nil {
+		t.Fatal("fastForward to a missing ref: got nil error")
+	}
+	if errors.Is(err, forge.ErrMergeTransient) {
+		t.Errorf("fastForward to a missing ref: err = %v, must not be ErrMergeTransient", err)
+	}
+}
+
+// A seam that lost the create race to a sibling must find the sibling's branch
+// untouched and treat the create as done, not reset it to the new sha.
+func TestCreateBranch_ExistingBranchIsLeftUntouched(t *testing.T) {
+	f := twoBranchFixture(t)
+	other := revParse(t, f.bare, "refs/heads/"+f.b1)
+
+	if err := createBranch(f.bare, f.integration, other); err != nil {
+		t.Fatalf("createBranch on an existing branch: %v", err)
+	}
+	if got := revParse(t, f.bare, "refs/heads/"+f.integration); got != f.baseTip {
+		t.Errorf("integration = %s, want it left at %s", got, f.baseTip)
+	}
+}
+
+// The first seam of a parent finds no integration branch and must create it at
+// the given sha.
+func TestCreateBranch_AbsentBranchIsCreatedAtSHA(t *testing.T) {
+	f := twoBranchFixture(t)
+	want := revParse(t, f.bare, "refs/heads/"+f.b1)
+
+	if err := createBranch(f.bare, "integration/fresh", want); err != nil {
+		t.Fatalf("createBranch: %v", err)
+	}
+	if got := revParse(t, f.bare, "refs/heads/integration/fresh"); got != want {
+		t.Errorf("integration/fresh = %s, want %s", got, want)
 	}
 }
