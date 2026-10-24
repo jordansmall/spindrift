@@ -313,6 +313,35 @@ func TestBwrapIntegration_NixStoreReadOnly(t *testing.T) {
 	}
 }
 
+// TestBwrapIntegration_ShebangBinResolves asserts from inside a real bwrap
+// sandbox that #!/bin/sh and #!/bin/bash scripts run: the kernel resolves the
+// interpreter through the Box root's /bin, which must come from agentEnv
+// (issue #6004).
+func TestBwrapIntegration_ShebangBinResolves(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	for _, interp := range []string{"sh", "bash"} {
+		t.Run(interp, func(t *testing.T) {
+			a, etcDir := newIntegrationBwrapAdapter(t)
+			box := runner.Box{Env: map[string]string{}}
+			// Written host-side: the Box mounts agentEnv/bin read-only at /bin.
+			probe := filepath.Join(a.agentEnv, "bin", "shebang-probe")
+			script := "#!/bin/" + interp + "\necho shebang-ok\n"
+			if err := os.WriteFile(probe, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			args := bwrapProbeArgs(a, etcDir, box, bashBin, "/bin/shebang-probe")
+
+			out, err := exec.Command("bwrap", args...).CombinedOutput()
+			if err != nil {
+				t.Fatalf("expected a #!/bin/%s script to run inside the sandbox: %v: %s", interp, err, out)
+			}
+			if strings.TrimSpace(string(out)) != "shebang-ok" {
+				t.Errorf("script output = %q, want %q", out, "shebang-ok")
+			}
+		})
+	}
+}
+
 // TestBwrapIntegration_SandboxUID asserts from inside a real bwrap sandbox
 // that the process runs as uid 1000: the --uid/--gid mapping buildArgs sets is
 // enforced by the kernel, not just present on argv (issue #576).
