@@ -13,8 +13,20 @@ import (
 // TestGenerationRootsProtectStoreArtifactsFromGC drives the production
 // register and reclaim paths against a real nix store and asks nix itself which
 // paths are collectable. The store is a throwaway chroot store, so the test
-// needs no daemon and never touches the host store.
+// needs no daemon and never touches the host store. It runs the generation both
+// with a store-DB snapshot (nixInBox on) and as just a lock file and a roots dir
+// (nixInBox off, issue #5996): the roots must protect the artifacts either way.
 func TestGenerationRootsProtectStoreArtifactsFromGC(t *testing.T) {
+	for _, nixInBox := range []bool{true, false} {
+		name := "nixInBox-off"
+		if nixInBox {
+			name = "nixInBox-on"
+		}
+		t.Run(name, func(t *testing.T) { testGenerationRootsProtectStoreArtifactsFromGC(t, nixInBox) })
+	}
+}
+
+func testGenerationRootsProtectStoreArtifactsFromGC(t *testing.T, nixInBox bool) {
 	for _, bin := range []string{"nix", "nix-store"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not found on PATH", bin)
@@ -67,7 +79,13 @@ func TestGenerationRootsProtectStoreArtifactsFromGC(t *testing.T) {
 	assertDead(false, "after registerGenerationRoot")
 
 	snapRoot := NixVarSnapshotRoot(pwd)
-	if err := os.MkdirAll(NixVarSnapshotDir(pwd, gen), 0o755); err != nil {
+	// The build creates the snapshot dir only with nixInBox on, but always
+	// creates the root the lock file lives in.
+	mkdir := snapRoot
+	if nixInBox {
+		mkdir = NixVarSnapshotDir(pwd, gen)
+	}
+	if err := os.MkdirAll(mkdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	lf, err := LockSnapshotShared(NixVarSnapshotDir(pwd, gen))
@@ -84,4 +102,13 @@ func TestGenerationRootsProtectStoreArtifactsFromGC(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertDead(true, "after reclaim dropped the generation")
+
+	if !nixInBox {
+		genDir := NixVarSnapshotDir(pwd, gen)
+		for _, p := range []string{genDir, SnapshotLockPath(genDir), filepath.Join(NixGCRootsRoot(pwd), gen)} {
+			if _, err := os.Stat(p); !os.IsNotExist(err) {
+				t.Errorf("%s survived reclaim of a lock-only generation (stat err = %v)", p, err)
+			}
+		}
+	}
 }
