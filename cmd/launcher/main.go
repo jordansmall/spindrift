@@ -1951,22 +1951,20 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 				fmt.Fprintf(stderr, "==> %s hot-swap: realized tip tag %q is not a nix store path, draining instead\n", art.Name, res.TipTag)
 				return drain()
 			}
-			// nixInBox Consumers need the runner family to prepare the
-			// realized closure, e.g. a nix-var store-DB snapshot generation a
-			// Box can bind (ADR 0043, ADR 0069). Draining beats
+			// The runner family prepares the realized closure before a Box
+			// binds it, nixInBox or not (ADR 0043, ADR 0069). Draining beats
 			// binding an unprepared generation, which would otherwise surface
-			// as every later Box launch failing to stat.
-			if c.nixConfigFile != "" {
-				s, err := lookupRunnerStrategy(c.runnerKind)
-				if err != nil {
-					fmt.Fprintf(stderr, "==> %s hot-swap: runner family lookup failed, draining instead: %v\n", art.Name, err)
+			// as every later Box launch failing to stat or its closure being
+			// collected.
+			s, err := lookupRunnerStrategy(c.runnerKind)
+			if err != nil {
+				fmt.Fprintf(stderr, "==> %s hot-swap: runner family lookup failed, draining instead: %v\n", art.Name, err)
+				return drain()
+			}
+			if s.PrepareHotSwap != nil {
+				if err := s.PrepareHotSwap(runnerConfig(c), pwd, res.TipTag); err != nil {
+					fmt.Fprintf(stderr, "==> %s hot-swap: preparing generation failed, draining instead: %v\n", art.Name, err)
 					return drain()
-				}
-				if s.PrepareHotSwap != nil {
-					if err := s.PrepareHotSwap(runnerConfig(c), pwd, res.TipTag); err != nil {
-						fmt.Fprintf(stderr, "==> %s hot-swap: snapshot generation failed, draining instead: %v\n", art.Name, err)
-						return drain()
-					}
 				}
 			}
 			gen := runner.NewAgentGeneration(res.TipTag)

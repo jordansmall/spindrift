@@ -27,8 +27,10 @@ type Strategy struct {
 	// none.
 	Prerequisites func(cfg Config, l KnobLookup) []Prerequisite
 	// PrepareHotSwap prepares a realized store-closure (a /nix/store path) before
-	// a hot-swap binds it as the new agent generation; core calls it only for a
-	// nixInBox Consumer. nil means the family needs no preparation (ADR 0069
+	// a hot-swap binds it as the new agent generation; core calls it for every
+	// store-closure hot-swap, nixInBox or not (issue #5996), so a family can root
+	// the generation either way and keys nixInBox-only work off cfg.NixConfigFile.
+	// nil means the family needs no preparation (ADR 0069
 	// decision 2). cfg carries the daemon's startup-config artifacts a hot-swapped
 	// Box still mounts, which the family must keep alive alongside closure.
 	PrepareHotSwap func(cfg Config, pwd, closure string) error

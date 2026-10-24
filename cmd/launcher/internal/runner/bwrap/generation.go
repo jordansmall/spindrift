@@ -197,37 +197,47 @@ func UnlockSnapshot(lf *os.File) {
 	lf.Close()
 }
 
-// SnapshotGeneration writes the nix-var snapshot for a closure hot-swapped
-// mid-run (ADR 0043, issue #2682), before binding it: Run's stat guard fails a
-// Box naming a generation with no directory. It skips the vacuum when db.sqlite
-// already exists, since a live Box may be reading it, and never reclaims: an
-// idle Dispatch holds no flock on a generation it will launch against again.
+// SnapshotGeneration prepares a closure hot-swapped mid-run before binding it.
+// For a nixInBox Consumer it writes the nix-var snapshot (ADR 0043, issue
+// #2682): Run's stat guard fails a Box naming a generation with no directory.
+// It skips the vacuum when db.sqlite already exists, since a live Box may be
+// reading it, and never reclaims: an idle Dispatch holds no flock on a
+// generation it will launch against again.
 //
 // It also GC-roots what a Box on the swapped generation mounts: the closure's
 // files/env/nix-config/prefetch children, plus the passwd, group and syscall
 // filter the daemon booted with (issue #5995). The root is registered even when
 // db.sqlite already exists, so a re-swap onto a generation still roots it.
+// With nixInBox off (cfg.NixConfigFile empty) only the lock and roots happen:
+// the Box mounts no nix-var snapshot, so none is written and no VACUUM runs
+// (issue #5996).
 func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	generation := ClosureGeneration(closurePath)
 	dir := NixVarSnapshotDir(pwd, generation)
 	root := NixVarSnapshotRoot(pwd)
 
 	dest := filepath.Join(dir, "nix", "db", StoreDBName)
-	// Sweep before the existence check: a temp leaked by a killed launcher would
-	// otherwise stay forever once a concurrent launcher has installed dest.
-	sweepStaleVacuumTemps(filepath.Dir(dest))
+	snapshot := cfg.NixConfigFile != ""
+	if snapshot {
+		// Sweep before the existence check: a temp leaked by a killed launcher would
+		// otherwise stay forever once a concurrent launcher has installed dest.
+		sweepStaleVacuumTemps(filepath.Dir(dest))
+	}
 
 	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
 	}
 	lf, lockErr := LockSnapshotShared(dir)
 	if lockErr != nil {
-		fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(dir), lockErr)
+		fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(dir), lockErr)
 	}
 	defer UnlockSnapshot(lf)
 
 	registerMountedArtifactRoots(NixGCRootsRoot(pwd), generation, []string{closurePath}, cfg.PasswdFile, cfg.GroupFile, cfg.SyscallFilterPath)
 
+	if !snapshot {
+		return nil
+	}
 	if _, err := os.Stat(dest); err == nil {
 		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
 		return nil

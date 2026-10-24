@@ -532,20 +532,26 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_NilHook_SwapsWithoutPrep
 	}
 }
 
-// TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_SkipsPreparation pins
-// that the nixInBox gate stays in core: with it off, a family's hook is never
-// called.
-func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_SkipsPreparation(t *testing.T) {
+// TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares pins
+// that core calls the family's hook for every store-closure swap (issue
+// #5996): a family can prepare the generation with nixInBox off too, and keys
+// nixInBox-only work off cfg.NixConfigFile.
+func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares(t *testing.T) {
+	var gotCfg runner.Config
 	called := false
-	r := runNixInBoxSwap(t, false, strategyWithHook(func(runner.Config, string, string) error {
+	r := runNixInBoxSwap(t, false, strategyWithHook(func(cfg runner.Config, _, _ string) error {
 		called = true
+		gotCfg = cfg
 		return nil
 	}))
 	if r.err != nil {
 		t.Fatalf("runContinuousDispatch = %v, want nil", r.err)
 	}
-	if called {
-		t.Error("PrepareHotSwap was called with nixInBox off")
+	if !called {
+		t.Error("PrepareHotSwap was not called with nixInBox off")
+	}
+	if gotCfg.NixConfigFile != "" {
+		t.Errorf("PrepareHotSwap cfg.NixConfigFile = %q, want empty (nixInBox off)", gotCfg.NixConfigFile)
 	}
 	if len(r.fr.RunCalls) != 1 || r.fr.RunCalls[0].ClosureGeneration == nil {
 		t.Fatalf("fr.RunCalls = %v, want one Run call carrying the swapped generation", r.fr.RunCalls)
@@ -564,8 +570,8 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PrepareFails_FallsBackTo
 	if got := exitCodeFor(r.err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed PrepareHotSwap must fall back to the ordinary drain, not crash or hang", got)
 	}
-	if !strings.Contains(r.stderr, "snapshot generation failed, draining instead: boom: vacuum into failed") {
-		t.Errorf("stderr = %q, want the snapshot-failed drain message", r.stderr)
+	if !strings.Contains(r.stderr, "preparing generation failed, draining instead: boom: vacuum into failed") {
+		t.Errorf("stderr = %q, want the prepare-failed drain message", r.stderr)
 	}
 	if got := r.f.AgentGeneration(); got != nil {
 		t.Errorf("f.AgentGeneration() = %+v, want nil -- a failed PrepareHotSwap must never bind a swapped generation", got)
