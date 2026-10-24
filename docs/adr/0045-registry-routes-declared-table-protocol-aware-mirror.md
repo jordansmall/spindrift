@@ -257,6 +257,12 @@ hand-written renderer functions the implementation grew, retires the one
 derive their ecosystem list from the table instead of nine hand-maintained
 strings. Adding an ecosystem is one row plus its tests.
 
+*Amended by issue #5958:* [ADR
+0048](0048-ecosystem-knowledge-is-one-row-and-a-route-credential-is-per-host.md)'s
+2026-10-22 amendment (PR #5939) split the table: each ecosystem is now its
+own package exporting a Strategy, and the Bundle registers them in
+precedence order.
+
 ## What 0044 established and this ADR keeps
 
 - The credential lives in the launcher; the Box holds none, on any

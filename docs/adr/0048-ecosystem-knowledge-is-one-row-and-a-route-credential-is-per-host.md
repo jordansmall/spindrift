@@ -11,7 +11,8 @@ per-ecosystem fact and hook — lockfiles, committed-config parser,
 route-declaration validation, response-rewrite rows, credential store,
 bindings — lives on the row, one file per ecosystem in one package, with
 an ordered table in the package's root file and a parity test that every
-row is in it. Consumers walk the table; none spells a name. Alongside it,
+row is in it. (The 2026-10-22 amendment below supersedes the package
+layout.) Consumers walk the table; none spells a name. Alongside it,
 a **Registry route carries exactly one credential and one auth scheme for
 its whole host**, never one per ecosystem.
 
@@ -210,7 +211,11 @@ Consequences:
   `ecosystems.go` is left out of its fileset, as `backends.go` is
   (issue #5738), and kept in the Box's and `driver-exec`'s, since both
   bind registries.
-- Adding an ecosystem takes a package, its corpus, and one argument in
-  `ecosystems.go`.
+- Adding an ecosystem takes a package, its corpus, and an import plus one
+  `Register` argument in `ecosystems.go`.
 - Upstream host products are a separate axis, covered by ADR 0071, not
   by any ecosystem.
+- Stage 1 closed in issue #5958. The Ecosystem row is now the Ecosystem
+  Strategy throughout, the glossary names its package and its corpus
+  home, and the core `internal/ecosystem` package holds no ecosystem's
+  file-format code.
