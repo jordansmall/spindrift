@@ -499,3 +499,36 @@ libc `system()`, and the `/bin/bash` login shell in passwd.
 The bwrap runner now read-only binds `agentEnv`'s `/bin` at `/bin`. It uses
 the same per-Box `agentEnv` value that supplies the Box's `PATH`, so a
 closure-generation swap moves both together and they cannot disagree.
+
+## Amendment (issue #6008): a bwrap run prepares its own closure generation
+
+The bwrap run adapter's `EnsureReady` realized nothing and only checked the
+snapshot, so a run needed a prior `launcher build`. A Daemon that fetched a
+tip with a new agent closure started its children on a generation nobody had
+built: each failed in its first second and the failures tripped the breaker.
+A build at Daemon restart cannot cover this, because the fetched tip moves
+the closure between restarts.
+
+`EnsureReady` now prepares the generation the way the OCI adapter loads an
+image only when it is absent. It is warm, doing nothing and sending no
+`image_build` records, when every realized store path and, with `nixInBox`
+on, the snapshot's `db.sqlite` exist. Otherwise it realizes the closures and
+writes the snapshot only if absent, under the `image_build` pair. Concurrent
+cold starts serialize the snapshot write on a dedicated realize lock beside
+the snapshot root, then re-check, so a loser skips the VACUUM. It is not the
+per-generation lock a running Box holds shared for its lifetime, so a running
+Box never blocks a sibling's readiness. `launcher build` takes neither the
+realize lock nor the write-if-absent path: it still replaces the snapshot.
+
+After a cold prepare the run path reclaims stale generations under the same
+exclusive-flock liveness probe as `launcher build`. That departs from OCI,
+which never deletes images: snapshots are about 100 MB each, share nothing,
+and live in spindrift's own state directory, so without a reclaim on the run
+path nothing would remove them. The warm path does not reclaim.
+
+Reclaim can still remove the snapshot between readiness and launch. When
+`Run` takes the generation's shared lock and finds `db.sqlite` gone, it
+re-registers the GC roots and recreates the snapshot write-if-absent while
+holding that lock, so reclaim cannot remove it again before the Box starts.
+`--no-build` is unchanged: `IsReady` still fails when the snapshot is
+missing and prepares nothing.

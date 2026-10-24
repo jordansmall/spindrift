@@ -8315,15 +8315,43 @@ the realize proceed unlocked rather than failing it outright
 (`lockImage`) — without the lock a child only duplicates the work every
 child duplicated before this issue, which beats refusing to build. The
 same lock guards `spindrift build`'s realize too, since `build` calls
-this identical `EnsureReady` rather than a separate code path. Neither
-bwrap adapter needs an image lock: `bwrapAdapter`'s `EnsureReady`
-realizes nothing at all, delegating to `IsReady`, and the one that does
-realize, `bwrapBuildAdapter`'s, runs `nix build` over store closures —
-never a runtime image load or re-tag. That realize takes no lock of its
-own either; the `LockSnapshotShared` it does take covers only the nix-var
-snapshot write that follows it (`snapshotStoreDB`, and only when a
-`nixConfigFileDrv` is configured), not the closure build. There is no
-image tag here for concurrent children to race over.
+this identical `EnsureReady` rather than a separate code path. The bwrap
+adapters need no image lock, as there is no image tag for concurrent
+children to race over, but the run adapter's `EnsureReady` has the same
+probe-then-lock shape over its closure generation (issue #6008, [ADR
+0042](adr/0042-the-bwrap-box-gets-in-box-nix-from-an-ephemeral-overlay-store.md)).
+It is warm when every realized store path (agent files, agent env, passwd,
+group, nix config, syscall filter) exists and, with `nixInBox` on, the
+generation's nix-var snapshot `db.sqlite` does too; it then returns without
+building anything and sends no `image_build` records. Otherwise it realizes
+the agent store closures (`nix build <drv>^* --no-link`, under no spindrift
+lock) and, with `nixInBox` on, writes the snapshot only if absent, sending
+the `image_build` pair around the work. That is what lets a Daemon child on
+a fetched tip with a new agent closure start without a prior `launcher
+build`. Concurrent cold starts serialize their snapshot write on a
+dedicated realize lock, `.spindrift/nix-var-snapshot.realize.lock`, a
+sibling of the snapshot root that is never removed. It is exclusive and
+held only around that write: a launcher that finds it held prints a waiting
+line, re-checks for the snapshot once it holds the lock, and skips the
+VACUUM when a sibling already wrote it. It is deliberately not the
+per-generation `<generation>.lock`, which a running Box holds shared for
+its whole lifetime, so a running Box never blocks a sibling's readiness.
+`launcher build` does not take the realize lock: it always realizes and
+replaces the snapshot.
+
+After a cold prepare the run path reclaims stale snapshot generations
+exactly as `launcher build` does: a non-blocking exclusive probe on each
+generation's lock, so never a generation a Box holds (including a Box whose
+launcher survived a Daemon in-place restart), and never on the legacy flat
+generation-less path. The warm path does not reclaim. This differs from the
+OCI runner, which never deletes images, because snapshots are about 100 MB
+each, share nothing, and live in spindrift's own state directory where
+nothing else removes them. If reclaim removes the generation's `db.sqlite`
+between readiness and launch, `Run` re-registers the GC roots and recreates
+the snapshot (write-if-absent) while holding the generation's shared lock,
+so reclaim cannot remove it again before the Box starts. `--no-build` is
+unchanged: it prepares nothing, and fails with `nix store snapshot not
+found at ...; run "launcher build" first` when the snapshot is missing.
 
 **Child environment.** Every child the daemon starts — a dispatch child, a
 research child, and the doctor preflight below — execs with the daemon's own
@@ -9984,11 +10012,14 @@ child sends it from bootstrap, before it has claimed anything. The OCI
 runner sends `started` just before it runs `nix build` on a cold image, and
 `finished` when that build and load end, failure included; an image that is
 already loaded, or that a sibling child realised while this one waited on
-the image lock, sends neither. The bwrap build adapter realises its store
-closures on every run, so it always sends the pair, and a warm run clears
-almost at once. The daemon rejects any other `state`, publishes a running
-build on the slot's status entry (`image_build_since`), and emits each
-record as an `image_build` event.
+the image lock, sends neither. The bwrap run adapter sends the pair only
+from a cold closure generation, and every launcher that takes the cold path
+sends it, including one that finds the snapshot a sibling wrote while it
+waited on the realize lock, since it still realised closures; a warm
+generation sends neither. `launcher build` always realises, so it always
+sends the pair, and a warm one clears almost at once. The daemon rejects
+any other `state`, publishes a running build on the slot's status entry
+(`image_build_since`), and emits each record as an `image_build` event.
 
 **What this first cut doesn't do.** The instance lock, the queryable status
 file (issue #3545, above), the self-change halt (issue #3543, above) and
