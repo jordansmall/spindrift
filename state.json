@@ -1,20 +1,15 @@
 {
-  "lastSwept": "828fe1010238d097e48c70c0c0049c53491d2fad",
-  "cursor": "cmd/launcher/internal/ecosystem/testdata/corpus/npm/scoped-only/pathset.golden.json",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-24T17:01:28.485336343-04:00"
-  },
+  "lastSwept": "2815ca0e46ca887fec671251d26084bf6c88b5bc",
+  "cursor": "cmd/launcher/internal/ecosystemtest/testdata/corpus/matched/binding.golden.json",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 34,
+    "output_tokens": 5193,
+    "cache_read_input_tokens": 819463,
+    "cache_creation_input_tokens": 55587,
+    "total_cost_usd": 0.7147069249999999,
+    "duration_ms": 73144,
+    "duration_api_ms": 70704,
+    "num_turns": 19
   }
 }
