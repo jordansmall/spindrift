@@ -72,7 +72,7 @@ func DeriveRows(repoDir string, rows []ecosystem.Strategy) ([]HostPathSet, error
 		if j, ok := seen[key]; ok {
 			// An unscoped twin outweighs a scoped one: the path is bound
 			// unless every declaration of it is scoped. Same rule as
-			// ecosystem.addNpmFamilyDeclaration (per URL); change both.
+			// npmfamily's addNpmFamilyDeclaration (per URL); change both.
 			if !subtree.Scoped {
 				out[index[host]].Subtrees[j].Scoped = false
 			}

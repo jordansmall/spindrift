@@ -1,6 +1,10 @@
-package ecosystem
+package npmfamily
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
+)
 
 // TestConfigParserMatchesInTreeConfigPath guards against a future Table Strategy
 // acquiring a non-empty InTreeConfigPath with no ConfigParser (registrydiscover's
@@ -8,7 +12,7 @@ import "testing"
 // undiscovered with no test failure anywhere) or the reverse -- a
 // ConfigParser with nothing for it to read. Checks both directions.
 func TestConfigParserMatchesInTreeConfigPath(t *testing.T) {
-	for _, row := range Table {
+	for _, row := range ecosystem.Table {
 		hasPath := row.InTreeConfigPath != ""
 		hasParser := row.ConfigParser != nil
 		if hasPath && !hasParser {

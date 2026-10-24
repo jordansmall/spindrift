@@ -1,8 +1,9 @@
-package ecosystem
+package npmfamily
 
 import (
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
@@ -15,15 +16,14 @@ const (
 	pnpmBindingEnvVar = "pnpm_config_registry"
 )
 
-// Pnpm is exported only so the Bundle can register it, until a later ticket of
-// issue #5940 moves it into its own package.
-var Pnpm = Strategy{
+// Pnpm is the pnpm Strategy, which the Bundle registers.
+var Pnpm = ecosystem.Strategy{
 	Name:             namePnpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"pnpm-lock.yaml"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: "pnpm-workspace.yaml",
-	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		return npmFamilyBinding(port, routes, pnpmBindingEnvVar, namePnpm)
 	},
 	BindingEnvVar: pnpmBindingEnvVar,
@@ -45,9 +45,9 @@ func isPnpmRegistryKey(key string) bool {
 // bare "registry" key or a scoped catalog key with an http(s) value. Scanning
 // lines covers the shapes pnpm emits without a YAML library for one key;
 // adding one is an ADR 0048 promotion trigger, not a prohibition.
-func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
+func parsePnpmRegistryConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	indexByURL := make(map[string]int)
-	var out []Declaration
+	var out []ecosystem.Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -66,7 +66,7 @@ func parsePnpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		if !ok {
 			continue
 		}
-		out = addNpmFamilyDeclaration(out, indexByURL, Declaration{
+		out = addNpmFamilyDeclaration(out, indexByURL, ecosystem.Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
 			Scoped:          isScopedNpmFamilyKey(key),

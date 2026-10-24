@@ -297,10 +297,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   digestkit's `TestRunReplaysCorpusIntoGoldens`) to overwrite the goldens under
   `cmd/launcher/internal/*/testdata/digest/` and
   `cmd/launcher/internal/digestkit/testdata/corpus/`, and the Ecosystem corpus
-  tests (`TestCorpus` in `cmd/launcher/internal/ecosystem`, each ecosystem
-  package and `cmd/launcher/internal/ecosystemtest`) to overwrite the goldens
-  under `cmd/launcher/internal/ecosystem/testdata/corpus/`,
-  `cmd/launcher/internal/ecosystem/<ecosystem>/testdata/corpus/` and
+  tests (`TestCorpus` in each ecosystem package and
+  `cmd/launcher/internal/ecosystemtest`) to overwrite the goldens
+  under `cmd/launcher/internal/ecosystem/<ecosystem>/testdata/corpus/` and
   `cmd/launcher/internal/ecosystemtest/testdata/corpus/` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a
   check when you add a guarantee.

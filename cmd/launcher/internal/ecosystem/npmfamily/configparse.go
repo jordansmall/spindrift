@@ -1,4 +1,4 @@
-package ecosystem
+package npmfamily
 
 // This file holds the parsing helpers shared by more than one Strategy's
 // ConfigParser. A helper used by only one ecosystem stays in that ecosystem's

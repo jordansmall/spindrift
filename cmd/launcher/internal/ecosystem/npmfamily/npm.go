@@ -1,10 +1,11 @@
-package ecosystem
+package npmfamily
 
 import (
 	"fmt"
 	"net/http"
 	"strings"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -18,15 +19,14 @@ const (
 	npmBindingEnvVar = "npm_config_registry"
 )
 
-// Npm is exported only so the Bundle can register it, until a later ticket of
-// issue #5940 moves it into its own package.
-var Npm = Strategy{
+// Npm is the npm Strategy, which the Bundle registers.
+var Npm = ecosystem.Strategy{
 	Name:             nameNpm,
 	CredentialStores: []string{"netrc", "npmrc", "gradle-properties"},
 	LockfileNames:    []string{"package-lock.json"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".npmrc",
-	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 		return npmFamilyBinding(port, routes, npmBindingEnvVar, nameNpm)
 	},
 	BindingEnvVar: npmBindingEnvVar,
@@ -44,9 +44,9 @@ var Npm = Strategy{
 // "@scope:registry=" lines. npm's format is ini-ish and accepts unquoted
 // values, so a line-based scan matches npm's own parsing more closely than a
 // general-purpose ini library would.
-func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
+func parseNpmRegistryConfig(content string) ([]ecosystem.Declaration, bool, error) {
 	indexByURL := make(map[string]int)
-	var out []Declaration
+	var out []ecosystem.Declaration
 	sawDeclaration := false
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
@@ -67,7 +67,7 @@ func parseNpmRegistryConfig(content string) ([]Declaration, bool, error) {
 		if !ok {
 			continue
 		}
-		out = addNpmFamilyDeclaration(out, indexByURL, Declaration{
+		out = addNpmFamilyDeclaration(out, indexByURL, ecosystem.Declaration{
 			Host:            host,
 			UpstreamBaseURL: upstreamBaseURL,
 			Scoped:          isScopedNpmFamilyKey(key),
@@ -88,7 +88,7 @@ func isScopedNpmFamilyKey(key string) bool { return key != "registry" }
 // skips scoped declarations, so a URL that is also the default registry must
 // not stay scoped just because a scoped line came first. registrypathset
 // applies the same rule per host+path; change one, change both.
-func addNpmFamilyDeclaration(out []Declaration, indexByURL map[string]int, d Declaration) []Declaration {
+func addNpmFamilyDeclaration(out []ecosystem.Declaration, indexByURL map[string]int, d ecosystem.Declaration) []ecosystem.Declaration {
 	if i, seen := indexByURL[d.UpstreamBaseURL]; seen {
 		if !d.Scoped {
 			out[i].Scoped = false
@@ -100,14 +100,14 @@ func addNpmFamilyDeclaration(out []Declaration, indexByURL map[string]int, d Dec
 }
 
 // npmFamilyBinding points one npm-family tool at the Forwarder through envVar,
-// searching every route for the one unscoped path tagged with ecosystem and
+// searching every route for the one unscoped path tagged with tag and
 // binding that route's own prefix. Unlike BindHomes' routes[0] rule (#3142),
 // npm need not follow route order: the unscoped registry is identifiable once
 // scope is carried (#5720). Each Strategy computes its own var independently
 // (issue #3259): a route's tagged paths can differ across npm, pnpm, and yarn.
 // Unscoped registries only; these bind packument requests, and
 // streamNpmPackument (#3401) re-points embedded tarball URLs.
-func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, ecosystem string) ([]EnvExport, []string) {
+func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, tag string) ([]ecosystem.EnvExport, []string) {
 	var matches []npmFamilyMatch
 	for _, route := range routes {
 		// An empty prefix has no Forwarder address to bind. BindHomes'
@@ -117,7 +117,7 @@ func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, ecosyst
 			continue
 		}
 		for _, p := range route.EnforcedPaths {
-			if p.Ecosystem == ecosystem && !p.Scoped {
+			if p.Ecosystem == tag && !p.Scoped {
 				matches = append(matches, npmFamilyMatch{prefix: route.Prefix, path: p.Path})
 			}
 		}
@@ -138,7 +138,7 @@ func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, ecosyst
 		if matchPath == "/" {
 			matchPath = ""
 		}
-		return []EnvExport{{
+		return []ecosystem.EnvExport{{
 			Name:  envVar,
 			Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, matches[0].prefix, matchPath),
 		}}, nil
@@ -151,7 +151,7 @@ func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, ecosyst
 		}
 		return nil, []string{fmt.Sprintf(
 			"==> WARNING: %d unscoped %s-tagged paths (%s); %s is ambiguous and will not be bound",
-			len(matches), ecosystem, strings.Join(entries, ", "), envVar)}
+			len(matches), tag, strings.Join(entries, ", "), envVar)}
 	}
 }
 

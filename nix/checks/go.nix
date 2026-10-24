@@ -51,8 +51,9 @@ let
   allRunnerDirs = map runnerDir runnerNames;
   # One Ecosystem package per directory beneath internal/ecosystem, so a new
   # ecosystem yields its go test derivation with no hand-pinned attr. The kit
-  # (ecosystemkit) is shared library code, not an ecosystem; testdata is the
-  # core ecosystem package's own corpus.
+  # (ecosystemkit) is shared library code, not an ecosystem; the testdata
+  # exclusion stays so a corpus dir restored under the core package is never
+  # mistaken for an ecosystem package.
   ecosystemDir = launcherDir + "/internal/ecosystem";
   ecosystemKitDir = "ecosystemkit";
   ecosystemNamesIn =

@@ -1,6 +1,10 @@
-package ecosystem
+package npmfamily
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/ecosystem"
+)
 
 func TestParseYarnRegistryConfig_NpmRegistryServerQuoted(t *testing.T) {
 	content := `
@@ -16,7 +20,7 @@ npmScopes:
 	if !namedAny {
 		t.Error("namedAny = false, want true")
 	}
-	want := []Declaration{
+	want := []ecosystem.Declaration{
 		{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/registry"},
 		{Host: "scoped-yarn.example.com", UpstreamBaseURL: "https://scoped-yarn.example.com/registry", Scoped: true},
 	}
@@ -80,7 +84,7 @@ func TestParseYarnRegistryConfig_TrailingInlineCommentStripped(t *testing.T) {
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
+	want := ecosystem.Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v", decls[0], want)
 	}
@@ -94,7 +98,7 @@ func TestParseYarnRegistryConfig_TabBeforeTrailingInlineCommentStripped(t *testi
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
+	want := ecosystem.Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v", decls[0], want)
 	}
@@ -108,7 +112,7 @@ func TestParseYarnRegistryConfig_QuotedValueHashFragmentNotTreatedAsComment(t *t
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
+	want := ecosystem.Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v (a quoted \"#\" must not be mistaken for a trailing comment)", decls[0], want)
 	}
@@ -124,7 +128,7 @@ func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTrailingCommentStripped
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
+	want := ecosystem.Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v (a trailing comment after a \"#\" fragment must still be stripped)", decls[0], want)
 	}
@@ -138,7 +142,7 @@ func TestParseYarnRegistryConfig_UnquotedHashFragmentPlusTabTrailingCommentStrip
 	if len(decls) != 1 {
 		t.Fatalf("decls = %+v, want exactly 1", decls)
 	}
-	want := Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
+	want := ecosystem.Declaration{Host: "yarn.example.com", UpstreamBaseURL: "https://yarn.example.com/#frag"}
 	if decls[0] != want {
 		t.Errorf("decls[0] = %+v, want %+v (a trailing comment after a \"#\" fragment must still be stripped)", decls[0], want)
 	}

@@ -1,4 +1,4 @@
-package ecosystem_test
+package npmfamily_test
 
 import (
 	"encoding/json"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/ecosystem/npmfamily"
 	"spindrift.dev/launcher/internal/ecosystemtest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -143,4 +144,13 @@ func TestCorpus_EveryLockfileRowHasAScanHit(t *testing.T) {
 			t.Errorf("no corpus case under testdata/corpus/%s has a non-empty lockfile-scan.golden.txt", row.Name)
 		})
 	}
+}
+
+// The replay pipeline reads the process-wide registry (route parsing validates
+// ecosystem names against it), and the Bundle that owns the real Register call
+// is not linked here. The order matches the Bundle's, since Table order is the
+// precedence this package's tests lean on.
+func TestMain(m *testing.M) {
+	ecosystem.Register(npmfamily.Npm, npmfamily.Yarn, npmfamily.Pnpm)
+	os.Exit(m.Run())
 }

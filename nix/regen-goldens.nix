@@ -7,7 +7,6 @@
 # cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
 # cmd/launcher/internal/driver/<driver>/corpus_test.go,
 # cmd/launcher/internal/driver/bundle/referencedocs_test.go,
-# cmd/launcher/internal/ecosystem/corpus_test.go,
 # cmd/launcher/internal/ecosystem/<ecosystem>/corpus_test.go,
 # cmd/launcher/internal/ecosystemtest/ecosystemtest_test.go,
 # cmd/launcher/internal/digestkit/digestkit_test.go,
@@ -54,7 +53,7 @@ pkgs.writeShellApplication {
     # testdata/golden, each Driver's corpus
     # (internal/driver/<driver>/testdata/corpus), each Digest corpus
     # (internal/*/testdata/digest, plus the digestkit's own testdata/corpus),
-    # and every Ecosystem corpus (internal/ecosystem{,/*,test}/testdata/corpus),
+    # and every Ecosystem corpus (internal/ecosystem{/*,test}/testdata/corpus),
     # so goldens written through them land in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
@@ -100,12 +99,11 @@ pkgs.writeShellApplication {
     ln -s "$root/$kit_corpus" "$scratch/src/$kit_corpus"
     # Symlinked, not copied: ecosystemtest.Run also deletes goldens for stages a
     # row skips, and a copy would lose those deletions with the scratch tree.
-    # The core ecosystem package and ecosystemtest are named; every ecosystem
-    # package (internal/ecosystem/<name>) carries its own corpus, found by glob
-    # so a new ecosystem is picked up without touching this file.
-    eco_pkgs=(./internal/ecosystem ./internal/ecosystemtest)
+    # Only ecosystemtest is named; every ecosystem package
+    # (internal/ecosystem/<name>) carries its own corpus, found by glob so a new
+    # ecosystem is picked up without touching this file.
+    eco_pkgs=(./internal/ecosystemtest)
     eco_corpora=(
-      cmd/launcher/internal/ecosystem/testdata/corpus
       cmd/launcher/internal/ecosystemtest/testdata/corpus
     )
     for corpus in "$root"/cmd/launcher/internal/ecosystem/*/testdata/corpus; do

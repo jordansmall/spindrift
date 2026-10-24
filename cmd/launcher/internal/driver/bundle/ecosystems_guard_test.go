@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem/cargo"
 	"spindrift.dev/launcher/internal/ecosystem/gomod"
 	"spindrift.dev/launcher/internal/ecosystem/gradle"
+	"spindrift.dev/launcher/internal/ecosystem/npmfamily"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -28,8 +29,8 @@ import (
 // literals from every importer of internal/ecosystem, this package included.
 func TestRegisteredEcosystemOrderIsPinned(t *testing.T) {
 	want := []string{
-		cargo.Strategy.Name, ecosystem.Npm.Name, ecosystem.Yarn.Name,
-		ecosystem.Pnpm.Name, gomod.Strategy.Name, gradle.Strategy.Name,
+		cargo.Strategy.Name, npmfamily.Npm.Name, npmfamily.Yarn.Name,
+		npmfamily.Pnpm.Name, gomod.Strategy.Name, gradle.Strategy.Name,
 	}
 	var got []string
 	for _, s := range ecosystem.Registered() {
@@ -413,88 +414,5 @@ func init() { core.Register(core.A, sub.S) }
 	want := []strategyRef{{"example.com/ecosystem", "A"}, {"example.com/ecosystem/sub", "S"}}
 	if err != nil || !slices.Equal(got, want) {
 		t.Fatalf("readRegisterArgs = %v, %v; want %v", got, err, want)
-	}
-}
-
-// coreRegisteredArgs returns the identifiers passed to the bare Register(...)
-// call in TestMain of the file at path, in order.
-func coreRegisteredArgs(t *testing.T, filePath string) []string {
-	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), filePath, nil, 0)
-	if err != nil {
-		t.Fatalf("ParseFile(%s): %v", filePath, err)
-	}
-	var args []string
-	calls := 0
-	for _, decl := range file.Decls {
-		fd, ok := decl.(*ast.FuncDecl)
-		if !ok || fd.Recv != nil || fd.Name.Name != "TestMain" {
-			continue
-		}
-		ast.Inspect(fd.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || !isIdent(call.Fun, "Register") {
-				return true
-			}
-			calls++
-			for _, a := range call.Args {
-				id, ok := a.(*ast.Ident)
-				if !ok {
-					t.Fatalf("%s: Register argument is not a bare identifier", filePath)
-				}
-				args = append(args, id.Name)
-			}
-			return true
-		})
-	}
-	if calls != 1 {
-		t.Fatalf("%s TestMain holds %d Register calls, want exactly 1", filePath, calls)
-	}
-	return args
-}
-
-// coreResidentArgs keeps the Bundle's Register arguments that the core package
-// itself declares, in order. Every other argument must come from a package
-// directly beneath internal/ecosystem (ecosystemkit aside), so one that does
-// not is reported as a problem rather than silently dropped.
-func coreResidentArgs(args []strategyRef, ecosystemImport string) (core, problems []string) {
-	for _, a := range args {
-		switch {
-		case a.ImportPath == ecosystemImport:
-			core = append(core, a.Name)
-		case strings.HasPrefix(a.ImportPath, ecosystemImport+"/") && a.ImportPath != ecosystemImport+"/"+ecosystemKit:
-		default:
-			problems = append(problems, a.String())
-		}
-	}
-	return core, problems
-}
-
-// The core package's tests cannot link the Bundle, so TestMain there hand-lists
-// the Strategies; that copy must not drift from the Bundle's own Register call.
-// A Strategy the Bundle takes from an ecosystem package of its own (cargo, gradle, gomod)
-// is outside this copy, since core cannot import it.
-func TestCoreTestMainRegistersTheBundlesStrategies(t *testing.T) {
-	moduleName := readModuleName(t, filepath.Join(realModuleRoot, "go.mod"))
-	want, problems := coreResidentArgs(registerArgs(t, "ecosystems.go", moduleName+"/internal/ecosystem"), moduleName+"/internal/ecosystem")
-	if len(problems) > 0 {
-		t.Fatalf("Register argument(s) declared outside internal/ecosystem and its ecosystem packages: %v", problems)
-	}
-	got := coreRegisteredArgs(t, "../../ecosystem/main_test.go")
-	if !slices.Equal(got, want) {
-		t.Fatalf("internal/ecosystem/main_test.go TestMain registers %v, want the Bundle's core-resident %v", got, want)
-	}
-}
-
-func TestCoreResidentArgsClassifiesPlantedInput(t *testing.T) {
-	const eco = "example.com/ecosystem"
-	got, problems := coreResidentArgs([]strategyRef{
-		{eco, "A"}, {eco + "/sub", "S"}, {eco, "B"}, {"example.com/elsewhere", "X"}, {eco + "/ecosystemkit", "K"},
-	}, eco)
-	if want := []string{"A", "B"}; !slices.Equal(got, want) {
-		t.Fatalf("coreResidentArgs = %v, want %v", got, want)
-	}
-	if want := []string{"elsewhere.X", "ecosystemkit.K"}; !slices.Equal(problems, want) {
-		t.Fatalf("problems = %v, want %v", problems, want)
 	}
 }

@@ -1,9 +1,10 @@
-package ecosystem
+package npmfamily
 
 import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -36,7 +37,7 @@ func taggedRoute(prefix string, paths ...registryvocab.Subtree) []registrymanife
 	return []registrymanifest.Route{{Prefix: prefix, EnforcedPaths: paths}}
 }
 
-func rowExports(t *testing.T, name string, port int, prefix string, routes []registrymanifest.Route) ([]EnvExport, []string) {
+func rowExports(t *testing.T, name string, port int, prefix string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
 	t.Helper()
 	row := rowByName(t, name)
 	if row.EnvExports == nil {
@@ -57,7 +58,7 @@ func TestNpmFamilyRows_BindOnlyOwnVarFromOwnTaggedPath(t *testing.T) {
 			if len(warnings) != 0 {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
-			want := []EnvExport{{Name: tc.envVar, Value: "http://127.0.0.1:27182/r0/" + tc.row + "/"}}
+			want := []ecosystem.EnvExport{{Name: tc.envVar, Value: "http://127.0.0.1:27182/r0/" + tc.row + "/"}}
 			if len(got) != 1 || got[0] != want[0] {
 				t.Errorf("exports = %v, want %v", got, want)
 			}
@@ -70,7 +71,7 @@ func TestNpmFamilyRows_DifferentPortDifferentURL(t *testing.T) {
 		t.Run(tc.row, func(t *testing.T) {
 			got, _ := rowExports(t, tc.row, 9999, "", npmFamilyTaggedRoutes())
 			want := "http://127.0.0.1:9999/r0/" + tc.row + "/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
@@ -86,7 +87,7 @@ func TestNpmFamilyRows_DifferentPrefixDifferentURL(t *testing.T) {
 			routes[0].Prefix = "artifactory-npm"
 			got, _ := rowExports(t, tc.row, 27182, "", routes)
 			want := "http://127.0.0.1:27182/artifactory-npm/" + tc.row + "/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
@@ -104,7 +105,7 @@ func TestNpmFamilyRows_SingleTaggedPath(t *testing.T) {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
 			want := "http://127.0.0.1:27182/r0/artifactory/api/npm/npm-local/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 
@@ -134,7 +135,7 @@ func TestNpmFamilyRows_WholeHostTaggedPath(t *testing.T) {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
 			want := "http://127.0.0.1:27182/r0/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
@@ -168,7 +169,7 @@ func TestNpmFamilyRows_AmbiguousTaggedPaths(t *testing.T) {
 				registryvocab.Subtree{Ecosystem: tc.row, Path: "/artifactory/api/npm/npm-other"},
 			)
 			got, warnings := rowExports(t, tc.row, 27182, "", routes)
-			if _, ok := ExportValue(got, tc.envVar); ok {
+			if _, ok := ecosystem.ExportValue(got, tc.envVar); ok {
 				t.Errorf("%s exported, want no export (ambiguous)", tc.envVar)
 			}
 			if len(warnings) != 1 {
@@ -214,7 +215,7 @@ func TestNpmFamilyRows_ScopedPathDoesNotMakeUnscopedAmbiguous(t *testing.T) {
 			if len(warnings) != 0 {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != "http://127.0.0.1:27182/r0/default/" {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != "http://127.0.0.1:27182/r0/default/" {
 				t.Errorf("%s = (%q, %v), want the unscoped path", tc.envVar, value, ok)
 			}
 		})
@@ -235,7 +236,7 @@ func TestNpmFamilyRows_UnscopedOnLaterRouteBindsThatRoutePrefix(t *testing.T) {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
 			want := "http://127.0.0.1:27182/r1/default/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
@@ -252,7 +253,7 @@ func TestNpmFamilyRows_UnscopedOnTwoRoutesIsAmbiguous(t *testing.T) {
 				taggedRoute("r1", registryvocab.Subtree{Ecosystem: tc.row, Path: "/second"})...,
 			)
 			got, warnings := rowExports(t, tc.row, 27182, "", routes)
-			if _, ok := ExportValue(got, tc.envVar); ok {
+			if _, ok := ecosystem.ExportValue(got, tc.envVar); ok {
 				t.Errorf("%s exported, want no export (ambiguous)", tc.envVar)
 			}
 			if len(warnings) != 1 {
@@ -285,7 +286,7 @@ func TestNpmFamilyRows_EmptyPrefixRouteIsIgnored(t *testing.T) {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
 			want := "http://127.0.0.1:27182/r1/default/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
@@ -314,7 +315,7 @@ func TestNpmFamilyRows_IndependentPerEcosystem(t *testing.T) {
 				t.Fatalf("got warnings %v, want none", warnings)
 			}
 			want := "http://127.0.0.1:27182/r0/" + tc.row + "-repo/"
-			if value, ok := ExportValue(got, tc.envVar); !ok || value != want {
+			if value, ok := ecosystem.ExportValue(got, tc.envVar); !ok || value != want {
 				t.Errorf("%s = (%q, %v), want (%q, true)", tc.envVar, value, ok, want)
 			}
 		})
@@ -337,7 +338,7 @@ registry=https://npm.example.com/
 	if !namedAny {
 		t.Error("namedAny = false, want true")
 	}
-	want := []Declaration{
+	want := []ecosystem.Declaration{
 		{Host: "npm.example.com", UpstreamBaseURL: "https://npm.example.com"},
 		{Host: "scoped.example.com", UpstreamBaseURL: "https://scoped.example.com/npm", Scoped: true},
 	}
