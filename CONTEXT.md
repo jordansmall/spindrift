@@ -287,10 +287,21 @@ The one record per dependency ecosystem (cargo, npm, yarn, pnpm, go, gradle)
 holding everything the Harness knows about it: the lockfiles that identify it,
 how to read its committed registry config, what a Registry route may declare
 for it, how its registry's responses are rewritten, and how it is bound to
-the Registry proxy (ADR 0048). Every consumer walks the Strategies in their
-fixed precedence order; none spells an ecosystem's name, so adding an
-ecosystem is adding one Strategy. A capability the ecosystem lacks is simply
-absent from its Strategy — an absence, not a stub.
+the Registry proxy (ADR 0048). Each Strategy lives in its own package under
+`cmd/launcher/internal/ecosystem/<name>` (the npm family shares `npmfamily`;
+go's is `gomod`); the core `internal/ecosystem` package holds the Strategy type
+and its hook types, the shared record types (`Declaration`, `Note`),
+`EnvExport` with `ExportValue`, `RouteLocalURL`, the registry
+(`Register`/`Registered`, and the stage-1 `Table` alias with its
+accessors), and the route keys `registryroutes` reads without importing a
+Strategy (the three frozen retired keys and cargo's live `registries` key)
+— no ecosystem's file-format code, and no import of an
+ecosystem package. The precedence order is the one `Register`
+call in the Bundle's `ecosystems.go`, and every consumer walks the Strategies
+in that order; none spells an ecosystem's name, so adding an ecosystem takes
+a package, its corpus, and an import plus one `Register` argument in
+`ecosystems.go`. A capability the ecosystem lacks is simply absent from its
+Strategy — an absence, not a stub.
 _Avoid_: Ecosystem row (its former name), ecosystem support, extractor table,
 plugin, driver (that is the agent CLI seam).
 
@@ -298,8 +309,10 @@ plugin, driver (that is the agent CLI seam).
 The worked examples that prove one Ecosystem Strategy: small Target-repo trees
 with their committed registry config, each with the routes, enforced
 path-set, binding, lockfile scan, bindings summary and proxy rewrites it
-must produce. The ecosystem counterpart of a Driver's corpus (ADR 0048
-amendment). _Avoid_: ecosystem fixtures, registry test data.
+must produce. It lives in `testdata/corpus` under each ecosystem's package,
+replayed by that package's tests through `ecosystemtest`. The ecosystem
+counterpart of a Driver's corpus (ADR 0048 amendment).
+_Avoid_: ecosystem fixtures, registry test data.
 
 **Route discovery**:
 How a routes file gets written without hand-transcription (ADR 0045):
@@ -352,11 +365,11 @@ In-tree mode (`bindregistry.ApplyInTree`, `bindregistry.RevertInTreeBindings`;
 the verb's `-intree-action=apply|revert`) is the only mode with a revert.
 Its rewrite is a textual host substitution of a tracked config file for cargo,
 npm, yarn, and pnpm, tagged `skip-worktree`
-so the Agent neither sees nor commits it, table-driven off one row per
+so the Agent neither sees nor commits it, table-driven off one binding per
 ecosystem in `bindregistry.InTreeBindings()`
 (`cmd/launcher/internal/bindregistry/intreebinding.go`), itself a filtered
-view of the one shared `ecosystem.Table`, so an ecosystem's name is spelled
-once — but apply first probes for an already-listening
+view of the registered Strategies (`ecosystem.Table`), so an ecosystem's name
+is spelled once — but apply first probes for an already-listening
 Forwarder and spawns one if needed, gating the whole rewrite all-or-nothing
 on TCP readiness (AC5: a Forwarder that never becomes ready leaves every
 in-tree file untouched, no partial rewrite; the gate is
