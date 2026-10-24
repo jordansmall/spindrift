@@ -50,19 +50,28 @@ func relayBundle(repoPath, outboxDir, ref string) error {
 // assumes its base branch exists, which holds for real remotes but not for a
 // freshly seeded Accumulation repo: SeedAccumulationRepo seeds only baseBranch.
 func ensureIntegrationBranch(repoPath, baseBranch, integrationBranch string) error {
-	verify := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+integrationBranch)
-	if err := verify.Run(); err == nil {
-		return nil
+	if _, ok, err := branchTipSHA(repoPath, integrationBranch); err != nil || ok {
+		return err
 	}
 	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "refs/heads/"+baseBranch).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("local: resolve base branch %s: %w: %s", baseBranch, err, out)
 	}
-	sha := strings.TrimSpace(string(out))
-	if out, err := exec.Command("git", "-C", repoPath, "update-ref", "refs/heads/"+integrationBranch, sha).CombinedOutput(); err != nil {
-		return fmt.Errorf("local: create integration branch %s: %w: %s", integrationBranch, err, out)
+	return createBranch(repoPath, integrationBranch, strings.TrimSpace(string(out)))
+}
+
+// createBranch points a new branch at sha in repoPath. The empty old value
+// makes update-ref refuse an existing ref, so a sibling seam that created the
+// branch first is never reset to base; that lost create race counts as success.
+func createBranch(repoPath, branch, sha string) error {
+	out, err := exec.Command("git", "-C", repoPath, "update-ref", "refs/heads/"+branch, sha, "").CombinedOutput()
+	if err == nil {
+		return nil
 	}
-	return nil
+	if _, ok, _ := branchTipSHA(repoPath, branch); ok {
+		return nil
+	}
+	return fmt.Errorf("local: create branch %s: %w: %s", branch, err, out)
 }
 
 // rebaseLand rebases branch onto integrationBranch's tip in repoPath and
