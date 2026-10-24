@@ -1791,7 +1791,7 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 		// dir must not exist.
 		shims []string
 		hook  bool
-		// fjArgv is the one add-key call fj must have recorded; nil means none.
+		// fjArgv is the add-key call fj must have recorded; nil means none.
 		fjArgv []string
 	}{
 		{name: "read-write github", env: map[string]string{}},
@@ -1899,7 +1899,12 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 					t.Errorf("fj ran: %v; want no call", gotFj)
 				}
 			} else {
-				if want := [][]string{c.fjArgv}; !reflect.DeepEqual(gotFj, want) {
+				want := [][]string{c.fjArgv}
+				if slices.Contains(c.shims, "fj") {
+					// readonly-guards verification runs the installed shim once.
+					want = append(want, []string{"--version"})
+				}
+				if !reflect.DeepEqual(gotFj, want) {
 					t.Errorf("fj argv = %v; want %v", gotFj, want)
 				}
 				if got, _ := os.ReadFile(fjStdinRec); string(got) != token {
