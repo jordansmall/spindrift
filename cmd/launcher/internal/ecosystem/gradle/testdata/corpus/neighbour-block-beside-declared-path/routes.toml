@@ -4,5 +4,8 @@ upstream-origin = "https://repo.acme.test"
 auth-scheme = "bearer"
 credential = { env = "GRADLE_TOKEN" }
 
-[routes.ecosystems.npm]
-path = "/npm"
+[routes.ecosystems.gradle]
+path = "/some/path"
+
+[routes.ecosystems.neighbour]
+path = "/neighbour"

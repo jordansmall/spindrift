@@ -13,8 +13,8 @@
       "UpstreamURL": "https://repo.acme.test"
     },
     "Ecosystems": {
-      "npm": {
-        "path": "/npm"
+      "neighbour": {
+        "path": "/neighbour"
       }
     },
     "MatchHost": "repo.acme.test",
