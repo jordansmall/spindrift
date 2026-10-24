@@ -45,6 +45,8 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		nixConfigFile:      cfg.NixConfigFile,
 		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
 		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
+		nixGCRootsRoot:     NixGCRootsRoot("/pwd"),
+		generation:         ClosureGeneration(cfg.ImageTag),
 	}
 	// Compare with reflect.DeepEqual over pointers, not !=: the mu/running
 	// fields Kill uses (issue #649) are not comparable, and dereferencing

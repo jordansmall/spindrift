@@ -144,6 +144,56 @@ func TestBwrapBuildEnsureReady_RootRegistrationHoldsSnapshotLock(t *testing.T) {
 	}
 }
 
+// With nix-in-box off the build still locks, roots and reclaims its generation,
+// but takes no snapshot: no VACUUM, no snapshot dir, only the lock file.
+func TestBwrapBuildEnsureReady_NixInBoxOffRootsAndReclaimsWithoutSnapshot(t *testing.T) {
+	calls := stubNix(t, false)
+	a, pwd := rootedAdapter(t, "gen-a")
+	a.nixConfigFileDrv, a.nixConfigFile = "", ""
+	root, gcRoots := a.nixVarSnapshotRoot, a.nixGCRootsRoot
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staleLock := filepath.Join(root, "gen-old.lock")
+	if err := os.WriteFile(staleLock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleRoot := mkGCRootDir(t, gcRoots, "gen-old")
+	lockPath := SnapshotLockPath(a.nixVarSnapshotDir)
+	probed := assertOutLinkHoldsSnapshotLock(t, lockPath)
+
+	if err := a.EnsureReady(); err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+
+	if !*probed {
+		t.Error("out-link call never made; lock probe never ran")
+	}
+	genDir := filepath.Join(pwd, ".spindrift", "nix-gcroots", "gen-a")
+	want := wantOutLinkCalls(genDir,
+		"/nix/store/aaa-agent-files", "/nix/store/bbb-agent-env",
+		"/nix/store/ccc-passwd", "/nix/store/ddd-group", "/nix/store/fff-filter.bpf")
+	if got := outLinkCalls(*calls); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v", got, want)
+	}
+	for _, c := range *calls {
+		if c[0] != "nix" {
+			t.Errorf("non-nix command %v run: nix-in-box off must not snapshot the store DB", c)
+		}
+	}
+	if _, err := os.Stat(a.nixVarSnapshotDir); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(snapshot dir) = %v, want not-exist", err)
+	}
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("os.Stat(%q) = %v, want the generation lock file", lockPath, err)
+	}
+	for _, p := range []string{staleLock, staleRoot} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("os.Stat(%q) = %v, want stale generation reclaimed", p, err)
+		}
+	}
+}
+
 func TestBwrapBuildEnsureReady_RootFailureWarnsAndSucceeds(t *testing.T) {
 	stubNix(t, true)
 	a, _ := rootedAdapter(t, "gen-a")
