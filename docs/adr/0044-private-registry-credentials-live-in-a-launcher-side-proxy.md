@@ -148,7 +148,9 @@ the artifact base path is registry-specific, not a fixed shape.
 > **Update.** The gap the Update above records is now closed (issue
 > #3401). ADR 0045's response-rewrite table plus ADR 0048's
 > ecosystem-declared rows landed the npm packument row as a row on the
-> npm Ecosystem row, rather than as the ad-hoc `ModifyResponse` hook
+> npm Ecosystem row (now the npm Strategy, per [ADR
+> 0048](0048-ecosystem-knowledge-is-one-row-and-a-route-credential-is-per-host.md)'s
+> 2026-10-22 amendment), rather than as the ad-hoc `ModifyResponse` hook
 > this ADR reverted above. Each of that hook's three defects is excluded
 > by construction this time: an exact path-shape match against the
 > route's own npm-tagged bases, not content sniffing, stands in for the
@@ -252,11 +254,14 @@ the artifact base path is registry-specific, not a fixed shape.
 
 > **Update.** Issue #3179 moved the path-allowlist patterns themselves onto
 > the shared table, as a `Patterns` field on each `ecosystem.Row`
-> (`cmd/launcher/internal/ecosystem/ecosystem.go`), and deleted
+> (`cmd/launcher/internal/ecosystem/ecosystem.go`; the row is now
+> `ecosystem.Strategy`, one package per ecosystem, per ADR 0048's
+> 2026-10-22 amendment), and deleted
 > `registryproxy`'s own `bindings` table. Every reference above to
 > `allowlist.go` as the home of the patterns — and every line number cited
 > against that file — is historical as of this amendment; `allowlist.go`
-> still exists but now only matches a path against `ecosystem.Table`'s rows.
+> still exists but now only matches a path against the registered
+> Strategies' patterns (`ecosystem.Table`).
 > No pattern's value changed, so none of the allowlist-policy claims above
 > are affected.
 
