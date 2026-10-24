@@ -1,20 +1,18 @@
 {
-  "lastSwept": "828fe1010238d097e48c70c0c0049c53491d2fad",
-  "cursor": "cmd/launcher/internal/forge/github/failure_detail_seam_test.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-24T16:58:27.028619322-04:00"
-  },
+  "lastSwept": "2815ca0e46ca887fec671251d26084bf6c88b5bc",
+  "cursor": "cmd/launcher/internal/forge/jira/knobs_gen.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6016"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 38,
+    "output_tokens": 11725,
+    "cache_read_input_tokens": 1155309,
+    "cache_creation_input_tokens": 77500,
+    "total_cost_usd": 1.08919127,
+    "duration_ms": 144555,
+    "duration_api_ms": 138124,
+    "num_turns": 22
   }
 }
