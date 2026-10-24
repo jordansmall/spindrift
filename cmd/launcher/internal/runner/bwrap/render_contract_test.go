@@ -40,7 +40,7 @@ func (bwrapRenderingHarness) Family() string { return runner.KindBwrap }
 func (bwrapRenderingHarness) Baked(l contract.Launch) contract.BakedSet {
 	baked := contract.BakedSet{
 		EnvKeys:      []string{"HOME", "PATH", "PREFETCH", "SSL_CERT_FILE", "GIT_SSL_CAINFO"},
-		MountTargets: []string{"/nix/store", "/etc/passwd", "/etc/group", "/etc/nix/nix.conf", "/agent", "/home-agent-staged"},
+		MountTargets: []string{"/nix/store", "/etc/passwd", "/etc/group", "/etc/nix/nix.conf", "/bin", "/agent", "/home-agent-staged"},
 	}
 	if l.Network != runner.NetworkModeNone {
 		baked.MountTargets = append(baked.MountTargets, "/etc/resolv.conf")
@@ -111,7 +111,7 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 		d.Network = runner.NetworkModeNoHostLoopback
 	}
 
-	var overlaySrc, agentFilesAgent, agentEnvPath, nixConf string
+	var overlaySrc, agentFilesAgent, agentEnvPath, binSource, nixConf string
 	arg := func(i, n int) []string {
 		if i+n >= len(argv) {
 			t.Fatalf("flag %s is missing %d value(s): %v", argv[i], n, argv)
@@ -132,6 +132,11 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 				agentFilesAgent = v[0]
 			case ro && v[1] == "/etc/nix/nix.conf":
 				nixConf = v[0]
+			case v[1] == "/bin":
+				if !ro {
+					t.Fatalf("/bin must be bound read-only: %v", argv)
+				}
+				binSource = v[0]
 			}
 		case "--setenv":
 			v := arg(i, 2)
@@ -159,6 +164,12 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 		default:
 			t.Fatalf("unrecognised bwrap flag %q at %d: %v", flag, i, argv)
 		}
+	}
+
+	// A /bin bind from any other closure than PATH's would let shebangs and
+	// libc system() run different binaries than the agent's own PATH resolves.
+	if binSource == "" || binSource != agentEnvPath {
+		t.Fatalf("/bin bind source %q must equal PATH %q: %v", binSource, agentEnvPath, argv)
 	}
 
 	g := runner.AgentGeneration{

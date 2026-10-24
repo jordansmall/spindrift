@@ -234,7 +234,7 @@ func (a *bwrapAdapter) agentFilesFor(box runner.Box) string {
 }
 
 // agentEnvFor resolves the agentEnv store path box's launch should bind for
-// PATH/SSL_CERT_FILE/GIT_SSL_CAINFO. Callers append "/bin" and
+// /bin, PATH, SSL_CERT_FILE and GIT_SSL_CAINFO. Callers append "/bin" and
 // "/etc/ssl/certs/ca-bundle.crt" to the result.
 func (a *bwrapAdapter) agentEnvFor(box runner.Box) string {
 	if box.ClosureGeneration == nil {
@@ -335,6 +335,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 		// pastaDNSForwardAddr before invoking bwrap.
 		args = append(args, "--ro-bind", filepath.Join(etcDir, "resolv.conf"), "/etc/resolv.conf")
 	}
+	agentEnv := a.agentEnvFor(box)
+	// Shebangs (#!/bin/sh), libc system(), and passwd's login shell resolve
+	// absolute /bin paths; the OCI image has /bin via buildEnv, bwrap's root
+	// does not. Same agentEnv as PATH below so a generation swap moves both.
+	args = append(args, "--ro-bind", agentEnv+"/bin", "/bin")
 	agentFiles := a.agentFilesFor(box)
 	args = append(args, "--ro-bind", agentFiles+"/agent", "/agent")
 	// The real /home/agent is a fresh writable tmpfs, so baked content (Claude
@@ -367,7 +372,6 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 	// --clearenv is deliberately absent: the OffArgvKeys subset of box.Env
 	// reaches the sandbox through resolvedRunEnv, which Run sets as cmd.Env and
 	// bwrap inherits. See OffArgvKeys for why those keys stay off argv.
-	agentEnv := a.agentEnvFor(box)
 	args = append(args,
 		"--setenv", "HOME", "/home/agent",
 		"--setenv", "PATH", agentEnv+"/bin",

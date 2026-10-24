@@ -3594,6 +3594,10 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 		}
 	}
 
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/swapped/env/bin", "/bin") {
+		t.Errorf("expected --ro-bind /swapped/env/bin /bin in args: %v", args)
+	}
+
 	for _, arg := range args {
 		if strings.Contains(arg, "/fake/env") {
 			t.Errorf("args still reference the adapter's pre-swap a.agentEnv %q: %v", "/fake/env", args)
