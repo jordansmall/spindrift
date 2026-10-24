@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -315,6 +316,131 @@ func TestReadonlyGuards_VerificationCatchesAMissingHook(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "git hook missing") {
 		t.Fatalf("run() error = %v, want the missing hook reported", err)
 	}
+}
+
+// requireGuardsPhaseError runs the Box and asserts the read-only guards phase
+// failed with every want in its message and the Driver never ran.
+func requireGuardsPhaseError(t *testing.T, g *guardsFixture, wants ...string) {
+	t.Helper()
+	_, err := run(g.in, g.env, g.d)
+	var pe *phaseError
+	if !errors.As(err, &pe) || pe.phase != "readonly-guards" {
+		t.Fatalf("run() error = %v, want a readonly-guards phase error", err)
+	}
+	for _, want := range wants {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("run() error = %v, want it to mention %q", err, want)
+		}
+	}
+	if len(g.calls) != 0 {
+		t.Fatal("Driver ran with a guard that cannot run")
+	}
+}
+
+// afterInstall runs tamper once the real Install has written the guards.
+func afterInstall(g *guardsFixture, tamper func()) {
+	install := g.d.Guards.Install
+	g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
+		res, err := install(rows, cfg, out)
+		tamper()
+		return res, err
+	}
+}
+
+// replaceShim overwrites the installed gh shim with body once Install ran.
+func replaceShim(g *guardsFixture, body string) {
+	afterInstall(g, func() { g.write(filepath.Join(g.shimDir, "gh"), body) })
+}
+
+// chmodAfterInstall sets path's mode once Install ran.
+func chmodAfterInstall(g *guardsFixture, path string, mode os.FileMode) {
+	afterInstall(g, func() {
+		if err := os.Chmod(path, mode); err != nil {
+			g.t.Fatal(err)
+		}
+	})
+}
+
+func TestReadonlyGuards_VerificationCatchesAnUnrunnableShim(t *testing.T) {
+	g := newGuardsFixture(t)
+	replaceShim(g, "#!/nonexistent/interpreter\nexit 0\n")
+	requireGuardsPhaseError(t, g, "shim gh", "/nonexistent/interpreter")
+}
+
+func TestReadonlyGuards_VerificationCatchesAShimWhoseTargetIsMissing(t *testing.T) {
+	g := newGuardsFixture(t)
+	replaceShim(g, "#!/bin/sh\nexec /nonexistent/real-gh \"$@\"\n")
+	// No exit code pinned: macOS /bin/sh exits 126 for exec of a missing path, dash 127.
+	requireGuardsPhaseError(t, g, "shim gh", "interpreter /bin/sh", "missing or not executable")
+}
+
+func TestReadonlyGuards_VerificationCatchesANonExecutableShim(t *testing.T) {
+	g := newGuardsFixture(t)
+	chmodAfterInstall(g, filepath.Join(g.shimDir, "gh"), 0o644)
+	requireGuardsPhaseError(t, g, "shim gh", "interpreter ", "permission denied")
+}
+
+func TestReadonlyGuards_VerificationCatchesAShimKilledByASignal(t *testing.T) {
+	g := newGuardsFixture(t)
+	replaceShim(g, "#!/bin/sh\nkill -KILL $$\n")
+	requireGuardsPhaseError(t, g, "shim gh", "signal: killed")
+}
+
+func TestReadonlyGuards_VerificationTimesOutAHungShim(t *testing.T) {
+	g := newGuardsFixture(t)
+	old := probeTimeout
+	probeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { probeTimeout = old })
+	replaceShim(g, "#!/bin/sh\nexec sleep 5\n")
+	requireGuardsPhaseError(t, g, "shim gh", "timed out")
+}
+
+func TestReadonlyGuards_VerificationCatchesAnUnrunnableHook(t *testing.T) {
+	g := newGuardsFixture(t)
+	g.env.OutboxRelayCapable = true
+	hook := filepath.Join(g.in.WorkDir, ".git", "hooks", "pre-push")
+	afterInstall(g, func() {
+		g.write(hook, "#!/nonexistent/interpreter\nexit 1\n")
+		if err := os.Chmod(hook, 0o755); err != nil {
+			g.t.Fatal(err)
+		}
+	})
+	requireGuardsPhaseError(t, g, "pre-push", "/nonexistent/interpreter")
+}
+
+func TestReadonlyGuards_VerificationCatchesANonExecutableHook(t *testing.T) {
+	g := newGuardsFixture(t)
+	g.env.OutboxRelayCapable = true
+	chmodAfterInstall(g, filepath.Join(g.in.WorkDir, ".git", "hooks", "pre-push"), 0o644)
+	requireGuardsPhaseError(t, g, "pre-push", "interpreter ", "permission denied")
+}
+
+func TestShebangInterpreter(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct{ name, body, want string }{
+		{"env", "#!/usr/bin/env bash\n", "bash"},
+		{"env with flags", "#!/usr/bin/env -S bash -e\n", "bash"},
+		{"env with only flags", "#!/usr/bin/env -S\n", "/usr/bin/env"},
+		{"absolute", "#!/bin/sh -e\n", "/bin/sh"},
+		{"no shebang", "echo hi\n", "none (no #! line)"},
+		{"empty shebang", "#!\n", "none (empty #! line)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "-"))
+			if err := os.WriteFile(path, []byte(tc.body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if got := shebangInterpreter(path); got != tc.want {
+				t.Errorf("shebangInterpreter = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	t.Run("missing file", func(t *testing.T) {
+		got := shebangInterpreter(filepath.Join(dir, "absent"))
+		if !strings.HasPrefix(got, "unknown (") || !strings.Contains(got, "no such file") {
+			t.Errorf("shebangInterpreter = %q, want unknown (<open error>)", got)
+		}
+	})
 }
 
 func TestReadonlyGuards_VerificationCatchesARetargetedPushurl(t *testing.T) {

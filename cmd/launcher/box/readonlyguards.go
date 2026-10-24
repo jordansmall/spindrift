@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/readonlyguards"
@@ -93,17 +98,26 @@ func (r *boxRun) installReadonlyGuards() error {
 // verifyReadonlyGuards asserts the guards are in place and in force before the
 // Driver can run, rather than trusting the install sequence: each installed
 // shim must be what its argv0 now resolves to on PATH, and an installed hook
-// must exist and be executable in every repo it was written to, with origin's
-// pushurl still pointing at the decoy. LookPath resolves against the process
-// PATH the preceding Setenv updated.
+// must exist and run in every repo it was written to, with origin's pushurl
+// still pointing at the decoy. Each shim must also actually run, not just
+// carry an exec bit. LookPath resolves against the process PATH the preceding
+// Setenv updated.
 func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string, cfg readonlyguards.Config, decoy string) error {
 	d := r.d
 	for _, argv0 := range res.Shims {
+		want := filepath.Join(shimDir, argv0)
+		// Probed before LookPath, which skips a non-executable file and would
+		// report a bad-mode shim as merely absent. --version matches no guard
+		// row, so every shim passes it through to the real binary offline; a
+		// guard row on --version would turn this probe into a rejection.
+		if err := runnable("shim "+argv0, "", want, "--version"); err != nil {
+			return err
+		}
 		got, err := d.LookPath(argv0)
 		if err != nil {
 			return fmt.Errorf("shim %s does not resolve on PATH: %w", argv0, err)
 		}
-		if want := filepath.Join(shimDir, argv0); got != want {
+		if got != want {
 			return fmt.Errorf("%s resolves to %s, not the guard shim %s", argv0, got, want)
 		}
 	}
@@ -112,12 +126,11 @@ func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string,
 	}
 	for _, dir := range append([]string{cfg.RepoDir}, cfg.ExtraRepoDirs...) {
 		for _, hook := range readonlyguards.HookPaths(dir) {
-			info, err := os.Stat(hook)
-			if err != nil {
+			if _, err := os.Stat(hook); err != nil {
 				return fmt.Errorf("git hook missing: %w", err)
 			}
-			if info.Mode()&0o111 == 0 {
-				return fmt.Errorf("git hook %s is not executable", hook)
+			if err := runnable("git hook "+hook, dir, hook); err != nil {
+				return err
 			}
 		}
 	}
@@ -132,4 +145,65 @@ func (r *boxRun) verifyReadonlyGuards(res readonlyguards.Result, shimDir string,
 		return fmt.Errorf("origin's pushurl is %q, not the decoy %s", got, decoy)
 	}
 	return nil
+}
+
+// probeTimeout bounds one runnable probe; a var so a test can shrink it.
+var probeTimeout = 10 * time.Second
+
+// runnable starts path in dir (the caller's cwd when empty) and reports an
+// error when it cannot be exec'd, hangs, or dies on a signal. Exit 126 and 127
+// are the shell's cannot-execute and not-found codes (a shim whose interpreter
+// starts but whose real target is missing), so they count as not runnable. Any
+// other non-zero exit still counts as running: the push-guard hook exits 1 by
+// design. Output is discarded and stdin is /dev/null so the hook reads no ref
+// data.
+func runnable(label, dir, path string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s timed out after %s (interpreter %s)", label, probeTimeout, shebangInterpreter(path))
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.Exited() {
+		switch code := exit.ExitCode(); code {
+		case 126, 127:
+			return fmt.Errorf("%s started under interpreter %s, but a command it runs is missing or not executable (exit %d)", label, shebangInterpreter(path), code)
+		default:
+			return nil
+		}
+	}
+	return fmt.Errorf("%s cannot run (interpreter %s): %w", label, shebangInterpreter(path), err)
+}
+
+// shebangInterpreter names the interpreter on path's #! line, looking through
+// `env` (and its flags) to the program it launches.
+func shebangInterpreter(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return "unknown (" + err.Error() + ")"
+	}
+	defer f.Close()
+	line, _ := bufio.NewReader(f).ReadString('\n')
+	rest, ok := strings.CutPrefix(line, "#!")
+	if !ok {
+		return "none (no #! line)"
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return "none (empty #! line)"
+	}
+	if filepath.Base(fields[0]) == "env" {
+		for _, field := range fields[1:] {
+			if !strings.HasPrefix(field, "-") {
+				return field
+			}
+		}
+	}
+	return fields[0]
 }
