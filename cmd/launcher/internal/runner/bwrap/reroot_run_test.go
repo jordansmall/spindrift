@@ -130,18 +130,25 @@ func TestBwrapRun_NixInBoxOffLeavesExistingRootsAlone(t *testing.T) {
 	}
 }
 
-// With nixInBox on a reclaimed snapshot dir fails Run before launch, so root
-// re-registration is never reached.
-func TestBwrapRun_NixInBoxOnDoesNotReRootReclaimedGeneration(t *testing.T) {
-	got, _, rooted, err := runAfterReclaimDropsRoots(t, "/nix/store/eee-nix.conf")
-	if err == nil {
-		t.Error("Run = nil, want an error: the snapshot dir was reclaimed")
+// With nixInBox on Run recreates the reclaimed snapshot under the held lock,
+// re-rooting the generation, nix-config closure included, before launch.
+func TestBwrapRun_NixInBoxOnRecreatesAndReRootsReclaimedGeneration(t *testing.T) {
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return nil }
+
+	got, genDir, rooted, err := runAfterReclaimDropsRoots(t, "/nix/store/eee-nix.conf")
+	if err != nil {
+		t.Fatalf("Run = %v, want nil: the reclaimed snapshot is recreated", err)
 	}
-	if rooted {
-		t.Error("bwrap launched, want Run to fail before launch")
+	want := wantOutLinkCalls(genDir,
+		"/nix/store/aaa-agent-files", "/nix/store/bbb-agent-env", "/nix/store/eee-nix.conf",
+		"/nix/store/ccc-passwd", "/nix/store/ddd-group", "/nix/store/fff-filter.bpf")
+	if !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v", got, want)
 	}
-	if len(got) != 0 {
-		t.Errorf("out-link calls = %v, want none with nixInBox on", got)
+	if !rooted {
+		t.Error("roots dir missing when bwrap launched: the Box started unrooted")
 	}
 }
 

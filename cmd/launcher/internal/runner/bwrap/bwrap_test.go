@@ -758,9 +758,7 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 	}
 
 	snapshotDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "abc123-agent-closure")
-	if err := os.MkdirAll(snapshotDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
+	seedSnapshot(t, snapshotDBPath(snapshotDir), "snapshot")
 	lockPath := snapshotDir + ".lock"
 
 	a := &bwrapAdapter{
@@ -931,20 +929,24 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	}
 }
 
-// The open-then-lock race: nixVarSnapshotDir stands in for a generation
-// reclaimStaleSnapshots removed between Run's OpenFile and its Flock, while
-// the lock file's parent still exists so the lock itself succeeds. Run must
-// re-check the generation dir once it holds the lock and bail out instead of
-// exec'ing bwrap against a mountpoint that no longer exists.
-func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing.T) {
+// A sibling launcher's reclaim removed this generation
+// between this launcher's readiness check and its Run. With the shared lock
+// held Run recreates the snapshot (write-if-absent) instead of failing, so the
+// Box launches and reclaim, which needs the exclusive lock, cannot remove it
+// again before bwrap starts.
+func TestBwrapRun_SnapshotReclaimedBeforeRunIsRecreatedUnderTheLock(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command(script, args...)
-	}
+	var snapshotDir string
+	fakeVacuumInto(t, script, "recreated", 0, func(tmp string) {
+		if !strings.HasPrefix(tmp, snapshotDir+string(filepath.Separator)) {
+			t.Errorf("VACUUM INTO temp %q is outside the generation dir %q", tmp, snapshotDir)
+		}
+		if err := probeExclusiveLock(snapshotDir + ".lock"); err == nil {
+			t.Errorf("exclusive lock acquirable while recreating: Run must hold the shared lock across the recreate")
+		}
+	})
 
-	snapshotDir := filepath.Join(t.TempDir(), "gen-reclaimed") // deliberately never created
+	snapshotDir = filepath.Join(t.TempDir(), "gen-reclaimed") // deliberately never created
 
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -953,31 +955,105 @@ func TestBwrapRun_SnapshotGoneAfterLockAcquiredFailsRunRatherThanExec(t *testing
 		nixConfigFile:     "/fake/nix.conf",
 		nixVarSnapshotDir: snapshotDir,
 	}
-	err := a.Run(runner.Box{Name: "agent-issue-12", Env: map[string]string{}})
-
-	if err == nil {
-		t.Fatal("Run: want error when nix-var snapshot dir is gone once the lock is held, got nil")
+	var runErr error
+	out := runnertest.CaptureStdoutDuring(t, func() {
+		runErr = a.Run(runner.Box{Name: "agent-issue-12", Env: map[string]string{}})
+	})
+	if runErr != nil {
+		t.Fatalf("Run: want nil after recreating the reclaimed snapshot, got %v", runErr)
 	}
-	if !strings.Contains(err.Error(), "no longer exists") {
-		t.Errorf("Run error = %q, want it to mention %q", err.Error(), "no longer exists")
+	if !strings.Contains(out, "was reclaimed before box") {
+		t.Errorf("Run output missing recreate notice: %q", out)
+	}
+	if got, err := os.ReadFile(snapshotDBPath(snapshotDir)); err != nil || string(got) != "recreated" {
+		t.Errorf("db.sqlite = %q, %v; want the recreated snapshot", got, err)
+	}
+	if got := runnertest.CallCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1 (the Box must launch after the recreate)", got)
+	}
+	if err := probeExclusiveLock(snapshotDir + ".lock"); err != nil {
+		t.Errorf("exclusive Flock after Run returned: want nil (lock released), got %v", err)
+	}
+}
+
+// A hot-swapped Box recreates its own generation's snapshot, never the baked one.
+func TestBwrapRun_HotSwappedSnapshotGoneIsRecreatedInItsOwnGenerationDir(t *testing.T) {
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	fakeVacuumInto(t, script, "recreated", 0, nil)
+
+	root := t.TempDir()
+	bakedDir := filepath.Join(root, "baked-gen")
+	a := &bwrapAdapter{
+		agentFiles:         "/fake/agent",
+		agentEnv:           "/fake/env",
+		bakedPrefetch:      "echo ok",
+		nixConfigFile:      "/fake/nix.conf",
+		nixVarSnapshotDir:  bakedDir,
+		nixVarSnapshotRoot: root,
+	}
+	gen := runner.AgentGeneration{AgentFiles: "/gen2/agent-files", Generation: "gen2"}
+	if err := a.Run(runner.Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, err := os.Stat(snapshotDBPath(filepath.Join(root, "gen2"))); err != nil {
+		t.Errorf("gen2 db.sqlite: want recreated, got %v", err)
+	}
+	if _, err := os.Stat(bakedDir); !os.IsNotExist(err) {
+		t.Errorf("baked dir %s: want untouched, got stat err=%v", bakedDir, err)
+	}
+	if got := runnertest.CallCount(t, dir); got != 1 {
+		t.Errorf("callCount = %d, want 1", got)
+	}
+}
+
+// A recreate that cannot complete fails Run before exec, releases the lock, and
+// names the snapshot dir it could not rebuild.
+func TestBwrapRun_SnapshotRecreateFailureFailsRunBeforeExec(t *testing.T) {
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return errors.New("host db missing") }
+
+	snapshotDir := filepath.Join(t.TempDir(), "gen-reclaimed")
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: snapshotDir,
+	}
+	err := a.Run(runner.Box{Name: "agent-issue-12", Env: map[string]string{}})
+	if err == nil {
+		t.Fatal("Run: want error when the snapshot cannot be recreated, got nil")
+	}
+	if !strings.Contains(err.Error(), snapshotDir) || !strings.Contains(err.Error(), "host db missing") {
+		t.Errorf("Run error = %q, want it to name %q and wrap the cause", err.Error(), snapshotDir)
 	}
 	if got := runnertest.CallCount(t, dir); got != 0 {
 		t.Errorf("callCount = %d, want 0 (Run must bail before exec'ing bwrap)", got)
 	}
+	if lockErr := probeExclusiveLock(snapshotDir + ".lock"); lockErr != nil {
+		t.Errorf("exclusive Flock after Run returned error: want nil (lock released), got %v", lockErr)
+	}
+}
 
-	// The lock must not be left held: a fresh exclusive Flock attempt should
-	// succeed once Run has returned its error.
-	lockPath := snapshotDir + ".lock"
-	f, err := os.OpenFile(lockPath, os.O_RDWR, 0o644)
+// probeExclusiveLock reports whether a non-blocking exclusive flock on path
+// succeeds, releasing it again if so.
+func probeExclusiveLock(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
 	if err != nil {
-		t.Fatalf("OpenFile lock: %v", err)
+		return err
 	}
 	defer f.Close()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		t.Errorf("exclusive Flock after Run returned error: want nil (lock released), got %v", err)
-	} else {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		return err
 	}
+	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }
 
 // Run must release the shared lock when cmd.Start() itself fails, not leak it
@@ -992,6 +1068,7 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 	}
 
 	snapshotDir := t.TempDir()
+	seedSnapshot(t, snapshotDBPath(snapshotDir), "snapshot")
 
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -1021,11 +1098,11 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 	}
 }
 
-// Run's shared-lock/stat step must guard box.ClosureGeneration's per-launch
+// Run's shared-lock step must guard box.ClosureGeneration's per-launch
 // snapshot dir (issue #2681), not the adapter's startup-baked
 // nixVarSnapshotDir. The baked dir deliberately points at a directory that is
 // never created, so a Run that used it instead of the per-launch override
-// would fail with "no longer exists".
+// would create its lock file; the final assertion on that lock file is the guard.
 func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
 	orig := execCommand
@@ -1037,11 +1114,8 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	root := t.TempDir()
 	gen1Dir := filepath.Join(root, "gen1")
 	gen2Dir := filepath.Join(root, "gen2")
-	if err := os.MkdirAll(gen1Dir, 0o755); err != nil {
-		t.Fatalf("MkdirAll gen1: %v", err)
-	}
-	if err := os.MkdirAll(gen2Dir, 0o755); err != nil {
-		t.Fatalf("MkdirAll gen2: %v", err)
+	for _, d := range []string{gen1Dir, gen2Dir} {
+		seedSnapshot(t, snapshotDBPath(d), "snapshot")
 	}
 
 	a := &bwrapAdapter{
@@ -1092,10 +1166,7 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 	}
 
 	root := t.TempDir()
-	genDir := filepath.Join(root, "gen1")
-	if err := os.MkdirAll(genDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll gen1: %v", err)
-	}
+	seedSnapshot(t, snapshotDBPath(filepath.Join(root, "gen1")), "snapshot")
 
 	a := &bwrapAdapter{
 		agentFiles:         "/fake/agent",
@@ -1124,8 +1195,8 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 	}
 }
 
-// The round trip SnapshotGeneration exists to close: Run's shared-lock/stat
-// guard ("nix-var snapshot %s no longer exists") must find a real directory
+// The round trip SnapshotGeneration exists to close: Run's shared-lock
+// step must find the snapshot already in place (no recreate)
 // once SnapshotGeneration has run against the same pwd/closure a swap binds
 // via NewAgentGeneration, so a swap's snapshot dir and its bound
 // AgentGeneration.Generation always name the same thing.
@@ -4145,5 +4216,115 @@ func TestReclaimStaleSnapshots_LockOnlyGenerationDropsRootsAndLockInOnePass(t *t
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("os.Stat(%q) = %v, want nil", p, err)
 		}
+	}
+}
+
+// recordNixBuilds wraps the current execCommand and returns a func yielding the
+// `nix build --out-link` (link, target) pairs seen so far, in call order.
+func recordNixBuilds(t *testing.T) func() [][2]string {
+	t.Helper()
+	var calls [][2]string
+	inner := execCommand
+	t.Cleanup(func() { execCommand = inner })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		// Mirrors registerGenerationRoot's `nix build --out-link <link> -- <path>`.
+		if name == "nix" && len(args) == 5 && args[0] == "build" && args[1] == "--out-link" && args[3] == "--" {
+			calls = append(calls, [2]string{args[2], args[4]})
+			return exec.Command("true")
+		}
+		return inner(name, args...)
+	}
+	return func() [][2]string { return calls }
+}
+
+// Reclaim deletes a generation's GC-root dir with its snapshot, so the recreate
+// must re-root the generation the Box actually mounts: the baked one, or the
+// hot-swapped closure path itself (the set SnapshotGeneration roots).
+func TestRecreateSnapshotIfGone_ReRegistersGCRootsForTheBoxsGeneration(t *testing.T) {
+	hot := runner.NewAgentGeneration("/nix/store/aaa-agent-closure")
+	cases := []struct {
+		name    string
+		box     runner.Box
+		wantGen string
+		want    []string
+	}{
+		{
+			name:    "baked",
+			box:     runner.Box{Name: "agent-issue-1"},
+			wantGen: "baked-gen",
+			want:    []string{"/fake/agent", "/fake/env", "/fake/nix.conf", "/fake/passwd", "/fake/group", "/fake/seccomp.bpf"},
+		},
+		{
+			name:    "hot-swapped",
+			box:     runner.Box{Name: "agent-issue-2", ClosureGeneration: &hot},
+			wantGen: "aaa-agent-closure",
+			want:    []string{"/nix/store/aaa-agent-closure", "/fake/passwd", "/fake/group", "/fake/seccomp.bpf"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeVacuumInto(t, "true", "recreated", 0, nil)
+			calls := recordNixBuilds(t)
+
+			rootsRoot := t.TempDir()
+			snapshotDir := filepath.Join(t.TempDir(), "gen")
+			a := &bwrapAdapter{
+				agentFiles:        "/fake/agent",
+				agentEnv:          "/fake/env",
+				nixConfigFile:     "/fake/nix.conf",
+				passwdFile:        "/fake/passwd",
+				groupFile:         "/fake/group",
+				syscallFilterPath: "/fake/seccomp.bpf",
+			}
+			a.nixGCRootsRoot = rootsRoot
+			a.generation = "baked-gen"
+			runnertest.CaptureStdoutDuring(t, func() {
+				if err := a.recreateSnapshotIfGone(tc.box, snapshotDir); err != nil {
+					t.Fatalf("recreateSnapshotIfGone: %v", err)
+				}
+			})
+
+			var targets []string
+			for i, c := range calls() {
+				wantLink := filepath.Join(rootsRoot, tc.wantGen, fmt.Sprintf("artifact-%d", i))
+				if c[0] != wantLink {
+					t.Errorf("call %d out-link = %q, want %q", i, c[0], wantLink)
+				}
+				targets = append(targets, c[1])
+			}
+			if !slices.Equal(targets, tc.want) {
+				t.Errorf("rooted paths = %q, want %q", targets, tc.want)
+			}
+		})
+	}
+}
+
+// A hot-swapped generation that names no AgentFiles must not root filepath.Dir("")
+// (the cwd, "."): the baked closure set is what pick() binds.
+func TestRecreateSnapshotIfGone_HotSwapWithoutAgentFilesRootsNoCwd(t *testing.T) {
+	fakeVacuumInto(t, "true", "recreated", 0, nil)
+	calls := recordNixBuilds(t)
+
+	rootsRoot := t.TempDir()
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", nixConfigFile: "/fake/nix.conf"}
+	a.nixGCRootsRoot = rootsRoot
+	a.generation = "baked-gen"
+	hot := runner.AgentGeneration{Generation: "hot-gen"}
+	box := runner.Box{Name: "agent-issue-3", ClosureGeneration: &hot}
+	runnertest.CaptureStdoutDuring(t, func() {
+		if err := a.recreateSnapshotIfGone(box, filepath.Join(t.TempDir(), "gen")); err != nil {
+			t.Fatalf("recreateSnapshotIfGone: %v", err)
+		}
+	})
+
+	var targets []string
+	for _, c := range calls() {
+		targets = append(targets, c[1])
+		if want := filepath.Join(rootsRoot, "hot-gen"); filepath.Dir(c[0]) != want {
+			t.Errorf("out-link %q not under %q", c[0], want)
+		}
+	}
+	if want := []string{"/fake/agent", "/fake/env", "/fake/nix.conf"}; !slices.Equal(targets, want) {
+		t.Errorf("rooted paths = %q, want the baked closure %q", targets, want)
 	}
 }

@@ -57,6 +57,13 @@ func NixGCRootsRoot(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "nix-gcroots")
 }
 
+// snapshotDBPath is where a generation dir's snapshot lands. Its presence, not
+// the dir's, marks the snapshot complete: VacuumStoreDBInto creates the dir
+// before it installs db.sqlite.
+func snapshotDBPath(dir string) string {
+	return filepath.Join(dir, "nix", "db", StoreDBName)
+}
+
 // RealizeLockPath is the lock concurrent cold starts on one snapshot root
 // serialize their snapshot write on. A sibling of root, never inside it:
 // reclaimStaleSnapshots sweeps any NAME.lock under root as a generation lock.
@@ -230,24 +237,23 @@ func UnlockSnapshot(lf *os.File) {
 
 // SnapshotGeneration prepares a closure hot-swapped mid-run before binding it.
 // For a nixInBox Consumer it writes the nix-var snapshot (ADR 0043, issue
-// #2682): Run's stat guard fails a Box naming a generation with no directory.
-// It skips the vacuum when db.sqlite already exists, since a live Box may be
-// reading it, and never reclaims: an idle Dispatch holds no flock on a
-// generation it will launch against again.
+// #2682), so the copy happens here rather than in Run's recreate. It skips the
+// vacuum when db.sqlite already exists, since a live Box may be reading it, and
+// never reclaims: an idle Dispatch holds no flock on a generation it will
+// launch against again.
 //
-// It also GC-roots what a Box on the swapped generation mounts: the closure's
-// files/env/nix-config/prefetch children, plus the passwd, group and syscall
-// filter the daemon booted with (issue #5995). The root is registered even when
-// db.sqlite already exists, so a re-swap onto a generation still roots it.
-// With nixInBox off (cfg.NixConfigFile empty) only the lock and roots happen:
-// the Box mounts no nix-var snapshot, so none is written and no VACUUM runs
-// (issue #5996).
+// It also GC-roots what a Box on the swapped generation mounts: the closure,
+// plus the passwd, group and syscall filter the daemon booted with (issue
+// #5995). The root is registered even when db.sqlite already exists, so a
+// re-swap onto a generation still roots it. With nixInBox off
+// (cfg.NixConfigFile empty) only the lock and roots happen: the Box mounts no
+// nix-var snapshot, so none is written and no VACUUM runs (issue #5996).
 func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	generation := ClosureGeneration(closurePath)
 	dir := NixVarSnapshotDir(pwd, generation)
 	root := NixVarSnapshotRoot(pwd)
 
-	dest := filepath.Join(dir, "nix", "db", StoreDBName)
+	dest := snapshotDBPath(dir)
 	snapshot := cfg.NixConfigFile != ""
 	if snapshot {
 		// Sweep before the existence check: a temp leaked by a killed launcher would
@@ -305,7 +311,7 @@ func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
 		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
 	}
 
-	dest := filepath.Join(dir, "nix", "db", StoreDBName)
+	dest := snapshotDBPath(dir)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
 	}
