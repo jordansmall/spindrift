@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.30.1](https://github.com/jordansmall/spindrift/compare/v0.30.0...v0.30.1) (2026-10-24)
+
+
+### Features
+
+* **bwrap:** drop a generation's GC roots with its stale snapshot ([65528b5](https://github.com/jordansmall/spindrift/commit/65528b598f51cc20c4bd98b7ca94d3b72ca57936)), closes [#5995](https://github.com/jordansmall/spindrift/issues/5995)
+* **bwrap:** prepare a cold closure generation on the run path ([616b917](https://github.com/jordansmall/spindrift/commit/616b91718ddc03a11ed793c8c296561cb3aed2db)), closes [#6008](https://github.com/jordansmall/spindrift/issues/6008)
+* **bwrap:** probe a real pasta namespace in network isolation ([17f90c8](https://github.com/jordansmall/spindrift/commit/17f90c80b6060f67128a4182018a1ed2c9643c6c)), closes [#5983](https://github.com/jordansmall/spindrift/issues/5983)
+* **bwrap:** recreate a reclaimed snapshot when a Box launches ([a481c8a](https://github.com/jordansmall/spindrift/commit/a481c8afd4df6f599b4287a6c9e0a58e2308aa4a)), closes [#6008](https://github.com/jordansmall/spindrift/issues/6008)
+* **bwrap:** root a build's store artifacts per closure generation ([a1b57fb](https://github.com/jordansmall/spindrift/commit/a1b57fb9593988e46b063e23e8b409c6b018c419)), closes [#5995](https://github.com/jordansmall/spindrift/issues/5995)
+* **bwrap:** root a hot-swapped generation before Boxes launch on it ([9739134](https://github.com/jordansmall/spindrift/commit/9739134c94f73fe951b752650b6afa3e26483058)), closes [#5995](https://github.com/jordansmall/spindrift/issues/5995)
+* **ecosystem:** register ecosystems from the Bundle in one call ([afa4e34](https://github.com/jordansmall/spindrift/commit/afa4e3474e30640ac0a314f7e42465a795fbe421)), closes [#5952](https://github.com/jordansmall/spindrift/issues/5952)
+* **hostprofile:** add the host profile table and matcher ([e4a2dee](https://github.com/jordansmall/spindrift/commit/e4a2dee3184f5bf94a925679f10220cdbfb788dc)), closes [#5965](https://github.com/jordansmall/spindrift/issues/5965)
+* **passmanifest:** add UnreviewedReady predicate ([10f409d](https://github.com/jordansmall/spindrift/commit/10f409ddfda04fb593fb69d3b1a9eefad55128ba)), closes [#5973](https://github.com/jordansmall/spindrift/issues/5973)
+
+
+### Bug Fixes
+
+* **box:** verify each installed shim and hook actually runs ([f458ff3](https://github.com/jordansmall/spindrift/commit/f458ff30893e40525a19783f0d1afe6ee87be242)), closes [#6005](https://github.com/jordansmall/spindrift/issues/6005)
+* **bwrap:** bind agentEnv's /bin at /bin in the Box root ([9f722be](https://github.com/jordansmall/spindrift/commit/9f722be6ea430f662f623fa39ff59819011c235d)), closes [#6004](https://github.com/jordansmall/spindrift/issues/6004)
+* **bwrap:** lock and root every generation, with or without nixInBox ([f744c27](https://github.com/jordansmall/spindrift/commit/f744c27dba0376415cf3677d398544410b5fe4f7)), closes [#5996](https://github.com/jordansmall/spindrift/issues/5996)
+* **bwrap:** open the seccomp filter after pasta's exec ([c481d3f](https://github.com/jordansmall/spindrift/commit/c481d3f7c0860f7bbe02600b383cc790976af56a)), closes [#5982](https://github.com/jordansmall/spindrift/issues/5982)
+* **bwrap:** pass --config-net to the pasta wrapper ([31e589e](https://github.com/jordansmall/spindrift/commit/31e589ed1f697409bd23a924ddd677eceec0d56c)), closes [#5981](https://github.com/jordansmall/spindrift/issues/5981)
+* **launcher:** root hot-swapped generations without nixInBox too ([0fb43a7](https://github.com/jordansmall/spindrift/commit/0fb43a748db2adc7713e1db26b5edd4a9a3ee698)), closes [#5996](https://github.com/jordansmall/spindrift/issues/5996)
+* **orchestrator:** pass the outcome status to the pass machine ([8515316](https://github.com/jordansmall/spindrift/commit/851531613297af54ea48be042d6f25b7cb2ce2ef)), closes [#5972](https://github.com/jordansmall/spindrift/issues/5972)
+* **passmachine:** keep reviewing after a premature ready ([d83fde3](https://github.com/jordansmall/spindrift/commit/d83fde33e0d1d1e20cf0daafb8561e17b0095657)), closes [#5972](https://github.com/jordansmall/spindrift/issues/5972)
+* **recover:** skip a ready no land pass reported ([41e5a1e](https://github.com/jordansmall/spindrift/commit/41e5a1ec0d06eaf31c57c7772353b79f62795059)), closes [#5973](https://github.com/jordansmall/spindrift/issues/5973)
+* **settle:** fail a review-loop ready no land pass reported ([4eb1bb4](https://github.com/jordansmall/spindrift/commit/4eb1bb498779c053518cc905ef45910c36ca84f3)), closes [#5973](https://github.com/jordansmall/spindrift/issues/5973)
+
+
+### Documentation
+
+* **adr:** add 0071 registry host profiles ([8187525](https://github.com/jordansmall/spindrift/commit/818752517c0a252e741a87660ecebef6f99bf786))
+* **adr:** amend 0042 with the generation-scoped GC root ([acfa695](https://github.com/jordansmall/spindrift/commit/acfa69573513645f34ee1f2a1376d1450a3c7b8e)), closes [#5995](https://github.com/jordansmall/spindrift/issues/5995)
+* **adr:** amend 0048 to put ecosystems behind a kit ([0c349d4](https://github.com/jordansmall/spindrift/commit/0c349d4013ed49791645126e873631092ff9ffde))
+* **adr:** amend 0054 with the pasta chain's filter path ([b8deb99](https://github.com/jordansmall/spindrift/commit/b8deb997d203a044e2d16ec6cfded99a8991b00b)), closes [#5982](https://github.com/jordansmall/spindrift/issues/5982)
+* **adr:** extend the 0042 GC root amendment to nixInBox-off Boxes ([aa0f194](https://github.com/jordansmall/spindrift/commit/aa0f194c010e81113a6ec9428f40f6497c8ad257)), closes [#5996](https://github.com/jordansmall/spindrift/issues/5996)
+* **adr:** name the ecosystemkit helpers as they landed ([cf6fbd1](https://github.com/jordansmall/spindrift/commit/cf6fbd1a17d9bbb97c1b59f06ba20170c9383f1b)), closes [#5953](https://github.com/jordansmall/spindrift/issues/5953)
+* **adr:** record --config-net in the pasta flag set ([aea2ba8](https://github.com/jordansmall/spindrift/commit/aea2ba89f48db4ffb611148fdc1c1e2691855438)), closes [#5981](https://github.com/jordansmall/spindrift/issues/5981)
+* **adr:** record that the bwrap root's /bin matches OCI ([de2e10d](https://github.com/jordansmall/spindrift/commit/de2e10db559155ad14b4c19dbb3a7773ec23290e)), closes [#6004](https://github.com/jordansmall/spindrift/issues/6004)
+* **bwrap:** describe the run path's own generation prepare ([2815ca0](https://github.com/jordansmall/spindrift/commit/2815ca0e46ca887fec671251d26084bf6c88b5bc)), closes [#6008](https://github.com/jordansmall/spindrift/issues/6008)
+* **context:** call the per-ecosystem record an Ecosystem Strategy ([5b52a29](https://github.com/jordansmall/spindrift/commit/5b52a29d1abea4de971e8073af6a8b726b2d55f5)), closes [#5951](https://github.com/jordansmall/spindrift/issues/5951)
+* **context:** define Host profile in the glossary ([e8f68e7](https://github.com/jordansmall/spindrift/commit/e8f68e7f202afec2927c553585314ce42b024829)), closes [#5965](https://github.com/jordansmall/spindrift/issues/5965)
+* name the unreviewed ready in settle and recover ([c31d26b](https://github.com/jordansmall/spindrift/commit/c31d26bddf9739fcc92531c276c8eb7f05ec8a8e)), closes [#5973](https://github.com/jordansmall/spindrift/issues/5973)
+* **reference:** describe what bwrap-network-isolation checks ([00fdf84](https://github.com/jordansmall/spindrift/commit/00fdf84f08b8c9d7c828a0d1ac3906e11de038e9)), closes [#5983](https://github.com/jordansmall/spindrift/issues/5983)
+
+
+### Code Refactoring
+
+* **ecosystem:** extract the shared helpers into ecosystemkit ([ac498c0](https://github.com/jordansmall/spindrift/commit/ac498c05af1102924d99dded449175ac065ef467)), closes [#5953](https://github.com/jordansmall/spindrift/issues/5953)
+* **ecosystem:** keep cargo's frozen keys and RouteLocalURL in core ([cfbc9b3](https://github.com/jordansmall/spindrift/commit/cfbc9b3ec6733c301443471f3aead807c2a9a73a)), closes [#5956](https://github.com/jordansmall/spindrift/issues/5956)
+* **ecosystem:** move cargo into its own package ([399e143](https://github.com/jordansmall/spindrift/commit/399e1436e750da1026f4508783bc31e3115889d2)), closes [#5956](https://github.com/jordansmall/spindrift/issues/5956)
+* **ecosystem:** move go into the gomod package ([828fe10](https://github.com/jordansmall/spindrift/commit/828fe1010238d097e48c70c0c0049c53491d2fad)), closes [#5955](https://github.com/jordansmall/spindrift/issues/5955)
+* **ecosystem:** move gradle into its own package ([8784d5e](https://github.com/jordansmall/spindrift/commit/8784d5e68694b3d416c414b0a647ed81736b7173)), closes [#5954](https://github.com/jordansmall/spindrift/issues/5954)
+* **ecosystem:** move npm, yarn and pnpm into npmfamily ([5ae2b25](https://github.com/jordansmall/spindrift/commit/5ae2b25a3dfee5825dfd5ca2bbf75fd352e9a099)), closes [#5957](https://github.com/jordansmall/spindrift/issues/5957)
+* **ecosystem:** rename the Row type to Strategy ([bcd683d](https://github.com/jordansmall/spindrift/commit/bcd683d856c3cb5d58a25d9eeb8551b063317fb7)), closes [#5951](https://github.com/jordansmall/spindrift/issues/5951)
+* **ecosystemtest:** name the synthetic entry a Strategy ([94e4100](https://github.com/jordansmall/spindrift/commit/94e41003e8559370bfc7144e670b652fc5bc0234)), closes [#5951](https://github.com/jordansmall/spindrift/issues/5951)
+
+
+### Tests
+
+* **bundle:** guard the ecosystem registration ([94255de](https://github.com/jordansmall/spindrift/commit/94255dec2c3ff29967ce866315b277b975fb8e23)), closes [#5952](https://github.com/jordansmall/spindrift/issues/5952)
+* **bundle:** scope ecosystem guards to each ecosystem's package ([cae1efa](https://github.com/jordansmall/spindrift/commit/cae1efad743d55ba4fa76866a0f165bda2fe0067)), closes [#5954](https://github.com/jordansmall/spindrift/issues/5954)
+* **bwrap:** exercise the real pasta probe end to end ([6e6aeed](https://github.com/jordansmall/spindrift/commit/6e6aeed3f3dd49d2fb2ae87d58e95dca3e8dcc5a)), closes [#5983](https://github.com/jordansmall/spindrift/issues/5983)
+* **bwrap:** fail sandbox skips when required ([3fc4291](https://github.com/jordansmall/spindrift/commit/3fc4291f1eb35fcc4c3310c4947c0a83042b1fcb))
+* **bwrap:** match path-info's store path, not bin ([22473bf](https://github.com/jordansmall/spindrift/commit/22473bf96a465ef41e427cb647469142e313b18f))
+* **bwrap:** prove generation roots keep artifacts out of the GC ([7893e23](https://github.com/jordansmall/spindrift/commit/7893e23f8e6a7e98ae8ecafc33980b75c38d027d)), closes [#5995](https://github.com/jordansmall/spindrift/issues/5995)
+* **bwrap:** prove nixInBox-off generation roots keep artifacts from GC ([a72ee96](https://github.com/jordansmall/spindrift/commit/a72ee96164eb61ac7713ee8b230135a5f3103ccd)), closes [#5996](https://github.com/jordansmall/spindrift/issues/5996)
+* **bwrap:** prove the pasta namespace is usable, not just present ([11a01d8](https://github.com/jordansmall/spindrift/commit/11a01d8bddc006332d307323dda3300ee018b611)), closes [#5981](https://github.com/jordansmall/spindrift/issues/5981)
+* **bwrap:** run #!/bin/sh and #!/bin/bash scripts in a real Box ([8029355](https://github.com/jordansmall/spindrift/commit/8029355bcf210474f5a911c73d0fe40d33f5c143)), closes [#6004](https://github.com/jordansmall/spindrift/issues/6004)
+* **bwrap:** run the filter through the real pasta chain ([b1ae18d](https://github.com/jordansmall/spindrift/commit/b1ae18d69ee07c88982e9fffbdf08171fdda6a2c)), closes [#5982](https://github.com/jordansmall/spindrift/issues/5982)
+* **ecosystemkit:** cover HTTPAbsoluteURL and DeclaredPath ([a882a56](https://github.com/jordansmall/spindrift/commit/a882a56264cd4bfa0a5d744bab8e892be5944547)), closes [#5953](https://github.com/jordansmall/spindrift/issues/5953)
+* **gradle:** replay neighbour-block cases against a synthetic row ([a4db90b](https://github.com/jordansmall/spindrift/commit/a4db90bea01774c82506968206d803ba9a44032f)), closes [#5957](https://github.com/jordansmall/spindrift/issues/5957)
+* **hostprofile:** guard the advisory boundary on the import graph ([54e267f](https://github.com/jordansmall/spindrift/commit/54e267f2694cf5013834b4256cabb7604157ca7d)), closes [#5965](https://github.com/jordansmall/spindrift/issues/5965)
+* keep core tests off the real ecosystem Strategies ([0c756f1](https://github.com/jordansmall/spindrift/commit/0c756f198eb7edf98b2568d126adf78c855226cc)), closes [#5952](https://github.com/jordansmall/spindrift/issues/5952)
+* **nix:** give each ecosystem package its own go test derivation ([5e29e17](https://github.com/jordansmall/spindrift/commit/5e29e1732de18ab089af1701becfd4681b5c0071)), closes [#5954](https://github.com/jordansmall/spindrift/issues/5954)
+* **registryproxy:** build route blocks from plain route vocabulary ([3aae52a](https://github.com/jordansmall/spindrift/commit/3aae52a62372846cd8ad60d355116d03933aa46e)), closes [#5956](https://github.com/jordansmall/spindrift/issues/5956)
+* stub pasta as a working namespace, not just a PATH entry ([7ab2ac3](https://github.com/jordansmall/spindrift/commit/7ab2ac35a9236e63ea3fd301abb3d52926f03662)), closes [#5983](https://github.com/jordansmall/spindrift/issues/5983)
+
+
+### Build System
+
+* **devshell:** add sqlite for the bwrap nix tests ([8ff691e](https://github.com/jordansmall/spindrift/commit/8ff691e4e9db1f5caf52cfa86b539a58171fdf23))
+* **nix:** find every ecosystem corpus in regen-goldens ([ee64af2](https://github.com/jordansmall/spindrift/commit/ee64af2f61d6f835ea9d12688102c3e7a5a8d174)), closes [#5954](https://github.com/jordansmall/spindrift/issues/5954)
+
+
+### Continuous Integration
+
+* run the bwrap integration tests for real ([30faf72](https://github.com/jordansmall/spindrift/commit/30faf720eb54a38b9a1af3d1818b1b72ce04eab3))
+
 ## [0.30.0](https://github.com/jordansmall/spindrift/compare/v0.29.0...v0.30.0) (2026-10-23)
 
 
