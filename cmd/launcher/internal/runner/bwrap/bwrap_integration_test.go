@@ -163,9 +163,22 @@ func newIntegrationBwrapAdapter(t *testing.T) (*bwrapAdapter, string) {
 	if err := os.WriteFile(filepath.Join(etcDir, "group"), []byte(group), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// buildArgs ro-binds agentEnv/bin at /bin, so agentEnv must be a real dir.
+	// Its bin/ holds sh and bash, as bashInteractive gives the real agentEnv
+	// (lib/image.nix), so #!/bin/sh and passwd's /bin/bash both resolve.
+	agentEnv := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(agentEnv, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bash := resolveSandboxBin(t, "bash")
+	for _, name := range []string{"sh", "bash"} {
+		if err := os.Symlink(bash, filepath.Join(agentEnv, "bin", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	a := &bwrapAdapter{
 		agentFiles:    agentFiles,
-		agentEnv:      "/fake/agent-env",
+		agentEnv:      agentEnv,
 		passwdFile:    filepath.Join(etcDir, "passwd"),
 		groupFile:     filepath.Join(etcDir, "group"),
 		bakedPrefetch: "true",

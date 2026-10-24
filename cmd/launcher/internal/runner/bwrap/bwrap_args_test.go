@@ -307,6 +307,17 @@ func TestBwrapArgs_AccountFilesBindStorePaths(t *testing.T) {
 	}
 }
 
+// Issue #6004: the sandbox root would have no /bin without this bind, so
+// `#!/bin/sh` shims would fail; the OCI image gets /bin from buildEnv.
+func TestBwrapArgs_BindsAgentEnvBin(t *testing.T) {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env"}
+	args := a.buildArgs("/tmp/fake-etc", runner.Box{Env: map[string]string{}})
+
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/fake/env/bin", "/bin") {
+		t.Errorf("expected --ro-bind /fake/env/bin /bin in args: %v", args)
+	}
+}
+
 // Some nix build sandboxes have no /etc/resolv.conf, so a test that needs one
 // present stubs statResolvConf and defers the returned restore func.
 func stubResolvConfPresent() func() {
