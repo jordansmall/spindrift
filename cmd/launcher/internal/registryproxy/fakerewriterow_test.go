@@ -18,7 +18,7 @@ import (
 
 // This file drives findResponseRewriteRow and the learning path
 // (learnRewriteBase/learnedAdmits) with a registryvocab.RewriteRow for an
-// invented ecosystem tag ("widget") that names no real ecosystem.Table row,
+// invented ecosystem tag ("widget") that names no real registered Strategy,
 // so these tests pin the matching and learning mechanism itself rather than
 // anything specific to one real ecosystem (issue #3400).
 
@@ -136,7 +136,7 @@ func rewriteFakeSkipNoEdits(body []byte, rc registryvocab.RewriteContext) regist
 }
 
 // fakeManifestRow matches the same request shape as an index.json row
-// matches, but tagged for an ecosystem no ecosystem.Table row declares.
+// matches, but tagged for an ecosystem no registered Strategy declares.
 func fakeManifestRow(rewrite func([]byte, registryvocab.RewriteContext) registryvocab.RewriteResult) registryvocab.RewriteRow {
 	return registryvocab.RewriteRow{
 		Name:      "widget manifest.json",
@@ -206,8 +206,8 @@ func TestFakeRewriteRow_MatchesAndLearns(t *testing.T) {
 
 // A row declared for one ecosystem tag must never match a route base tagged
 // for a different ecosystem, even when the row's method and path shape fit
-// exactly. A bug here would let one ecosystem's row rewrite another's
-// response.
+// exactly. A bug here would let a rewrite row declared for one ecosystem
+// rewrite another's response.
 func TestFakeRewriteRow_EcosystemTagMismatchNeverMatches(t *testing.T) {
 	const assetBody = `{"asset":"https://widget.example.com/downloads/pkg-1.0.tar.gz"}`
 

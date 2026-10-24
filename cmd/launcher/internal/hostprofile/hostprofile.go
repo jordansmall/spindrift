@@ -28,7 +28,7 @@ type Row struct {
 	AuthScheme string
 	// BasicUsername is display text describing the username convention.
 	BasicUsername string
-	// Siblings maps an ecosystem row name to path patterns, relative to the
+	// Siblings maps an ecosystem Strategy name to path patterns, relative to the
 	// registry path the Target repo declares.
 	Siblings         map[string][]string
 	CredentialHelper string
