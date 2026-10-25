@@ -35,7 +35,7 @@ func TestWarnStaleLockfilesWarnsOnHit(t *testing.T) {
 	setManifestOn(t)
 
 	var out bytes.Buffer
-	WarnStaleLockfilesRows(&out, dir, scanRows, os.Getenv)
+	WarnStaleLockfiles(&out, dir, scanRows, os.Getenv)
 
 	want := "==> WARNING: synthetic lockfile synthetic.lock still names the registry proxy Forwarder URL 127.0.0.1:" + port + " — this will ship in the PR (issue #3199)\n"
 	if out.String() != want {
@@ -49,7 +49,7 @@ func TestWarnStaleLockfilesCleanRepoIsSilent(t *testing.T) {
 	setManifestOn(t)
 
 	var out bytes.Buffer
-	WarnStaleLockfilesRows(&out, dir, scanRows, os.Getenv)
+	WarnStaleLockfiles(&out, dir, scanRows, os.Getenv)
 
 	if out.Len() != 0 {
 		t.Errorf("output = %q, want empty for a clean repo", out.String())
@@ -62,7 +62,7 @@ func TestWarnStaleLockfilesManifestAbsentIsSilent(t *testing.T) {
 	t.Setenv(registrymanifest.EnvVar, "")
 
 	var out bytes.Buffer
-	WarnStaleLockfilesRows(&out, dir, scanRows, os.Getenv)
+	WarnStaleLockfiles(&out, dir, scanRows, os.Getenv)
 
 	if out.Len() != 0 {
 		t.Errorf("output = %q, want empty when the registry proxy is off", out.String())
@@ -73,7 +73,7 @@ func TestWarnStaleLockfilesMalformedManifestWarns(t *testing.T) {
 	t.Setenv(registrymanifest.EnvVar, "{not valid json")
 
 	var out bytes.Buffer
-	WarnStaleLockfilesRows(&out, newTestRepo(t), scanRows, os.Getenv)
+	WarnStaleLockfiles(&out, newTestRepo(t), scanRows, os.Getenv)
 
 	want := "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed, skipping the lockfile Forwarder-URL scan:"
 	if !strings.HasPrefix(out.String(), want) {
@@ -86,7 +86,7 @@ func TestWarnStaleLockfilesScanErrorWarns(t *testing.T) {
 	setManifestOn(t)
 
 	var out bytes.Buffer
-	WarnStaleLockfilesRows(&out, t.TempDir(), scanRows, os.Getenv)
+	WarnStaleLockfiles(&out, t.TempDir(), scanRows, os.Getenv)
 
 	want := "==> WARNING: lockfile Forwarder-URL scan failed, skipping:"
 	if !strings.HasPrefix(out.String(), want) {

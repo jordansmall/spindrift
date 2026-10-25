@@ -98,7 +98,7 @@ func (c *replay) binding() ([]byte, error) {
 		}
 		out.HomeConfig = home
 	}
-	if len(bindregistry.InTreeBindingsOf(c.primaryRows())) > 0 {
+	if len(bindregistry.InTreeBindings(c.primaryRows())) > 0 {
 		if out.InTree, err = c.inTreeRewrite(rewrites); err != nil {
 			return nil, err
 		}

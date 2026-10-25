@@ -42,6 +42,7 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers and backends
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -168,18 +169,20 @@ func main() {
 		Setenv:        os.Setenv,
 		Recover:       branchrecovery.Recover,
 		PublishBranch: branchrecovery.Publish,
-		WarnLockfiles: bindregistry.WarnStaleLockfiles,
-		Nix:           toolchain.RunNix(os.Stdout),
-		RunCmd:        func(cmd *exec.Cmd) error { return cmd.Run() },
-		LookPath:      exec.LookPath,
-		Git:           gitRun,
-		GitOutput:     gitOutput,
-		AbortRebase:   abortRebase,
-		Registry:      realRegistryDeps(),
-		Guards:        realGuardsDeps(),
-		Getenv:        os.Getenv,
-		Stdout:        os.Stdout,
-		Stderr:        os.Stderr,
+		WarnLockfiles: func(w io.Writer, workDir string) {
+			bindregistry.WarnStaleLockfiles(w, workDir, ecosystem.Registered(), os.Getenv)
+		},
+		Nix:         toolchain.RunNix(os.Stdout),
+		RunCmd:      func(cmd *exec.Cmd) error { return cmd.Run() },
+		LookPath:    exec.LookPath,
+		Git:         gitRun,
+		GitOutput:   gitOutput,
+		AbortRebase: abortRebase,
+		Registry:    realRegistryDeps(),
+		Guards:      realGuardsDeps(),
+		Getenv:      os.Getenv,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
 	}
 	os.Exit(mainRun(os.Args[1:], promptassembly.EnvFromEnviron(), d))
 }

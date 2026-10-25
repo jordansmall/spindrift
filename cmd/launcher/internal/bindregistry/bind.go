@@ -404,7 +404,7 @@ func ApplyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 	return applyRepoAwareHomeConfigs(stdout, workDir, rows, gate, publish)
 }
 
-// applyInTree loops over every InTreeBindingsOf(rows) Strategy (npm, yarn and pnpm
+// applyInTree loops over every InTreeBindings(rows) Strategy (npm, yarn and pnpm
 // today, cargo retired from this loop by issue #3201), so a future table Strategy
 // needs no change here.
 func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, gate Gate) bool {
@@ -434,7 +434,7 @@ func applyInTree(stdout io.Writer, workDir string, rows []ecosystem.Strategy, ga
 		return true
 	}
 
-	failed := applyEachRow(InTreeBindingsOf(rows), func(row ecosystem.Strategy) error {
+	failed := applyEachRow(InTreeBindings(rows), func(row ecosystem.Strategy) error {
 		outcome, err := ApplyInTreeBinding(workDir, row, rewrites)
 		if err != nil {
 			fmt.Fprintln(stdout, "driver-exec bind-registry: apply in-tree "+row.InTreeConfigPath+":", err)

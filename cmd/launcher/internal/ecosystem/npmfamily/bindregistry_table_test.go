@@ -24,7 +24,7 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 		{name: "pnpm", configPath: "pnpm-workspace.yaml"},
 	}
 
-	got := bindregistry.InTreeBindings()
+	got := bindregistry.InTreeBindings(ecosystem.Registered())
 	if len(got) != len(want) {
 		t.Fatalf("InTreeBindings() has %d rows, want exactly %d: %+v", len(got), len(want), got)
 	}
@@ -51,7 +51,7 @@ func TestClassify_EachLockfileClassifiesAsItsStrategy(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(dir, lockfile), nil, 0o644); err != nil {
 					t.Fatalf("WriteFile: %v", err)
 				}
-				if got := bindregistry.Classify(dir); got != row.Classification {
+				if got := bindregistry.Classify(dir, registered); got != row.Classification {
 					t.Errorf("Classify with %s = %q, want %q", lockfile, got, row.Classification)
 				}
 			})

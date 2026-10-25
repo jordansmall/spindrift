@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // killWaitDelay is how long a cancelled nix gets after SIGTERM before it is
@@ -67,16 +68,16 @@ func RunNix(stdout io.Writer) Nix {
 	}
 }
 
-// Decide classifies workDir and probes its flake.nix for .#name with
+// Decide classifies workDir against rows and probes its flake.nix for .#name with
 // `nix develop .#<name> --command true`, bounded by timeout: a number with an
 // optional s, m, h or d suffix (seconds when bare; 0 is unbounded). The hint
 // (see Hint) and the probing line go to w before nix runs, since the probe can
 // take minutes; the outcome is Decision.Line.
-func Decide(ctx context.Context, w io.Writer, workDir, name, timeout, prefetch string, nix Nix) Decision {
+func Decide(ctx context.Context, w io.Writer, workDir string, rows []ecosystem.Strategy, name, timeout, prefetch string, nix Nix) Decision {
 	if name == "" {
 		name = "default"
 	}
-	d := Decision{Ecosystem: bindregistry.Classify(workDir), Name: name, Timeout: timeout}
+	d := Decision{Ecosystem: bindregistry.Classify(workDir, rows), Name: name, Timeout: timeout}
 	if hint := d.Hint(prefetch); hint != "" {
 		fmt.Fprintln(w, hint)
 	}
