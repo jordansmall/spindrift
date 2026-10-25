@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/profileprobe"
 	"spindrift.dev/launcher/internal/registrydiscover"
 )
 
@@ -127,9 +128,9 @@ func cmdRegistryDiscover(rows []ecosystem.Strategy, args []string, stdout, stder
 		return 1
 	}
 
-	probe := func(u string) registrydiscover.ProbeResult {
+	probe := profileprobe.Fill(func(u string) registrydiscover.ProbeResult {
 		return registrydiscover.HTTPProbe(registrydiscover.DefaultProbeClient(), u)
-	}
+	})
 
 	return runRegistryDiscover(stdout, stderr, rows, positional[0], positional[1], force, stores, registrydiscover.StoreLookup, probe)
 }

@@ -598,3 +598,32 @@ func storeKinds() []credresolver.Kind {
 	}
 	return kinds
 }
+
+func TestRender_HostProfileCommentPrecedesAuthSchemeAndParses(t *testing.T) {
+	route := Route{
+		MatchHost:        "repo.corp.example",
+		UpstreamBaseURL:  "https://repo.corp.example/artifactory/api/npm/",
+		AuthScheme:       "bearer",
+		Profile:          "artifactory",
+		CredentialSource: "env",
+		CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_REPO_CORP_EXAMPLE",
+	}
+	rendered := Render([]Route{route})
+
+	want := "# auth-scheme from host profile \"artifactory\": the probe saw no usable challenge\nauth-scheme = \"bearer\"\n"
+	if !strings.Contains(string(rendered), want) {
+		t.Errorf("Render output missing %q:\n%s", want, rendered)
+	}
+	parsed, err := registryroutes.Parse(rendered, nil)
+	if err != nil {
+		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
+	}
+	if len(parsed) != 1 || parsed[0].AuthScheme != "bearer" {
+		t.Errorf("parsed = %+v, want one bearer route", parsed)
+	}
+
+	route.Profile = ""
+	if got := string(Render([]Route{route})); strings.Contains(got, "host profile") {
+		t.Errorf("Render without a Profile mentions a host profile:\n%s", got)
+	}
+}

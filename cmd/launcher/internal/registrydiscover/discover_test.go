@@ -691,3 +691,31 @@ func TestDiscover_ScansSuppliedRows(t *testing.T) {
 		t.Errorf("routes = %+v, want one route for reg.fake.example", routes)
 	}
 }
+
+func TestDiscover_ProbeProfileLandsOnRoute(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
+
+	probe := func(string) ProbeResult { return ProbeResult{Scheme: "basic", Profile: "artifactory"} }
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probe)
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1", routes)
+	}
+	if routes[0].AuthScheme != "basic" || routes[0].Profile != "artifactory" {
+		t.Errorf("route = %+v, want AuthScheme basic, Profile artifactory", routes[0])
+	}
+}
+
+func TestDiscover_RejectedProfileSchemeDropsProfileAttribution(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
+
+	probe := func(string) ProbeResult { return ProbeResult{Scheme: "header:", Profile: "x"} }
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probe)
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1", routes)
+	}
+	if routes[0].AuthScheme != "bearer" || routes[0].Profile != "" {
+		t.Errorf("route = %+v, want fallback AuthScheme bearer and empty Profile", routes[0])
+	}
+}
