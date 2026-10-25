@@ -540,6 +540,13 @@ withRowKnobs {
     doc = "pi auth store (JSON) — the contents of a pi auth.json, which the Box writes to ~/.pi/agent/auth.json before the pi Driver runs. Only GitHub Copilot OAuth entries are accepted (the github-copilot Provider is OAuth-only); an OAuth entry for any other Provider is refused at preflight — use that Provider's API key instead. Mint once on a host by running pi and '/login' for GitHub Copilot, then export the github-copilot slice of ~/.pi/agent/auth.json. Required when DRIVER=pi and any model tier (MODEL, REVIEW_MODEL, WORKER_MODEL, SCOUT_MODEL, FILER_MODEL) is github-copilot/<model>; ignored under the claude and opencode Drivers. Never placed on argv";
     boxEnv = true;
   };
+  piModelsContent = {
+    env = "PI_MODELS_CONTENT";
+    secret = true;
+    hostConfig = true;
+    doc = "pi Provider config (JSON) — the contents of a pi models.json, which the Box writes to ~/.pi/agent/models.json before the pi Driver runs. Declares custom Providers such as a self-hosted OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM). A Provider it declares under a name no credential rule matches needs no key at preflight; an apiKey that references $VAR resolves only against variables already forwarded into the Box. Ignored under the claude and opencode Drivers. Never placed on argv";
+    boxEnv = true;
+  };
   anthropicAPIKey = {
     env = "ANTHROPIC_API_KEY";
     secret = true;

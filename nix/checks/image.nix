@@ -815,6 +815,10 @@ in
           echo "credential-vars missing or not naming PI_AUTH_CONTENT at $vars" >&2
           exit 1
         }
+        grep -qx PI_MODELS_CONTENT "$vars" || {
+          echo "credential-vars missing or not naming PI_MODELS_CONTENT at $vars" >&2
+          exit 1
+        }
         settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json
         jq -e \
           'any(.hooks.PreToolUse[]; .matcher == "Bash" and (.hooks[0].command | (contains("/home/agent/.claude/hooks/env-credential-scrub.sh") and contains("refusing the call"))))' \

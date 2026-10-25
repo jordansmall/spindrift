@@ -372,14 +372,18 @@ let
     else
       name;
 
-  # Every env var any Driver credential rule names (ADR 0066 decision 7): the
-  # Box's Bash scrub list and the bwrap runner's off-argv set both derive from
-  # it. Sorted and deduplicated so a render is stable across row order.
+  # Every env var any Driver credential rule names, plus every envFiles env
+  # (ADR 0066 decision 7): the Box's Bash scrub list and the bwrap runner's
+  # off-argv set both derive from it. An envFiles value is host-supplied
+  # content written into the Box home and may carry a literal secret even when
+  # no credential rule names it (pi's PI_MODELS_CONTENT, issue #6048). Sorted
+  # and deduplicated so a render is stable across row order.
   credentialEnv = lib.sort (a: b: a < b) (
     lib.unique (
       lib.concatMap (
         driverEntry:
         lib.concatMap (rule: map (assertShellIdent "credentials env name") rule.env) driverEntry.credentials
+        ++ map (f: assertShellIdent "envFiles env name" f.env) (driverEntry.envFiles or [ ])
       ) (builtins.attrValues entries)
     )
   );
