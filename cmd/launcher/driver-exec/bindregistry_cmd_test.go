@@ -105,11 +105,11 @@ func clearManifestEnv(t *testing.T) {
 // declaration) rendered once for the exact-wording assertions below.
 var forwarderPortStr = strconv.Itoa(bindregistry.ForwarderPort)
 
-// runSyntheticBind is runBindRegistryWithRows over the kit's synthetic Strategy
+// runSyntheticBind is runBindRegistryWithDeps over the kit's synthetic Strategy
 // alone: the generic behaviour of the verb, with no real ecosystem's rendering
 // in the way.
 func runSyntheticBind(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
-	return runBindRegistryWithRows(args, []ecosystem.Strategy{synthetic.Strategy}, stdout, probe, spawn, lookPath, timeout, pollInterval)
+	return runBindRegistryWithDeps(args, []ecosystem.Strategy{synthetic.Strategy}, stdout, probe, spawn, lookPath, timeout, pollInterval)
 }
 
 // rowsWith returns the synthetic Strategy followed by the stub Strategies, in that order.
@@ -174,7 +174,7 @@ func bindReady(t *testing.T, rows []ecosystem.Strategy, routes ...registrymanife
 	mountSocketManifest(t, routes...)
 	bindingsOut = filepath.Join(t.TempDir(), "bindings.env")
 	var out bytes.Buffer
-	rc = runBindRegistryWithRows([]string{
+	rc = runBindRegistryWithDeps([]string{
 		"-bindings-env-output", bindingsOut,
 	}, rows, &out,
 		func(int) bool { return true },
@@ -496,7 +496,7 @@ func TestBindRegistry_UnusableGateFallbackNamesComeFromRowsWalk(t *testing.T) {
 	bindingsOut := filepath.Join(t.TempDir(), "bindings.env")
 
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithRows([]string{
+	rc := runBindRegistryWithDeps([]string{
 		"-bindings-env-output", bindingsOut,
 	}, rows, &stdout,
 		func(int) bool {
@@ -1101,7 +1101,7 @@ func TestBindRegistry_SharedGateSpawnsForwarderAtMostOnceAcrossBothModes(t *test
 
 	spawnCalls := 0
 	var stdout bytes.Buffer
-	rc := runBindRegistryWithRows([]string{
+	rc := runBindRegistryWithDeps([]string{
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
 	}, rowsWith(intreeRepoAwareRow), &stdout,
@@ -1226,7 +1226,7 @@ var intreeUpstreamRoute = registrymanifest.Route{Prefix: "r0", UpstreamHost: "up
 // timings.
 func runIntree(action, dir string, rows []ecosystem.Strategy, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc) (rc int, stdout string) {
 	var out bytes.Buffer
-	rc = runBindRegistryWithRows([]string{
+	rc = runBindRegistryWithDeps([]string{
 		"-intree-action", action,
 		"-intree-work-dir", dir,
 	}, rows, &out, probe, spawn, lookPath,
@@ -1884,7 +1884,7 @@ func repoAwareSetup(t *testing.T, repoConfig string, routes ...registrymanifest.
 // Forwarder already reporting ready.
 func applyRepoAware(dir, envOut string) (rc int, stdout string) {
 	var out bytes.Buffer
-	rc = runBindRegistryWithRows([]string{
+	rc = runBindRegistryWithDeps([]string{
 		"-intree-action", "apply",
 		"-intree-work-dir", dir,
 		"-intree-bindings-env-output", envOut,
@@ -2121,7 +2121,7 @@ func TestBindRegistry_IntreeApplyUnreadableRepoConfigFails(t *testing.T) {
 }
 
 // -intree-bindings-env-output must be paired with -intree-action=apply, mirroring
-// the other flag-pair validation errors in runBindRegistryWithRows.
+// the other flag-pair validation errors in runBindRegistryWithDeps.
 func TestBindRegistry_IntreeBindingsEnvOutputRequiresApply(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "intree-bindings.env")
 

@@ -26,9 +26,9 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 		extra = replaceCheckByName(extra, registryProxyRoutesCheckName, registryProxyRoutesCheck(c, false))
 		// One parse feeds both row families. A read or parse failure
 		// yields nil for both, leaving the failure to registryProxyRoutesCheck.
-		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Table); err == nil {
+		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Registered()); err == nil {
 			perRoute = routeChecksFor(routes)
-			drift = registryRouteDriftCheckForRoutes(c, routes, ecosystem.Table)
+			drift = registryRouteDriftCheckForRoutes(c, routes, ecosystem.Registered())
 		}
 	}
 	extra = memoizeCheckProbes(extra)

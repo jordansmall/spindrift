@@ -34,9 +34,9 @@ var referenceSpans = []docSpan{
 	{"REGISTRY DISCOVERY SOURCES", renderRegistryDiscoverySources},
 }
 
-// renderLockfileClassification merges consecutive Table Strategies sharing a
+// renderLockfileClassification merges consecutive registered Strategies sharing a
 // Classification (npm, yarn and pnpm report one ecosystem). Only adjacent Strategies
-// merge, so the rendered order is always first-match precedence, i.e. Table
+// merge, so the rendered order is always first-match precedence, i.e. registration
 // order.
 func renderLockfileClassification() string {
 	type group struct {
@@ -44,7 +44,7 @@ func renderLockfileClassification() string {
 		files []string
 	}
 	var groups []group
-	for _, row := range ecosystem.Table {
+	for _, row := range ecosystem.Registered() {
 		if n := len(groups); n == 0 || groups[n-1].class != row.Classification {
 			groups = append(groups, group{class: row.Classification})
 		}
@@ -72,7 +72,7 @@ func renderLockfileClassification() string {
 
 func renderRegistryDiscoverySources() string {
 	var configs []string
-	for _, row := range ecosystem.Table {
+	for _, row := range ecosystem.Registered() {
 		if row.InTreeConfigPath != "" {
 			configs = append(configs, "`"+row.InTreeConfigPath+"`")
 		}
@@ -132,7 +132,7 @@ func TestReferenceDocs_GeneratedSpans(t *testing.T) {
 		return
 	}
 	for _, name := range stale {
-		t.Errorf("docs/reference.md span %s is out of date with the ecosystem table; %s", name, regenHint)
+		t.Errorf("docs/reference.md span %s is out of date with the registered Strategies; %s", name, regenHint)
 	}
 }
 

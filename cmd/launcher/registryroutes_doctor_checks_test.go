@@ -61,7 +61,7 @@ match-host = "registry-b.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Table)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Registered())
 	checks := routeChecksFor(routes)
 	if len(checks) != 4 {
 		t.Fatalf("routeChecksFor() returned %d rows, want 4", len(checks))
@@ -95,7 +95,7 @@ match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DOCTOR_CHECKS_UNSET" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Table)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Registered())
 	checks := routeChecksFor(routes)
 	ch := checkByName(t, checks, "registry-route-credential[registry.example.com]")
 	_, err := ch.Probe()
@@ -332,7 +332,7 @@ match-host = "registry-resolved.example.com"
 credential = { env = "`+envVar+`" }
 `)
 
-	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Table)
+	routes := mustLoadRoutes(t, c.registryProxyRoutesFile, ecosystem.Registered())
 	checks := routeChecksFor(routes)
 
 	passthroughCh := checkByName(t, checks, "registry-route-credential[registry-passthrough.example.com]")

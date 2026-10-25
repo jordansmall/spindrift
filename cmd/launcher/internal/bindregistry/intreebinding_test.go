@@ -18,7 +18,7 @@ import (
 // A Strategy with a RepoAwareHomeConfig binds by re-rendering its home config, which
 // the in-tree rewrite does not compose with (issue #3201), and a Strategy with no
 // InTreeConfigPath has nothing to rewrite; both are filtered out and the rest
-// keep the Strategies' own order. Which Table Strategies survive is pinned in the ecosystem
+// keep the Strategies' own order. Which registered Strategies survive is pinned in the ecosystem
 // package's bindregistry_table_test.go.
 func TestInTreeBindings_FiltersByRepoAwareHomeConfigAndConfigPath(t *testing.T) {
 	repoAware := ecosystem.Strategy{
@@ -149,7 +149,7 @@ var rootBinding = ecosystem.Strategy{Name: "stub-root", InTreeConfigPath: ".stub
 
 // ApplyInTree must walk the supplied Strategies, not the production Strategy table: a Strategy
 // only the caller knows about gets its in-tree config rewritten, which a call
-// site reaching for the Table-default wrapper would never see.
+// site reaching for a registered-Strategies default would never see.
 func TestApplyInTreeWalksSuppliedRows(t *testing.T) {
 	stub := ecosystem.Strategy{Name: "stub-ecosystem", InTreeConfigPath: ".stubrc"}
 	dir := newTestRepo(t)
