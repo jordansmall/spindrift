@@ -1,0 +1,1 @@
+{"probe": {"www-authenticate": "Basic realm=\"Artifactory Realm\"", "headers": {"X-Artifactory-Id": "corpus-fake-artifactory-id"}}}

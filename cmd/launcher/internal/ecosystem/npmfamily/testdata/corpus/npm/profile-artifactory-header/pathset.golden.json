@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "npm.corp.test",
+      "Origin": "https://npm.corp.test",
+      "Subtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/registry"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/registry"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/registry"
+        }
+      ],
+      "matchHost": "npm.corp.test",
+      "upstream": "https://npm.corp.test"
+    }
+  ]
+}
