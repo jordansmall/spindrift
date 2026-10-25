@@ -1,0 +1,8 @@
+[[routes]]
+match-host = "acme.jfrog.io"
+upstream-origin = "https://acme.jfrog.io"
+auth-scheme = "bearer"
+credential = { env = "GO_TOKEN" }
+
+[routes.ecosystems.go]
+path = "/artifactory/api/go/go-remote"

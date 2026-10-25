@@ -1,0 +1,23 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "GRADLE_TOKEN",
+      "FromFile": "",
+      "MatchHost": "acme.jfrog.io",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://acme.jfrog.io"
+    },
+    "Ecosystems": {
+      "gradle": {
+        "path": "/artifactory/api/gradle/gradle-remote"
+      }
+    },
+    "MatchHost": "acme.jfrog.io",
+    "UpstreamOrigin": "https://acme.jfrog.io"
+  }
+]

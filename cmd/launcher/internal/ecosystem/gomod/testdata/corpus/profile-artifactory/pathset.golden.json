@@ -1,0 +1,18 @@
+{
+  "derived": null,
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/artifactory/api/go/go-remote"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "go",
+          "path": "/artifactory/api/go/go-remote"
+        }
+      ],
+      "matchHost": "acme.jfrog.io",
+      "upstream": "https://acme.jfrog.io"
+    }
+  ]
+}

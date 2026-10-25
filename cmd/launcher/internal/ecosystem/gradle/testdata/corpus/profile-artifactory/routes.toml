@@ -1,0 +1,8 @@
+[[routes]]
+match-host = "acme.jfrog.io"
+upstream-origin = "https://acme.jfrog.io"
+auth-scheme = "bearer"
+credential = { env = "GRADLE_TOKEN" }
+
+[routes.ecosystems.gradle]
+path = "/artifactory/api/gradle/gradle-remote"

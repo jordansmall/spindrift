@@ -6,6 +6,7 @@ package hostprofile
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/glob"
@@ -59,6 +60,32 @@ var table = []Row{
 	{Name: "proxy.golang.org", Hosts: []string{"proxy.golang.org"}, Note: publicNote},
 }
 
+// Rows returns a deep copy of the table's rows in match order, for the test
+// that proves every row against the ecosystem corpora. Editing the result never
+// changes the table.
+func Rows() []Row {
+	out := make([]Row, len(table))
+	for i, r := range table {
+		out[i] = r.clone()
+	}
+	return out
+}
+
+// clone copies every slice and map so a returned Row cannot alias the table.
+func (r Row) clone() Row {
+	r.Hosts = slices.Clone(r.Hosts)
+	r.PathPrefixes = slices.Clone(r.PathPrefixes)
+	r.ProbeHeaders = slices.Clone(r.ProbeHeaders)
+	if r.Siblings != nil {
+		sib := make(map[string][]string, len(r.Siblings))
+		for k, v := range r.Siblings {
+			sib[k] = slices.Clone(v)
+		}
+		r.Siblings = sib
+	}
+	return r
+}
+
 // Match returns the first table row whose host pattern, path prefix or probe
 // header matches. An unparseable URL can still match on a header.
 func Match(declaredURL string, header http.Header) (Row, bool) {
@@ -68,7 +95,7 @@ func Match(declaredURL string, header http.Header) (Row, bool) {
 	}
 	for _, row := range table {
 		if matches(row, host, path, header) {
-			return row, true
+			return row.clone(), true
 		}
 	}
 	return Row{}, false

@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "GO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "proxy.golang.org",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://proxy.golang.org"
+    },
+    "Ecosystems": null,
+    "MatchHost": "proxy.golang.org",
+    "UpstreamOrigin": "https://proxy.golang.org"
+  }
+]

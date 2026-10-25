@@ -1,0 +1,5 @@
+[[routes]]
+match-host = "proxy.golang.org"
+upstream-origin = "https://proxy.golang.org"
+auth-scheme = "bearer"
+credential = { env = "GO_TOKEN" }

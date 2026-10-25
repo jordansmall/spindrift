@@ -1,0 +1,11 @@
+{
+  "derived": null,
+  "enforced": [
+    {
+      "enforcedPaths": [],
+      "enforcedSubtrees": [],
+      "matchHost": "proxy.golang.org",
+      "upstream": "https://proxy.golang.org"
+    }
+  ]
+}
