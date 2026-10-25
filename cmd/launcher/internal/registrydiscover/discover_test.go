@@ -2,6 +2,7 @@ package registrydiscover
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
+	"spindrift.dev/launcher/internal/registryroutes"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -45,7 +47,7 @@ func TestDiscover_SingleRegistryMatchedRoute(t *testing.T) {
 		CredentialSource: "netrc",
 		CredentialValue:  "/home/agent/.netrc",
 	}
-	if routes[0] != want {
+	if !reflect.DeepEqual(routes[0], want) {
 		t.Errorf("routes[0] = %+v, want %+v", routes[0], want)
 	}
 	wantMatched := []MatchedHost{{Host: "registry.example.com", StoreName: "netrc", StorePath: "/home/agent/.netrc"}}
@@ -696,26 +698,139 @@ func TestDiscover_ProbeProfileLandsOnRoute(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	probe := func(string) ProbeResult { return ProbeResult{Scheme: "basic", Profile: "artifactory"} }
+	advice := ProfileAdvice{Name: "artifactory", Note: "JFrog Artifactory", BasicUsername: "user"}
+	probe := func(string) ProbeResult {
+		return ProbeResult{Scheme: "basic", Profile: advice, SchemeFromProfile: true}
+	}
 	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probe)
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
-	if routes[0].AuthScheme != "basic" || routes[0].Profile != "artifactory" {
-		t.Errorf("route = %+v, want AuthScheme basic, Profile artifactory", routes[0])
+	if routes[0].AuthScheme != "basic" || !reflect.DeepEqual(routes[0].Profile, advice) || !routes[0].SchemeFromProfile {
+		t.Errorf("route = %+v, want AuthScheme basic, the profile advice, SchemeFromProfile", routes[0])
 	}
 }
 
-func TestDiscover_RejectedProfileSchemeDropsProfileAttribution(t *testing.T) {
+func TestDiscover_RejectedProfileSchemeIsNotAttributedToProfile(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	probe := func(string) ProbeResult { return ProbeResult{Scheme: "header:", Profile: "x"} }
+	probe := func(string) ProbeResult {
+		return ProbeResult{Scheme: "header:", Profile: ProfileAdvice{Name: "x"}, SchemeFromProfile: true}
+	}
 	routes, _ := discoverSynthetic(t, dir, nil, noMatch, probe)
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
 	}
-	if routes[0].AuthScheme != "bearer" || routes[0].Profile != "" {
-		t.Errorf("route = %+v, want fallback AuthScheme bearer and empty Profile", routes[0])
+	if routes[0].AuthScheme != "bearer" || routes[0].SchemeFromProfile {
+		t.Errorf("route = %+v, want fallback AuthScheme bearer and no SchemeFromProfile", routes[0])
+	}
+}
+
+func siblingsProbe(siblings map[string][]string) Probe {
+	return func(string) ProbeResult {
+		return ProbeResult{Scheme: "bearer", Profile: ProfileAdvice{Name: "p", Siblings: siblings}}
+	}
+}
+
+func TestDiscover_AllowMergesSiblingsOfServedEcosystemsOnly(t *testing.T) {
+	dir := t.TempDir()
+	twin := synthetic.Twin("synthetic-twin")
+	other := synthetic.Twin("synthetic-other")
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://host.example.com/repo/index/\n")
+	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://host.example.com/other/index/\n")
+	// The probe sees one host once, yet each declaration's siblings count.
+	rows := []ecosystem.Strategy{syntheticRows[0], twin, other}
+	probe := siblingsProbe(map[string][]string{
+		"synthetic":       {"../v1/crates", "../v1/crates"},
+		"synthetic-twin":  {"../v1/crates", "extra"},
+		"synthetic-other": {"../unserved"},
+	})
+
+	routes, _, err := Discover(dir, rows, nil, noMatch, probe)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1", routes)
+	}
+	want := []string{"/repo/v1/crates", "/other/v1/crates", "/other/index/extra"}
+	if !slices.Equal(routes[0].Allow, want) {
+		t.Errorf("Allow = %v, want %v", routes[0].Allow, want)
+	}
+}
+
+// A root-rooted declaration has no subtree to stay inside: path.Join clamps
+// "..", so "../v1/crates" would become "/v1/crates", outside anything declared.
+func TestDiscover_AllowSkipsRootRootedDeclaration(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://host.example.com/\n")
+
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, siblingsProbe(map[string][]string{"synthetic": {"..", "/", "x", "../v1/crates"}}))
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1", routes)
+	}
+	if len(routes[0].Allow) != 0 {
+		t.Errorf("Allow = %v, want none", routes[0].Allow)
+	}
+}
+
+func TestDiscover_AllowDropsBareRootJoin(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, "main = https://host.example.com/api/\n")
+
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, siblingsProbe(map[string][]string{"synthetic": {"..", "x"}}))
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1", routes)
+	}
+	if want := []string{"/api/x"}; !slices.Equal(routes[0].Allow, want) {
+		t.Errorf("Allow = %v, want %v", routes[0].Allow, want)
+	}
+}
+
+func TestSiblingAllow_SkipsUnparseableUpstreamBaseURL(t *testing.T) {
+	decls := []ecosystem.Declaration{{Ecosystem: "synthetic", UpstreamBaseURL: "https://host.example.com/%zz/"}}
+	got := siblingAllow(decls, ProfileAdvice{Siblings: map[string][]string{"synthetic": {"x", "../v1/crates"}}})
+	if len(got) != 0 {
+		t.Errorf("siblingAllow = %v, want none", got)
+	}
+}
+
+// A declared path whose percent-escapes decode to "?", "#", or a dot segment
+// would give a join the routes file rejects or one that leaves the declared
+// subtree, so such a declaration contributes no sibling allow entry.
+func TestDiscover_AllowSkipsNonCanonicalDeclaredSubtree(t *testing.T) {
+	for _, tc := range []struct{ name, url string }{
+		{"encoded question mark", "https://host.example.com/api/a%3Fb/index/"},
+		{"encoded hash", "https://host.example.com/api/a%23b/index/"},
+		{"encoded dot-dot segment", "https://host.example.com/a%2F..%2F/"},
+		{"encoded dot segment", "https://host.example.com/a%2F.%2Fb/"},
+		{"encoded empty segment", "https://host.example.com/a%2F%2Fb/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			testutil.WriteFixture(t, dir, cfgPath, "main = "+tc.url+"\n")
+
+			routes, _ := discoverSynthetic(t, dir, nil, noMatch, siblingsProbe(map[string][]string{"synthetic": {"x", "../v1/crates"}}))
+			if len(routes) != 1 {
+				t.Fatalf("routes = %+v, want exactly 1", routes)
+			}
+			if len(routes[0].Allow) != 0 {
+				t.Errorf("Allow = %v, want none", routes[0].Allow)
+			}
+			if _, err := registryroutes.Parse(Render(routes), nil); err != nil {
+				t.Errorf("rendered routes file does not parse: %v", err)
+			}
+		})
+	}
+}
+
+func TestDiscover_NoSiblingsLeavesAllowEmpty(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
+
+	routes, _ := discoverSynthetic(t, dir, nil, noMatch, siblingsProbe(nil))
+	if len(routes) != 1 || routes[0].Allow != nil {
+		t.Errorf("routes = %+v, want one route with nil Allow", routes)
 	}
 }

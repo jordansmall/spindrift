@@ -35,7 +35,7 @@ type Row struct {
 	Note             string
 }
 
-const publicNote = "known host, unauthenticated, nothing to configure"
+const publicNote = "known public host, needs no credential, nothing to configure"
 
 // table is ordered; Match returns the first row any signal matches. It stays
 // unexported so no importer can reorder or edit it under Match.
@@ -45,12 +45,14 @@ var table = []Row{
 		Hosts:        []string{"*.jfrog.io"},
 		PathPrefixes: []string{"/artifactory/api/"},
 		ProbeHeaders: []string{"X-Artifactory-Id"},
-		// AuthScheme and Siblings stay provisional until the discovery corpus
-		// cases establish them (ADR 0071 decision 3).
-		AuthScheme:       "bearer",
+		AuthScheme:   "bearer",
+		// Cargo's config.json dl is <repo>/v1/crates, a sibling of the declared
+		// <repo>/index path. The other ecosystems' downloads sit under the
+		// declared path.
+		Siblings:         map[string][]string{"cargo": {"../v1/crates"}},
 		BasicUsername:    "the Artifactory username (or email) that owns the token",
 		CredentialHelper: "an access token from the JFrog Platform UI or `jf rt access-token-create`",
-		Note:             "auth scheme and sibling paths are provisional, not yet established by discovery cases",
+		Note:             "JFrog Artifactory; a challenge the probe receives wins over the bearer default, and basic pairs the username below with the token as password",
 	},
 	{Name: "crates.io", Hosts: []string{"crates.io", "*.crates.io"}, Note: publicNote},
 	{Name: "registry.npmjs.org", Hosts: []string{"registry.npmjs.org"}, Note: publicNote},

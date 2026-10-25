@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net/http"
+	"net/url"
+	"path"
 	"slices"
 	"strings"
 
@@ -32,10 +34,21 @@ type ProbeResult struct {
 	// Header is the response's headers, for host-profile matching; nil when
 	// unreachable.
 	Header http.Header
-	// Profile names the Host profile that supplied Scheme because the probe
-	// received none; empty when the registry announced a scheme itself or no
-	// profile with a scheme matched.
-	Profile string
+	// Profile is the matched Host profile's advice; its zero Name means none
+	// matched.
+	Profile ProfileAdvice
+	// SchemeFromProfile reports that Profile supplied Scheme because the probe
+	// received none.
+	SchemeFromProfile bool
+}
+
+// ProfileAdvice is a matched Host profile's advice, copied in by profileprobe
+// so this package never imports hostprofile (ADR 0071).
+type ProfileAdvice struct {
+	Name, Note, BasicUsername, CredentialHelper string
+	// Siblings maps an ecosystem name to path patterns relative to the registry
+	// path a Target repo declares.
+	Siblings map[string][]string
 }
 
 // Probe answers what an upstream base URL's registry reveals. The real probe
@@ -45,7 +58,8 @@ type Probe func(upstreamBaseURL string) ProbeResult
 
 // Route is one proposed route, shaped to write directly into a registry routes
 // file (registryroutes.Route) minus the optional keys this engine has no basis
-// to guess (allow, the per-ecosystem path declarations).
+// to guess (the per-ecosystem path declarations). Allow is set only from a Host
+// profile's sibling paths.
 type Route struct {
 	MatchHost string
 	// UpstreamBaseURL is not a routes file key: Render distills it down to an
@@ -54,8 +68,14 @@ type Route struct {
 	// credential-store match.
 	UpstreamBaseURL string
 	AuthScheme      string
-	// Profile is ProbeResult.Profile: the Host profile that supplied AuthScheme.
-	Profile          string
+	// Profile is ProbeResult.Profile.
+	Profile ProfileAdvice
+	// SchemeFromProfile is ProbeResult.SchemeFromProfile, kept only while
+	// AuthScheme is the profile's own value.
+	SchemeFromProfile bool
+	// Allow is the Host profile's sibling paths for the ecosystems this host
+	// serves, joined onto each declared registry path.
+	Allow            []string
 	CredentialSource string // "netrc"|"npmrc"|"cargo-credentials"|"gradle-properties"|"env" (env = placeholder for unmatched)
 	CredentialValue  string // store path, or placeholder env var name
 	RegistryName     string // companion registry-name, cargo-credentials only
@@ -100,6 +120,13 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 	var routes []Route
 	report := Report{NoRegistry: notes}
 	seen := make(map[string]bool, len(declared))
+	// The probe runs once per host, but its siblings apply to every ecosystem
+	// declaring that host.
+	byHost := make(map[string][]ecosystem.Declaration, len(declared))
+	for _, d := range declared {
+		host := registryvocab.HostKey(d.Host)
+		byHost[host] = append(byHost[host], d)
+	}
 	for _, d := range declared {
 		host := registryvocab.HostKey(d.Host)
 		if seen[host] {
@@ -115,9 +142,10 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 		}
 		res := probe(d.UpstreamBaseURL)
 		route.AuthScheme = normalizeAuthScheme(res.Scheme)
-		if route.AuthScheme == res.Scheme {
-			route.Profile = res.Profile
-		}
+		route.Profile = res.Profile
+		// A profile scheme normalizeAuthScheme replaced is not the profile's any more.
+		route.SchemeFromProfile = res.SchemeFromProfile && route.AuthScheme == res.Scheme
+		route.Allow = siblingAllow(byHost[host], res.Profile)
 		if found {
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
@@ -145,6 +173,33 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 	}
 
 	return routes, report, nil
+}
+
+// siblingAllow joins each profile sibling for a declaration's ecosystem onto
+// that declaration's registry path. A result of "/" is dropped: it would admit
+// the whole host, which routes files refuse. A declaration contributes nothing
+// when its URL does not parse, its subtree is "/" (path.Join clamps ".." at the
+// root, so a sibling would land outside any declared subtree), or its decoded
+// path is not canonical or carries "?" or "#" (the join would fail the routes
+// file's allow validation or escape the declared subtree).
+func siblingAllow(decls []ecosystem.Declaration, profile ProfileAdvice) []string {
+	var allow []string
+	for _, d := range decls {
+		u, err := url.Parse(d.UpstreamBaseURL)
+		if err != nil {
+			continue
+		}
+		subtree := "/" + strings.Trim(u.Path, "/")
+		if subtree == "/" || path.Clean(subtree) != subtree || strings.ContainsAny(subtree, "?#") {
+			continue
+		}
+		for _, sibling := range profile.Siblings[d.Ecosystem] {
+			if p := path.Join(subtree, sibling); p != "/" && !slices.Contains(allow, p) {
+				allow = append(allow, p)
+			}
+		}
+	}
+	return allow
 }
 
 // disambiguateEnvPlaceholders resolves envPlaceholder collisions among this

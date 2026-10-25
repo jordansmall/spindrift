@@ -9,18 +9,26 @@ import (
 	"spindrift.dev/launcher/internal/registrydiscover"
 )
 
-// Fill wraps probe so a response with no usable challenge takes its scheme
-// from the matching Host profile. A scheme the registry announced always wins
-// (ADR 0071 decision 2), and a public profile, which has no scheme, fills
-// nothing.
+// Fill wraps probe so the matching Host profile's advice reaches discovery. A
+// response with no usable challenge also takes its scheme from the profile. A
+// scheme the registry announced always wins (ADR 0071 decision 2), and a
+// public profile, which has no scheme, fills none.
 func Fill(probe registrydiscover.Probe) registrydiscover.Probe {
 	return func(upstreamBaseURL string) registrydiscover.ProbeResult {
 		res := probe(upstreamBaseURL)
-		if res.Scheme != "" {
+		row, ok := hostprofile.Match(upstreamBaseURL, res.Header)
+		if !ok {
 			return res
 		}
-		if row, ok := hostprofile.Match(upstreamBaseURL, res.Header); ok && row.AuthScheme != "" {
-			res.Scheme, res.Profile = row.AuthScheme, row.Name
+		res.Profile = registrydiscover.ProfileAdvice{
+			Name:             row.Name,
+			Note:             row.Note,
+			BasicUsername:    row.BasicUsername,
+			CredentialHelper: row.CredentialHelper,
+			Siblings:         row.Siblings,
+		}
+		if res.Scheme == "" && row.AuthScheme != "" {
+			res.Scheme, res.SchemeFromProfile = row.AuthScheme, true
 		}
 		return res
 	}

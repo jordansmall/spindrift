@@ -22,6 +22,7 @@ func Render(routes []Route) []byte {
 
 	for _, r := range routes {
 		b.WriteString("\n[[routes]]\n")
+		writeProfileComments(&b, r.Profile)
 		fmt.Fprintf(&b, "match-host = %s\n", quoteTOMLString(r.MatchHost))
 		// registryroutes owns the rule for whether a route needs an
 		// upstream-origin. The migration remedies quote the same rule, so a
@@ -32,10 +33,18 @@ func Render(routes []Route) []byte {
 		// Discovery probed (or profile-filled) this value, so always write it
 		// out rather than leaning on registryroutes.Parse's "bearer" default,
 		// which is a fallback for hand-written files.
-		if r.Profile != "" {
-			fmt.Fprintf(&b, "# auth-scheme from host profile %s: the probe saw no usable challenge\n", quoteTOMLString(r.Profile))
+		if r.SchemeFromProfile {
+			fmt.Fprintf(&b, "# auth-scheme from host profile %s: the probe saw no usable challenge\n", quoteTOMLString(r.Profile.Name))
 		}
 		fmt.Fprintf(&b, "auth-scheme = %s\n", quoteTOMLString(r.AuthScheme))
+		if len(r.Allow) > 0 {
+			fmt.Fprintf(&b, "# allow from host profile %s: sibling paths outside the declared registry path\n", quoteTOMLString(r.Profile.Name))
+			quoted := make([]string, len(r.Allow))
+			for i, p := range r.Allow {
+				quoted[i] = quoteTOMLString(p)
+			}
+			fmt.Fprintf(&b, "allow = [%s]\n", strings.Join(quoted, ", "))
+		}
 
 		b.WriteString("credential = { ")
 		fmt.Fprintf(&b, "%s = %s", r.CredentialSource, quoteTOMLString(r.CredentialValue))
@@ -49,6 +58,22 @@ func Render(routes []Route) []byte {
 	}
 
 	return []byte(b.String())
+}
+
+// writeProfileComments writes the matched Host profile's display text as
+// comments. Newlines are flattened so profile text can never break the file.
+func writeProfileComments(b *strings.Builder, p ProfileAdvice) {
+	if p.Name == "" {
+		return
+	}
+	line := strings.NewReplacer("\r", " ", "\n", " ")
+	fmt.Fprintf(b, "# host profile %s: %s\n", quoteTOMLString(p.Name), line.Replace(p.Note))
+	if p.BasicUsername != "" {
+		fmt.Fprintf(b, "# basic username: %s\n", line.Replace(p.BasicUsername))
+	}
+	if p.CredentialHelper != "" {
+		fmt.Fprintf(b, "# credential helper: %s\n", line.Replace(p.CredentialHelper))
+	}
 }
 
 // anyEnvPlaceholder reports whether any route carries the "env" placeholder
