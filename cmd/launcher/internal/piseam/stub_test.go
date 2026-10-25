@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // reply is one scripted answer to one POST /v1/chat/completions.
@@ -17,6 +18,9 @@ type reply struct {
 	status int // 0 means 200 with an SSE stream of chunks
 	body   string
 	chunks []map[string]any
+	// delay is how long the stub waits before sending its first byte; a client
+	// that gives up sooner cuts the wait short.
+	delay time.Duration
 }
 
 func textReply(text string) reply {
@@ -134,6 +138,13 @@ func (s *stub) serve(t *testing.T, w http.ResponseWriter, r *http.Request) {
 		t.Errorf("stub: request %d arrived with the script exhausted", n)
 		http.Error(w, "script exhausted", http.StatusInternalServerError)
 		return
+	}
+	if rep.delay > 0 {
+		select {
+		case <-time.After(rep.delay):
+		case <-r.Context().Done():
+			return
+		}
 	}
 	if rep.status != 0 {
 		w.Header().Set("Content-Type", "application/json")

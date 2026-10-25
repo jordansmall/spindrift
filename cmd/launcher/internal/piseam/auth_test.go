@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/homelayout"
 )
@@ -221,4 +222,59 @@ func TestPiModelsContentReachesPi(t *testing.T) {
 		t.Errorf("Authorization = %q, want %q", got, "Bearer "+key)
 	}
 	assertPrivateFile(t, filepath.Join(dirs.agentDir, "models.json"), content)
+}
+
+// The path the Box takes for PI_SETTINGS_CONTENT: the Driver's envFiles write
+// it into $HOME/.pi/agent/settings.json, which pi reads with
+// PI_CODING_AGENT_DIR unset. The stub waits before its first byte, so the
+// request survives only when the written httpIdleTimeoutMs outlasts the wait.
+func TestPiSettingsContentReachesPi(t *testing.T) {
+	const (
+		answer = "reply after the wait"
+		wait   = 3 * time.Second
+	)
+	// Retries are off so a timed-out request fails in one attempt, not four.
+	settings := func(idleMs int) string {
+		b, err := json.Marshal(map[string]any{
+			"httpIdleTimeoutMs": idleMs,
+			"retry":             map[string]any{"maxRetries": 0},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	runWith := func(t *testing.T, content string) run {
+		s := newStub(t, reply{chunks: textReply(answer).chunks, delay: wait})
+		dirs := newPiDirs(t)
+		dirs.agentDir = filepath.Join(dirs.home, ".pi", "agent")
+		writePiEnvFiles(t, dirs.home, map[string]string{"PI_SETTINGS_CONTENT": content})
+		r := runPiWith(t, s, piOpts{noSettings: true, defaultAgentDir: true, dirs: &dirs}, "hi")
+		if r.err != nil {
+			t.Fatalf("pi exit = %v, stderr = %q", r.err, r.stderr)
+		}
+		if n := len(s.Requests()); n != 1 {
+			t.Errorf("stub got %d requests, want 1", n)
+		}
+		assertPrivateFile(t, filepath.Join(dirs.agentDir, "settings.json"), content)
+		return r
+	}
+
+	t.Run("a timeout shorter than the wait fails the request", func(t *testing.T) {
+		r := runWith(t, settings(500))
+		msg := lastAssistantMessage(r.events)
+		if msg["stopReason"] != "error" {
+			t.Errorf("stopReason = %v, want error\nstdout:\n%s", msg["stopReason"], r.stdout)
+		}
+		if got, _ := msg["errorMessage"].(string); !strings.Contains(got, "timed out") {
+			t.Errorf("errorMessage = %q, want a timeout", got)
+		}
+	})
+
+	t.Run("a timeout longer than the wait succeeds", func(t *testing.T) {
+		r := runWith(t, settings(30000))
+		if got := finalAssistantText(r.events); got != answer {
+			t.Errorf("final assistant text = %q, want %q\nstdout:\n%s", got, answer, r.stdout)
+		}
+	})
 }
