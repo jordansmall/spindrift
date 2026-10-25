@@ -108,6 +108,8 @@ type piOpts struct {
 	noAPIKey bool
 	// noModels skips the harness's models.json, for a test that supplies its own.
 	noModels bool
+	// noSettings skips the harness's settings.json, for a test that supplies its own.
+	noSettings bool
 	// approve trusts project-local files (--approve) instead of ignoring them.
 	approve bool
 	// defaultAgentDir leaves PI_CODING_AGENT_DIR unset, so pi uses
@@ -164,9 +166,11 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 		seed(work)
 	}
 	// Retries are wall-clock; the default 2s base delay would stall retry tests.
-	writeJSON(t, filepath.Join(agentDir, "settings.json"), map[string]any{
-		"retry": map[string]any{"maxRetries": 3, "baseDelayMs": 10},
-	})
+	if !opts.noSettings {
+		writeJSON(t, filepath.Join(agentDir, "settings.json"), map[string]any{
+			"retry": map[string]any{"maxRetries": 3, "baseDelayMs": 10},
+		})
+	}
 
 	if opts.hooks != "" {
 		installBridge(t, agentDir, opts.hooks)
