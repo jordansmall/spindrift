@@ -78,7 +78,7 @@ func (d Delta) Summary() string {
 	return fmt.Sprintf("post-approval land delta: %d files changed, %d insertions(+), %d deletions(-)", d.Files, d.Insertions, d.Deletions)
 }
 
-// anchorRe mirrors the orchestrator's validReviewedCommitAnchor pattern (issue
+// anchorRe mirrors seedblock.ValidReviewedCommitAnchor's pattern (issue
 // #2551). It checks format only; a valid-shaped but unreachable SHA is caught
 // by the rev-parse --verify in Compute, which also fails open.
 var anchorRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
