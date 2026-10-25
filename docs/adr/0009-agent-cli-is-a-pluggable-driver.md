@@ -580,3 +580,26 @@ and report model carries the bare id only. Pass logs ingested before this
 change are re-read once (store migration 14) to pick up bare ids and efforts;
 a Record whose log was already pruned keeps its suffixed ids, so `stats by
 model` can still mix suffixed and bare ids for that history.
+
+## Amendment (issue #6048): pi's Tier 5 Providers come from `PI_MODELS_CONTENT`
+
+The #269 amendment found that a local/self-hosted Provider needs no
+secret-injection axis, only a way to declare the Provider to the Driver CLI.
+For opencode that was a generated `opencode.json`. pi reads its custom
+Providers from `models.json` in its agent directory, so `PI_MODELS_CONTENT`
+carries the contents of that file and the pi row's `envFiles` writes it to
+`.pi/agent/models.json` before the first pass, the same primitive as
+`PI_AUTH_CONTENT` (#5484). Unset, nothing is written.
+
+The tier is still not a credential. There is no credential rule for the knob,
+so preflight requires no key for a Provider whose name no credential rule
+matches, and a `$VAR` `apiKey` in it resolves only against variables the Box
+already has. What changed is
+that the file may still hold a literal `apiKey`, so the knob is treated as
+credential-bearing: it is a secret knob (`_CMD` and `_FILE` sources, never
+argv, never baked) and it is on the Bash scrub list. To get there without a
+credential rule, the scrub list and the runner's off-argv set now derive from
+every `envFiles` env as well as every credential-rule env (ADR 0066, item 7).
+Every `envFiles` env that existed was already a credential env, so
+`PI_MODELS_CONTENT` is the only name this adds. Reachability of the endpoint
+is still the runner-netns question the #269 amendment named.

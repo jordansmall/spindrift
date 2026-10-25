@@ -1436,8 +1436,10 @@ Driver entry declares:
   before the first pass, and skips an unset one; preflight owns requiring
   it. `assertShape` requires `env` to be a variable name and `pathRelative`
   a `$HOME`-relative path with no `..` segment or whitespace. pi uses it to
-  write `PI_AUTH_CONTENT` to `.pi/agent/auth.json`. Unlike `configFiles`,
-  the value arrives at run time, so it can carry a secret.
+  write `PI_AUTH_CONTENT` to `.pi/agent/auth.json` and `PI_MODELS_CONTENT`
+  to `.pi/agent/models.json`. Unlike `configFiles`, the value arrives at run
+  time, so it can carry a secret; every `envFiles` env joins the Bash scrub
+  list and the off-argv set whether or not a credential rule names it.
 - `authContent` — `{ env; oauthProviders; apiKeyProviders?; }`, naming an
   env var that holds a Provider-keyed auth store and the Providers allowed
   an OAuth entry in it. Optional. It renders into the Driver Descriptor,
@@ -1888,13 +1890,14 @@ and the guard plugin described after this list (issue #5346):
   `hookSpecificOutput.updatedInput` — a documented PreToolUse capability,
   independent of `permissionDecision` in Claude Code's own hook-output
   schema, that lets a hook replace a tool call's input before it runs — to
-  `unset` every variable in the shared credential list (every Driver
-  credential rule's variables, `agent/credential-vars`; see below) ahead of the
-  Driver's original command, and asserts no `permissionDecision` of its own on that
-  path (the same silent, no-explicit-opinion posture `reject-background-bash.sh`
-  and `credential-deny.sh` use for a call they don't deny — three hooks
-  share the `Bash` matcher, and an explicit `allow` here could read as this
-  hook's opinion overriding a sibling's `deny` on the same call). The
+  `unset` every variable in the shared credential list (the variables of
+  every credential rule and `envFiles` row, `agent/credential-vars`; see
+  below) ahead of the Driver's original command, and asserts no
+  `permissionDecision` of its own on that path (the same silent,
+  no-explicit-opinion posture `reject-background-bash.sh` and
+  `credential-deny.sh` use for a call they don't deny — three hooks share the
+  `Bash` matcher, and an explicit `allow` here could read as this hook's
+  opinion overriding a sibling's `deny` on the same call). The
   rewrite is an actual removal from the subprocess's environment, not a
   denylist of dump commands: `env`/`printenv`/`set`/`export -p`/a direct
   `$VAR` expansion all come up empty as a structural consequence, with no
@@ -2012,9 +2015,10 @@ environment.
 
 The variables the Bash tool must never inherit live in one baked file,
 `/home/agent/.claude/hooks/credential-vars`: every env var a Driver's
-credential rules name, which `nix run .#regen` renders from the rows in
-`lib/drivers/*.nix` (the launcher's shared `OffArgvKeys` takes its Driver half
-from the same render), so a new Driver's keys cannot miss either list. It is
+credential rules or `envFiles` name, which `nix run .#regen` renders from the
+rows in `lib/drivers/*.nix` (the launcher's shared `OffArgvKeys` takes its
+Driver half from the same render), so a new Driver's keys cannot miss either
+list. It is
 parsed by the sibling `credential-vars-parse`, which both
 `env-credential-scrub.sh` and `bash-output-tee.sh` source so the two `unset`
 lists cannot drift. The `CREDENTIAL_VARS_FILE` environment variable overrides
@@ -2326,7 +2330,11 @@ it drifts from them:
   `SCOUT_MODEL`, `FILER_MODEL`) uses that Provider. Like opencode, the
   lookup still runs for each key that has no value (a tier baked into the
   image may select it), a miss for a Provider no tier visibly uses is
-  ignored, and a hit is passed into the Box anyway.
+  ignored, and a hit is passed into the Box anyway. `PI_MODELS_CONTENT`
+  (custom Providers; see [pi Driver: self-hosted
+  Providers](#pi-driver-self-hosted-providers)) is not a credential rule:
+  it is never required, and a Provider it declares under a name no
+  credential rule matches needs no key.
 - `opencode`: `OPENCODE_AUTH_CONTENT`. A miss is an error only when `MODEL`
   or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
   `FILER_MODEL`) is `github-copilot/<model>`. When no tier visibly needs it
@@ -2518,6 +2526,43 @@ instead`. `api_key` entries in `PI_AUTH_CONTENT` are accepted for any
 Provider. Host-side refresh for rotating Providers is a later decision (ADR
 0009's pi amendment).
 
+### pi Driver: self-hosted Providers
+
+pi can talk to a self-hosted OpenAI-compatible server (llama.cpp, Ollama, LM
+Studio, vLLM) once it knows the Provider. `PI_MODELS_CONTENT` carries the
+contents of a pi `models.json`, and the Box writes it to
+`/home/agent/.pi/agent/models.json` (mode `0600`) before the Driver runs, the
+same `envFiles` path `PI_AUTH_CONTENT` takes. Set it to JSON, never a path:
+
+```sh
+PI_MODELS_CONTENT='{"providers":{"llm":{"api":"openai-completions","apiKey":"dummy","baseUrl":"http://llm.internal:8080/v1","models":[{"id":"my-model","contextWindow":131072,"input":["text"],"reasoning":true}]}}}'
+```
+
+Then name the Provider in a model tier as `<provider>/<model>`, e.g.
+`MODEL=llm/my-model`. The JSON is operator-controlled host-side
+content and is never read from the Target repo. Editing it takes effect on
+the next dispatch with no image rebuild. Unset, nothing is written and
+preflight is unchanged.
+
+A Provider declared here under a name no credential rule matches needs no key
+at preflight; one that reuses a known Provider name (`openai`, `openrouter`,
+...) still needs that Provider's key. If its `apiKey` is a `$VAR` reference,
+pi resolves it only against variables already forwarded into the Box, so the
+variable must be one spindrift forwards (for example a pi Provider key). The endpoint must also be
+reachable from the Box's network; under the bwrap default and restricted
+`NETWORK_MODE` settings a host-loopback or LAN server is not, see [Reaching a
+local/self-hosted model server under egress
+restriction](#reaching-a-localself-hosted-model-server-under-egress-restriction).
+
+`PI_MODELS_CONTENT` is a secret knob because a literal `apiKey` in it is a
+credential: set it in `harness.env`, source it with
+`PI_MODELS_CONTENT_CMD`/`--pi-models-content-cmd` (preferred), or pass
+`--pi-models-content-file`. It never reaches argv, and it is in the Bash scrub
+list (`agent/credential-vars`). The written file is on the credential-deny
+list (`lib/credential-paths.nix`), so the agent's own `read` and `bash` calls
+cannot open it. It has no flake option, since secrets are never baked into
+the image.
+
 ### Advanced tuning
 
 These knobs are rarely changed. All except `SPINDRIFT_SKILLS_DIR` and
@@ -2645,10 +2690,12 @@ between them, pick one.
 
 #### Reaching a local/self-hosted model server under egress restriction
 
-A local/self-hosted opencode Provider — Ollama, LM Studio, or a llama.cpp
-server (Tier 5; [ADR 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)'s
-issue-#269 amendment) — is an OpenAI-compatible endpoint on the host loopback
-or LAN (`http://localhost:11434/v1`, `http://127.0.0.1:1234/v1`,
+A local/self-hosted opencode Provider (a pi one is declared through
+[`PI_MODELS_CONTENT`](#pi-driver-self-hosted-providers) and meets the same
+netns rules) — Ollama, LM Studio, or a llama.cpp server (Tier 5; [ADR
+0009](adr/0009-agent-cli-is-a-pluggable-driver.md)'s issue-#269 amendment) —
+is an OpenAI-compatible endpoint on the host loopback or LAN
+(`http://localhost:11434/v1`, `http://127.0.0.1:1234/v1`,
 `http://127.0.0.1:8080/v1`). Whether the Box can reach it turns on
 [`NETWORK_MODE`](#network-mode-network_mode) (or, on a Consumer that still
 sets a raw knob instead, `PODMAN_NETWORK`/`BWRAP_UNSHARE_NET`), and the two
@@ -5755,9 +5802,9 @@ boundary does and does not promise.
 2. **The Box can't read its own credentials (per Driver).** Under the claude Driver, a
    `PreToolUse` hook (`env-credential-scrub.sh`, issue #1927) rewrites every
    Bash call to `unset` every variable in the shared credential list
-   (every Driver credential rule's variables, `agent/credential-vars`)
-   before it runs, so a spawned subprocess never inherits a credential, and
-   a second `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash`
+   (the variables of every credential rule and `envFiles` row,
+   `agent/credential-vars`) before it runs, so a spawned subprocess never
+   inherits a credential, and a second `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash`
    call targeting a known credential path. Both are always-on Harness
    defaults, no operator configuration. The opencode Driver never runs
    Claude's hook registration; a baked plugin (issue #5346) runs the path

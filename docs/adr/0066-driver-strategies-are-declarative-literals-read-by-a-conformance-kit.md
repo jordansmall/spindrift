@@ -193,3 +193,12 @@ matches the first" in item 6 no longer holds. The fact was only ever
 opencode's: that check moved into opencode's check file as
 `drivers-opencode-skills-dir-matches-claude`, and `pi`'s file pins its own
 directory.
+
+## Amendment (issue #6048): the scrub list also covers `envFiles`
+
+Item 7 says the Box's scrub list and the runner's off-argv map render from the
+credential rows. They now render from the union of every credential rule's env
+and every `envFiles` env. A file-backed env can carry a literal secret without
+a credential rule naming it, as pi's `PI_MODELS_CONTENT` can through an
+`apiKey` in `models.json`. The render stays sorted and deduplicated, and the
+credential-rule envs it already held are unchanged.
