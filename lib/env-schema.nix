@@ -547,6 +547,13 @@ withRowKnobs {
     doc = "pi Provider config (JSON) — the contents of a pi models.json, which the Box writes to ~/.pi/agent/models.json before the pi Driver runs. Declares custom Providers such as a self-hosted OpenAI-compatible server (llama.cpp, Ollama, LM Studio, vLLM). A Provider it declares under a name no credential rule matches needs no key at preflight; an apiKey that references $VAR resolves only against variables already forwarded into the Box. Ignored under the claude and opencode Drivers. Never placed on argv";
     boxEnv = true;
   };
+  piSettingsContent = {
+    env = "PI_SETTINGS_CONTENT";
+    secret = true;
+    hostConfig = true;
+    doc = "pi settings (JSON) — the contents of a pi settings.json, which the Box writes to ~/.pi/agent/settings.json before the pi Driver runs, e.g. a larger httpIdleTimeoutMs (milliseconds) to lengthen pi's HTTP idle timeout for a slow self-hosted Provider. pi validates the file when it loads settings, so an invalid value (a non-numeric httpIdleTimeoutMs) makes pi throw at startup. Unset writes no file. Ignored under the claude and opencode Drivers. Never placed on argv";
+    boxEnv = true;
+  };
   anthropicAPIKey = {
     env = "ANTHROPIC_API_KEY";
     secret = true;

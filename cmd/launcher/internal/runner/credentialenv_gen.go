@@ -5,4 +5,4 @@ package runner
 // row names, the Driver-derived half of the off-argv set: the bwrap runner
 // passes these keys through the environment, never on argv.
 // Regenerate with `nix run .#regen` after editing lib/drivers/*.nix.
-var driverCredentialEnv = []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENAI_API_KEY", "OPENCODE_AUTH_CONTENT", "OPENROUTER_API_KEY", "PI_AUTH_CONTENT", "PI_MODELS_CONTENT", "XAI_API_KEY"}
+var driverCredentialEnv = []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENAI_API_KEY", "OPENCODE_AUTH_CONTENT", "OPENROUTER_API_KEY", "PI_AUTH_CONTENT", "PI_MODELS_CONTENT", "PI_SETTINGS_CONTENT", "XAI_API_KEY"}
