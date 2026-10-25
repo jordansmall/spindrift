@@ -6,6 +6,7 @@
   ".claude/.credentials.json"
   ".config/gh/hosts.yml"
   ".pi/agent/auth.json"
+  ".pi/agent/models.json"
   ".local/share/opencode/auth.json"
   ".env"
   ".env.*"

@@ -50,9 +50,10 @@ let
   ];
   # A model-/effort-/bash-timeout-shaped env row is Driver-valued unless named
   # in the exemption list, which is for rows that match the shape but are
-  # genuinely shared across Drivers.
+  # genuinely shared across Drivers, or match it only by name (piModelsContent
+  # carries pi's models.json file, not a model id).
   driverValuedShape = ".*([Mm]odel|[Ee]ffort|BashTimeout).*";
-  driverValuedExempt = [ ];
+  driverValuedExempt = [ "piModelsContent" ];
   unmarkedShaped = filter (
     n:
     builtins.match driverValuedShape n != null

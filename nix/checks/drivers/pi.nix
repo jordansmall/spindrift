@@ -238,7 +238,7 @@ in
     pkgs.runCommand "drivers-pi-session-cache-dir" { } "touch $out";
 
   # pi has no env-native auth store: PI_AUTH_CONTENT is written to auth.json
-  # (see lib/drivers/pi.nix).
+  # and PI_MODELS_CONTENT to models.json (see lib/drivers/pi.nix).
   drivers-pi-env-files =
     assert assertMsg
       (
@@ -247,12 +247,17 @@ in
             env = "PI_AUTH_CONTENT";
             pathRelative = ".pi/agent/auth.json";
           }
+          {
+            env = "PI_MODELS_CONTENT";
+            pathRelative = ".pi/agent/models.json";
+          }
         ]
       )
-      "pi Driver must declare PI_AUTH_CONTENT -> .pi/agent/auth.json in envFiles, got: ${
+      "pi Driver must declare PI_AUTH_CONTENT -> .pi/agent/auth.json and PI_MODELS_CONTENT -> .pi/agent/models.json in envFiles, got: ${
         builtins.toJSON (entry.envFiles or [ ])
       }";
-    assert assertMsg (hasInfix "DRIVER_ENV_FILES='PI_AUTH_CONTENT=.pi/agent/auth.json'\n" preamble)
+    assert assertMsg
+      (hasInfix "DRIVER_ENV_FILES='PI_AUTH_CONTENT=.pi/agent/auth.json PI_MODELS_CONTENT=.pi/agent/models.json'\n" preamble)
       "renderPreamble must bake pi's DRIVER_ENV_FILES, got: ${preamble}";
     pkgs.runCommand "drivers-pi-env-files" { } "touch $out";
 

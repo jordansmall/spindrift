@@ -125,6 +125,26 @@ setup() {
   done
 }
 
+@test "denies a Read of pi's ~/.pi/agent/models.json" {
+  run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Read","tool_input":{"file_path":"/home/agent/.pi/agent/models.json"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a Bash call catting pi's ~/.pi/agent/models.json" {
+  run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"cat ~/.pi/agent/models.json"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows pi models.json lookalikes with a longer name on either side" {
+  for cmd in 'cat ~/.pi/agent/models.json.bak' 'cat ~/my.pi/agent/models.json' 'cat ~/.pi/agent/models.jsonl'; do
+    run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<"$(jq -nc --arg c "$cmd" '{tool_name:"Bash",tool_input:{command:$c}}')"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+  done
+}
+
 @test "denies a Read of opencode's ~/.local/share/opencode/auth.json" {
   run bash "$CREDENTIAL_DENY_HOOK_SCRIPT" <<<'{"tool_name":"Read","tool_input":{"file_path":"/home/agent/.local/share/opencode/auth.json"}}'
   [ "$status" -eq 0 ]

@@ -1546,7 +1546,8 @@ rec {
       + "# plugin and pi through its hook bridge, each running the same scrub hook.\n"
       + "# One name per line; `#` lines and blank lines are ignored.\n"
       + "#\n"
-      + "# Generated from the credential rules in lib/drivers/*.nix by nix/regen.nix.\n"
+      + "# Generated from the credential rules and envFiles rows in lib/drivers/*.nix by\n"
+      + "# nix/regen.nix.\n"
       + "# DO NOT EDIT; regenerate with `nix run .#regen`.\n"
       + concatStrings (map (name: "${name}\n") names);
 
@@ -1560,9 +1561,9 @@ rec {
       package = "runner";
       varName = "driverCredentialEnv";
       docLines = [
-        "driverCredentialEnv is every env var a Driver credential rule names, the"
-        "Driver-derived half of the off-argv set: the bwrap runner passes these"
-        "keys through the environment, never on argv."
+        "driverCredentialEnv is every env var a Driver credential rule or envFiles"
+        "row names, the Driver-derived half of the off-argv set: the bwrap runner"
+        "passes these keys through the environment, never on argv."
       ];
       items = names;
     };

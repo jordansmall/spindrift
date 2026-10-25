@@ -176,11 +176,17 @@ in
 
   # pi reads its OAuth credentials only from auth.json under its agent dir.
   # The sessions mount above takes .pi/agent/sessions, so it does not shadow
-  # this file.
+  # this file. models.json declares custom Providers (a self-hosted
+  # OpenAI-compatible server) and carries no credential rule: unset, no file is
+  # written and preflight is unchanged (issue #6048).
   envFiles = [
     {
       env = "PI_AUTH_CONTENT";
       pathRelative = ".pi/agent/auth.json";
+    }
+    {
+      env = "PI_MODELS_CONTENT";
+      pathRelative = ".pi/agent/models.json";
     }
   ];
 
