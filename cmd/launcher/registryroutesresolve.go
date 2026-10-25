@@ -119,7 +119,7 @@ func resolveRegistryRoutesFromFile(routesFile string, rows []ecosystem.Strategy)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", routesFile, err)
 	}
-	parsed, err := registryroutes.ParseRows(data, rows)
+	parsed, err := registryroutes.Parse(data, rows)
 	if err != nil {
 		return nil, err
 	}

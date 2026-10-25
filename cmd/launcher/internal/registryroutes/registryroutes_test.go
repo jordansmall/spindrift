@@ -20,7 +20,7 @@ import (
 // pinned here without naming a real ecosystem, whose own declarations are
 // pinned by the ecosystem corpora.
 func parse(data []byte) ([]registryroutes.Route, error) {
-	return registryroutes.ParseRows(data, []ecosystem.Strategy{synthetic.Strategy})
+	return registryroutes.Parse(data, []ecosystem.Strategy{synthetic.Strategy})
 }
 
 // Pins the minimal valid routes file of ADR 0045 and its mapping onto
@@ -1308,7 +1308,7 @@ func TestParse_EcosystemsKeyTheHookRejectsIsError(t *testing.T) {
 	}
 }
 
-// An ecosystem is unknown when it has no Strategy among those ParseRows was given.
+// An ecosystem is unknown when it has no Strategy among those Parse was given.
 func TestParse_EcosystemsUnknownEcosystemNameIsError(t *testing.T) {
 	const doc = `
 [[routes]]
@@ -1340,7 +1340,7 @@ func TestParse_EcosystemsPathNotStringIsError(t *testing.T) {
 	}
 }
 
-// Drives ParseRows, the seam Parse wraps, with a fake Strategy rather
+// Drives Parse with a fake Strategy rather
 // than a real ecosystem, so the hook contract is tested without depending on
 // any shipped ecosystem's rules.
 func TestParseRoutes_FakeRowRouteDeclarationHookSeesBlockKey(t *testing.T) {
@@ -1361,7 +1361,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
+	routes, err := registryroutes.Parse([]byte(doc), []ecosystem.Strategy{row})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1386,7 +1386,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
+	_, err := registryroutes.Parse([]byte(doc), []ecosystem.Strategy{row})
 	if err == nil {
 		t.Fatal("expected error for a key a nil-hook row doesn't accept, got nil")
 	}
@@ -1413,7 +1413,7 @@ credential = { netrc = "~/.netrc" }
 [routes.ecosystems.fake]
 widget = "gizmo"
 `
-	_, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
+	_, err := registryroutes.Parse([]byte(doc), []ecosystem.Strategy{row})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1591,7 +1591,7 @@ credential = { netrc = "~/.netrc" }
 
 [routes.ecosystems.fake]
 ` + tc.block + "\n"
-			routes, err := registryroutes.ParseRows([]byte(doc), []ecosystem.Strategy{row})
+			routes, err := registryroutes.Parse([]byte(doc), []ecosystem.Strategy{row})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -1734,7 +1734,7 @@ credential = { %s }
 
 // Issue #3436: a route carrying a retired key must still validate its
 // credential first. A malformed credential fails on parseCredential's own
-// error before ParseRows ever reaches the retired-key check, so no
+// error before Parse ever reaches the retired-key check, so no
 // replacement stanza is printed for it -- the stanza-echo path only ever
 // sees a credential parseCredential already accepted.
 func TestParse_RetiredKeyRouteWithMalformedCredentialFailsOnCredential(t *testing.T) {

@@ -60,7 +60,7 @@ func TestStrategy_Shape(t *testing.T) {
 
 // registryroutes resolves the retired cargo-registries key through the registry.
 func TestStrategy_ResolvesByRetiredRouteKey(t *testing.T) {
-	row, ok := ecosystem.RowByRetiredRouteKey("cargo-registries")
+	row, ok := ecosystem.RowByRetiredRouteKey("cargo-registries", []ecosystem.Strategy{Strategy})
 	if !ok || row.Name != "cargo" {
 		t.Errorf(`RowByRetiredRouteKey("cargo-registries") = (%q, %v), want (cargo, true)`, row.Name, ok)
 	}

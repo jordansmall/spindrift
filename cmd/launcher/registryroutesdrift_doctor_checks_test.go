@@ -168,7 +168,7 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_COVERED" }
 }
 
 // Pins issue #3405: a route in ADR 0048 block grammar still parses through
-// registryroutes.ParseRows. The len(checks) == 1 assertion plus a passing Probe
+// registryroutes.Parse. The len(checks) == 1 assertion plus a passing Probe
 // together prove the migrated grammar reached the drift check rather than
 // degrading down the parse-error path, which returns zero rows.
 func TestRegistryRouteDriftCheckForRoutes_BlockGrammarRouteParsesAndReportsNoDrift(t *testing.T) {

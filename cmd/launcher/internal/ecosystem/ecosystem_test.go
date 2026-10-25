@@ -57,17 +57,15 @@ func TestHomeConfigRowsOf_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
 // declared key, reject one no Strategy declares, and never resolve "" to a
 // Strategy that merely carries no retired key.
 func TestRowByRetiredRouteKey(t *testing.T) {
-	saved := Table
-	t.Cleanup(func() { Table = saved })
-	Table = []Strategy{{Name: "keyless"}, {Name: "keyed", RetiredRouteKey: "keyed-registries"}}
+	rows := []Strategy{{Name: "keyless"}, {Name: "keyed", RetiredRouteKey: "keyed-registries"}}
 
-	if row, ok := RowByRetiredRouteKey("keyed-registries"); !ok || row.Name != "keyed" {
-		t.Errorf(`RowByRetiredRouteKey("keyed-registries") = (%q, %v), want (keyed, true)`, row.Name, ok)
+	if row, ok := RowByRetiredRouteKey("keyed-registries", rows); !ok || row.Name != "keyed" {
+		t.Errorf(`RowByRetiredRouteKey("keyed-registries", rows) = (%q, %v), want (keyed, true)`, row.Name, ok)
 	}
-	if _, ok := RowByRetiredRouteKey("npm-registry"); ok {
-		t.Error(`RowByRetiredRouteKey("npm-registry"): ok = true, want false`)
+	if _, ok := RowByRetiredRouteKey("npm-registry", rows); ok {
+		t.Error(`RowByRetiredRouteKey("npm-registry", rows): ok = true, want false`)
 	}
-	if _, ok := RowByRetiredRouteKey(""); ok {
-		t.Error(`RowByRetiredRouteKey(""): ok = true, want false`)
+	if _, ok := RowByRetiredRouteKey("", rows); ok {
+		t.Error(`RowByRetiredRouteKey("", rows): ok = true, want false`)
 	}
 }

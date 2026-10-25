@@ -90,7 +90,7 @@ func TestRunRegistryDiscover_ArtifactoryFieldShape_OneRouteNoPathKeys(t *testing
 		}
 	}
 
-	routes, err := registryroutes.Parse(data)
+	routes, err := registryroutes.Parse(data, ecosystem.Registered())
 	if err != nil {
 		t.Fatalf("registryroutes.Parse: %v; data=%s", err, data)
 	}
@@ -145,7 +145,7 @@ func TestRunRegistryDiscover_EndToEnd_WritesParseableRoutesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
-	routes, err := registryroutes.Parse(data)
+	routes, err := registryroutes.Parse(data, ecosystem.Registered())
 	if err != nil {
 		t.Fatalf("registryroutes.Parse: %v; data=%s", err, data)
 	}
