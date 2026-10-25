@@ -1,0 +1,1 @@
+==> registry proxy Forwarder up on 127.0.0.1:27182 — gradle bound to it via $GRADLE_USER_HOME/init.d/spindrift-registry-proxy.init.gradle

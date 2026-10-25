@@ -1,0 +1,8 @@
+{
+  "envExports": [
+    {
+      "Name": "GOTOOLCHAIN",
+      "Value": "local"
+    }
+  ]
+}

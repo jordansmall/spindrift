@@ -1,0 +1,23 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "",
+      "FromEnv": "GO_TOKEN",
+      "FromFile": "",
+      "MatchHost": "acme.jfrog.io",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://acme.jfrog.io"
+    },
+    "Ecosystems": {
+      "go": {
+        "path": "/artifactory/api/go/go-remote"
+      }
+    },
+    "MatchHost": "acme.jfrog.io",
+    "UpstreamOrigin": "https://acme.jfrog.io"
+  }
+]

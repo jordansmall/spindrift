@@ -103,3 +103,32 @@ func TestRowIsValueOnly(t *testing.T) {
 	}
 	walk("Row", reflect.TypeOf(Row{}), map[reflect.Type]bool{})
 }
+
+func TestRowsAndMatchReturnDeepCopies(t *testing.T) {
+	wantSibling := table[0].Siblings["cargo"][0]
+	wantHost := table[0].Hosts[0]
+
+	rows := Rows()
+	if len(rows) != len(table) {
+		t.Fatalf("Rows() has %d rows, table has %d", len(rows), len(table))
+	}
+	rows[0].Siblings["cargo"][0] = "edited"
+	rows[0].Siblings["extra"] = []string{"x"}
+	rows[0].Hosts[0] = "edited"
+
+	m, ok := Match("https://acme.jfrog.io/artifactory/api/npm/x", nil)
+	if !ok {
+		t.Fatal("no match for a jfrog.io host")
+	}
+	m.Siblings["cargo"][0] = "edited"
+	m.Hosts[0] = "edited"
+
+	for name, got := range map[string]Row{"table": table[0], "Rows()": Rows()[0]} {
+		if got.Siblings["cargo"][0] != wantSibling || got.Hosts[0] != wantHost {
+			t.Errorf("%s was aliased by a returned row: siblings %q hosts %q", name, got.Siblings["cargo"][0], got.Hosts[0])
+		}
+		if _, ok := got.Siblings["extra"]; ok {
+			t.Errorf("%s gained a Siblings key from a returned row", name)
+		}
+	}
+}

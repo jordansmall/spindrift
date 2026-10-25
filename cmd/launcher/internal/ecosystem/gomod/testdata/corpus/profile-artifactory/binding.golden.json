@@ -1,0 +1,20 @@
+{
+  "envExports": [
+    {
+      "Name": "GOPROXY",
+      "Value": "http://127.0.0.1:27182/acme-jfrog-io/artifactory/api/go/go-remote"
+    },
+    {
+      "Name": "GOTOOLCHAIN",
+      "Value": "local"
+    },
+    {
+      "Name": "GONOPROXY",
+      "Value": "none"
+    },
+    {
+      "Name": "GOSUMDB",
+      "Value": "off"
+    }
+  ]
+}

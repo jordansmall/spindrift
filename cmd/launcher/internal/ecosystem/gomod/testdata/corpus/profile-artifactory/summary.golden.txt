@@ -1,0 +1,2 @@
+==> registry proxy Forwarder up on 127.0.0.1:27182 — go bound to it via GOPROXY
+==> go bound to it via GOPROXY=http://127.0.0.1:27182/acme-jfrog-io/artifactory/api/go/go-remote

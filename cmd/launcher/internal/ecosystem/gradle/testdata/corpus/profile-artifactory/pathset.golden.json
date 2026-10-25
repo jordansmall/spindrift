@@ -1,0 +1,18 @@
+{
+  "derived": null,
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/artifactory/api/gradle/gradle-remote"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "gradle",
+          "path": "/artifactory/api/gradle/gradle-remote"
+        }
+      ],
+      "matchHost": "acme.jfrog.io",
+      "upstream": "https://acme.jfrog.io"
+    }
+  ]
+}
