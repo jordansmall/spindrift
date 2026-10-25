@@ -3,6 +3,7 @@ package registrydiscover
 import (
 	"fmt"
 	"hash/fnv"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -22,10 +23,21 @@ type Store struct {
 // credential value.
 type Lookup func(store Store, d ecosystem.Declaration) (found bool, err error)
 
-// Probe answers the auth scheme for an upstream base URL. The real probe reads
-// the registry's WWW-Authenticate answer and defaults to "bearer" when the
-// registry is unreachable.
-type Probe func(upstreamBaseURL string) string
+// ProbeResult is what the probe learned from one registry response.
+type ProbeResult struct {
+	// Scheme is "bearer" or "basic", or empty when the response carried no
+	// usable challenge (unreachable, no WWW-Authenticate, or a scheme
+	// discovery does not model).
+	Scheme string
+	// Header is the response's headers, for host-profile matching; nil when
+	// unreachable.
+	Header http.Header
+}
+
+// Probe answers what an upstream base URL's registry reveals. The real probe
+// reads the registry's WWW-Authenticate answer and response headers; it does
+// not default to "bearer", so an empty Scheme means no usable challenge.
+type Probe func(upstreamBaseURL string) ProbeResult
 
 // Route is one proposed route, shaped to write directly into a registry routes
 // file (registryroutes.Route) minus the optional keys this engine has no basis
@@ -94,7 +106,7 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 		route := Route{
 			MatchHost:       host,
 			UpstreamBaseURL: d.UpstreamBaseURL,
-			AuthScheme:      normalizeAuthScheme(probe(d.UpstreamBaseURL)),
+			AuthScheme:      normalizeAuthScheme(probe(d.UpstreamBaseURL).Scheme),
 		}
 		if found {
 			route.CredentialSource = matchedStore.Name

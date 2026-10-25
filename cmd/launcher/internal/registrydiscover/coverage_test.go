@@ -106,7 +106,7 @@ func TestUncoveredHosts_ConsistentWithDiscover_SameTree(t *testing.T) {
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "other = https://two.example.com/\n")
 
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
-	probe := func(upstreamBaseURL string) string { return "bearer" }
+	probe := probeAs("bearer")
 
 	routes, _, err := Discover(dir, rows, nil, lookup, probe)
 	if err != nil {

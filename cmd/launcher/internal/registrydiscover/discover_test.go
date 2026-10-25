@@ -15,7 +15,9 @@ import (
 func noMatch(Store, ecosystem.Declaration) (bool, error)     { return false, nil }
 func alwaysMatch(Store, ecosystem.Declaration) (bool, error) { return true, nil }
 
-func probeAs(scheme string) Probe { return func(string) string { return scheme } }
+func probeAs(scheme string) Probe {
+	return func(string) ProbeResult { return ProbeResult{Scheme: scheme} }
+}
 
 // discoverSynthetic runs Discover over the synthetic Strategy alone.
 func discoverSynthetic(t *testing.T, dir string, stores []Store, lookup Lookup, probe Probe) ([]Route, Report) {

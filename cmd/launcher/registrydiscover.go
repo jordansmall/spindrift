@@ -127,7 +127,7 @@ func cmdRegistryDiscover(rows []ecosystem.Strategy, args []string, stdout, stder
 		return 1
 	}
 
-	probe := func(u string) string {
+	probe := func(u string) registrydiscover.ProbeResult {
 		return registrydiscover.HTTPProbe(registrydiscover.DefaultProbeClient(), u)
 	}
 

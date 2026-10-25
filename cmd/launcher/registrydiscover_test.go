@@ -30,7 +30,9 @@ func writeDiscoverDeclarations(t *testing.T, dir string, row ecosystem.Strategy,
 	}
 }
 
-func discoverBearerProbe(string) string { return "bearer" }
+func discoverBearerProbe(string) registrydiscover.ProbeResult {
+	return registrydiscover.ProbeResult{Scheme: "bearer"}
+}
 
 // discoverOver calls runRegistryDiscover over Strategies with the fixed "bearer" probe.
 func discoverOver(rows []ecosystem.Strategy, repoDir, outPath string, force bool, stores []registrydiscover.Store, lookup registrydiscover.Lookup) (code int, stdout, stderr string) {
