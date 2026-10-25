@@ -813,9 +813,9 @@ func TestLocalTracker_DepsOf_EmptyBlockedBySection(t *testing.T) {
 }
 
 // The frontmatter keeps state and labels as separate fields on disk, but
-// main.go's Readiness.Status checks containsLabel(fi.Labels, c.failedLabel)
-// generically across adapters, so Issue has to fold the state marker into
-// Labels the way the GitHub adapter does.
+// waves.Readiness.Status (via blockerStatus) checks fi.Labels for
+// cfg.FailedLabel generically across adapters, so Issue has to fold the
+// state marker into Labels the way the GitHub adapter does.
 func TestLocalTracker_Issue_LabelsIncludeDispatchState(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
