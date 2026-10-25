@@ -69,37 +69,57 @@ func gitCheckoutRoot(dir string) string {
 	}
 }
 
-// registryRouteDriftCheckForRoutes keys the row's source on
-// backendkit.ByName(c.codeForge).HostMediatedRemote, not a codeForge == "local"
-// compare a future host-mediated backend would break. A host-mediated forge
-// reads the bare Accumulation repo at c.baseBranch, the same snapshot the
-// launch itself derives host-rooted routes from.
-func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, rows []ecosystem.Strategy) []doctor.Check {
+// targetRepoSource names where the Target repo's committed config is read
+// from: a cwd checkout (ref == "") or a host-mediated forge's Accumulation repo
+// at ref. Both route-advisory rows resolve it through resolveTargetRepoSource,
+// so they cannot disagree on which snapshot they read.
+type targetRepoSource struct {
+	dir, ref string
+}
+
+// resolveTargetRepoSource keys on backendkit.ByName(c.codeForge).HostMediatedRemote,
+// not a codeForge == "local" compare a future host-mediated backend would
+// break. A host-mediated forge reads the bare Accumulation repo at
+// c.baseBranch, the same snapshot the launch itself derives host-rooted routes
+// from. Only ResolveRef runs eagerly, and it materializes nothing, so a
+// fail-fast run that never reaches a Probe leaks no snapshot dir. ok is false
+// when no Target repo resolves.
+func resolveTargetRepoSource(c config) (src targetRepoSource, ok bool) {
 	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
-		return registryRouteDriftCheckForRef(c.hostRepoDir(), c.baseBranch, routes, rows)
+		if err := registrydiscover.ResolveRef(c.hostRepoDir(), c.baseBranch); err != nil {
+			return targetRepoSource{}, false
+		}
+		return targetRepoSource{dir: c.hostRepoDir(), ref: c.baseBranch}, true
 	}
 
 	repoDir, err := registryRouteDriftRepoDirFn()
 	if err != nil || repoDir == "" || !checkoutIsTargetRepo(repoDir, c) {
+		return targetRepoSource{}, false
+	}
+	return targetRepoSource{dir: repoDir}, true
+}
+
+// registryRouteDriftCheckForRoutes builds the drift row for the resolved Target
+// repo source, or nil when none resolves.
+func registryRouteDriftCheckForRoutes(c config, routes []registryroutes.Route, rows []ecosystem.Strategy) []doctor.Check {
+	src, ok := resolveTargetRepoSource(c)
+	if !ok {
 		return nil
 	}
-	return []doctor.Check{registryRouteDriftCheckFor(repoDir, routes, rows)}
+	if src.ref != "" {
+		return []doctor.Check{registryRouteDriftCheckForRef(src.dir, src.ref, routes, rows)}
+	}
+	return []doctor.Check{registryRouteDriftCheckFor(src.dir, routes, rows)}
 }
 
 // registryRouteDriftCheckForRef builds the drift row for a host-mediated
-// forge's Accumulation repo, or nil when ref cannot be resolved. Only
-// ResolveRef runs eagerly, and it materializes nothing, so a fail-fast run
-// that never reaches the Probe leaks no snapshot dir. The Probe materializes
-// the ref itself and cleans up, at the cost of a repeated rev-parse.
-func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route, rows []ecosystem.Strategy) []doctor.Check {
-	if err := registrydiscover.ResolveRef(repoDir, ref); err != nil {
-		return nil
-	}
-	check := registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
+// forge's Accumulation repo. The Probe materializes the ref itself and cleans
+// up, at the cost of a repeated rev-parse.
+func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.Route, rows []ecosystem.Strategy) doctor.Check {
+	return registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
 		return registrydiscover.UncoveredHostsFromGitRef(repoDir, ref, covered, rows)
 	})
-	return []doctor.Check{check}
 }
 
 // registryRouteDriftCheckName keeps the row's Name and its SuccessMsg closure
