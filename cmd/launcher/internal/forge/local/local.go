@@ -352,7 +352,8 @@ func (lt *LocalTracker) TransitionState(num string, from, to forge.DispatchState
 // label. It errors without touching the file when verdict has no configured
 // state (the work-kind construction path) or when num is not InProgress, the
 // github adapter's #701 double-dispatch guard. Check-then-write narrows the
-// double-dispatch window without closing it, as exec.go's version also notes.
+// double-dispatch window without closing it, as github/exec_issues.go's
+// version also notes.
 func (lt *LocalTracker) CompleteVerdict(num string, verdict forge.Verdict) error {
 	state := lt.verdictLabels.Label(verdict)
 	if state == "" {
