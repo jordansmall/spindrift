@@ -11,15 +11,15 @@ import (
 )
 
 // loadRegistryRoutes reads and parses file so doctorCheckSets and
-// registryProxyRoutesCheck word a read failure the same way. A ParseRows
-// failure passes through unwrapped: registryroutes.ParseRows's own
+// registryProxyRoutesCheck word a read failure the same way. A Parse
+// failure passes through unwrapped: registryroutes.Parse's own
 // "registryroutes: ..." message already names what is wrong.
 func loadRegistryRoutes(file string, rows []ecosystem.Strategy) ([]registryroutes.Route, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("reading REGISTRY_PROXY_ROUTES_FILE %q: %w", file, err)
 	}
-	return registryroutes.ParseRows(data, rows)
+	return registryroutes.Parse(data, rows)
 }
 
 // routeChecksFor takes an already-parsed route slice so a test can pass a route

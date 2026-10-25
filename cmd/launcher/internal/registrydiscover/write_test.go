@@ -50,7 +50,7 @@ func TestRender_CompanionKeyMatchesKindTable(t *testing.T) {
 				t.Errorf("rendered = %s, want to contain companion key %q", rendered, kind.CompanionKey)
 			}
 
-			parsed, err := registryroutes.Parse(rendered)
+			parsed, err := registryroutes.Parse(rendered, nil)
 			if err != nil {
 				t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 			}
@@ -81,7 +81,7 @@ func TestRender_NetrcRouteRoundTripsThroughParse(t *testing.T) {
 		CredentialValue:  "/home/op/.netrc",
 	}}
 
-	parsed, err := registryroutes.Parse(Render(routes))
+	parsed, err := registryroutes.Parse(Render(routes), nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestRender_StoreKindRouteRoundTrips(t *testing.T) {
 				PropertyKey:      cfg.PropertyKey,
 			}}
 
-			parsed, err := registryroutes.Parse(Render(routes))
+			parsed, err := registryroutes.Parse(Render(routes), nil)
 			if err != nil {
 				t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 			}
@@ -193,7 +193,7 @@ func TestRender_EnvPlaceholderRouteRoundTrips(t *testing.T) {
 		CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_UNMATCHED_EXAMPLE_COM",
 	}}
 
-	parsed, err := registryroutes.Parse(Render(routes))
+	parsed, err := registryroutes.Parse(Render(routes), nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRender_TwoRoutesParseInOrder(t *testing.T) {
 		},
 	}
 
-	parsed, err := registryroutes.Parse(Render(routes))
+	parsed, err := registryroutes.Parse(Render(routes), nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestRender_QuotedCredentialValueEscapesAndRoundTrips(t *testing.T) {
 		t.Fatalf("rendered TOML contains an unescaped quote, corrupting the document:\n%s", rendered)
 	}
 
-	parsed, err := registryroutes.Parse(rendered)
+	parsed, err := registryroutes.Parse(rendered, nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestWriteFile_ForceOverwritesExistingFile(t *testing.T) {
 	if strings.Contains(string(got), "stale") {
 		t.Errorf("file still contains stale content: %s", got)
 	}
-	if _, err := registryroutes.Parse(got); err != nil {
+	if _, err := registryroutes.Parse(got, nil); err != nil {
 		t.Errorf("Parse of overwritten file: unexpected error: %v", err)
 	}
 }
@@ -332,7 +332,7 @@ func TestWriteFile_NewFilePermsAndParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registryroutes.Parse(got); err != nil {
+	if _, err := registryroutes.Parse(got, nil); err != nil {
 		t.Errorf("Parse of written file: unexpected error: %v", err)
 	}
 }
@@ -397,7 +397,7 @@ credential = { netrc = "/home/op/.netrc" }
 		t.Errorf("Render() =\n%s\nwant:\n%s", got, want)
 	}
 
-	if _, err := registryroutes.Parse(Render(routes)); err != nil {
+	if _, err := registryroutes.Parse(Render(routes), nil); err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
 }
@@ -424,7 +424,7 @@ func TestRender_ExplicitPortEmitsOriginWithoutPath(t *testing.T) {
 		t.Errorf("Render() =\n%s\nwant the base URL's path dropped from the origin", rendered)
 	}
 
-	parsed, err := registryroutes.Parse([]byte(rendered))
+	parsed, err := registryroutes.Parse([]byte(rendered), nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestRender_HTTPSchemeEmitsOrigin(t *testing.T) {
 		t.Errorf("Render() =\n%s\nwant an upstream-origin line carrying the http scheme", rendered)
 	}
 
-	parsed, err := registryroutes.Parse([]byte(rendered))
+	parsed, err := registryroutes.Parse([]byte(rendered), nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestRender_MixedOriginRoutesRoundTripThroughParse(t *testing.T) {
 		},
 	}
 
-	parsed, err := registryroutes.Parse(Render(routes))
+	parsed, err := registryroutes.Parse(Render(routes), nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v; rendered:\n%s", err, Render(routes))
 	}
@@ -550,7 +550,7 @@ func TestRender_BlockGrammarRoundTripsRenderParseRender(t *testing.T) {
 		}
 	}
 
-	parsed, err := registryroutes.Parse(first)
+	parsed, err := registryroutes.Parse(first, nil)
 	if err != nil {
 		t.Fatalf("Parse(Render(routes)): unexpected error: %v; rendered:\n%s", err, first)
 	}

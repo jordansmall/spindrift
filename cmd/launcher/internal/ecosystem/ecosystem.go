@@ -230,16 +230,17 @@ func Registered() []Strategy { return registered }
 // from the Register call in internal/driver/bundle/ecosystems.go.
 var Table []Strategy
 
-// RowByRetiredRouteKey returns the Strategy whose RetiredRouteKey equals key, so a
-// caller translating a retired routes-file key never hand-lists which
-// ecosystem it stood for. ok is false when nothing matches, including key ==
-// "": npm, yarn and pnpm all carry an empty RetiredRouteKey, so without the
-// guard an empty key would resolve to whichever of them Table lists first.
-func RowByRetiredRouteKey(key string) (Strategy, bool) {
+// RowByRetiredRouteKey returns the Strategy among rows whose RetiredRouteKey
+// equals key, so a caller translating a retired routes-file key never
+// hand-lists which ecosystem it stood for. ok is false when nothing matches,
+// including key == "": npm, yarn and pnpm all carry an empty RetiredRouteKey,
+// so without the guard an empty key would resolve to whichever of them rows
+// lists first.
+func RowByRetiredRouteKey(key string, rows []Strategy) (Strategy, bool) {
 	if key == "" {
 		return Strategy{}, false
 	}
-	for _, row := range Table {
+	for _, row := range rows {
 		if row.RetiredRouteKey == key {
 			return row, true
 		}

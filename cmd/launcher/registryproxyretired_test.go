@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registryroutes"
 )
@@ -247,7 +248,7 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaParsesThroughRegistryroutes(t *
 				t.Fatal("expected error")
 			}
 			stanza := extractStanza(t, err.Error())
-			if _, err := registryroutes.Parse([]byte(stanza)); err != nil {
+			if _, err := registryroutes.Parse([]byte(stanza), ecosystem.Registered()); err != nil {
 				t.Errorf("rendered stanza %q must parse via registryroutes.Parse, got: %v", stanza, err)
 			}
 		})

@@ -23,6 +23,10 @@ var (
 	listOwnerForCargoKey  = synthetic.Twin("retired-cargo-key-owner")
 )
 
+// retiredOwners is the row set the retired-key tests parse against, set in TestMain
+// once the stand-ins carry their frozen keys.
+var retiredOwners []ecosystem.Strategy
+
 func TestMain(m *testing.M) {
 	pathOwnerForGradleKey.RetiredRouteKey = ecosystem.GradleRetiredRouteKey
 	pathOwnerForGoKey.RetiredRouteKey = ecosystem.GoRetiredRouteKey
@@ -37,7 +41,7 @@ func TestMain(m *testing.M) {
 		}
 		return nil
 	}
-	ecosystem.Register(pathOwnerForGradleKey, pathOwnerForGoKey, listOwnerForCargoKey)
+	retiredOwners = []ecosystem.Strategy{pathOwnerForGradleKey, pathOwnerForGoKey, listOwnerForCargoKey}
 	os.Exit(m.Run())
 }
 
@@ -121,14 +125,13 @@ match-host = "repo.example.com"
 credential = { netrc = "~/.netrc" }
 `
 
-// The retirement gate runs before any Strategy is consulted, so a retired key is
-// refused as retired even when no Strategy exists to look it up in, and detection is
-// by presence: an empty value is as retired as a populated one.
-func TestRetiredRouteKeysFireBeforeRowsAreConsulted(t *testing.T) {
+// Retired-key detection is by presence: an empty value is as retired as a
+// populated one.
+func TestRetiredRouteKeysAreRefusedByPresence(t *testing.T) {
 	for key, field := range retiredKeyFields(t) {
 		for _, empty := range []bool{false, true} {
 			doc := retiredBaseRoute + retiredDeclaration(t, key, field, empty) + "\n"
-			_, err := ParseRows([]byte(doc), nil)
+			_, err := Parse([]byte(doc), retiredOwners)
 			if err == nil {
 				t.Errorf("%s (empty=%v): expected a retirement error, got nil", key, empty)
 				continue
@@ -150,7 +153,7 @@ func TestRetiredRouteKeysAcrossBothADRsNameAllInOneError(t *testing.T) {
 		doc += retiredDeclaration(t, key, field, false) + "\n"
 		wants = append(wants, key)
 	}
-	_, err := ParseRows([]byte(doc), nil)
+	_, err := Parse([]byte(doc), retiredOwners)
 	if err == nil {
 		t.Fatal("expected a retirement error, got nil")
 	}
@@ -166,13 +169,13 @@ func TestRetiredRouteKeysAcrossBothADRsNameAllInOneError(t *testing.T) {
 // so credential is the last top-level key the stanza renders.
 func TestRetiredRouteKeyStanzaCarriesRowBlockBesideDeclaredBlock(t *testing.T) {
 	for key, field := range retiredKeyFields(t) {
-		row, ok := ecosystem.RowByRetiredRouteKey(key)
+		row, ok := ecosystem.RowByRetiredRouteKey(key, retiredOwners)
 		if !ok {
 			t.Errorf("%s: no registered Strategy owns the retired key", key)
 			continue
 		}
 		doc := retiredBaseRoute + retiredDeclaration(t, key, field, false) + "\n\n[routes.ecosystems.unlisted]\nwidget = \"gizmo\"\n"
-		_, err := ParseRows([]byte(doc), nil)
+		_, err := Parse([]byte(doc), retiredOwners)
 		if err == nil {
 			t.Errorf("%s: expected a retirement error, got nil", key)
 			continue
@@ -198,7 +201,7 @@ func TestRetiredRouteStanzaRoundTripsThroughParse(t *testing.T) {
 	for key, field := range retiredKeyFields(t) {
 		doc += retiredDeclaration(t, key, field, false) + "\n"
 	}
-	_, err := ParseRows([]byte(doc), nil)
+	_, err := Parse([]byte(doc), retiredOwners)
 	if err == nil {
 		t.Fatal("expected a retirement error, got nil")
 	}
@@ -208,12 +211,12 @@ func TestRetiredRouteStanzaRoundTripsThroughParse(t *testing.T) {
 	}
 	stanza := err.Error()[at:]
 
-	routes, err := Parse([]byte(stanza))
+	routes, err := Parse([]byte(stanza), retiredOwners)
 	if err != nil {
 		t.Fatalf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 	}
 	for key := range retiredKeyFields(t) {
-		row, ok := ecosystem.RowByRetiredRouteKey(key)
+		row, ok := ecosystem.RowByRetiredRouteKey(key, retiredOwners)
 		if !ok {
 			t.Errorf("%s: no registered Strategy owns the retired key", key)
 			continue
@@ -243,7 +246,7 @@ func TestRetiredRouteKeyWithMalformedCredentialFailsOnCredential(t *testing.T) {
 			t.Run(cc.name+"/"+key, func(t *testing.T) {
 				doc := "\n[[routes]]\nmatch-host = \"repo.example.com\"\ncredential = " + cc.credential + "\n" +
 					retiredDeclaration(t, key, field, false) + "\n"
-				_, err := ParseRows([]byte(doc), nil)
+				_, err := Parse([]byte(doc), retiredOwners)
 				if err == nil {
 					t.Fatal("expected error for malformed credential, got nil")
 				}
@@ -290,7 +293,7 @@ func TestRetiredRouteInvalidValueIsOmittedFromStanzaAndNamed(t *testing.T) {
 			invalidClause(ecosystem.CargoRetiredRouteKey, listOwnerForCargoKey, ecosystem.CargoRouteRegistriesKey, "names", "an empty string")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n"), nil)
+			_, err := Parse([]byte(retiredBaseRoute+tc.decl+"\n"), retiredOwners)
 			if err == nil {
 				t.Fatal("expected a retirement error, got nil")
 			}
@@ -310,7 +313,7 @@ func TestRetiredRouteInvalidValueIsOmittedFromStanzaAndNamed(t *testing.T) {
 			if strings.Contains(stanza, tc.invalid) {
 				t.Errorf("stanza echoes the invalid value %q:\n%s", tc.invalid, stanza)
 			}
-			if _, err := Parse([]byte(stanza)); err != nil {
+			if _, err := Parse([]byte(stanza), retiredOwners); err != nil {
 				t.Errorf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 			}
 		})
@@ -331,7 +334,7 @@ func TestRetiredRouteInvalidValueBesideExplicitBlockIsNotValidated(t *testing.T)
 		{"list", ecosystem.CargoRetiredRouteKey + ` = [""]`, "[routes.ecosystems." + listOwnerForCargoKey.Name + "]\n" + ecosystem.CargoRouteRegistriesKey + " = [\"ok\"]\n", `""`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+tc.explicit), nil)
+			_, err := Parse([]byte(retiredBaseRoute+tc.decl+"\n\n"+tc.explicit), retiredOwners)
 			if err == nil {
 				t.Fatal("expected a retirement error, got nil")
 			}
@@ -366,7 +369,7 @@ func TestRetiredRouteInvalidValueBesideBlockLackingTheKeyIsRefused(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			header := "[routes.ecosystems." + tc.owner.Name + "]"
-			_, err := ParseRows([]byte(retiredBaseRoute+tc.decl+"\n\n"+header+"\n"), nil)
+			_, err := Parse([]byte(retiredBaseRoute+tc.decl+"\n\n"+header+"\n"), retiredOwners)
 			if err == nil {
 				t.Fatal("expected a retirement error, got nil")
 			}
@@ -384,7 +387,7 @@ func TestRetiredRouteInvalidValueBesideBlockLackingTheKeyIsRefused(t *testing.T)
 			if strings.Contains(stanza, tc.invalid) {
 				t.Errorf("stanza echoes the invalid value %q:\n%s", tc.invalid, stanza)
 			}
-			if _, err := Parse([]byte(stanza)); err != nil {
+			if _, err := Parse([]byte(stanza), retiredOwners); err != nil {
 				t.Errorf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 			}
 		})

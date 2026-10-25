@@ -368,7 +368,7 @@ func (c *replay) parsedRoutes() ([]registryroutes.Route, error) {
 		if err != nil {
 			return nil, err
 		}
-		routes, err := registryroutes.ParseRows(input, c.allRows)
+		routes, err := registryroutes.Parse(input, c.allRows)
 		if err != nil && operator {
 			return nil, &refusedError{err}
 		}
@@ -376,7 +376,7 @@ func (c *replay) parsedRoutes() ([]registryroutes.Route, error) {
 	})
 }
 
-// refusedError is ParseRows rejecting an operator-written routes file, which a
+// refusedError is Parse rejecting an operator-written routes file, which a
 // case may pin as its outcome. Discovery's own output failing to parse is a
 // bug in the Strategy, never a refusal, so it stays a plain error.
 type refusedError struct{ error }

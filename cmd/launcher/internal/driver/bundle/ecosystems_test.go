@@ -34,7 +34,7 @@ func TestEveryRetiredRouteKeyResolvesToARegisteredStrategy(t *testing.T) {
 		ecosystem.GoRetiredRouteKey:     gomod.Strategy,
 		ecosystem.CargoRetiredRouteKey:  cargo.Strategy,
 	} {
-		got, ok := ecosystem.RowByRetiredRouteKey(key)
+		got, ok := ecosystem.RowByRetiredRouteKey(key, ecosystem.Registered())
 		if !ok {
 			t.Errorf("retired key %q resolves to no registered Strategy", key)
 			continue
@@ -69,7 +69,7 @@ func TestRetiredRouteInvalidValueNamesTheRealOwnersValidation(t *testing.T) {
 			carryOverClause(ecosystem.CargoRetiredRouteKey, cargo.Strategy.Name, "registries", "names an empty string")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := registryroutes.Parse([]byte(base + tc.decl + "\n"))
+			_, err := registryroutes.Parse([]byte(base+tc.decl+"\n"), ecosystem.Registered())
 			if err == nil {
 				t.Fatal("expected a retirement error, got nil")
 			}
@@ -83,7 +83,7 @@ func TestRetiredRouteInvalidValueNamesTheRealOwnersValidation(t *testing.T) {
 			if strings.Contains(stanza, tc.invalid) {
 				t.Errorf("stanza echoes the invalid value %q:\n%s", tc.invalid, stanza)
 			}
-			if _, err := registryroutes.Parse([]byte(stanza)); err != nil {
+			if _, err := registryroutes.Parse([]byte(stanza), ecosystem.Registered()); err != nil {
 				t.Errorf("expected the replacement stanza to parse, got: %v\nstanza:\n%s", err, stanza)
 			}
 		})

@@ -124,7 +124,7 @@ func TestInitScript_PrefixInterpolated(t *testing.T) {
 // rather than a bare-route-root redirect, which would 404 against the
 // Forwarder's path-set enforcement.
 //
-// No test feeds an unknown ecosystem's block: ParseRows refuses one before it
+// No test feeds an unknown ecosystem's block: Parse refuses one before it
 // reaches the renderer, and a real neighbour's block is a corpus case.
 func TestInitScript_NoDeclaredPathIsInert(t *testing.T) {
 	got := initScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
@@ -200,7 +200,7 @@ func TestStrategy_Shape(t *testing.T) {
 
 // registryroutes resolves the retired gradle-path key through the registry.
 func TestStrategy_ResolvesByRetiredRouteKey(t *testing.T) {
-	row, ok := ecosystem.RowByRetiredRouteKey("gradle-path")
+	row, ok := ecosystem.RowByRetiredRouteKey("gradle-path", []ecosystem.Strategy{Strategy})
 	if !ok || row.Name != "gradle" {
 		t.Errorf(`RowByRetiredRouteKey("gradle-path") = (%q, %v), want (gradle, true)`, row.Name, ok)
 	}

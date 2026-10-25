@@ -309,7 +309,7 @@ func TestStrategy_Shape(t *testing.T) {
 
 // registryroutes resolves the retired go-path key through the registry.
 func TestStrategy_ResolvesByRetiredRouteKey(t *testing.T) {
-	row, ok := ecosystem.RowByRetiredRouteKey("go-path")
+	row, ok := ecosystem.RowByRetiredRouteKey("go-path", []ecosystem.Strategy{Strategy})
 	if !ok || row.Name != "go" {
 		t.Errorf(`RowByRetiredRouteKey("go-path") = (%q, %v), want (go, true)`, row.Name, ok)
 	}
