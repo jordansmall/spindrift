@@ -178,7 +178,11 @@ in
   # The sessions mount above takes .pi/agent/sessions, so it does not shadow
   # this file. models.json declares custom Providers (a self-hosted
   # OpenAI-compatible server) and carries no credential rule: unset, no file is
-  # written and preflight is unchanged (issue #6048).
+  # written and preflight is unchanged (issue #6048). settings.json tunes pi
+  # itself (e.g. httpIdleTimeoutMs), also with no credential rule. Its schema
+  # row is secret only to keep the value off argv and give it _CMD/_FILE
+  # sources; the written file needs no credential-deny path because pi's
+  # settings.json carries no credential (issue #6052).
   envFiles = [
     {
       env = "PI_AUTH_CONTENT";
@@ -187,6 +191,10 @@ in
     {
       env = "PI_MODELS_CONTENT";
       pathRelative = ".pi/agent/models.json";
+    }
+    {
+      env = "PI_SETTINGS_CONTENT";
+      pathRelative = ".pi/agent/settings.json";
     }
   ];
 

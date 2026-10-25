@@ -83,6 +83,7 @@ type schemaConfig struct {
 	overlapGate               string
 	piAuthContent             string
 	piModelsContent           string
+	piSettingsContent         string
 	pidsLimit                 string
 	preflightStaleBase        bool
 	registryProxyRoutesFile   string
@@ -175,6 +176,7 @@ func loadSchemaConfig() schemaConfig {
 		overlapGate:               getenvSchema("OVERLAP_GATE"),
 		piAuthContent:             os.Getenv("PI_AUTH_CONTENT"),
 		piModelsContent:           os.Getenv("PI_MODELS_CONTENT"),
+		piSettingsContent:         os.Getenv("PI_SETTINGS_CONTENT"),
 		pidsLimit:                 getenvSchema("PIDS_LIMIT"),
 		preflightStaleBase:        getenvSchema("PREFLIGHT_STALE_BASE") != "",
 		registryProxyRoutesFile:   getenvSchema("REGISTRY_PROXY_ROUTES_FILE"),
