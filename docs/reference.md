@@ -146,6 +146,16 @@ socket](#signal-socket-box_signal_carriersocket)),
   inside a checkout whose `origin` remote matches the configured Target
   repo (the same-repo/dogfood case) (issue #3311) — see [Registry route
   discovery](#registry-route-discovery).
+- An advisory `registry-route-profile` row (ADR 0071), read from the same
+  Target-repo snapshot as `registry-route-drift`, and skipped whenever that
+  row is skipped:
+  for each route whose host matches a Host profile by host pattern or by
+  the path of the registry URL the repo declares, it warns when the
+  route's `auth-scheme` differs from the profile's, or when a profile
+  sibling path for an ecosystem the route serves is not admitted by the
+  route's derived path-set or `allow`. It makes no network probe and never
+  fails doctor, so a deliberate departure from a profile doesn't block a
+  launch.
 - A `registry-proxy-transport` row naming which transport (`unix socket` or
   `tcp`) a dispatch would use to reach the launcher-side registry proxy,
   probed through the identical seam a dispatch itself calls (issue #3111)
@@ -7554,6 +7564,17 @@ whole signal: a route covers a host outright, whatever paths the repo
 declares under it, so paths are not a drift category at all. The remedy
 is adding routes for those hosts by hand, or regenerating the whole file
 with `spindrift registry discover --force`, which discards hand edits.
+
+A route can also depart from what spindrift knows about its host's
+product. `spindrift doctor`'s advisory `registry-route-profile` row (ADR
+0071) matches each route against the Host profile table by host pattern
+or declared-URL path, without probing the network, and warns when the
+route's `auth-scheme` differs from the profile's or when it doesn't admit
+one of the profile's sibling paths (resolved relative to the registry path
+the repo declares) for an ecosystem it serves. A profile with no auth
+scheme, such as a public registry's, has no scheme to depart from. The
+warning never fails doctor: edit the route's `auth-scheme` or `allow` only
+if the departure isn't deliberate.
 
 ## Registry transport probe cache
 
