@@ -127,9 +127,9 @@ func forgejoVersionURL(baseURL string) string {
 
 // requireForgejoRuntime returns the CLI name ("podman" or "docker") for the
 // first runtime on PATH with a reachable daemon, skipping cleanly when neither
-// is usable. It mirrors internal/runner's requireRealOCI (issue #576, "skip on
-// hosts with no real runtime"), reimplemented here so this package need not
-// import internal/runner for one small probe.
+// is usable. It mirrors internal/runner/oci's requireRealOCI (issue #576, "skip
+// on hosts with no real runtime"), reimplemented here so this package need not
+// import internal/runner/oci for one small probe.
 func requireForgejoRuntime(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "linux" {

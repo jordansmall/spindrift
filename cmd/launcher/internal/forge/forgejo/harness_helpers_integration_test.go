@@ -8,8 +8,8 @@ import (
 )
 
 // Colors must be bare 6-hex-digit strings with no leading "#". The adapter's
-// CreateLabel prepends the "#" itself (forgejo.go:446), so a helper-supplied
-// "#" would double up.
+// CreateLabel prepends the "#" itself, so a helper-supplied "#" would double
+// up.
 func TestForgejoHarnessLabels(t *testing.T) {
 	labels := forgejoHarnessLabels()
 
