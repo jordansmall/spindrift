@@ -601,12 +601,13 @@ func storeKinds() []credresolver.Kind {
 
 func TestRender_HostProfileCommentPrecedesAuthSchemeAndParses(t *testing.T) {
 	route := Route{
-		MatchHost:        "repo.corp.example",
-		UpstreamBaseURL:  "https://repo.corp.example/artifactory/api/npm/",
-		AuthScheme:       "bearer",
-		Profile:          "artifactory",
-		CredentialSource: "env",
-		CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_REPO_CORP_EXAMPLE",
+		MatchHost:         "repo.corp.example",
+		UpstreamBaseURL:   "https://repo.corp.example/artifactory/api/npm/",
+		AuthScheme:        "bearer",
+		Profile:           ProfileAdvice{Name: "artifactory"},
+		SchemeFromProfile: true,
+		CredentialSource:  "env",
+		CredentialValue:   "SPINDRIFT_REGISTRY_CREDENTIAL_REPO_CORP_EXAMPLE",
 	}
 	rendered := Render([]Route{route})
 
@@ -622,8 +623,84 @@ func TestRender_HostProfileCommentPrecedesAuthSchemeAndParses(t *testing.T) {
 		t.Errorf("parsed = %+v, want one bearer route", parsed)
 	}
 
-	route.Profile = ""
+	route.Profile, route.SchemeFromProfile = ProfileAdvice{}, false
 	if got := string(Render([]Route{route})); strings.Contains(got, "host profile") {
 		t.Errorf("Render without a Profile mentions a host profile:\n%s", got)
+	}
+}
+
+func TestRender_HostProfileAdviceCommentsAndAllowParse(t *testing.T) {
+	route := Route{
+		MatchHost:         "repo.corp.example",
+		UpstreamBaseURL:   "https://repo.corp.example/artifactory/api/cargo/repo/index",
+		AuthScheme:        "bearer",
+		SchemeFromProfile: true,
+		Profile: ProfileAdvice{
+			Name:             "artifactory",
+			Note:             "JFrog\nArtifactory",
+			BasicUsername:    "the user",
+			CredentialHelper: "an access token from `jf`",
+		},
+		Allow:            []string{"/artifactory/api/cargo/repo/v1/crates", "/other"},
+		CredentialSource: "env",
+		CredentialValue:  "SPINDRIFT_REGISTRY_CREDENTIAL_REPO_CORP_EXAMPLE",
+	}
+	rendered := string(Render([]Route{route}))
+
+	for _, want := range []string{
+		"[[routes]]\n# host profile \"artifactory\": JFrog Artifactory\n# basic username: the user\n# credential helper: an access token from `jf`\nmatch-host",
+		"# auth-scheme from host profile \"artifactory\": the probe saw no usable challenge\nauth-scheme = \"bearer\"\n# allow from host profile \"artifactory\": sibling paths outside the declared registry path\nallow = [\"/artifactory/api/cargo/repo/v1/crates\", \"/other\"]\ncredential",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("Render output missing %q:\n%s", want, rendered)
+		}
+	}
+	parsed, err := registryroutes.Parse([]byte(rendered), nil)
+	if err != nil {
+		t.Fatalf("Parse(Render(routes)): unexpected error: %v", err)
+	}
+	if len(parsed) != 1 || !slices.Equal(parsed[0].Allow, route.Allow) {
+		t.Errorf("parsed = %+v, want one route allowing %v", parsed, route.Allow)
+	}
+}
+
+func TestRender_ReceivedSchemeKeepsAdviceWithoutSchemeComment(t *testing.T) {
+	route := Route{
+		MatchHost:        "repo.corp.example",
+		UpstreamBaseURL:  "https://repo.corp.example/npm/",
+		AuthScheme:       "basic",
+		Profile:          ProfileAdvice{Name: "artifactory", Note: "JFrog Artifactory", BasicUsername: "the user"},
+		CredentialSource: "env",
+		CredentialValue:  "X",
+	}
+	got := string(Render([]Route{route}))
+	if !strings.Contains(got, "# host profile \"artifactory\"") || !strings.Contains(got, "# basic username: the user\n") {
+		t.Errorf("Render output missing profile advice:\n%s", got)
+	}
+	if strings.Contains(got, "auth-scheme from host profile") || strings.Contains(got, "allow") {
+		t.Errorf("Render output carries a scheme or allow comment it has no basis for:\n%s", got)
+	}
+}
+
+func TestRender_PublicProfileWritesOnlyTheNoteComment(t *testing.T) {
+	const note = "known public host, needs no credential, nothing to configure"
+	route := Route{
+		MatchHost:        "registry.npmjs.org",
+		UpstreamBaseURL:  "https://registry.npmjs.org/",
+		AuthScheme:       "bearer",
+		Profile:          ProfileAdvice{Name: "registry.npmjs.org", Note: note},
+		CredentialSource: "env",
+		CredentialValue:  "X",
+	}
+	plain := route
+	plain.Profile = ProfileAdvice{}
+
+	got := string(Render([]Route{route}))
+	want := "# host profile \"registry.npmjs.org\": " + note + "\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("Render output missing %q:\n%s", want, got)
+	}
+	if stripped := strings.Replace(got, want, "", 1); stripped != string(Render([]Route{plain})) {
+		t.Errorf("a public profile changed more than its comment:\n%s", got)
 	}
 }

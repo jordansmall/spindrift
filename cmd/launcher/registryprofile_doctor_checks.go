@@ -20,8 +20,7 @@ import (
 const registryRouteProfileCheckName = "registry-route-profile"
 
 // profileMatcher is hostprofile.Match's shape. The row takes it as a parameter
-// so a test can supply a profile carrying Siblings, which the shipped table
-// does not yet.
+// so a test can supply a profile that differs from the shipped table.
 type profileMatcher func(declaredURL string, header http.Header) (hostprofile.Row, bool)
 
 // registryRouteProfileCheckForRoutes builds the advisory row warning where a
