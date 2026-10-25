@@ -2,7 +2,7 @@
 // own tests: Run replays a corpus of Target-repo trees through the registry
 // pipeline's stages in order and checks each stage's output against the golden
 // beside the case (issue #5654). It takes an ecosystem.Strategy and a directory,
-// never ecosystem.Table, so a Strategy proves itself over its own corpus, plus the
+// never the registered list, so a Strategy proves itself over its own corpus, plus the
 // neighbour Strategies a case names, which the caller resolves.
 //
 // A corpus directory holds one subdirectory per case:
@@ -21,7 +21,7 @@
 //	case.json                     optional JSON object, unknown keys refused: "rows", the
 //	                              names of neighbour Strategies replayed beside the primary Strategy
 //	                              (naming the primary Strategy too fixes its place in the order,
-//	                              as ecosystem.Table does in production; else it comes first),
+//	                              as registration order does in production; else it comes first),
 //	                              and "port", the Forwarder port the binding and rewrites
 //	                              stages render against (default bindregistry.ForwarderPort);
 //	                              the lockfile scan and bindings summary run production code
@@ -258,7 +258,7 @@ func readCaseConfig(dir string) (caseConfig, error) {
 
 // resolveRows is the case's Strategies in the order the pipeline reads them. Naming
 // the primary Strategy fixes its position among the neighbours, which matters where
-// production's ecosystem.Table order shows in a golden; left unnamed it comes
+// production's registration order shows in a golden; left unnamed it comes
 // first. A Strategy named twice would declare twice.
 func (cfg caseConfig) resolveRows(primary ecosystem.Strategy, lookup StrategyLookup) ([]ecosystem.Strategy, error) {
 	seen := map[string]bool{}

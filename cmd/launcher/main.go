@@ -2414,7 +2414,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, subcommandUsage("registry"))
 			return 1
 		}
-		return cmdRegistryDiscover(ecosystem.Table, args[1:], stdout, stderr)
+		return cmdRegistryDiscover(ecosystem.Registered(), args[1:], stdout, stderr)
 	},
 }
 

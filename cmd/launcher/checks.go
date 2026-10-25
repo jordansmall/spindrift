@@ -80,7 +80,7 @@ func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
 			// The Probe loads the file on every call rather than reusing a
 			// hoisted load: it must report a read or parse failure even on
 			// validate()'s fail-fast path, where the per-route rows never run.
-			routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Table)
+			routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Registered())
 			if err != nil {
 				return nil, err
 			}

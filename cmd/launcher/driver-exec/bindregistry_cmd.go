@@ -19,10 +19,11 @@ func isBindRegistryInvocation(args []string) bool {
 }
 
 // runBindRegistry is the bind-registry subcommand's entry point (ADR 0007, ADR
-// 0036 amendment #6, issues #2930/#2931): it wires the real DialProbe and
-// SpawnSocat into runBindRegistryWithDeps and returns the process exit code.
+// 0036 amendment #6, issues #2930/#2931): it wires the registered Strategies, the
+// real DialProbe and SpawnSocat into runBindRegistryWithDeps and returns the
+// process exit code.
 func runBindRegistry(args []string, stdout io.Writer) int {
-	return runBindRegistryWithDeps(args, stdout, bindregistry.DialProbe, bindregistry.SpawnSocat, exec.LookPath, bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval)
+	return runBindRegistryWithDeps(args, ecosystem.Registered(), stdout, bindregistry.DialProbe, bindregistry.SpawnSocat, exec.LookPath, bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval)
 }
 
 // spawnHTTPForwarder is an indirection over bindregistry.SpawnHTTPForwarder (issue
@@ -49,18 +50,12 @@ func renderEnvExports(exports []ecosystem.EnvExport) string {
 	return rendered
 }
 
-// runBindRegistryWithDeps is runBindRegistryWithRows over ecosystem.Table, the
-// production Strategies.
-func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
-	return runBindRegistryWithRows(args, ecosystem.Table, stdout, probe, spawn, lookPath, timeout, pollInterval)
-}
-
-// runBindRegistryWithRows parses the flags and runs whichever of three modes they
+// runBindRegistryWithDeps parses the flags and runs whichever of three modes they
 // select: bindings, in-tree (issue #2932) and the lockfile scan. Any mode's flags may
-// be given alone or with another's. probe, spawn, timeout and pollInterval are
+// be given alone or with another's. rows, probe, spawn, timeout and pollInterval are
 // injected so tests can exercise the readiness paths without a real socat or
 // listener. Bindings and in-tree apply share one gate, so neither respawns (#3141).
-func runBindRegistryWithRows(args []string, rows []ecosystem.Strategy, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
+func runBindRegistryWithDeps(args []string, rows []ecosystem.Strategy, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath bindregistry.LookPathFunc, timeout, pollInterval time.Duration) int {
 	fs := flag.NewFlagSet("bind-registry", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional; triggers bindings mode alone)")
