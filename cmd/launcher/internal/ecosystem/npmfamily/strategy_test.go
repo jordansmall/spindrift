@@ -199,7 +199,7 @@ func TestTable_InTreeConfigPath(t *testing.T) {
 // Without this pin, dropping Npm's RewriteRows shows up only indirectly,
 // as a proxy round-trip failure a package away from the cause.
 func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
-	rows := ecosystem.ResponseRewriteRows()
+	rows := ecosystem.ResponseRewriteRows([]ecosystem.Strategy{Npm, Yarn, Pnpm})
 	if len(rows) == 0 {
 		t.Fatal("ResponseRewriteRows() = empty, want at least npm's packument row")
 	}

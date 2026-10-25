@@ -167,12 +167,12 @@ func HomeConfigRowsOf(in []Strategy) []Strategy {
 	return rows
 }
 
-// ResponseRewriteRows returns every rewrite row declared across Table, in
-// Table order, so registryproxy never has to know which Strategies declare them.
-func ResponseRewriteRows() []registryvocab.RewriteRow {
+// ResponseRewriteRows returns every rewrite row declared across strategies, in
+// order, so registryproxy never has to know which Strategies declare them.
+func ResponseRewriteRows(strategies []Strategy) []registryvocab.RewriteRow {
 	var rows []registryvocab.RewriteRow
-	for _, row := range Table {
-		rows = append(rows, row.RewriteRows...)
+	for _, s := range strategies {
+		rows = append(rows, s.RewriteRows...)
 	}
 	return rows
 }

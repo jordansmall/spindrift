@@ -25,6 +25,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -3389,6 +3390,30 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	}
 	if cfg.ForgeBackend != "GH" {
 		t.Errorf("ForgeBackend = %q, want GH for codeForge=github", cfg.ForgeBackend)
+	}
+}
+
+// The Box's registry proxy takes its response-rewrite rows from this Config;
+// a zero value would run the proxy with no rewrites and no failing signal.
+func TestDispatchConfig_RegistryProxyRewriteRowsFromRegisteredStrategies(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	it := forge.NewFake()
+	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), forge.NewFake(), forge.Capabilities{})
+
+	want := ecosystem.ResponseRewriteRows(ecosystem.Registered())
+	if len(want) == 0 {
+		t.Fatal("ecosystem.Registered() yields no rewrite rows; Bundle not linked into this test binary")
+	}
+	var got, wantNames []string
+	for _, r := range cfg.RegistryProxyRewriteRows {
+		got = append(got, r.Ecosystem+"/"+r.Name)
+	}
+	for _, r := range want {
+		wantNames = append(wantNames, r.Ecosystem+"/"+r.Name)
+	}
+	if !reflect.DeepEqual(got, wantNames) {
+		t.Errorf("RegistryProxyRewriteRows = %v, want %v", got, wantNames)
 	}
 }
 
