@@ -7683,7 +7683,19 @@ and the route gets a comment naming the profile: Artifactory is recognised
 from an `/artifactory/api/` path in the declared registry URL, a
 `*.jfrog.io` hostname, or the `X-Artifactory-Id` header the probe received.
 A scheme the registry did announce always wins, and an unprofiled host
-still defaults to `bearer`. It's a setup-time,
+still defaults to `bearer`. The profile's advice does not depend on the
+probe: for a route on a profiled host, discovery also merges the
+profile's sibling paths for the ecosystems declaring that host into the
+route's `allow`, each joined onto the declared registry path (a join
+that lands on the bare root `/` is dropped), and writes comments beside
+the route naming the profile and giving its `basic` username convention
+and credential-helper hint. The Artifactory profile's only sibling is
+cargo's `../v1/crates`, because Artifactory's cargo `config.json`
+points `dl` at `<repo>/v1/crates`, beside the declared `<repo>/index`.
+A public-default host (crates.io, registry.npmjs.org) instead gets one
+comment saying it is a known public host that needs no credential and
+has nothing to configure; the route itself is unchanged. Only the
+scheme fill is gated on the probe being silent. It's a setup-time,
 operator-run tool, never invoked from inside the Box — a Box-influenced
 route would let an Agent steer a real credential at a host of its choosing. Once a route is configured,
 how a proxied dispatch actually reaches the Box over it — socket or
@@ -7696,11 +7708,13 @@ Registry route input (see the **Credential reference** glossary entry in
 store path (plus, for `cargo-credentials`, the registry name, or for
 `gradle-properties`, the property key) rather than the credential value
 itself. A written route otherwise carries only `match-host` and
-`auth-scheme` — the base URLs and cargo registry names discovery scanned
-out of the repo's config drive the auth-scheme probe and the credential
-match, not the file's contents, so neither a base URL nor any path ever
-lands in it. `upstream-origin` is the one exception, and only appears
-when the discovered URL's scheme or port is something `match-host` alone
+`auth-scheme`, plus `allow` when a matched Host profile names sibling
+paths — the base URLs and cargo registry names discovery scanned out of
+the repo's config drive the auth-scheme probe and the credential match,
+not the file's contents, so no base URL ever lands in it, and the only
+paths are those profile siblings. `upstream-origin` is the other
+exception, and only appears when the discovered URL's scheme or port is
+something `match-host` alone
 can't imply (ADR 0047, issue #3261). A route's per-ecosystem declaration —
 a `[routes.ecosystems.<name>]` sub-table carrying gradle's or go's typed
 `path` key, or cargo's `registries` list (ADR 0048, issue #3405) — is a
