@@ -1,0 +1,13 @@
+{
+  "envExports": [
+    {
+      "Name": "pnpm_config_registry",
+      "Value": "http://127.0.0.1:27182/artifacts-corp-test/artifactory/api/npm/npm-remote/"
+    }
+  ],
+  "inTree": {
+    "configPath": "pnpm-workspace.yaml",
+    "content": "registry: http://127.0.0.1:27182/artifacts-corp-test/artifactory/api/npm/npm-remote/\n",
+    "outcome": "applied"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "envExports": [
+    {
+      "Name": "npm_config_registry",
+      "Value": "http://127.0.0.1:27182/registry-npmjs-org/"
+    }
+  ],
+  "inTree": {
+    "configPath": ".npmrc",
+    "content": "registry=http://127.0.0.1:27182/registry-npmjs-org/\n",
+    "outcome": "applied"
+  }
+}

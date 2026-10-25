@@ -1,0 +1,30 @@
+{
+  "derived": [
+    {
+      "Host": "acme.jfrog.io",
+      "Origin": "https://acme.jfrog.io",
+      "Subtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/artifactory/api/cargo/cargo-local/index"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/artifactory/api/cargo/cargo-local/index",
+        "/artifactory/api/cargo/cargo-local/v1/crates"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/artifactory/api/cargo/cargo-local/index"
+        }
+      ],
+      "matchHost": "acme.jfrog.io",
+      "upstream": "https://acme.jfrog.io"
+    }
+  ]
+}

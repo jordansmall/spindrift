@@ -1,0 +1,2 @@
+[registries.acme]
+index = "sparse+https://acme.jfrog.io/artifactory/api/cargo/cargo-local/index/"

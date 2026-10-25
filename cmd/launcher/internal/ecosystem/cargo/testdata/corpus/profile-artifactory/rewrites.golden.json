@@ -1,0 +1,7 @@
+[
+  {
+    "body": "{\"api\":\"https://acme.jfrog.io/artifactory/api/cargo/cargo-local\",\"dl\":\"http://127.0.0.1:27182/acme-jfrog-io/artifactory/api/cargo/cargo-local/v1/crates\"}",
+    "request": "GET /acme-jfrog-io/artifactory/api/cargo/cargo-local/index/config.json",
+    "status": 200
+  }
+]

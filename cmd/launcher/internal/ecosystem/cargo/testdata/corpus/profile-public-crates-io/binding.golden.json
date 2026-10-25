@@ -1,0 +1,13 @@
+{
+  "envExports": [
+    {
+      "Name": "CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_TOKEN",
+      "Value": "spindrift-registry-proxy-placeholder-not-a-secret"
+    }
+  ],
+  "homeConfig": {
+    "configPath": "config.toml",
+    "content": "[source.crates-io]\nreplace-with = \"spindrift-registry-proxy\"\n\n[source.spindrift-registry-proxy]\nregistry = \"sparse+http://127.0.0.1:27182/index-crates-io/\"\n\n[registry]\nglobal-credential-providers = [\"cargo:token\"]\n\n[source.spindrift-upstream-acme]\nregistry = \"sparse+https://index.crates.io/\"\nreplace-with = \"spindrift-registry-proxy\"\n\n[registries.spindrift-registry-proxy]\nindex = \"sparse+http://127.0.0.1:27182/index-crates-io/\"\n",
+    "homeEnvVar": "CARGO_HOME"
+  }
+}

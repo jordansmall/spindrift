@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "registry.npmjs.org",
+      "Origin": "https://registry.npmjs.org",
+      "Subtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/"
+        }
+      ],
+      "matchHost": "registry.npmjs.org",
+      "upstream": "https://registry.npmjs.org"
+    }
+  ]
+}
