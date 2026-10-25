@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "acme.jfrog.io",
+      "Origin": "https://acme.jfrog.io",
+      "Subtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/api/npm/npm-remote"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/api/npm/npm-remote"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "npm",
+          "path": "/api/npm/npm-remote"
+        }
+      ],
+      "matchHost": "acme.jfrog.io",
+      "upstream": "https://acme.jfrog.io"
+    }
+  ]
+}

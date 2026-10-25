@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "npmrc",
+      "FromEnv": "",
+      "FromFile": "stores/npmrc",
+      "MatchHost": "artifacts.corp.test",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://artifacts.corp.test"
+    },
+    "Ecosystems": null,
+    "MatchHost": "artifacts.corp.test",
+    "UpstreamOrigin": ""
+  }
+]
