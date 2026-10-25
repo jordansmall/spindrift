@@ -613,7 +613,7 @@ func TestProbe_LauncherHashDeriveFailure_TipTagEmptyImageFresh(t *testing.T) {
 	}
 }
 
-// imageRepo splits on the last colon because a repo can itself embed one,
+// ImageRepo splits on the last colon because a repo can itself embed one,
 // for example a "host:port" registry prefix. A tag with no colon falls back
 // to the default "spindrift" repo rather than an empty one.
 func TestImageRepo_DerivesRepoFromLastColon(t *testing.T) {
