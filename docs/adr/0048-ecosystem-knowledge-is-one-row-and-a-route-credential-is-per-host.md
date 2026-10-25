@@ -89,7 +89,7 @@ dependency this ADR rules out.
 
 Credential sources therefore stay one table in `credresolver`. Each
 Ecosystem row declares, by source key, which stores it reads, and
-`registrydiscover.DiscoverRows` derives that map from the rows it is
+`registrydiscover.Discover` derives that map from the rows it is
 given with `ecosystem.CredentialStores(rows)`, as the proxy's rewrite
 rows come from the same table. That removes
 `f.Ecosystem == "cargo"`, the one name literal the containment scan
@@ -112,7 +112,7 @@ File-per-ecosystem stands. None of the promotion triggers above has fired.
 tests fall in or out of the synthetic-row move as follows.
 
 - **Registry-route drift check.** The doctor check takes its rows as a
-  parameter, and production passes `ecosystem.Table`. Its tests run on
+  parameter, and production passes `ecosystem.Registered()`. Its tests run on
   the synthetic row. A real row's multi-registry parsing, such as cargo
   declaring two registries on one host, stays pinned by its corpus
   (`cargo/replaced-source-two-registries`).
@@ -124,7 +124,7 @@ tests fall in or out of the synthetic-row move as follows.
   knowledge, so a synthetic row has nothing to replace them with.
   Neither writes an in-tree registry config or a lockfile.
 - **Box seam golden.** `box/box_seam_test.go` keeps asserting over
-  `ecosystem.Table`. It builds and runs the shipped `box` binary, which
+  `ecosystem.Registered()`. It builds and runs the shipped `box` binary, which
   binds the real table. A row seam there would need a test-only switch
   compiled into that binary. The Box's generic registry behaviour is
   already tested in-process on the synthetic row
@@ -155,7 +155,7 @@ option" instead.
    moves under `internal/ecosystem/<name>` and exports a Strategy. The
    Strategy is today's Row, renamed, with its nil-able hook fields
    unchanged. `internal/ecosystem` keeps the type, the registry and the
-   accessors (`EnvExportRowsOf`, `CredentialStores`, and so on). The
+   accessors (`EnvExportRows`, `CredentialStores`, and so on). The
    packages are `cargo`, `npmfamily`, `gomod` and `gradle`. `go` is a Go
    keyword, so the go ecosystem's package is `gomod`, but its Strategy is
    still named `"go"`.
@@ -219,3 +219,10 @@ Consequences:
   Strategy throughout, the glossary names its package and its corpus
   home, and the core `internal/ecosystem` package holds no ecosystem's
   file-format code.
+- Stage 2 closed in issue #5959. Libraries take Strategies only as
+  arguments, `ecosystem.Table` and the `Table`-default wrappers are gone,
+  and only the binaries, the Bundle guards and the Bundle-linking tests
+  read `ecosystem.Registered()`. The `...Rows` variants took the plain
+  names back. `dispatch/box.go` is not one of those call sites after
+  all: `main.go` fills `dispatch.Config.RegistryProxyRewriteRows` from
+  the registered Strategies, so dispatch stays a library.
