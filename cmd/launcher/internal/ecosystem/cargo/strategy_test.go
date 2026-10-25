@@ -10,9 +10,13 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
+// strategies is the list the tests below walk: cargo alone, since an ecosystem
+// package never imports another.
+var strategies = []ecosystem.Strategy{Strategy}
+
 func TestStrategy_CredentialStores(t *testing.T) {
 	want := []string{"cargo-credentials", "gradle-properties", "netrc", "npmrc"}
-	got := slices.Sorted(slices.Values(ecosystem.CredentialStores(ecosystem.Table)[Strategy.Name]))
+	got := slices.Sorted(slices.Values(ecosystem.CredentialStores(strategies)[Strategy.Name]))
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("stores = %v, want %v", got, want)
 	}
@@ -60,7 +64,7 @@ func TestStrategy_Shape(t *testing.T) {
 
 // registryroutes resolves the retired cargo-registries key through the registry.
 func TestStrategy_ResolvesByRetiredRouteKey(t *testing.T) {
-	row, ok := ecosystem.RowByRetiredRouteKey("cargo-registries", []ecosystem.Strategy{Strategy})
+	row, ok := ecosystem.RowByRetiredRouteKey("cargo-registries", strategies)
 	if !ok || row.Name != "cargo" {
 		t.Errorf(`RowByRetiredRouteKey("cargo-registries") = (%q, %v), want (cargo, true)`, row.Name, ok)
 	}
@@ -69,7 +73,7 @@ func TestStrategy_ResolvesByRetiredRouteKey(t *testing.T) {
 // Nothing else asserts on the collected slice's contents, so a Strategy the
 // collector forgets to gather would fail silently: New would just never see it.
 func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
-	rows := ecosystem.ResponseRewriteRows([]ecosystem.Strategy{Strategy})
+	rows := ecosystem.ResponseRewriteRows(strategies)
 	for _, row := range rows {
 		if row.Name == "cargo config.json" && row.Ecosystem == Strategy.Name {
 			return
@@ -78,11 +82,11 @@ func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
 	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", Strategy.Name)
 }
 
-// The only Strategy registered here is cargo, so a second home-config row
+// The only Strategy listed here is cargo, so a second home-config row
 // cannot hide behind it.
 func TestHomeConfigRows_Cargo(t *testing.T) {
 	var got []string
-	for _, row := range ecosystem.HomeConfigRows() {
+	for _, row := range ecosystem.HomeConfigRows(strategies) {
 		got = append(got, row.Name)
 	}
 	if want := []string{Strategy.Name}; !slices.Equal(got, want) {
@@ -122,9 +126,9 @@ func TestStrategy_HomeConfig(t *testing.T) {
 // source-replacement home config, which its 1:1 URL to source-name rule cannot
 // tolerate.
 func TestInTreeBindings_ExcludesCargo(t *testing.T) {
-	for _, row := range bindregistry.InTreeBindings(ecosystem.Registered()) {
+	for _, row := range bindregistry.InTreeBindings(strategies) {
 		if row.Name == Strategy.Name {
-			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", bindregistry.InTreeBindings(ecosystem.Registered()))
+			t.Fatalf("InTreeBindings(strategies) = %+v, want it to never include the cargo row", bindregistry.InTreeBindings(strategies))
 		}
 	}
 }

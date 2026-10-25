@@ -1,7 +1,6 @@
 package gomod_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -21,12 +20,4 @@ func lookup(name string) (ecosystem.Strategy, bool) {
 		return gomod.Strategy, true
 	}
 	return ecosystem.Strategy{}, false
-}
-
-// The replay pipeline reads the process-wide registry (route parsing validates
-// ecosystem names against it), and the Bundle that owns the real Register call
-// is not linked here.
-func TestMain(m *testing.M) {
-	ecosystem.Register(gomod.Strategy)
-	os.Exit(m.Run())
 }

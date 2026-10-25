@@ -1,7 +1,6 @@
 package gradle_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,13 +41,4 @@ func lookup(name string) (ecosystem.Strategy, bool) {
 		return neighbour, true
 	}
 	return ecosystem.Strategy{}, false
-}
-
-// The replay pipeline reads the process-wide registry (route parsing validates
-// ecosystem names against it), and the Bundle that owns the real Register call
-// is not linked here. Register the neighbour before gradle, as the Bundle lists
-// its rows.
-func TestMain(m *testing.M) {
-	ecosystem.Register(neighbour, gradle.Strategy)
-	os.Exit(m.Run())
 }

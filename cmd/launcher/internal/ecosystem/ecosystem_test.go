@@ -6,9 +6,9 @@ import (
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
 
-// Table order is the export-file order, so the stub's export-less Strategy must be
+// Strategy order is the export-file order, so the stub's export-less Strategy must be
 // skipped without disturbing the rest.
-func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
+func TestEnvExportRows_FollowsInputOrder(t *testing.T) {
 	renderer := func(int, string, func(string) string, []registrymanifest.Route) ([]EnvExport, []string) {
 		return nil, nil
 	}
@@ -20,13 +20,13 @@ func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
 	}
 
 	var got []string
-	for _, row := range EnvExportRowsOf(rows) {
+	for _, row := range EnvExportRows(rows) {
 		got = append(got, row.Name)
 	}
 
 	want := []string{"first", "second", "third"}
 	if len(got) != len(want) {
-		t.Fatalf("EnvExportRowsOf() = %v, want %v", got, want)
+		t.Fatalf("EnvExportRows() = %v, want %v", got, want)
 	}
 	for i, name := range want {
 		if got[i] != name {
@@ -35,7 +35,7 @@ func TestEnvExportRows_FollowsTableOrder(t *testing.T) {
 	}
 }
 
-func TestHomeConfigRowsOf_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
+func TestHomeConfigRows_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
 	rows := []Strategy{
 		{Name: "b", HomeConfig: &HomeConfig{}},
 		{Name: "none"},
@@ -43,12 +43,12 @@ func TestHomeConfigRowsOf_KeepsHomeConfigRowsInInputOrder(t *testing.T) {
 	}
 
 	var got []string
-	for _, row := range HomeConfigRowsOf(rows) {
+	for _, row := range HomeConfigRows(rows) {
 		got = append(got, row.Name)
 	}
 
 	if len(got) != 2 || got[0] != "b" || got[1] != "a" {
-		t.Errorf("HomeConfigRowsOf() = %v, want [b a]", got)
+		t.Errorf("HomeConfigRows() = %v, want [b a]", got)
 	}
 }
 

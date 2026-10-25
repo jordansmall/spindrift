@@ -33,22 +33,16 @@ func TestRegister_EmptyListPanics(t *testing.T) {
 	register(&fresh, nil)
 }
 
-func TestRegister_InstallsTable(t *testing.T) {
-	savedRegistered, savedTable := registered, Table
-	registered, Table = nil, nil
-	defer func() { registered, Table = savedRegistered, savedTable }()
+func TestRegister_InstallsCopyInOrder(t *testing.T) {
+	var fresh []Strategy
+	in := []Strategy{{Name: "first"}, {Name: "second"}}
+	register(&fresh, in)
 
-	Register(Strategy{Name: "first"})
-	for name, got := range map[string][]Strategy{"Registered()": Registered(), "Table": Table} {
-		if len(got) != 1 || got[0].Name != "first" {
-			t.Errorf("%s = %+v, want exactly the one Strategy %q", name, got, "first")
-		}
+	if len(fresh) != 2 || fresh[0].Name != "first" || fresh[1].Name != "second" {
+		t.Fatalf("installed = %+v, want first then second", fresh)
 	}
-
-	defer func() {
-		if recover() == nil {
-			t.Error("second Register call did not panic")
-		}
-	}()
-	Register(Strategy{Name: "second"})
+	in[0].Name = "mutated"
+	if fresh[0].Name != "first" {
+		t.Errorf("installed list aliases the caller's slice: %+v", fresh)
+	}
 }
