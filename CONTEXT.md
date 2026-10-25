@@ -292,8 +292,7 @@ the Registry proxy (ADR 0048). Each Strategy lives in its own package under
 go's is `gomod`); the core `internal/ecosystem` package holds the Strategy type
 and its hook types, the shared record types (`Declaration`, `Note`),
 `EnvExport` with `ExportValue`, `RouteLocalURL`, the registry
-(`Register`/`Registered`, and the stage-1 `Table` alias with its
-accessors), and the route keys `registryroutes` reads without importing a
+(`Register`/`Registered`), and the route keys `registryroutes` reads without importing a
 Strategy (the three frozen retired keys and cargo's live `registries` key)
 — no ecosystem's file-format code, and no import of an
 ecosystem package. The precedence order is the one `Register`
@@ -366,10 +365,10 @@ the verb's `-intree-action=apply|revert`) is the only mode with a revert.
 Its rewrite is a textual host substitution of a tracked config file for cargo,
 npm, yarn, and pnpm, tagged `skip-worktree`
 so the Agent neither sees nor commits it, table-driven off one binding per
-ecosystem in `bindregistry.InTreeBindings()`
+ecosystem in `bindregistry.InTreeBindings`
 (`cmd/launcher/internal/bindregistry/intreebinding.go`), itself a filtered
-view of the registered Strategies (`ecosystem.Table`), so an ecosystem's name
-is spelled once — but apply first probes for an already-listening
+view of the registered Strategies (`ecosystem.Registered()`), so an ecosystem's
+name is spelled once — but apply first probes for an already-listening
 Forwarder and spawns one if needed, gating the whole rewrite all-or-nothing
 on TCP readiness (AC5: a Forwarder that never becomes ready leaves every
 in-tree file untouched, no partial rewrite; the gate is
