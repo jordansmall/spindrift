@@ -554,3 +554,56 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+func TestCaseConfigProbeFixture(t *testing.T) {
+	read := func(t *testing.T, body string) (caseConfig, error) {
+		t.Helper()
+		dir := t.TempDir()
+		if body != "" {
+			if err := os.WriteFile(filepath.Join(dir, "case.json"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return readCaseConfig(dir)
+	}
+	t.Run("absent keeps the stub", func(t *testing.T) {
+		for _, body := range []string{"", `{}`} {
+			if cfg, err := read(t, body); err != nil || cfg.Probe != nil {
+				t.Errorf("body %q: probe = %+v, %v; want nil", body, cfg.Probe, err)
+			}
+		}
+	})
+	t.Run("empty object is a real response with no headers", func(t *testing.T) {
+		cfg, err := read(t, `{"probe": {}}`)
+		if err != nil || cfg.Probe == nil {
+			t.Fatalf("probe = %+v, %v; want non-nil", cfg.Probe, err)
+		}
+		if h := cfg.Probe.header(); len(h) != 0 {
+			t.Errorf("header = %v, want empty", h)
+		}
+	})
+	t.Run("header carries the challenge and the extra headers", func(t *testing.T) {
+		cfg, err := read(t, `{"probe": {"www-authenticate": "Basic realm=\"r\"", "headers": {"x-artifactory-id": "abc"}}}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := cfg.Probe.header()
+		if got := h.Get("WWW-Authenticate"); got != `Basic realm="r"` {
+			t.Errorf("WWW-Authenticate = %q", got)
+		}
+		if got := h.Get("X-Artifactory-Id"); got != "abc" {
+			t.Errorf("X-Artifactory-Id = %q", got)
+		}
+	})
+	for _, tc := range []struct{ name, body, want string }{
+		{"unknown probe key", `{"probe": {"challenge": "x"}}`, "unknown field"},
+		{"challenge in headers", `{"probe": {"headers": {"www-authenticate": "Basic"}}}`, "www-authenticate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := read(t, tc.body)
+			if err == nil || !strings.Contains(err.Error(), "case.json") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want case.json error containing %q", err, tc.want)
+			}
+		})
+	}
+}

@@ -25,7 +25,12 @@
 //	                              and "port", the Forwarder port the binding and rewrites
 //	                              stages render against (default bindregistry.ForwarderPort);
 //	                              the lockfile scan and bindings summary run production code
-//	                              on the fixed ForwarderPort, so "port" does not reach them
+//	                              on the fixed ForwarderPort, so "port" does not reach them;
+//	                              and "probe", the stubbed discovery probe's response, an
+//	                              object of "www-authenticate" and "headers" (string to
+//	                              string) read by the live probe's parsing and then filled
+//	                              from a matched Host profile; absent, the probe answers
+//	                              bearer for every host and no profile is consulted
 //	upstream/<match-host>/<path>  optional upstream response bodies the proxy rewrites (stage 8)
 //	classification.golden.txt     stage 1: the lockfile classification, empty when no lockfile matches
 //	lockfile-scan.golden.txt      stage 2: the warnings for a tracked lockfile still naming the
@@ -49,14 +54,17 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/credresolver"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/golden"
+	"spindrift.dev/launcher/internal/profileprobe"
 	"spindrift.dev/launcher/internal/registrydiscover"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registrypathset"
@@ -201,7 +209,7 @@ func replayCase(row ecosystem.Strategy, dir string, update bool, lookup Strategy
 	if err != nil {
 		return []error{err}
 	}
-	c := &replay{row: row, allRows: rows, port: bindregistry.ForwarderPort, dir: dir}
+	c := &replay{row: row, allRows: rows, port: bindregistry.ForwarderPort, probe: cfg.Probe, dir: dir}
 	if cfg.Port != nil {
 		c.port = *cfg.Port
 	}
@@ -234,6 +242,27 @@ type caseConfig struct {
 	Rows []string `json:"rows"`
 	// Port is a pointer so an explicit "port": 0 is refused, not defaulted.
 	Port *int `json:"port"`
+	// Probe is a pointer so an absent key keeps the bearer stub while "probe": {}
+	// is a real response with no headers.
+	Probe *probeFixture `json:"probe"`
+}
+
+// probeFixture is the stubbed discovery probe's response.
+type probeFixture struct {
+	WWWAuthenticate string            `json:"www-authenticate"`
+	Headers         map[string]string `json:"headers"`
+}
+
+// header is the response header the live probe would have read.
+func (f probeFixture) header() http.Header {
+	h := http.Header{}
+	for k, v := range f.Headers {
+		h.Set(k, v)
+	}
+	if f.WWWAuthenticate != "" {
+		h.Set("WWW-Authenticate", f.WWWAuthenticate)
+	}
+	return h
 }
 
 func readCaseConfig(dir string) (caseConfig, error) {
@@ -252,6 +281,13 @@ func readCaseConfig(dir string) (caseConfig, error) {
 	}
 	if cfg.Port != nil && (*cfg.Port < 1 || *cfg.Port > 65535) {
 		return cfg, fmt.Errorf("case.json: port %d is outside 1-65535", *cfg.Port)
+	}
+	if cfg.Probe != nil {
+		for k := range cfg.Probe.Headers {
+			if strings.EqualFold(k, "WWW-Authenticate") {
+				return cfg, fmt.Errorf("case.json: probe header %q belongs in \"www-authenticate\"", k)
+			}
+		}
 	}
 	return cfg, nil
 }
@@ -313,6 +349,7 @@ type replay struct {
 	row     ecosystem.Strategy
 	allRows []ecosystem.Strategy
 	port    int
+	probe   *probeFixture
 	dir     string
 
 	rendered memo[[]byte]
@@ -348,11 +385,16 @@ func (c *replay) discovery() ([]byte, error) {
 		lookup := func(s registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 			return registrydiscover.StoreLookup(registrydiscover.Store{Name: s.Name, Path: filepath.Join(c.dir, s.Path)}, d)
 		}
-		routes, _, err := registrydiscover.Discover(
-			c.repo(), c.allRows, stores,
-			lookup, func(string) registrydiscover.ProbeResult {
-				return registrydiscover.ProbeResult{Scheme: probedAuthScheme}
+		probe := func(string) registrydiscover.ProbeResult {
+			return registrydiscover.ProbeResult{Scheme: probedAuthScheme}
+		}
+		if c.probe != nil {
+			h := c.probe.header()
+			probe = profileprobe.Fill(func(string) registrydiscover.ProbeResult {
+				return registrydiscover.ReadProbeResponse(h)
 			})
+		}
+		routes, _, err := registrydiscover.Discover(c.repo(), c.allRows, stores, lookup, probe)
 		if err != nil {
 			return nil, err
 		}
