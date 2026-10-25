@@ -1436,8 +1436,9 @@ Driver entry declares:
   before the first pass, and skips an unset one; preflight owns requiring
   it. `assertShape` requires `env` to be a variable name and `pathRelative`
   a `$HOME`-relative path with no `..` segment or whitespace. pi uses it to
-  write `PI_AUTH_CONTENT` to `.pi/agent/auth.json` and `PI_MODELS_CONTENT`
-  to `.pi/agent/models.json`. Unlike `configFiles`, the value arrives at run
+  write `PI_AUTH_CONTENT` to `.pi/agent/auth.json`, `PI_MODELS_CONTENT` to
+  `.pi/agent/models.json`, and `PI_SETTINGS_CONTENT` to
+  `.pi/agent/settings.json`. Unlike `configFiles`, the value arrives at run
   time, so it can carry a secret; every `envFiles` env joins the Bash scrub
   list and the off-argv set whether or not a credential rule names it.
 - `authContent` — `{ env; oauthProviders; apiKeyProviders?; }`, naming an
@@ -2334,7 +2335,9 @@ it drifts from them:
   (custom Providers; see [pi Driver: self-hosted
   Providers](#pi-driver-self-hosted-providers)) is not a credential rule:
   it is never required, and a Provider it declares under a name no
-  credential rule matches needs no key.
+  credential rule matches needs no key. Nor is `PI_SETTINGS_CONTENT` (see
+  [Lengthening pi's HTTP idle
+  timeout](#lengthening-pis-http-idle-timeout)), which is never required.
 - `opencode`: `OPENCODE_AUTH_CONTENT`. A miss is an error only when `MODEL`
   or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
   `FILER_MODEL`) is `github-copilot/<model>`. When no tier visibly needs it
@@ -2562,6 +2565,34 @@ list (`agent/credential-vars`). The written file is on the credential-deny
 list (`lib/credential-paths.nix`), so the agent's own `read` and `bash` calls
 cannot open it. It has no flake option, since secrets are never baked into
 the image.
+
+#### Lengthening pi's HTTP idle timeout
+
+pi aborts a request that receives no bytes for `httpIdleTimeoutMs`
+milliseconds (default 300000, five minutes) and reports it as a network
+transient. A self-hosted server streams nothing before its first token, so a
+long cold prefill (a large prompt on a slow or shared GPU can take a quarter
+of an hour) is dropped that way. `PI_SETTINGS_CONTENT` carries the contents of
+a pi `settings.json`, and the Box writes it to
+`/home/agent/.pi/agent/settings.json` (mode `0600`) before the Driver runs,
+the same `envFiles` path as the two knobs above. Set it to JSON, never a path:
+
+```sh
+PI_SETTINGS_CONTENT='{"httpIdleTimeoutMs":3600000}'
+```
+
+pi validates the file when it loads settings, so a non-numeric
+`httpIdleTimeoutMs` makes pi throw at startup. The JSON is operator-controlled
+host-side content and is never read from the Target repo. Unset, nothing is
+written, preflight is unchanged, and no credential rule applies.
+
+It is sourced like `PI_MODELS_CONTENT`: `harness.env`,
+`PI_SETTINGS_CONTENT_CMD`/`--pi-settings-content-cmd`, or
+`--pi-settings-content-file`. It never reaches argv, it is in the Bash scrub
+list (`agent/credential-vars`), and it has no flake option. Unlike the two
+knobs above, the written file is not on the credential-deny list: pi's
+`settings.json` carries no credential, so the agent's own `read` and `bash`
+calls may open it.
 
 ### Advanced tuning
 

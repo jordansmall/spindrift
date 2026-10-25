@@ -603,3 +603,18 @@ every `envFiles` env as well as every credential-rule env (ADR 0066, item 7).
 Every `envFiles` env that existed was already a credential env, so
 `PI_MODELS_CONTENT` is the only name this adds. Reachability of the endpoint
 is still the runner-netns question the #269 amendment named.
+
+## Amendment (issue #6052): pi's `settings.json` comes from `PI_SETTINGS_CONTENT`
+
+A self-hosted Provider streams nothing before its first token, and pi aborts a
+request that sees no bytes for `httpIdleTimeoutMs` (default five minutes), so a
+long cold prefill is dropped as a network transient. pi reads that setting from
+`settings.json` in its agent directory. `PI_SETTINGS_CONTENT` carries the
+contents of that file and the pi row's `envFiles` writes it to
+`.pi/agent/settings.json` before the first pass, the same primitive as
+`PI_AUTH_CONTENT` and `PI_MODELS_CONTENT`. Unset, nothing is written. It has no
+credential rule and no preflight check. Like its siblings it is a secret knob
+(`_CMD` and `_FILE` sources, never argv, never baked) on the Bash scrub list,
+but unlike theirs its written file is deliberately left off the
+credential-deny list (`lib/credential-paths.nix`): pi's `settings.json`
+carries no credential, so the agent's own `read` and `bash` calls may open it.
