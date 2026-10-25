@@ -11,6 +11,10 @@ import (
 	"spindrift.dev/launcher/internal/registryvocab"
 )
 
+// strategies lists the family in the Bundle's order, since Strategy order is the
+// precedence these tests lean on.
+var strategies = []ecosystem.Strategy{Npm, Yarn, Pnpm}
+
 // stubGetenv stands in for os.Getenv so these tests never read the real
 // process environment.
 func stubGetenv(env map[string]string) func(string) string {
@@ -19,7 +23,7 @@ func stubGetenv(env map[string]string) func(string) string {
 
 func rowByName(t *testing.T, name string) ecosystem.Strategy {
 	t.Helper()
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		if row.Name == name {
 			return row
 		}
@@ -34,7 +38,7 @@ func TestStrategy_CredentialStores(t *testing.T) {
 	for _, k := range credresolver.StoreKinds() {
 		storeKeys[k.SourceKey] = true
 	}
-	stores := ecosystem.CredentialStores(ecosystem.Table)
+	stores := ecosystem.CredentialStores(strategies)
 	for _, s := range []ecosystem.Strategy{Npm, Yarn, Pnpm} {
 		got := slices.Sorted(slices.Values(stores[s.Name]))
 		if !reflect.DeepEqual(got, want) {
@@ -50,13 +54,13 @@ func TestStrategy_CredentialStores(t *testing.T) {
 
 // A Strategy that gains or loses EnvExports otherwise fails silently: it
 // contributes nothing to the export file, or panics a caller.
-func TestTable_EnvExportsPresence(t *testing.T) {
+func TestStrategies_EnvExportsPresence(t *testing.T) {
 	want := map[string]bool{
 		"npm":  true,
 		"yarn": true,
 		"pnpm": true,
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		wantPresent, ok := want[row.Name]
 		if !ok {
 			t.Fatalf("row %q not covered by this test's want map", row.Name)
@@ -70,13 +74,13 @@ func TestTable_EnvExportsPresence(t *testing.T) {
 
 // npm, pnpm and yarn bind the Forwarder through an env var; a Strategy that
 // binds through a file leaves the field empty.
-func TestTable_BindingEnvVarPresence(t *testing.T) {
+func TestStrategies_BindingEnvVarPresence(t *testing.T) {
 	want := map[string]string{
 		"npm":  "npm_config_registry",
 		"yarn": "YARN_NPM_REGISTRY_SERVER",
 		"pnpm": "pnpm_config_registry",
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		wantVar, ok := want[row.Name]
 		if !ok {
 			t.Fatalf("row %q not covered by this test's want map", row.Name)
@@ -89,17 +93,17 @@ func TestTable_BindingEnvVarPresence(t *testing.T) {
 
 // A single Strategy's own EnvExports output cannot always be diffed against its
 // BindingEnvVar: a renderer may emit its vars conditionally. So this checks
-// each BindingEnvVar against the whole export file, walking EnvExportRows()
+// each BindingEnvVar against the whole export file, walking EnvExportRows
 // the way bindings mode does.
-func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
+func TestStrategies_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 	renderedNames := map[string]bool{}
-	for _, row := range ecosystem.EnvExportRows() {
+	for _, row := range ecosystem.EnvExportRows(strategies) {
 		exports, _ := row.EnvExports(27182, "r0", stubGetenv(nil), allDeclaredRoutes())
 		for _, export := range exports {
 			renderedNames[export.Name] = true
 		}
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		if row.BindingEnvVar == "" {
 			continue
 		}
@@ -112,13 +116,13 @@ func TestTable_BindingEnvVarMatchesRenderedExports(t *testing.T) {
 // No npm-family Strategy re-renders its home config once the Target repo is on
 // disk (issue #3201); a Strategy that does must fail here rather than pass
 // silently.
-func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
+func TestStrategies_RepoAwareHomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
 		"npm":  false,
 		"yarn": false,
 		"pnpm": false,
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		wantPresent, ok := want[row.Name]
 		if !ok {
 			t.Fatalf("row %q not covered by this test's want map", row.Name)
@@ -130,21 +134,21 @@ func TestTable_RepoAwareHomeConfigPresence(t *testing.T) {
 	}
 }
 
-// The only caller reaches repo-aware Strategies by filtering HomeConfigRows(), so
+// The only caller reaches repo-aware Strategies by filtering HomeConfigRows, so
 // a Strategy setting RepoAwareHomeConfig with a nil HomeConfig never runs at all
 // (issue #3201).
-func TestTable_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
-	for _, row := range ecosystem.Table {
+func TestStrategies_RepoAwareHomeConfigRequiresHomeConfig(t *testing.T) {
+	for _, row := range strategies {
 		if row.RepoAwareHomeConfig != nil && row.HomeConfig == nil {
-			t.Errorf("row %q sets RepoAwareHomeConfig with a nil HomeConfig, want both set: such a row never runs, since repo-aware rows are reached only by filtering ecosystem.HomeConfigRows()", row.Name)
+			t.Errorf("row %q sets RepoAwareHomeConfig with a nil HomeConfig, want both set: such a row never runs, since repo-aware rows are reached only by filtering ecosystem.HomeConfigRows", row.Name)
 		}
 	}
 }
 
 // BindHomes announces AnnounceBindingValue by reading the BindingEnvVar export,
 // so a Strategy setting it without naming a var would announce nothing.
-func TestTable_AnnounceBindingValueRequiresBindingEnvVar(t *testing.T) {
-	for _, row := range ecosystem.Table {
+func TestStrategies_AnnounceBindingValueRequiresBindingEnvVar(t *testing.T) {
+	for _, row := range strategies {
 		if row.AnnounceBindingValue && row.BindingEnvVar == "" {
 			t.Errorf("row %q sets AnnounceBindingValue with an empty BindingEnvVar, want both set", row.Name)
 		}
@@ -152,9 +156,9 @@ func TestTable_AnnounceBindingValueRequiresBindingEnvVar(t *testing.T) {
 }
 
 // Duplicate names would make every lookup by name ambiguous.
-func TestTable_NamesUnique(t *testing.T) {
-	seen := make(map[string]bool, len(ecosystem.Table))
-	for _, row := range ecosystem.Table {
+func TestStrategies_NamesUnique(t *testing.T) {
+	seen := make(map[string]bool, len(strategies))
+	for _, row := range strategies {
 		if seen[row.Name] {
 			t.Fatalf("duplicate row name %q", row.Name)
 		}
@@ -164,8 +168,8 @@ func TestTable_NamesUnique(t *testing.T) {
 
 // A Strategy added without a classification would silently carry a blank nudge
 // string.
-func TestTable_ClassificationNonEmpty(t *testing.T) {
-	for _, row := range ecosystem.Table {
+func TestStrategies_ClassificationNonEmpty(t *testing.T) {
+	for _, row := range strategies {
 		if row.Classification == "" {
 			t.Errorf("row %q has empty classification", row.Name)
 		}
@@ -175,13 +179,13 @@ func TestTable_ClassificationNonEmpty(t *testing.T) {
 // The want map covers the empty paths too, so a Strategy added without a decision
 // on its in-tree registry-config path fails here rather than being silently
 // excluded or included wherever a consumer filters on the field.
-func TestTable_InTreeConfigPath(t *testing.T) {
+func TestStrategies_InTreeConfigPath(t *testing.T) {
 	want := map[string]string{
 		"npm":  ".npmrc",
 		"yarn": ".yarnrc.yml",
 		"pnpm": "pnpm-workspace.yaml",
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		path, ok := want[row.Name]
 		if !ok {
 			t.Errorf("row %q has no expected InTreeConfigPath in this test", row.Name)
@@ -213,13 +217,13 @@ func TestResponseRewriteRows_ContainsNpmPackumentRow(t *testing.T) {
 
 // No npm-family Strategy writes a home-level config. A Strategy gaining or
 // losing one otherwise just changes HomeConfigRows' count silently.
-func TestTable_HomeConfigPresence(t *testing.T) {
+func TestStrategies_HomeConfigPresence(t *testing.T) {
 	want := map[string]bool{
 		"npm":  false,
 		"yarn": false,
 		"pnpm": false,
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		wantPresent, ok := want[row.Name]
 		if !ok {
 			t.Fatalf("row %q not covered by this test's want map", row.Name)
@@ -236,8 +240,8 @@ func TestTable_HomeConfigPresence(t *testing.T) {
 			homeConfigRowCount++
 		}
 	}
-	if got := len(ecosystem.HomeConfigRows()); got != homeConfigRowCount {
-		t.Errorf("len(ecosystem.HomeConfigRows()) = %d, want %d", got, homeConfigRowCount)
+	if got := len(ecosystem.HomeConfigRows(strategies)); got != homeConfigRowCount {
+		t.Errorf("len(ecosystem.HomeConfigRows(strategies)) = %d, want %d", got, homeConfigRowCount)
 	}
 }
 
@@ -258,13 +262,13 @@ func allDeclaredRoutes() []registrymanifest.Route {
 // Some Strategies carry a retired top-level routes-file key (ADR 0047, issue
 // #3261) predating [routes.ecosystems.<name>] (issue #3403). A Strategy gaining
 // or losing the key must fail here.
-func TestTable_RetiredRouteKeyPresence(t *testing.T) {
+func TestStrategies_RetiredRouteKeyPresence(t *testing.T) {
 	want := map[string]string{
 		"npm":  "",
 		"yarn": "",
 		"pnpm": "",
 	}
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		wantKey, ok := want[row.Name]
 		if !ok {
 			t.Fatalf("row %q not covered by this test's want map", row.Name)
@@ -277,8 +281,8 @@ func TestTable_RetiredRouteKeyPresence(t *testing.T) {
 
 // A nil RouteDeclaration means "no such notion", not "accept anything", so the
 // caller rejects every non-"path" key for a Strategy with no hook.
-func TestTable_NoStrategyHasRouteDeclaration(t *testing.T) {
-	for _, row := range ecosystem.Table {
+func TestStrategies_NoStrategyHasRouteDeclaration(t *testing.T) {
+	for _, row := range strategies {
 		if row.RouteDeclaration != nil {
 			t.Errorf("row %q: RouteDeclaration is non-nil, want nil (no key beyond \"path\" accepted)", row.Name)
 		}

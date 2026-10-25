@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrydiscover"
 )
 
@@ -15,7 +14,7 @@ import (
 // the real Strategies to it, since a core package may not name them.
 func TestExtract_ReadsEveryRegisteredPath(t *testing.T) {
 	var checked int
-	for _, row := range ecosystem.Registered() {
+	for _, row := range strategies {
 		if row.InTreeConfigPath == "" || row.ConfigParser == nil {
 			continue
 		}
@@ -26,7 +25,7 @@ func TestExtract_ReadsEveryRegisteredPath(t *testing.T) {
 				t.Fatalf("MkdirAll: %v", err)
 			}
 
-			_, _, err := registrydiscover.Extract(dir, ecosystem.Registered())
+			_, _, err := registrydiscover.Extract(dir, strategies)
 			if err == nil {
 				t.Fatal("Extract: want a read error for a directory at the row's path, got nil")
 			}

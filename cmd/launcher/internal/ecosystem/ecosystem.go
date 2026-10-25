@@ -61,8 +61,8 @@ type ConfigParser func(content string) (decls []Declaration, namedAny bool, err 
 // <key>: ". Nil means the caller must reject every key beyond "path".
 type RouteDeclarationValidator func(key string, value any) error
 
-// Strategy is one ecosystem's entry in Table. A nil hook field contributes nothing
-// to a walk over Table.
+// Strategy is one ecosystem's entry in the registered list. A nil hook field
+// contributes nothing to a walk over Strategies.
 type Strategy struct {
 	Name          string
 	LockfileNames []string
@@ -86,7 +86,7 @@ type Strategy struct {
 	// a Strategy keeps its InTreeConfigPath, which the renderer reads, but is
 	// excluded from the in-tree rewrite, since the two do not compose
 	// (bindregistry.InTreeBindings). It needs a non-nil HomeConfig: the only
-	// caller filters HomeConfigRows(), so a Strategy setting one alone is skipped.
+	// caller filters HomeConfigRows, so a Strategy setting one alone is skipped.
 	RepoAwareHomeConfig RepoAwareHomeConfigRenderer
 
 	// BindingEnvVar names the one env var the Strategy's binding lands in (npm,
@@ -124,18 +124,11 @@ type Strategy struct {
 	CredentialStores []string
 }
 
-// EnvExportRows returns the Strategies carrying an EnvExports renderer, in Table
-// order, which is the rendered export file's line order.
-// The slice is fresh, but its Strategy copies share their LockfileNames backing
-// array with Table, which callers must not write through.
-func EnvExportRows() []Strategy {
-	return EnvExportRowsOf(Table)
-}
-
-// EnvExportRowsOf is EnvExportRows over the given Strategies rather than Table. The
-// slice is fresh, but its Strategy copies share their LockfileNames backing array
-// with in, which callers must not write through.
-func EnvExportRowsOf(in []Strategy) []Strategy {
+// EnvExportRows returns the Strategies of in carrying an EnvExports renderer, in
+// input order, which is the rendered export file's line order. The slice is
+// fresh, but its Strategy copies share their LockfileNames backing array with
+// in, which callers must not write through.
+func EnvExportRows(in []Strategy) []Strategy {
 	rows := make([]Strategy, 0, len(in))
 	for _, row := range in {
 		if row.EnvExports == nil {
@@ -146,17 +139,10 @@ func EnvExportRowsOf(in []Strategy) []Strategy {
 	return rows
 }
 
-// HomeConfigRows returns the Strategies carrying a non-nil HomeConfig, in Table
-// order. The slice is fresh, but its Strategy copies share their LockfileNames
-// backing array with Table, which callers must not write through.
-func HomeConfigRows() []Strategy {
-	return HomeConfigRowsOf(Table)
-}
-
-// HomeConfigRowsOf is HomeConfigRows over the given Strategies rather than Table. The
-// slice is fresh, but its Strategy copies share their LockfileNames backing array
-// with in, which callers must not write through.
-func HomeConfigRowsOf(in []Strategy) []Strategy {
+// HomeConfigRows returns the Strategies of in carrying a non-nil HomeConfig, in
+// input order. The slice is fresh, but its Strategy copies share their
+// LockfileNames backing array with in, which callers must not write through.
+func HomeConfigRows(in []Strategy) []Strategy {
 	rows := make([]Strategy, 0, len(in))
 	for _, row := range in {
 		if row.HomeConfig == nil {
@@ -200,7 +186,6 @@ var registered []Strategy
 // or an empty list, so a half-registered or silently shadowed table cannot run.
 func Register(strategies ...Strategy) {
 	register(&registered, strategies)
-	Table = registered
 }
 
 func register(into *[]Strategy, strategies []Strategy) {
@@ -221,14 +206,9 @@ func register(into *[]Strategy, strategies []Strategy) {
 }
 
 // Registered returns the Strategies Register installed, in precedence order.
-// It is empty until the Bundle (or a test's TestMain) has registered. Treat it
-// as read-only; a consumer handing Strategies further out copies them.
+// It is empty until the Bundle has registered. Treat it as read-only; a consumer
+// handing Strategies further out copies them.
 func Registered() []Strategy { return registered }
-
-// Table is the stage-1 alias of the registered list that the wrappers below
-// and their callers still read; stage 2 of issue #5940 deletes it. Order comes
-// from the Register call in internal/driver/bundle/ecosystems.go.
-var Table []Strategy
 
 // RowByRetiredRouteKey returns the Strategy among rows whose RetiredRouteKey
 // equals key, so a caller translating a retired routes-file key never

@@ -27,14 +27,6 @@ func lookup(name string) (ecosystem.Strategy, bool) {
 	return ecosystem.Strategy{}, false
 }
 
-// The replay pipeline reads the process-wide registry (route parsing validates
-// ecosystem names against it), and the Bundle that owns the real Register call
-// is not linked here.
-func TestMain(m *testing.M) {
-	ecosystem.Register(cargo.Strategy)
-	os.Exit(m.Run())
-}
-
 // TestCorpus_DerivesAPath guards against an in-tree config that parses but
 // derives no path, which would leave the proxy refusing every request cargo
 // makes, or one whose subtree admits no path beneath itself.

@@ -6,12 +6,11 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/bindregistry"
-	"spindrift.dev/launcher/internal/ecosystem"
 )
 
 // Order is asserted, not just membership: the verb's apply/revert loop
-// iterates InTreeBindings() in whatever order it returns, so npm/yarn/pnpm
-// must match ecosystem.Table's own order (issue #3180, Strategies from issue
+// iterates InTreeBindings(strategies) in whatever order it returns, so npm/yarn/pnpm
+// must match the Bundle's order (issue #3180, Strategies from issue
 // #2933). cargo is absent by design (issue #3201), pinned in its own package
 // by TestInTreeBindings_ExcludesCargo.
 func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
@@ -24,9 +23,9 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 		{name: "pnpm", configPath: "pnpm-workspace.yaml"},
 	}
 
-	got := bindregistry.InTreeBindings(ecosystem.Registered())
+	got := bindregistry.InTreeBindings(strategies)
 	if len(got) != len(want) {
-		t.Fatalf("InTreeBindings() has %d rows, want exactly %d: %+v", len(got), len(want), got)
+		t.Fatalf("InTreeBindings(strategies) has %d rows, want exactly %d: %+v", len(got), len(want), got)
 	}
 	for i, tc := range want {
 		if got[i].Name != tc.name || got[i].InTreeConfigPath != tc.configPath {
@@ -40,7 +39,7 @@ func TestInTreeBindingTableHasExpectedRows(t *testing.T) {
 // toolchain hint names this classification, and toolchain's own tests run on a
 // stand-in, so this is where each real lockfile's spelling is held.
 func TestClassify_EachLockfileClassifiesAsItsStrategy(t *testing.T) {
-	registered := ecosystem.Registered()
+	registered := strategies
 	if len(registered) == 0 {
 		t.Fatal("no Strategies registered")
 	}

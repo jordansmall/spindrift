@@ -27,17 +27,17 @@ func TestCorpus(t *testing.T) {
 		}
 		name := e.Name()
 		t.Run(name, func(t *testing.T) {
-			row, ok := tableRow(name)
+			row, ok := strategyRow(name)
 			if !ok {
 				t.Fatalf("testdata/corpus/%s matches no registered Strategy", name)
 			}
-			ecosystemtest.Run(t, row, filepath.Join("testdata", "corpus", name), tableRow)
+			ecosystemtest.Run(t, row, filepath.Join("testdata", "corpus", name), strategyRow)
 		})
 	}
 }
 
-func tableRow(name string) (ecosystem.Strategy, bool) {
-	for _, row := range ecosystem.Table {
+func strategyRow(name string) (ecosystem.Strategy, bool) {
+	for _, row := range strategies {
 		if row.Name == name {
 			return row, true
 		}
@@ -45,13 +45,13 @@ func tableRow(name string) (ecosystem.Strategy, bool) {
 	return ecosystem.Strategy{}, false
 }
 
-// TestCorpus_EveryInTreeRowDerivesAPath guards the Table against a Strategy whose
+// TestCorpus_EveryInTreeRowDerivesAPath guards the Strategies against a Strategy whose
 // in-tree config parses but derives no path, which would leave the proxy
 // refusing every request that ecosystem makes, or one whose subtree admits no
 // path beneath itself. Strategies with an empty InTreeConfigPath derive nothing by
 // design and are excluded.
 func TestCorpus_EveryInTreeRowDerivesAPath(t *testing.T) {
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		if row.InTreeConfigPath == "" {
 			continue
 		}
@@ -104,7 +104,7 @@ func TestCorpus_EveryInTreeRowDerivesAPath(t *testing.T) {
 // the Strategy's corpus directory would go unclassified and unscanned, since each
 // stage replays only what a case's repo/ holds.
 func TestCorpus_EveryLockfileNameHasACase(t *testing.T) {
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		for _, lockfile := range row.LockfileNames {
 			t.Run(row.Name+"/"+lockfile, func(t *testing.T) {
 				matches, err := filepath.Glob(filepath.Join("testdata", "corpus", row.Name, "*", "repo", lockfile))
@@ -123,7 +123,7 @@ func TestCorpus_EveryLockfileNameHasACase(t *testing.T) {
 // a Strategy whose cases all leave it empty proves nothing about the scan reaching
 // that Strategy.
 func TestCorpus_EveryLockfileRowHasAScanHit(t *testing.T) {
-	for _, row := range ecosystem.Table {
+	for _, row := range strategies {
 		if len(row.LockfileNames) == 0 {
 			continue
 		}
@@ -146,11 +146,6 @@ func TestCorpus_EveryLockfileRowHasAScanHit(t *testing.T) {
 	}
 }
 
-// The replay pipeline reads the process-wide registry (route parsing validates
-// ecosystem names against it), and the Bundle that owns the real Register call
-// is not linked here. The order matches the Bundle's, since Table order is the
+// strategies lists the family in the Bundle's order, since Strategy order is the
 // precedence this package's tests lean on.
-func TestMain(m *testing.M) {
-	ecosystem.Register(npmfamily.Npm, npmfamily.Yarn, npmfamily.Pnpm)
-	os.Exit(m.Run())
-}
+var strategies = []ecosystem.Strategy{npmfamily.Npm, npmfamily.Yarn, npmfamily.Pnpm}

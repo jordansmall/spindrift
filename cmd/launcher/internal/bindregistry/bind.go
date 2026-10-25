@@ -229,7 +229,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 	// here.
 	var exports []ecosystem.EnvExport
 	var warnings []string
-	for _, row := range ecosystem.EnvExportRowsOf(rows) {
+	for _, row := range ecosystem.EnvExportRows(rows) {
 		rowExports, rowWarnings := row.EnvExports(port, prefix, getenv, gate.manifest.Routes)
 		exports = append(exports, rowExports...)
 		warnings = append(warnings, rowWarnings...)
@@ -243,7 +243,7 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 	// path Strategy-generically. Only Strategies with a non-nil HomeConfig land here, which
 	// is exactly the set that summary looks up, so its lookup never misses.
 	homeConfigPaths := make(map[string]string)
-	for _, row := range ecosystem.HomeConfigRowsOf(rows) {
+	for _, row := range ecosystem.HomeConfigRows(rows) {
 		path, ok := resolveHomeConfigPath(stdout, row, getenv)
 		if !ok {
 			return false
@@ -522,12 +522,12 @@ func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExpor
 	return joinProse(fragments)
 }
 
-// repoAwareHomeConfigRows filters HomeConfigRowsOf(rows) rather than rows because the
+// repoAwareHomeConfigRows filters HomeConfigRows(rows) rather than rows because the
 // renderer re-renders the Strategy's own HomeConfig file; a non-nil RepoAwareHomeConfig
 // requires a non-nil HomeConfig, which makes the two equivalent.
 func repoAwareHomeConfigRows(rows []ecosystem.Strategy) []ecosystem.Strategy {
 	var out []ecosystem.Strategy
-	for _, row := range ecosystem.HomeConfigRowsOf(rows) {
+	for _, row := range ecosystem.HomeConfigRows(rows) {
 		if row.RepoAwareHomeConfig != nil {
 			out = append(out, row)
 		}
