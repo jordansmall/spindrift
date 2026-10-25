@@ -11,15 +11,16 @@ import (
 // memoizeCheckProbes shares one *sync.Once per row, so a credential Peeks at
 // most once across the one set this call builds -- run-wide that holds only
 // at readContext.validation(), the single call site building one set and
-// running both halves over it. classify omits the drift and transport rows
-// (both the registry-proxy and signal-socket transport rows) and the runner's
-// launch-gate prerequisites, which must never make validateConfig exit 2
-// (issue #2671, ADR 0045, issue #3114, issue #3728); the per-route rows stay,
-// so a bad credential still exits 2. The runner's doctor-only prerequisites
-// join classify (issue #3544; see prerequisiteChecks).
+// running both halves over it. classify omits the drift and profile rows, the
+// transport rows (both the registry-proxy and signal-socket transport rows) and
+// the runner's launch-gate prerequisites, which must never make
+// validateConfig exit 2 (issue #2671, ADR 0045, issue #3114, issue #3728); the
+// per-route rows stay, so a bad credential still exits 2. The runner's
+// doctor-only prerequisites join classify (issue #3544; see
+// prerequisiteChecks).
 func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	extra := doctorExtraChecks(c)
-	var perRoute, drift []doctor.Check
+	var perRoute, advisory []doctor.Check
 	// A config that declares no routes gets no route rows at all, not an
 	// empty-routes report (issue #3145).
 	if c.registryProxyRoutesFile != "" {
@@ -28,7 +29,8 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 		// yields nil for both, leaving the failure to registryProxyRoutesCheck.
 		if routes, err := loadRegistryRoutes(c.registryProxyRoutesFile, ecosystem.Registered()); err == nil {
 			perRoute = routeChecksFor(routes)
-			drift = registryRouteDriftCheckForRoutes(c, routes, ecosystem.Registered())
+			advisory = registryRouteDriftCheckForRoutes(c, routes, ecosystem.Registered())
+			advisory = append(advisory, registryRouteProfileCheckForRoutes(c, routes, ecosystem.Registered())...)
 		}
 	}
 	extra = memoizeCheckProbes(extra)
@@ -43,11 +45,11 @@ func doctorCheckSets(c config) (classify, report []doctor.Check) {
 	classify = append(classify, perRoute...)
 
 	signalSocket := signalSocketTransportChecks(c)
-	report = make([]doctor.Check, 0, len(extra)+len(prereqReport)+len(perRoute)+len(drift)+len(signalSocket)+1)
+	report = make([]doctor.Check, 0, len(extra)+len(prereqReport)+len(perRoute)+len(advisory)+len(signalSocket)+1)
 	report = append(report, extra...)
 	report = append(report, prereqReport...)
 	report = append(report, perRoute...)
-	report = append(report, drift...)
+	report = append(report, advisory...)
 	report = append(report, registryProxyTransportCheck(c))
 	report = append(report, signalSocket...)
 
