@@ -350,7 +350,9 @@ func (c *replay) discovery() ([]byte, error) {
 		}
 		routes, _, err := registrydiscover.Discover(
 			c.repo(), c.allRows, stores,
-			lookup, func(string) string { return probedAuthScheme })
+			lookup, func(string) registrydiscover.ProbeResult {
+				return registrydiscover.ProbeResult{Scheme: probedAuthScheme}
+			})
 		if err != nil {
 			return nil, err
 		}
