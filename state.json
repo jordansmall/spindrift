@@ -1,20 +1,15 @@
 {
-  "lastSwept": "a23dc9b63ea1ac58b2783e39133b419088f62573",
-  "cursor": "cmd/launcher/internal/registrypathset/gitref.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-25T07:16:12.118129673-04:00"
-  },
+  "lastSwept": "70285c6fad44fed18eee041c0f6f83856819b3da",
+  "cursor": "cmd/launcher/internal/runner/bwrap/bwrap_test.go",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 38,
+    "output_tokens": 13589,
+    "cache_read_input_tokens": 1570413,
+    "cache_creation_input_tokens": 143237,
+    "total_cost_usd": 1.7319106000000002,
+    "duration_ms": 155783,
+    "duration_api_ms": 154350,
+    "num_turns": 21
   }
 }
