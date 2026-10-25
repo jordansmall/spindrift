@@ -46,13 +46,13 @@ func realRegistryDeps() registryDeps {
 			})
 		},
 		BindHomes: func(w io.Writer, gate bindregistry.Gate, publish bindregistry.PublishFunc) bool {
-			return bindregistry.BindHomes(w, ecosystem.Table, gate, publish, os.Getenv)
+			return bindregistry.BindHomes(w, ecosystem.Registered(), gate, publish, os.Getenv)
 		},
 		ApplyInTree: func(w io.Writer, workDir string, gate bindregistry.Gate, publish bindregistry.PublishFunc) bool {
-			return bindregistry.ApplyInTree(w, workDir, ecosystem.Table, gate, publish)
+			return bindregistry.ApplyInTree(w, workDir, ecosystem.Registered(), gate, publish)
 		},
 		Revert: func(workDir string, w io.Writer) bool {
-			return !bindregistry.RevertInTreeBindings(workDir, bindregistry.InTreeBindingsOf(ecosystem.Table), "driver-exec bind-registry", w)
+			return !bindregistry.RevertInTreeBindings(workDir, bindregistry.InTreeBindings(ecosystem.Registered()), "driver-exec bind-registry", w)
 		},
 		Setenv: os.Setenv,
 	}

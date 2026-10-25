@@ -99,13 +99,13 @@ func runBindRegistryWithRows(args []string, rows []ecosystem.Strategy, stdout io
 	}
 
 	if *lockfileScanWorkDir != "" {
-		bindregistry.WarnStaleLockfilesRows(stdout, *lockfileScanWorkDir, rows, os.Getenv)
+		bindregistry.WarnStaleLockfiles(stdout, *lockfileScanWorkDir, rows, os.Getenv)
 	}
 
 	// Resolved only when a mode that needs a live Forwarder will run (issue
 	// #3141). A revert-only call never touches REGISTRY_PROXY_MANIFEST or
 	// the probe/spawn deps. A lockfile-scan-only call never resolves the
-	// gate or touches those deps; WarnStaleLockfilesRows reads the manifest
+	// gate or touches those deps; WarnStaleLockfiles reads the manifest
 	// only to decide whether the scan runs.
 	var gate bindregistry.Gate
 	if *intreeAction == "apply" || *bindingsEnvOutput != "" {
@@ -121,7 +121,7 @@ func runBindRegistryWithRows(args []string, rows []ecosystem.Strategy, stdout io
 
 	switch *intreeAction {
 	case "revert":
-		if bindregistry.RevertInTreeBindings(*intreeWorkDir, bindregistry.InTreeBindingsOf(rows), "driver-exec bind-registry", stdout) {
+		if bindregistry.RevertInTreeBindings(*intreeWorkDir, bindregistry.InTreeBindings(rows), "driver-exec bind-registry", stdout) {
 			return 1
 		}
 	case "apply":

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -17,13 +16,7 @@ import (
 // readiness gate, which probes and can spawn the Forwarder; a settle-time scan
 // must never do that. An absent manifest (registry proxy off) is silent, and
 // every failure path only warns.
-func WarnStaleLockfiles(w io.Writer, workDir string) {
-	WarnStaleLockfilesRows(w, workDir, ecosystem.Table, os.Getenv)
-}
-
-// WarnStaleLockfilesRows is WarnStaleLockfiles over the given Strategies, so a
-// synthetic Strategy can prove the scan without ecosystem.Table.
-func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Strategy, getenv func(string) string) {
+func WarnStaleLockfiles(w io.Writer, workDir string, rows []ecosystem.Strategy, getenv func(string) string) {
 	if _, err := registrymanifest.Parse(getenv(registrymanifest.EnvVar)); err != nil {
 		if errors.Is(err, registrymanifest.ErrAbsent) {
 			return
@@ -32,7 +25,7 @@ func WarnStaleLockfilesRows(w io.Writer, workDir string, rows []ecosystem.Strate
 		return
 	}
 
-	hits, err := ScanLockfilesForForwarderRows(workDir, ForwarderPort, rows)
+	hits, err := ScanLockfilesForForwarder(workDir, ForwarderPort, rows)
 	if err != nil {
 		fmt.Fprintln(w, "==> WARNING: lockfile Forwarder-URL scan failed, skipping: "+err.Error())
 		return

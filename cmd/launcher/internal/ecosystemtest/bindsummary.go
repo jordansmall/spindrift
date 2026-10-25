@@ -14,7 +14,7 @@ import (
 // dials it, but a manifest and a ready gate each carry one.
 var forwarderEndpoint = registrymanifest.NewUnixEndpoint("/run/ecosystemtest/forwarder.sock")
 
-// lockfileScan is the output WarnStaleLockfilesRows prints over a git copy of
+// lockfileScan is the output WarnStaleLockfiles prints over a git copy of
 // repo/: a lockfile still naming the Forwarder URL. The copy's root is the
 // scan's repoDir and hits are repo-relative, so no temp path reaches the golden.
 func (c *replay) lockfileScan() ([]byte, error) {
@@ -29,7 +29,7 @@ func (c *replay) lockfileScan() ([]byte, error) {
 		return nil, err
 	}
 	var buf bytes.Buffer
-	bindregistry.WarnStaleLockfilesRows(&buf, work, c.allRows, func(k string) string {
+	bindregistry.WarnStaleLockfiles(&buf, work, c.allRows, func(k string) string {
 		if k == registrymanifest.EnvVar {
 			return encoded
 		}

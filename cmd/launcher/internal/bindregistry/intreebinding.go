@@ -17,13 +17,10 @@ import (
 // the write site and the cleanup site cannot drift into two prefixes.
 const intreebindingTempFilePattern = ".intreebinding-*"
 
-// InTreeBindings is InTreeBindingsOf over ecosystem.Table, the production Strategies.
-func InTreeBindings() []ecosystem.Strategy { return InTreeBindingsOf(ecosystem.Table) }
-
-// InTreeBindingsOf returns every Strategy whose registry pin lives in a tracked config
-// file rather than an env var (ADR 0044), in Strategies order: npm's .npmrc, yarn
+// InTreeBindings returns every Strategy of all whose registry pin lives in a
+// tracked config file rather than an env var (ADR 0044), in Strategies order: npm's .npmrc, yarn
 // berry's .yarnrc.yml (issue #2856), and pnpm's pnpm-workspace.yaml (issue #2855).
-func InTreeBindingsOf(all []ecosystem.Strategy) []ecosystem.Strategy {
+func InTreeBindings(all []ecosystem.Strategy) []ecosystem.Strategy {
 	var rows []ecosystem.Strategy
 	for _, row := range all {
 		// A Strategy with a RepoAwareHomeConfig binds by re-rendering that home config
@@ -186,7 +183,7 @@ func replaceAllFold(s, old, repl string) string {
 
 // ApplyInTreeBinding rewrites row's in-tree config file, when it exists and is
 // git-tracked, so references to any rewrites' UpstreamHost point at that
-// entry's LocalURL. row is one of InTreeBindings()'s: tracked config that
+// entry's LocalURL. row is one of InTreeBindings's: tracked config that
 // would otherwise take precedence over an env override (ADR 0044), or that
 // says what one cannot (a per-scope .npmrc registry, .yarnrc.yml's npmScopes,
 // pnpm-workspace.yaml's registries; ADR 0044's yarn and pnpm updates), so the

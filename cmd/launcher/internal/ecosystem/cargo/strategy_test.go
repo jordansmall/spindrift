@@ -121,9 +121,9 @@ func TestStrategy_HomeConfig(t *testing.T) {
 // source-replacement home config, which its 1:1 URL to source-name rule cannot
 // tolerate.
 func TestInTreeBindings_ExcludesCargo(t *testing.T) {
-	for _, row := range bindregistry.InTreeBindings() {
+	for _, row := range bindregistry.InTreeBindings(ecosystem.Registered()) {
 		if row.Name == Strategy.Name {
-			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", bindregistry.InTreeBindings())
+			t.Fatalf("InTreeBindings() = %+v, want it to never include the cargo row", bindregistry.InTreeBindings(ecosystem.Registered()))
 		}
 	}
 }

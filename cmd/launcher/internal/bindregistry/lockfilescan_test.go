@@ -16,7 +16,7 @@ var scanRows = []ecosystem.Strategy{
 	{Name: "beta", LockfileNames: []string{"beta.lock", "beta.sum"}},
 }
 
-func TestScanLockfilesForForwarderRowsReportsTrackedLockfileNamingForwarder(t *testing.T) {
+func TestScanLockfilesForForwarderReportsTrackedLockfileNamingForwarder(t *testing.T) {
 	dir := newTestRepo(t)
 
 	lockfile := filepath.Join(dir, "synthetic.lock")
@@ -26,9 +26,9 @@ func TestScanLockfilesForForwarderRowsReportsTrackedLockfileNamingForwarder(t *t
 	runGit(t, dir, "add", "synthetic.lock")
 	runGit(t, dir, "commit", "-m", "add lockfile")
 
-	hits, err := ScanLockfilesForForwarderRows(dir, 27182, scanRows)
+	hits, err := ScanLockfilesForForwarder(dir, 27182, scanRows)
 	if err != nil {
-		t.Fatalf("ScanLockfilesForForwarderRows: %v", err)
+		t.Fatalf("ScanLockfilesForForwarder: %v", err)
 	}
 
 	if len(hits) != 1 {
@@ -46,15 +46,15 @@ func TestScanLockfilesForForwarderRowsReportsTrackedLockfileNamingForwarder(t *t
 }
 
 // Every name a Strategy lists is scanned, not only the first.
-func TestScanLockfilesForForwarderRowsMatchesEachRowLockfileName(t *testing.T) {
+func TestScanLockfilesForForwarderMatchesEachRowLockfileName(t *testing.T) {
 	dir := newTestRepo(t)
 
 	writeTrackedFile(t, dir, "beta.sum", []byte("127.0.0.1:27182\n"))
 	runGit(t, dir, "commit", "-m", "add lockfile")
 
-	hits, err := ScanLockfilesForForwarderRows(dir, 27182, scanRows)
+	hits, err := ScanLockfilesForForwarder(dir, 27182, scanRows)
 	if err != nil {
-		t.Fatalf("ScanLockfilesForForwarderRows: %v", err)
+		t.Fatalf("ScanLockfilesForForwarder: %v", err)
 	}
 	if len(hits) != 1 || hits[0].Ecosystem != "beta" || hits[0].Path != "beta.sum" {
 		t.Fatalf("hits = %+v, want exactly beta beta.sum", hits)
@@ -64,7 +64,7 @@ func TestScanLockfilesForForwarderRowsMatchesEachRowLockfileName(t *testing.T) {
 // The beta hit's path sorts lexically before the synthetic hit's path, so this
 // fixture confirms Strategy order (synthetic before beta) wins over lexical path order
 // rather than the reverse.
-func TestScanLockfilesForForwarderRowsOrdersByRowThenPath(t *testing.T) {
+func TestScanLockfilesForForwarderOrdersByRowThenPath(t *testing.T) {
 	dir := newTestRepo(t)
 
 	needle := []byte("127.0.0.1:27182\n")
@@ -72,9 +72,9 @@ func TestScanLockfilesForForwarderRowsOrdersByRowThenPath(t *testing.T) {
 	writeTrackedFile(t, dir, filepath.Join("zzz", "synthetic.lock"), needle)
 	runGit(t, dir, "commit", "-m", "add lockfiles")
 
-	hits, err := ScanLockfilesForForwarderRows(dir, 27182, scanRows)
+	hits, err := ScanLockfilesForForwarder(dir, 27182, scanRows)
 	if err != nil {
-		t.Fatalf("ScanLockfilesForForwarderRows: %v", err)
+		t.Fatalf("ScanLockfilesForForwarder: %v", err)
 	}
 
 	if len(hits) != 2 {
@@ -89,15 +89,15 @@ func TestScanLockfilesForForwarderRowsOrdersByRowThenPath(t *testing.T) {
 }
 
 // The scan reads only the Strategies it is handed.
-func TestScanLockfilesForForwarderRowsUsesOnlyTheGivenRows(t *testing.T) {
+func TestScanLockfilesForForwarderUsesOnlyTheGivenRows(t *testing.T) {
 	dir := newTestRepo(t)
 
 	writeTrackedFile(t, dir, "synthetic.lock", []byte("127.0.0.1:27182\n"))
 	runGit(t, dir, "commit", "-m", "add lockfile")
 
-	hits, err := ScanLockfilesForForwarderRows(dir, 27182, scanRows[1:])
+	hits, err := ScanLockfilesForForwarder(dir, 27182, scanRows[1:])
 	if err != nil {
-		t.Fatalf("ScanLockfilesForForwarderRows: %v", err)
+		t.Fatalf("ScanLockfilesForForwarder: %v", err)
 	}
 	if len(hits) != 0 {
 		t.Fatalf("len(hits) = %d, want 0: %+v", len(hits), hits)
@@ -105,9 +105,9 @@ func TestScanLockfilesForForwarderRowsUsesOnlyTheGivenRows(t *testing.T) {
 }
 
 // Git still tracks the lockfile, but the working tree lacks it (deleted, or a
-// sparse-checkout exclusion). ScanLockfilesForForwarderRows must skip it silently
+// sparse-checkout exclusion). ScanLockfilesForForwarder must skip it silently
 // rather than report the stat/read failure as an error.
-func TestScanLockfilesForForwarderRowsSkipsTrackedFileMissingFromWorkingTree(t *testing.T) {
+func TestScanLockfilesForForwarderSkipsTrackedFileMissingFromWorkingTree(t *testing.T) {
 	dir := newTestRepo(t)
 
 	writeTrackedFile(t, dir, "synthetic.lock", []byte("127.0.0.1:27182\n"))
@@ -117,9 +117,9 @@ func TestScanLockfilesForForwarderRowsSkipsTrackedFileMissingFromWorkingTree(t *
 		t.Fatal(err)
 	}
 
-	hits, err := ScanLockfilesForForwarderRows(dir, 27182, scanRows)
+	hits, err := ScanLockfilesForForwarder(dir, 27182, scanRows)
 	if err != nil {
-		t.Fatalf("ScanLockfilesForForwarderRows: %v", err)
+		t.Fatalf("ScanLockfilesForForwarder: %v", err)
 	}
 	if len(hits) != 0 {
 		t.Fatalf("len(hits) = %d, want 0: %+v", len(hits), hits)
@@ -128,15 +128,15 @@ func TestScanLockfilesForForwarderRowsSkipsTrackedFileMissingFromWorkingTree(t *
 
 // The scan filters by basename against the Strategies, so a tracked file that names
 // the Forwarder URL but has a basename no Strategy lists produces no hit.
-func TestScanLockfilesForForwarderRowsIgnoresNonLockfileTrackedFiles(t *testing.T) {
+func TestScanLockfilesForForwarderIgnoresNonLockfileTrackedFiles(t *testing.T) {
 	dir := newTestRepo(t)
 
 	writeTrackedFile(t, dir, "notes.txt", []byte("127.0.0.1:27182\n"))
 	runGit(t, dir, "commit", "-m", "add notes")
 
-	hits, err := ScanLockfilesForForwarderRows(dir, 27182, scanRows)
+	hits, err := ScanLockfilesForForwarder(dir, 27182, scanRows)
 	if err != nil {
-		t.Fatalf("ScanLockfilesForForwarderRows: %v", err)
+		t.Fatalf("ScanLockfilesForForwarder: %v", err)
 	}
 	if len(hits) != 0 {
 		t.Fatalf("len(hits) = %d, want 0: %+v", len(hits), hits)

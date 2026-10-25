@@ -16,12 +16,9 @@ import (
 	"spindrift.dev/launcher/internal/ecosystemtest/synthetic"
 )
 
-// Decide classifies through the registered Strategies; per-ecosystem lockfile
+// Decide classifies against the rows it is handed; per-ecosystem lockfile
 // classification is pinned in internal/ecosystem, so one stand-in suffices.
-func TestMain(m *testing.M) {
-	ecosystem.Register(synthetic.Strategy)
-	os.Exit(m.Run())
-}
+var rows = []ecosystem.Strategy{synthetic.Strategy}
 
 type nixCall struct {
 	dir  string
@@ -104,7 +101,7 @@ func TestDecide_Probe(t *testing.T) {
 			var calls []nixCall
 			var out strings.Builder
 			var headBeforeNix bool
-			d := Decide(context.Background(), &out, dir, "ci", tc.timeout, "", fakeNix(&calls, func(ctx context.Context) error {
+			d := Decide(context.Background(), &out, dir, rows, "ci", tc.timeout, "", fakeNix(&calls, func(ctx context.Context) error {
 				headBeforeNix = out.String() == head+"\n"
 				if tc.fn == nil {
 					return nil
@@ -148,7 +145,7 @@ func TestDecide_UnboundedTimeoutHasNoDeadline(t *testing.T) {
 	writeFile(t, dir, "flake.nix")
 	var hasDeadline bool
 	var calls []nixCall
-	Decide(context.Background(), io.Discard, dir, "default", "0", "", fakeNix(&calls, func(ctx context.Context) error {
+	Decide(context.Background(), io.Discard, dir, rows, "default", "0", "", fakeNix(&calls, func(ctx context.Context) error {
 		_, hasDeadline = ctx.Deadline()
 		return nil
 	}))
@@ -159,10 +156,10 @@ func TestDecide_UnboundedTimeoutHasNoDeadline(t *testing.T) {
 
 func TestDecide_Name(t *testing.T) {
 	var calls []nixCall
-	if d := Decide(context.Background(), io.Discard, t.TempDir(), "", "300", "", fakeNix(&calls, nil)); d.Name != "default" {
+	if d := Decide(context.Background(), io.Discard, t.TempDir(), rows, "", "300", "", fakeNix(&calls, nil)); d.Name != "default" {
 		t.Errorf("Name = %q, want default", d.Name)
 	}
-	if d := Decide(context.Background(), io.Discard, t.TempDir(), "ci", "300", "", fakeNix(&calls, nil)); d.Name != "ci" {
+	if d := Decide(context.Background(), io.Discard, t.TempDir(), rows, "ci", "300", "", fakeNix(&calls, nil)); d.Name != "ci" {
 		t.Errorf("Name = %q, want ci", d.Name)
 	}
 }
@@ -182,7 +179,7 @@ func TestDecide_AndHint_Ecosystem(t *testing.T) {
 			dir := t.TempDir()
 			writeFile(t, dir, tc.file)
 			var calls []nixCall
-			d := Decide(context.Background(), io.Discard, dir, "default", "300", "", fakeNix(&calls, nil))
+			d := Decide(context.Background(), io.Discard, dir, rows, "default", "300", "", fakeNix(&calls, nil))
 			if d.Ecosystem != tc.wantEco {
 				t.Fatalf("Ecosystem = %q, want %q", d.Ecosystem, tc.wantEco)
 			}
@@ -311,7 +308,7 @@ func TestRunNix_ContextBoundsHungNix(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
-	d := Decide(context.Background(), io.Discard, flakeDir(t), "default", "0.2", "", RunNix(nil))
+	d := Decide(context.Background(), io.Discard, flakeDir(t), rows, "default", "0.2", "", RunNix(nil))
 	if d.Probe != TimedOut {
 		t.Errorf("Probe = %v, want TimedOut", d.Probe)
 	}
@@ -330,7 +327,7 @@ func TestDecide_HintPrecedesProbingLine(t *testing.T) {
 	writeFile(t, dir, synthetic.Strategy.LockfileNames[0])
 	var out strings.Builder
 	var calls []nixCall
-	Decide(context.Background(), &out, dir, "default", "300", "", fakeNix(&calls, nil))
+	Decide(context.Background(), &out, dir, rows, "default", "300", "", fakeNix(&calls, nil))
 	want := "==> hint: " + synthetic.Strategy.Classification + " project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image\n" +
 		"==> flake.nix found in cloned repo; probing for devShell\n"
 	if out.String() != want {
@@ -338,7 +335,7 @@ func TestDecide_HintPrecedesProbingLine(t *testing.T) {
 	}
 
 	out.Reset()
-	Decide(context.Background(), &out, dir, "default", "300", "go mod download", fakeNix(&calls, nil))
+	Decide(context.Background(), &out, dir, rows, "default", "300", "go mod download", fakeNix(&calls, nil))
 	if strings.Contains(out.String(), "hint:") {
 		t.Errorf("stdout = %q, want no hint with prefetch set", out.String())
 	}

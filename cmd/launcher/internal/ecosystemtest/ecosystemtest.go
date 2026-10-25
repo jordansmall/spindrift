@@ -128,7 +128,7 @@ var stages = []stage{
 		asJSON:      true,
 		afterRoutes: true,
 		takesPart: func(row ecosystem.Strategy) bool {
-			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindingsOf([]ecosystem.Strategy{row})) > 0
+			return row.EnvExports != nil || row.HomeConfig != nil || len(bindregistry.InTreeBindings([]ecosystem.Strategy{row})) > 0
 		},
 		replay: (*replay).binding,
 	},
@@ -327,7 +327,7 @@ func (c *replay) primaryRows() []ecosystem.Strategy { return []ecosystem.Strateg
 func (c *replay) repo() string { return filepath.Join(c.dir, "repo") }
 
 func (c *replay) classification() ([]byte, error) {
-	return []byte(bindregistry.ClassifyRows(c.repo(), c.allRows) + "\n"), nil
+	return []byte(bindregistry.Classify(c.repo(), c.allRows) + "\n"), nil
 }
 
 // discovery hands Discover a repo-relative display path for each store, so

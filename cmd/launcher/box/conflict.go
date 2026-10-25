@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/conflictresolve"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -147,7 +148,7 @@ func (r *boxRun) publishRebased() error {
 // path git refuses to check it out, so a failed revert is expected rather than
 // a real problem; `git rebase --abort` cleans up regardless.
 func abortRebase(workDir string, w io.Writer) {
-	if bindregistry.RevertInTreeBindings(workDir, bindregistry.InTreeBindings(), "box", w) {
+	if bindregistry.RevertInTreeBindings(workDir, bindregistry.InTreeBindings(ecosystem.Registered()), "box", w) {
 		fmt.Fprintln(w, "==> WARNING: in-tree binding revert failed")
 	}
 	cmd := exec.Command("git", "rebase", "--abort")

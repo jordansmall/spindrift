@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/markergate"
@@ -671,7 +672,7 @@ func (r *boxRun) decideToolchain() {
 		return
 	}
 	d, workDir, prefetch := r.d, r.in.WorkDir, r.d.Getenv("PREFETCH")
-	dec := toolchain.Decide(context.Background(), d.Stdout, workDir,
+	dec := toolchain.Decide(context.Background(), d.Stdout, workDir, ecosystem.Registered(),
 		d.Getenv("DEV_SHELL_NAME"), d.Getenv("DEV_SHELL_PROBE_TIMEOUT"), prefetch, d.Nix)
 	if line := dec.Line(); line != "" {
 		r.say("%s", line)
