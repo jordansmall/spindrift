@@ -11,7 +11,7 @@ import (
 
 // The config file sits under a subdirectory so the test pins that the walker
 // joins InTreeConfigPath onto repoDir rather than reading a flat name.
-func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
+func TestExtract_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "nested", "sub"), 0o755); err != nil {
 		t.Fatal(err)
@@ -31,15 +31,15 @@ func TestExtractRows_ReadsFileNamedByRowRelativeToRepoDir(t *testing.T) {
 		},
 	}
 
-	if _, _, err := ExtractRows(dir, []ecosystem.Strategy{row}); err != nil {
-		t.Fatalf("ExtractRows: unexpected error: %v", err)
+	if _, _, err := Extract(dir, []ecosystem.Strategy{row}); err != nil {
+		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 	if gotContent != content {
 		t.Errorf("parser received %q, want %q", gotContent, content)
 	}
 }
 
-func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T) {
+func TestExtract_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T) {
 	dir := t.TempDir()
 	missing := ecosystem.Strategy{
 		Name:             "missing",
@@ -60,9 +60,9 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 		},
 	}
 
-	declared, notes, err := ExtractRows(dir, []ecosystem.Strategy{missing, present})
+	declared, notes, err := Extract(dir, []ecosystem.Strategy{missing, present})
 	if err != nil {
-		t.Fatalf("ExtractRows: unexpected error: %v", err)
+		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 	if len(notes) != 0 {
 		t.Errorf("notes = %+v, want none", notes)
@@ -75,7 +75,7 @@ func TestExtractRows_MissingFileYieldsNothingAndDoesNotStopTheWalk(t *testing.T)
 // A directory stands in for the nil-parser Strategy's named file: if the walker read
 // it anyway, os.ReadFile would fail and the test would see the error. An empty
 // path joins to repoDir, also a directory, so the same check catches it.
-func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
+func TestExtract_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "a-directory"), 0o755); err != nil {
 		t.Fatal(err)
@@ -92,9 +92,9 @@ func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 		InTreeConfigPath: "a-directory",
 	}
 
-	declared, notes, err := ExtractRows(dir, []ecosystem.Strategy{noPath, noParser})
+	declared, notes, err := Extract(dir, []ecosystem.Strategy{noPath, noParser})
 	if err != nil {
-		t.Fatalf("ExtractRows: unexpected error: %v", err)
+		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 	if len(declared) != 0 {
 		t.Errorf("declared = %+v, want none", declared)
@@ -106,7 +106,7 @@ func TestExtractRows_SkipsRowWithNoPathOrNoParser(t *testing.T) {
 
 // The parser sets Ecosystem and ConfigPath to wrong values on purpose, so the
 // test can see the Strategy's own stamp win.
-func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
+func TestExtract_StampsRowFieldsOverParserOutput(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,9 +119,9 @@ func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 		},
 	}
 
-	declared, _, err := ExtractRows(dir, []ecosystem.Strategy{row})
+	declared, _, err := Extract(dir, []ecosystem.Strategy{row})
 	if err != nil {
-		t.Fatalf("ExtractRows: unexpected error: %v", err)
+		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 	if len(declared) != 1 {
 		t.Fatalf("declared = %+v, want exactly 1", declared)
@@ -132,7 +132,7 @@ func TestExtractRows_StampsRowFieldsOverParserOutput(t *testing.T) {
 	}
 }
 
-func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
+func TestExtract_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 	for _, namedAny := range []bool{true, false} {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "fake.cfg"), []byte("x"), 0o644); err != nil {
@@ -146,9 +146,9 @@ func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 			},
 		}
 
-		declared, notes, err := ExtractRows(dir, []ecosystem.Strategy{row})
+		declared, notes, err := Extract(dir, []ecosystem.Strategy{row})
 		if err != nil {
-			t.Fatalf("ExtractRows: unexpected error: %v", err)
+			t.Fatalf("Extract: unexpected error: %v", err)
 		}
 		if len(declared) != 0 {
 			t.Errorf("declared = %+v, want none", declared)
@@ -160,7 +160,7 @@ func TestExtractRows_NoDeclarationsProducesNoteCarryingNamedAny(t *testing.T) {
 	}
 }
 
-func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
+func TestExtract_OrderFollowsRowsThenParserOrder(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"r1.cfg", "r2.cfg", "r3.cfg", "r4.cfg"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
@@ -189,9 +189,9 @@ func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
 		{Name: "r4", InTreeConfigPath: "r4.cfg", ConfigParser: noting(true)},
 	}
 
-	declared, notes, err := ExtractRows(dir, rows)
+	declared, notes, err := Extract(dir, rows)
 	if err != nil {
-		t.Fatalf("ExtractRows: unexpected error: %v", err)
+		t.Fatalf("Extract: unexpected error: %v", err)
 	}
 
 	var gotHosts []string
@@ -216,7 +216,7 @@ func TestExtractRows_OrderFollowsRowsThenParserOrder(t *testing.T) {
 	}
 }
 
-func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
+func TestExtract_ParserErrorAbortsTheWalk(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "bad.cfg"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -242,9 +242,9 @@ func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 		},
 	}
 
-	_, _, err := ExtractRows(dir, rows)
+	_, _, err := Extract(dir, rows)
 	if err == nil {
-		t.Fatal("ExtractRows: expected an error, got nil")
+		t.Fatal("Extract: expected an error, got nil")
 	}
 	want := "registrydiscover: parsing bad.cfg: " + errTestParse.Error()
 	if err.Error() != want {
@@ -254,8 +254,8 @@ func TestExtractRows_ParserErrorAbortsTheWalk(t *testing.T) {
 
 // A directory sits where the Strategy expects a file, which is portable across
 // platforms unlike a permission-bit trick. This is the read-error half of the
-// contract TestExtractRows_ParserErrorAbortsTheWalk pins for parse errors.
-func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {
+// contract TestExtract_ParserErrorAbortsTheWalk pins for parse errors.
+func TestExtract_UnreadableFileAbortsTheWalk(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "not-a-file.cfg"), 0o755); err != nil {
 		t.Fatal(err)
@@ -282,9 +282,9 @@ func TestExtractRows_UnreadableFileAbortsTheWalk(t *testing.T) {
 		},
 	}
 
-	_, _, err := ExtractRows(dir, rows)
+	_, _, err := Extract(dir, rows)
 	if err == nil {
-		t.Fatal("ExtractRows: expected an error, got nil")
+		t.Fatal("Extract: expected an error, got nil")
 	}
 	if !strings.HasPrefix(err.Error(), "registrydiscover: reading not-a-file.cfg: ") {
 		t.Errorf("err = %q, want it to start with the walker's reading-error prefix naming not-a-file.cfg", err.Error())

@@ -23,7 +23,7 @@ var (
 const hostDecl = "main = https://host.example.com/registry\n"
 
 // Pins ResolveRef's fail-closed contract directly, not only through its
-// MaterializeRef and UncoveredHostsFromGitRefRows callers.
+// MaterializeRef and UncoveredHostsFromGitRef callers.
 func TestResolveRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	if err := ResolveRef(missing, "main"); err == nil {
@@ -74,77 +74,77 @@ func TestResolveRef_ResolvableRefSucceeds(t *testing.T) {
 	}
 }
 
-func TestUncoveredHostsFromGitRefRows_UncoveredHostReported(t *testing.T) {
+func TestUncoveredHostsFromGitRef_UncoveredHostReported(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath: hostDecl,
 	}, nil)
 
-	got, err := UncoveredHostsFromGitRefRows(bare, "main", nil, syntheticRows)
+	got, err := UncoveredHostsFromGitRef(bare, "main", nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
 	want := []string{"host.example.com"}
 	if len(got) != 1 || got[0] != want[0] {
-		t.Errorf("UncoveredHostsFromGitRefRows = %v, want %v", got, want)
+		t.Errorf("UncoveredHostsFromGitRef = %v, want %v", got, want)
 	}
 }
 
-func TestUncoveredHostsFromGitRefRows_FullyCoveredReturnsNone(t *testing.T) {
+func TestUncoveredHostsFromGitRef_FullyCoveredReturnsNone(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath: hostDecl,
 	}, nil)
 
-	got, err := UncoveredHostsFromGitRefRows(bare, "main", []string{"host.example.com"}, syntheticRows)
+	got, err := UncoveredHostsFromGitRef(bare, "main", []string{"host.example.com"}, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("UncoveredHostsFromGitRefRows = %v, want none", got)
+		t.Errorf("UncoveredHostsFromGitRef = %v, want none", got)
 	}
 }
 
-func TestUncoveredHostsFromGitRefRows_MissingRepoDirFails(t *testing.T) {
+func TestUncoveredHostsFromGitRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := UncoveredHostsFromGitRefRows(missing, "main", nil, syntheticRows)
+	_, err := UncoveredHostsFromGitRef(missing, "main", nil, syntheticRows)
 	if err == nil {
-		t.Fatal("UncoveredHostsFromGitRefRows: want error for a missing repo dir, got nil")
+		t.Fatal("UncoveredHostsFromGitRef: want error for a missing repo dir, got nil")
 	}
 }
 
-func TestUncoveredHostsFromGitRefRows_MissingRefFails(t *testing.T) {
+func TestUncoveredHostsFromGitRef_MissingRefFails(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath: hostDecl,
 	}, nil)
 
-	_, err := UncoveredHostsFromGitRefRows(bare, "does-not-exist", nil, syntheticRows)
+	_, err := UncoveredHostsFromGitRef(bare, "does-not-exist", nil, syntheticRows)
 	if err == nil {
-		t.Fatal("UncoveredHostsFromGitRefRows: want error for a ref that does not exist, got nil")
+		t.Fatal("UncoveredHostsFromGitRef: want error for a ref that does not exist, got nil")
 	}
 	if !strings.Contains(err.Error(), "does-not-exist") {
-		t.Errorf("UncoveredHostsFromGitRefRows error = %q, want it to name the missing ref", err.Error())
+		t.Errorf("UncoveredHostsFromGitRef error = %q, want it to name the missing ref", err.Error())
 	}
 }
 
 // A ref declaring no config files is not an error, unlike a broken repo or
 // ref. Both yield no hosts, so only the error distinguishes them.
-func TestUncoveredHostsFromGitRefRows_NoConfigFilesReturnsNone(t *testing.T) {
+func TestUncoveredHostsFromGitRef_NoConfigFilesReturnsNone(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, nil)
 
-	got, err := UncoveredHostsFromGitRefRows(bare, "main", nil, syntheticRows)
+	got, err := UncoveredHostsFromGitRef(bare, "main", nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("UncoveredHostsFromGitRefRows = %v, want none", got)
+		t.Errorf("UncoveredHostsFromGitRef = %v, want none", got)
 	}
 }
 
 func mustMaterializeRef(t *testing.T, bare, ref string) string {
 	t.Helper()
-	dir, cleanup, err := MaterializeRefRows(bare, ref, syntheticRows)
+	dir, cleanup, err := MaterializeRef(bare, ref, syntheticRows)
 	t.Cleanup(cleanup)
 	if err != nil {
-		t.Fatalf("MaterializeRefRows: unexpected error: %v", err)
+		t.Fatalf("MaterializeRef: unexpected error: %v", err)
 	}
 	return dir
 }
@@ -162,19 +162,19 @@ func mustNotExist(t *testing.T, path string) {
 // slices would pass slices.Equal without either side having followed a link.
 func assertRefCheckoutHostsAgree(t *testing.T, bare, ref, src string) {
 	t.Helper()
-	refHosts, err := UncoveredHostsFromGitRefRows(bare, ref, nil, syntheticRows)
+	refHosts, err := UncoveredHostsFromGitRef(bare, ref, nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHostsFromGitRef: unexpected error: %v", err)
 	}
-	checkoutHosts, err := UncoveredHostsRows(src, nil, syntheticRows)
+	checkoutHosts, err := UncoveredHosts(src, nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(refHosts) == 0 {
-		t.Fatalf("UncoveredHostsFromGitRefRows = %v, want at least one host", refHosts)
+		t.Fatalf("UncoveredHostsFromGitRef = %v, want at least one host", refHosts)
 	}
 	if !slices.Equal(refHosts, checkoutHosts) {
-		t.Errorf("UncoveredHostsFromGitRefRows = %v, UncoveredHostsRows = %v, want them equal", refHosts, checkoutHosts)
+		t.Errorf("UncoveredHostsFromGitRef = %v, UncoveredHosts = %v, want them equal", refHosts, checkoutHosts)
 	}
 }
 
@@ -224,7 +224,7 @@ func TestMaterializeRef_ParentDirSymlinkResolvesToTargetContent(t *testing.T) {
 }
 
 // A directory at a config path skips like a missing file, although
-// ExtractRows hard-errors reading one in a checkout.
+// Extract hard-errors reading one in a checkout.
 func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		cfgPath + "/inner": "anything",
@@ -234,17 +234,17 @@ func TestMaterializeRef_DirectoryAtConfigPathSkips(t *testing.T) {
 	mustNotExist(t, filepath.Join(dir, cfgPath))
 }
 
-// The checkout side of the parity above: ExtractRows does hard-error reading
+// The checkout side of the parity above: Extract does hard-error reading
 // a directory at the config path, unlike the ref snapshot it is compared
 // against.
-func TestUncoveredHostsRows_DirectoryAtConfigPathErrors(t *testing.T) {
+func TestUncoveredHosts_DirectoryAtConfigPathErrors(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := UncoveredHostsRows(dir, nil, syntheticRows); !errors.Is(err, syscall.EISDIR) {
-		t.Fatalf("UncoveredHostsRows: err = %v, want EISDIR for a directory at the config path", err)
+	if _, err := UncoveredHosts(dir, nil, syntheticRows); !errors.Is(err, syscall.EISDIR) {
+		t.Fatalf("UncoveredHosts: err = %v, want EISDIR for a directory at the config path", err)
 	}
 }
 
@@ -306,10 +306,10 @@ func TestMaterializeRef_MultiRowBatchParsing(t *testing.T) {
 		twin.InTreeConfigPath: twinContent,
 	}, nil)
 
-	dir, cleanup, err := MaterializeRefRows(bare, "main", rows)
+	dir, cleanup, err := MaterializeRef(bare, "main", rows)
 	t.Cleanup(cleanup)
 	if err != nil {
-		t.Fatalf("MaterializeRefRows: unexpected error: %v", err)
+		t.Fatalf("MaterializeRef: unexpected error: %v", err)
 	}
 
 	mustNotExist(t, filepath.Join(dir, cfgPath))

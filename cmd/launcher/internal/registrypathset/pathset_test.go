@@ -30,9 +30,9 @@ func deriveSynthetic(t *testing.T, body string) []HostPathSet {
 	t.Helper()
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, synthetic.Strategy.InTreeConfigPath, body)
-	got, err := DeriveRows(dir, syntheticRows)
+	got, err := Derive(dir, syntheticRows)
 	if err != nil {
-		t.Fatalf("DeriveRows: unexpected error: %v", err)
+		t.Fatalf("Derive: unexpected error: %v", err)
 	}
 	return got
 }
@@ -54,7 +54,7 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveRows = %+v, want %+v", got, want)
+		t.Errorf("Derive = %+v, want %+v", got, want)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestDerive_SameHostOriginDisagreementMerges(t *testing.T) {
 		},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveRows = %+v, want %+v", got, want)
+		t.Errorf("Derive = %+v, want %+v", got, want)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestDerive_ExactRepeatWithinHostDedupes(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveRows = %+v, want %+v", got, want)
+		t.Errorf("Derive = %+v, want %+v", got, want)
 	}
 }
 
@@ -104,7 +104,7 @@ func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveRows = %+v, want %+v", got, want)
+		t.Errorf("Derive = %+v, want %+v", got, want)
 	}
 }
 
@@ -113,12 +113,12 @@ func TestDerive_IPv6HostUnbracketsButOriginKeepsBrackets(t *testing.T) {
 // because nothing in the snapshot names a registry for it.
 func TestDerive_NoDeclarationDerivesNoPaths(t *testing.T) {
 	t.Run("empty repo", func(t *testing.T) {
-		got, err := DeriveRows(t.TempDir(), syntheticRows)
+		got, err := Derive(t.TempDir(), syntheticRows)
 		if err != nil {
-			t.Fatalf("DeriveRows: unexpected error: %v", err)
+			t.Fatalf("Derive: unexpected error: %v", err)
 		}
 		if len(got) != 0 {
-			t.Errorf("DeriveRows = %+v, want no host path sets", got)
+			t.Errorf("Derive = %+v, want no host path sets", got)
 		}
 	})
 
@@ -127,17 +127,17 @@ func TestDerive_NoDeclarationDerivesNoPaths(t *testing.T) {
 		dir := t.TempDir()
 		testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "a = https://twin.example.com/index\n")
 
-		got, err := DeriveRows(dir, syntheticRows)
+		got, err := Derive(dir, syntheticRows)
 		if err != nil {
-			t.Fatalf("DeriveRows: unexpected error: %v", err)
+			t.Fatalf("Derive: unexpected error: %v", err)
 		}
 		if len(got) != 0 {
-			t.Errorf("DeriveRows over the synthetic row = %+v, want no host path sets: only the twin declares", got)
+			t.Errorf("Derive over the synthetic row = %+v, want no host path sets: only the twin declares", got)
 		}
 
-		got, err = DeriveRows(dir, []ecosystem.Strategy{twin})
+		got, err = Derive(dir, []ecosystem.Strategy{twin})
 		if err != nil {
-			t.Fatalf("DeriveRows: unexpected error: %v", err)
+			t.Fatalf("Derive: unexpected error: %v", err)
 		}
 		want := []HostPathSet{{
 			Host:     "twin.example.com",
@@ -145,7 +145,7 @@ func TestDerive_NoDeclarationDerivesNoPaths(t *testing.T) {
 			Subtrees: []registryvocab.Subtree{{Ecosystem: twin.Name, Path: "/index", RegistryName: "a"}},
 		}}
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("DeriveRows over the twin = %+v, want %+v", got, want)
+			t.Errorf("Derive over the twin = %+v, want %+v", got, want)
 		}
 	})
 }
@@ -160,7 +160,7 @@ func TestDerive_BareHostDerivesRootSubtree(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveRows = %+v, want %+v", got, want)
+		t.Errorf("Derive = %+v, want %+v", got, want)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestDerive_HostNormalizedOriginKeepsPort(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo/index", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveRows = %+v, want %+v", got, want)
+		t.Errorf("Derive = %+v, want %+v", got, want)
 	}
 }
 
@@ -190,7 +190,7 @@ internal = https://artifacts.example.com/artifactory/api/internal/index
 remote = https://artifacts.example.com/artifactory/api/remote/index
 `)
 	if len(got) != 1 {
-		t.Fatalf("DeriveRows = %+v, want exactly one host path set", got)
+		t.Fatalf("Derive = %+v, want exactly one host path set", got)
 	}
 	set := got[0]
 	if set.Host != "artifacts.example.com" {
@@ -236,7 +236,7 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 // parser; this one proves a Strategy's declaration reaches a subtree. A Strategy whose
 // config parses but derives no path would leave the proxy refusing every
 // request that Strategy makes, with no other test failing. The ecosystem corpus
-// proves the same for each ecosystem.Table Strategy.
+// proves the same for each registered Strategy.
 func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 	got := deriveSynthetic(t, "a = https://registry.example.com/repo/index\n")
 	found := false
@@ -252,7 +252,7 @@ func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("DeriveRows = %+v, want a %s subtree", got, synthetic.Strategy.Name)
+		t.Errorf("Derive = %+v, want a %s subtree", got, synthetic.Strategy.Name)
 	}
 }
 
@@ -271,16 +271,16 @@ b = https://other.example.com/repo
 `)
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "a = https://twin.example.com/repo\n")
 
-	first, err := DeriveRows(dir, rows)
+	first, err := Derive(dir, rows)
 	if err != nil {
-		t.Fatalf("DeriveRows: unexpected error: %v", err)
+		t.Fatalf("Derive: unexpected error: %v", err)
 	}
-	second, err := DeriveRows(dir, rows)
+	second, err := Derive(dir, rows)
 	if err != nil {
-		t.Fatalf("DeriveRows: unexpected error: %v", err)
+		t.Fatalf("Derive: unexpected error: %v", err)
 	}
 	if !reflect.DeepEqual(first, second) {
-		t.Errorf("DeriveRows twice over one snapshot disagreed:\nfirst  = %+v\nsecond = %+v", first, second)
+		t.Errorf("Derive twice over one snapshot disagreed:\nfirst  = %+v\nsecond = %+v", first, second)
 	}
 }
 
@@ -308,9 +308,9 @@ func deriveScoped(t *testing.T, body string) []HostPathSet {
 	t.Helper()
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, scopedRow.InTreeConfigPath, body)
-	got, err := DeriveRows(dir, []ecosystem.Strategy{scopedRow})
+	got, err := Derive(dir, []ecosystem.Strategy{scopedRow})
 	if err != nil {
-		t.Fatalf("DeriveRows: unexpected error: %v", err)
+		t.Fatalf("Derive: unexpected error: %v", err)
 	}
 	return got
 }
@@ -322,7 +322,7 @@ func TestDerive_CopiesScopedFromDeclaration(t *testing.T) {
 		{Ecosystem: "scopedfake", Path: "/plain", RegistryName: "b"},
 	}
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Subtrees, want) {
-		t.Errorf("DeriveRows = %+v, want one host with subtrees %+v", got, want)
+		t.Errorf("Derive = %+v, want one host with subtrees %+v", got, want)
 	}
 }
 
@@ -337,7 +337,7 @@ func TestDerive_ScopedAndUnscopedTwinMergesToUnscoped(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			got := deriveScoped(t, body)
 			if len(got) != 1 || len(got[0].Subtrees) != 1 {
-				t.Fatalf("DeriveRows = %+v, want one host with one subtree", got)
+				t.Fatalf("Derive = %+v, want one host with one subtree", got)
 			}
 			if got[0].Subtrees[0].Scoped {
 				t.Errorf("Subtrees[0] = %+v, want Scoped false", got[0].Subtrees[0])
@@ -349,6 +349,6 @@ func TestDerive_ScopedAndUnscopedTwinMergesToUnscoped(t *testing.T) {
 func TestDerive_ScopedTwinsStayScoped(t *testing.T) {
 	got := deriveScoped(t, "a https://h.example.com/r scoped\nb https://h.example.com/r scoped\n")
 	if len(got) != 1 || len(got[0].Subtrees) != 1 || !got[0].Subtrees[0].Scoped {
-		t.Errorf("DeriveRows = %+v, want one scoped subtree", got)
+		t.Errorf("Derive = %+v, want one scoped subtree", got)
 	}
 }

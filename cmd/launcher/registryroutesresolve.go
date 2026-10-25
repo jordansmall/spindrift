@@ -18,8 +18,8 @@ import (
 // issue #3145 retired the scalar REGISTRY_PROXY_* knobs. AssignPrefixes runs
 // here, not in the file parser, so every production table carries a Prefix
 // (issue #3142) while the parser stays testable on its own.
-// rows is the ecosystem table to resolve over: production passes
-// ecosystem.Table, tests a synthetic Strategy.
+// rows is the registered Strategies to resolve over: production passes
+// ecosystem.Registered(), tests a synthetic Strategy.
 func buildRegistryProxyRoutes(c config, rows []ecosystem.Strategy) ([]registryproxy.Route, error) {
 	if c.registryProxyRoutesFile == "" {
 		return nil, nil
@@ -78,7 +78,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosyst
 	row, _ := backendkit.ByName(c.codeForge)
 	if row.HostMediatedRemote {
 		accumDir := c.hostRepoDir()
-		sets, err := registrypathset.DeriveFromGitRefRows(accumDir, c.baseBranch, rows)
+		sets, err := registrypathset.DeriveFromGitRef(accumDir, c.baseBranch, rows)
 		if err != nil {
 			return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need the Accumulation repo's %q branch to derive their enforced path-set, and deriving it from %q failed: %w", strings.Join(hostRootedHosts, ", "), c.baseBranch, accumDir, err)
 		}
@@ -90,7 +90,7 @@ func deriveHostRootedPathSets(c config, hostRootedHosts []string, rows []ecosyst
 		return nil, fmt.Errorf("registry proxy: host-rooted route(s) %s need a Target-repo checkout to derive their enforced path-set, and none is available here; run inside a checkout of the Target repo", strings.Join(hostRootedHosts, ", "))
 	}
 
-	sets, err := registrypathset.DeriveRows(repoDir, rows)
+	sets, err := registrypathset.Derive(repoDir, rows)
 	if err != nil {
 		return nil, fmt.Errorf("registry proxy: deriving enforced path-set from %q: %w", repoDir, err)
 	}

@@ -1,5 +1,5 @@
 // Package registrydiscover extracts registry declarations from a Target repo's
-// own committed config files, the ones named by ecosystem.Table's
+// own committed config files, the ones named by the Strategies'
 // InTreeConfigPath field (ADR 0044/0045), so `spindrift registry discover` can
 // propose a routes file instead of an operator transcribing hosts by hand.
 package registrydiscover
@@ -12,17 +12,12 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// Extract scans repoDir against ecosystem.Table.
-func Extract(repoDir string) ([]ecosystem.Declaration, []ecosystem.Note, error) {
-	return ExtractRows(repoDir, ecosystem.Table)
-}
-
-// ExtractRows owns every bit of I/O and stamping that a Strategy's ConfigParser hook
+// Extract owns every bit of I/O and stamping that a Strategy's ConfigParser hook
 // must not do itself. rows is a parameter so a caller can pass a fake Strategy
-// rather than mutate ecosystem.Table. Order is deterministic: Strategy order, then
+// rather than mutate a global. Order is deterministic: Strategy order, then
 // declaration order within a file (cargo's TOML map has no source order, so its
 // parser sorts by name).
-func ExtractRows(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declaration, []ecosystem.Note, error) {
+func Extract(repoDir string, rows []ecosystem.Strategy) ([]ecosystem.Declaration, []ecosystem.Note, error) {
 	var declared []ecosystem.Declaration
 	var notes []ecosystem.Note
 

@@ -38,13 +38,8 @@ type dedupeKey struct {
 // declaring an internal and a remote cargo registry on one host serves both
 // index subtrees. Hosts come out in first-declaration order, subtrees in
 // declaration order. go and gradle declare no in-tree path, so derive nothing.
-func Derive(repoDir string) ([]HostPathSet, error) {
-	return DeriveRows(repoDir, ecosystem.Table)
-}
-
-// DeriveRows is Derive over the given Strategies rather than ecosystem.Table.
-func DeriveRows(repoDir string, rows []ecosystem.Strategy) ([]HostPathSet, error) {
-	declared, _, err := registrydiscover.ExtractRows(repoDir, rows)
+func Derive(repoDir string, rows []ecosystem.Strategy) ([]HostPathSet, error) {
+	declared, _, err := registrydiscover.Extract(repoDir, rows)
 	if err != nil {
 		return nil, err
 	}

@@ -25,12 +25,12 @@ func TestExtract_ReadsEveryPathFromRows(t *testing.T) {
 			dir := t.TempDir()
 			testutil.WriteFixture(t, dir, row.InTreeConfigPath+"/placeholder", "")
 
-			_, _, err := ExtractRows(dir, rows)
+			_, _, err := Extract(dir, rows)
 			if err == nil {
-				t.Fatal("ExtractRows: want a read error for a directory at the row's path, got nil")
+				t.Fatal("Extract: want a read error for a directory at the row's path, got nil")
 			}
 			if !strings.Contains(err.Error(), row.InTreeConfigPath) {
-				t.Errorf("ExtractRows error = %q, want it to name %q (the %s Strategy's path)", err, row.InTreeConfigPath, row.Name)
+				t.Errorf("Extract error = %q, want it to name %q (the %s Strategy's path)", err, row.InTreeConfigPath, row.Name)
 			}
 		})
 	}

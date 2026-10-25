@@ -97,7 +97,7 @@ func registryRouteDriftCheckForRef(repoDir, ref string, routes []registryroutes.
 		return nil
 	}
 	check := registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
-		return registrydiscover.UncoveredHostsFromGitRefRows(repoDir, ref, covered, rows)
+		return registrydiscover.UncoveredHostsFromGitRef(repoDir, ref, covered, rows)
 	})
 	return []doctor.Check{check}
 }
@@ -110,7 +110,7 @@ const registryRouteDriftCheckName = "registry-route-drift"
 // checkout, so a test can hand it a fixture dir directly.
 func registryRouteDriftCheckFor(dir string, routes []registryroutes.Route, rows []ecosystem.Strategy) doctor.Check {
 	return registryRouteDriftRow(routes, func(covered []string) ([]string, error) {
-		return registrydiscover.UncoveredHostsRows(dir, covered, rows)
+		return registrydiscover.UncoveredHosts(dir, covered, rows)
 	})
 }
 

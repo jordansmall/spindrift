@@ -330,7 +330,7 @@ func (c *replay) classification() ([]byte, error) {
 	return []byte(bindregistry.ClassifyRows(c.repo(), c.allRows) + "\n"), nil
 }
 
-// discovery hands DiscoverRows a repo-relative display path for each store, so
+// discovery hands Discover a repo-relative display path for each store, so
 // the golden carries no absolute temp path, and maps it back to the real file
 // for the lookup.
 func (c *replay) discovery() ([]byte, error) {
@@ -348,7 +348,7 @@ func (c *replay) discovery() ([]byte, error) {
 		lookup := func(s registrydiscover.Store, d ecosystem.Declaration) (bool, error) {
 			return registrydiscover.StoreLookup(registrydiscover.Store{Name: s.Name, Path: filepath.Join(c.dir, s.Path)}, d)
 		}
-		routes, _, err := registrydiscover.DiscoverRows(
+		routes, _, err := registrydiscover.Discover(
 			c.repo(), c.allRows, stores,
 			lookup, func(string) string { return probedAuthScheme })
 		if err != nil {
@@ -403,7 +403,7 @@ func (c *replay) routes() ([]byte, error) {
 
 func (c *replay) pathSets() ([]registrypathset.HostPathSet, error) {
 	return c.sets.get(func() ([]registrypathset.HostPathSet, error) {
-		return registrypathset.DeriveRows(c.repo(), c.allRows)
+		return registrypathset.Derive(c.repo(), c.allRows)
 	})
 }
 
