@@ -7488,8 +7488,13 @@ serving both an internal cargo mirror and a crates.io passthrough — still
 collapses to a single route, since matching is host-keyed. `discover` stops
 at the first store that has a credential for that host, then probes the
 upstream base URL and reads its `WWW-Authenticate` response header to guess
-the auth scheme (`bearer` or `basic`, defaulting to `bearer` when the
-registry is unreachable or answers with neither). It's a setup-time,
+the auth scheme (`bearer` or `basic`). When the registry is unreachable or
+answers with neither, a matched Host profile (ADR 0071) fills the scheme
+and the route gets a comment naming the profile: Artifactory is recognised
+from an `/artifactory/api/` path in the declared registry URL, a
+`*.jfrog.io` hostname, or the `X-Artifactory-Id` header the probe received.
+A scheme the registry did announce always wins, and an unprofiled host
+still defaults to `bearer`. It's a setup-time,
 operator-run tool, never invoked from inside the Box — a Box-influenced
 route would let an Agent steer a real credential at a host of its choosing. Once a route is configured,
 how a proxied dispatch actually reaches the Box over it — socket or
