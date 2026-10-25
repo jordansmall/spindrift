@@ -2535,7 +2535,7 @@ contents of a pi `models.json`, and the Box writes it to
 same `envFiles` path `PI_AUTH_CONTENT` takes. Set it to JSON, never a path:
 
 ```sh
-PI_MODELS_CONTENT='{"providers":{"llm":{"api":"openai-completions","apiKey":"dummy","baseUrl":"http://llm.internal:8080/v1","models":[{"id":"my-model","contextWindow":131072,"input":["text"],"reasoning":true}]}}}'
+PI_MODELS_CONTENT='{"providers":{"llm":{"api":"openai-completions","apiKey":"dummy","baseUrl":"http://192.168.1.50:8080/v1","models":[{"id":"my-model","contextWindow":131072,"input":["text"],"reasoning":true}]}}}'
 ```
 
 Then name the Provider in a model tier as `<provider>/<model>`, e.g.
@@ -2548,10 +2548,12 @@ A Provider declared here under a name no credential rule matches needs no key
 at preflight; one that reuses a known Provider name (`openai`, `openrouter`,
 ...) still needs that Provider's key. If its `apiKey` is a `$VAR` reference,
 pi resolves it only against variables already forwarded into the Box, so the
-variable must be one spindrift forwards (for example a pi Provider key). The endpoint must also be
-reachable from the Box's network; under the bwrap default and restricted
-`NETWORK_MODE` settings a host-loopback or LAN server is not, see [Reaching a
-local/self-hosted model server under egress
+variable must be one spindrift forwards (for example a pi Provider key). The
+endpoint must also be reachable from the Box's network. Under the bwrap
+default a server on the spindrift host itself is not (and under
+`NETWORK_MODE=none` no server is); one on another LAN host is, but only by IP literal in
+`baseUrl`, since the Box has no hosts file and its resolver does not know LAN
+hostnames. See [Reaching a local/self-hosted model server under egress
 restriction](#reaching-a-localself-hosted-model-server-under-egress-restriction).
 
 `PI_MODELS_CONTENT` is a secret knob because a literal `apiKey` in it is a
@@ -2696,7 +2698,8 @@ netns rules) — Ollama, LM Studio, or a llama.cpp server (Tier 5; [ADR
 0009](adr/0009-agent-cli-is-a-pluggable-driver.md)'s issue-#269 amendment) —
 is an OpenAI-compatible endpoint on the host loopback or LAN
 (`http://localhost:11434/v1`, `http://127.0.0.1:1234/v1`,
-`http://127.0.0.1:8080/v1`). Whether the Box can reach it turns on
+`http://127.0.0.1:8080/v1`, or `http://192.168.1.50:8080/v1` on another
+host). Whether the Box can reach it turns on
 [`NETWORK_MODE`](#network-mode-network_mode) (or, on a Consumer that still
 sets a raw knob instead, `PODMAN_NETWORK`/`BWRAP_UNSHARE_NET`), and the two
 runners differ:
@@ -2706,15 +2709,21 @@ runners differ:
   host-loopback/LAN model server is reachable with no extra wiring.
   Selecting a local Provider opens nothing new; the reachability is already
   latent. This did not change with issue #2666.
-- **`open` (default), bwrap — no longer reachable (issue #2666).** As of
-  issue #2666, `open` isolates bwrap into its own network namespace behind a
-  hardened pasta helper, which blocks host loopback by design (the whole
-  point of the issue). A host-loopback/LAN model server is **not** reachable
-  under the default anymore. To deliberately reopen it, set
-  `NETWORK_MODE=host` — the documented bwrap-only opt-out that restores the
-  pre-#2666 shared-host-netns behavior — at the cost of losing the
-  isolation this issue adds for the whole Box, not just the model-server
-  path.
+- **`open` (default), bwrap — same-host server blocked, LAN host reachable by
+  IP (issues #2666, #6049).** As of issue #2666, `open` isolates bwrap into
+  its own network namespace behind a hardened pasta helper, which blocks host
+  loopback by design (the whole point of the issue). pasta also copies the
+  host's own address into the namespace and `--no-map-gw` leaves no route
+  back to the host, so a model server on the spindrift host itself, by
+  loopback or by that address, is **not** reachable under the default. A server on *another* LAN host is reachable by
+  IP literal (verified in issue #6049); its LAN hostname does not resolve,
+  because bwrap builds `/etc` from an empty directory (no hosts file) and
+  `resolv.conf` names pasta's DNS forwarder, which only answers names the
+  host's upstream resolver serves. Put the IP literal in `baseUrl`. To
+  deliberately reopen the same-host case, set `NETWORK_MODE=host` — the
+  documented bwrap-only opt-out that restores the pre-#2666 shared-host-netns
+  behavior — at the cost of losing the isolation this issue adds for the
+  whole Box, not just the model-server path.
 - **`no-host-loopback`, podman — reopen it with the raw escape hatch.**
   `NETWORK_MODE=no-host-loopback` renders plain `--network=pasta`, which
   denies host-loopback. For a backend that needs both restricted egress
@@ -2735,7 +2744,7 @@ runners differ:
   since issue #2666, `open` already isolates bwrap the same way
   `no-host-loopback` would (pasta-backed, egress works, host loopback
   blocked), so the distinct choice has no distinct rendering to reject into.
-  A local Provider is reachable under neither `open` nor
+  A same-host local Provider is reachable under neither `open` nor
   `no-host-loopback` on bwrap; reopen it with `NETWORK_MODE=host` instead
   (see the `open`, bwrap bullet above), which also reopens general
   host-loopback/LAN reachability, not just for a local Provider.
