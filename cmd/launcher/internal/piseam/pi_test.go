@@ -106,6 +106,8 @@ type piOpts struct {
 	// noAPIKey leaves apiKey out of the stub Provider, so a key can only come
 	// from auth.json.
 	noAPIKey bool
+	// noModels skips the harness's models.json, for a test that supplies its own.
+	noModels bool
 	// approve trusts project-local files (--approve) instead of ignoring them.
 	approve bool
 	// defaultAgentDir leaves PI_CODING_AGENT_DIR unset, so pi uses
@@ -120,6 +122,27 @@ type piOpts struct {
 	env []string
 }
 
+// stubModelsJSON is a pi models.json declaring the stub Provider at baseURL.
+// An empty apiKey is left out, so a key can only come from auth.json.
+func stubModelsJSON(baseURL, apiKey string, reasoning bool) map[string]any {
+	// Non-zero per-million prices make pi's computed usage.cost non-zero.
+	model := map[string]any{"id": stubModel, "cost": map[string]any{
+		"input": 1.0, "output": 2.0, "cacheRead": 0.1, "cacheWrite": 0.0,
+	}}
+	if reasoning {
+		model["reasoning"] = true
+	}
+	provider := map[string]any{
+		"baseUrl": baseURL + "/v1",
+		"api":     "openai-completions",
+		"models":  []map[string]any{model},
+	}
+	if apiKey != "" {
+		provider["apiKey"] = apiKey
+	}
+	return map[string]any{"providers": map[string]any{stubProvider: provider}}
+}
+
 func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...func(work string)) run {
 	t.Helper()
 	bin := piPath(t)
@@ -130,24 +153,13 @@ func runPiWith(t *testing.T, s *stub, opts piOpts, prompt string, seedWork ...fu
 		dirs = newPiDirs(t)
 	}
 	home, agentDir, work := dirs.home, dirs.agentDir, dirs.work
-	// Non-zero per-million prices make pi's computed usage.cost non-zero.
-	model := map[string]any{"id": stubModel, "cost": map[string]any{
-		"input": 1.0, "output": 2.0, "cacheRead": 0.1, "cacheWrite": 0.0,
-	}}
-	if opts.reasoning {
-		model["reasoning"] = true
+	if !opts.noModels {
+		apiKey := "stub-key"
+		if opts.noAPIKey {
+			apiKey = ""
+		}
+		writeJSON(t, filepath.Join(agentDir, "models.json"), stubModelsJSON(s.URL, apiKey, opts.reasoning))
 	}
-	provider := map[string]any{
-		"baseUrl": s.URL + "/v1",
-		"api":     "openai-completions",
-		"models":  []map[string]any{model},
-	}
-	if !opts.noAPIKey {
-		provider["apiKey"] = "stub-key"
-	}
-	writeJSON(t, filepath.Join(agentDir, "models.json"), map[string]any{
-		"providers": map[string]any{stubProvider: provider},
-	})
 	for _, seed := range seedWork {
 		seed(work)
 	}
