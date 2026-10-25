@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/registryproxy"
+	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/signalsocket"
@@ -132,6 +133,13 @@ type Config struct {
 	// at startup, before it builds this Config. An empty slice turns the
 	// feature off, and runOnce then starts no proxy and mounts no socket.
 	RegistryProxyRoutes []registryproxy.Route
+
+	// RegistryProxyRewriteRows are the response-rewrite rows the proxy
+	// applies, in the registered Strategies' order. Which response shapes get
+	// rewritten is static per-ecosystem knowledge, not something a run
+	// resolves per route the way RegistryProxyRoutes are; the launcher fills
+	// it so dispatch never reads the registry.
+	RegistryProxyRewriteRows []registryvocab.RewriteRow
 
 	// Kind is the dispatch kind, a name from dispatchkind.All ("work",
 	// "research", "butler" or "recover"). Its descriptor's axes reach the Box as DISPATCH_KEYING and

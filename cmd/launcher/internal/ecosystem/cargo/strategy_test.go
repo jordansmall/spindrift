@@ -69,12 +69,13 @@ func TestStrategy_ResolvesByRetiredRouteKey(t *testing.T) {
 // Nothing else asserts on the collected slice's contents, so a Strategy the
 // collector forgets to gather would fail silently: New would just never see it.
 func TestResponseRewriteRows_ContainsCargoConfigRow(t *testing.T) {
-	for _, row := range ecosystem.ResponseRewriteRows() {
+	rows := ecosystem.ResponseRewriteRows([]ecosystem.Strategy{Strategy})
+	for _, row := range rows {
 		if row.Name == "cargo config.json" && row.Ecosystem == Strategy.Name {
 			return
 		}
 	}
-	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", ecosystem.ResponseRewriteRows(), "cargo config.json", Strategy.Name)
+	t.Errorf("ResponseRewriteRows() = %+v, want a row named %q tagged %q", rows, "cargo config.json", Strategy.Name)
 }
 
 // The only Strategy registered here is cargo, so a second home-config row
