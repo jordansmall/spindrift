@@ -17,12 +17,12 @@ func alwaysMatch(Store, ecosystem.Declaration) (bool, error) { return true, nil 
 
 func probeAs(scheme string) Probe { return func(string) string { return scheme } }
 
-// discoverSynthetic runs DiscoverRows over the synthetic Strategy alone.
+// discoverSynthetic runs Discover over the synthetic Strategy alone.
 func discoverSynthetic(t *testing.T, dir string, stores []Store, lookup Lookup, probe Probe) ([]Route, Report) {
 	t.Helper()
-	routes, report, err := DiscoverRows(dir, syntheticRows, stores, lookup, probe)
+	routes, report, err := Discover(dir, syntheticRows, stores, lookup, probe)
 	if err != nil {
-		t.Fatalf("DiscoverRows: unexpected error: %v", err)
+		t.Fatalf("Discover: unexpected error: %v", err)
 	}
 	return routes, report
 }
@@ -67,9 +67,9 @@ func TestDiscover_TwoHostsAcrossFilesTwoRoutes(t *testing.T) {
 
 	rows := []ecosystem.Strategy{syntheticRows[0], twin}
 	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
-	routes, _, err := DiscoverRows(dir, rows, stores, noMatch, probeAs("bearer"))
+	routes, _, err := Discover(dir, rows, stores, noMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("DiscoverRows: unexpected error: %v", err)
+		t.Fatalf("Discover: unexpected error: %v", err)
 	}
 	if len(routes) != 2 {
 		t.Fatalf("routes = %+v, want exactly 2", routes)
@@ -125,9 +125,9 @@ func TestDiscover_StorePrecedenceEarlierStoreWins(t *testing.T) {
 	// Both stores would report a match; earlier in the slice must win.
 	row := synthetic.Strategy
 	row.CredentialStores = []string{"netrc", "other-store"}
-	routes, report, err := DiscoverRows(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
+	routes, report, err := Discover(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("DiscoverRows: unexpected error: %v", err)
+		t.Fatalf("Discover: unexpected error: %v", err)
 	}
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
@@ -514,7 +514,7 @@ func TestDiscover_BoundExhaustedPropagatesErrorAndReturnsNilRoutes(t *testing.T)
 		return d.Host == matchedHost, nil
 	}
 
-	routes, report, err := DiscoverRows(dir, syntheticRows, stores, lookup, probeAs("bearer"))
+	routes, report, err := Discover(dir, syntheticRows, stores, lookup, probeAs("bearer"))
 	if err == nil {
 		t.Fatalf("Discover: want error on unresolvable env placeholder collision, got nil (routes = %+v)", routes)
 	}
@@ -593,9 +593,9 @@ func TestDiscover_SameHostTwoFilesOneRoute(t *testing.T) {
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "main = https://shared.example.com/second/\n")
 
 	rows := []ecosystem.Strategy{syntheticRows[0], twin}
-	routes, _, err := DiscoverRows(dir, rows, nil, noMatch, probeAs("bearer"))
+	routes, _, err := Discover(dir, rows, nil, noMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("DiscoverRows: unexpected error: %v", err)
+		t.Fatalf("Discover: unexpected error: %v", err)
 	}
 	if len(routes) != 1 {
 		t.Fatalf("routes = %+v, want exactly 1", routes)
@@ -625,9 +625,9 @@ func TestDiscover_MatchedStoreCompanionsComeFromKindStoreConfig(t *testing.T) {
 			stores := []Store{{Name: kind.SourceKey, Path: path}}
 			row := synthetic.Strategy
 			row.CredentialStores = []string{kind.SourceKey}
-			routes, _, err := DiscoverRows(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
+			routes, _, err := Discover(dir, []ecosystem.Strategy{row}, stores, alwaysMatch, probeAs("bearer"))
 			if err != nil {
-				t.Fatalf("DiscoverRows: unexpected error: %v", err)
+				t.Fatalf("Discover: unexpected error: %v", err)
 			}
 			if len(routes) != 1 {
 				t.Fatalf("routes = %+v, want exactly 1", routes)
@@ -668,9 +668,9 @@ func TestDiscover_NormalizedHostDedupesCaseAndPort(t *testing.T) {
 	}
 }
 
-// The stub Strategy's config path is in no Table Strategy, so a route can only appear if
-// DiscoverRows walked the supplied Strategies rather than ecosystem.Table.
-func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
+// The stub Strategy's config path is in no registered Strategy, so a route can only appear if
+// Discover walked the supplied Strategies rather than the registered Strategies.
+func TestDiscover_ScansSuppliedRows(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, "fake.cfg", "x")
 	row := ecosystem.Strategy{
@@ -681,9 +681,9 @@ func TestDiscoverRows_ScansSuppliedRowsNotTable(t *testing.T) {
 		},
 	}
 
-	routes, _, err := DiscoverRows(dir, []ecosystem.Strategy{row}, nil, noMatch, probeAs("bearer"))
+	routes, _, err := Discover(dir, []ecosystem.Strategy{row}, nil, noMatch, probeAs("bearer"))
 	if err != nil {
-		t.Fatalf("DiscoverRows: %v", err)
+		t.Fatalf("Discover: %v", err)
 	}
 	if len(routes) != 1 || routes[0].MatchHost != "reg.fake.example" {
 		t.Errorf("routes = %+v, want one route for reg.fake.example", routes)

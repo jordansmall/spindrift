@@ -58,7 +58,7 @@ type UnmatchedHost struct {
 	StoresSearched []string
 }
 
-// Report summarizes a DiscoverRows run: which declared hosts matched a store,
+// Report summarizes a Discover run: which declared hosts matched a store,
 // which did not, and which config files declare no usable registry (carried
 // through from Extract's Note, including its Skipped distinction).
 type Report struct {
@@ -67,14 +67,14 @@ type Report struct {
 	NoRegistry []ecosystem.Note
 }
 
-// DiscoverRows extracts registry declarations from repoDir over the given Strategies
+// Discover extracts registry declarations from repoDir over the given Strategies
 // and proposes a route per unique host, searching stores in order for a
 // matching credential. Each Strategy's CredentialStores bound which stores are
 // queried for its declarations; a store outside a declaration's Strategy is named
 // in StoresSearched but never queried.
-func DiscoverRows(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
+func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup Lookup, probe Probe) ([]Route, Report, error) {
 	storesByEcosystem := ecosystem.CredentialStores(rows)
-	declared, notes, err := ExtractRows(repoDir, rows)
+	declared, notes, err := Extract(repoDir, rows)
 	if err != nil {
 		return nil, Report{}, err
 	}
@@ -100,7 +100,7 @@ func DiscoverRows(repoDir string, rows []ecosystem.Strategy, stores []Store, loo
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
 			// Each kind's own StoreConfig already names every companion it
-			// contributes, so DiscoverRows assigns both unconditionally rather
+			// contributes, so Discover assigns both unconditionally rather
 			// than branching per store name.
 			if kind, ok := credresolver.KindBySourceKey(matchedStore.Name); ok && kind.StoreConfig != nil {
 				cfg := kind.StoreConfig(matchedStore.Path, declarationFacts(d))

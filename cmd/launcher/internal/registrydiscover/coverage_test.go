@@ -9,10 +9,10 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-// UncoveredHostsRows must surface Extract's error instead of swallowing it. The
+// UncoveredHosts must surface Extract's error instead of swallowing it. The
 // synthetic parser never fails, so the Strategy under test swaps in one that does;
 // the real parsers' malformed-input errors are pinned in the ecosystem package.
-func TestUncoveredHostsRows_ExtractErrorReturnsError(t *testing.T) {
+func TestUncoveredHosts_ExtractErrorReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, "anything")
 	failing := synthetic.Strategy
@@ -20,44 +20,44 @@ func TestUncoveredHostsRows_ExtractErrorReturnsError(t *testing.T) {
 		return nil, false, errors.New("parse failed")
 	}
 
-	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Strategy{failing})
+	got, err := UncoveredHosts(dir, nil, []ecosystem.Strategy{failing})
 	if err == nil {
-		t.Fatal("UncoveredHostsRows() succeeded, want the parser's error")
+		t.Fatal("UncoveredHosts() succeeded, want the parser's error")
 	}
 	if got != nil {
-		t.Errorf("UncoveredHostsRows() = %v, want nil on error", got)
+		t.Errorf("UncoveredHosts() = %v, want nil on error", got)
 	}
 }
 
 // Two config files (one per Strategy) declaring the same host must produce one
 // entry, the first occurrence. Discover's own loop applies the same dedup.
-func TestUncoveredHostsRows_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
+func TestUncoveredHosts_DuplicateDeclaredHostDedupedToOne(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")
 	testutil.WriteFixture(t, dir, cfgPath, "a = https://registry.same.example.com/\n")
 	testutil.WriteFixture(t, dir, twin.InTreeConfigPath, "b = https://registry.same.example.com\n")
 
-	got, err := UncoveredHostsRows(dir, nil, []ecosystem.Strategy{synthetic.Strategy, twin})
+	got, err := UncoveredHosts(dir, nil, []ecosystem.Strategy{synthetic.Strategy, twin})
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(got) != 1 || got[0] != "registry.same.example.com" {
-		t.Errorf("UncoveredHostsRows() = %v, want [registry.same.example.com] deduped to one entry", got)
+		t.Errorf("UncoveredHosts() = %v, want [registry.same.example.com] deduped to one entry", got)
 	}
 }
 
 // A declared host with no matching covered entry is the drift doctor row's
 // core signal (issue #3144 slice 2).
-func TestUncoveredHostsRows_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
+func TestUncoveredHosts_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	got, err := UncoveredHostsRows(dir, nil, syntheticRows)
+	got, err := UncoveredHosts(dir, nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(got) != 1 || got[0] != "host.example.com" {
-		t.Errorf("UncoveredHostsRows() = %v, want [host.example.com]", got)
+		t.Errorf("UncoveredHosts() = %v, want [host.example.com]", got)
 	}
 }
 
@@ -65,40 +65,40 @@ func TestUncoveredHostsRows_DeclaredHostNotInCovered_ReturnsHost(t *testing.T) {
 // normalization Discover and registryroutes.Parse apply, so a covered
 // MatchHost differing only in case or an explicit default port still counts
 // as coverage.
-func TestUncoveredHostsRows_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
+func TestUncoveredHosts_DeclaredHostCoveredCaseAndPortNormalized_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
 
-	got, err := UncoveredHostsRows(dir, []string{"HOST.Example.com:443"}, syntheticRows)
+	got, err := UncoveredHosts(dir, []string{"HOST.Example.com:443"}, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("UncoveredHostsRows() = %v, want none (covered host normalizes to a match)", got)
+		t.Errorf("UncoveredHosts() = %v, want none (covered host normalizes to a match)", got)
 	}
 }
 
 // A tree with none of the Strategies' config files, such as no checkout or a
 // checkout naming no registry, yields no uncovered hosts rather than an
 // error: nothing declared means nothing to be uncovered.
-func TestUncoveredHostsRows_NoDeclarations_ReturnsEmpty(t *testing.T) {
+func TestUncoveredHosts_NoDeclarations_ReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 
-	got, err := UncoveredHostsRows(dir, nil, syntheticRows)
+	got, err := UncoveredHosts(dir, nil, syntheticRows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("UncoveredHostsRows() = %v, want none", got)
+		t.Errorf("UncoveredHosts() = %v, want none", got)
 	}
 }
 
 // This test pins the shared-engine acceptance criterion of issue #3144.
-// Discover and UncoveredHostsRows read their declared hosts off the same Extract
+// Discover and UncoveredHosts read their declared hosts off the same Extract
 // call, so with zero routes configured every host Discover proposes a route
 // for must come back uncovered, and covering exactly those routes' own
 // MatchHost values must leave nothing uncovered.
-func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
+func TestUncoveredHosts_ConsistentWithDiscover_SameTree(t *testing.T) {
 	dir := t.TempDir()
 	twin := synthetic.Twin("synthetic-twin")
 	rows := []ecosystem.Strategy{synthetic.Strategy, twin}
@@ -108,21 +108,21 @@ func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
 	lookup := func(store Store, d ecosystem.Declaration) (bool, error) { return false, nil }
 	probe := func(upstreamBaseURL string) string { return "bearer" }
 
-	routes, _, err := DiscoverRows(dir, rows, nil, lookup, probe)
+	routes, _, err := Discover(dir, rows, nil, lookup, probe)
 	if err != nil {
-		t.Fatalf("DiscoverRows: unexpected error: %v", err)
+		t.Fatalf("Discover: unexpected error: %v", err)
 	}
 	var discoveredHosts []string
 	for _, r := range routes {
 		discoveredHosts = append(discoveredHosts, r.MatchHost)
 	}
 
-	uncoveredNone, err := UncoveredHostsRows(dir, nil, rows)
+	uncoveredNone, err := UncoveredHosts(dir, nil, rows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(uncoveredNone) != len(discoveredHosts) {
-		t.Fatalf("UncoveredHostsRows(nil) = %v, want the same hosts DiscoverRows proposed routes for: %v", uncoveredNone, discoveredHosts)
+		t.Fatalf("UncoveredHosts(nil) = %v, want the same hosts Discover proposed routes for: %v", uncoveredNone, discoveredHosts)
 	}
 	for _, h := range discoveredHosts {
 		found := false
@@ -132,15 +132,15 @@ func TestUncoveredHostsRows_ConsistentWithDiscover_SameTree(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("DiscoverRows proposed a route for %q, but UncoveredHostsRows(nil) = %v doesn't name it", h, uncoveredNone)
+			t.Errorf("Discover proposed a route for %q, but UncoveredHosts(nil) = %v doesn't name it", h, uncoveredNone)
 		}
 	}
 
-	uncoveredAll, err := UncoveredHostsRows(dir, discoveredHosts, rows)
+	uncoveredAll, err := UncoveredHosts(dir, discoveredHosts, rows)
 	if err != nil {
-		t.Fatalf("UncoveredHostsRows: unexpected error: %v", err)
+		t.Fatalf("UncoveredHosts: unexpected error: %v", err)
 	}
 	if len(uncoveredAll) != 0 {
-		t.Errorf("UncoveredHostsRows(discoveredHosts) = %v, want none once every discovered host is covered", uncoveredAll)
+		t.Errorf("UncoveredHosts(discoveredHosts) = %v, want none once every discovered host is covered", uncoveredAll)
 	}
 }

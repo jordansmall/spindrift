@@ -23,24 +23,18 @@ import (
 // A symlink inside ref's tree, at the config path or at a parent directory,
 // resolves to its target's content, as a checkout's os.ReadFile would. Two
 // shapes deliberately part from a checkout and skip like a missing file: a
-// directory at the config path, which ExtractRows hard-errors on, since a
+// directory at the config path, which Extract hard-errors on, since a
 // snapshot has no failing read to report, only nothing to declare; and an
 // absolute or out-of-tree symlink, since a snapshot must never read the host
 // file it names. A dangling link skips too.
-func MaterializeRef(repoDir, ref string) (dir string, cleanup func(), err error) {
-	return MaterializeRefRows(repoDir, ref, ecosystem.Table)
-}
-
-// MaterializeRefRows is MaterializeRef over the given Strategies rather than
-// ecosystem.Table.
-func MaterializeRefRows(repoDir, ref string, rows []ecosystem.Strategy) (dir string, cleanup func(), err error) {
+func MaterializeRef(repoDir, ref string, rows []ecosystem.Strategy) (dir string, cleanup func(), err error) {
 	noop := func() {}
 
 	if err := ResolveRef(repoDir, ref); err != nil {
 		return "", noop, err
 	}
 
-	// Walking Strategies, the same Strategies ExtractRows walks, keeps the materialized
+	// Walking Strategies, the same Strategies Extract walks, keeps the materialized
 	// file set from drifting from the scanned one: a config path added to a Strategy
 	// is picked up here with no second list to maintain.
 	var paths []string
@@ -147,14 +141,14 @@ func ResolveRef(repoDir, ref string) error {
 	return nil
 }
 
-// UncoveredHostsFromGitRefRows is UncoveredHostsRows for a ref inside a git repo
+// UncoveredHostsFromGitRef is UncoveredHosts for a ref inside a git repo
 // rather than a checkout on disk, so the result reflects what ref has committed
 // and nothing an uncommitted or divergent working tree might contribute.
-func UncoveredHostsFromGitRefRows(repoDir, ref string, covered []string, rows []ecosystem.Strategy) ([]string, error) {
-	dir, cleanup, err := MaterializeRefRows(repoDir, ref, rows)
+func UncoveredHostsFromGitRef(repoDir, ref string, covered []string, rows []ecosystem.Strategy) ([]string, error) {
+	dir, cleanup, err := MaterializeRef(repoDir, ref, rows)
 	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
-	return UncoveredHostsRows(dir, covered, rows)
+	return UncoveredHosts(dir, covered, rows)
 }

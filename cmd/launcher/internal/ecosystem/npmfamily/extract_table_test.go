@@ -26,7 +26,7 @@ func TestExtract_ReadsEveryRegisteredPath(t *testing.T) {
 				t.Fatalf("MkdirAll: %v", err)
 			}
 
-			_, _, err := registrydiscover.Extract(dir)
+			_, _, err := registrydiscover.Extract(dir, ecosystem.Registered())
 			if err == nil {
 				t.Fatal("Extract: want a read error for a directory at the row's path, got nil")
 			}

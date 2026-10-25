@@ -61,7 +61,7 @@ func ApplyToRoute(route registryproxy.Route, sets map[string]HostPathSet, rows [
 	return route, nil
 }
 
-// declaredPath is one ecosystem.Table Strategy's declared path (issue #3403), read
+// declaredPath is one registered Strategy's declared path (issue #3403), read
 // out of route.Ecosystems with the tag its EnforcedSubtrees entry carries.
 type declaredPath struct {
 	ecosystem string
@@ -92,7 +92,7 @@ func declaredPathAloneLabel(route registryproxy.Route, rows []ecosystem.Strategy
 }
 
 // discoverableNames joins, in Strategies' order, the names of the Strategies whose in-tree
-// config registrydiscover.ExtractRows can read: the same filter, so the error
+// config registrydiscover.Extract can read: the same filter, so the error
 // advice never names an ecosystem whose declaration would go undiscovered.
 func discoverableNames(rows []ecosystem.Strategy) string {
 	var names []string

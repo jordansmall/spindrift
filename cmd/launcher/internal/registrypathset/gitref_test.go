@@ -17,9 +17,9 @@ func TestDeriveFromGitRef_CommittedConfigDerives(t *testing.T) {
 		synthetic.Strategy.InTreeConfigPath: "a = https://host.example.com/repo\n",
 	}, nil)
 
-	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
+	got, err := DeriveFromGitRef(bare, "main", syntheticRows)
 	if err != nil {
-		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
 	want := []HostPathSet{{
 		Host:     "host.example.com",
@@ -27,7 +27,7 @@ func TestDeriveFromGitRef_CommittedConfigDerives(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveFromGitRefRows = %+v, want %+v", got, want)
+		t.Errorf("DeriveFromGitRef = %+v, want %+v", got, want)
 	}
 }
 
@@ -40,9 +40,9 @@ func TestDeriveFromGitRef_MultipleRowsMaterializeAndDerive(t *testing.T) {
 		twin.InTreeConfigPath:               "a = https://second.example.com/repo/second\n",
 	}, nil)
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Strategy, twin})
+	got, err := DeriveFromGitRef(bare, "main", []ecosystem.Strategy{synthetic.Strategy, twin})
 	if err != nil {
-		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
 
 	hosts := make(map[string]HostPathSet, len(got))
@@ -50,7 +50,7 @@ func TestDeriveFromGitRef_MultipleRowsMaterializeAndDerive(t *testing.T) {
 		hosts[hps.Host] = hps
 	}
 	if len(hosts) != 2 {
-		t.Fatalf("DeriveFromGitRefRows = %+v, want exactly 2 host path sets", got)
+		t.Fatalf("DeriveFromGitRef = %+v, want exactly 2 host path sets", got)
 	}
 	if hps, ok := hosts["first.example.com"]; !ok || !hps.admits("/repo/first/pkg") {
 		t.Errorf("first host path set = %+v, want an admitting /repo/first subtree", hps)
@@ -69,9 +69,9 @@ func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 		map[string]string{synthetic.Strategy.InTreeConfigPath: "a = https://committed.example.com/repo\n"}, nil)
 	testutil.WriteFixture(t, src, twin.InTreeConfigPath, "a = https://uncommitted.example.com/repo\n")
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{synthetic.Strategy, twin})
+	got, err := DeriveFromGitRef(bare, "main", []ecosystem.Strategy{synthetic.Strategy, twin})
 	if err != nil {
-		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
 	want := []HostPathSet{{
 		Host:     "committed.example.com",
@@ -79,7 +79,7 @@ func TestDeriveFromGitRef_UncommittedFileNeverEnters(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: synthetic.Strategy.Name, Path: "/repo", RegistryName: "a"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveFromGitRefRows = %+v, want only the committed host %+v", got, want)
+		t.Errorf("DeriveFromGitRef = %+v, want only the committed host %+v", got, want)
 	}
 }
 
@@ -103,18 +103,18 @@ func TestDeriveFromGitRef_OtherBranchConfigNeverEnters(t *testing.T) {
 	testutil.GitRun(t, "", "init", "--bare", bare)
 	testutil.GitRun(t, src, "push", bare, "+refs/heads/main:refs/heads/main", "+refs/heads/other:refs/heads/other")
 
-	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
+	got, err := DeriveFromGitRef(bare, "main", syntheticRows)
 	if err != nil {
 		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
 	if len(got) != 0 {
-		t.Errorf("DeriveFromGitRefRows over main = %+v, want no host path sets: the config only exists on other", got)
+		t.Errorf("DeriveFromGitRef over main = %+v, want no host path sets: the config only exists on other", got)
 	}
 }
 
 func TestDeriveFromGitRef_MissingRepoDirFails(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
-	_, err := DeriveFromGitRefRows(missing, "main", syntheticRows)
+	_, err := DeriveFromGitRef(missing, "main", syntheticRows)
 	if err == nil {
 		t.Fatal("DeriveFromGitRef: want error for a missing repo dir, got nil")
 	}
@@ -126,7 +126,7 @@ func TestDeriveFromGitRef_MissingRepoDirFails(t *testing.T) {
 // A plain directory must be rejected rather than read as an empty tree.
 func TestDeriveFromGitRef_NotAGitRepoFails(t *testing.T) {
 	dir := t.TempDir()
-	_, err := DeriveFromGitRefRows(dir, "main", syntheticRows)
+	_, err := DeriveFromGitRef(dir, "main", syntheticRows)
 	if err == nil {
 		t.Fatal("DeriveFromGitRef: want error for a directory that is not a git repo, got nil")
 	}
@@ -139,7 +139,7 @@ func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 		".synthetic/registries": "a = https://host.example.com/repo\n",
 	}, nil)
 
-	_, err := DeriveFromGitRefRows(bare, "does-not-exist", syntheticRows)
+	_, err := DeriveFromGitRef(bare, "does-not-exist", syntheticRows)
 	if err == nil {
 		t.Fatal("DeriveFromGitRef: want error for a ref that does not exist, got nil")
 	}
@@ -154,7 +154,7 @@ func TestDeriveFromGitRef_MissingRefFails(t *testing.T) {
 func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", nil, nil)
 
-	got, err := DeriveFromGitRefRows(bare, "main", syntheticRows)
+	got, err := DeriveFromGitRef(bare, "main", syntheticRows)
 	if err != nil {
 		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
@@ -163,9 +163,9 @@ func TestDeriveFromGitRef_NoConfigFilesDerivesEmptySet(t *testing.T) {
 	}
 }
 
-// A Strategy that is not in ecosystem.Table is walked end to end: materialized from
+// A Strategy that is not registered is walked end to end: materialized from
 // the ref, parsed, and derived, proving the rows parameter reaches both stages.
-func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
+func TestDeriveFromGitRef_WalksSuppliedRow(t *testing.T) {
 	bare, _ := testutil.BareRepoWithConfigs(t, "main", map[string]string{
 		"fake.cfg": "x",
 	}, nil)
@@ -177,9 +177,9 @@ func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
 		},
 	}
 
-	got, err := DeriveFromGitRefRows(bare, "main", []ecosystem.Strategy{row})
+	got, err := DeriveFromGitRef(bare, "main", []ecosystem.Strategy{row})
 	if err != nil {
-		t.Fatalf("DeriveFromGitRefRows: unexpected error: %v", err)
+		t.Fatalf("DeriveFromGitRef: unexpected error: %v", err)
 	}
 	want := []HostPathSet{{
 		Host:     "fake.example.com",
@@ -187,6 +187,6 @@ func TestDeriveFromGitRefRows_WalksSuppliedRowNotTable(t *testing.T) {
 		Subtrees: []registryvocab.Subtree{{Ecosystem: "fake", Path: "/repo"}},
 	}}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("DeriveFromGitRefRows = %+v, want %+v", got, want)
+		t.Errorf("DeriveFromGitRef = %+v, want %+v", got, want)
 	}
 }
