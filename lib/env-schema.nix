@@ -537,7 +537,7 @@ withRowKnobs {
     env = "PI_AUTH_CONTENT";
     secret = true;
     hostConfig = true;
-    doc = "pi auth store (JSON) — the contents of a pi auth.json, which the Box writes to ~/.pi/agent/auth.json before the pi Driver runs. Only GitHub Copilot OAuth entries are accepted (the github-copilot Provider is OAuth-only); an OAuth entry for any other Provider is refused at preflight — use that Provider's API key instead. Mint once on a host by running pi and '/login' for GitHub Copilot, then export the github-copilot slice of ~/.pi/agent/auth.json. Required when DRIVER=pi and any model tier (MODEL, REVIEW_MODEL, WORKER_MODEL, SCOUT_MODEL, FILER_MODEL) is github-copilot/<model>; ignored under the claude and opencode Drivers. Never placed on argv";
+    doc = "pi auth store (JSON) — the contents of a pi auth.json, which the Box writes to ~/.pi/agent/auth.json before the pi Driver runs. Only GitHub Copilot OAuth entries are accepted (the github-copilot Provider is OAuth-only); an OAuth entry for any other Provider is refused at preflight — use that Provider's API key instead. Mint once on a host by running pi and '/login' for GitHub Copilot, then export the github-copilot slice of ~/.pi/agent/auth.json. Required when DRIVER=pi and any model tier (MODEL, REVIEW_MODEL, WORKER_MODEL, SCOUT_MODEL, FILER_MODEL) is github-copilot/<model>, and the store must then hold an OAuth-type github-copilot entry; ignored under the claude and opencode Drivers. Never placed on argv";
     boxEnv = true;
   };
   anthropicAPIKey = {

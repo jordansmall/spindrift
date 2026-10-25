@@ -17,9 +17,11 @@ let
   # checks it via envFileErrors.
   # authContent is { env, oauthProviders, apiKeyProviders? }: the env var holds
   # a Provider-keyed auth store whose OAuth entries preflight limits to
-  # oauthProviders; apiKeyProviders maps an OAuth Provider id to the
-  # differently named Provider its API key is under (string -> string,
-  # default {}). assertShape checks it via authContentErrors.
+  # oauthProviders, and requires one for each oauthProviders Provider a model
+  # tier targets by its <provider>/ prefix; apiKeyProviders maps an OAuth
+  # Provider id to the differently named Provider its API key is under
+  # (string -> string, default {}). assertShape checks it via
+  # authContentErrors.
   # credentials is a list of rules (possibly empty), shape-checked by
   # credentialRuleErrors. A rule's optional keys are modelPrefix, setupCommand,
   # labels (env name after the first -> human label for its fallback prompt;

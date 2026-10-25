@@ -141,7 +141,8 @@ in
   # a stable GitHub token, so that never invalidates the host's copy, while a
   # Provider that rotates refresh tokens would have the Box burn the host's
   # credential. Preflight rejects any other OAuth entry (use that Provider's
-  # API key instead).
+  # API key instead), and requires an OAuth entry for each of these Providers
+  # whenever a model tier targets its <provider>/ prefix.
   authContent = {
     env = "PI_AUTH_CONTENT";
     oauthProviders = [ "github-copilot" ];
