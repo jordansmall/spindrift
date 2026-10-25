@@ -125,9 +125,10 @@ func TestPiAuthJSON(t *testing.T) {
 	})
 }
 
-// The path the Box takes for PI_AUTH_CONTENT: the Driver's envFiles write it
-// into $HOME/.pi/agent/auth.json, which pi reads with PI_CODING_AGENT_DIR unset.
-func TestPiAuthContentReachesPi(t *testing.T) {
+// writePiEnvFiles runs the Box's WriteEnvFiles over the pi Driver's envFiles
+// with env as the environment, skipping the test when the spec is not rendered.
+func writePiEnvFiles(t *testing.T, home string, env map[string]string) {
+	t.Helper()
 	spec := os.Getenv(envFilesEnv)
 	if spec == "" {
 		t.Skipf("%s unset: nix/checks/go.nix renders it from the pi Driver's envFiles", envFilesEnv)
@@ -136,7 +137,26 @@ func TestPiAuthContentReachesPi(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse %s=%q: %v", envFilesEnv, spec, err)
 	}
+	if err := homelayout.WriteEnvFiles(home, files, func(name string) string { return env[name] }); err != nil {
+		t.Fatalf("WriteEnvFiles: %v", err)
+	}
+}
 
+// assertPrivateFile fails the test unless path holds exactly want at mode 0600.
+func assertPrivateFile(t *testing.T, path, want string) {
+	t.Helper()
+	name := filepath.Base(path)
+	if st, err := os.Stat(path); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("%s: %v, %v; want mode 0600", name, st, err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != want {
+		t.Errorf("%s = %q, %v; want %q", name, got, err, want)
+	}
+}
+
+// The path the Box takes for PI_AUTH_CONTENT: the Driver's envFiles write it
+// into $HOME/.pi/agent/auth.json, which pi reads with PI_CODING_AGENT_DIR unset.
+func TestPiAuthContentReachesPi(t *testing.T) {
 	const key = "auth-content-key"
 	b, err := json.Marshal(authJSON(key))
 	if err != nil {
@@ -146,15 +166,7 @@ func TestPiAuthContentReachesPi(t *testing.T) {
 
 	dirs := newPiDirs(t)
 	dirs.agentDir = filepath.Join(dirs.home, ".pi", "agent")
-	getenv := func(name string) string {
-		if name == "PI_AUTH_CONTENT" {
-			return content
-		}
-		return ""
-	}
-	if err := homelayout.WriteEnvFiles(dirs.home, files, getenv); err != nil {
-		t.Fatalf("WriteEnvFiles: %v", err)
-	}
+	writePiEnvFiles(t, dirs.home, map[string]string{"PI_AUTH_CONTENT": content})
 
 	s := newStub(t, textReply("ok"))
 	r := runPiWith(t, s, piOpts{
@@ -170,16 +182,43 @@ func TestPiAuthContentReachesPi(t *testing.T) {
 	if got := authHeader(t, s); got != "Bearer "+key {
 		t.Errorf("Authorization = %q, want %q", got, "Bearer "+key)
 	}
-	p := filepath.Join(dirs.agentDir, "auth.json")
-	if st, err := os.Stat(p); err != nil || st.Mode().Perm() != 0o600 {
-		t.Errorf("auth.json: %v, %v; want mode 0600", st, err)
-	}
-	if got, err := os.ReadFile(p); err != nil || string(got) != content {
-		t.Errorf("auth.json = %q, %v; want %q", got, err, content)
-	}
+	assertPrivateFile(t, filepath.Join(dirs.agentDir, "auth.json"), content)
 	for _, a := range r.argv {
 		if strings.Contains(a, key) {
 			t.Errorf("pi argv holds the key: %q", a)
 		}
 	}
+}
+
+// The path the Box takes for PI_MODELS_CONTENT: the Driver's envFiles write it
+// into $HOME/.pi/agent/models.json, which pi reads with PI_CODING_AGENT_DIR
+// unset. The harness writes no models.json of its own, so the Provider can only
+// come from the written file.
+func TestPiModelsContentReachesPi(t *testing.T) {
+	const (
+		answer = "reply via written models.json"
+		key    = "models-content-key"
+	)
+	s := newStub(t, textReply(answer))
+	b, err := json.Marshal(stubModelsJSON(s.URL, key, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+
+	dirs := newPiDirs(t)
+	dirs.agentDir = filepath.Join(dirs.home, ".pi", "agent")
+	writePiEnvFiles(t, dirs.home, map[string]string{"PI_MODELS_CONTENT": content})
+
+	r := runPiWith(t, s, piOpts{noModels: true, defaultAgentDir: true, dirs: &dirs}, "hi")
+	if r.err != nil {
+		t.Fatalf("pi exit = %v, stderr = %q", r.err, r.stderr)
+	}
+	if got := finalAssistantText(r.events); got != answer {
+		t.Errorf("final assistant text = %q, want %q\nstdout:\n%s", got, answer, r.stdout)
+	}
+	if got := authHeader(t, s); got != "Bearer "+key {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer "+key)
+	}
+	assertPrivateFile(t, filepath.Join(dirs.agentDir, "models.json"), content)
 }
