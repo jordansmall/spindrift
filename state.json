@@ -1,21 +1,20 @@
 {
   "lastSwept": "2815ca0e46ca887fec671251d26084bf6c88b5bc",
   "cursor": "cmd/launcher/internal/forge/prresolver.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6019"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/6019"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-24T21:05:09.65104258-04:00"
+  },
   "usage": {
-    "input_tokens": 50,
-    "output_tokens": 13914,
-    "cache_read_input_tokens": 1623595,
-    "cache_creation_input_tokens": 79392,
-    "total_cost_usd": 1.454846165,
-    "duration_ms": 185100,
-    "duration_api_ms": 181824,
-    "num_turns": 27
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
