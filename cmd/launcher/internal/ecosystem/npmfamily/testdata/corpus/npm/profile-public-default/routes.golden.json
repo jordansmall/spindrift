@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "npmrc",
+      "FromEnv": "",
+      "FromFile": "stores/npmrc",
+      "MatchHost": "registry.npmjs.org",
+      "PropertyKey": "",
+      "RegistryName": "",
+      "UpstreamURL": "https://registry.npmjs.org"
+    },
+    "Ecosystems": null,
+    "MatchHost": "registry.npmjs.org",
+    "UpstreamOrigin": ""
+  }
+]

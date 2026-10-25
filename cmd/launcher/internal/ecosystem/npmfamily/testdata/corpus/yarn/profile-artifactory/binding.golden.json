@@ -1,0 +1,13 @@
+{
+  "envExports": [
+    {
+      "Name": "YARN_NPM_REGISTRY_SERVER",
+      "Value": "http://127.0.0.1:27182/artifacts-corp-test/artifactory/api/npm/npm-remote/"
+    }
+  ],
+  "inTree": {
+    "configPath": ".yarnrc.yml",
+    "content": "npmRegistryServer: \"http://127.0.0.1:27182/artifacts-corp-test/artifactory/api/npm/npm-remote/\"\n",
+    "outcome": "applied"
+  }
+}

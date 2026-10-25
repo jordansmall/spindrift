@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "artifacts.corp.test",
+      "Origin": "https://artifacts.corp.test",
+      "Subtrees": [
+        {
+          "ecosystem": "pnpm",
+          "path": "/artifactory/api/npm/npm-remote"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/artifactory/api/npm/npm-remote"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "pnpm",
+          "path": "/artifactory/api/npm/npm-remote"
+        }
+      ],
+      "matchHost": "artifacts.corp.test",
+      "upstream": "https://artifacts.corp.test"
+    }
+  ]
+}

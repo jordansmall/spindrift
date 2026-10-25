@@ -1,0 +1,21 @@
+[
+  {
+    "Allow": [
+      "/artifactory/api/cargo/cargo-local/v1/crates"
+    ],
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "cargo-credentials",
+      "FromEnv": "",
+      "FromFile": "stores/cargo-credentials",
+      "MatchHost": "acme.jfrog.io",
+      "PropertyKey": "",
+      "RegistryName": "acme",
+      "UpstreamURL": "https://acme.jfrog.io"
+    },
+    "Ecosystems": null,
+    "MatchHost": "acme.jfrog.io",
+    "UpstreamOrigin": ""
+  }
+]

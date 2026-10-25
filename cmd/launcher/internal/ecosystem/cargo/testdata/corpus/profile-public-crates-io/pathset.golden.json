@@ -1,0 +1,29 @@
+{
+  "derived": [
+    {
+      "Host": "index.crates.io",
+      "Origin": "https://index.crates.io",
+      "Subtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/"
+        }
+      ]
+    }
+  ],
+  "enforced": [
+    {
+      "enforcedPaths": [
+        "/"
+      ],
+      "enforcedSubtrees": [
+        {
+          "ecosystem": "cargo",
+          "path": "/"
+        }
+      ],
+      "matchHost": "index.crates.io",
+      "upstream": "https://index.crates.io"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+[
+  {
+    "Allow": null,
+    "AuthScheme": "bearer",
+    "Credential": {
+      "ExecArgv": null,
+      "FileFormat": "cargo-credentials",
+      "FromEnv": "",
+      "FromFile": "stores/cargo-credentials",
+      "MatchHost": "index.crates.io",
+      "PropertyKey": "",
+      "RegistryName": "acme",
+      "UpstreamURL": "https://index.crates.io"
+    },
+    "Ecosystems": null,
+    "MatchHost": "index.crates.io",
+    "UpstreamOrigin": ""
+  }
+]
