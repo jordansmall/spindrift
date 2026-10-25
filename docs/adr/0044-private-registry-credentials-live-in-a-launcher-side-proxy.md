@@ -261,7 +261,7 @@ the artifact base path is registry-specific, not a fixed shape.
 > `allowlist.go` as the home of the patterns — and every line number cited
 > against that file — is historical as of this amendment; `allowlist.go`
 > still exists but now only matches a path against the registered
-> Strategies' patterns (`ecosystem.Table`).
+> Strategies' patterns (`ecosystem.Registered()`).
 > No pattern's value changed, so none of the allowlist-policy claims above
 > are affected.
 

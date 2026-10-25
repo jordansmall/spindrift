@@ -223,7 +223,7 @@ of re-deriving its own lockfile if/elif chain — the same file-output idiom
 process that cannot inherit a child's exports. The box port has since
 moved that decision in-process: the `box` binary calls
 `internal/toolchain` (issue #4297), which calls `bindregistry.Classify`
-directly against `internal/ecosystem.Table` (`Ecosystems()` is gone), so
+directly against `internal/ecosystem.Registered()` (`Ecosystems()` is gone), so
 the verb no longer emits a classification env file and
 `phase_toolchain_nudge` is gone.
 
