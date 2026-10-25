@@ -29,9 +29,12 @@ func Render(routes []Route) []byte {
 		if origin := registryroutes.UpstreamOriginFor(r.UpstreamBaseURL); origin != "" {
 			fmt.Fprintf(&b, "upstream-origin = %s\n", quoteTOMLString(origin))
 		}
-		// Discovery probed this value, so always write it out rather than
-		// leaning on registryroutes.Parse's "bearer" default, which is a
-		// fallback for hand-written files.
+		// Discovery probed (or profile-filled) this value, so always write it
+		// out rather than leaning on registryroutes.Parse's "bearer" default,
+		// which is a fallback for hand-written files.
+		if r.Profile != "" {
+			fmt.Fprintf(&b, "# auth-scheme from host profile %s: the probe saw no usable challenge\n", quoteTOMLString(r.Profile))
+		}
 		fmt.Fprintf(&b, "auth-scheme = %s\n", quoteTOMLString(r.AuthScheme))
 
 		b.WriteString("credential = { ")

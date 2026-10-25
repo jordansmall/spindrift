@@ -25,13 +25,17 @@ type Lookup func(store Store, d ecosystem.Declaration) (found bool, err error)
 
 // ProbeResult is what the probe learned from one registry response.
 type ProbeResult struct {
-	// Scheme is "bearer" or "basic", or empty when the response carried no
-	// usable challenge (unreachable, no WWW-Authenticate, or a scheme
-	// discovery does not model).
+	// Scheme is the probe's "bearer" or "basic", or empty when the response
+	// carried no usable challenge; a Host profile fill may instead supply any
+	// routes-file scheme, including "header:<Name>".
 	Scheme string
 	// Header is the response's headers, for host-profile matching; nil when
 	// unreachable.
 	Header http.Header
+	// Profile names the Host profile that supplied Scheme because the probe
+	// received none; empty when the registry announced a scheme itself or no
+	// profile with a scheme matched.
+	Profile string
 }
 
 // Probe answers what an upstream base URL's registry reveals. The real probe
@@ -48,8 +52,10 @@ type Route struct {
 	// upstream origin, and only when the scheme or port says something
 	// match-host does not. It is kept here for the auth-scheme probe and the
 	// credential-store match.
-	UpstreamBaseURL  string
-	AuthScheme       string
+	UpstreamBaseURL string
+	AuthScheme      string
+	// Profile is ProbeResult.Profile: the Host profile that supplied AuthScheme.
+	Profile          string
 	CredentialSource string // "netrc"|"npmrc"|"cargo-credentials"|"gradle-properties"|"env" (env = placeholder for unmatched)
 	CredentialValue  string // store path, or placeholder env var name
 	RegistryName     string // companion registry-name, cargo-credentials only
@@ -106,7 +112,11 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 		route := Route{
 			MatchHost:       host,
 			UpstreamBaseURL: d.UpstreamBaseURL,
-			AuthScheme:      normalizeAuthScheme(probe(d.UpstreamBaseURL).Scheme),
+		}
+		res := probe(d.UpstreamBaseURL)
+		route.AuthScheme = normalizeAuthScheme(res.Scheme)
+		if route.AuthScheme == res.Scheme {
+			route.Profile = res.Profile
 		}
 		if found {
 			route.CredentialSource = matchedStore.Name
