@@ -204,13 +204,20 @@
               # (issue #4280).
               seam-fixtures = fixtures.seamFixtures;
             }
-            # lib/preambles.nix bakes FLAKE_IMAGE_ATTR as the fixed path
-            # `.#packages.<system>.agent-closure` (issue #2672), so the launcher's
-            # freshness Probe needs agent-closure here at top level, not only on
-            # fixtures.dogfoodBwrapHarness. The guard matches lib/mkHarness.nix:
+            # A bwrap harness bakes FLAKE_IMAGE_ATTR as
+            # `.#packages.<system>.<imageAttrName>` (issue #2672), agent-closure
+            # here, so the launcher's freshness Probe needs agent-closure at top
+            # level, not only on fixtures.dogfoodBwrapHarness. The guard matches
+            # lib/mkHarness.nix:
             # on aarch64-darwin that harness has none and the access would throw.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
+            }
+            # The pi twin's closure (issue #6064). Its FLAKE_IMAGE_ATTR names
+            # agent-closure-pi, not the claude closure above, so freshness
+            # needs its own top-level entry; same guard as agent-closure.
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapPiHarness.packages ? agent-closure-pi) {
+              agent-closure-pi = fixtures.dogfoodBwrapPiHarness.packages.agent-closure-pi;
             };
 
             apps = {
@@ -274,6 +281,14 @@
               # drives a bwrap Box rather than the podman one apps.daemon
               # (off the default harness) would.
               dogfood-bwrap-daemon = fixtures.dogfoodBwrapHarness.apps.daemon;
+            }
+            # The pi Driver in a bwrap Box (issue #6064): the bwrap twin above
+            # with only Driver, model/Roster, image attr and daemon app names
+            # changed. Guarded on its own closure, which builds only where
+            # dogfoodBwrapHarness's does.
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapPiHarness.packages ? agent-closure-pi) {
+              dogfood-bwrap-pi = fixtures.dogfoodBwrapPiHarness.apps.default;
+              dogfood-bwrap-pi-daemon = fixtures.dogfoodBwrapPiHarness.apps.daemon;
             };
 
             devShells = {
