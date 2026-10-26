@@ -90,9 +90,10 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 	}
 }
 
-// The ImageTag fixture is a nix store path because lib/preambles.nix's bwrap
-// branch renders it that way. Each closure gets a generation subdir named
-// after its basename, replacing the flat path every closure collided on.
+// The ImageTag fixture is a nix store path because lib/runners/bwrap.nix
+// fills IMAGE_TAG with the agent closure's store path. Each closure gets a
+// generation subdir named after its basename, replacing the flat path every
+// closure collided on.
 func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
 	r, err := New(cfg, runnertest.Lookup(nil), "/pwd")
