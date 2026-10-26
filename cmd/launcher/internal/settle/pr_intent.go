@@ -163,12 +163,19 @@ func (s *Settle) blockHandoff(num, branch string, err error) {
 // reaches here.
 func (s *Settle) parkRelayFailure(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=relay-failed  !! %v\n", num, branch, err)
-	next := fmt.Sprintf("run `spindrift recover %s` to retry relaying and landing it.", num)
-	if errors.Is(err, forge.ErrWorkflowPermissionDenied) {
-		next = forge.WorkflowPermissionRemedy(num)
-	}
+	next := relayFailureNext(num, err, fmt.Sprintf("run `spindrift recover %s` to retry relaying and landing it.", num))
 	s.it.Comment(num, fmt.Sprintf("bundle relay failed: %v. The Box's bundle is preserved in the outbox; %s", err, next))
 	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox", ReasonRelayFailed)
+}
+
+// relayFailureNext swaps a park comment's recover hint for the workflow-scope
+// remedy when err is the forge refusing a workflow-file push: recover would
+// hit the same refusal.
+func relayFailureNext(num string, err error, fallback string) string {
+	if errors.Is(err, forge.ErrWorkflowPermissionDenied) {
+		return forge.WorkflowPermissionRemedy(num)
+	}
+	return fallback
 }
 
 // parkDraftPRFailure fails an issue whose bundle relayed but whose host-side

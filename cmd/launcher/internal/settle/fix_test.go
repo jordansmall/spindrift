@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -206,17 +208,17 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck(t *testing.T) {
 	}
 }
 
-// A RelayBundle failure after a fix pass (a crashed Box that left no bundle,
-// say) is logged but must never block or crash the retry loop. It falls
-// through to the next gateToGreen poll and exhausts normally rather than
-// becoming its own terminal condition.
-func TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal(t *testing.T) {
+// A missing bundle after a fix pass (a crashed Box that left none) preserves
+// nothing to recover, so it is logged but must never park the issue. With the
+// head unmoved it falls through to the fix-no-op check.
+func TestSelfHeal_ReadOnlyFixPassMissingBundleFallsThrough(t *testing.T) {
 	c := fixConfig(1)
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
-	fc.RelayBundleErr = errors.New("bundle missing")
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
+	fc.RelayBundleErr = forge.ErrBundleNotFound
 	cf := fc.AsGithubReadOnly()
 	s := newTestSettle(c, fc, cf)
 
@@ -228,16 +230,151 @@ func TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal(t *testing.T) {
 	})
 
 	if landing != landingFailed {
-		t.Fatalf("selfHeal = %v, want landingFailed (still red after the relay failure)", landing)
+		t.Fatalf("selfHeal = %v, want landingFailed", landing)
 	}
-	if !strings.Contains(reason, "ci-red:") {
-		t.Errorf("selfHeal reason = %q, want a substring containing %q", reason, "ci-red:")
+	if !strings.Contains(reason, "fix-no-op:") {
+		t.Errorf("selfHeal reason = %q, want a substring containing %q", reason, "fix-no-op:")
 	}
 	if len(fc.RelayBundleCalls) != 1 {
 		t.Errorf("RelayBundle called %d times, want 1: %+v", len(fc.RelayBundleCalls), fc.RelayBundleCalls)
 	}
 	if !strings.Contains(out, "fix-relay-failed") {
 		t.Errorf("console output must log the relay failure; got: %q", out)
+	}
+	if strings.Contains(out, "status=relay-failed") {
+		t.Errorf("a missing bundle must not park as relay-failed; got: %q", out)
+	}
+	assertLatchedReason(t, s, "1", ReasonFixNoOp)
+}
+
+// A parkable relay failure after a fix pass leaves the bundle in the outbox
+// and the head unmoved. It must park for `spindrift recover` rather than be
+// misread as a fix-no-op (issue #6074).
+func TestSelfHeal_ReadOnlyFixPassParkableRelayFailureParks(t *testing.T) {
+	c := fixConfig(3)
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
+	fc.RelayBundleErr = errors.New("ssh auth blip")
+	cf := fc.AsGithubReadOnly()
+	s := newTestSettle(c, fc, cf)
+
+	d := dispatch.NewFake()
+	var landing landingResult
+	var reason string
+	out := testutil.CaptureStdout(t, func() {
+		landing, reason = s.selfHeal(d, "1", 0, testPR, nil)
+	})
+
+	if landing != landingFailed {
+		t.Fatalf("selfHeal = %v, want landingFailed", landing)
+	}
+	if !strings.HasPrefix(reason, "relay-failed: fix pass 1's bundle relay failed;") {
+		t.Errorf("selfHeal reason = %q, want a fix pass relay-failed note", reason)
+	}
+	if !strings.Contains(out, "status=relay-failed") {
+		t.Errorf("stdout must carry a status=relay-failed line, got: %q", out)
+	}
+	if strings.Contains(out, "fix-no-op") {
+		t.Errorf("a parkable relay failure must not be reported as fix-no-op; got: %q", out)
+	}
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle called %d times, want 1 (no further fix passes): %+v", len(fc.RelayBundleCalls), fc.RelayBundleCalls)
+	}
+	if n := len(fc.TransitionStateCalls); n == 0 || fc.TransitionStateCalls[n-1].To != forge.Failed {
+		t.Errorf("issue must be transitioned to Failed; calls=%+v", fc.TransitionStateCalls)
+	}
+	assertLatchedReason(t, s, "1", ReasonRelayFailed)
+	var named bool
+	for _, cc := range fc.CommentCalls {
+		if strings.Contains(cc.Body, "`spindrift recover 1`") {
+			named = true
+		}
+		if strings.Contains(cc.Body, "retry relaying and landing") {
+			t.Errorf("recover re-gates an open PR and never relays this bundle; comment = %q", cc.Body)
+		}
+	}
+	if !named {
+		t.Errorf("a comment must name `spindrift recover 1`; got %+v", fc.CommentCalls)
+	}
+}
+
+// A workflow-scope refusal is the one parkable failure whose recover hint
+// would hit the same wall, so the comment carries the scope remedy instead.
+func TestSelfHeal_ReadOnlyFixPassWorkflowPermissionDeniedParksWithRemedy(t *testing.T) {
+	c := fixConfig(3)
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
+	fc.RelayBundleErr = fmt.Errorf("push refused: %w", forge.ErrWorkflowPermissionDenied)
+	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
+
+	var landing landingResult
+	testutil.CaptureStdout(t, func() {
+		landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	})
+
+	if landing != landingFailed {
+		t.Fatalf("selfHeal = %v, want landingFailed", landing)
+	}
+	var remedy bool
+	for _, cc := range fc.CommentCalls {
+		if strings.Contains(cc.Body, forge.WorkflowPermissionRemedy("1")) {
+			remedy = true
+		}
+	}
+	if !remedy {
+		t.Errorf("a comment must carry the workflow-permission remedy; got %+v", fc.CommentCalls)
+	}
+	if n := len(fc.TransitionStateCalls); n == 0 || fc.TransitionStateCalls[n-1].To != forge.Failed {
+		t.Errorf("issue must be transitioned to Failed; calls=%+v", fc.TransitionStateCalls)
+	}
+	assertLatchedReason(t, s, "1", ReasonRelayFailed)
+}
+
+// A mark landing during the relay's final attempt is not a backoff, so the
+// retry loop returns an exhausted error rather than errAbandoned (issue
+// #3523): the park must see the mark and leave the released issue alone.
+func TestSelfHeal_ReadOnlyFixPassRelayMarkedDuringFinalAttemptAbandons(t *testing.T) {
+	var s *Settle
+	c := fixConfig(3)
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.Policy = retry.Policy{Max: 3, Unit: time.Second}
+	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) {}}
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure, forge.StateFailure})
+	fc.SetHeadCommitSHAs(testPR, []string{"sha-1", "sha-1", "sha-1", "sha-1"})
+	fc.RelayBundleErr = errors.New("ssh auth blip")
+	fc.RelayBundleOnCall = func(attempt int) {
+		if attempt == c.Policy.Max+1 {
+			s.term.Mark("1")
+		}
+	}
+	s = newTestSettle(c, fc, fc.AsGithubReadOnly())
+	gen := s.term.Begin("1")
+
+	var landing landingResult
+	var reason string
+	testutil.CaptureStdout(t, func() {
+		landing, reason = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil)
+	})
+
+	if landing != landingAbandoned || reason != "" {
+		t.Errorf("selfHeal = (%v, %q), want (landingAbandoned, \"\")", landing, reason)
+	}
+	if len(fc.RelayBundleCalls) != c.Policy.Max+1 {
+		t.Errorf("RelayBundle calls = %d, want %d", len(fc.RelayBundleCalls), c.Policy.Max+1)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("an abandoned run must not transition state; calls=%+v", fc.TransitionStateCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("an abandoned run must not comment; got %+v", fc.CommentCalls)
 	}
 }
 
@@ -552,5 +689,14 @@ func TestSelfHeal_CleanFixPassRecordsNothing(t *testing.T) {
 
 	if len(d.RecordedWarnings) != 0 {
 		t.Errorf("RecordedWarnings = %q, want none", d.RecordedWarnings)
+	}
+}
+
+func assertLatchedReason(t *testing.T, s *Settle, num, want string) {
+	t.Helper()
+	s.settledMu.Lock()
+	defer s.settledMu.Unlock()
+	if r := s.settledLatch[num].reason; r != want {
+		t.Errorf("latched reason = %q, want %q", r, want)
 	}
 }

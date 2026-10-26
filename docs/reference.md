@@ -2688,7 +2688,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate. Not a rate-limit lever: the gate issues one strictly-serialized, single-point GraphQL query at a time, only while a PR is actively mid-landing, bounded by `MERGE_POLL_TIMEOUT` — it never bursts. The cadence-sensitive pollers are the *continuous refill* ticker (runs for the launcher's whole lifetime and bursts outside its ticker) and the *console backlog* poll — slow those in a rate-limit sweep, not this knob. The interval is also reused as four fixed-call-count delays (the `SUCCESS` confirm re-poll, the `3 ×` check-registration window, the merge-blocked-by-checks retry, and the fix-pass no-op confirm), so raising it stretches every landing for zero rate-limit benefit (issue #3249) |
 | `MERGE_POLL_TIMEOUT`   | `3600`  | `branches`         | seconds to wait for CI green before abandoning the merge — at the default, a merge that rides out the full deadline can outlive an installation token's ~1h lifetime when `GH_TOKEN_REFRESH_FILE` is unset (see [GitHub App installation token](#github-app-installation-token-recommended)) |
 | `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
-| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649) and of the host-side draft PR create after it (issue #5146); once the `status=ready` landing relay exhausts them the issue parks `agent-failed` (issue #4651), while the fix-pass and conflict-resolve relays never park |
+| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649) and of the host-side draft PR create after it (issue #5146); once the `status=ready` landing relay or a fix-pass relay exhausts them the issue parks `agent-failed` (issues #4651, #6074), while the conflict-resolve relay never parks |
 | `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry; also the backoff between host-side bundle relay retries for a read-only Box (issue #4649) and between draft PR create retries (issue #5146) |
 | `HOLD_JITTER_SECS`     | `5`     | `selfHealing`      | jitter added to a 429 hold-until-reset before re-dispatch |
 | `DEV_SHELL_NAME`       | `default` | `sandbox`        | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
@@ -3954,22 +3954,26 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   swaps `agent-in-progress` → `agent-failed` and comments `bundle relay failed:
   <err>` with the work preserved in the outbox (issue #4651). This holds on
   the PR-shaped path and on the push-only `CODE_FORGE=local` path alike; the
-  fix-pass and conflict-resolve relays do not park. Run `spindrift recover
-  <n>` on the host holding the outbox to relay and land the bundle (opening
-  the PR and driving the merge gate on a PR-shaped forge); landing strips the
-  stale `agent-failed`, leaving `agent-complete`. Under `ISSUE_TRACKER=jira`
-  with a status mapping, a workflow lacking a Failed→Complete transition
-  falls back to adding the `agent-complete` label while the native status
-  stays Failed (the gap recovering after red CI already has). On the
-  PR-shaped path a relay that succeeds but whose host-side draft-PR create
-  then fails retries the create on the same bound and backoff, on GitHub and
-  Forgejo alike, adopting instead any open PR a timed-out create made on the
-  branch (issue #5146); once those retries run out it parks the issue the
-  same way, with reason `draft-pr-failed` and a `draft PR create failed:
-  <err>` comment (issue #5144); `spindrift recover <n>` opens the PR from
-  the preserved bundle. A missing bundle, a wiring error, or a missing PR
-  intent with no fallback still posts "merge blocked" and leaves the issue
-  `agent-in-progress`.
+  conflict-resolve relay does not park. Run `spindrift recover <n>` on the host
+  holding the outbox to relay and land the bundle (opening the PR and driving
+  the merge gate on a PR-shaped forge); landing strips the stale
+  `agent-failed`, leaving `agent-complete`. A fix pass's relay parks too, with
+  reason `relay-failed` and a `fix pass <k>'s bundle relay failed: <err>`
+  comment, instead of misreading the unmoved head as `fix-no-op` (issue
+  #6074); its PR is already open, so the daemon's recover kind skips it and
+  `spindrift recover <n>` re-gates it rather than relaying that bundle.
+  Under `ISSUE_TRACKER=jira` with a status mapping, a workflow lacking a
+  Failed→Complete transition falls back to adding the `agent-complete` label
+  while the native status stays Failed (the gap recovering after red CI
+  already has). On the PR-shaped path a relay that succeeds but whose
+  host-side draft-PR create then fails retries the create on the same bound
+  and backoff, on GitHub and Forgejo alike, adopting instead any open PR a
+  timed-out create made on the branch (issue #5146); once those retries run
+  out it parks the issue the same way, with reason `draft-pr-failed` and a
+  `draft PR create failed: <err>` comment (issue #5144); `spindrift recover
+  <n>` opens the PR from the preserved bundle. A missing bundle, a wiring
+  error, or a missing PR intent with no fallback still posts "merge blocked"
+  and leaves the issue `agent-in-progress`.
 - **A ready that skipped the land pass never lands.** A review-loop run
   whose `status=ready` did not come from its land pass never cleared
   review: the pass manifest's last implement, fix, or land entry is not
