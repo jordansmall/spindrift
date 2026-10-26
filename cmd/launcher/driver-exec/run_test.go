@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -333,5 +335,150 @@ func TestRunLogsObservabilityEventOnRelaunch(t *testing.T) {
 	})
 	if !strings.Contains(stderr, "relaunching in baked env") {
 		t.Errorf("stderr = %q, want a relaunch observability line", stderr)
+	}
+}
+
+const (
+	piMessageStart = `{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}` + "\n"
+	piDeltaHel     = `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hel"}}` + "\n"
+	piDeltaLo      = `{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"lo"}}` + "\n"
+	piMessageEnd   = `{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"stopReason":"stop"}}` + "\n"
+	piToolUpdate   = `{"type":"tool_execution_update","toolCallId":"t1","partialResult":"out"}` + "\n"
+)
+
+// fixtureConfig returns an execConfig for a fake Driver that prints stream
+// verbatim and then runs tail, a shell snippet.
+func fixtureConfig(t *testing.T, driverName, stream, tail string) execConfig {
+	t.Helper()
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "stream.txt")
+	if err := os.WriteFile(fixture, []byte(stream), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return execConfig{
+		driver:       driverName,
+		driverBin:    writeFakeDriver(t, dir, "fake-driver", "cat "+fixture+"\n"+tail),
+		logPath:      filepath.Join(dir, "stream.log"),
+		heartbeatLog: filepath.Join(dir, "heartbeat.log"),
+		issue:        "7",
+	}
+}
+
+// runFixture runs a fake Driver that prints stream verbatim and returns what
+// reached stdout and the Pass log.
+func runFixture(t *testing.T, driverName, stream string) (stdout, log string) {
+	t.Helper()
+	cfg := fixtureConfig(t, driverName, stream, "")
+	var out bytes.Buffer
+	rc, err := run(cfg, &out)
+	if err != nil || rc != 0 {
+		t.Fatalf("run = (%d, %v), want (0, nil)", rc, err)
+	}
+	got, err := os.ReadFile(cfg.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.String(), string(got)
+}
+
+// Only pi drops anything: claude and opencode streams reach the Pass log and
+// stdout byte for byte, even when they look like pi deltas or end mid-line.
+func TestRunPassthroughDriversKeepStreamByteIdentical(t *testing.T) {
+	stream := piMessageStart + piDeltaHel + piDeltaLo + piMessageEnd + `{"type":"result","result":"no newline"}`
+	for _, name := range []string{"claude", "opencode"} {
+		t.Run(name, func(t *testing.T) {
+			stdout, log := runFixture(t, name, stream)
+			if stdout != stream {
+				t.Errorf("stdout = %q, want %q", stdout, stream)
+			}
+			if log != stream {
+				t.Errorf("log = %q, want %q", log, stream)
+			}
+		})
+	}
+}
+
+// A finished assistant message's deltas are redundant with its message_end
+// (issue #6066); everything else, tool updates included, passes through. The
+// filter wraps the stdout tee too, so driver-exec's stdout loses them as well.
+func TestRunPiDropsDeltasOfFinishedMessage(t *testing.T) {
+	stdout, log := runFixture(t, "pi", piMessageStart+piDeltaHel+piToolUpdate+piDeltaLo+piMessageEnd)
+	want := piMessageStart + piToolUpdate + piMessageEnd
+	if log != want {
+		t.Errorf("log = %q, want %q", log, want)
+	}
+	if stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+// A message cut off by the end of the stream is only recorded by its deltas.
+func TestRunPiKeepsCoalescedDeltasOfUnfinishedMessage(t *testing.T) {
+	_, log := runFixture(t, "pi", piMessageStart+piDeltaHel+piDeltaLo)
+	if !strings.HasPrefix(log, piMessageStart) {
+		t.Errorf("log = %q, want it to start with the message_start line", log)
+	}
+	if n := strings.Count(log, `"delta":"Hello"`); n != 1 {
+		t.Errorf("log has %d coalesced \"Hello\" deltas, want 1: %q", n, log)
+	}
+	if strings.Contains(log, `"delta":"Hel"`) {
+		t.Errorf("log still carries a raw partial delta: %q", log)
+	}
+}
+
+// SIGTERM mid-message must not lose the held text: the Box stop path signals
+// driver-exec, which has no other chance to write it out.
+func TestRunSIGTERMFlushesHeldDeltasAndExitsSIGTERM(t *testing.T) {
+	// exec so the sleep is the signalled child and holds no extra pipe copy.
+	cfg := fixtureConfig(t, "pi", piMessageStart+piDeltaHel+piDeltaLo, "exec sleep 30\n")
+
+	exited := make(chan int, 1)
+	orig := exit
+	exit = func(code int) { exited <- code }
+	t.Cleanup(func() { exit = orig })
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var out bytes.Buffer
+		_, _ = run(cfg, &out)
+	}()
+
+	// The message_start line passes the filter straight away, so it shows the
+	// Driver is running and the handler is installed.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if b, _ := os.ReadFile(cfg.logPath); strings.Contains(string(b), piMessageStart) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the Driver's message_start in the Pass log")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case code := <-exited:
+		if code != exitSIGTERM {
+			t.Errorf("exit code = %d, want %d", code, exitSIGTERM)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for the SIGTERM exit")
+	}
+	log, err := os.ReadFile(cfg.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), `"delta":"Hello"`) {
+		t.Errorf("log = %q, want the coalesced partial message", log)
+	}
+	// The forwarded SIGTERM ends the Driver, so run returns instead of leaking it.
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return after the Driver was signalled")
 	}
 }
