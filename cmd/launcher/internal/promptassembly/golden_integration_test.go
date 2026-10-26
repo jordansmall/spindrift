@@ -144,8 +144,8 @@ func (c *cellInputs) localForge() {
 	c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 }
 
-// butler mirrors setup_butler_env: the butler is keyed by Chore name, never a
-// tracker issue.
+// butler mirrors dispatch.buildBoxEnv's Chore branch: the butler is keyed by
+// Chore name, never a tracker issue.
 func (c *cellInputs) butler(chore string) {
 	c.unset("ISSUE_NUMBER")
 	c.unset("ISSUE_TITLE")
