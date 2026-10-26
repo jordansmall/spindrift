@@ -417,6 +417,27 @@ func TestGitClient_Probe_DoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
+// Probe's success value flows to the Box the same way its error does, so the
+// returned remote URL must be redacted too — git's file transport happily
+// succeeds against a credential-bearing URL, which would otherwise echo the
+// token back.
+func TestGitClient_Probe_SuccessDoesNotLeakCredentials(t *testing.T) {
+	const secret = "sometoken123"
+	bare := newBareRemoteWithBranches(t)
+	remote := "file://oauth2:" + secret + "@/" + bare
+	g := NewGitClient(remote, "main", "Test Bot", "bot@example.com", "agent/issue-")
+
+	got, err := g.Probe()
+	if err != nil {
+		t.Fatalf("Probe against reachable credential-bearing remote: %v", err)
+	}
+	if u, perr := url.Parse(got); perr != nil {
+		t.Fatalf("Probe success returned unparseable URL %q: %v", got, perr)
+	} else if u.User != nil {
+		t.Fatalf("Probe success leaks embedded credential: %q", got)
+	}
+}
+
 // hangingRemoteURL returns a credential-bearing http URL whose listener
 // accepts every connection and never answers, so the remote hangs
 // mid-handshake. unreachableRemoteURL covers the fail-fast case.
