@@ -1297,6 +1297,13 @@ What the Driver carries:
   output blocks the call (fail closed); the post-tool summary hook fails open,
   because pi only logs a throwing `tool_result` handler, and the full output
   stays in the log.
+- **Streaming deltas of finished messages are dropped (issue #6066).**
+  driver-exec drops the `message_update` `*_delta` events of every assistant
+  message that finishes, since its `message_end` repeats the whole message. The
+  Pass log omits them, so the Transcript's raw JSONL view no longer shows them.
+  A message cut off before `message_end` (stream end or SIGTERM) keeps its text
+  as one coalesced delta event per content block. `tool_execution_update` and
+  the `*_start`/`*_end` markers pass through unchanged.
 
 Fix passes and nudges resume the first pass's pi session with `--session-id`,
 and a missing session starts fresh instead of failing, as the fix box's session
