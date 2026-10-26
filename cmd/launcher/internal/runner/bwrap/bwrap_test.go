@@ -1683,7 +1683,7 @@ func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 	}
 }
 
-// FORGEJO_TOKEN (lib/env-schema.nix's forgejoToken, secret=true/boxEnv=true;
+// FORGEJO_TOKEN (lib/backends/forgejo.nix's forgejoToken, secret=true/boxEnv=true;
 // issue #2861) must stay off the bwrap command line, where ps/proc would
 // expose it to other local users, while still reaching the sandbox through
 // process environment inheritance (bwrap has no --clearenv).
