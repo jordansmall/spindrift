@@ -101,7 +101,8 @@ func TestSettle_TransitionState_NonTerminal_EmitsNoRecord(t *testing.T) {
 
 // Even a failed tracker write still reports what the host decided (issue
 // #3627): the record is an operator-visible statement of intent, not a
-// confirmation the label landed.
+// confirmation the label landed. The warning names the tracker's error, so a
+// stuck issue is diagnosable from the log (issue #6067).
 func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
@@ -110,12 +111,17 @@ func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testin
 	fc.TransitionStateErr = fmt.Errorf("boom")
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	stderr := testutil.CaptureStderr(t, func() {
+		s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	})
 	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].State != "failed" {
 		t.Fatalf("records = %+v, want one settled/failed record despite the tracker error", recs)
+	}
+	if want := "    ?? #9: could not transition to state failed: boom\n"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 	}
 }
 

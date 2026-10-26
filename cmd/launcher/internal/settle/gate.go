@@ -330,7 +330,7 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState, note,
 		return
 	}
 	if err := s.it.TransitionState(num, from, to); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s\n", num, to)
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, to, err)
 	}
 	if !to.Terminal() {
 		return
