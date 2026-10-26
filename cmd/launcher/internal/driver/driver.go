@@ -33,6 +33,11 @@ type Driver interface {
 	// own default (issue #2092).
 	NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer
 
+	// NewStreamFilter wraps w with the filter a Pass log's stdout tee goes
+	// through; Flush writes out anything it holds. A Driver with no filter
+	// forwards every byte unchanged.
+	NewStreamFilter(w io.Writer) driverkit.StreamFilter
+
 	// ExtractUsage returns aggregate and per-model usage from the box log.
 	ExtractUsage(logPath string) (usage.Report, error)
 

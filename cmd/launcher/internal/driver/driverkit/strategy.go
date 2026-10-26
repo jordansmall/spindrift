@@ -1,5 +1,7 @@
 package driverkit
 
+import "io"
+
 // ResultReader names how a Driver's final-message text is read from its log.
 type ResultReader int
 
@@ -50,6 +52,9 @@ type Strategy struct {
 	// SessionFlags renders the CLI's session flags for mode; see
 	// driver.Driver.SessionFlags.
 	SessionFlags func(mode, repoSlug, issue, home string) string
+	// NewStreamFilter wraps the writer a Pass log is teed to with a filter over the
+	// CLI's stdout; nil is the identity, bytes passing through untouched.
+	NewStreamFilter func(w io.Writer) StreamFilter
 }
 
 // ReadResult returns the final-message text of the log at logPath, read as
