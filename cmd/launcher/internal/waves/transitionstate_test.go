@@ -2,6 +2,7 @@ package waves
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,5 +64,22 @@ func TestTransitionState_NoteReported(t *testing.T) {
 	}
 	if len(settled) != 1 || settled[0].RecordID != "work:42@x" || settled[0].State != "failed" || settled[0].Reason != "box-failed" {
 		t.Fatalf("settled ops = %+v, want one failed/box-failed for work:42@x", settled)
+	}
+}
+
+// TestTransitionState_WarnsWithTrackerError pins issue #6067: the best-effort
+// warning must name the tracker's error, not just the target state.
+func TestTransitionState_WarnsWithTrackerError(t *testing.T) {
+	testutil.InstallPipeReporter(t)
+	fc := forge.NewFake()
+	fc.TransitionStateErr = fmt.Errorf("boom")
+	d := dispatch.NewFake()
+
+	got := testutil.CaptureStderr(t, func() {
+		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "", settle.ReasonBoxFailed)
+	})
+
+	if want := "    ?? #42: could not transition to state failed: boom\n"; !strings.Contains(got, want) {
+		t.Errorf("stderr = %q, want it to contain %q", got, want)
 	}
 }

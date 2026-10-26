@@ -26,7 +26,7 @@ import (
 // d's Record directly rather than latching.
 func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, from, to forge.DispatchState, note, reason string) {
 	if err := it.TransitionState(num, from, to); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s\n", num, to)
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, to, err)
 	}
 	// Same failed-write-still-reports rule as settle.Settle.transitionState
 	// (issue #3627): the record is what the host decided, not whether the
