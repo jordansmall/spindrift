@@ -290,12 +290,30 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 	// agent bundled its work to the outbox, so HeadCommitSHA reflects no
 	// work until this relay lands it. It must run before the no-op check
 	// below, which would otherwise misread every read-only fix pass as a
-	// no-op. Best-effort: a failure here only logs.
+	// no-op. Only an unparkable failure (a missing bundle or a wiring error)
+	// falls through to it.
 	if _, err := s.relayBoxBundle(num, gen); err != nil {
 		// A stop mid-backoff already released num (issue #3523); falling
 		// through would log a failure and sleep the no-op confirm poll.
 		if errors.Is(err, errAbandoned) {
 			return landingAbandoned, "", true
+		}
+		// The bundle is intact in the outbox but unrelayed, so head never
+		// moved: falling through would misreport it as fix-no-op.
+		if relayFailureParkable(err) {
+			// The final relay attempt is not a backoff, so a mark landing
+			// there yields an exhausted error, not errAbandoned.
+			if s.terminated(num, gen) {
+				return landingAbandoned, "", true
+			}
+			// Not parkRelayFailure: the PR is already open, so `recover`
+			// re-gates it rather than relaying this bundle.
+			fmt.Printf("    #%s  landing=%s  status=relay-failed  !! fix pass %d: %v\n", num, pr, attempt+1, err)
+			next := relayFailureNext(num, err, fmt.Sprintf("run `spindrift recover %s` to re-gate the PR (recover does not relay this bundle).", num))
+			s.it.Comment(num, fmt.Sprintf("fix pass %d's bundle relay failed: %v. Its commits never reached the PR; %s", attempt+1, err, next))
+			note := fmt.Sprintf("relay-failed: fix pass %d's bundle relay failed; its commits never reached the PR", attempt+1)
+			s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonRelayFailed)
+			return landingFailed, note, true
 		}
 		fmt.Printf("    #%s  landing=%s  status=fix-relay-failed  !! %v\n", num, pr, err)
 	}
