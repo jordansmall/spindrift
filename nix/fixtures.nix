@@ -153,23 +153,38 @@ let
 
   # The pi Driver's Harness, mirroring dogfoodOpencodeHarness. flake.nix sets
   # no bashTimeoutMs for pi (its row declares no timeout variable), so nothing
-  # is re-added.
-  dogfoodPiHarness = import ../lib/mkHarness.nix (
-    dogfoodHarnessArgs
+  # is re-added. The args are shared with dogfoodBwrapPiHarness, which differs
+  # only in runner, imageAttrName and daemon app names (issue #6064).
+  dogfoodPiHarnessArgs = dogfoodHarnessArgs // {
+    driver = "pi";
+    roster = dogfoodDefaults.pi.roster;
+    imageAttrName = "agent-image-pi";
+    defaults =
+      removeAttrs dogfoodHarnessArgs.defaults [
+        "effort"
+        "driverBashTimeoutMs"
+      ]
+      // {
+        model = dogfoodDefaults.pi.model;
+        daemonApp = ".#pi";
+        daemonSelfApp = ".#pi-daemon";
+      };
+  };
+  dogfoodPiHarness = import ../lib/mkHarness.nix dogfoodPiHarnessArgs;
+
+  # The pi Driver in a bwrap Box (issue #6064), the pi twin of
+  # dogfoodBwrapHarness. A bwrap harness publishes its closure under
+  # imageAttrName, so the inherited "agent-image-pi" would collide with the
+  # podman pi image and FLAKE_IMAGE_ATTR would name the wrong closure.
+  dogfoodBwrapPiHarness = import ../lib/mkHarness.nix (
+    dogfoodPiHarnessArgs
     // {
-      driver = "pi";
-      roster = dogfoodDefaults.pi.roster;
-      imageAttrName = "agent-image-pi";
-      defaults =
-        removeAttrs dogfoodHarnessArgs.defaults [
-          "effort"
-          "driverBashTimeoutMs"
-        ]
-        // {
-          model = dogfoodDefaults.pi.model;
-          daemonApp = ".#pi";
-          daemonSelfApp = ".#pi-daemon";
-        };
+      runtime = bwrapRuntime;
+      imageAttrName = "agent-closure-pi";
+      defaults = dogfoodPiHarnessArgs.defaults // {
+        daemonApp = ".#dogfood-bwrap-pi";
+        daemonSelfApp = ".#dogfood-bwrap-pi-daemon";
+      };
     }
   );
 
@@ -647,6 +662,7 @@ in
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
     dogfoodPiHarness
+    dogfoodBwrapPiHarness
     nonRustHarness
     leanHarness
     nixStoreWritableHarness
