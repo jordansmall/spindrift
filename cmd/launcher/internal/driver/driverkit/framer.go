@@ -26,3 +26,11 @@ func (f *LineFramer) Push(p []byte, emit func(line string)) {
 		emit(line)
 	}
 }
+
+// Drain returns the buffered trailing partial line, newline-less, and empties
+// the buffer.
+func (f *LineFramer) Drain() string {
+	rest := string(f.buf)
+	f.buf = nil
+	return rest
+}

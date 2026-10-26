@@ -37,3 +37,14 @@ func TestLineFramerTrailingPartialNotEmitted(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestLineFramerDrainReturnsPartialOnce(t *testing.T) {
+	var f LineFramer
+	f.Push([]byte("one\ntw"), func(string) {})
+	if got := f.Drain(); got != "tw" {
+		t.Errorf("Drain = %q, want %q", got, "tw")
+	}
+	if got := f.Drain(); got != "" {
+		t.Errorf("second Drain = %q, want empty", got)
+	}
+}

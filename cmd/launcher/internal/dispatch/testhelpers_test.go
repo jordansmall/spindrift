@@ -112,6 +112,10 @@ func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Write
 	return raw
 }
 
+func (d fakeDriver) NewStreamFilter(w io.Writer) driverkit.StreamFilter {
+	return d.base().NewStreamFilter(w)
+}
+
 func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return d.base().ExtractUsage(logPath)
 }

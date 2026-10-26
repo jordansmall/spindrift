@@ -40,6 +40,26 @@ func (d Driver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, o
 	return NewHeartbeatWriter(raw, issue, out, d.s.NewDecoder, role).Track(d.s.Heartbeat).OnModel(opts.OnModel)
 }
 
+// StreamFilter sits between a Driver's stdout and its Pass-log tee. Flush
+// writes out anything the filter still holds, and is safe to call repeatedly.
+type StreamFilter interface {
+	io.Writer
+	Flush() error
+}
+
+type passthrough struct{ io.Writer }
+
+func (passthrough) Flush() error { return nil }
+
+// NewStreamFilter returns the Strategy's filter over w, or one that forwards
+// every byte to w when the Strategy declares none.
+func (d Driver) NewStreamFilter(w io.Writer) StreamFilter {
+	if d.s.NewStreamFilter == nil {
+		return passthrough{w}
+	}
+	return d.s.NewStreamFilter(w)
+}
+
 func (d Driver) ExtractUsage(logPath string) (usage.Report, error) {
 	byModel := func(p string) ([]usage.ModelUsage, error) {
 		return usageByModel(p, d.s.NewDecoder, d.s.Heartbeat.Family)
