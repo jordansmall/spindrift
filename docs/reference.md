@@ -1131,8 +1131,8 @@ opencode (and `.#pi`, `.#pi-daemon` through pi) while `nix run .`,
 that Driver's limits: a worker is provisioned only when the roster names a
 Provider-namespaced worker model (an inherited non-namespaced default is
 dropped); every other model must be namespaced or evaluation fails. The pi
-entry namespaces every role, the worker included (github-copilot ids), so its
-worker is provisioned.
+entry namespaces every role, the worker included (self-hosted `wadsworth/` and
+`npu/` ids), so its worker is provisioned.
 Running two Drivers' Daemons at once (`nix run .#daemon` and
 `nix run .#opencode-daemon` or `.#pi-daemon`) needs two checkouts, for
 example two `git worktree`s, because both take the same per-checkout
@@ -2593,6 +2593,21 @@ list (`agent/credential-vars`), and it has no flake option. Unlike the two
 knobs above, the written file is not on the credential-deny list: pi's
 `settings.json` carries no credential, so the agent's own `read` and `bash`
 calls may open it.
+
+#### Server quirks
+
+Two settings in a model's `models.json` entry fix what some servers do with
+pi's requests (both seen on the dogfood's servers, issue #6049):
+
+- **`compat.supportsDeveloperRole: false`.** pi sends its system prompt with
+  the `developer` role, which some servers reject. FastFlowLM answers `400
+  invalid_value`. With the flag, pi sends a `system` message instead.
+- **`thinkingLevelMap`.** pi sends a tier's effort as `reasoning_effort`, and
+  what a server does with each value depends on its chat template.
+  GLM-5.3-Flash's template reads only `low` and `high`, treats any other
+  value as its slowest `max` setting, and cannot turn thinking off. A map such
+  as `{"minimal":"low","low":"low","medium":"high","high":"high"}` keeps an
+  unpinned or `medium` tier off `max`.
 
 ### Advanced tuning
 
@@ -7957,13 +7972,20 @@ efforts, and its orchestrator review effort, are all set via `roster` in
 `nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
 mechanism and dogfood's specific values.
 
-**pi Driver.** The dogfood config also declares `agents.drivers.pi`, with
-`github-copilot/*` models for every role (the worker included) and a per-role
-effort, so `PI_AUTH_CONTENT` is its credential (see [pi Driver:
-github-copilot Provider
-credential](#pi-driver-github-copilot-provider-credential)). `claude` stays
-the default Driver and the one CI uses; run pi with `nix run .#pi-daemon`. The
-overview is [The pi Driver](#the-pi-driver).
+**pi Driver.** The dogfood config also declares `agents.drivers.pi`, on two
+self-hosted Providers (issue #6049). `wadsworth/glm-5.3-flash`, a llama.cpp
+server, runs the coordinator, worker and reviewer, and `npu/qwen3.5:4b`, a
+FastFlowLM server, runs the scout and filer. Each role pins effort `low` or
+`high` (see [Server quirks](#server-quirks)). No tier is `github-copilot`, so
+the dispatch needs no `PI_AUTH_CONTENT`. It does need `PI_MODELS_CONTENT`
+declaring both Providers by those names, with an IP-literal `baseUrl` since a
+Box cannot resolve LAN hostnames, and should set `PI_SETTINGS_CONTENT` to
+raise pi's idle timeout (see [pi Driver: self-hosted
+Providers](#pi-driver-self-hosted-providers)). Without `PI_MODELS_CONTENT`, pi
+fails at startup with a model-not-found error. The roster is baked into the
+image, so pointing it elsewhere means editing `nix/dogfood-defaults.nix`.
+`claude` stays the default Driver and the one CI uses; run pi with
+`nix run .#pi-daemon`. The overview is [The pi Driver](#the-pi-driver).
 
 **Bash timeout.** The dogfood config sets both
 `agents.drivers.claude.bashTimeoutMs` and
