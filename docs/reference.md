@@ -1131,8 +1131,8 @@ opencode (and `.#pi`, `.#pi-daemon` through pi) while `nix run .`,
 that Driver's limits: a worker is provisioned only when the roster names a
 Provider-namespaced worker model (an inherited non-namespaced default is
 dropped); every other model must be namespaced or evaluation fails. The pi
-entry namespaces every role, the worker included (self-hosted `wadsworth/` and
-`npu/` ids), so its worker is provisioned.
+entry namespaces every role, the worker included (self-hosted `wadsworth/`
+ids), so its worker is provisioned.
 Running two Drivers' Daemons at once (`nix run .#daemon` and
 `nix run .#opencode-daemon` or `.#pi-daemon`) needs two checkouts, for
 example two `git worktree`s, because both take the same per-checkout
@@ -7972,14 +7972,16 @@ efforts, and its orchestrator review effort, are all set via `roster` in
 `nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
 mechanism and dogfood's specific values.
 
-**pi Driver.** The dogfood config also declares `agents.drivers.pi`, on two
-self-hosted Providers (issue #6049). `wadsworth/glm-5.3-flash`, a llama.cpp
-server, runs the coordinator, worker and reviewer, and `npu/qwen3.5:4b`, a
-FastFlowLM server, runs the scout and filer. Each role pins effort `low` or
-`high` (see [Server quirks](#server-quirks)). No tier is `github-copilot`, so
-the dispatch needs no `PI_AUTH_CONTENT`. It does need `PI_MODELS_CONTENT`
-declaring both Providers by those names, with an IP-literal `baseUrl` since a
-Box cannot resolve LAN hostnames, and should set `PI_SETTINGS_CONTENT` to
+**pi Driver.** The dogfood config also declares `agents.drivers.pi`, on one
+self-hosted Provider (issue #6049): every role runs `wadsworth/glm-5.3-flash`,
+a llama.cpp server. The coordinator, worker and reviewer pin effort `high`,
+and the scout and filer `low` (GLM reads only those two, see [Server
+quirks](#server-quirks)). The scout and filer first ran on a FastFlowLM
+server's `qwen3.5:4b`, but its 32k context overflowed on a scout's first call.
+No tier is `github-copilot`, so the dispatch needs no `PI_AUTH_CONTENT`. It
+does need `PI_MODELS_CONTENT` declaring the `wadsworth` Provider, with an
+IP-literal `baseUrl` since a Box cannot resolve LAN hostnames, and should set
+`PI_SETTINGS_CONTENT` to
 raise pi's idle timeout (see [pi Driver: self-hosted
 Providers](#pi-driver-self-hosted-providers)). Without `PI_MODELS_CONTENT`, pi
 fails at startup with a model-not-found error. The roster is baked into the
