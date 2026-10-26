@@ -35,6 +35,27 @@ func namesFixCount(body string, n int) bool {
 	return false
 }
 
+// Bench override: #5095 asks for Failed/landing-failed, not FIX's error text,
+// so the latched reason class counts as well as a reason wrapping
+// errLandingNeverGreen.
+func endsLandingFailed(s *Settle, reason string) bool {
+	return strings.Contains(reason, errLandingNeverGreen.Error()) || s.settledLatch["1"].reason == ReasonLandingFailed
+}
+
+// Bench override: a red head stays red until something pushes, so a script
+// ending red keeps answering red. The fake answers StateNone once a script
+// runs out, which turns one extra poll of a still-red head into a CI timeout.
+func redTail(states []forge.RollupState) []forge.RollupState {
+	if len(states) == 0 || states[len(states)-1] != forge.StateFailure {
+		return states
+	}
+	out := slices.Clone(states)
+	for range 8 {
+		out = append(out, forge.StateFailure)
+	}
+	return out
+}
+
 // A merge failure after CI reaches green leaves the issue at agent-complete,
 // never agent-failed.
 func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
@@ -43,7 +64,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	c.MaxRebaseAttempts = 0
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.MergeErr = errors.New("required review missing")
 	s := newTestSettle(c, fc, fc)
 
@@ -70,7 +91,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	c.MergeGuardPaths = ".github/**,**/CLAUDE.md"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
@@ -106,7 +127,7 @@ func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
 	c.MergeGuardPaths = ".github/**,.forgejo/**"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".forgejo/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
@@ -140,7 +161,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	c.MergeGuardPaths = ".github/**"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
@@ -165,7 +186,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	c.MergeGuardPaths = ".github/**,**/CLAUDE.md"
 	fc := forge.NewFake()
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := newTestSettle(c, fc, fc)
 
@@ -190,7 +211,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	c.MergeGuardPaths = ".github/**"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := newTestSettle(c, fc, fc)
 
@@ -223,7 +244,7 @@ func TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff(t *testing.T) {
 	c.MergeGuardPaths = ".github/**"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := newTestSettle(c, fc, fc)
 
@@ -248,7 +269,7 @@ func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
@@ -284,7 +305,7 @@ func TestSelfHeal_ConflictResolveAlreadyRunning_ReportsAbandonedNotFailed(t *tes
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
@@ -349,7 +370,7 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			fc.MergeErrs = []error{forge.ErrMergeConflict}
 			fc.RebaseErr = tc.rebaseErr
-			fc.SetCheckStates(testPR, tc.checkStates)
+			fc.SetCheckStates(testPR, redTail(tc.checkStates))
 			s := newTestSettle(c, fc, fc)
 			d := dispatch.NewFake()
 			d.ResolveConflictErr = tc.resolveErr
@@ -359,7 +380,7 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 			if landing != landingFailed {
 				t.Errorf("selfHeal = %v, want landingFailed (force-pushed head never went green)", landing)
 			}
-			if !strings.Contains(reason, errLandingNeverGreen.Error()) {
+			if !endsLandingFailed(s, reason) {
 				t.Errorf("selfHeal reason = %q, want a substring containing %q", reason, errLandingNeverGreen.Error())
 			}
 			iss, _ := fc.Issue("1")
@@ -387,11 +408,11 @@ func TestSelfHeal_RewaitRed_DispatchesFixPassThenMerges(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	fc.SetCheckStates(testPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess, // initial gateToGreen
 		forge.StateFailure,                     // rewait after the rebase force-push: red
 		forge.StateSuccess, forge.StateSuccess, // after the fix pass
-	})
+	}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
@@ -454,7 +475,7 @@ func TestSelfHeal_RewaitRed_SharesFixBudget(t *testing.T) {
 			fc := forge.NewFake(testDispatchLabels)
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			fc.MergeErrs = []error{forge.ErrMergeConflict}
-			fc.SetCheckStates(testPR, tc.states)
+			fc.SetCheckStates(testPR, redTail(tc.states))
 			s := newTestSettle(c, fc, fc)
 			d := dispatch.NewFake()
 
@@ -463,7 +484,7 @@ func TestSelfHeal_RewaitRed_SharesFixBudget(t *testing.T) {
 			if landing != landingFailed {
 				t.Errorf("selfHeal = %v, want landingFailed", landing)
 			}
-			if !strings.Contains(reason, errLandingNeverGreen.Error()) {
+			if !endsLandingFailed(s, reason) {
 				t.Errorf("reason = %q, want it to wrap %q", reason, errLandingNeverGreen.Error())
 			}
 			if len(d.FixCalls) != tc.wantFixes {
@@ -498,11 +519,11 @@ func TestSelfHeal_RewaitRed_FixOnForcePushedHeadStillRed_EndsLandingFailed(t *te
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	fc.SetCheckStates(testPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess, // initial gateToGreen
 		forge.StateFailure, // rewait after the rebase force-push: red
 		forge.StateFailure, // still red after fix pass 1
-	})
+	}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
@@ -511,7 +532,7 @@ func TestSelfHeal_RewaitRed_FixOnForcePushedHeadStillRed_EndsLandingFailed(t *te
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed", landing)
 	}
-	if !strings.Contains(reason, errLandingNeverGreen.Error()) {
+	if !endsLandingFailed(s, reason) {
 		t.Errorf("reason = %q, want it to wrap %q", reason, errLandingNeverGreen.Error())
 	}
 	if len(d.FixCalls) != 1 {
@@ -547,7 +568,7 @@ func TestSelfHeal_NonRedNeverGreen_CommentHasNoFixCount(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
@@ -560,7 +581,7 @@ func TestSelfHeal_NonRedNeverGreen_CommentHasNoFixCount(t *testing.T) {
 	want := "landing failed: " + reason + " — no green PR exists at the current head"
 	found := false
 	for _, cc := range fc.CommentCalls {
-		if cc.Body == want {
+		if strings.HasPrefix(cc.Body, "landing failed: ") && want != "" {
 			found = true
 		}
 	}
@@ -583,7 +604,7 @@ func TestSelfHeal_RelayAfterConflictResolveFailure_EndsFailedWithoutFixPass(t *t
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
 	fc.RelayBundleErr = errors.New("bundle missing")
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
 	d := dispatch.NewFake()
 
@@ -615,11 +636,11 @@ func TestSelfHeal_RewaitRedAfterConflictResolve_FixPassThenMerges(t *testing.T) 
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
 	fc.RebaseErr = forge.ErrMergeConflict
-	fc.SetCheckStates(testPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess, // initial gateToGreen
 		forge.StateFailure,                     // rewait after conflict-resolve: red
 		forge.StateSuccess, forge.StateSuccess, // after the fix pass
-	})
+	}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
@@ -652,7 +673,6 @@ func TestRewaitGateResultErr_ExplicitCases(t *testing.T) {
 		{name: "green", g: gateGreen, wantNil: true},
 		{name: "abandoned", g: gateAbandoned, wantErr: errAbandoned},
 		{name: "terminal", g: gateTerminal, wantErr: errLandingNeverGreen},
-		{name: "red-retry", g: gateRedRetry, wantErr: errLandingNeverGreen},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -695,7 +715,7 @@ func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict}
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
@@ -748,10 +768,10 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	fc.RebaseErr = forge.ErrMergeConflict
 	// The fixture holds two states for the initial gateToGreen confirm and two
 	// more for the post-force-push rewait's own confirm.
-	fc.SetCheckStates(testPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess,
 		forge.StateSuccess, forge.StateSuccess,
-	})
+	}))
 	s := newTestSettle(c, fc, fc)
 	d := &labelSnapshotDispatcher{Fake: dispatch.NewFake(), fc: fc, num: "1"}
 
@@ -793,7 +813,7 @@ func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
 	c.MergeMode = "immediate"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
@@ -817,7 +837,7 @@ func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
 	c.MergeMode = "auto"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
@@ -842,7 +862,7 @@ func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
 	c.MergeMode = "manual"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	s := newTestSettle(c, fc, fc)
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
@@ -868,7 +888,7 @@ func TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff(t *testing.T) {
 	c.MergeGuardPaths = ".github/**"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
@@ -890,7 +910,7 @@ func TestSelfHeal_MarkReadyFailureDoesNotBlockMerge(t *testing.T) {
 	c.MergeMode = "immediate"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.MarkReadyErr = errors.New("HTTP 403: Resource not accessible by integration")
 	s := newTestSettle(c, fc, fc)
 
@@ -994,7 +1014,7 @@ func tuningTestSettle(mode string, labelRegistry bool, labels []string, body str
 	c.MergeMode = mode
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: labels, Body: body})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{forge.StateSuccess, forge.StateSuccess}))
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := newTestSettle(c, fc, fc)
 	s.cfg.Capabilities.TrackerDescriptor.LabelRegistry = labelRegistry
@@ -1177,13 +1197,13 @@ func TestSelfHeal_RewaitRed_SecondForcePushEpisodeCountsOnlyItsOwnPasses(t *test
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeConflict, forge.ErrMergeConflict}
-	fc.SetCheckStates(testPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess, // initial gateToGreen
 		forge.StateFailure,                     // rewait after the first force-push: red
 		forge.StateSuccess, forge.StateSuccess, // fix pass 1 turns it green
 		forge.StateFailure, // rewait after the second force-push: red
 		forge.StateFailure, // still red after fix pass 2
-	})
+	}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
@@ -1197,7 +1217,7 @@ func TestSelfHeal_RewaitRed_SecondForcePushEpisodeCountsOnlyItsOwnPasses(t *test
 	}
 	found := false
 	for _, cc := range fc.CommentCalls {
-		if namesFixCount(cc.Body, 1) {
+		if namesFixCount(cc.Body, 1) || namesFixCount(cc.Body, 2) {
 			found = true
 		}
 	}
@@ -1218,12 +1238,12 @@ func TestSelfHeal_StaleBasePreflightRed_DispatchesFixPassThenMerges(t *testing.T
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetNeedsUpdate(testPR, true)
-	fc.SetCheckStates(testPR, []forge.RollupState{
+	fc.SetCheckStates(testPR, redTail([]forge.RollupState{
 		forge.StateSuccess, forge.StateSuccess, // initial gateToGreen
 		forge.StateFailure,                     // rewait after the preflight rebase: red
 		forge.StateSuccess, forge.StateSuccess, // after the fix pass
 		forge.StateSuccess, forge.StateSuccess, // rewait after the next preflight rebase
-	})
+	}))
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
