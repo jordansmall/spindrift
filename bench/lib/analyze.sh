@@ -5,8 +5,8 @@
 # c<M><E>-s<M><E>-w<M><E>-r<M><E> for coordinator, scout, worker, reviewer.
 
 # Prints TASK's runs as task, arm, resolved, cost, duration_ms, overall, peek,
-# with overall empty when the run has no usable judge score and peek 1 only
-# for a run the peek audit flagged. Columns are found by header name, so
+# rep, with overall empty when the run has no usable judge score and peek 1
+# only for a run the peek audit flagged. Columns are found by header name, so
 # either file may grow columns.
 analyze_rows() {
   local task="$1" dir="$2" scores="$2/judging/SCORES.tsv"
@@ -28,7 +28,7 @@ analyze_rows() {
       b = $mc["blind"]
       p = ("peek" in mc && $mc["peek"] == 1) ? 1 : 0
       print task, $mc["arm"], $mc["resolved"] + 0, $mc["cost_usd"] + 0, \
-        $mc["duration_ms"] + 0, (b != "" && b in overall) ? overall[b] : "", p
+        $mc["duration_ms"] + 0, (b != "" && b in overall) ? overall[b] : "", p, $mc["rep"]
     }' "$dir/metrics.tsv"
 }
 
@@ -65,7 +65,7 @@ analyze_report() {
     {
       if ($7 == 1) {
         npeek++
-        if (!(($1 " " $2) in peekseen)) { peekseen[$1 " " $2] = 1; peeked = peeked (peeked == "" ? "" : ", ") $1 " " $2 }
+        peeked = peeked (peeked == "" ? "" : ", ") $1 " " $2 " r" $8
         next
       }
       if ($2 !~ /^c[osh][lmhx]-s[osh][lmhx]-w[osh][lmhx]-r[osh][lmhx]$/) {
@@ -236,10 +236,11 @@ analyze_report() {
         for (i = (ne - 4 > 11 ? ne - 4 : 11); i <= ne; i++) rankrow(i, el[i])
       }
 
+      # Only ranked arms: judge and cost alone would put an arm that fails its
+      # tests on the frontier.
       np = 0
-      for (i = 1; i <= na; i++) {
-        a = aorder[i]; g = "a:" a
-        if (!jn[g]) continue
+      for (i = 1; i <= ne; i++) {
+        a = el[i]; g = "a:" a
         pc[a] = cr[g] / n[g]; pj[a] = js[g] / jn[g]; cand[++nc] = a
       }
       for (i = 1; i <= nc; i++) {
@@ -258,14 +259,14 @@ analyze_report() {
       print ""
       print "## Pareto frontier"
       print ""
-      print "Arms no other arm beats on both mean cost ratio (lower) and mean judge (higher),"
-      print "cheapest first. Arms with no judge score are left out."
+      print "Ranked arms no other ranked arm beats on both mean cost ratio (lower) and mean"
+      print "judge (higher), cheapest first."
       print ""
-      print "| arm | cost ratio | judge | runs |"
-      print "| --- | --- | --- | --- |"
+      print "| arm | resolved | cost ratio | judge | runs |"
+      print "| --- | --- | --- | --- | --- |"
       for (i = 1; i <= np; i++) {
         g = "a:" fr[i]
-        printf "| %s | %s | %s | %d |\n", fr[i], f2(pc[fr[i]], n[g]), jmean(g), n[g]
+        printf "| %s | %s | %s | %s | %d |\n", fr[i], pct(g), f2(pc[fr[i]], n[g]), jmean(g), n[g]
       }
     }
     function effrow(f, l, g) {

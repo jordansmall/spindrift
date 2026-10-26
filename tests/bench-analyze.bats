@@ -160,14 +160,16 @@ has() { grep -qxF -- "$1" "$T/analysis.md" || { echo "missing line: $1"; cat "$T
   sed -n '/^### Bottom 5/,/^## /p' "$T/analysis.md" | grep -qF 'No arms beyond the top 10.'
 }
 
-@test "analyze: the Pareto frontier keeps only undominated arms, cheapest first" {
+@test "analyze: the Pareto frontier keeps only undominated ranked arms, cheapest first" {
   analyze
-  has '| arm | cost ratio | judge | runs |'
+  has '| arm | resolved | cost ratio | judge | runs |'
   local front
   front="$(sed -n '/^## Pareto frontier/,$p' "$T/analysis.md" | grep -E '^\| c[a-z]{2}-')"
+  # Cheaper and better-judged arms that resolve too rarely to rank are left
+  # out, so the frontier never offers an arm that fails its tests.
   [ "$front" = "$(printf '%s\n' \
-    '| csm-shm-whl-rsm | 0.54† | 2.0† | 2 |' \
-    '| coh-shm-whl-roh | 0.69† | 4.0† | 3 |')" ]
+    '| coh-shh-wsm-roh | 100%† | 1.00† | 3.2† | 1 |' \
+    '| coh-shm-wsh-roh | 100%† | 1.61† | 4.0† | 3 |')" ]
 }
 
 @test "analyze: with 13 eligible arms the bottom 5 shows only ranks 11 to 13" {
@@ -200,5 +202,5 @@ has() { grep -qxF -- "$1" "$T/analysis.md" || { echo "missing line: $1"; cat "$T
   mv "$T/m" "$T/results/alpha/metrics.tsv"
   analyze
   has '| alpha | 6 | 67% | 3.4 | 5 | 3.00 | 11.0 |'
-  grep -qF "Excluded 1 run(s) the peek audit flagged as reaching for another run's work: alpha coh-shm-wsh-roh." "$T/analysis.md"
+  grep -qF "Excluded 1 run(s) the peek audit flagged as reaching for another run's work: alpha coh-shm-wsh-roh r3." "$T/analysis.md"
 }
