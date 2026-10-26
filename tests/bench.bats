@@ -95,7 +95,9 @@ work=$(mktemp -d)
 git clone -q "$remote" "$work"
 cd "$work"
 git checkout -q -b "$prefix$slug" "origin/$base"
-case "$app" in *#good) echo fixed >value.txt ;; *) echo wrong >value.txt ;; esac
+case "$app" in *#good | *#owntest) echo fixed >value.txt ;; *) echo wrong >value.txt ;; esac
+# owntest also adds a test of its own that the hidden grader can't run.
+case "$app" in *#owntest) echo false >tests-own.sh && git add tests-own.sh ;; esac
 git -c user.name=t -c user.email=t@t commit -qam work
 # A read-only Box always leaves its bundle in the outbox; the host then
 # relays it. fail: the relay push failed. fixpass: a CI fix pass repaired the
@@ -124,6 +126,9 @@ cd "$cwd"
 case "$app" in
   *#peekall) peek='git branch -a' ;;
   *#peeksib) peek='git diff origin/bench/good/r1/t1' ;;
+  *#peekgrep) peek="grep -rnE 'checkout|ls-remote|for-each-ref' lib" ;;
+  *#peekremote) peek='git ls-remote origin' ;;
+  *#peeklogall) peek='git -C /work log --oneline --all -i --grep=t1' ;;
   *) peek='git fetch origin' ;;
 esac
 cat >"$log" <<EOF
@@ -435,6 +440,28 @@ remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; 
   grep -F 'peeksib r1' "$T/out/summary.md"
 }
 
+@test "peek: only a git command lists refs, not a search whose pattern names one" {
+  printf 'peekgrep .#peekgrep\npeekremote .#peekremote\npeeklogall .#peeklogall\n' >>"$T/arms"
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 peekgrep peekremote peeklogall
+  [ "$status" -eq 0 ]
+  [ "$(rows | awk -F'\t' -v a="$(col arm)" -v k="$(col peek)" '{print $a "=" $k}' | sort | tr '\n' ' ')" \
+    = "peekgrep=0 peeklogall=1 peekremote=1 " ]
+}
+
+@test "regrade: re-audits peek, so a run flagged by older patterns is cleared" {
+  printf 'peekgrep .#peekgrep\npeeksib .#peeksib\n' >>"$T/arms"
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 peekgrep peeksib
+  [ "$status" -eq 0 ]
+  local k
+  k=$(col peek)
+  awk -F'\t' -v OFS='\t' -v k="$k" 'NR > 1 { $k = 1 } { print }' "$T/out/metrics.tsv" >"$T/m" && mv "$T/m" "$T/out/metrics.tsv"
+  run bench regrade t1
+  [ "$status" -eq 0 ]
+  [ "$(rows | awk -F'\t' -v a="$(col arm)" -v k="$k" '{print $a "=" $k}' | sort | tr '\n' ' ')" = "peekgrep=0 peeksib=1 " ]
+}
+
 @test "peek: an older metrics.tsv without the peek column gains it, blank for old rows" {
   cd "$T/cwd"
   BENCH_REPS=1 run bench run t1 good
@@ -676,6 +703,27 @@ loosen_hidden_test() {
   [ "$(cut -f1-5,9- "$T/out/metrics.tsv")" = "$before" ]
   grep -F '| bad | 1 | 1/1 |' "$T/out/summary.md"
   [ "$(git -C "$T/out/work.git" worktree list | wc -l)" -eq 1 ]
+}
+
+@test "grade: DROP_RUN_TESTS removes test files the run added, never the hidden ones" {
+  printf 'owntest .#owntest\n' >>"$T/arms"
+  # Every test file in the tree runs, as `go test` runs a whole package.
+  sed -i '/^GRADE_CMD=/d' "$T/tasks/t1/task.env"
+  cat >>"$T/tasks/t1/task.env" <<'EOF'
+GRADE_CMD='for f in tests/*.sh tests-*.sh; do [ ! -e "$f" ] || bash "$f" || exit 1; done'
+DROP_RUN_TESTS='tests/*.sh tests-*.sh'
+EOF
+  run bench validate t1
+  [ "$status" -eq 0 ]
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 owntest bad
+  [ "$status" -eq 0 ]
+  [ "$(rows | awk -F'\t' -v a="$(col arm)" -v r="$(col resolved)" '{print $a "=" $r}' | sort | tr '\n' ' ')" \
+    = "bad=0 owntest=1 " ]
+  sed -i '/^DROP_RUN_TESTS=/d' "$T/tasks/t1/task.env"
+  run bench regrade t1
+  [ "$status" -eq 0 ]
+  [ "$(rows | awk -F'\t' -v r="$(col resolved)" '$r == 1' | wc -l)" -eq 0 ]
 }
 
 @test "regrade: a CHECK_CMD that now fails leaves the run unresolved" {

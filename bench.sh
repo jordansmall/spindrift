@@ -15,8 +15,10 @@
 # A task's optional hidden/ tree (repo-relative paths) is overlaid after FIX's
 # tests and wins on a shared path: FIX's tests often pin details the issue
 # never states, such as exact message wording, which no other correct fix
-# matches. `regrade` re-grades every stored run against the task's current
-# grader without dispatching anything.
+# matches. Optional DROP_RUN_TESTS (space-separated globs) removes test files
+# a run added before the overlay, since the hidden tests replace the run's.
+# `regrade` re-grades every stored run against the task's current grader, and
+# re-runs the peek audit, without dispatching anything.
 #
 #   bench.sh new-task --issue N --fix SHA [--base SHA] [--name NAME]
 #   bench.sh validate TASK
@@ -122,7 +124,7 @@ parse_peek() {
   local own="$2" hit=""
   hit="$(jq -Rr 'fromjson? | select(.type == "assistant") | .message.content[]?
       | (.text // empty), (.input // empty | tostring)' "$1" 2>/dev/null \
-    | grep -oE 'bench/[A-Za-z0-9_.-]+/r[0-9]+/|branch +(-a|-r|--all|--remotes)([^a-z-]|$)|log [^|;&"]*--all([^a-z-]|$)|ls-remote|for-each-ref|gh +pr +list|gh +search' \
+    | grep -oE 'bench/[A-Za-z0-9_.-]+/r[0-9]+/|git( +-C +[^ ]+)? +(branch +(-a|-r|--all|--remotes)([^a-z-]|$)|log [^|;&"]*--all([^a-z-]|$)|ls-remote|for-each-ref)|gh +pr +list|gh +search' \
     | grep -vxF -- "$own" | head -1)" || true
   if [ -n "$hit" ]; then echo 1; else echo 0; fi
 }
@@ -327,7 +329,7 @@ load_task() {
   TASK_DIR="$BENCH_TASKS_DIR/$task"
   [ -f "$TASK_DIR/task.env" ] || die "no task '$task' (expected $TASK_DIR/task.env)"
   [ -f "$TASK_DIR/issue.md" ] || die "task '$task' has no issue.md"
-  BASE="" FIX="" TEST_PATHS="" GRADE_CMD="" CHECK_CMD=""
+  BASE="" FIX="" TEST_PATHS="" GRADE_CMD="" CHECK_CMD="" DROP_RUN_TESTS=""
   # shellcheck disable=SC1091
   . "$TASK_DIR/task.env"
   [ -n "$BASE" ] && [ -n "$FIX" ] && [ -n "$GRADE_CMD" ] \
@@ -361,10 +363,23 @@ ensure_grading_repo() {
 
 # Checks out REV into a fresh worktree DIR and overlays FIX's hidden tests,
 # then the task's own hidden/ tree. The overlay is staged, since a flake only
-# sees tracked files.
+# sees tracked files. First, files REV added since BASE that match a
+# DROP_RUN_TESTS glob are removed: a run's own tests can lean on helpers in a
+# test file the overlay replaces, or redeclare a hidden test, and either
+# breaks the package's build before a hidden test runs.
 prepare_tree() {
-  local repo="$1" rev="$2" dir="$3"
+  local repo="$1" rev="$2" dir="$3" f g
+  local -a globs=()
   locked "$repo.lock" git -C "$repo" worktree add -q --detach "$dir" "$rev"
+  read -ra globs <<<"$DROP_RUN_TESTS"
+  if [ ${#globs[@]} -gt 0 ]; then
+    while IFS= read -r f; do
+      for g in "${globs[@]}"; do
+        # shellcheck disable=SC2053 # g is a glob on purpose
+        if [[ "$f" == $g ]]; then git -C "$dir" rm -q -- "$f"; break; fi
+      done
+    done < <(git -C "$dir" diff --name-only --diff-filter=A "$BASE" HEAD)
+  fi
   if [ -n "$TEST_PATHS" ]; then
     # shellcheck disable=SC2086 # TEST_PATHS is a space-separated list
     git -C "$dir" checkout -q "$FIX" -- $TEST_PATHS
@@ -1029,19 +1044,29 @@ cmd_regrade() {
   [ -f "$m" ] || die "no results at $m"
   local -a runs=()
   mapfile -t runs < <(awk -F'\t' 'NR > 1 { print $2 "\t" $3 }' "$m")
-  local graded="$OUT/regrade.tsv" run arm rep ref grade checks
+  local graded="$OUT/regrade.tsv" run arm rep ref grade checks peek
   : >"$graded"
   for run in "${runs[@]}"; do
     arm="${run%%$'\t'*}" rep="${run#*$'\t'}" ref="refs/runs/$arm/r$rep"
-    git -C "$OUT/work.git" rev-parse -q --verify "$ref" >/dev/null || continue
-    read -r grade checks < <(grade_ref "$ref" "$OUT/runs/$arm/r$rep")
-    info "$1 [$arm r$rep] grade=$grade checks=$checks"
-    printf '%s\t%s\t%s\t%s\n' "$arm" "$rep" "$grade" "$checks" >>"$graded"
+    peek="$(parse_peek "$OUT/runs/$arm/r$rep/box.log" "bench/$arm/r$rep/")"
+    if git -C "$OUT/work.git" rev-parse -q --verify "$ref" >/dev/null; then
+      read -r grade checks < <(grade_ref "$ref" "$OUT/runs/$arm/r$rep")
+      info "$1 [$arm r$rep] grade=$grade checks=$checks peek=$peek"
+    else
+      grade="" checks=""
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' "$arm" "$rep" "$grade" "$checks" "$peek" >>"$graded"
   done
+  # A run with no stored branch keeps its grade; every run is re-audited for
+  # peek, so tightened patterns reach old results.
   awk -F'\t' -v OFS='\t' '
-    NR == FNR { g[$1, $2] = $3; c[$1, $2] = $4; next }
+    NR == FNR { g[$1, $2] = $3; c[$1, $2] = $4; p[$1, $2] = $5; next }
+    FNR == 1 { for (i = 1; i <= NF; i++) if ($i == "peek") pk = i }
     FNR > 1 && (($2, $3) in g) {
-      $7 = g[$2, $3]; $8 = c[$2, $3]; $6 = ($7 == "pass" && $8 != "fail") ? 1 : 0
+      if (g[$2, $3] != "") {
+        $7 = g[$2, $3]; $8 = c[$2, $3]; $6 = ($7 == "pass" && $8 != "fail") ? 1 : 0
+      }
+      if (pk) $pk = p[$2, $3]
     }
     { print }' "$graded" "$m" >"$m.tmp"
   mv "$m.tmp" "$m"
