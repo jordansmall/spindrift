@@ -180,6 +180,8 @@ let
     # agent-closure, which flake.nix only re-exports when
     # fixtures.dogfoodBwrapHarness.packages has it.
     "dogfood-bwrap-app-wiring"
+    # Same gate for agent-closure-pi off fixtures.dogfoodBwrapPiHarness.
+    "dogfood-bwrap-pi-app-wiring"
     # lib/seccomp.nix builds against pkgs.libseccomp, whose meta.platforms is
     # Linux-only, so evaluating it on darwin throws "Refusing to evaluate
     # package 'libseccomp'" before the check derivation itself ever runs.
