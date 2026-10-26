@@ -70,31 +70,34 @@ in
       };
     };
   };
-  # The pi Driver entry mirrors opencode's: github-copilot ids, so the one
-  # credential is PI_AUTH_CONTENT. Unlike opencode's, the worker has a
-  # namespaced model, so it provisions, and each role pins an effort, which
-  # rides on its model id as `<model>:<level>`. byName leaves review-axis
-  # unpinned: it follows the reviewer's model and inherits its effort from
-  # rosterDefaults, and the Driver-level coordinator sets no models.effort.
+  # The pi Driver entry runs on self-hosted Providers (issue #6049): wadsworth
+  # serves GLM-5.3-Flash from its GPU and qwen3.5:4b from its NPU, and the
+  # operator supplies both Providers through PI_MODELS_CONTENT. No tier is
+  # github-copilot, so PI_AUTH_CONTENT is not needed. Each role pins an effort,
+  # which rides on its model id as `<model>:<level>`, and only low or high:
+  # GLM's chat template treats any other effort as max. byName leaves
+  # review-axis unpinned: it follows the reviewer's model and inherits its
+  # effort from rosterDefaults, and the Driver-level coordinator sets no
+  # models.effort.
   pi = {
-    model = "github-copilot/claude-opus-4.5";
+    model = "wadsworth/glm-5.3-flash";
     roster = rosterLib.defaultRoster {
       byName = {
         scout = {
-          model = "github-copilot/claude-haiku-4.5";
+          model = "npu/qwen3.5:4b";
           effort = "low";
         };
         filer = {
-          model = "github-copilot/claude-haiku-4.5";
+          model = "npu/qwen3.5:4b";
           effort = "low";
         };
         reviewer = {
-          model = "github-copilot/claude-opus-4.5";
+          model = "wadsworth/glm-5.3-flash";
           effort = "high";
         };
         worker = {
-          model = "github-copilot/claude-sonnet-4.5";
-          effort = "medium";
+          model = "wadsworth/glm-5.3-flash";
+          effort = "high";
         };
       };
     };
