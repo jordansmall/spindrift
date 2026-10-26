@@ -277,5 +277,5 @@ func (g *gitClient) Probe() (string, error) {
 		}
 		return "", fmt.Errorf("%w: %s", forge.ErrRepoNotFound, forge.RedactURLCredentials(g.remoteURL))
 	}
-	return g.remoteURL, nil
+	return forge.RedactURLCredentials(g.remoteURL), nil
 }
