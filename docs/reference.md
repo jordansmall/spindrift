@@ -2618,6 +2618,36 @@ pi's requests (both seen on the dogfood's servers, issue #6049):
   as `{"minimal":"low","low":"low","medium":"high","high":"high"}` keeps an
   unpinned or `medium` tier off `max`.
 
+### pi on the bwrap runner
+
+`nix run .#dogfood-bwrap-pi` and `nix run .#dogfood-bwrap-pi-daemon` are the
+twin of `.#dogfood-bwrap` with the pi Driver and the dogfood pi Roster (issue
+#6064; see [Dogfood Consumer config](#dogfood-consumer-config)). They exist
+only where the `agent-closure-pi` package does. Running them as a service
+takes four things:
+
+- **Secrets go through `harness.env`.** Set `PI_MODELS_CONTENT_CMD` and
+  `PI_SETTINGS_CONTENT_CMD` there (see [pi Driver: self-hosted
+  Providers](#pi-driver-self-hosted-providers)). The daemon's only operator
+  flags are `--input`, `--check-only`, `--restart-in-place` and
+  `--feature-branch`, plus an optional kind, so it rejects the
+  `--pi-*-content-file` flags.
+- **`bwrap` and `pasta` must be on the service unit's `PATH`.** The launcher
+  execs both by bare name, and a systemd user manager's default `PATH` has
+  neither. Add them to the unit's `Environment=PATH=` line (see
+  [Daemon](#daemon), **Service unit**).
+- **Use an IP-literal `baseUrl`.** The Box has no `/etc/hosts`, and its
+  resolver does not know LAN hostnames.
+- **A model server's reachability turns on `NETWORK_MODE`.** Under the default
+  `open`, a server on another LAN machine is reachable by IP literal; one on
+  the daemon's own host is not. Reaching that one takes `host` mode, which
+  gives up the Box's network isolation. Bake it as `infra.network.mode`
+  (`defaults.networkMode` in `mkHarness`); a `NETWORK_MODE` line in
+  `harness.env` is only the deprecated ambient override, which prints a
+  warning. See [Network mode](#network-mode-network_mode) and [Reaching a
+  local/self-hosted model server under egress
+  restriction](#reaching-a-localself-hosted-model-server-under-egress-restriction).
+
 ### Advanced tuning
 
 These knobs are rarely changed. All except `SPINDRIFT_SKILLS_DIR` and
@@ -8049,6 +8079,8 @@ the freshness Probe resolves it). No check proves `apps.default` and
 `apps.dogfood-bwrap` identical — they deliberately are not.
 `apps.dogfood-bwrap` exists only on Linux, where
 `fixtures.dogfoodBwrapHarness`'s `packages` has an `agent-closure` to build.
+`apps.dogfood-bwrap-pi` and `apps.dogfood-bwrap-pi-daemon` are its pi twin; see
+[pi on the bwrap runner](#pi-on-the-bwrap-runner).
 
 **Baked skills.** The dogfood Box bakes nine skills — eight pinned upstream,
 one authored in this repo — via the Consumer-configured `skills` list (see
