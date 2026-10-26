@@ -70,9 +70,10 @@ in
       };
     };
   };
-  # The pi Driver entry runs on self-hosted Providers (issue #6049): wadsworth
-  # serves GLM-5.3-Flash from its GPU and qwen3.5:4b from its NPU, and the
-  # operator supplies both Providers through PI_MODELS_CONTENT. No tier is
+  # The pi Driver entry runs on a self-hosted Provider (issue #6049): wadsworth
+  # serves GLM-5.3-Flash from its GPU, and the operator supplies the Provider
+  # through PI_MODELS_CONTENT. The scout and filer use it too: the NPU's
+  # qwen3.5:4b overflowed its 32k context on #6003's scout. No tier is
   # github-copilot, so PI_AUTH_CONTENT is not needed. Each role pins an effort,
   # which rides on its model id as `<model>:<level>`, and only low or high:
   # GLM's chat template treats any other effort as max. byName leaves
@@ -84,11 +85,11 @@ in
     roster = rosterLib.defaultRoster {
       byName = {
         scout = {
-          model = "npu/qwen3.5:4b";
+          model = "wadsworth/glm-5.3-flash";
           effort = "low";
         };
         filer = {
-          model = "npu/qwen3.5:4b";
+          model = "wadsworth/glm-5.3-flash";
           effort = "low";
         };
         reviewer = {
