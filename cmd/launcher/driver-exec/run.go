@@ -5,6 +5,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
+	"sync/atomic"
+	"syscall"
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -30,9 +33,20 @@ type execConfig struct {
 	topLevelRole string
 }
 
-// run spawns the Driver, tees its raw stdout unchanged to stdout and to
-// cfg.logPath, filters heartbeats in-process to cfg.heartbeatLog, and returns
-// the Driver's own exit code.
+// exit is os.Exit, swapped by tests so the SIGTERM path can be observed.
+var exit = os.Exit
+
+// exitSIGTERM is the shell's 128+N code for a process killed by SIGTERM.
+const exitSIGTERM = 128 + int(syscall.SIGTERM)
+
+// run spawns the Driver, passes its stdout through the Driver's stream filter
+// to stdout and to cfg.logPath, filters heartbeats in-process to
+// cfg.heartbeatLog, and returns the Driver's own exit code. The filter wraps
+// stdout as well as the log, so stdout loses any dropped lines too.
+//
+// A SIGTERM mid-run forwards to the Driver and flushes the filter before
+// exiting: the filter may hold the text of a message still open, which nothing
+// else records.
 func run(cfg execConfig, stdout io.Writer) (int, error) {
 	logFile, err := os.Create(cfg.logPath)
 	if err != nil {
@@ -50,11 +64,35 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	raw := io.MultiWriter(stdout, logFile)
-	w := d.NewHeartbeatWriter(raw, cfg.issue, heartbeatFile, driverkit.RenderOptions{TopLevelRole: cfg.topLevelRole})
+	filter := d.NewStreamFilter(io.MultiWriter(stdout, logFile))
+	w := d.NewHeartbeatWriter(filter, cfg.issue, heartbeatFile, driverkit.RenderOptions{TopLevelRole: cfg.topLevelRole})
 
-	rc, err := runOnce(cfg, w)
+	var child atomic.Pointer[os.Process]
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGTERM)
+	done := make(chan struct{})
+	defer close(done)
+	defer signal.Stop(sigs)
+	go func() {
+		select {
+		case <-sigs:
+		case <-done:
+			return
+		}
+		if p := child.Load(); p != nil {
+			_ = p.Signal(syscall.SIGTERM)
+		}
+		if err := filter.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "driver-exec: flush stream filter on SIGTERM: %v\n", err)
+		}
+		exit(exitSIGTERM)
+	}()
+
+	rc, err := runOnce(cfg, w, &child)
 	if err != nil {
+		return 0, err
+	}
+	if err := filter.Flush(); err != nil {
 		return 0, err
 	}
 
@@ -69,22 +107,30 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 		fmt.Fprintf(os.Stderr, "==> nix develop failed to launch Driver (rc=%d, empty stream) — relaunching in baked env\n", rc)
 		direct := cfg
 		direct.devshell = false
-		rc, err = runOnce(direct, w)
+		rc, err = runOnce(direct, w, &child)
 		if err != nil {
+			return 0, err
+		}
+		if err := filter.Flush(); err != nil {
 			return 0, err
 		}
 	}
 	return rc, nil
 }
 
-func runOnce(cfg execConfig, w io.Writer) (int, error) {
+func runOnce(cfg execConfig, w io.Writer, child *atomic.Pointer[os.Process]) (int, error) {
 	cmd, err := buildCmd(cfg)
 	if err != nil {
 		return 0, err
 	}
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr
-	runErr := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	child.Store(cmd.Process)
+	runErr := cmd.Wait()
+	child.Store(nil)
 	if exitErr, ok := runErr.(*exec.ExitError); ok {
 		return exitErr.ExitCode(), nil
 	}
