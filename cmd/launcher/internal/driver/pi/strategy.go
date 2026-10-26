@@ -22,4 +22,5 @@ var Strategy = driverkit.Strategy{
 	ResolveExit:       ResolveExit,
 	ResultEvent:       ResultEvent,
 	SessionFlags:      SessionFlags,
+	NewStreamFilter:   NewStreamFilter,
 }
