@@ -2152,6 +2152,89 @@ in
     # only to give it a buildable output.
     pkgs.runCommand "dogfood-bwrap-app-wiring" { } "touch $out";
 
+  # The pi Driver's bwrap twin of the dogfood harness (issue #6064):
+  # flake.nix's dogfood-bwrap-pi / dogfood-bwrap-pi-daemon apps and the
+  # top-level agent-closure-pi package are fed from
+  # fixtures.dogfoodBwrapPiHarness. .program / outPath equality catches
+  # flake.nix wiring the wrong harness, as dogfood-bwrap-app-wiring does.
+  dogfood-bwrap-pi-app-wiring =
+    let
+      inherit (pkgs.lib) assertMsg;
+      twin = fixtures.dogfoodBwrapPiHarness;
+      appPairs = [
+        {
+          name = "dogfood-bwrap-pi";
+          fixtureApp = twin.apps.default;
+        }
+        {
+          name = "dogfood-bwrap-pi-daemon";
+          fixtureApp = twin.apps.daemon;
+        }
+      ];
+      # The only run-document keys that may differ from the dogfood bwrap
+      # harness's (both are bwrap, so the runner itself never differs). The
+      # artifacts all derive from the Driver, its Roster and imageAttrName;
+      # the settings are the daemon app names, the model, and the claude-only
+      # EFFORT / DRIVER_BASH_TIMEOUT_MS that a non-default Driver drops.
+      allowedDiff = builtins.toJSON [
+        "artifacts.AGENT_ENV"
+        "artifacts.AGENT_ENV_DRV"
+        "artifacts.AGENT_FILES"
+        "artifacts.AGENT_FILES_DRV"
+        "artifacts.DRIVER"
+        "artifacts.DRIVER_SESSION_CACHE_DIR"
+        "artifacts.DRIVER_SKILLS_DIR"
+        "artifacts.DRIVER_VERSION"
+        "artifacts.FLAKE_IMAGE_ATTR"
+        "artifacts.IMAGE_TAG"
+        "artifacts.ROLE_MODELS"
+        "settings.DAEMON_APP"
+        "settings.DAEMON_SELF_APP"
+        "settings.DRIVER_BASH_TIMEOUT_MS"
+        "settings.EFFORT"
+        "settings.MODEL"
+      ];
+    in
+    assert builtins.all (
+      a:
+      assertMsg (config.apps ? ${a.name})
+        "flake.nix must expose apps.${a.name} at the top level (issue #6064), got top-level app names: ${builtins.toJSON (builtins.attrNames config.apps)}"
+      &&
+        assertMsg (config.apps.${a.name}.type == "app")
+          "flake.nix's top-level apps.${a.name} must be a real app, got: ${
+            builtins.toJSON config.apps.${a.name}
+          }"
+      &&
+        assertMsg (config.apps.${a.name}.program == a.fixtureApp.program)
+          "flake.nix's top-level apps.${a.name} must be the SAME app as fixtures.dogfoodBwrapPiHarness's (issue #6064) -- otherwise it silently runs a foreign harness's spindrift binary: ${config.apps.${a.name}.program} != ${a.fixtureApp.program}"
+    ) appPairs;
+    assert assertMsg (config.packages ? agent-closure-pi)
+      "flake.nix must expose packages.agent-closure-pi at the top level (issue #6064) so the twin's FLAKE_IMAGE_ATTR resolves, got top-level package names: ${builtins.toJSON (builtins.attrNames config.packages)}";
+    assert assertMsg
+      (config.packages.agent-closure-pi.outPath == twin.packages.agent-closure-pi.outPath)
+      "flake.nix's top-level packages.agent-closure-pi must be the SAME derivation as fixtures.dogfoodBwrapPiHarness.packages.agent-closure-pi (issue #6064) -- otherwise the freshness Probe compares IMAGE_TAG against a foreign closure and reports perpetually stale: ${config.packages.agent-closure-pi.outPath} != ${twin.packages.agent-closure-pi.outPath}";
+    pkgs.runCommand "dogfood-bwrap-pi-app-wiring"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        twinDoc = twin.internals.runInputDocumentFile;
+        dogfoodDoc = fixtures.dogfoodBwrapHarness.internals.runInputDocumentFile;
+        inherit allowedDiff;
+      }
+      ''
+        ${bakedSettingCheck}
+        jq -n --slurpfile a "$dogfoodDoc" --slurpfile b "$twinDoc" '
+          def differing($x; $y):
+            [($x + $y) | keys_unsorted[] | select(. as $k | $x[$k] != $y[$k])];
+          [ $a[0] | keys[] as $s | differing(.[$s]; $b[0][$s])[] | $s + "." + . ] | sort' > got.json
+        check '.#dogfood-bwrap-pi' DAEMON_APP "$twinDoc"
+        check '.#dogfood-bwrap-pi-daemon' DAEMON_SELF_APP "$twinDoc"
+        if ! jq -e --argjson want "$allowedDiff" '. == ($want | sort)' got.json >/dev/null; then
+          echo "twin run document differs from the dogfood bwrap harness's in unexpected keys: $(cat got.json); want exactly $allowedDiff" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
   # The Consumer-facing attrset carries no check-only outputs (issue #2529 AC1):
   # every check-only key lives under `internals`. Without this, a regression
   # re-adding a top-level `imagePath` or `build` would pass every other check.
