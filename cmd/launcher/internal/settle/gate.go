@@ -635,8 +635,10 @@ func (s *Settle) unreviewedLanding(num string, result dispatch.Result) string {
 	return s.cfForNum(num).AgentBranch(num)
 }
 
-// failUnreviewed settles num as agent-failed for a status=ready that did not
-// come from a land pass (issue #5973): nothing is landed and selfHeal never runs.
+// failUnreviewed settles num as agent-failed for a run the review loop never
+// carried through its land pass: a ready from another pass (issue #5973) or a
+// signal-killed run stopped before land (issue #5984). Nothing is landed and
+// selfHeal never runs.
 func (s *Settle) failUnreviewed(d dispatch.Dispatcher, num, landing string) {
 	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, landing, UnreviewedNote)
 	s.transitionState(num, forge.InProgress, forge.Failed, UnreviewedNote, ReasonUnreviewed)
@@ -644,7 +646,7 @@ func (s *Settle) failUnreviewed(d dispatch.Dispatcher, num, landing string) {
 	if s.cfg.DispatchLabel != "" {
 		retry = fmt.Sprintf("re-apply `%s`", s.cfg.DispatchLabel)
 	}
-	body := "The run reported `status=ready` from a review-loop pass other than its land pass, so the work was never reviewed and landed; nothing was landed. To re-run it, " + retry + "."
+	body := "The run's review loop stopped before its land pass finished, so the work was never reviewed and landed; nothing was landed. To re-run it, " + retry + "."
 	if err := s.it.Comment(num, body); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post unreviewed comment: %v\n", num, err)
 	}

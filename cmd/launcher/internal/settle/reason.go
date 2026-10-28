@@ -43,10 +43,11 @@ const (
 	ReasonRecoverable = "recoverable"
 )
 
-// UnreviewedNote is why a status=ready is not trusted (ReasonUnreviewed, issue
-// #5973): a review-loop pass other than the land pass reported it, so the
-// work was never reviewed and landed, and nothing was landed.
-const UnreviewedNote = "ready came from a review-loop pass other than the land pass, so the work was never reviewed and landed"
+// UnreviewedNote is why a run is not trusted (ReasonUnreviewed): its review
+// loop stopped before its land pass finished, so nothing was landed. Either a
+// status=ready came from another pass (issue #5973), or a run with no success
+// self-report stopped in implement or fix (issue #5984).
+const UnreviewedNote = "the review loop stopped before its land pass finished, so the work was never reviewed and landed"
 
 // ReasonLeavesPROpen reports whether reason names a Complete settle that left
 // its PR open: nothing re-settles such a PR when it merges later, so

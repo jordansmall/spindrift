@@ -121,7 +121,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // opening its draft PR failed.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
 	defer s.flushSettled(d, num)
-	// An unreviewed ready is not adoption evidence, push-only included (issue #5973).
+	// An unreviewed run is not adoption evidence, push-only included (issues #5973, #5984).
 	if sit.OpenPRFound || sit.Unreviewed {
 		return false, nil
 	}
@@ -188,8 +188,9 @@ func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Resu
 // coincides with a bundle in the outbox, leaving the land itself to `spindrift
 // recover`. It only stats the outbox, so no local issue is ever
 // fast-forwarded on unauthenticated evidence alone. A success self-report
-// that is unreviewed fails the issue instead, since recover would decline that
-// bundle (issue #5973). True means the issue is settled, Recoverable or Failed.
+// that is unreviewed, or a signal-killed run whose loop stopped before its
+// land pass, fails the issue instead, since recover would decline that bundle
+// (issues #5973, #5984). True means the issue is settled, Recoverable or Failed.
 func (s *Settle) tryMarkRecoverable(d dispatch.Dispatcher, num string, result dispatch.Result) bool {
 	cf := s.cfForNum(num)
 	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
