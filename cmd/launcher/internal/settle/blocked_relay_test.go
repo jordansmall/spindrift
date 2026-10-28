@@ -133,11 +133,11 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlread
 	}
 }
 
-// Pins ensureClosesReference's LandingRecorder short-circuit: with a
+// Pins ensureClosesReference's GithubTracker allow-list (issue #2341): a
 // local-shaped IssueTracker (ISSUE_TRACKER=local, CODE_FORGE=github, a valid
-// combination), settle must not append a closing keyword. The local adapter
-// closes issues through its own axis (ADR 0029), not GitHub's
-// auto-close-on-merge convention.
+// combination) is not a forge.GithubTracker, so settle must not append a
+// closing keyword. The local adapter closes issues through its own axis
+// (ADR 0029), not GitHub's auto-close-on-merge convention.
 func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTrackerNotInjected(t *testing.T) {
 	const issNum = "1933"
 	const prURL = "https://github.com/owner/repo/pull/1933"

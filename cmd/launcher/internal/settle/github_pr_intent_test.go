@@ -123,10 +123,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_ClosesAlr
 	}
 }
 
-// ensureClosesReference short-circuits on a LandingRecorder: with
+// Pins ensureClosesReference's GithubTracker allow-list (issue #2341): with
 // ISSUE_TRACKER=local and CODE_FORGE=github, a valid real combination, the
-// local adapter closes issues through its own axis (ADR 0029), so settle must
-// not append a "Closes #<num>".
+// local-shaped tracker is not a forge.GithubTracker, so settle must not append
+// a "Closes #<num>". The local adapter closes issues through its own axis
+// (ADR 0029), not GitHub's auto-close-on-merge convention.
 func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrackerNotInjected(t *testing.T) {
 	const issNum = "1919"
 	const prURL = "https://github.com/owner/repo/pull/1919"
