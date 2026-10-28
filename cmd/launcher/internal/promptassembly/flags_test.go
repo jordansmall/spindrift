@@ -1,6 +1,7 @@
 package promptassembly
 
 import (
+	"encoding/json"
 	"flag"
 	"io"
 	"reflect"
@@ -147,6 +148,7 @@ func TestBindFlagsBudgetsDegradeToZeroWithoutFailingParse(t *testing.T) {
 		{"malformed", "lots", "lots", 0, 0},
 		{"negative", "-3", "-3", 0, 0},
 		{"empty", "", "", 0, 0},
+		{"infinite", "1000", "inf", 1000, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,6 +159,9 @@ func TestBindFlagsBudgetsDegradeToZeroWithoutFailingParse(t *testing.T) {
 			caps := a.Passthrough.Caps
 			if caps.MaxBudgetTokens != tc.wantTokens || caps.MaxBudgetUSD != tc.wantUSD {
 				t.Errorf("caps = %+v, want tokens %d usd %v", caps, tc.wantTokens, tc.wantUSD)
+			}
+			if _, err := json.Marshal(a.Passthrough); err != nil {
+				t.Errorf("handoff caps must marshal: %v", err)
 			}
 		})
 	}

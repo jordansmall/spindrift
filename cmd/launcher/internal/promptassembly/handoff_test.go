@@ -107,8 +107,8 @@ func TestParseNonnegBudgetTokens(t *testing.T) {
 	}
 }
 
-// The -max-budget-usd counterpart, mirroring the host launcher's
-// floatNonnegSchema tolerance. Unlike the tokens case, a fractional value
+// The -max-budget-usd counterpart, which the host launcher's
+// floatNonnegSchema shares. Unlike the tokens case, a fractional value
 // parses normally here.
 func TestParseNonnegBudgetUSD(t *testing.T) {
 	tests := []struct {
@@ -122,6 +122,11 @@ func TestParseNonnegBudgetUSD(t *testing.T) {
 		{"negative collapses to 0", "-0.01", 0, false},
 		{"malformed collapses to 0", "not-a-number", 0, false},
 		{"empty collapses to 0", "", 0, false},
+		{"inf collapses to 0", "inf", 0, false},
+		{"+Inf collapses to 0", "+Inf", 0, false},
+		{"Infinity collapses to 0", "Infinity", 0, false},
+		{"-Inf collapses to 0", "-Inf", 0, false},
+		{"NaN collapses to 0", "NaN", 0, false},
 	}
 
 	for _, tt := range tests {
