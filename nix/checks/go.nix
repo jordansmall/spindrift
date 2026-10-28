@@ -874,7 +874,8 @@ driverGoTests
     pkgs.runCommand "nix-fmt-covers-tracked" { } "touch $out";
 
   # go-check-env.nix's GOMAXPROCS bound (issue #3915), and its unset/0 fallback
-  # against lib/image.nix's baked nix.conf `cores` (issue #3965).
+  # against lib/image.nix's baked nix.conf `cores` (issue #3965), and its HOME
+  # redirect under $TMPDIR (issue #6009).
   go-check-env =
     let
       # Spliced inside shell double quotes: without the \\` escapes a
@@ -895,6 +896,21 @@ driverGoTests
       (unset NIX_BUILD_CORES; check ${imageNixCores} "${drift}")
       NIX_BUILD_CORES=0 check ${imageNixCores} "${drift}"
       NIX_BUILD_CORES=2 check 2
+      home=$(
+        ${goCheckEnv}
+        sh -c 'echo "$HOME"'
+      )
+      if [ -z "$TMPDIR" ]; then
+        echo "TMPDIR is empty: the HOME-under-TMPDIR assertion would pass vacuously" >&2
+        exit 1
+      fi
+      case "$home" in
+        "$TMPDIR"/*) ;;
+        *)
+          echo "HOME=$home: nix/checks/go-check-env.nix must redirect HOME under \$TMPDIR so Go's telemetry never creates /homeless-shelter (issue #6009)" >&2
+          exit 1
+          ;;
+      esac
       touch $out
     '';
 
