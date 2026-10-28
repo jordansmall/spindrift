@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 
 	"spindrift.dev/launcher/internal/doctor"
@@ -124,7 +125,8 @@ func (b *Buffer) AcceptPRIntent(p signalwire.PRIntent) (signalwire.Receipt, *sig
 	return r, nil
 }
 
-// AcceptIssueIntent validates i and appends it. A byte-identical repeat is
+// AcceptIssueIntent validates i and appends it. A repeat identical in every
+// field once blank dedup terms are pruned, Cites and Metric included, is
 // accepted idempotently: it returns the stored receipt unchanged, sequence
 // included, and does not grow the list, so a Box that retries a signal it
 // never saw the receipt for is not punished with a duplicate issue -- nor
@@ -140,14 +142,26 @@ func (b *Buffer) AcceptIssueIntent(i signalwire.IssueIntent) (signalwire.Receipt
 	// term keeps every check it has today (UTF-8, oversize).
 	i = i.PruneBlankDedupTerms()
 
-	total := len(i.Title) + len(i.Body) + len(i.Type) + len(i.Class) + len(i.Concurrence) + len(i.Patch)
-	for _, term := range i.DedupTerms {
-		total += len(term)
+	// One field list feeds both Bytes and Hash, so a field added to the intent
+	// cannot reach one and miss the other (issue #6083). Each list is
+	// count-framed so a term moved between Cites and DedupTerms, or a field
+	// appended later, cannot reproduce another intent's hash.
+	values := []string{i.Title, i.Body, i.Type, i.Class, i.Concurrence, i.Patch, i.Metric}
+	total := 0
+	for _, v := range values {
+		total += len(v)
+	}
+	for _, list := range [][]string{i.Cites, i.DedupTerms} {
+		values = append(values, strconv.Itoa(len(list)))
+		for _, v := range list {
+			total += len(v)
+			values = append(values, v)
+		}
 	}
 	partial := signalwire.Receipt{
 		Kind:  signalwire.KindIssueIntent,
 		Bytes: total,
-		Hash:  contentHash(signalwire.KindIssueIntent, append([]string{i.Title, i.Body, i.Type, i.Class, i.Concurrence, i.Patch}, i.DedupTerms...)...),
+		Hash:  contentHash(signalwire.KindIssueIntent, values...),
 	}
 	if rej := b.checkKind(signalwire.KindIssueIntent); rej != nil {
 		return partial, rej
@@ -250,7 +264,9 @@ func (b *Buffer) checkKind(k signalwire.Kind) *signalwire.Reject {
 
 // contentHash content-hashes a signal, domain-separated by kind and
 // length-framed per field, so neither two kinds nor two ways of splitting the
-// same bytes across fields can collide.
+// same bytes across fields can collide. A caller passing more than one
+// variable-length list must precede each with its element count, or the
+// boundary between the lists is lost.
 func contentHash(k signalwire.Kind, values ...string) string {
 	h := sha256.New()
 	writeFramed(h, string(k))

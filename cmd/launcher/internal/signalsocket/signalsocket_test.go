@@ -174,20 +174,16 @@ func TestBytesCountsContentFields(t *testing.T) {
 	}
 }
 
-// A term-less, class-less, concurrence-less, patch-less intent must hash and
-// count a fixed literal -- pinned so a future change to the framing can't
-// silently drift it. Bytes stays the pre-slice value since
-// Class/Concurrence/Patch contribute their own (zero) length either way; the
-// hash moved once, when issue #3880 gave Class and Concurrence their own
-// always-framed slots alongside Type, moved again when issue #4072 gave
-// Patch one too, and is now pinned again at that new value.
-func TestBytesAndHashUnchangedWithoutDedupTerms(t *testing.T) {
+// A minimal intent -- title, body and type only -- must count and hash a
+// fixed literal, pinned so a change to the framing cannot drift it silently.
+// Unset optional fields add no bytes but still occupy framed hash slots.
+func TestBytesAndHashPinnedForMinimalIntent(t *testing.T) {
 	b := newAll(t)
 	r := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "ti", Body: "body", Type: "bug"})
 	if want := len("ti") + len("body") + len("bug"); r.Bytes != want {
 		t.Fatalf("bytes = %d, want %d", r.Bytes, want)
 	}
-	const wantHash = "sha256:cfdf7c4dcbe3bf0c4f6250ef05ecbd7cdc6c10fda077d190972ba5b0ea7e558c"
+	const wantHash = "sha256:17363bb5e4a44d052db596c4f4bcd025135c89b7f7b4cf266162e196768042e1"
 	if r.Hash != wantHash {
 		t.Fatalf("hash = %q, want %q", r.Hash, wantHash)
 	}
@@ -746,5 +742,69 @@ func TestRejectedMultilineRetryKeepsStoredPRIntent(t *testing.T) {
 	}
 	if st := b.Status(); st.PRIntent == nil || *st.PRIntent != first {
 		t.Fatalf("Status().PRIntent = %+v, want %+v", st.PRIntent, first)
+	}
+}
+
+// Cites and Metric are part of the idempotency key (issue #6083): a resend
+// that corrects only one of them is a new intent, not a swallowed repeat.
+func TestIssueIntentsCitesAndMetricDistinguish(t *testing.T) {
+	base := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Cites: []string{"a1"}, Metric: "m-one"}
+	cites := base
+	cites.Cites = []string{"a2"}
+	metric := base
+	metric.Metric = "m-two"
+
+	for name, corrected := range map[string]signalwire.IssueIntent{"cites": cites, "metric": metric} {
+		t.Run(name, func(t *testing.T) {
+			b := newAll(t)
+			r1 := mustAcceptIssue(t, b, base)
+			r2 := mustAcceptIssue(t, b, corrected)
+			if r1.Hash == r2.Hash {
+				t.Fatalf("differing only in %s hashed alike: %q", name, r1.Hash)
+			}
+			if r2.Sequence != 2 {
+				t.Fatalf("second sequence = %d, want 2 (not an idempotent repeat)", r2.Sequence)
+			}
+			got := b.IssueIntents()
+			if len(got) != 2 || !reflect.DeepEqual(got[1], corrected) {
+				t.Fatalf("IssueIntents() = %+v, want the second entry to carry the correction %+v", got, corrected)
+			}
+		})
+	}
+}
+
+// A term moved from DedupTerms to Cites must not collide: each list is
+// count-framed.
+func TestIssueIntentsListBoundaryDistinguishes(t *testing.T) {
+	b := newAll(t)
+	terms := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"a", "b"}})
+	split := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", DedupTerms: []string{"a"}, Cites: []string{"b"}})
+	if terms.Hash == split.Hash {
+		t.Fatalf("list-boundary collision: %q", terms.Hash)
+	}
+	if split.Sequence != 2 {
+		t.Fatalf("second sequence = %d, want 2", split.Sequence)
+	}
+}
+
+func TestIssueIntentsCitesAndMetricRepeatIsIdempotent(t *testing.T) {
+	b := newAll(t)
+	i := signalwire.IssueIntent{Title: "t", Body: "b", Type: "bug", Cites: []string{"a1", "a2"}, Metric: "m-one"}
+
+	r1 := mustAcceptIssue(t, b, i)
+	rDup := mustAcceptIssue(t, b, i)
+	if rDup != r1 {
+		t.Fatalf("dup receipt = %+v, want the stored receipt %+v unchanged", rDup, r1)
+	}
+	if got := b.IssueIntents(); len(got) != 1 {
+		t.Fatalf("IssueIntents() = %+v, want 1 entry (repeat did not grow the list)", got)
+	}
+}
+
+func TestBytesCountsCitesAndMetric(t *testing.T) {
+	b := newAll(t)
+	r := mustAcceptIssue(t, b, signalwire.IssueIntent{Title: "ti", Body: "body", Type: "bug", Cites: []string{"abc", "de"}, Metric: "m-one"})
+	if want := len("ti") + len("body") + len("bug") + len("abc") + len("de") + len("m-one"); r.Bytes != want {
+		t.Fatalf("bytes = %d, want %d", r.Bytes, want)
 	}
 }
