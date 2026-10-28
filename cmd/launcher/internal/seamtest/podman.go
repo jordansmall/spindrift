@@ -69,7 +69,10 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	case "inspect":
-		// Container liveness probe: no container exists.
+		// Container liveness probe: no container exists. The not-found
+		// wording is what lets Kill tell this from an unreachable daemon.
+		name := args[len(args)-1]
+		fmt.Fprintf(stderr, "Error: no such object: %q\n", name)
 		return 1
 	case "run":
 		n := 0

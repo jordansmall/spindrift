@@ -26,7 +26,9 @@ case "${1:-}" in
     fi
     ;;
   inspect)
-    # Container liveness probe: no container ever exists.
+    # Container liveness probe: no container ever exists. The wording is what
+    # lets Kill tell this from an unreachable daemon.
+    echo "Error: no such object: \"${*: -1}\"" >&2
     exit 1
     ;;
 esac
