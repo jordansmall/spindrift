@@ -25,7 +25,7 @@ func (ociLifecycleHarness) adapter(script string) *ociAdapter {
 
 func (h ociLifecycleHarness) Exiting(t *testing.T, _ string, code int) runner.Runner {
 	script, _ := runnertest.NewFakeCLIBySubcommand(t, map[string]runnertest.Call{
-		"inspect": {Exit: 1},
+		"inspect": {Exit: 1, Stderr: `Error: no such object: "x"`},
 		"ps":      {},
 		"run":     {Exit: code},
 	})
@@ -55,7 +55,7 @@ func (h ociLifecycleHarness) Killable(t *testing.T, name string) (runner.Runner,
 		"rm": {Shell: "touch killed"},
 		"inspect": {
 			Stdout: inspectJSONStdout(t, "cid-1", "running", time.Now()),
-			Shell:  live + " || exit 1",
+			Shell:  live + ` || { echo 'Error: no such object: "` + name + `"' >&2; exit 1; }`,
 		},
 		"ps": {
 			Stdout: name,

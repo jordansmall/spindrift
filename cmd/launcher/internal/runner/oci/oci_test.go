@@ -2443,14 +2443,65 @@ func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
 // there is no container left to kill. Runner.Kill's contract treats that as
 // success, not a failure Terminate would otherwise misreport.
 func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
-	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 1}) // inspect: no such container
+	// Matched on stderr text, not exit code: podman exits 125, docker 1.
+	for _, tc := range []struct {
+		name   string
+		exit   int
+		stderr string
+	}{
+		{"podman", 125, `Error: no such object: "agent-issue-1"`},
+		{"docker", 1, "Error: No such object: agent-issue-1"},
+		{"no such container", 1, "Error: No such container: agent-issue-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: tc.exit, Stderr: tc.stderr})
+			a := &ociAdapter{cli: script}
+
+			if err := a.Kill("agent-issue-1"); err != nil {
+				t.Errorf("Kill: got %v, want nil for a missing container", err)
+			}
+			if calls := runnertest.CallCount(t, dir); calls != 1 {
+				t.Errorf("Kill: want 1 call (inspect only, no rm attempted), got %d", calls)
+			}
+		})
+	}
+}
+
+// An inspect that fails for any other reason (daemon unreachable) proves
+// nothing about the Box, so Kill must report it rather than claim success
+// over a possibly live container.
+func TestKill_InspectFailure_ReturnsErrorWithStderr(t *testing.T) {
+	const stderr = "Error: Cannot connect to Podman. Please verify your connection"
+	script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 125, Stderr: stderr})
 	a := &ociAdapter{cli: script}
 
-	if err := a.Kill("agent-issue-1"); err != nil {
-		t.Errorf("Kill: got %v, want nil for a missing container", err)
+	err := a.Kill("agent-issue-1")
+	if err == nil || !strings.Contains(err.Error(), stderr) {
+		t.Errorf("Kill: got %v, want an error containing %q", err, stderr)
 	}
 	if calls := runnertest.CallCount(t, dir); calls != 1 {
 		t.Errorf("Kill: want 1 call (inspect only, no rm attempted), got %d", calls)
+	}
+}
+
+// A successful inspect proves the container exists; with no ID to pin the
+// removal to, Kill must not claim it removed anything or fall back to the name.
+func TestKill_NoContainerID_ReturnsErrorWithoutRemoving(t *testing.T) {
+	for _, tc := range []struct{ name, stdout string }{
+		{"undecodable body", "not json"},
+		{"decoded body without ID", "{}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			script, dir := runnertest.NewFakeCLI(t, runnertest.Call{Stdout: tc.stdout})
+			a := &ociAdapter{cli: script}
+
+			if err := a.Kill("agent-issue-1"); err == nil {
+				t.Error("Kill: got nil, want an error when the inspect yields no container ID")
+			}
+			if calls := runnertest.CallCount(t, dir); calls != 1 {
+				t.Errorf("Kill: want 1 call (inspect only, no rm attempted), got %d", calls)
+			}
+		})
 	}
 }
 
