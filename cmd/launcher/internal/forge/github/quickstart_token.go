@@ -88,18 +88,15 @@ func auditGHToken(token string, p backendkit.TokenPrompt) error {
 	return nil
 }
 
-// broadGHScopes are classic scopes wider than the single-repo least privilege
-// quickstart wants. excessGHScopes catches admin:* separately, by prefix.
-var broadGHScopes = map[string]bool{
-	"repo":      true,
-	"write:org": true,
-	"read:org":  true,
-}
+// leastPrivilegeGHScope is the only classic-token scope the audit accepts.
+const leastPrivilegeGHScope = "public_repo"
 
+// excessGHScopes returns every scope but leastPrivilegeGHScope, in input order:
+// an allow-list flags a scope GitHub adds later rather than silently missing it.
 func excessGHScopes(scopes []string) []string {
 	var excess []string
 	for _, s := range scopes {
-		if broadGHScopes[s] || strings.HasPrefix(s, "admin:") {
+		if s != leastPrivilegeGHScope {
 			excess = append(excess, s)
 		}
 	}
