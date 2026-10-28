@@ -63,15 +63,15 @@ func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	readSelfCgroup = func() (string, error) { return "", errors.New("no cgroup in contract test") }
 	t.Cleanup(stubResolvConfPresent())
 
-	// Run locks the snapshot dir of the generation it mounts and recreates a
-	// missing one, so each carries a db.sqlite.
+	// Run locks the generation it mounts and writes a missing current-version
+	// snapshot, so each carries a db-1 (the stubbed host version) db.sqlite.
 	snapshotRoot := t.TempDir()
 	dirs := []string{bakedGeneration}
 	if g := l.Box.ClosureGeneration; g != nil {
 		dirs = append(dirs, g.Generation)
 	}
 	for _, d := range dirs {
-		seedSnapshot(t, snapshotDBPath(filepath.Join(snapshotRoot, d)), "snapshot")
+		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(filepath.Join(snapshotRoot, d), "1")), "snapshot")
 	}
 
 	a := &bwrapAdapter{
@@ -174,7 +174,7 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 		AgentFiles:    strings.TrimSuffix(agentFilesAgent, "/agent"),
 		AgentEnv:      strings.TrimSuffix(agentEnvPath, "/bin"),
 		NixConfigFile: nixConf,
-		Generation:    filepath.Base(overlaySrc),
+		Generation:    filepath.Base(filepath.Dir(overlaySrc)),
 	}
 	baked := runner.AgentGeneration{
 		AgentFiles:    bakedAgentFiles,

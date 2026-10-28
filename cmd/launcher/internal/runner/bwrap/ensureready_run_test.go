@@ -52,7 +52,7 @@ func newReadyFixture(t *testing.T) readyFixture {
 	}
 	return readyFixture{
 		a:      &bwrapAdapter{prepare: b},
-		dbPath: snapshotDBPath(b.nixVarSnapshotDir),
+		dbPath: versionedDBPath(b.nixVarSnapshotDir),
 		paths:  []string{b.agentFiles, b.agentEnv, b.passwdFile, b.groupFile, b.nixConfigFile, b.syscallFilterPath},
 	}
 }
@@ -222,4 +222,44 @@ func TestBwrapRunEnsureReady_NixConfigWithoutDrvIsWarmWithoutSnapshot(t *testing
 		t.Fatalf("EnsureReady: %v", err)
 	}
 	runnertest.WantImageBuildStates(t, drain())
+}
+
+// A host DB that registered paths after the snapshot was written makes the
+// generation cold, so the snapshot is refreshed (issue #6072).
+func TestBwrapRunEnsureReady_HostVersionMovedPastSnapshotIsNotReady(t *testing.T) {
+	f := newReadyFixture(t)
+	seedSnapshot(t, f.dbPath, "snapshot")
+	if !f.a.prepare.generationReady() {
+		t.Fatal("generationReady = false at the snapshot's version, want true")
+	}
+	stubHostVersion(t, func() (string, error) { return "2", nil })
+	if f.a.prepare.generationReady() {
+		t.Error("generationReady = true after the host version moved past the snapshot, want false")
+	}
+}
+
+// The cold path writes the new version's snapshot beside the old one and never
+// touches the old db.sqlite, which a running Box may be reading.
+func TestBwrapRunEnsureReady_MovedHostVersionWritesNewVersionDirOnly(t *testing.T) {
+	drain := runnertest.InstallImageBuildPipe(t)
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+	)
+	fakeVacuumInto(t, script, "new snapshot", 0, nil)
+	f := newReadyFixture(t)
+	seedSnapshot(t, f.dbPath, "old snapshot")
+	stubHostVersion(t, func() (string, error) { return "2", nil })
+
+	if err := f.a.EnsureReady(); err != nil {
+		t.Fatalf("EnsureReady: %v", err)
+	}
+	newPath := snapshotDBPath(snapshotVersionDir(f.a.prepare.nixVarSnapshotDir, "2"))
+	if got, err := os.ReadFile(newPath); err != nil || string(got) != "new snapshot" {
+		t.Errorf("db-2 db.sqlite = %q, %v; want the new snapshot", got, err)
+	}
+	if got, err := os.ReadFile(f.dbPath); err != nil || string(got) != "old snapshot" {
+		t.Errorf("db-%s db.sqlite = %q, %v; want the old snapshot untouched", testHostVersion, got, err)
+	}
+	runnertest.WantImageBuildStates(t, drain(), report.ImageBuildStarted, report.ImageBuildFinished)
 }

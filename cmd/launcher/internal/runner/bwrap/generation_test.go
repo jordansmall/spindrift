@@ -40,7 +40,7 @@ func fakeVacuumInto(t *testing.T, script, content string, code int, onVacuum fun
 
 // snapshotDest is the db.sqlite SnapshotGeneration writes for closure's generation.
 func snapshotDest(pwd, closure string) string {
-	return filepath.Join(NixVarSnapshotDir(pwd, ClosureGeneration(closure)), "nix", "db", "db.sqlite")
+	return versionedDBPath(NixVarSnapshotDir(pwd, ClosureGeneration(closure)))
 }
 
 // tempSiblings lists leftover vacuum temp files next to db.sqlite.
@@ -306,7 +306,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	// The fake sqlite3 stub writes nothing to the temp, so dest is an empty file;
 	// the dir and the argv naming a temp sibling of dest are what pin
 	// SnapshotGeneration onto the derived-generation dir.
-	wantDest := filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "abc-agent-closure", "nix", "db", "db.sqlite")
+	wantDest := filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "abc-agent-closure", "db-"+testHostVersion, "nix", "db", "db.sqlite")
 	if _, err := os.Stat(filepath.Dir(wantDest)); err != nil {
 		t.Errorf("os.Stat(%q) = %v, want the destination dir created at the derived generation dir", filepath.Dir(wantDest), err)
 	}
@@ -587,7 +587,7 @@ func TestHostStoreDBVersion_ParsesMaxID(t *testing.T) {
 				gotArgs = append([]string{name}, args...)
 				return exec.Command("printf", "%s", tc.out)
 			}
-			got, err := hostStoreDBVersion()
+			got, err := realHostStoreDBVersion()
 			if (err != nil) != tc.wantErr || got != tc.want {
 				t.Errorf("hostStoreDBVersion() = %q, %v; want %q, wantErr=%v", got, err, tc.want, tc.wantErr)
 			}
@@ -608,7 +608,7 @@ func TestHostStoreDBVersion_MissingHostDB(t *testing.T) {
 		t.Errorf("execCommand(%q) called, want the stat preflight to fail first", name)
 		return exec.Command("true")
 	}
-	if _, err := hostStoreDBVersion(); err == nil {
+	if _, err := realHostStoreDBVersion(); err == nil {
 		t.Error("hostStoreDBVersion() = nil error, want one when the host db is missing")
 	}
 }
@@ -808,5 +808,49 @@ func TestPrepareSnapshotVersion_VacuumFailureReleasesLock(t *testing.T) {
 	defer ex.Close()
 	if err := syscall.Flock(int(ex.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Errorf("exclusive flock = %v, want the shared lock released on error", err)
+	}
+}
+
+// testHostVersion is the host DB version every test sees unless it re-stubs
+// hostStoreDBVersion, so no test reaches the real host DB or counts the probe as
+// a sqlite3 call.
+const testHostVersion = "1"
+
+// realHostStoreDBVersion is the production probe, for the tests of the probe itself.
+var realHostStoreDBVersion = hostStoreDBVersion
+
+func TestMain(m *testing.M) {
+	hostStoreDBVersion = func() (string, error) { return testHostVersion, nil }
+	// CI's nix build sandbox has no host DB, while a dev machine or Box does:
+	// pin the sandbox's answer so an unstubbed vacuum fails the same everywhere.
+	statHostNixDB = func() error { return os.ErrNotExist }
+	os.Exit(m.Run())
+}
+
+// versionedDBPath is the db.sqlite prepareSnapshotVersion writes under genDir
+// while the host DB sits at testHostVersion.
+func versionedDBPath(genDir string) string {
+	return snapshotDBPath(snapshotVersionDir(genDir, testHostVersion))
+}
+
+// SnapshotGeneration writes into the db-<V> dir of the host DB's current
+// version and leaves an older version's snapshot alone (issue #6072).
+func TestSnapshotGeneration_WritesIntoCurrentVersionDir(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	fakeVacuumInto(t, script, "v9", 0, nil)
+	stubHostVersion(t, func() (string, error) { return "9", nil })
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	genDir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
+	old := seedSnapshotDir(t, snapshotVersionDir(genDir, "4"), "v4")
+
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if got, err := os.ReadFile(snapshotDBPath(snapshotVersionDir(genDir, "9"))); err != nil || string(got) != "v9" {
+		t.Errorf("db-9 db.sqlite = %q, %v; want the new snapshot", got, err)
+	}
+	if got, err := os.ReadFile(old); err != nil || string(got) != "v4" {
+		t.Errorf("db-4 db.sqlite = %q, %v; want it untouched", got, err)
 	}
 }

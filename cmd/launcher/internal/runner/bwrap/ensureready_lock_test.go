@@ -62,7 +62,7 @@ func lockShared(t *testing.T, path string) *os.File {
 func staleGeneration(t *testing.T, f readyFixture, name string) string {
 	t.Helper()
 	dir := filepath.Join(f.a.prepare.nixVarSnapshotRoot, name)
-	seedSnapshot(t, snapshotDBPath(dir), "old")
+	seedSnapshot(t, versionedDBPath(dir), "old")
 	return dir
 }
 

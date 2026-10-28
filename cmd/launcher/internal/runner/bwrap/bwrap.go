@@ -205,7 +205,7 @@ func (a *bwrapAdapter) EnsureReady() error {
 	return nil
 }
 
-// IsReady checks that the nix-in-box snapshot (written by `launcher build` or
+// IsReady checks that a nix-in-box snapshot (written by `launcher build` or
 // EnsureReady) is present when the Consumer's nixInBox knob is on (ADR 0042).
 // Scoped to that one gap (issue #2664): buildArgs conditions no other mount on
 // absence, so without this a missing snapshot surfaces only as a raw bwrap
@@ -214,11 +214,17 @@ func (a *bwrapAdapter) IsReady() error {
 	if a.nixConfigFile == "" {
 		return nil
 	}
-	// Check the db.sqlite file itself, not just its parent dir: snapshotStoreDB
-	// MkdirAlls <nixVarSnapshotDir>/nix/db before it writes db.sqlite, so a
-	// dir-only check would report ready on a dir left behind by a failed
-	// snapshot (issue #2664).
-	dbPath := snapshotDBPath(a.nixVarSnapshotDir)
+	// Check the db.sqlite file itself, not just its parent dir: VacuumStoreDBInto
+	// MkdirAlls <version dir>/nix/db before it writes db.sqlite, so a dir-only
+	// check would report ready on a dir left behind by a failed snapshot (issue
+	// #2664). Any existing snapshot passes, with no host probe: a host DB that
+	// moved on must not fail --no-build, and Run refreshes it (issue #6072).
+	snapDir := newestSnapshotDir(a.nixVarSnapshotDir)
+	if snapDir == "" {
+		// Only shapes the not-found error below, which names the expected path.
+		snapDir = a.nixVarSnapshotDir
+	}
+	dbPath := snapshotDBPath(snapDir)
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -314,11 +320,12 @@ func (a *bwrapAdapter) prefetchFor(box runner.Box) string {
 	return string(content)
 }
 
-// snapshotDirFor resolves the nix-var snapshot directory box's launch overlays
-// onto /nix/var and locks for its lifetime (issue #2681). An empty or unsafe
-// Generation falls back to the baked dir: joining a raw "" resolves to the root
-// itself, which has no db.sqlite, and ".." escapes it. Joins onto
-// a.nixVarSnapshotRoot directly, since nixVarSnapshotDir would re-append it.
+// snapshotDirFor resolves the nix-var snapshot generation directory box locks
+// for its lifetime (issue #2681). The Box mounts a db-<V> dir under it, which
+// ensureRunSnapshot resolves (issue #6072). An empty or unsafe Generation falls
+// back to the baked dir: joining a raw "" resolves to the root itself, which
+// has no db.sqlite, and ".." escapes it. Joins onto a.nixVarSnapshotRoot
+// directly, since nixVarSnapshotDir would re-append it.
 func (a *bwrapAdapter) snapshotDirFor(box runner.Box) string {
 	if gen := a.generationFor(box); gen != "" {
 		return filepath.Join(a.nixVarSnapshotRoot, gen)
@@ -370,8 +377,9 @@ func (a *bwrapAdapter) reRootIfReclaimed(box runner.Box) {
 // stay off argv and reach the sandbox via the inherited process environment (no
 // --clearenv); see OffArgvKeys. etcDir is only still needed for the synthesised
 // /etc/resolv.conf on the pasta path, since passwd/group are baked store paths
-// (issue #2663). Pasta is never part of this return value; see execTarget.
-func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
+// (issue #2663). nixVarLower is the /nix/var overlay lower: the db-<V> dir Run
+// resolved. Pasta is never part of this return value; see execTarget.
+func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box, nixVarLower string) []string {
 	var args []string
 	if a.nixConfigFile != "" && a.nixStoreWritable {
 		args = append(args, "--overlay-src", "/nix/store", "--tmp-overlay", "/nix/store")
@@ -390,12 +398,13 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 	)
 	// An empty nixConfigFile means nixInBox is off and nix is not on PATH, so
 	// both nix mounts below are skipped together. When set, --overlay-src plus
-	// --tmp-overlay gives a read-only lower (the VACUUMed db.sqlite snapshot,
-	// ADR 0042) under an ephemeral tmpfs upper, so nix's own writes in the Box
-	// (gcroots, profiles, WAL files) vanish instead of touching host disk.
+	// --tmp-overlay gives a read-only lower (nixVarLower, a db-<V> dir holding
+	// the VACUUMed db.sqlite snapshot, ADR 0042) under an ephemeral tmpfs upper,
+	// so nix's own writes in the Box (gcroots, profiles, WAL files) vanish
+	// instead of touching host disk.
 	if a.nixConfigFile != "" {
 		args = append(args, "--ro-bind", a.nixConfigFileFor(box), "/etc/nix/nix.conf")
-		args = append(args, "--overlay-src", a.snapshotDirFor(box), "--tmp-overlay", "/nix/var")
+		args = append(args, "--overlay-src", nixVarLower, "--tmp-overlay", "/nix/var")
 	}
 	if !a.network.Isolate {
 		if err := statResolvConf(); err == nil {
@@ -495,8 +504,8 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 // buildArgs emits --seccomp from the path alone, so an unopened filter has the
 // flag stripped here, or bwrap reads a dead fd 3 and the launch fails (issue
 // #2670). On the pasta chain an open filter also adds the sh trampoline.
-func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box, filterOpen bool) (string, []string, bool) {
-	bwrapArgs := a.buildArgs(etcDir, box)
+func (a *bwrapAdapter) execTarget(etcDir string, box runner.Box, nixVarLower string, filterOpen bool) (string, []string, bool) {
+	bwrapArgs := a.buildArgs(etcDir, box, nixVarLower)
 	if !filterOpen {
 		bwrapArgs = removeSeccompFlag(bwrapArgs)
 	}
@@ -865,6 +874,47 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	// at all.
 	cgroupDir := a.provisionCgroup(box)
 
+	// Shared flocks held for the life of the sandboxed process are how
+	// reclaimStaleSnapshots detects a live Box still using this generation (its
+	// snapshot dir and GC roots both) and how a snapshot version is kept from
+	// being swept while mounted. The generation lock is taken for every Box with
+	// a generation or nixConfigFile. A launcher that passed readiness holds no
+	// lock until here, so reclaim can remove the generation first: under
+	// nixConfigFile, recreate the roots rather than fail, under the lock when it
+	// could be taken.
+	// The Box then mounts the host DB's current version dir under the generation
+	// (writing it if absent) and holds that version's lock too, so it sees every
+	// path the host DB lists valid at launch and no writer disturbs its lower
+	// (issue #6072). With nixInBox off, reclaim may have dropped the roots, so
+	// re-root them under the held lock.
+	var nixVarSnapshotLock, nixVarVersionLock *os.File
+	// Empty only for an adapter not built by New, where SnapshotLockPath would be
+	// a cwd-relative ".lock". The flat path with nixInBox off has no mount and no
+	// root, and reclaim never sweeps it, so a lock there would only leave litter.
+	genDir := a.snapshotDirFor(box)
+	nixVarLower := genDir
+	if genDir != "" && (a.nixConfigFile != "" || a.generationFor(box) != "") {
+		lf, lockErr := LockSnapshotShared(genDir)
+		if lockErr != nil {
+			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); reclaim cannot detect box %q is using this generation\n", SnapshotLockPath(genDir), lockErr, box.Name)
+		} else {
+			nixVarSnapshotLock = lf
+		}
+		if a.nixConfigFile != "" {
+			dir, vlf, ensureErr := a.ensureRunSnapshot(box, genDir)
+			if ensureErr != nil {
+				UnlockSnapshot(nixVarSnapshotLock)
+				if cgroupDir != "" {
+					_ = os.Remove(cgroupDir)
+				}
+				return ensureErr
+			}
+			nixVarLower, nixVarVersionLock = dir, vlf
+		} else if lockErr == nil {
+			a.reRootIfReclaimed(box)
+		}
+	}
+
 	// The single point where a bad filter degrades, so it is opened here even on
 	// the pasta chain, whose trampoline reopens it: a failed redirect there would
 	// kill the Box after pasta exec'd, and a stray --seccomp fails it at bwrap's
@@ -879,7 +929,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 			defer f.Close()
 		}
 	}
-	program, execArgs, childExecsByName := a.execTarget(etcDir, box, syscallFilterFile != nil)
+	program, execArgs, childExecsByName := a.execTarget(etcDir, box, nixVarLower, syscallFilterFile != nil)
 	// A func, not a value: exec.Cmd.Start is one-shot, and the CLONE_INTO_CGROUP
 	// attempt below may need a fresh Cmd for its fallback.
 	newCmd := func() *exec.Cmd {
@@ -908,40 +958,6 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 		return cmd
 	}
 
-	// A shared flock held for the life of the sandboxed process is how
-	// reclaimStaleSnapshots detects a live Box still using this generation, its
-	// snapshot dir and GC roots both. Taken for every Box with a generation or
-	// nixConfigFile. A launcher that passed readiness holds no lock until here,
-	// so reclaim can remove the generation first: under nixConfigFile, recreate
-	// the snapshot while holding the lock rather than fail, since --overlay-src
-	// against a removed dir would not mount and reclaim cannot run against a
-	// held lock. With nixInBox off, reclaim may have dropped the roots, so
-	// re-root them under the held lock.
-	var nixVarSnapshotLock *os.File
-	// The same call buildArgs' --overlay-src bind uses, so the lock and the
-	// recreate guard the exact directory this launch mounts. Empty only for an
-	// adapter not built by New, where SnapshotLockPath would be a cwd-relative
-	// ".lock". The flat path with nixInBox off has no mount and no root, and
-	// reclaim never sweeps it, so a lock there would only leave litter.
-	if snapshotDir := a.snapshotDirFor(box); snapshotDir != "" && (a.nixConfigFile != "" || a.generationFor(box) != "") {
-		lf, err := LockSnapshotShared(snapshotDir)
-		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); reclaim cannot detect box %q is using this generation\n", SnapshotLockPath(snapshotDir), err, box.Name)
-		} else {
-			if a.nixConfigFile != "" {
-				if recreateErr := a.recreateSnapshotIfGone(box, snapshotDir); recreateErr != nil {
-					UnlockSnapshot(lf)
-					if cgroupDir != "" {
-						_ = os.Remove(cgroupDir)
-					}
-					return recreateErr
-				}
-			} else {
-				a.reRootIfReclaimed(box)
-			}
-			nixVarSnapshotLock = lf
-		}
-	}
 	// Cloned straight into the cgroup where the kernel supports it, so pasta's
 	// and bwrap's own forks never run outside the limits (issue #4815). The fd
 	// only needs to outlive Start.
@@ -974,6 +990,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 			_ = os.Remove(cgroupDir)
 		}
 		UnlockSnapshot(nixVarSnapshotLock)
+		UnlockSnapshot(nixVarVersionLock)
 		return err
 	}
 	if cgroupDir != "" {
@@ -994,6 +1011,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	// while the sandboxed process is still reading it. Flock releases on process
 	// exit, so a crashed launcher needs no separate recovery path.
 	defer UnlockSnapshot(nixVarSnapshotLock)
+	defer UnlockSnapshot(nixVarVersionLock)
 	if cgroupDir != "" {
 		// Deferred so cleanup runs after cmd.Wait() returns: the cgroup dir can
 		// only be rmdir'd once no live process remains inside it (ADR 0042).
@@ -1006,29 +1024,31 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	return runner.AsRunError(cmd.Wait())
 }
 
-// recreateSnapshotIfGone rebuilds box's nix-var snapshot when a sibling's
-// reclaim removed it, and must be called with the generation's shared lock
-// held. It re-registers the GC roots reclaim dropped with the generation, then
-// writes db.sqlite write-if-absent, so a snapshot a sibling just installed is
-// never disturbed. It takes no realize lock: the held shared lock already
-// keeps reclaim out, and InstallIfAbsent covers a concurrent writer.
-func (a *bwrapAdapter) recreateSnapshotIfGone(box runner.Box, snapshotDir string) error {
-	if _, err := os.Stat(snapshotDBPath(snapshotDir)); err == nil {
-		return nil
+// ensureRunSnapshot resolves the snapshot dir box mounts as /nix/var's lower:
+// the host DB's current version under genDir, written if absent. It returns
+// that version's shared lock still held, for Run to keep for the Box's life.
+// Call it with the generation's shared lock held when it could be taken (a
+// failed take only warns). When a sibling's reclaim removed the whole
+// generation, the GC roots went with it, so they are re-registered first. The
+// write is InstallIfAbsent and takes no realize lock: the held locks keep
+// reclaim out, and the link covers a concurrent writer.
+func (a *bwrapAdapter) ensureRunSnapshot(box runner.Box, genDir string) (string, *os.File, error) {
+	if newestSnapshotDir(genDir) == "" {
+		fmt.Printf("==> bwrap runner: nix-var snapshot %s was reclaimed before box %q launched; recreating it\n", genDir, box.Name)
+		closureSide := []string{a.agentFiles, a.agentEnv, a.nixConfigFile}
+		// Root the closure itself, as SnapshotGeneration does, so both writers keep
+		// one root set per generation. NewAgentGeneration makes AgentFiles a child
+		// of the closure.
+		if g := box.ClosureGeneration; boxGeneration(box) != "" && g.AgentFiles != "" {
+			closureSide = []string{filepath.Dir(g.AgentFiles)}
+		}
+		registerMountedArtifactRoots(a.nixGCRootsRoot, a.generationFor(box), closureSide, a.passwdFile, a.groupFile, a.syscallFilterPath)
 	}
-	fmt.Printf("==> bwrap runner: nix-var snapshot %s was reclaimed before box %q launched; recreating it\n", snapshotDir, box.Name)
-	closureSide := []string{a.agentFiles, a.agentEnv, a.nixConfigFile}
-	// Root the closure itself, as SnapshotGeneration does, so both writers keep
-	// one root set per generation. NewAgentGeneration makes AgentFiles a child
-	// of the closure.
-	if g := box.ClosureGeneration; boxGeneration(box) != "" && g.AgentFiles != "" {
-		closureSide = []string{filepath.Dir(g.AgentFiles)}
+	dir, lf, err := prepareSnapshotVersion(genDir, InstallIfAbsent)
+	if err != nil {
+		return "", nil, fmt.Errorf("prepare nix-var snapshot under %s: %w", genDir, err)
 	}
-	registerMountedArtifactRoots(a.nixGCRootsRoot, a.generationFor(box), closureSide, a.passwdFile, a.groupFile, a.syscallFilterPath)
-	if err := VacuumStoreDBInto(snapshotDir, InstallIfAbsent); err != nil {
-		return fmt.Errorf("recreate reclaimed nix-var snapshot %s: %w", snapshotDir, err)
-	}
-	return nil
+	return dir, lf, nil
 }
 
 // alreadyRunning reports whether a Box named name is live. A sibling Run still
@@ -1180,8 +1200,8 @@ type bwrapBuildAdapter struct {
 	// like nixConfigFileDrv, so a zero-value adapter (a bare test struct
 	// literal) never tries to realize an empty drv path.
 	syscallFilterDrv string
-	// nixVarSnapshotDir is the host-side directory snapshotStoreDB writes into,
-	// the same directory the run adapter mounts.
+	// nixVarSnapshotDir is the host-side directory the snapshot writers nest db-<V>
+	// dirs under; the run adapter mounts one of those as /nix/var's lower.
 	nixVarSnapshotDir string
 	// nixVarSnapshotRoot and nixVarGeneration are kept as their own fields,
 	// rather than re-derived from nixVarSnapshotDir by path surgery, so
@@ -1311,9 +1331,10 @@ func (a *bwrapBuildAdapter) realizeClosures() error {
 }
 
 // publishSnapshot locks and roots the generation's artifacts and, when nixInBox
-// is on, writes its store-DB snapshot (ADR 0042). With InstallIfAbsent an
-// existing db.sqlite is kept and not re-vacuumed, since a running Box may be
-// reading it.
+// is on, writes its store-DB snapshot for the host DB's current version (ADR
+// 0042, issue #6072). With InstallIfAbsent an existing db.sqlite for that
+// version is kept and not re-vacuumed, since a running Box may be reading it;
+// an older version's snapshot is never touched.
 func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
 	// Guarded like Run: an adapter not built by NewBuild has no dir, and
 	// SnapshotLockPath("") would be a cwd-relative ".lock". Likewise no lock on
@@ -1356,18 +1377,17 @@ func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
 	if a.nixConfigFileDrv == "" {
 		return nil
 	}
-	if mode == InstallIfAbsent {
-		if _, err := os.Stat(snapshotDBPath(a.nixVarSnapshotDir)); err == nil {
-			fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already written; skipping vacuum\n", a.nixVarGeneration)
-			return nil
-		}
-	}
-	return a.snapshotStoreDB(mode)
+	// The version lock is dropped on return: a Box takes it itself for its life.
+	_, vlf, err := prepareSnapshotVersion(a.nixVarSnapshotDir, mode)
+	UnlockSnapshot(vlf)
+	return err
 }
 
 // generationReady reports whether every realized store path exists and, when
-// ensureReady would write a snapshot (a nix-config drv), its db.sqlite is a
-// file: the state the run adapter's EnsureReady treats as warm.
+// ensureReady would write a snapshot (a nix-config drv), the snapshot for the
+// host DB's current version is a file: the state the run adapter's EnsureReady
+// treats as warm. A host DB that has moved past the newest snapshot is cold, so
+// the cold path writes the new version (issue #6072).
 func (a *bwrapBuildAdapter) generationReady() bool {
 	for _, p := range []string{a.agentFiles, a.agentEnv, a.passwdFile, a.groupFile, a.nixConfigFile, a.syscallFilterPath} {
 		if p == "" {
@@ -1380,19 +1400,12 @@ func (a *bwrapBuildAdapter) generationReady() bool {
 	if a.nixConfigFileDrv == "" {
 		return true
 	}
-	info, err := os.Stat(snapshotDBPath(a.nixVarSnapshotDir))
+	dir, err := currentSnapshotDir(a.nixVarSnapshotDir)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(snapshotDBPath(dir))
 	return err == nil && !info.IsDir()
-}
-
-// snapshotStoreDB copies the host's live nix store database into
-// a.nixVarSnapshotDir, compacting it in the same step (ADR 0042: ~302MB raw vs
-// ~104MB compacted, and an overlay copy-up rewrites a file whole, so the
-// compacted size is what lands in the Box's tmpfs upper on first touch). VACUUM
-// INTO fills a temp the launcher itself created, so the snapshot is owned by the
-// invoking uid and no explicit chown is needed.
-func (a *bwrapBuildAdapter) snapshotStoreDB(mode SnapshotInstall) error {
-	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
-	return VacuumStoreDBInto(a.nixVarSnapshotDir, mode)
 }
 
 // reclaimStaleSnapshots removes generation directories under root that are
