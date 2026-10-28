@@ -2786,8 +2786,8 @@ func TestValidateIssueTracker_AcceptsKnown(t *testing.T) {
 	}
 }
 
-// ISSUE_TRACKER=local selects a tracker reading from localIssuesDir instead
-// of the GitHub gh-exec adapter.
+// ISSUE_TRACKER=local selects a tracker reading from the LOCAL_ISSUES_DIR knob
+// instead of the GitHub gh-exec adapter.
 func TestNewIssueTracker_Local(t *testing.T) {
 	dir := t.TempDir()
 	issueFile := `---
