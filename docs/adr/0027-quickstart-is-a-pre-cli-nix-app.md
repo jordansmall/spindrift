@@ -72,13 +72,14 @@ remaining step.
 - Quickstart validates the GitHub token before writing it, and the least-
   privilege audit is asymmetric by token type: classic/OAuth tokens
   (`ghp_`/`gho_`) expose `X-OAuth-Scopes`, so a wider-than-needed grant
-  (`repo`/org/admin) is detected and gated behind a second literal `ACCEPT`;
-  fine-grained tokens (`github_pat_`) have no introspection endpoint, so the
-  wizard only probes that they have *enough*, prints the four permissions they
-  should carry, and trusts the creation-time scoping. The `gh auth token`
-  fallback is therefore the case the gate most often bites. A Forgejo token
-  gets a live Probe against the instance instead: Forgejo tokens carry no
-  sniffable prefix, so there is no least-privilege audit on that path.
+  (any scope beyond `public_repo` — amended by issue #6016) is detected and
+  gated behind a second literal `ACCEPT`; fine-grained tokens (`github_pat_`)
+  have no introspection endpoint, so the wizard only probes that they have
+  *enough*, prints the four permissions they should carry, and trusts the
+  creation-time scoping. The
+  `gh auth token` fallback is therefore the case the gate most often bites. A
+  Forgejo token gets a live Probe against the instance instead: Forgejo tokens
+  carry no sniffable prefix, so there is no least-privilege audit on that path.
 - `apps.quickstart` becomes a public entry point advertised in the README's
   Quick start, alongside (not replacing) `nix flake init -t` for users who
   prefer to hand-edit.
