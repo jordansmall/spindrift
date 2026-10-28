@@ -1016,7 +1016,7 @@ func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	}
 }
 
-// The default (ADR 0027): with PreflightStaleBase off, a green PR behind its
+// The default (ADR 0028): with PreflightStaleBase off, a green PR behind its
 // base merges as-is. NeedsUpdate is never queried, sparing a compare-API round
 // trip, and Rebase is never called even though MaxRebaseAttempts would allow it,
 // because only a genuine conflict on the Merge attempt triggers a rebase.
