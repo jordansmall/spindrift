@@ -34,6 +34,7 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -365,11 +366,12 @@ func floatSchemaDefault(key string) float64 {
 	return n
 }
 
-// floatNonnegSchema parses key's env value as a non-negative float64 (the
-// USD-budget counterpart to atoiNonnegSchema), falling back to its schema
-// default; a negative or unparseable value also falls back to the default.
+// floatNonnegSchema parses key's env value as a non-negative finite float64
+// (the USD-budget counterpart to atoiNonnegSchema), falling back to its schema
+// default; a negative, infinite, or unparseable value also falls back to the
+// default. It shares the Box's parser so host and Box agree on what is valid.
 func floatNonnegSchema(key string) float64 {
-	if n, err := strconv.ParseFloat(os.Getenv(key), 64); err == nil && n >= 0 {
+	if n, ok := promptassembly.ParseNonnegBudgetUSD(os.Getenv(key)); ok {
 		return n
 	}
 	return floatSchemaDefault(key)

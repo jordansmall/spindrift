@@ -3361,7 +3361,7 @@ artifact, not a growing transcript:
   total. Either dimension alone can trip it; a negative or malformed value
   degrades to `0` (disabled) rather than erroring, mirroring the host
   launcher's own tolerance for the identical `MAX_BUDGET_TOKENS`/
-  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`). The CLI wrappers
+  `MAX_BUDGET_USD` env vars (`atoiNonnegSchema`/`floatNonnegSchema`). The CLI wrappers
   that parse the raw strings — `box`'s and `driver-exec assemble-prompt`'s own
   `--max-budget-tokens`/`--max-budget-usd` flags — degrade a malformed value
   silently, the same as the host launcher: neither has an operator-facing
