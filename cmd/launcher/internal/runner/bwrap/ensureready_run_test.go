@@ -250,6 +250,8 @@ func TestBwrapRunEnsureReady_MovedHostVersionWritesNewVersionDirOnly(t *testing.
 	f := newReadyFixture(t)
 	seedSnapshot(t, f.dbPath, "old snapshot")
 	stubHostVersion(t, func() (string, error) { return "2", nil })
+	// A running Box holds the old version, so the post-build sweep must spare it.
+	holdShared(t, SnapshotLockPath(snapshotVersionDir(f.a.prepare.nixVarSnapshotDir, testHostVersion)))
 
 	if err := f.a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady: %v", err)
