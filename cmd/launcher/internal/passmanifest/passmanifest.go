@@ -144,22 +144,11 @@ func Read(path string) ([]Entry, error) {
 // at or after it: the land pass itself, or a legacy nudge resume or host fix
 // pass; otherwise land crashed and the ready is a stale earlier one.
 func UnreviewedReady(entries []Entry) bool {
-	land := passmachine.KindLand.ManifestKind()
-	work := map[string]bool{
-		passmachine.KindImplement.ManifestKind(): true,
-		passmachine.KindFix.ManifestKind():       true,
-		land:                                     true,
-	}
-	last := -1
-	for i, en := range entries {
-		if work[en.Kind] {
-			last = i
-		}
-	}
+	last := lastWork(entries)
 	if last < 0 {
 		return false
 	}
-	if entries[last].Kind != land {
+	if !isLand(entries[last]) {
 		return true
 	}
 	for _, en := range entries[last:] {
@@ -168,4 +157,29 @@ func UnreviewedReady(entries []Entry) bool {
 		}
 	}
 	return true
+}
+
+// StoppedBeforeLand reports whether the last implement, fix or land entry is
+// implement or fix rather than land (issue #5984). No such entry fails open.
+func StoppedBeforeLand(entries []Entry) bool {
+	last := lastWork(entries)
+	return last >= 0 && !isLand(entries[last])
+}
+
+func isLand(e Entry) bool { return e.Kind == passmachine.KindLand.ManifestKind() }
+
+// lastWork returns the index of the last implement, fix or land entry, or -1.
+func lastWork(entries []Entry) int {
+	work := map[string]bool{
+		passmachine.KindImplement.ManifestKind(): true,
+		passmachine.KindFix.ManifestKind():       true,
+		passmachine.KindLand.ManifestKind():      true,
+	}
+	last := -1
+	for i, en := range entries {
+		if work[en.Kind] {
+			last = i
+		}
+	}
+	return last
 }

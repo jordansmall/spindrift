@@ -358,6 +358,36 @@ func TestReadSymlinkReturnsError(t *testing.T) {
 	}
 }
 
+// StoppedBeforeLand keys only on where the loop stopped (issue #5984): a
+// crashed land pass already cleared review, so it is not stopped before land.
+func TestStoppedBeforeLand(t *testing.T) {
+	e := func(kind string, found bool) Entry { return Entry{Kind: kind, OutcomeFound: found} }
+	tests := []struct {
+		name    string
+		entries []Entry
+		want    bool
+	}{
+		{"nil", nil, false},
+		{"empty", []Entry{}, false},
+		{"legacy only", []Entry{e("legacy", true), e("legacy", false)}, false},
+		{"unknown kinds only", []Entry{e("", true), e("mystery", true)}, false},
+		{"implement last", []Entry{e("implement", false)}, true},
+		{"fix last", []Entry{e("implement", true), e("review", false), e("fix", false)}, true},
+		{"implement then review", []Entry{e("implement", true), e("review", false)}, true},
+		{"land with outcome", []Entry{e("implement", true), e("review", false), e("land", true)}, false},
+		{"land crashed after approved review", []Entry{e("implement", true), e("review", false), e("land", false)}, false},
+		{"land then fix", []Entry{e("implement", true), e("review", false), e("land", true), e("fix", false)}, true},
+		{"land then delta-review", []Entry{e("implement", true), e("review", false), e("land", false), e("delta-review", false)}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StoppedBeforeLand(tc.entries); got != tc.want {
+				t.Errorf("StoppedBeforeLand(%+v) = %v, want %v", tc.entries, got, tc.want)
+			}
+		})
+	}
+}
+
 // UnreviewedReady keys on the last review-loop work pass (issue #5973): only
 // a land pass's own outcome, or a legacy resume after it, makes ready reviewed.
 func TestUnreviewedReady(t *testing.T) {
