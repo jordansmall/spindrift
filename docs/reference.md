@@ -27,7 +27,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready` (from its land pass, if it ran a review loop), has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
-| `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
+| `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged and reset an orphaned `InProgress` issue to `Dispatchable` (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
 | `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, agent (subagent), prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
@@ -5360,8 +5360,21 @@ twice never double-acts: a closed issue drops out of `ListOpenIssues`, and an
 already-`abandoned` issue is skipped on later sweeps, so neither is ever
 revisited.
 
-The gated `InProgress → Dispatchable` orphan-reset is later work — see
-[ADR 0029](adr/0029-local-issue-lifecycle-and-reconcile.md).
+On a local tracker whose Code Forge has PRs (`github`, `forgejo`), reconcile
+also resets an orphaned `InProgress` issue to `Dispatchable`, so a later
+dispatch picks it up again; a Code Forge without PRs (`local`, `git`) skips
+the reset. It resets an issue only when all of these hold: no PR in any
+state for its agent branch (a PR closed unmerged also blocks the reset, so
+rejected work is not re-dispatched), no pushed agent branch, a Box log last
+written over 3 hours ago (or no log at all), and, when the container runtime
+answers, no running Box container — an unreachable runtime does not block
+the reset. An issue the gates keep `InProgress` stays for the explicit
+`spindrift recover <n>`. Each sweep that completes prints
+`reconcile: reset N issue(s): <issues>` or `reconcile: no issues reset.`;
+`reconcile: no issues reset.` also prints when the reset was skipped, so on
+its own it does not show the gates ran. See
+[ADR 0029](adr/0029-local-issue-lifecycle-and-reconcile.md) for the
+rationale.
 
 #### PR-body ticket reference (`LOCAL_ISSUE_REFERENCE`)
 
