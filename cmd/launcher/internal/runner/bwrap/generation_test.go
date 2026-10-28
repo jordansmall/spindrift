@@ -205,7 +205,7 @@ func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
 }
 
 // With no prior snapshot, a failed VACUUM INTO that left partial bytes must
-// leave dest absent (issue #4817): SnapshotGeneration's existence check would
+// leave dest absent (issue #4817): prepareSnapshotVersion's existence check would
 // otherwise trust the partial file forever, and a second call must re-run
 // sqlite3 rather than skip.
 func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
@@ -551,5 +551,262 @@ func TestStrategy_PrepareHotSwapIsSet(t *testing.T) {
 	got := reflect.ValueOf(Strategy.PrepareHotSwap).Pointer()
 	if want := reflect.ValueOf(SnapshotGeneration).Pointer(); got != want {
 		t.Fatal("bwrap Strategy.PrepareHotSwap is not SnapshotGeneration")
+	}
+}
+
+// stubHostVersion pins hostStoreDBVersion so a test controls which version dir
+// the primitives pick without a real host DB.
+func stubHostVersion(t *testing.T, v func() (string, error)) {
+	t.Helper()
+	orig := hostStoreDBVersion
+	t.Cleanup(func() { hostStoreDBVersion = orig })
+	hostStoreDBVersion = v
+}
+
+func TestHostStoreDBVersion_ParsesMaxID(t *testing.T) {
+	for _, tc := range []struct {
+		name, out string
+		want      string
+		wantErr   bool
+	}{
+		{"plain", "4217\n", "4217", false},
+		{"empty table", "0\n", "0", false},
+		{"empty output", "", "", true},
+		{"non-numeric", "Error: database is locked\n", "", true},
+		{"negative", "-3\n", "", true},
+		{"two rows", "1\n2\n", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origStat := statHostNixDB
+			t.Cleanup(func() { statHostNixDB = origStat })
+			statHostNixDB = func() error { return nil }
+			orig := execCommand
+			t.Cleanup(func() { execCommand = orig })
+			var gotArgs []string
+			execCommand = func(name string, args ...string) *exec.Cmd {
+				gotArgs = append([]string{name}, args...)
+				return exec.Command("printf", "%s", tc.out)
+			}
+			got, err := hostStoreDBVersion()
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Errorf("hostStoreDBVersion() = %q, %v; want %q, wantErr=%v", got, err, tc.want, tc.wantErr)
+			}
+			if len(gotArgs) != 3 || gotArgs[0] != "sqlite3" || gotArgs[1] != hostNixDBPath || !strings.Contains(gotArgs[2], "ValidPaths") {
+				t.Errorf("execCommand argv = %v, want sqlite3 on the host db querying ValidPaths", gotArgs)
+			}
+		})
+	}
+}
+
+func TestHostStoreDBVersion_MissingHostDB(t *testing.T) {
+	origStat := statHostNixDB
+	t.Cleanup(func() { statHostNixDB = origStat })
+	statHostNixDB = func() error { return os.ErrNotExist }
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Errorf("execCommand(%q) called, want the stat preflight to fail first", name)
+		return exec.Command("true")
+	}
+	if _, err := hostStoreDBVersion(); err == nil {
+		t.Error("hostStoreDBVersion() = nil error, want one when the host db is missing")
+	}
+}
+
+func seedSnapshotDir(t *testing.T, dir, content string) string {
+	t.Helper()
+	p := snapshotDBPath(dir)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestNewestSnapshotDir(t *testing.T) {
+	t.Run("numeric not lexical order", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, snapshotVersionDir(gen, "9"), "a")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "10"), "b")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "x"), "c")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "99x"), "d")
+		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "10"); got != want {
+			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("skips a version dir without a complete snapshot", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, snapshotVersionDir(gen, "5"), "a")
+		if err := os.MkdirAll(filepath.Join(snapshotVersionDir(gen, "7"), "nix", "db"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "5"); got != want {
+			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("legacy flat layout", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, gen, "a")
+		if got := newestSnapshotDir(gen); got != gen {
+			t.Errorf("newestSnapshotDir = %q, want the flat gen dir %q", got, gen)
+		}
+	})
+	t.Run("versioned beats legacy", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, gen, "old")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "1"), "new")
+		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "1"); got != want {
+			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("nothing", func(t *testing.T) {
+		if got := newestSnapshotDir(t.TempDir()); got != "" {
+			t.Errorf("newestSnapshotDir = %q, want empty", got)
+		}
+		if got := newestSnapshotDir(filepath.Join(t.TempDir(), "absent")); got != "" {
+			t.Errorf("newestSnapshotDir(absent) = %q, want empty", got)
+		}
+	})
+}
+
+func TestCurrentSnapshotDir(t *testing.T) {
+	t.Run("probe ok", func(t *testing.T) {
+		stubHostVersion(t, func() (string, error) { return "42", nil })
+		gen := t.TempDir()
+		got, err := currentSnapshotDir(gen)
+		if want := snapshotVersionDir(gen, "42"); err != nil || got != want {
+			t.Errorf("currentSnapshotDir = %q, %v; want %q", got, err, want)
+		}
+	})
+	t.Run("probe error falls back to newest", func(t *testing.T) {
+		stubHostVersion(t, func() (string, error) { return "", errors.New("locked") })
+		gen := t.TempDir()
+		seedSnapshotDir(t, snapshotVersionDir(gen, "3"), "a")
+		got, err := currentSnapshotDir(gen)
+		if want := snapshotVersionDir(gen, "3"); err != nil || got != want {
+			t.Errorf("currentSnapshotDir = %q, %v; want %q", got, err, want)
+		}
+	})
+	t.Run("probe error with no snapshot", func(t *testing.T) {
+		stubHostVersion(t, func() (string, error) { return "", errors.New("locked") })
+		got, err := currentSnapshotDir(t.TempDir())
+		if err == nil || got != "" || !strings.Contains(err.Error(), "locked") {
+			t.Errorf("currentSnapshotDir = %q, %v; want empty and an error wrapping the probe error", got, err)
+		}
+	})
+}
+
+// A new registration on the host moves the version, so the next prepare writes a
+// fresh dir and leaves the old one byte- and inode-identical: a Box may still
+// mount it (issue #6072).
+func TestPrepareSnapshotVersion_NewVersionLeavesOldUntouched(t *testing.T) {
+	fakeVacuumInto(t, "true", "snapshot-content", 0, nil)
+	version := "1"
+	stubHostVersion(t, func() (string, error) { return version, nil })
+	gen := filepath.Join(t.TempDir(), "gen")
+
+	dir1, lf1, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer UnlockSnapshot(lf1)
+	if want := snapshotVersionDir(gen, "1"); dir1 != want {
+		t.Fatalf("dir = %q, want %q", dir1, want)
+	}
+	old := snapshotDBPath(dir1)
+	before, err := os.Stat(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	version = "2"
+	dir2, lf2, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer UnlockSnapshot(lf2)
+	if want := snapshotVersionDir(gen, "2"); dir2 != want {
+		t.Fatalf("dir = %q, want %q", dir2, want)
+	}
+	if got, err := os.ReadFile(snapshotDBPath(dir2)); err != nil || string(got) != "snapshot-content" {
+		t.Errorf("new version db = %q, %v; want a fresh snapshot", got, err)
+	}
+	after, err := os.Stat(old)
+	if err != nil || !os.SameFile(before, after) {
+		t.Errorf("old version db changed identity (err=%v), want it untouched", err)
+	}
+	for _, d := range []string{dir1, dir2} {
+		if _, err := os.Stat(SnapshotLockPath(d)); err != nil {
+			t.Errorf("lock for %s: %v, want a sibling lock inside the generation dir", d, err)
+		}
+	}
+}
+
+func TestPrepareSnapshotVersion_SkipsVacuumWhenVersionExists(t *testing.T) {
+	stubHostVersion(t, func() (string, error) { return "7", nil })
+	gen := filepath.Join(t.TempDir(), "gen")
+	existing := seedSnapshotDir(t, snapshotVersionDir(gen, "7"), "keep")
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Errorf("execCommand(%q) called, want no vacuum for an existing version", name)
+		return exec.Command("true")
+	}
+	dir, lf, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer UnlockSnapshot(lf)
+	if got, _ := os.ReadFile(existing); string(got) != "keep" || dir != snapshotVersionDir(gen, "7") {
+		t.Errorf("dir=%q content=%q, want the existing snapshot kept", dir, got)
+	}
+}
+
+func TestPrepareSnapshotVersion_ReplaceRevacuumsExistingVersion(t *testing.T) {
+	fakeVacuumInto(t, "true", "fresh", 0, nil)
+	stubHostVersion(t, func() (string, error) { return "7", nil })
+	gen := filepath.Join(t.TempDir(), "gen")
+	existing := seedSnapshotDir(t, snapshotVersionDir(gen, "7"), "stale")
+	_, lf, err := prepareSnapshotVersion(gen, InstallReplace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer UnlockSnapshot(lf)
+	if got, _ := os.ReadFile(existing); string(got) != "fresh" {
+		t.Errorf("db = %q, want InstallReplace to refresh it", got)
+	}
+}
+
+func TestPrepareSnapshotVersion_ProbeErrorReusesNewest(t *testing.T) {
+	stubHostVersion(t, func() (string, error) { return "", errors.New("locked") })
+	gen := filepath.Join(t.TempDir(), "gen")
+	seedSnapshotDir(t, snapshotVersionDir(gen, "3"), "keep")
+	dir, lf, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer UnlockSnapshot(lf)
+	if want := snapshotVersionDir(gen, "3"); dir != want {
+		t.Errorf("dir = %q, want %q", dir, want)
+	}
+}
+
+func TestPrepareSnapshotVersion_VacuumFailureReleasesLock(t *testing.T) {
+	fakeVacuumInto(t, "true", "", 1, nil)
+	stubHostVersion(t, func() (string, error) { return "1", nil })
+	gen := filepath.Join(t.TempDir(), "gen")
+	dir, lf, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	if err == nil || lf != nil {
+		t.Fatalf("prepareSnapshotVersion = %q, %v, %v; want an error and no held lock", dir, lf, err)
+	}
+	ex, ferr := os.OpenFile(SnapshotLockPath(snapshotVersionDir(gen, "1")), os.O_RDWR, 0)
+	if ferr != nil {
+		t.Fatal(ferr)
+	}
+	defer ex.Close()
+	if err := syscall.Flock(int(ex.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Errorf("exclusive flock = %v, want the shared lock released on error", err)
 	}
 }

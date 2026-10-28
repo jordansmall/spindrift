@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -307,8 +308,8 @@ const (
 // #2682). Writes dir/nix/db/db.sqlite, the layout every NixVarSnapshotDir
 // caller expects. mode picks how the finished temp lands on db.sqlite.
 func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
-	if err := statHostNixDB(); err != nil {
-		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
+	if err := checkHostNixDB(); err != nil {
+		return err
 	}
 
 	dest := snapshotDBPath(dir)
@@ -408,7 +409,8 @@ func createLockedVacuumTemp(dir string) (*os.File, error) {
 	return nil, fmt.Errorf("create temp nix store db snapshot in %s: swept by a concurrent launcher across %d attempts", dir, maxVacuumTempAttempts)
 }
 
-// StoreDBName is the snapshot file name under <dir>/nix/db; vacuumTempPrefix
+// StoreDBName is the snapshot file name under <dir>/nix/db, where <dir> is a
+// version dir (db-<V>, or a flat pre-#6072 generation dir); vacuumTempPrefix
 // derives from it.
 const StoreDBName = "db.sqlite"
 
@@ -477,4 +479,135 @@ func isVacuumTempName(name string) bool {
 		}
 	}
 	return true
+}
+
+// snapshotVersionPrefix names the per-host-DB-version dirs nested under a
+// generation dir (issue #6072): <generation>/db-<V>.
+const snapshotVersionPrefix = "db-"
+
+// snapshotVersionDir is the snapshot dir for host-DB version under genDir. Each
+// version is its own immutable lower with its own SnapshotLockPath sibling, so a
+// newer host DB never replaces a snapshot a running Box mounts.
+func snapshotVersionDir(genDir, version string) string {
+	return filepath.Join(genDir, snapshotVersionPrefix+version)
+}
+
+// checkHostNixDB stats the host store DB, naming the path in the error.
+func checkHostNixDB() error {
+	if err := statHostNixDB(); err != nil {
+		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
+	}
+	return nil
+}
+
+// hostStoreDBVersion is the host DB's version: max(ValidPaths.id), which nix
+// autoincrements, so every new registration raises it. A GC deletion can at most
+// lower it, costing one harmless extra refresh. Its own seam, apart from
+// execCommand, so tests counting sqlite3 calls need not model the probe.
+var hostStoreDBVersion = func() (string, error) {
+	if err := checkHostNixDB(); err != nil {
+		return "", err
+	}
+	out, err := execCommand("sqlite3", hostNixDBPath, "SELECT coalesce(max(id), 0) FROM ValidPaths;").Output()
+	if err != nil {
+		return "", fmt.Errorf("sqlite3 probe of host nix store db version: %w", err)
+	}
+	v := strings.TrimSpace(string(out))
+	if !isDecimal(v) {
+		return "", fmt.Errorf("host nix store db version %q is not a decimal number", v)
+	}
+	return v, nil
+}
+
+// isDecimal reports whether s is a non-empty run of ASCII digits.
+func isDecimal(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// newestSnapshotDir is the complete snapshot under genDir with the numerically
+// largest version, so a failed host probe can still reuse what a prior run wrote.
+// Failing that it is genDir itself when it holds a flat pre-#6072 snapshot (what
+// an older launcher's build left); "" when there is none.
+func newestSnapshotDir(genDir string) string {
+	entries, err := os.ReadDir(genDir)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Printf("==> bwrap runner: warning: could not read nix-var snapshot dir %s (%v); treating it as having no snapshot\n", genDir, err)
+	}
+	best, bestN := "", -1
+	for _, e := range entries {
+		v, ok := strings.CutPrefix(e.Name(), snapshotVersionPrefix)
+		if !ok || !e.IsDir() || !isDecimal(v) {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= bestN {
+			continue
+		}
+		dir := filepath.Join(genDir, e.Name())
+		if _, err := os.Stat(snapshotDBPath(dir)); err == nil {
+			best, bestN = dir, n
+		}
+	}
+	if best != "" {
+		return best
+	}
+	if _, err := os.Stat(snapshotDBPath(genDir)); err == nil {
+		return genDir
+	}
+	return ""
+}
+
+// currentSnapshotDir is the snapshot dir a Box should mount for the host DB as
+// it is now. When the version probe fails it degrades to the newest snapshot on
+// disk, which may be stale but is DB-valid for what it covers; with none, the
+// probe error stands.
+func currentSnapshotDir(genDir string) (string, error) {
+	v, err := hostStoreDBVersion()
+	if err == nil {
+		return snapshotVersionDir(genDir, v), nil
+	}
+	if dir := newestSnapshotDir(genDir); dir != "" {
+		fmt.Printf("==> bwrap runner: warning: could not read host nix store db version (%v); reusing the newest existing snapshot %s\n", err, dir)
+		return dir, nil
+	}
+	return "", fmt.Errorf("read host nix store db version: %w", err)
+}
+
+// prepareSnapshotVersion resolves the current version dir under genDir, takes
+// its shared lock and writes the snapshot unless one is already there (or mode is
+// InstallReplace). The returned lock is still held for the caller to release,
+// since a Box keeps it for its life; on error it is released here. A lock that
+// cannot be taken warns and yields a nil lf, as the other callers do.
+func prepareSnapshotVersion(genDir string, mode SnapshotInstall) (dir string, lf *os.File, err error) {
+	dir, err = currentSnapshotDir(genDir)
+	if err != nil {
+		return "", nil, err
+	}
+	// The version lock is a sibling of the version dir, so genDir must exist.
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("mkdir nix-var-snapshot generation dir: %w", err)
+	}
+	lf, lockErr := LockSnapshotShared(dir)
+	if lockErr != nil {
+		fmt.Printf("==> bwrap runner: warning: could not acquire snapshot lock %s (%v); a concurrent build cannot detect this snapshot is in use, and a later Run's version sweep or reclaim may delete it under this Box\n", SnapshotLockPath(dir), lockErr)
+		lf = nil
+	}
+	sweepStaleVacuumTemps(filepath.Dir(snapshotDBPath(dir)))
+	if _, statErr := os.Stat(snapshotDBPath(dir)); mode == InstallReplace || statErr != nil {
+		if err := VacuumStoreDBInto(dir, mode); err != nil {
+			UnlockSnapshot(lf)
+			return "", nil, err
+		}
+		return dir, lf, nil
+	}
+	fmt.Printf("==> bwrap runner: nix-var snapshot %s already exists; skipping vacuum\n", dir)
+	return dir, lf, nil
 }
