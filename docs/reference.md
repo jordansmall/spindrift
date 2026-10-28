@@ -3985,7 +3985,14 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   decline it too, and recover skips it. Legacy-loop and advise-only runs
   write no such entries and are unaffected, and a land pass reached by a
   cap counts as reviewed. The manifest is Box-written, so this guards
-  against model mistakes, not an adversarial Box (issue #5973).
+  against model mistakes, not an adversarial Box (issue #5973). A run
+  with no success self-report (none at all, or a blocked or ambiguous
+  one), such as a Box killed by a signal, is judged by where its loop
+  stopped: if the last implement, fix, or land entry is not `land`, a
+  hand-run `spindrift recover <n>` declines its bundle instead of landing
+  it. A land pass killed mid-check already cleared review, so recover
+  still lands its bundle, and a manifest with no such entries still
+  trusts the bundle alone (issue #5984).
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
@@ -9028,9 +9035,9 @@ is an upper bound: the child still checks
 the label, the self-report and any open PR after it takes the host claim,
 and may exit 2, which records Ready 0 like any probed kind's empty child. A
 counted bundle can still be one the child declines (a green PR waiting on a
-`MERGE_MODE=manual` merge, a run still settling, a self-report that is not
-ready, a ready from a review-loop pass other than the land pass), so an
-exit 2 against a nonzero count backs `recover` off, doubling from
+`MERGE_MODE=manual` merge, a run still settling, a missing self-report or
+one that is not ready, a ready from a review-loop pass other than the land
+pass), so an exit 2 against a nonzero count backs `recover` off, doubling from
 `DAEMON_IDLE_FLOOR` toward `DAEMON_IDLE_CAP`, and a bundle the
 backoff has not seen lifts it at once: a rise in the count, or a new
 bundle (named by outbox key and bundle hash) replacing one that left,
