@@ -150,7 +150,7 @@ func (bwrapRenderingHarness) Decode(t *testing.T, argv []string) contract.Decode
 				overlaySrc = v[0]
 			}
 			i++
-		case "--symlink":
+		case "--symlink", "--chmod":
 			i += len(arg(i, 2))
 		case "--dir", "--tmpfs", "--proc", "--dev", "--tmp-overlay", "--uid", "--gid", "--seccomp":
 			i += len(arg(i, 1))
