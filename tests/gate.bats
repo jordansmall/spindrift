@@ -41,6 +41,20 @@ STUB
   cat >"$STUBS/nix" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$NIX_ARGV"
+[ -z "${STUB_NIX_STDERR:-}" ] || printf '%s\n' "$STUB_NIX_STDERR" >&2
+# With STUB_FAIL_DRVS set, a lone-drv rebuild (the gate's per-job fallback)
+# fails only for the drvs listed; every other call exits STUB_NIX_STATUS. A
+# rebuild is a call with one `^*` whose drv an earlier call already named (each
+# drv is in exactly one batch), so a single-job batch is not mistaken for one.
+if [ -n "${STUB_FAIL_DRVS+x}" ] && [ "$(grep -o -- '\^\*' <<<"$*" | wc -l)" -eq 1 ]; then
+  drv=${*: -1}
+  if head -n -1 "$NIX_ARGV" | grep -qF -- "$drv"; then
+    for d in $STUB_FAIL_DRVS; do
+      case "$*" in *"$d^*"*) exit 1 ;; esac
+    done
+    exit 0
+  fi
+fi
 exit "$STUB_NIX_STATUS"
 STUB
   cat >"$STUBS/nix-store" <<'STUB'
@@ -165,6 +179,84 @@ workers_for() {
   run bash "$GATE_SH"
   [ "$status" -ne 0 ]
   [[ "$output" == *"build failed: a"* ]]
+}
+
+@test "a batch abort re-builds each invalid job alone and names only the real failure" {
+  job a
+  job b
+  job c
+  STUB_NIX_STATUS=1
+  STUB_INVALID=$'/nix/store/a-out\n/nix/store/b-out\n/nix/store/c-out'
+  STUB_FAIL_DRVS=/nix/store/b.drv
+  STUB_NIX_STDERR="error: fchmodat2 \"/nix/store/x-go-modules\": Operation not permitted"
+  export STUB_FAIL_DRVS STUB_NIX_STDERR
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"1 job(s) failed: b"* ]]
+  [[ "$output" != *"failed: a"* ]]
+  [[ "$output" != *"failed: c"* ]]
+  [[ "$output" == *"fchmodat2 \"/nix/store/x-go-modules\""* ]]
+  for j in a b c; do
+    grep -qxF -- "build --no-link --keep-going -L /nix/store/$j.drv^*" "$NIX_ARGV"
+  done
+}
+
+@test "a builder failure named in the batch log is reported without a second build" {
+  job bad
+  job other
+  job fine
+  STUB_NIX_STATUS=1
+  STUB_INVALID=$'/nix/store/bad-out\n/nix/store/other-out'
+  STUB_FAIL_DRVS=/nix/store/other.drv
+  STUB_NIX_STDERR="error: builder for '/nix/store/bad.drv' failed with exit code 1"
+  export STUB_FAIL_DRVS STUB_NIX_STDERR
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"2 job(s) failed: bad other"* ]]
+  [[ "$output" == *"build failed: bad: error: builder for '/nix/store/bad.drv' failed"* ]]
+  [ "$(grep -c -- '/nix/store/bad.drv^\*' "$NIX_ARGV")" -eq 1 ]
+  [ "$(grep -c -- '/nix/store/other.drv^\*' "$NIX_ARGV")" -eq 2 ]
+  [ "$(grep -c -- '/nix/store/fine.drv^\*' "$NIX_ARGV")" -eq 1 ]
+}
+
+@test "the newer Cannot build form also counts as already failed" {
+  job bad
+  job other
+  STUB_NIX_STATUS=1
+  STUB_INVALID=$'/nix/store/bad-out\n/nix/store/other-out'
+  STUB_FAIL_DRVS=""
+  STUB_NIX_STDERR="error: Cannot build '/nix/store/bad.drv'."
+  export STUB_FAIL_DRVS STUB_NIX_STDERR
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"1 job(s) failed: bad"* ]]
+  [ "$(grep -c -- '/nix/store/bad.drv^\*' "$NIX_ARGV")" -eq 1 ]
+}
+
+@test "a failed batch whose lone re-builds all succeed still fails the gate" {
+  job a
+  job b
+  STUB_NIX_STATUS=1
+  STUB_INVALID=/nix/store/a-out
+  STUB_FAIL_DRVS=""
+  export STUB_FAIL_DRVS
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"1 job(s) failed: nix build (batch)"* ]]
+  [[ "$output" != *"build failed: a"* ]]
+  [[ "$output" != *"build failed: b"* ]]
+}
+
+@test "a single-job batch is not mistaken for a lone rebuild" {
+  job a
+  STUB_NIX_STATUS=1
+  STUB_INVALID=/nix/store/a-out
+  STUB_FAIL_DRVS=/nix/store/other.drv
+  export STUB_FAIL_DRVS
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"1 job(s) failed: nix build (batch)"* ]]
+  [ "$(grep -c -- '/nix/store/a.drv^\*' "$NIX_ARGV")" -eq 2 ]
 }
 
 @test "GATE_INSTALLABLE is required" {

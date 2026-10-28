@@ -52,7 +52,7 @@ nix-eval-jobs --flake "$GATE_INSTALLABLE" --workers "$workers" \
   --max-memory-size 12288 >"$work/jobs" &
 eval_pid=$!
 
-declare -A attr_of_out
+declare -A attr_of_out drv_of_attr
 failed=()
 total=0
 seen=0
@@ -75,6 +75,7 @@ while :; do
     mapfile -t -O "${#failed[@]}" failed < <(jq -r 'select(has("error")) | .attr' "$work/batch")
     while IFS=$'\t' read -ra row; do
       attrs+=("${row[0]}")
+      drv_of_attr[${row[0]}]=${row[1]}
       drvs+=("${row[1]}^*")
       for out in "${row[@]:2}"; do
         attr_of_out[$out]=${row[0]}
@@ -84,27 +85,48 @@ while :; do
   fi
 
   if ((${#drvs[@]} > 0)); then
+    build=(nix build --no-link --keep-going -L)
     # One build client at a time keeps the Box's nix.conf max-jobs/cores authoritative.
-    if ! nix build --no-link --keep-going -L "${drvs[@]}"; then
-      # --keep-going builds everything it can, so the outputs left invalid are
-      # exactly the failed jobs and their dependants.
+    # Piping makes stderr a non-tty, so nix's progress bar is lost; -L covers it.
+    if ! "${build[@]}" "${drvs[@]}" 2>&1 | tee "$work/build.log" >&2; then
+      # A fatal store error aborts the invocation, and --keep-going does not
+      # survive that: independent jobs are left unbuilt, so invalid outputs are
+      # not a reliable list of the jobs that failed.
+      candidates=()
       invalid=$(nix-store --check-validity --print-invalid "${outs[@]}" || true)
-      if [ -z "$invalid" ]; then
-        # Empty means nothing attributable (e.g. a fetch failed) or nix-store
-        # itself errored (the `|| true` above): fail the whole batch either way.
-        for a in "${attrs[@]}"; do
+      declare -A reported=()
+      while IFS= read -r out; do
+        [ -n "$out" ] || continue
+        a=${attr_of_out[$out]:-}
+        [ -n "$a" ] && [ -z "${reported[$a]:-}" ] || continue
+        reported[$a]=1
+        candidates+=("$a")
+      done <<<"$invalid"
+      # Empty means nothing attributable (a fetch failed, or invalid outputs map
+      # to no known attr) or nix-store errored (`|| true` above): all jobs suspect.
+      ((${#candidates[@]} > 0)) || candidates=("${attrs[@]}")
+
+      before=${#failed[@]}
+      # The fallback rebuilds serially, giving up cross-job parallelism after an abort.
+      for a in "${candidates[@]}"; do
+        drv=${drv_of_attr[$a]}
+        # A real builder failure is already named; rebuilding it would cost minutes.
+        # "dependencies of derivation ... failed" is older nix; "Cannot build" is newer.
+        if named=$(grep -m1 -F -e "builder for '$drv' failed" -e "Cannot build '$drv'" \
+          -e "dependencies of derivation '$drv' failed to build" "$work/build.log"); then
+          echo "gate: build failed: $a: $named" >&2
+        elif ! "${build[@]}" "$drv^*"; then
           echo "gate: build failed: $a" >&2
-          failed+=("$a")
-        done
-      else
-        declare -A reported=()
-        while IFS= read -r out; do
-          a=${attr_of_out[$out]}
-          [ -z "${reported[$a]:-}" ] || continue
-          reported[$a]=1
-          echo "gate: build failed: $a" >&2
-          failed+=("$a")
-        done <<<"$invalid"
+        else
+          continue
+        fi
+        failed+=("$a")
+      done
+      if ((${#failed[@]} == before)); then
+        # A failed batch must never pass, even if every lone rebuild succeeds; the
+        # jobs built green alone, so name the batch rather than any of them.
+        echo "gate: nix build failed but no job could be attributed; see the log above" >&2
+        failed+=("nix build (batch)")
       fi
     fi
   elif ((alive == 0)); then
