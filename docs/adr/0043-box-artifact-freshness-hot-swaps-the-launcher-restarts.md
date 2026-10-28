@@ -95,11 +95,12 @@ The decision set:
   revision still reaches `--version`; it simply stops being a freshness input.
 
 - **Store-DB snapshots are generation-scoped and outlive the swap that
-  replaced them.** ADR 0042's snapshot is taken once by `build`, after the
+  replaced them.** ADR 0042's snapshot is taken by `build`, after the
   agent closure is realized, and each Box mounts it as an overlay lower for
   the whole life of the sandbox. A swap therefore adds a generation named for
-  the closure it was taken against; it never replaces a file a running Box is
-  reading. Generations are reclaimed once no live Box references them —
+  the closure it was taken against, and a later host-DB change adds a new
+  version directory inside it (ADR 0042, issue #6072); neither replaces a file
+  a running Box is reading. Generations are reclaimed once no live Box references them —
   see the Consequences section below for the divergence the shipped
   implementation accepted instead.
 

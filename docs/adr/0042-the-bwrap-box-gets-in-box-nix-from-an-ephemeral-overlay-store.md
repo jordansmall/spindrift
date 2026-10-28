@@ -31,9 +31,10 @@ The decision set:
   superseded.
 
 - **The store database is a VACUUMed snapshot of the host's, overlaid per
-  Box.** `build` copies `/nix/var/nix/db/db.sqlite` once to an
-  agent-owned, VACUUMed snapshot; each Box gets a tmpfs `/nix/var` with
-  that snapshot as an overlay lower. Overlaying the host's `/nix/var`
+  Box.** `build` copies `/nix/var/nix/db/db.sqlite` to an
+  agent-owned, VACUUMed snapshot, once per host-DB version (issue
+  #6072); each Box gets a tmpfs `/nix/var` with that snapshot as an
+  overlay lower. Overlaying the host's `/nix/var`
   directly does not work and cannot be made to: `big-lock` is root-owned
   mode 0600 and `profiles/per-user` needs a chmod, and in bwrap's user
   namespace host root maps to an unmapped `nobody`, so both are EPERM for
@@ -111,7 +112,9 @@ The snapshot is a point-in-time copy with no gcroot pinning it, so a host
 `nix-store --gc` during a run can remove paths the Box's database still
 believes are valid. This is accepted rather than solved (narrowed by the issue #5995
 amendment below); pinning would make a Box hold host disk it should be
-free to release.
+free to release. The drift runs the other way too: paths the host realises
+after the snapshot are physically in the store lower but invalid in the
+Box's database (see the issue #6072 amendment below).
 
 Unprivileged bwrap maps exactly one uid, so a Box writes through its
 writable mounts as the operator's own uid — rootless podman would use a
@@ -532,3 +535,57 @@ re-registers the GC roots and recreates the snapshot write-if-absent while
 holding that lock, so reclaim cannot remove it again before the Box starts.
 `--no-build` is unchanged: `IsReady` still fails when the snapshot is
 missing and prepares nothing.
+
+## Amendment (issue #6072): the snapshot is keyed on the host DB's version
+
+A generation's snapshot was written once and reused for as long as its
+closure stayed the same. The store, though, is a live `--overlay-src
+/nix/store` lower, so every path the host realised after the snapshot was
+physically in the Box but invalid in its database. One research Box counted
+1985 of them. When in-box nix needed such a path (`nix store add-path` of a
+content-addressed source, or a fixed-output derivation whose output already
+sat there), it first tried to delete the "invalid" copy. That directory is
+owned by host root, which is unmapped in bwrap's user namespace (it shows as
+`UNKNOWN`, mode 555), so the chmod that makes it accessible for deletion
+fails with EPERM (`error: fchmodat2 "/nix/store/...-source": Operation not
+permitted`). Nix raises that as a fatal store error rather than a build
+failure, so it aborts the whole `nix build` invocation even under
+`--keep-going`, and independent derivations in the same invocation never
+build. A path the host itself holds invalid is out of scope: no database sync
+fixes it.
+
+The snapshot is now keyed on the host database's version, `max(ValidPaths.id)`.
+Each version is its own directory,
+`<root>/<generation>/db-<V>/nix/db/db.sqlite`, with its own shared lock,
+`<generation>/db-<V>.lock`. A newer host database lands in a new directory, so
+the lower a running Box mounts is never touched.
+
+- `Run` resolves the host's current version at Box start and writes that
+  version's snapshot if it is absent, with the same write-if-absent link that
+  never replaces a file. It mounts the result as `/nix/var`'s lower and holds
+  the version's lock for the Box's life, next to the generation lock.
+- `EnsureReady`'s warm check requires the snapshot for the current version. A
+  host database that has moved on is cold, so the cold path writes the new
+  version and then reclaims. The hot-swap's `SnapshotGeneration` and
+  `launcher build` write into the current version as well.
+- `--no-build`'s `IsReady` accepts any existing version, or a pre-#6072 flat
+  `<generation>/nix/db/db.sqlite`, and prepares nothing. `Run` refreshes.
+- A failed host version probe degrades to the newest existing snapshot rather
+  than failing the launch.
+- Reclaim also sweeps superseded versions of every surviving generation, kept
+  or held by a Box. It keeps the host DB's current version (the newest
+  complete one when the probe fails) and removes the rest only under an
+  exclusive non-blocking probe on each version's own lock. `Run` runs the same
+  sweep once it holds its version, so a long-lived daemon, which reclaims only
+  at bootstrap, does not keep one copy per host DB change.
+
+The issue #6008 amendment's "write the snapshot only if absent" still holds,
+now per version.
+
+Rejected: topping up the missing registrations inside the Box with
+`nix-store --load-db`. The per-Box upper is a tmpfs bwrap creates at start, so
+the host cannot pre-seed it. The top-up would need a new in-Box startup hook
+and a host-side diff of the store against the snapshot on every launch.
+
+The cost is a VACUUM of a roughly 100 MB database, a few seconds, once per
+host-database change rather than once per Box start.
