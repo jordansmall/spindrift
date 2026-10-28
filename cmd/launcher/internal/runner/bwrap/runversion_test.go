@@ -1,6 +1,7 @@
 package bwrap
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,11 +14,19 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// A warm generation whose only snapshot is a stale db-1 while the host DB has
-// moved to version 2: Run writes db-2, mounts it, and holds db-2's lock for the
-// Box's life, without touching the db-1 lower an older Box may still be reading
-// (issue #6072).
-func TestBwrapRun_MountsCurrentHostVersionSnapshotAndLeavesStaleOneUntouched(t *testing.T) {
+// startFakeBox runs a Box under genDir against a fake bwrap that records its
+// argv and sleeps, waits for that argv, and returns the adapter, the Run result
+// channel and the argv. The host DB sits at version host and the VACUUM writes
+// payload "v"+host.
+func startFakeBox(t *testing.T, genDir, name, host string) (*bwrapAdapter, chan error, []string) {
+	t.Helper()
+	return startFakeBoxWith(t, genDir, name, "v"+host, func() (string, error) { return host, nil })
+}
+
+// startFakeBoxWith is startFakeBox with both inputs explicit: the host-version
+// probe stub (so a test can make it fail) and the payload the VACUUM writes.
+func startFakeBoxWith(t *testing.T, genDir, name, payload string, probe func() (string, error)) (*bwrapAdapter, chan error, []string) {
+	t.Helper()
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "argv")
 	script := filepath.Join(dir, "fake-bwrap")
@@ -28,15 +37,9 @@ func TestBwrapRun_MountsCurrentHostVersionSnapshotAndLeavesStaleOneUntouched(t *
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fakeVacuumInto(t, script, "v2", 0, nil)
-	stubHostVersion(t, func() (string, error) { return "2", nil })
+	fakeVacuumInto(t, script, payload, 0, nil)
+	stubHostVersion(t, probe)
 
-	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
-	staleDB := seedSnapshotDir(t, snapshotVersionDir(genDir, "1"), "v1")
-	before, err := os.Stat(staleDB)
-	if err != nil {
-		t.Fatal(err)
-	}
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
 		agentEnv:          "/fake/env",
@@ -45,25 +48,49 @@ func TestBwrapRun_MountsCurrentHostVersionSnapshotAndLeavesStaleOneUntouched(t *
 		nixVarSnapshotDir: genDir,
 	}
 	done := make(chan error, 1)
-	go func() { done <- a.Run(runner.Box{Name: "agent-issue-v2", Env: map[string]string{}}) }()
+	go func() { done <- a.Run(runner.Box{Name: name, Env: map[string]string{}}) }()
 
-	var argv []string
 	deadline := time.Now().Add(5 * time.Second)
-	for argv == nil {
+	for {
 		if b, err := os.ReadFile(argsFile); err == nil {
-			argv = strings.Split(strings.TrimSpace(string(b)), "\n")
+			return a, done, strings.Split(strings.TrimSpace(string(b)), "\n")
 		} else if time.Now().After(deadline) {
 			t.Fatal("fake bwrap never ran")
-		} else {
-			time.Sleep(5 * time.Millisecond)
 		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func killFakeBox(t *testing.T, a *bwrapAdapter, done chan error, name string) {
+	t.Helper()
+	if err := a.Kill(name); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after Kill")
+	}
+}
+
+// A warm generation whose only snapshot is a stale db-1 that another Box still
+// holds, while the host DB has moved to version 2: Run writes db-2, mounts it,
+// and holds db-2's lock for the Box's life, without touching the db-1 lower
+// that Box is reading (issue #6072).
+func TestBwrapRun_MountsCurrentHostVersionSnapshotAndLeavesHeldStaleOneUntouched(t *testing.T) {
+	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
+	staleDir := snapshotVersionDir(genDir, "1")
+	staleDB := seedSnapshotDir(t, staleDir, "v1")
+	holdShared(t, SnapshotLockPath(staleDir))
+	before, err := os.Stat(staleDB)
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	a, done, argv := startFakeBox(t, genDir, "agent-issue-v2", "2")
+
 	v2Dir := snapshotVersionDir(genDir, "2")
-	i := slices.Index(argv, "--overlay-src")
-	if i < 0 || i+1 >= len(argv) || argv[i+1] != v2Dir {
-		t.Errorf("--overlay-src = %v, want %s", argv, v2Dir)
-	}
+	assertOverlaySrc(t, argv, v2Dir)
 	if got, err := os.ReadFile(snapshotDBPath(v2Dir)); err != nil || string(got) != "v2" {
 		t.Errorf("db-2 db.sqlite = %q, %v; want the freshly written snapshot", got, err)
 	}
@@ -73,14 +100,7 @@ func TestBwrapRun_MountsCurrentHostVersionSnapshotAndLeavesStaleOneUntouched(t *
 		}
 	}
 
-	if err := a.Kill("agent-issue-v2"); err != nil {
-		t.Fatalf("Kill: %v", err)
-	}
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run did not return after Kill")
-	}
+	killFakeBox(t, a, done, "agent-issue-v2")
 	if err := probeExclusiveLock(SnapshotLockPath(v2Dir)); err != nil {
 		t.Errorf("db-2 lock after Run returned: want released, got %v", err)
 	}
@@ -94,6 +114,49 @@ func TestBwrapRun_MountsCurrentHostVersionSnapshotAndLeavesStaleOneUntouched(t *
 	}
 }
 
+// A long-lived daemon reclaims only at bootstrap, so Run itself drops the
+// superseded unlocked db-1 once the host moved to version 2 (issue #6072).
+func TestBwrapRun_SweepsSupersededUnlockedVersionAndKeepsCurrent(t *testing.T) {
+	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
+	staleDir := snapshotVersionDir(genDir, "1")
+	seedSnapshotDir(t, staleDir, "v1")
+	if err := os.WriteFile(SnapshotLockPath(staleDir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a, done, _ := startFakeBox(t, genDir, "agent-issue-sweep", "2")
+	t.Cleanup(func() { killFakeBox(t, a, done, "agent-issue-sweep") })
+
+	assertExists(t, staleDir, false)
+	assertExists(t, SnapshotLockPath(staleDir), false)
+	assertExists(t, snapshotDBPath(snapshotVersionDir(genDir, "2")), true)
+}
+
+// A Box that mounts a flat genDir snapshot (the host probe failed, no complete
+// db-N) must not sweep: an incomplete unlocked db-N is inside the lower that this
+// Box and its siblings mount as /nix/var (issue #6072).
+func TestBwrapRun_DoesNotSweepVersionDirsInsideFlatGenDirLower(t *testing.T) {
+	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
+	seedSnapshotDir(t, genDir, "flat")
+	partialDir := snapshotVersionDir(genDir, "1")
+	if err := os.MkdirAll(partialDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(SnapshotLockPath(partialDir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The payload is inert: the flat snapshot already exists, so no VACUUM runs.
+	a, done, argv := startFakeBoxWith(t, genDir, "agent-issue-flat", "unused", func() (string, error) {
+		return "", errors.New("no host db")
+	})
+	t.Cleanup(func() { killFakeBox(t, a, done, "agent-issue-flat") })
+
+	assertOverlaySrc(t, argv, genDir)
+	assertExists(t, partialDir, true)
+	assertExists(t, SnapshotLockPath(partialDir), true)
+}
+
 func lookTool(t *testing.T, name string) string {
 	t.Helper()
 	p, err := exec.LookPath(name)
@@ -101,4 +164,13 @@ func lookTool(t *testing.T, name string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// assertOverlaySrc fails unless argv's --overlay-src operand is want.
+func assertOverlaySrc(t *testing.T, argv []string, want string) {
+	t.Helper()
+	i := slices.Index(argv, "--overlay-src")
+	if i < 0 || i+1 >= len(argv) || argv[i+1] != want {
+		t.Errorf("--overlay-src = %v, want %s", argv, want)
+	}
 }

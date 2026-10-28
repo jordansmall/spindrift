@@ -910,6 +910,12 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 				return ensureErr
 			}
 			nixVarLower, nixVarVersionLock = dir, vlf
+			// A daemon reclaims only at bootstrap, so versions its later
+			// registrations superseded are swept here, per Box. Not when the
+			// Box mounts a flat genDir: the version dirs are inside its lower.
+			if nixVarLower != genDir {
+				sweepStaleSnapshotVersions(genDir, nixVarLower)
+			}
 		} else if lockErr == nil {
 			a.reRootIfReclaimed(box)
 		}
@@ -1286,6 +1292,7 @@ func (a *bwrapBuildAdapter) reclaimStale() {
 	// against the root would sweep unrelated siblings like .spindrift/accum.git.
 	if a.nixVarGeneration == "" {
 		fmt.Println("==> bwrap runner: closure generation is unscoped (none known); skipping stale-generation reclaim")
+		sweepStaleSnapshotVersions(a.nixVarSnapshotDir, currentVersionKeeper()(a.nixVarSnapshotDir))
 		return
 	}
 	if err := reclaimStaleSnapshots(a.nixVarSnapshotRoot, a.nixGCRootsRoot, a.nixVarGeneration); err != nil {
@@ -1412,7 +1419,9 @@ func (a *bwrapBuildAdapter) generationReady() bool {
 // neither keepGeneration nor still referenced by a live Box. Liveness is a
 // non-blocking exclusive Flock on the generation's sibling lock file, which
 // fails while any Box holds the shared lock Run takes. A snapshot dir's lock file
-// is left for sweepOrphanedLock a pass later. Per-entry errors warn.
+// is left for sweepOrphanedLock a pass later. A generation that survives has its
+// superseded host-DB version dirs swept (sweepStaleSnapshotVersions). Per-entry
+// errors warn.
 //
 // gcRootsRoot holds each generation's GC-root out-links (registerGenerationRoot)
 // and is passed explicitly rather than derived from root. A generation's dir
@@ -1438,16 +1447,20 @@ func reclaimStaleSnapshots(root, gcRootsRoot, keepGeneration string) error {
 			knownGenerations[entry.Name()] = true
 		}
 	}
+	keepFor := currentVersionKeeper()
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			sweepOrphanedLock(root, entry.Name(), keepGeneration, knownGenerations)
 			continue
 		}
 		name := entry.Name()
-		if name == keepGeneration {
-			continue
+		if name != keepGeneration {
+			reclaimGeneration(root, gcRootsRoot, name, keepLock)
 		}
-		reclaimGeneration(root, gcRootsRoot, name, keepLock)
+		// A no-op once reclaimGeneration removed the dir; otherwise the
+		// generation lives on (kept, or a Box holds it) and so do its versions.
+		genDir := filepath.Join(root, name)
+		sweepStaleSnapshotVersions(genDir, keepFor(genDir))
 	}
 	rootEntries, err := os.ReadDir(gcRootsRoot)
 	if err != nil && !os.IsNotExist(err) {
@@ -1513,6 +1526,86 @@ func reclaimGeneration(root, gcRootsRoot, name string, lock lockDisposition) {
 		if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
 			fmt.Printf("==> bwrap runner: warning: could not remove stale generation lock %s: %v\n", lockPath, err)
 		}
+	}
+}
+
+// currentVersionKeeper probes the host DB version once and returns, per
+// generation dir, the version dir a reclaim pass spares: the host's current one,
+// not the numerically largest (a GC lowering max(id) leaves that one stale). A
+// failed probe falls back to the newest complete snapshot on disk.
+func currentVersionKeeper() func(genDir string) string {
+	v, err := hostStoreDBVersion()
+	if err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not read host nix store db version (%v); reclaim will keep each generation's newest existing snapshot\n", err)
+		return newestSnapshotDir
+	}
+	return func(genDir string) string { return snapshotVersionDir(genDir, v) }
+}
+
+// sweepStaleSnapshotVersions removes the db-<N> version dirs under genDir that no
+// Box mounts, sparing keep (issue #6072): the version the caller mounts or is
+// about to, which may be unlocked in between. Every other version, an
+// incomplete one included (a crashed write), goes only under an exclusive
+// non-blocking flock on its own lock, which fails while a Box or a mid-VACUUM
+// writer holds it shared. A db-<N>.lock with no db-<N> dir is removed the same
+// way. keep may be "" or genDir itself (a flat snapshot), sparing no db-<N>.
+// Entries not shaped db-<decimal>, such as a flat pre-#6072 "nix" dir an
+// older launcher's Box may mount, go only with the whole generation.
+func sweepStaleSnapshotVersions(genDir, keep string) {
+	entries, err := os.ReadDir(genDir)
+	if err != nil {
+		return
+	}
+	dirs := map[string]bool{}
+	for _, e := range entries {
+		if v, ok := strings.CutPrefix(e.Name(), snapshotVersionPrefix); ok && e.IsDir() && isDecimal(v) {
+			dirs[e.Name()] = true
+		}
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if dirs[name] {
+			if dir := filepath.Join(genDir, name); dir != keep {
+				removeSnapshotVersion(dir, true)
+			}
+			continue
+		}
+		base, ok := strings.CutSuffix(name, ".lock")
+		if !ok || dirs[base] || e.IsDir() {
+			continue
+		}
+		if v, ok := strings.CutPrefix(base, snapshotVersionPrefix); ok && isDecimal(v) && filepath.Join(genDir, base) != keep {
+			removeSnapshotVersion(filepath.Join(genDir, base), false)
+		}
+	}
+}
+
+// removeSnapshotVersion removes dir (when withDir) and its lock file under an
+// exclusive non-blocking flock on that lock, leaving both if it is held.
+func removeSnapshotVersion(dir string, withDir bool) {
+	lockPath := SnapshotLockPath(dir)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not open snapshot lock %s (%v); leaving stale snapshot version %s in place\n", lockPath, err, dir)
+		return
+	}
+	lockRaceWindowHook()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lf.Close()
+		return
+	}
+	defer UnlockSnapshot(lf)
+	if !LockedFDMatchesPath(lf, lockPath) {
+		return
+	}
+	if withDir {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Printf("==> bwrap runner: warning: could not remove stale snapshot version %s: %v\n", dir, err)
+			return
+		}
+	}
+	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("==> bwrap runner: warning: could not remove stale snapshot version lock %s: %v\n", lockPath, err)
 	}
 }
 
