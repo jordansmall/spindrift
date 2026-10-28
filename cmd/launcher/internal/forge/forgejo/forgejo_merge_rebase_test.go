@@ -18,13 +18,15 @@ func newMergeTestForge(t *testing.T, mergeMethod string, handler http.HandlerFun
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      srv.URL,
 		Repo:         "owner/repo",
 		Token:        "tok",
 		BranchPrefix: "agent/issue-",
 		MergeMethod:  mergeMethod,
 	}, nil, "unused")
+	forgejo.SetMergeRecheckDelay(cf, 0)
+	return cf
 }
 
 func TestMerge_Success_DefaultRebase(t *testing.T) {
@@ -71,19 +73,150 @@ func TestMerge_Success_SquashConfig(t *testing.T) {
 // conflict or is blocked by checks. The pull's own mergeable field, false here,
 // is what tells the two apart (issue #566).
 func TestMerge_Conflict(t *testing.T) {
+	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusConflict} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var gets int
+			cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPost:
+					w.WriteHeader(status)
+				case http.MethodGet:
+					gets++
+					w.Write([]byte(pullJSON(206, "open", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			err := cf.Merge("https://forge.test/owner/repo/pulls/206")
+			if !errors.Is(err, forge.ErrMergeConflict) {
+				t.Fatalf("Merge(...): want forge.ErrMergeConflict, got %v", err)
+			}
+			if gets != 2 {
+				t.Errorf("pull fetched %d times, want 2 (classify, then recheck)", gets)
+			}
+		})
+	}
+}
+
+// Forgejo reports mergeable=false on a draft or WIP pull, so a refusal there is
+// no evidence of a conflict; reporting one would demote and force-push a pull
+// that has none (issue #6001).
+func TestMerge_DraftPull_NotClassifiedAsConflict(t *testing.T) {
+	cases := []struct {
+		name  string
+		draft bool
+		title string
+	}{
+		{"draft field", true, "add feature"},
+		{"WIP title", false, "WIP: add feature"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gets int
+			cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPost:
+					w.WriteHeader(http.StatusMethodNotAllowed)
+				case http.MethodGet:
+					gets++
+					w.Write([]byte(pullJSON(206, "open", false, false, tc.draft, tc.title, "agent/issue-206", "abc123", "main")))
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			err := cf.Merge("https://forge.test/owner/repo/pulls/206")
+			if err == nil {
+				t.Fatal("Merge(...): want an error for a draft pull, got nil")
+			}
+			if errors.Is(err, forge.ErrMergeConflict) || errors.Is(err, forge.ErrMergeBlockedByChecks) {
+				t.Fatalf("Merge(...): draft pull must not classify as a sentinel, got %v", err)
+			}
+			if !strings.Contains(err.Error(), "draft") {
+				t.Errorf("Merge(...) error = %v, want it to name the draft", err)
+			}
+			if gets != 1 {
+				t.Errorf("pull fetched %d times, want 1 (a draft is never re-read)", gets)
+			}
+		})
+	}
+}
+
+// Forgejo's conflict check runs asynchronously and mergeable stays false until
+// it settles, so a pull that turns mergeable on the recheck is blocked by
+// checks, not conflicting (issue #6001).
+func TestMerge_ConflictCheckStillRunning_BlockedByChecks(t *testing.T) {
+	var gets int
 	cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
-			w.WriteHeader(http.StatusConflict)
+			w.WriteHeader(http.StatusMethodNotAllowed)
 		case http.MethodGet:
+			gets++
+			w.Write([]byte(pullJSON(206, "open", false, gets > 1, false, "add feature", "agent/issue-206", "abc123", "main")))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	err := cf.Merge("https://forge.test/owner/repo/pulls/206")
+	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
+		t.Fatalf("Merge(...): want forge.ErrMergeBlockedByChecks, got %v", err)
+	}
+	if gets != 2 {
+		t.Errorf("pull fetched %d times, want 2 (classify, then recheck)", gets)
+	}
+}
+
+// A merge that lands while the conflict check settles shows up only on the
+// recheck; that is success, not a conflict (issue #6001).
+func TestMerge_MergedOnRecheck_Succeeds(t *testing.T) {
+	var gets int
+	cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case http.MethodGet:
+			gets++
+			w.Write([]byte(pullJSON(206, "open", gets > 1, false, false, "add feature", "agent/issue-206", "abc123", "main")))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	if err := cf.Merge("https://forge.test/owner/repo/pulls/206"); err != nil {
+		t.Fatalf("Merge(...): want nil for a PR merged by the recheck, got %v", err)
+	}
+	if gets != 2 {
+		t.Errorf("pull fetched %d times, want 2", gets)
+	}
+}
+
+// A failed recheck read must surface as a lookup error, never as a conflict
+// guessed from the first read (issue #6001).
+func TestMerge_RecheckLookupFails_NotClassified(t *testing.T) {
+	var gets int
+	cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case http.MethodGet:
+			gets++
+			if gets > 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			w.Write([]byte(pullJSON(206, "open", false, false, false, "add feature", "agent/issue-206", "abc123", "main")))
 		default:
 			http.NotFound(w, r)
 		}
 	})
 	err := cf.Merge("https://forge.test/owner/repo/pulls/206")
-	if !errors.Is(err, forge.ErrMergeConflict) {
-		t.Fatalf("Merge(...): want forge.ErrMergeConflict, got %v", err)
+	if err == nil {
+		t.Fatal("Merge(...): want an error when the recheck lookup fails, got nil")
+	}
+	if errors.Is(err, forge.ErrMergeConflict) || errors.Is(err, forge.ErrMergeBlockedByChecks) {
+		t.Fatalf("Merge(...): failed lookup must not classify as a sentinel, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "PR lookup failed") {
+		t.Errorf("Merge(...) error = %v, want it to contain %q", err, "PR lookup failed")
 	}
 }
 
