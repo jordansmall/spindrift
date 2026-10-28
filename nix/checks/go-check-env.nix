@@ -7,12 +7,17 @@
 # every host CPU, and the Box's cgroup pids limit counts each Go process's
 # threads (issue #3915). Unset and 0 fall back to lib/image.nix's nix.conf
 # `cores`; go.nix's `go-check-env` check fails if the two drift (issue #3965).
+# HOME moves under $TMPDIR because Go writes telemetry to $HOME/.config/go
+# (GOTELEMETRY=off does not stop it) and an unsandboxed build's default
+# /homeless-shelter must stay absent or Nix's HOME guard fails every later
+# build (issue #6009).
 ''
   export GOPROXY=off
   export GOFLAGS=-mod=vendor
   export GONOSUMCHECK='*'
   export GOMODCACHE="$TMPDIR/gomodcache"
   export GOCACHE="$TMPDIR/gocache"
+  export HOME="$TMPDIR/home"
   export CGO_ENABLED=0
   export GOMAXPROCS="''${NIX_BUILD_CORES:-0}"
   [ "$GOMAXPROCS" != 0 ] || GOMAXPROCS=4
