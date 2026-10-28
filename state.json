@@ -1,20 +1,18 @@
 {
-  "lastSwept": "d6b78092516fc89b9e7b5983ff67c7a481eb61b5",
-  "cursor": "cmd/launcher/internal/runner/validate.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-28T04:52:18.544838044-04:00"
-  },
+  "lastSwept": "65d7085b275c28459cdc3a715d294c58caccbbeb",
+  "cursor": "cmd/launcher/internal/seedblock/seedblock.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6106"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 74,
+    "output_tokens": 11854,
+    "cache_read_input_tokens": 2290349,
+    "cache_creation_input_tokens": 92332,
+    "total_cost_usd": 1.5772271199999999,
+    "duration_ms": 138952,
+    "duration_api_ms": 135768,
+    "num_turns": 40
   }
 }
