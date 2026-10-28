@@ -206,7 +206,7 @@ func newIntegrationBwrapAdapterIsolated(t *testing.T) (*bwrapAdapter, string) {
 // newIntegrationBwrapAdapterWithNix wires ADR 0042's in-box nix mechanism
 // (issue #2664): a real nix.conf mirroring lib/image.nix, and a store-db
 // snapshot made with the same "VACUUM INTO" statement
-// bwrapBuildAdapter.snapshotStoreDB runs, called directly here so the test
+// prepareSnapshotVersion runs, called directly here so the test
 // stays decoupled from bwrap.go's build-vs-run adapter split.
 func newIntegrationBwrapAdapterWithNix(t *testing.T) (*bwrapAdapter, string) {
 	t.Helper()
@@ -261,7 +261,7 @@ func newIntegrationBwrapAdapterWithWritableStore(t *testing.T) (*bwrapAdapter, s
 // swaps the fixed "-- /agent/entrypoint.sh" tail for script, run via bash -c.
 // Every other mount/hardening flag reaches bwrap as production would send it.
 func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) []string {
-	args := a.buildArgs(etcDir, box)
+	args := a.buildArgs(etcDir, box, a.snapshotDirFor(box))
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
@@ -274,7 +274,7 @@ func bwrapProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, scr
 // mounted. Those probes guard with requireRealBwrapProc instead of
 // requireRealBwrap.
 func nixProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) []string {
-	args := a.buildArgs(etcDir, box)
+	args := a.buildArgs(etcDir, box, a.snapshotDirFor(box))
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator
 	return append(args, bashBin, "-c", script)
 }
@@ -285,7 +285,7 @@ func nixProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, scrip
 // that nested argv, and swaps the nested tail for script. The returned program
 // is "pasta" whenever network.Pasta applies, matching what Run() would exec.
 func pastaProbeArgs(a *bwrapAdapter, etcDir string, box runner.Box, bashBin, script string) (string, []string) {
-	program, args, _ := a.execTarget(etcDir, box, a.syscallFilterPath != "")
+	program, args, _ := a.execTarget(etcDir, box, a.snapshotDirFor(box), a.syscallFilterPath != "")
 	args = stripMountPair(args, "--proc", "/proc")
 	args = stripMountPair(args, "--dev", "/dev")
 	args = args[:len(args)-1] // drop "/agent/entrypoint.sh", keep the "--" separator

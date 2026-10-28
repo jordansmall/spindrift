@@ -30,7 +30,7 @@ func TestMountSpecs_RenderedByBwrap(t *testing.T) {
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, DriverCacheDir: fx.CacheDir, Sockets: []runner.SocketMount{{Source: fx.ProxySocket, Target: runner.RegistryProxySocketTarget}}}
 
-	fx.AssertRendered(t, "bwrap", strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " "), " ")
+	fx.AssertRendered(t, "bwrap", strings.Join(bwrap.buildArgs("/tmp/fake-etc", box, bwrap.snapshotDirFor(box)), " "), " ")
 }
 
 // ADR 0033, issue #1697: the Accumulation-repo and outbox mounts must reach
@@ -47,7 +47,7 @@ func TestLocalCodeForgeMounts_RenderedByBwrap(t *testing.T) {
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box, bwrap.snapshotDirFor(box)), " ")
 
 	if !strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
 		t.Errorf("bwrap missing read-only /repo mount in args: %s", bwrapArgs)
@@ -70,7 +70,7 @@ func TestOutboxMount_RenderedByBwrap(t *testing.T) {
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}, OutboxDir: outboxDir}
 
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box, bwrap.snapshotDirFor(box)), " ")
 
 	if !strings.Contains(bwrapArgs, "--bind "+outboxDir+" /outbox") {
 		t.Errorf("bwrap missing writable /outbox mount in args: %s", bwrapArgs)
@@ -94,7 +94,7 @@ func TestLocalCodeForgeMounts_AbsentOnNonLocalBwrap(t *testing.T) {
 	}
 	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{}}
 
-	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box), " ")
+	bwrapArgs := strings.Join(bwrap.buildArgs("/tmp/fake-etc", box, bwrap.snapshotDirFor(box)), " ")
 
 	if strings.Contains(bwrapArgs, "--ro-bind "+repoDir+" /repo") {
 		t.Errorf("bwrap must not mount /repo with HostMediatedRemote=false: %s", bwrapArgs)

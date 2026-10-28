@@ -96,12 +96,12 @@ func TestBwrapRun_PastaIsTopLevelProgramByDefault(t *testing.T) {
 func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 	t.Run("bare bwrap", func(t *testing.T) {
 		a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost), pidsLimit: "512"}
-		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}}, false)
+		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}}, a.snapshotDirFor(runner.Box{Env: map[string]string{}}), false)
 
 		if program != "bwrap" {
 			t.Errorf("execTarget program = %q, want %q", program, "bwrap")
 		}
-		wantArgs := a.buildArgs("", runner.Box{Env: map[string]string{}})
+		wantArgs := a.buildArgs("", runner.Box{Env: map[string]string{}}, a.snapshotDirFor(runner.Box{Env: map[string]string{}}))
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
 		}
@@ -115,7 +115,7 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 
 	t.Run("pasta", func(t *testing.T) {
 		a := &bwrapAdapter{network: testNet(""), agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", pidsLimit: "512"}
-		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}}, false)
+		program, args, _ := a.execTarget("", runner.Box{Env: map[string]string{}}, a.snapshotDirFor(runner.Box{Env: map[string]string{}}), false)
 
 		if program != "pasta" {
 			t.Errorf("execTarget program = %q, want %q", program, "pasta")
@@ -124,7 +124,7 @@ func TestBwrapExecTarget_PidsLimitNoLongerWrapsWithPrlimit(t *testing.T) {
 			"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw",
 			"--config-net", "--dns-forward", "169.254.2.2", "-f", "--", "bwrap",
 		}
-		wantArgs = append(wantArgs, a.buildArgs("", runner.Box{Env: map[string]string{}})...)
+		wantArgs = append(wantArgs, a.buildArgs("", runner.Box{Env: map[string]string{}}, a.snapshotDirFor(runner.Box{Env: map[string]string{}}))...)
 		if !reflect.DeepEqual(args, wantArgs) {
 			t.Errorf("execTarget args = %v, want %v", args, wantArgs)
 		}
@@ -383,7 +383,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 		t.Errorf("gotNames[5] = %q, want %q", gotNames[5], "sqlite3")
 	}
 
-	wantDest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
+	wantDest := versionedDBPath(snapshotDir)
 	call := runnertest.ReadCall(t, dir, 5)
 	if len(call) != 2 {
 		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
@@ -394,7 +394,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 	if !strings.Contains(call[1], "VACUUM INTO") {
 		t.Errorf("sqlite3 statement = %q, want it to contain %q", call[1], "VACUUM INTO")
 	}
-	wantTempPrefix := filepath.Join(snapshotDir, "nix", "db", vacuumTempPrefix)
+	wantTempPrefix := filepath.Join(filepath.Dir(wantDest), vacuumTempPrefix)
 	if !strings.Contains(call[1], wantTempPrefix) {
 		t.Errorf("sqlite3 statement = %q, want it to reference a temp sibling %q*", call[1], wantTempPrefix)
 	}
@@ -404,7 +404,7 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 }
 
 // Issue #2680: EnsureReady must hold the shared lock on the snapshot dir for
-// the whole of snapshotStoreDB's write, so a concurrent build's
+// the whole of the snapshot write, so a concurrent build's
 // reclaimStaleSnapshots probe sees it held and skips this generation instead
 // of RemoveAll-ing it mid-write. flock locks are scoped to the open file
 // description, so a second fd in this process conflicts like another's would.
@@ -433,7 +433,7 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 			defer lf.Close()
 			if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
 				_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
-				t.Error("exclusive Flock probe on snapshot lock succeeded during snapshotStoreDB — the shared lock was not held while VACUUM INTO ran")
+				t.Error("exclusive Flock probe on snapshot lock succeeded during the snapshot write — the shared lock was not held while VACUUM INTO ran")
 			}
 		}
 		return exec.Command(script, args...)
@@ -467,7 +467,7 @@ func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *test
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 	)
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
-	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
+	dest := versionedDBPath(snapshotDir)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) = %v, want nil", filepath.Dir(dest), err)
 	}
@@ -522,7 +522,7 @@ func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.
 	fakeVacuumInto(t, script, "partial", 1, nil)
 
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
-	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
+	dest := versionedDBPath(snapshotDir)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) = %v, want nil", filepath.Dir(dest), err)
 	}
@@ -758,7 +758,7 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 	}
 
 	snapshotDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "abc123-agent-closure")
-	seedSnapshot(t, snapshotDBPath(snapshotDir), "snapshot")
+	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, "1")), "snapshot")
 	lockPath := snapshotDir + ".lock"
 
 	a := &bwrapAdapter{
@@ -891,9 +891,9 @@ func TestBwrapRun_NixConfigEmptyStillHoldsLockWithoutSnapshotDir(t *testing.T) {
 
 // A failed lock open degrades to a warning rather than failing Run (ADR
 // 0042's degrade-don't-lie precedent): it is a reclaim-correctness concern,
-// not a Box requirement. The parent of nixVarSnapshotDir is a regular file
-// here, so os.OpenFile fails with ENOTDIR. Asserting the warning text catches
-// a regression that drops the fmt.Printf (issue #2680 review finding).
+// not a Box requirement. The generation's lock path is a directory here, so
+// os.OpenFile fails with EISDIR. Asserting the warning text catches a
+// regression that drops the fmt.Printf (issue #2680 review finding).
 func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{})
 	orig := execCommand
@@ -902,11 +902,11 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 		return exec.Command(script, args...)
 	}
 
-	notADir := filepath.Join(t.TempDir(), "not-a-dir")
-	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
+	snapshotDir := filepath.Join(t.TempDir(), "abc123-agent-closure")
+	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, "1")), "snapshot")
+	if err := os.Mkdir(SnapshotLockPath(snapshotDir), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
 	}
-	snapshotDir := filepath.Join(notADir, "abc123-agent-closure")
 
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -965,7 +965,7 @@ func TestBwrapRun_SnapshotReclaimedBeforeRunIsRecreatedUnderTheLock(t *testing.T
 	if !strings.Contains(out, "was reclaimed before box") {
 		t.Errorf("Run output missing recreate notice: %q", out)
 	}
-	if got, err := os.ReadFile(snapshotDBPath(snapshotDir)); err != nil || string(got) != "recreated" {
+	if got, err := os.ReadFile(snapshotDBPath(snapshotVersionDir(snapshotDir, "1"))); err != nil || string(got) != "recreated" {
 		t.Errorf("db.sqlite = %q, %v; want the recreated snapshot", got, err)
 	}
 	if got := runnertest.CallCount(t, dir); got != 1 {
@@ -995,7 +995,7 @@ func TestBwrapRun_HotSwappedSnapshotGoneIsRecreatedInItsOwnGenerationDir(t *test
 	if err := a.Run(runner.Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if _, err := os.Stat(snapshotDBPath(filepath.Join(root, "gen2"))); err != nil {
+	if _, err := os.Stat(snapshotDBPath(snapshotVersionDir(filepath.Join(root, "gen2"), "1"))); err != nil {
 		t.Errorf("gen2 db.sqlite: want recreated, got %v", err)
 	}
 	if _, err := os.Stat(bakedDir); !os.IsNotExist(err) {
@@ -1068,7 +1068,7 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 	}
 
 	snapshotDir := t.TempDir()
-	seedSnapshot(t, snapshotDBPath(snapshotDir), "snapshot")
+	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, "1")), "snapshot")
 
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -1115,7 +1115,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	gen1Dir := filepath.Join(root, "gen1")
 	gen2Dir := filepath.Join(root, "gen2")
 	for _, d := range []string{gen1Dir, gen2Dir} {
-		seedSnapshot(t, snapshotDBPath(d), "snapshot")
+		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(d, "1")), "snapshot")
 	}
 
 	a := &bwrapAdapter{
@@ -1166,7 +1166,7 @@ func TestBwrapRun_BindsSwappedNixConfigFileWhenClosureGenerationSet(t *testing.T
 	}
 
 	root := t.TempDir()
-	seedSnapshot(t, snapshotDBPath(filepath.Join(root, "gen1")), "snapshot")
+	seedSnapshot(t, versionedDBPath(filepath.Join(root, "gen1")), "snapshot")
 
 	a := &bwrapAdapter{
 		agentFiles:         "/fake/agent",
@@ -1293,7 +1293,7 @@ func TestBwrapIsReady_NixConfigEmptySkipsSnapshotCheck(t *testing.T) {
 	}
 }
 
-// db.sqlite is snapshotStoreDB's actual write target, so IsReady succeeds
+// db.sqlite is the snapshot writers' actual write target, so IsReady succeeds
 // once `launcher build` has populated it.
 func TestBwrapIsReady_NixConfigSetAndSnapshotPresentReturnsNil(t *testing.T) {
 	dir := t.TempDir()
@@ -1310,7 +1310,7 @@ func TestBwrapIsReady_NixConfigSetAndSnapshotPresentReturnsNil(t *testing.T) {
 	}
 }
 
-// Issue #2664: snapshotStoreDB creates <nixVarSnapshotDir>/nix/db via
+// Issue #2664: VacuumStoreDBInto creates <snapshot dir>/nix/db via
 // MkdirAll before running the VACUUM INTO that writes db.sqlite, so a
 // dir-only check falsely reports ready when that VACUUM INTO failed partway
 // (disk full, missing host db, a killed build) and left an empty dir behind.
@@ -1588,7 +1588,7 @@ func TestBwrapRun_OpencodeAuthContentOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box)) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("OPENCODE_AUTH_CONTENT sentinel found in bwrap argv: %v", arg)
 		}
@@ -1627,7 +1627,7 @@ func TestBwrapRun_RegistryProxyTCPSecretOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box)) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("REGISTRY_PROXY_TCP_SECRET sentinel found in bwrap argv: %v", arg)
 		}
@@ -1666,7 +1666,7 @@ func TestBwrapRun_SignalSocketSecretOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box)) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("SIGNAL_SOCKET_SECRET sentinel found in bwrap argv: %v", arg)
 		}
@@ -1705,7 +1705,7 @@ func TestBwrapRun_ForgejoTokenOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box)) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("FORGEJO_TOKEN sentinel found in bwrap argv: %v", arg)
 		}
@@ -1747,7 +1747,7 @@ func TestBwrapRun_IssueTextOffArgvButInProcessEnv(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+	for _, arg := range a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box)) {
 		if strings.Contains(arg, sentinel) {
 			t.Errorf("ISSUE_TEXT sentinel found in bwrap argv: %v", arg)
 		}
@@ -3675,7 +3675,7 @@ func TestBuildArgs_ClosureGenerationAgentEnvOverridesSetenv(t *testing.T) {
 		ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", Generation: "swapped"},
 	}
 
-	args := a.buildArgs("", box)
+	args := a.buildArgs("", box, a.snapshotDirFor(box))
 
 	wantSetenvs := []string{
 		"PATH", "/swapped/env/bin",
@@ -3755,7 +3755,7 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 			a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", network: testNet(runner.NetworkModeHost)}
 			box := runner.Box{Env: map[string]string{}, ClosureGeneration: tc.setup(t)}
 
-			args := a.buildArgs("", box)
+			args := a.buildArgs("", box, a.snapshotDirFor(box))
 
 			if got := setenvValue(t, args, "PREFETCH"); got != tc.want {
 				t.Errorf("--setenv PREFETCH = %q, want %q", got, tc.want)
@@ -3775,7 +3775,7 @@ func TestBuildArgs_PrefetchFallbackLoggedOncePerFile(t *testing.T) {
 		box := runner.Box{Env: map[string]string{}, ClosureGeneration: &runner.AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}}
 		var got string
 		logged := runnertest.CaptureStderrDuring(t, func() {
-			got = setenvValue(t, a.buildArgs("", box), "PREFETCH")
+			got = setenvValue(t, a.buildArgs("", box, a.snapshotDirFor(box)), "PREFETCH")
 		})
 		if got != "echo baked" {
 			t.Errorf("--setenv PREFETCH = %q, want baked fallback", got)
@@ -4019,7 +4019,7 @@ func TestBwrapRun_PiProviderKeysOffArgvButInProcessEnv(t *testing.T) {
 				t.Fatalf("Run: %v", err)
 			}
 
-			for _, arg := range a.buildArgs("/tmp/fake-etc", box) {
+			for _, arg := range a.buildArgs("/tmp/fake-etc", box, a.snapshotDirFor(box)) {
 				if strings.Contains(arg, sentinel) {
 					t.Errorf("%s sentinel found in bwrap argv: %v", name, arg)
 				}
@@ -4240,7 +4240,7 @@ func recordNixBuilds(t *testing.T) func() [][2]string {
 // Reclaim deletes a generation's GC-root dir with its snapshot, so the recreate
 // must re-root the generation the Box actually mounts: the baked one, or the
 // hot-swapped closure path itself (the set SnapshotGeneration roots).
-func TestRecreateSnapshotIfGone_ReRegistersGCRootsForTheBoxsGeneration(t *testing.T) {
+func TestEnsureRunSnapshot_ReRegistersGCRootsForTheBoxsGeneration(t *testing.T) {
 	hot := runner.NewAgentGeneration("/nix/store/aaa-agent-closure")
 	cases := []struct {
 		name    string
@@ -4279,8 +4279,10 @@ func TestRecreateSnapshotIfGone_ReRegistersGCRootsForTheBoxsGeneration(t *testin
 			a.nixGCRootsRoot = rootsRoot
 			a.generation = "baked-gen"
 			runnertest.CaptureStdoutDuring(t, func() {
-				if err := a.recreateSnapshotIfGone(tc.box, snapshotDir); err != nil {
-					t.Fatalf("recreateSnapshotIfGone: %v", err)
+				_, lf, err := a.ensureRunSnapshot(tc.box, snapshotDir)
+				UnlockSnapshot(lf)
+				if err != nil {
+					t.Fatalf("ensureRunSnapshot: %v", err)
 				}
 			})
 
@@ -4301,7 +4303,7 @@ func TestRecreateSnapshotIfGone_ReRegistersGCRootsForTheBoxsGeneration(t *testin
 
 // A hot-swapped generation that names no AgentFiles must not root filepath.Dir("")
 // (the cwd, "."): the baked closure set is what pick() binds.
-func TestRecreateSnapshotIfGone_HotSwapWithoutAgentFilesRootsNoCwd(t *testing.T) {
+func TestEnsureRunSnapshot_HotSwapWithoutAgentFilesRootsNoCwd(t *testing.T) {
 	fakeVacuumInto(t, "true", "recreated", 0, nil)
 	calls := recordNixBuilds(t)
 
@@ -4312,8 +4314,10 @@ func TestRecreateSnapshotIfGone_HotSwapWithoutAgentFilesRootsNoCwd(t *testing.T)
 	hot := runner.AgentGeneration{Generation: "hot-gen"}
 	box := runner.Box{Name: "agent-issue-3", ClosureGeneration: &hot}
 	runnertest.CaptureStdoutDuring(t, func() {
-		if err := a.recreateSnapshotIfGone(box, filepath.Join(t.TempDir(), "gen")); err != nil {
-			t.Fatalf("recreateSnapshotIfGone: %v", err)
+		_, lf, err := a.ensureRunSnapshot(box, filepath.Join(t.TempDir(), "gen"))
+		UnlockSnapshot(lf)
+		if err != nil {
+			t.Fatalf("ensureRunSnapshot: %v", err)
 		}
 	})
 
@@ -4326,5 +4330,20 @@ func TestRecreateSnapshotIfGone_HotSwapWithoutAgentFilesRootsNoCwd(t *testing.T)
 	}
 	if want := []string{"/fake/agent", "/fake/env", "/fake/nix.conf"}; !slices.Equal(targets, want) {
 		t.Errorf("rooted paths = %q, want the baked closure %q", targets, want)
+	}
+}
+
+// --no-build never prepares and must not probe the host: any existing version
+// satisfies it even when the host DB has moved on (issue #6072).
+func TestBwrapIsReady_OlderVersionSnapshotOnlyReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	seedSnapshotDir(t, snapshotVersionDir(dir, "3"), "old")
+	stubHostVersion(t, func() (string, error) {
+		t.Error("IsReady probed the host DB version, want no probe")
+		return "9", nil
+	})
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: dir}
+	if err := a.IsReady(); err != nil {
+		t.Errorf("IsReady with only an older version's snapshot: want nil, got %v", err)
 	}
 }

@@ -34,9 +34,10 @@ var vacuumTempRaceWindowHook = func() {}
 
 // NixVarSnapshotDir is the host-side directory standing in for /nix/var inside a
 // bwrap Box's overlay lower (ADR 0042): the build command writes a VACUUMed
-// snapshot of /nix/var/nix/db/db.sqlite to <dir>/nix/db/db.sqlite so the Box's
-// nix trusts host-present store paths. generation scopes it to one agent-closure
-// (issue #2680); empty means the flat pre-#2680 path.
+// snapshot of /nix/var/nix/db/db.sqlite to <dir>/db-<V>/nix/db/db.sqlite, V the
+// host DB version (issue #6072), so the Box's nix trusts host-present store
+// paths. generation scopes it to one agent-closure (issue #2680); empty means
+// the flat pre-#2680 path.
 func NixVarSnapshotDir(pwd, generation string) string {
 	return filepath.Join(NixVarSnapshotRoot(pwd), generation)
 }
@@ -237,11 +238,13 @@ func UnlockSnapshot(lf *os.File) {
 }
 
 // SnapshotGeneration prepares a closure hot-swapped mid-run before binding it.
-// For a nixInBox Consumer it writes the nix-var snapshot (ADR 0043, issue
-// #2682), so the copy happens here rather than in Run's recreate. It skips the
-// vacuum when db.sqlite already exists, since a live Box may be reading it, and
-// never reclaims: an idle Dispatch holds no flock on a generation it will
-// launch against again.
+// For a nixInBox Consumer it writes the nix-var snapshot for the host DB's
+// current version (ADR 0043, issues #2682, #6072), so the copy happens here
+// rather than in Run's recreate. It skips the vacuum when that version's
+// db.sqlite already exists, since a live Box may be reading it, and never
+// reclaims: an idle Dispatch holds no flock on a generation it will launch
+// against again. It drops the version lock before returning; Run takes it for
+// the Box's life.
 //
 // It also GC-roots what a Box on the swapped generation mounts: the closure,
 // plus the passwd, group and syscall filter the daemon booted with (issue
@@ -254,14 +257,6 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	dir := NixVarSnapshotDir(pwd, generation)
 	root := NixVarSnapshotRoot(pwd)
 
-	dest := snapshotDBPath(dir)
-	snapshot := cfg.NixConfigFile != ""
-	if snapshot {
-		// Sweep before the existence check: a temp leaked by a killed launcher would
-		// otherwise stay forever once a concurrent launcher has installed dest.
-		sweepStaleVacuumTemps(filepath.Dir(dest))
-	}
-
 	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
 	}
@@ -273,20 +268,16 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 
 	registerMountedArtifactRoots(NixGCRootsRoot(pwd), generation, []string{closurePath}, cfg.PasswdFile, cfg.GroupFile, cfg.SyscallFilterPath)
 
-	if !snapshot {
+	if cfg.NixConfigFile == "" {
 		return nil
 	}
-	if _, err := os.Stat(dest); err == nil {
-		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
-		return nil
-	}
-
-	fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) for hot-swapped generation %s\n", generation)
-	return VacuumStoreDBInto(dir, InstallIfAbsent)
+	_, vlf, err := prepareSnapshotVersion(dir, InstallIfAbsent)
+	UnlockSnapshot(vlf)
+	return err
 }
 
 // hostNixDBPath is the host's real, live nix store database, never a path inside
-// a sandbox: snapshotStoreDB runs host-side, on both the build and run paths.
+// a sandbox: the snapshot writers run host-side, on both the build and run paths.
 // It is the one Go call site that reaches into live host store metadata.
 const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 
@@ -305,8 +296,13 @@ const (
 // VacuumStoreDBInto does the VACUUM INTO and install work against an explicit
 // dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it rather
 // than reaching it only through a bwrapBuildAdapter's baked field (issue
-// #2682). Writes dir/nix/db/db.sqlite, the layout every NixVarSnapshotDir
-// caller expects. mode picks how the finished temp lands on db.sqlite.
+// #2682). Writes dir/nix/db/db.sqlite; callers pass a version dir (see
+// prepareSnapshotVersion). mode picks how the finished temp lands on db.sqlite.
+// It compacts in the same step (ADR 0042: ~302MB raw vs ~104MB compacted, and an
+// overlay copy-up rewrites a file whole, so the compacted size is what lands in
+// the Box's tmpfs upper on first touch). VACUUM INTO fills a temp the launcher
+// itself created, so the snapshot is owned by the invoking uid and needs no
+// chown.
 func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
 	if err := checkHostNixDB(); err != nil {
 		return err
@@ -318,7 +314,7 @@ func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
 	}
 
 	// Vacuum into a temp sibling and install over dest only on success, so dest
-	// only ever names a complete snapshot: SnapshotGeneration's existence check
+	// only ever names a complete snapshot: prepareSnapshotVersion's existence check
 	// and IsReady trust it, and a failed vacuum (disk full, host db locked) must
 	// neither leave a partial dest nor destroy a previous one (#2664, #4817).
 	// The name must be unique: concurrent launchers hold only a shared lock.
@@ -470,15 +466,7 @@ func sweepStaleVacuumTemps(dir string) {
 // nothing about ownership, which is the flock.
 func isVacuumTempName(name string) bool {
 	suffix, ok := strings.CutPrefix(name, vacuumTempPrefix)
-	if !ok || suffix == "" {
-		return false
-	}
-	for _, r := range suffix {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
+	return ok && isDecimal(suffix)
 }
 
 // snapshotVersionPrefix names the per-host-DB-version dirs nested under a
@@ -602,6 +590,7 @@ func prepareSnapshotVersion(genDir string, mode SnapshotInstall) (dir string, lf
 	}
 	sweepStaleVacuumTemps(filepath.Dir(snapshotDBPath(dir)))
 	if _, statErr := os.Stat(snapshotDBPath(dir)); mode == InstallReplace || statErr != nil {
+		fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) into %s\n", dir)
 		if err := VacuumStoreDBInto(dir, mode); err != nil {
 			UnlockSnapshot(lf)
 			return "", nil, err
