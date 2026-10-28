@@ -1562,6 +1562,32 @@ func TestAtoiNonnegSchema(t *testing.T) {
 	}
 }
 
+// floatNonnegSchema directly: zero and positive env values beat the schema
+// default; negative, non-numeric, infinite, and unset fall back to it.
+func TestFloatNonnegSchema(t *testing.T) {
+	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "7.5"}})
+
+	cases := []struct {
+		env  string
+		want float64
+	}{
+		{"0", 0},
+		{"4.44", 4.44},
+		{"-1", 7.5},
+		{"abc", 7.5},
+		{"", 7.5},
+		{"inf", 7.5},
+		{"+Inf", 7.5},
+		{"Infinity", 7.5},
+	}
+	for _, tc := range cases {
+		t.Setenv("SOME_KEY", tc.env)
+		if got := floatNonnegSchema("SOME_KEY"); got != tc.want {
+			t.Errorf("SOME_KEY=%q: floatNonnegSchema(SOME_KEY) = %v, want %v", tc.env, got, tc.want)
+		}
+	}
+}
+
 // GIT_USER_NAME/GIT_USER_EMAIL fall back to the host git config when the
 // document, flag and env chain supplies nothing: the in-process replacement
 // for the wrapper's retired `${VAR:-$(git config ...)}` fallback (ADR 0020).

@@ -1589,7 +1589,7 @@ host-side fix-pass retries, this is a behavior widening, not a breaking
 change: the cap now also applies to the in-Box review loop, which can land
 a run earlier than before at the same threshold. A malformed or negative
 value degrades to `0` (disabled) rather than erroring, matching this pair's
-existing host-side tolerance (`atoiNonneg`/`floatNonneg`) — under the
+existing host-side tolerance (`atoiNonnegSchema`/`floatNonnegSchema`) — under the
 legacy single-loop path (`ORCHESTRATOR_ENABLED` off, or a custom
 `SPINDRIFT_PROMPT_DIR` with no review-pass prompt) the value is accepted
 but never consulted.
