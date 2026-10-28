@@ -2,6 +2,7 @@ package bwrap
 
 import (
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1098,5 +1099,67 @@ func TestExecTarget_DirectWithUnopenedFilterStripsSeccomp(t *testing.T) {
 	}
 	if runnertest.ContainsArg(withFilter, "sh") {
 		t.Errorf("direct chain must not use the trampoline: %v", withFilter)
+	}
+}
+
+// Issue #6009: bwrap fabricates / as an agent-owned tmpfs, so --chmod 0555 /
+// must close it, and only after every op that fabricates a top-level path
+// (bwrap applies argv in order). ContainsTriple cannot check ordering.
+func TestBwrapArgs_RootChmodedReadOnlyAfterAllMounts(t *testing.T) {
+	a := &bwrapAdapter{
+		agentFiles:        t.TempDir(),
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/nix/store/fake-hash-nix-conf/nix.conf",
+		nixStoreWritable:  true,
+		nixVarSnapshotDir: "/fake/snapshot",
+		network:           testNet("open"),
+		syscallFilterPath: "/nix/store/fake-hash-seccomp/filter.bpf",
+		mountParams:       runner.MountParams{HostMediatedRemote: true, AccumulationRepoDir: t.TempDir()},
+	}
+	box := runner.Box{Name: "agent-issue-1", Env: map[string]string{"FOO": "bar"}, OutboxDir: t.TempDir()}
+	args := a.buildArgs("/tmp/fake-etc", box)
+
+	// The mounts that need a writable / are only exercised if the fixture
+	// still renders them.
+	if !runnertest.ContainsTriple(args, "--ro-bind", a.nixConfigFile, "/etc/nix/nix.conf") {
+		t.Errorf("fixture lost the /etc/nix/nix.conf bind: %v", args)
+	}
+	if !runnertest.ContainsTriple(args, "--ro-bind", "/tmp/fake-etc/resolv.conf", "/etc/resolv.conf") {
+		t.Errorf("fixture lost the pasta /etc/resolv.conf bind: %v", args)
+	}
+	if !runnertest.ContainsTriple(args, "--overlay-src", a.nixVarSnapshotDir, "--tmp-overlay") {
+		t.Errorf("fixture lost the /nix/var overlay: %v", args)
+	}
+	if !runnertest.ContainsTriple(args, "--bind", box.OutboxDir, "/outbox") {
+		t.Errorf("fixture lost its writable /outbox bind: %v", args)
+	}
+
+	sepAt := slices.Index(args, "--")
+	if sepAt == -1 {
+		t.Fatalf("no -- separator in args: %v", args)
+	}
+	flags := args[:sepAt]
+	chmodAt := slices.Index(flags, "--chmod")
+	if chmodAt == -1 || slices.Index(flags[chmodAt+1:], "--chmod") != -1 {
+		t.Fatalf("want exactly one --chmod before the -- separator: %v", args)
+	}
+	if chmodAt+2 >= len(flags) || flags[chmodAt+1] != "0555" || flags[chmodAt+2] != "/" {
+		t.Fatalf("expected --chmod 0555 / in args: %v", args)
+	}
+
+	// An allowlist rather than a list of mount ops, so a newly added mount flag
+	// fails here instead of silently landing after the chmod. The value is the
+	// flag's argument count.
+	allowed := map[string]int{
+		"--setenv": 2, "--uid": 1, "--gid": 1, "--seccomp": 1, "--die-with-parent": 0,
+	}
+	rest := flags[chmodAt+3:]
+	for i := 0; i < len(rest); i++ {
+		n, ok := allowed[rest[i]]
+		if !ok && !strings.HasPrefix(rest[i], "--unshare-") {
+			t.Fatalf("%s follows --chmod 0555 /, where / is no longer writable, so only non-mount flags may: %v", rest[i], args)
+		}
+		i += n
 	}
 }

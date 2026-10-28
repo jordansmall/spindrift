@@ -360,6 +360,24 @@ func TestBwrapIntegration_SandboxUID(t *testing.T) {
 	}
 }
 
+// TestBwrapIntegration_RootNotWritable asserts from inside a real bwrap sandbox
+// that / rejects new entries, so an unsandboxed nix build cannot create
+// /homeless-shelter (issue #6009).
+func TestBwrapIntegration_RootNotWritable(t *testing.T) {
+	bashBin := requireRealBwrap(t)
+	a, etcDir := newIntegrationBwrapAdapter(t)
+	box := runner.Box{Env: map[string]string{}}
+	args := bwrapProbeArgs(a, etcDir, box, bashBin, "if : > /homeless-shelter; then echo writable; else echo readonly; fi")
+
+	out, err := exec.Command("bwrap", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("bwrap probe failed: %v: %s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasSuffix(got, "readonly") {
+		t.Errorf("root write probe = %q, want it to end in \"readonly\"", got)
+	}
+}
+
 // TestBwrapIntegration_UnshareNetBlocksNetwork asserts from inside a real
 // bwrap sandbox with NETWORK_MODE=none (no pasta) that outbound network
 // access fails: the kernel enforcing --unshare-net with no egress path, not

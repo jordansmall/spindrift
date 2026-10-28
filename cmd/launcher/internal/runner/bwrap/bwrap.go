@@ -441,6 +441,11 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box runner.Box) []string {
 		}
 		args = append(args, "--ro-bind", m.Source, m.Target)
 	}
+	// bwrap fabricates / as an agent-owned tmpfs (mode 755), so an unsandboxed nix
+	// build's HOME=/homeless-shelter would be creatable and then trip nix's
+	// "home directory exists" guard on every later build (issue #6009). Must stay
+	// after every op that fabricates a top-level path: those need a writable /.
+	args = append(args, "--chmod", "0555", "/")
 	// --clearenv is deliberately absent: the OffArgvKeys subset of box.Env
 	// reaches the sandbox through resolvedRunEnv, which Run sets as cmd.Env and
 	// bwrap inherits. See OffArgvKeys for why those keys stay off argv.
