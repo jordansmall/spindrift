@@ -74,8 +74,7 @@ func TestHeadlessQueue_Pending_ForwardsCallersClaimedSet(t *testing.T) {
 }
 
 // ReportStaleDrain prints report.Console() to stdout and appends
-// report.HostLog() to pwd's stale-drain.log (#2939), mirroring continuous.go's
-// emitStaleDrainReport.
+// report.HostLog() to the stale-drain.log in pwd's host log dir (#2939).
 func TestHeadlessQueue_ReportStaleDrain_PrintsAndAppendsLog(t *testing.T) {
 	dir := tempLogDir(t)
 	q := NewHeadlessQueue(nil, nil, noopPending, dir)
