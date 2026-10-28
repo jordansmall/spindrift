@@ -557,6 +557,13 @@ func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName s
 	return append(args, a.image, "probe-registry-tcp", "-host", host, "-port", strconv.Itoa(port))
 }
 
+// cliWaitDelay bounds Cmd.WaitDelay for this package's container-CLI
+// shell-outs. A killed CLI's grandchild can hold the output pipe open past the
+// context deadline, and Go kills only the direct child, so without WaitDelay
+// CombinedOutput blocks until that grandchild exits. ErrWaitDelay means the CLI
+// itself exited 0.
+const cliWaitDelay = time.Second
+
 // registryProxyProbeTimeout bounds one throwaway probe container's start,
 // probe and exit, never a real Box's runtime, so a wedged container daemon
 // fails the probe in seconds instead of hanging every registry-proxy dispatch
@@ -595,7 +602,9 @@ func (a *ociAdapter) runRegistrySocketProbe(hostSocketPath string) (int, error) 
 
 	containerName := fmt.Sprintf("spindrift-registry-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
 	args := a.registrySocketProbeArgs(hostSocketPath, containerName)
-	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, a.cli, args...)
+	cmd.WaitDelay = cliWaitDelay
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return 0, fmt.Errorf("registry proxy transport probe: %s: timed out after %s: %s: %w", a.cli, registryProxyProbeTimeout, out, errProbeNoVerdict)
@@ -752,7 +761,9 @@ func (a *ociAdapter) probeRegistryTCPOnce(host string, addHost bool) error {
 
 	containerName := fmt.Sprintf("spindrift-registry-tcp-probe-%d-%d", os.Getpid(), time.Now().UnixNano())
 	args := a.registryTCPProbeArgs(host, tcpAddr.Port, containerName, addHost)
-	out, err := exec.CommandContext(ctx, a.cli, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, a.cli, args...)
+	cmd.WaitDelay = cliWaitDelay
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("registry proxy transport probe: %s: tcp-reachability sub-probe timed out after %s: %s: %w", a.cli, registryProxyProbeTimeout, out, errProbeNoVerdict)
@@ -938,8 +949,9 @@ func (a *ociAdapter) reap(name string) {
 }
 
 // removeHostTreeTimeout bounds the `podman unshare rm -rf` fallback so a stuck
-// removal cannot hang Dispatch.Close or Factory.Cleanup.
-const removeHostTreeTimeout = 2 * time.Minute
+// removal cannot hang Dispatch.Close or Factory.Cleanup. A var so tests can
+// shorten it.
+var removeHostTreeTimeout = 2 * time.Minute
 
 // RemoveHostTree removes path, falling back to `podman unshare rm -rf` when
 // the plain removal fails. Rootless podman remaps the Box's uid to a host
@@ -953,7 +965,9 @@ func (a *ociAdapter) RemoveHostTree(path string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), removeHostTreeTimeout)
 	defer cancel()
-	if out, uerr := exec.CommandContext(ctx, a.cli, "unshare", "rm", "-rf", "--", path).CombinedOutput(); uerr != nil {
+	cmd := exec.CommandContext(ctx, a.cli, "unshare", "rm", "-rf", "--", path)
+	cmd.WaitDelay = cliWaitDelay
+	if out, uerr := cmd.CombinedOutput(); uerr != nil && !errors.Is(uerr, exec.ErrWaitDelay) {
 		return fmt.Errorf("%w; podman unshare rm: %v: %s", err, uerr, strings.TrimSpace(string(out)))
 	}
 	return nil

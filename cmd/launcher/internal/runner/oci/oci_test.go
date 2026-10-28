@@ -1730,8 +1730,8 @@ func TestRegistryProxyTransport_ProbeTimesOut_ReturnsError(t *testing.T) {
 	callsFile := filepath.Join(dir, "calls.txt")
 	// The echo records the call before exec replaces this shell with sleep
 	// itself, so killing the *exec.Cmd's PID on timeout kills the sleeper
-	// immediately instead of leaving an orphaned child holding the
-	// CombinedOutput pipe open until it finishes on its own.
+	// immediately; WaitDelay would bound a surviving child anyway (see
+	// TestRegistryProbes_BoundedDespiteSurvivingChild).
 	if err := os.WriteFile(script, []byte(fmt.Sprintf(
 		"#!/bin/sh\necho ok >> %q\nexec sleep 5\n", callsFile,
 	)), 0o755); err != nil {
@@ -1788,6 +1788,77 @@ func TestProbeRegistryTCPReachable_TimesOut_ReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), registryProxyProbeTimeout.String()) {
 		t.Errorf("probeRegistryTCPReachable: error %q should mention the timeout duration %s", err, registryProxyProbeTimeout)
+	}
+}
+
+// fakePodman puts a `podman` script on PATH ahead of the real one. The real
+// PATH stays behind it so the script can reach sleep.
+func fakePodman(t *testing.T, script string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "podman"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
+
+// holdStdoutBackground backgrounds a grandchild that inherits the fake CLI's
+// stdout. Its life is a multiple of cliWaitDelay so a call that waits for it
+// overshoots every bound by a wide margin.
+var holdStdoutBackground = fmt.Sprintf("sleep %d &", 5*int(cliWaitDelay/time.Second))
+
+// Go kills only the direct child on timeout, so a grandchild that inherited
+// stdout would hold CombinedOutput open for its whole life without WaitDelay.
+// The exit-0 rows are the other WaitDelay outcome: the CLI exited cleanly but
+// a grandchild still holds stdout (ErrWaitDelay), which is no verdict either.
+// Mutates registryProxyProbeTimeout, so no test using it may call t.Parallel().
+func TestRegistryProbes_BoundedDespiteSurvivingChild(t *testing.T) {
+	probes := map[string]func(a *ociAdapter, dir string) error{
+		"tcp": func(a *ociAdapter, _ string) error {
+			_, err := a.probeRegistryTCPReachable("host.docker.internal")
+			return err
+		},
+		"socket": func(a *ociAdapter, dir string) error {
+			_, err := a.runRegistrySocketProbe(filepath.Join(dir, "probe.sock"))
+			return err
+		},
+	}
+	const timeout = 200 * time.Millisecond
+	for name, probe := range probes {
+		for _, tc := range []struct {
+			tail     string
+			timedOut bool
+			limit    time.Duration
+		}{
+			{"exec sleep 10", true, timeout + cliWaitDelay + time.Second},
+			{"exit 0", false, cliWaitDelay + time.Second},
+		} {
+			t.Run(name+"/"+tc.tail, func(t *testing.T) {
+				dir := t.TempDir()
+				script := filepath.Join(dir, "fake-cli")
+				if err := os.WriteFile(script, []byte("#!/bin/sh\n"+holdStdoutBackground+"\n"+tc.tail+"\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+
+				orig := registryProxyProbeTimeout
+				registryProxyProbeTimeout = timeout
+				t.Cleanup(func() { registryProxyProbeTimeout = orig })
+
+				a := &ociAdapter{cli: script, image: "spindrift:test"}
+				start := time.Now()
+				err := probe(a, dir)
+				elapsed := time.Since(start)
+				if !errors.Is(err, errProbeNoVerdict) {
+					t.Fatalf("error %v must wrap errProbeNoVerdict", err)
+				}
+				if tc.timedOut && !strings.Contains(err.Error(), timeout.String()) {
+					t.Errorf("error %q should mention the timeout duration %s", err, timeout)
+				}
+				if elapsed > tc.limit {
+					t.Errorf("took %s, want under %s: a surviving child must not hold the call past WaitDelay", elapsed, tc.limit)
+				}
+			})
+		}
 	}
 }
 
@@ -3023,6 +3094,70 @@ func TestOCIRemoveHostTree(t *testing.T) {
 				t.Errorf("tree gone = %v, want %v", os.IsNotExist(statErr), tc.wantGone)
 			}
 		})
+	}
+}
+
+// stuckTree makes a tree whose plain os.RemoveAll fails (read-only subdir), so
+// RemoveHostTree reaches its `podman unshare rm -rf` fallback.
+func stuckTree(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "tree")
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sub, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+	return root
+}
+
+// A surviving grandchild holding stdout must not stretch a timed-out
+// `podman unshare rm` past WaitDelay (issue #6047). Mutates
+// removeHostTreeTimeout, so no test using it may call t.Parallel().
+func TestOCIRemoveHostTree_TimeoutBoundedDespiteSurvivingChild(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can remove a read-only tree itself")
+	}
+	root := stuckTree(t)
+	fakePodman(t, holdStdoutBackground+"\nexec sleep 10")
+
+	orig := removeHostTreeTimeout
+	removeHostTreeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { removeHostTreeTimeout = orig })
+
+	start := time.Now()
+	err := (&ociAdapter{cli: "podman"}).RemoveHostTree(root)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("RemoveHostTree: want error when unshare rm times out")
+	}
+	if limit := removeHostTreeTimeout + cliWaitDelay + time.Second; elapsed > limit {
+		t.Errorf("RemoveHostTree took %s, want under %s", elapsed, limit)
+	}
+}
+
+// A CLI that exits 0 while a backgrounded child still holds stdout removed the
+// tree: ErrWaitDelay is success, not a failure.
+func TestOCIRemoveHostTree_ExitZeroWithSurvivingChildIsSuccess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can remove a read-only tree itself")
+	}
+	root := stuckTree(t)
+	fakePodman(t, holdStdoutBackground+"\nexit 0")
+
+	start := time.Now()
+	err := (&ociAdapter{cli: "podman"}).RemoveHostTree(root)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("RemoveHostTree: want nil when the CLI exited 0, got %v", err)
+	}
+	if limit := cliWaitDelay + time.Second; elapsed > limit {
+		t.Errorf("RemoveHostTree took %s, want under %s", elapsed, limit)
 	}
 }
 
