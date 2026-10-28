@@ -421,9 +421,9 @@ func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 	}
 }
 
-// The full Settle entry point, not just the standalone fileIssueIntents helper
-// above, drives the filing relay on the "ready" outcome path. Issue #2019
-// wired #2018's dormant fileIssueIntents into Settle.Settle.
+// The full Settle entry point, not just the fileIssueIntentsDetailed helper the
+// tests above call directly, drives the filing relay on the "ready" outcome
+// path. Issue #2019 wired #2018's dormant fileIssueIntents into Settle.Settle.
 func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	const issNum = "2019"
 	const prURL = "https://github.com/owner/repo/pull/2019"
@@ -451,8 +451,8 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 		t.Errorf("PostIssueCalls = %+v, want exactly the one intent filed", fc.PostIssueCalls)
 	}
 	// Guards gate.go's Config.FindingLabel read: unlike the direct
-	// fileIssueIntents calls above, this test drives the real work path from
-	// Settle.Settle through gate.go.
+	// fileIssueIntentsDetailed calls above, this test drives the real work path
+	// from Settle.Settle through gate.go.
 	if len(fc.PostIssueCalls) == 1 && (len(fc.PostIssueCalls[0].Labels) != 1 || fc.PostIssueCalls[0].Labels[0] != "agent-review-finding") {
 		t.Errorf("PostIssueCalls[0].Labels = %v, want [agent-review-finding]", fc.PostIssueCalls[0].Labels)
 	}
@@ -519,9 +519,10 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 }
 
 // fileIssueIntentsDetailed reports both success and failure as filedIntent
-// entries, rather than silently dropping failures the way fileIssueIntents'
-// URL-only return does. fc.PostIssueErr scripts every PostIssue call on a
-// given fake uniformly, so each case needs its own fake.
+// entries, rather than silently dropping failures the way the now-deleted
+// fileIssueIntents wrapper's URL-only return did. fc.PostIssueErr scripts
+// every PostIssue call on a given fake uniformly, so each case needs its own
+// fake.
 func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) {
 	result := dispatch.Result{
 		IssueIntentsFound: true,
