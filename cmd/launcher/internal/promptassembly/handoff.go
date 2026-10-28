@@ -3,6 +3,7 @@ package promptassembly
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 )
@@ -44,9 +45,12 @@ func ParseNonnegBudgetTokens(s string) (n int, ok bool) {
 	return 0, false
 }
 
-// ParseNonnegBudgetUSD is ParseNonnegBudgetTokens' -max-budget-usd counterpart.
+// ParseNonnegBudgetUSD is ParseNonnegBudgetTokens' -max-budget-usd counterpart,
+// and the host's floatNonnegSchema parses MAX_BUDGET_USD through it too. It
+// rejects infinities explicitly: ParseFloat returns +Inf for "inf" with a nil
+// error, and json.Marshal of the handoff then fails on it (issue #6029).
 func ParseNonnegBudgetUSD(s string) (n float64, ok bool) {
-	if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 0 {
+	if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 0 && !math.IsInf(v, 0) {
 		return v, true
 	}
 	return 0, false
