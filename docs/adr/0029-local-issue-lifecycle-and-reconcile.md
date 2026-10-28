@@ -62,8 +62,8 @@ the explicit operator gesture `spindrift recover <n>` (amended by issue #4656
 for stranded `agent-failed` bundles, below). Reconcile's orphan-reset
 does not overturn that; it **supplies the missing liveness signal**. It resets
 `InProgress → Dispatchable` only behind a strong composite death signal: no
-merged/open PR or agent branch, **and** `logs/issue-<num>.log` stale beyond a
-threshold, **and** — when the container runtime is reachable on-host — the box
+PR in any state (closed unmerged included) or agent branch, **and**
+`logs/issue-<num>.log` stale beyond a threshold, **and** — when the container runtime is reachable on-host — the box
 container absent. #600's worry was overlapping runners on a shared GitHub repo;
 a solo `local` operator on one host can often authoritatively ask the runtime
 whether the box still lives, a stronger signal the general case lacks. Absent
