@@ -1535,8 +1535,10 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	}
 	// An open PR does not vouch for the run: a Box that opens its draft PR
 	// in-box can still have crashed before its land pass, and the adopt path
-	// below would mark that PR ready and merge it (issue #5973).
-	if res.Found && sit.Unreviewed {
+	// below would mark that PR ready and merge it (issue #5973). Only a success
+	// self-report carries a stale ready; a run without one is left to the
+	// adopt path's merge gate.
+	if res.Found && sit.SelfReportSuccess && sit.Unreviewed {
 		return declineUnreviewed()
 	}
 	if !res.Found {

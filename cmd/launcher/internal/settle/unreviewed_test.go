@@ -15,6 +15,25 @@ func implementReadyPasses() []passmanifest.Entry {
 	return []passmanifest.Entry{{Pass: 1, Kind: "implement", OutcomeFound: true}}
 }
 
+// landLastNoOutcomePasses is the #2363 shape: the loop reached its land pass,
+// which died before printing an outcome.
+func landLastNoOutcomePasses() []passmanifest.Entry {
+	return []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: true},
+		{Pass: 2, Kind: "review", Verdict: "APPROVE"},
+		{Pass: 3, Kind: "land", OutcomeFound: false},
+	}
+}
+
+// fixLastPasses is a loop that stopped in a fix pass, before its land pass.
+func fixLastPasses() []passmanifest.Entry {
+	return []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: true},
+		{Pass: 2, Kind: "review", Verdict: "REQUEST_CHANGES"},
+		{Pass: 3, Kind: "fix"},
+	}
+}
+
 // Issue #5973: a status=ready that came from an implement pass never cleared
 // review, so settle fails it with its own reason and lands nothing.
 func TestSettle_ReadyFromUnreviewedPass_FailsUnreviewedAndLandsNothing(t *testing.T) {
@@ -42,7 +61,7 @@ func TestSettle_ReadyFromUnreviewedPass_FailsUnreviewedAndLandsNothing(t *testin
 	}
 	var found bool
 	for _, c := range fc.CommentCalls {
-		if strings.Contains(c.Body, "other than its land pass") && strings.Contains(c.Body, "never reviewed and landed") && strings.Contains(c.Body, "`my-ready`") && !strings.Contains(c.Body, "never cleared review") {
+		if strings.Contains(c.Body, "stopped before its land pass finished") && strings.Contains(c.Body, "never reviewed and landed") && strings.Contains(c.Body, "`my-ready`") && !strings.Contains(c.Body, "never cleared review") {
 			found = true
 		}
 	}
@@ -85,7 +104,7 @@ func TestSettle_ReadyFromLegacyPass_StillLands(t *testing.T) {
 	}
 }
 
-func TestSituationFor_UnreviewedNeedsSuccessSelfReportAndUnreviewedPasses(t *testing.T) {
+func TestSituationFor_UnreviewedFollowsSelfReportAndPasses(t *testing.T) {
 	s := newTestSettle(baseConfig(), forge.NewFake(testDispatchLabels), forge.NewFake(testDispatchLabels))
 	ready := outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusReady}}
 	cases := []struct {
@@ -96,7 +115,11 @@ func TestSituationFor_UnreviewedNeedsSuccessSelfReportAndUnreviewedPasses(t *tes
 		{"success with implement source", dispatch.Result{Resolved: ready, Passes: implementReadyPasses()}, true},
 		{"success with land source", dispatch.Result{Resolved: ready, Passes: []passmanifest.Entry{{Pass: 1, Kind: "land", OutcomeFound: true}}}, false},
 		{"success without passes", dispatch.Result{Resolved: ready}, false},
-		{"no success self-report", dispatch.Result{Passes: implementReadyPasses()}, false},
+		{"no success self-report, implement last", dispatch.Result{Passes: implementReadyPasses()}, true},
+		{"no success self-report, fix last", dispatch.Result{Passes: fixLastPasses()}, true},
+		{"no success self-report, land last", dispatch.Result{Passes: landLastNoOutcomePasses()}, false},
+		{"no success self-report, no passes", dispatch.Result{}, false},
+		{"blocked self-report, implement last", dispatch.Result{Resolved: outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusBlocked}}, Passes: implementReadyPasses()}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,10 +193,31 @@ func TestSettle_GithubReadOnly_UnreviewedSelfReportDoesNotAdopt(t *testing.T) {
 	}
 }
 
-// recover declines an unreviewed ready on both landing shapes (issue #5973):
-// the PR-shaped adopt and the push-only landing that a bundle alone justifies.
+// recover declines an unreviewed run on both landing shapes (issues #5973,
+// #5984): the PR-shaped adopt and the push-only landing that a bundle alone
+// justifies. The no-report cases are runs stopped in implement or fix.
 func TestSettle_SettleRelayedBranch_UnreviewedDeclines(t *testing.T) {
 	const issNum = "5973"
+	ready := outcome.Resolved{
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
+	}
+	results := []struct {
+		name   string
+		result dispatch.Result
+	}{
+		{"ready-from-implement", dispatch.Result{Resolved: ready, Passes: implementReadyPasses()}},
+		{"no-report-implement-last", dispatch.Result{Passes: []passmanifest.Entry{{Pass: 1, Kind: "implement"}}}},
+		{"no-report-fix-last", dispatch.Result{Passes: fixLastPasses()}},
+		{"blocked-report-fix-last", dispatch.Result{
+			Resolved: outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusBlocked}},
+			Passes:   fixLastPasses(),
+		}},
+		{"ambiguous-report-implement-last", dispatch.Result{
+			Resolved: outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusAmbiguous}},
+			Passes:   implementReadyPasses(),
+		}},
+	}
 	cases := []struct {
 		name  string
 		build func(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge)
@@ -186,36 +230,60 @@ func TestSettle_SettleRelayedBranch_UnreviewedDeclines(t *testing.T) {
 		}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			fc := forge.NewFake(testDispatchLabels)
-			fc.BranchPrefix = "agent/issue-"
-			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-failed"}})
-			c := baseConfig()
-			c.OutboxDir = func(num string) string { return "/outbox/" + num }
-			tr, cf := tc.build(fc)
-			s := newTestSettle(c, tr, cf)
+		for _, rc := range results {
+			t.Run(tc.name+"/"+rc.name, func(t *testing.T) {
+				fc := forge.NewFake(testDispatchLabels)
+				fc.BranchPrefix = "agent/issue-"
+				fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-failed"}})
+				c := baseConfig()
+				c.OutboxDir = func(num string) string { return "/outbox/" + num }
+				tr, cf := tc.build(fc)
+				s := newTestSettle(c, tr, cf)
 
-			result := dispatch.Result{
-				Resolved: outcome.Resolved{
-					SelfReportFound: true,
-					SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-				},
-				Passes: implementReadyPasses(),
-			}
-			sit := s.situationFor(issNum, false, result)
-			sit.BundlePresent = true
-			if !sit.Unreviewed {
-				t.Fatal("fixture must be unreviewed")
-			}
-			got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
-			if got || err != nil {
-				t.Fatalf("SettleRelayedBranch = %v, %v; want false, nil", got, err)
-			}
-			if len(fc.RelayBundleCalls) != 0 || len(fc.CreateDraftPRCalls) != 0 || len(fc.RecordLandingCalls) != 0 || fc.Merged != "" {
-				t.Errorf("nothing may land; relay=%+v draft=%+v landing=%+v merged=%q",
-					fc.RelayBundleCalls, fc.CreateDraftPRCalls, fc.RecordLandingCalls, fc.Merged)
-			}
-		})
+				sit := s.situationFor(issNum, false, rc.result)
+				sit.BundlePresent = true
+				if !sit.Unreviewed {
+					t.Fatal("fixture must be unreviewed")
+				}
+				got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, rc.result)
+				if got || err != nil {
+					t.Fatalf("SettleRelayedBranch = %v, %v; want false, nil", got, err)
+				}
+				if len(fc.RelayBundleCalls) != 0 || len(fc.CreateDraftPRCalls) != 0 || len(fc.RecordLandingCalls) != 0 || fc.Merged != "" {
+					t.Errorf("nothing may land; relay=%+v draft=%+v landing=%+v merged=%q",
+						fc.RelayBundleCalls, fc.CreateDraftPRCalls, fc.RecordLandingCalls, fc.Merged)
+				}
+			})
+		}
+	}
+}
+
+// A push-only run with no self-report whose loop reached its land pass is not
+// unreviewed: the bundle alone still justifies the landing (issues #2378, #5984).
+func TestSettle_SettleRelayedBranch_NoReportLandLastStillLands(t *testing.T) {
+	const issNum = "5984"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-failed"}})
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
+	result := dispatch.Result{Passes: landLastNoOutcomePasses()}
+
+	sit := s.situationFor(issNum, false, result)
+	sit.BundlePresent = true
+	if sit.Unreviewed {
+		t.Fatal("a land-last manifest must not be unreviewed")
+	}
+	var got bool
+	var err error
+	out := testutil.CaptureStdout(t, func() { got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result) })
+	if !got || err != nil {
+		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+	}
+	assertOutputHas(t, out, "status=adopted")
+	if len(fc.RecordLandingCalls) == 0 || fc.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: issNum, Landing: fc.AgentBranch(issNum)}) {
+		t.Errorf("RecordLandingCalls = %+v, want the agent branch recorded as the landing", fc.RecordLandingCalls)
 	}
 }
 
@@ -274,6 +342,58 @@ func TestSettle_LocalPushOnly_UnreviewedBundlePresentFailsUnreviewed(t *testing.
 				if call.To == forge.Recoverable {
 					t.Errorf("must not promote to Recoverable; calls=%+v", fc.TransitionStateCalls)
 				}
+			}
+		})
+	}
+}
+
+// A signal-killed local run that never printed a self-report is recoverable
+// only if its loop reached the land pass: stopped in implement or fix, recover
+// would decline the bundle, so settle fails it unreviewed (issues #5984, #2363).
+func TestSettle_LocalPushOnly_KilledNoReportBundlePresent_FailsUnreviewedUnlessLandLast(t *testing.T) {
+	const issNum = "5984"
+	cases := []struct {
+		name           string
+		passes         []passmanifest.Entry
+		wantUnreviewed bool
+	}{
+		{"implement-last", []passmanifest.Entry{{Pass: 1, Kind: "implement"}}, true},
+		{"fix-last", fixLastPasses(), true},
+		{"land-last", landLastNoOutcomePasses(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outbox := t.TempDir()
+			writeBundle(t, outbox)
+			fc := forge.NewFake(testDispatchLabels)
+			fc.BranchPrefix = "agent/issue-"
+			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+			d, path := stampedFake(t, "work:5984@x")
+			c := baseConfig()
+			c.LogPath = func(string) string { return path }
+			c.OutboxDir = func(string) string { return outbox }
+			s := newTestSettle(c, fc, fc.AsLocal())
+			result := dispatch.Result{KilledBySignal: true, Passes: tc.passes}
+
+			testutil.CaptureStdout(t, func() { s.Settle(d, issNum, 0, result) })
+
+			var recoverable bool
+			for _, call := range fc.TransitionStateCalls {
+				if call.To == forge.Recoverable {
+					recoverable = true
+				}
+			}
+			if !tc.wantUnreviewed {
+				if !recoverable {
+					t.Errorf("want Recoverable; calls=%+v", fc.TransitionStateCalls)
+				}
+				return
+			}
+			if recoverable {
+				t.Errorf("must not promote to Recoverable; calls=%+v", fc.TransitionStateCalls)
+			}
+			if ops := settledOps(t, path); len(ops) != 1 || ops[0].State != "failed" || ops[0].Reason != ReasonUnreviewed {
+				t.Fatalf("settled ops = %+v, want one failed/%s", ops, ReasonUnreviewed)
 			}
 		})
 	}

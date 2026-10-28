@@ -14,9 +14,10 @@ type Situation struct {
 	BundlePresent     bool
 	SelfReportSuccess bool
 
-	// Unreviewed means the self-reported success came from a review-loop pass
-	// other than the land pass, and no land pass outcome followed it (issue
-	// #5973).
+	// Unreviewed means the review loop stopped before its land pass finished:
+	// with a success self-report, the ready came from a pass other than the
+	// land pass and no land pass outcome followed it (issue #5973); without a
+	// success self-report, the loop stopped in implement or fix (issue #5984).
 	Unreviewed bool
 }
 
@@ -25,11 +26,20 @@ type Situation struct {
 // openPRFound passes through unchanged.
 func (s *Settle) situationFor(num string, openPRFound bool, result dispatch.Result) Situation {
 	success := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
+	// A run with no success self-report (none, or blocked/ambiguous) has no
+	// stale ready to judge, so only where the loop stopped matters; a crashed
+	// land pass already cleared review (#2378, #2363) and stays trusted.
+	var unreviewed bool
+	if success {
+		unreviewed = passmanifest.UnreviewedReady(result.Passes)
+	} else {
+		unreviewed = passmanifest.StoppedBeforeLand(result.Passes)
+	}
 	return Situation{
 		OpenPRFound:       openPRFound,
 		BundlePresent:     s.bundlePresent(num),
 		SelfReportSuccess: success,
-		Unreviewed:        success && passmanifest.UnreviewedReady(result.Passes),
+		Unreviewed:        unreviewed,
 	}
 }
 
