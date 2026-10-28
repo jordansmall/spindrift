@@ -343,8 +343,8 @@ func (c container) reapable(now time.Time) bool {
 }
 
 // inspectContainer runs a single inspect and decodes it into a container, so
-// a caller that both classifies and acts on one (Run, reap, Kill) does it
-// from one observation instead of two: acting on the ID this call returns,
+// a caller that both classifies and acts on one (Run, reap, and Kill through
+// inspect) does it from one observation instead of two: acting on the ID this call returns,
 // rather than re-resolving the name later, is what keeps a removal from
 // landing on a container a sibling launcher created in between (issue #3633).
 // ok means the container exists — true whenever the inspect command itself
@@ -355,9 +355,31 @@ func (c container) reapable(now time.Time) bool {
 // template this replaced could not carry (podman renders a Go time.Time
 // there, docker a string).
 func (a *ociAdapter) inspectContainer(name string) (container, bool) {
+	c, ok, _ := a.inspect(name)
+	return c, ok
+}
+
+// inspect is inspectContainer plus the one distinction its bool drops: err is
+// non-nil when the inspect failed for a reason other than the container not
+// existing (daemon unreachable, ...), so existence is unknown rather than
+// absent. Run, reap and IsRunning treat that as absent; Kill must not, or it
+// reports success over a Box that may still be running. Not-found is matched
+// on stderr, not exit code: podman exits 125, docker 1.
+func (a *ociAdapter) inspect(name string) (container, bool, error) {
 	out, err := exec.Command(a.cli, "inspect", "--format={{json .}}", name).Output()
 	if err != nil {
-		return container{}, false
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			return container{}, false, err
+		}
+		stderr := strings.TrimSpace(string(ee.Stderr))
+		if low := strings.ToLower(stderr); strings.Contains(low, "no such object") || strings.Contains(low, "no such container") {
+			return container{}, false, nil
+		}
+		if stderr == "" {
+			return container{}, false, err
+		}
+		return container{}, false, fmt.Errorf("%w: %s", err, stderr)
 	}
 	var raw struct {
 		ID      string
@@ -368,7 +390,7 @@ func (a *ociAdapter) inspectContainer(name string) (container, bool) {
 	}
 	if err := json.Unmarshal(out, &raw); err != nil {
 		fmt.Fprintf(os.Stderr, "==> WARNING: container %s: inspect output did not decode as JSON: %v\n", name, err)
-		return container{}, true
+		return container{}, true, nil
 	}
 	c := container{id: raw.ID, status: raw.State.Status}
 	if t, err := time.Parse(time.RFC3339Nano, raw.Created); err == nil {
@@ -376,7 +398,7 @@ func (a *ociAdapter) inspectContainer(name string) (container, bool) {
 	} else {
 		fmt.Fprintf(os.Stderr, "==> WARNING: container %s: unparseable Created timestamp %q: %v\n", name, raw.Created, err)
 	}
-	return c, true
+	return c, true, nil
 }
 
 // IsRunning reports whether a container named name exists, is not terminal,
@@ -978,14 +1000,22 @@ func (a *ociAdapter) RemoveHostTree(path string) error {
 // distinction reap's reapable check draws. Unlike reap, Kill is
 // unconditional — an operator-driven terminate (ADR 0024, issue #649) removes
 // a live container too — but it still pins the removal to the ID
-// inspectContainer observed, not name, for the same reason Run and reap do.
-// A container that no longer exists is not an error, matching the
+// inspect observed, not name, for the same reason Run and reap do.
+// A container confirmed not to exist is not an error, matching the
 // Runner.Kill contract; that is the common settle-phase case, where
-// reapAfterSuccess already removed the Box.
+// reapAfterSuccess already removed the Box. An inspect that could not tell,
+// or that found the container but no ID to remove, is an error: returning nil
+// there would let Terminate report a still-running Box as reclaimed.
 func (a *ociAdapter) Kill(name string) error {
-	c, ok := a.inspectContainer(name)
+	c, ok, err := a.inspect(name)
+	if err != nil {
+		return fmt.Errorf("kill %s: could not determine whether the container exists: %w", name, err)
+	}
 	if !ok {
 		return nil
+	}
+	if c.id == "" {
+		return fmt.Errorf("kill %s: inspect found the container but yielded no ID to remove; nothing removed", name)
 	}
 	return a.remove(c)
 }
