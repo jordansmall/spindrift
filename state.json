@@ -1,20 +1,15 @@
 {
   "lastSwept": "53ce65ae83db21e304117a0bca841870b095de03",
-  "cursor": "cmd/launcher/testdata/golden/stats-reverts-immature.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-28T15:05:21.959024183-04:00"
-  },
+  "cursor": "docs/adr/0004-build-realizes-the-image-with-container-fallback.md",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 28,
+    "output_tokens": 11416,
+    "cache_read_input_tokens": 857843,
+    "cache_creation_input_tokens": 96615,
+    "total_cost_usd": 1.1729205999999999,
+    "duration_ms": 126987,
+    "duration_api_ms": 125955,
+    "num_turns": 17
   }
 }
