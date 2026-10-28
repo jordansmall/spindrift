@@ -462,10 +462,11 @@ func TestCommitSubjects_DoesNotMutateOrigin(t *testing.T) {
 }
 
 // installGitLogStderrNoiseShim puts a "git" shim ahead of the real one on PATH
-// that writes noise to stderr for a `git ... log ...` invocation only, matching
-// CommitSubjects' own `git -C dir log ...` shape where $3 is the subcommand. It
-// then execs the real git unchanged, so stdout still carries the genuine commit
-// subjects and every other subcommand is untouched.
+// that writes noise to stderr for any invocation carrying a `log` argument.
+// gitexec.GuardedArgs puts `-C dir` and `-c` guard pairs ahead of the
+// subcommand, so the shim scans all of argv for `log` instead of testing a fixed
+// position. It then execs the real git unchanged, so stdout still carries the
+// genuine commit subjects and every other invocation is untouched.
 func installGitLogStderrNoiseShim(t *testing.T, noise string) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
@@ -474,9 +475,11 @@ func installGitLogStderrNoiseShim(t *testing.T, noise string) {
 	}
 	shimDir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$3\" = \"log\" ]; then\n" +
+		"for a in \"$@\"; do\n" +
+		"  [ \"$a\" = log ] || continue\n" +
 		"  echo '" + noise + "' >&2\n" +
-		"fi\n" +
+		"  break\n" +
+		"done\n" +
 		"exec " + realGit + " \"$@\"\n"
 	shim := filepath.Join(shimDir, "git")
 	forgetest.WriteFile(t, shim, script)
