@@ -265,10 +265,11 @@ grep -nE '^gate:|error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.
 The gate evaluates that same set in parallel `nix-eval-jobs` workers (their
 count is clamped to the Box's memory limit) and builds each check as it
 evaluates, so builds overlap evaluation instead of waiting behind a
-single-threaded one. The `gate:` lines name each failing attr and end in a
-one-line summary, and the exit code is non-zero on any failure. `nix build
-.#checks-inbox` builds the same set as one aggregate and stays for CI and
-humans, but evaluates single-threaded, so a Box should use the gate.
+single-threaded one. The `gate:` lines name each failing attr (or
+`nix-eval-jobs` / `nix build (batch)` when a failure cannot be pinned to one)
+and end in a one-line summary, and the exit code is non-zero on any failure.
+`nix build .#checks-inbox` builds the same set as one aggregate and stays for
+CI and humans, but evaluates single-threaded, so a Box should use the gate.
 
 The gate builds with `-L` (`--print-build-logs`) already, so it is complete
 as written. Keep `-L` on every single-attr `nix build`: without it a failure

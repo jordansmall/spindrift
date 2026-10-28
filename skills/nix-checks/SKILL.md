@@ -33,7 +33,8 @@ Run the gate and redirect to a file:
 The gate evaluates the same set `nix build .#checks-inbox` builds, but in
 parallel `nix-eval-jobs` workers (their count is clamped to the Box's memory
 limit), and builds each check as it evaluates. The `gate:` lines name each
-failing attr and end in a one-line summary, and the exit code is non-zero on
+failing attr (or `nix-eval-jobs` / `nix build (batch)` when a failure cannot be
+pinned to one) and end in a one-line summary, and the exit code is non-zero on
 any failure. `checks-inbox` stays for CI and humans; its evaluation is
 single-threaded, so a Box should use the gate.
 
