@@ -903,6 +903,10 @@ func TestRunQuickstart_FineGrainedToken_PrintsRequiredPermissions(t *testing.T) 
 	}
 }
 
+// narrowTokenScopes is the classic-token grant the audit passes without the
+// ACCEPT gate.
+var narrowTokenScopes = []string{"public_repo"}
+
 func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
@@ -915,7 +919,7 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"read:user"}, runtimes: map[string]bool{"podman": true}}
+	env := fakeEnvironment{tokenScopes: narrowTokenScopes, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -930,7 +934,7 @@ func TestRunQuickstart_ClassicTokenNarrowScope_AcceptedWithoutGate(t *testing.T)
 	if strings.Contains(out.String(), "ACCEPT") {
 		t.Errorf("expected no ACCEPT gate for a narrow-scope classic token, got transcript:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "read:user") {
+	if !strings.Contains(out.String(), "public_repo") {
 		t.Errorf("expected transcript to confirm the token's scopes (sourced from the Environment seam), got:\n%s", out.String())
 	}
 }
@@ -1001,7 +1005,7 @@ func TestRunQuickstart_NoAmbientToken_PrintsGuidedPATInstructions(t *testing.T) 
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{tokenScopes: []string{"read:user"}, runtimes: map[string]bool{"podman": true}}
+	env := fakeEnvironment{tokenScopes: narrowTokenScopes, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}
@@ -1026,7 +1030,7 @@ func TestRunQuickstart_BlankTokenInput_FallsBackToGHAuthToken(t *testing.T) {
 		"claude-oauth-faketoken",
 	}, "\n") + "\n")
 
-	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", tokenScopes: []string{"read:user"}, runtimes: map[string]bool{"podman": true}}
+	env := fakeEnvironment{ghAuthToken: "gho_fallbacktoken", tokenScopes: narrowTokenScopes, runtimes: map[string]bool{"podman": true}}
 	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
 		t.Fatalf("runQuickstart: %v", err)
 	}

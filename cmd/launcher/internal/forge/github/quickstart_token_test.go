@@ -98,6 +98,8 @@ func TestAcquireToken_ClassicTokenAudit(t *testing.T) {
 		{"narrow", []string{"public_repo"}, nil, "", "", "ok: scopes are least-privilege"},
 		{"broad accepted", []string{"repo", "admin:org"}, nil, "ACCEPT", "", "broader-than-needed scope(s): repo, admin:org"},
 		{"broad declined", []string{"read:org"}, nil, "no", "aborted: GitHub token grants broader access than needed (read:org)", ""},
+		{"extra scopes accepted", []string{"public_repo", "gist", "user", "write:packages"}, nil, "ACCEPT", "", "broader-than-needed scope(s): gist, user, write:packages"},
+		{"extra scope declined", []string{"public_repo", "delete_repo"}, nil, "no", "aborted: GitHub token grants broader access than needed (delete_repo)", "WARNING: token grants broader-than-needed scope(s): delete_repo"},
 		{"scopes error", nil, errors.New("net down"), "", "read token scopes: net down", ""},
 	}
 	for _, c := range cases {
