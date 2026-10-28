@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -528,6 +529,158 @@ func TestLastPRIntentInLog_ValidLineNotShadowedByEarlierRejectedMention(t *testi
 	}
 }
 
+// signalScanCase adapts the three signal scanners to one shape so the same-line
+// regression tests (issue #6023) run against each.
+type signalScanCase struct {
+	name  string
+	token string
+	scan  func(path string) ([]string, bool, outcome.Rejections, error)
+}
+
+func signalScanCases() []signalScanCase {
+	return []signalScanCase{
+		{"pr intent", outcome.PRIntentToken, func(p string) ([]string, bool, outcome.Rejections, error) {
+			b, ok, r, err := outcome.LastPRIntentInLog(p, "the-nonce")
+			return []string{b}, ok, r, err
+		}},
+		{"comment", outcome.CommentToken, func(p string) ([]string, bool, outcome.Rejections, error) {
+			b, ok, r, err := outcome.LastCommentLineInLog(p, "the-nonce")
+			return []string{b}, ok, r, err
+		}},
+		{"issue intent", outcome.IssueIntentToken, func(p string) ([]string, bool, outcome.Rejections, error) {
+			b, r, err := outcome.AllIssueIntentLinesInLog(p, "the-nonce")
+			return b, len(b) > 0, r, err
+		}},
+	}
+}
+
+// Issue #6023: one stream-json assistant text message is one physical log line
+// with its newlines escaped, so a prose mention of a token earlier in the
+// message must not hide a later nonce-verified marker on the same line.
+func TestSignalScanners_ProseMentionDoesNotHideLaterMarkerOnSameLine(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("payload"))
+	for _, c := range signalScanCases() {
+		t.Run(c.name, func(t *testing.T) {
+			line := `{"type":"assistant","message":{"content":[{"type":"text","text":"Emitting the ` + c.token +
+				` line now.\n` + c.token + ` the-nonce ` + payload +
+				`\nSPINDRIFT_OUTCOME issue=1 landing=x status=ready note=ok"}]}}`
+			got, found, rej, err := c.scan(writeLog(t, line))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !found || len(got) != 1 || got[0] != "payload" {
+				t.Errorf("got %q found=%v, want [payload]", got, found)
+			}
+			if rej.Total() != 0 {
+				t.Errorf("rejections: got %+v, want none", rej)
+			}
+		})
+	}
+}
+
+// Issue #6023: the opposite order on one line. A genuine marker followed by a
+// rejected mention still wins, and the mention is counted once per occurrence.
+func TestSignalScanners_GenuineMarkerThenRejectedMentionOnSameLine(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("payload"))
+	for _, c := range signalScanCases() {
+		t.Run(c.name, func(t *testing.T) {
+			line := `{"type":"user","content":"` + c.token + ` the-nonce ` + payload +
+				`\n` + c.token + ` wrong-nonce whatever"}`
+			got, found, rej, err := c.scan(writeLog(t, line))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !found || len(got) != 1 || got[0] != "payload" {
+				t.Errorf("got %q found=%v, want [payload]", got, found)
+			}
+			if rej.NonceMismatch != 1 || rej.Malformed != 0 {
+				t.Errorf("rejections: got %+v, want one NonceMismatch", rej)
+			}
+		})
+	}
+}
+
+// Issue #6023: the per-line reject rules keep their meaning on a later
+// occurrence. A non-leading empty payload is a placeholder, not a rejection
+// (#3668); a non-leading non-empty undecodable payload is Malformed and feeds
+// LongestPayload (#3670).
+func TestSignalScanners_LaterOccurrenceKeepsRejectRules(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString([]byte("payload"))
+	for _, c := range signalScanCases() {
+		t.Run(c.name+"/empty payload not counted", func(t *testing.T) {
+			line := `{"type":"user","content":"` + c.token + ` the-nonce ` + payload +
+				`\nprintf '` + c.token + ` the-nonce %s\n'"}`
+			got, found, rej, err := c.scan(writeLog(t, line))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !found || len(got) != 1 || got[0] != "payload" {
+				t.Errorf("got %q found=%v, want [payload]", got, found)
+			}
+			if rej.Total() != 0 {
+				t.Errorf("rejections: got %+v, want none", rej)
+			}
+		})
+		t.Run(c.name+"/undecodable payload counted", func(t *testing.T) {
+			line := `{"type":"user","content":"` + c.token + ` the-nonce ` + payload +
+				`\n` + c.token + ` the-nonce abcde\n"}`
+			got, found, rej, err := c.scan(writeLog(t, line))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !found || len(got) != 1 || got[0] != "payload" {
+				t.Errorf("got %q found=%v, want [payload]", got, found)
+			}
+			if rej.Malformed != 1 || rej.LongestPayload != 5 || rej.NonceMismatch != 0 {
+				t.Errorf("rejections: got %+v, want one Malformed with LongestPayload 5", rej)
+			}
+		})
+	}
+}
+
+// Issue #6023: two identical verifying intents on one line dedupe to one by
+// decoded payload (#2068), while distinct ones are both collected.
+func TestAllIssueIntentLinesInLog_TwoIntentsOnOneLine(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{"distinct", `SPINDRIFT_ISSUE_INTENT the-nonce YQ==\nSPINDRIFT_ISSUE_INTENT the-nonce Yg==`, []string{"a", "b"}},
+		{"identical", `SPINDRIFT_ISSUE_INTENT the-nonce YQ==\nSPINDRIFT_ISSUE_INTENT the-nonce YQ==`, []string{"a"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeLog(t, `{"type":"user","message":{"content":[{"type":"tool_result","content":"`+c.line+`"}]}}`)
+			got, rej, err := outcome.AllIssueIntentLinesInLog(path, "the-nonce")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+			if rej.Total() != 0 {
+				t.Errorf("rejections: got %+v, want none", rej)
+			}
+		})
+	}
+}
+
+// Issue #6023: when two verifying markers share a line, the later one wins.
+func TestLastPRIntentInLog_LaterVerifyingMarkerOnSameLineWins(t *testing.T) {
+	first := encodePRIntent(t, "first", "one")
+	second := encodePRIntent(t, "second", "two")
+	path := writeLog(t, `{"type":"user","content":"SPINDRIFT_PR_INTENT the-nonce `+first+
+		`\nSPINDRIFT_PR_INTENT the-nonce `+second+`"}`)
+	body, found, _, err := outcome.LastPRIntentInLog(path, "the-nonce")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found || body != "second\n\ntwo" {
+		t.Errorf("got %q found=%v, want the later marker", body, found)
+	}
+}
+
 // A line whose nonce does not match this run's own is the shape an untrusted
 // author's echoed text takes, since they wrote it before the nonce was minted.
 // It must never open a PR, and must surface as an error the caller can warn on
@@ -950,7 +1103,7 @@ func TestLastCommentLineInLog_NonceMismatchCountsRejectedLines(t *testing.T) {
 }
 
 // An empty expectedNonce never verifies a line, mirroring LineHasNonce's own
-// invariant even though classifySignalLine does not call it. The fixture
+// invariant even though classifySignalAt does not call it. The fixture
 // has only one field after the token, so under issue #2089 it also reads as a
 // doc example rather than a signal attempt: it stays silently non-matched
 // (err == nil) rather than warning.
@@ -1287,7 +1440,7 @@ func TestAllIssueIntentLinesInLog_DedupsSubagentEcho(t *testing.T) {
 
 // Issue #2976: a token-bearing line with an undecodable payload is dropped but
 // counted via rejectedCount, exactly as a nonce mismatch is. Both are
-// token-bearing lines that failed to verify per classifySignalLine.
+// token-bearing lines that failed to verify per classifySignalAt.
 func TestAllIssueIntentLinesInLog_MalformedBase64CountedAsRejected(t *testing.T) {
 	genuine := base64.StdEncoding.EncodeToString([]byte(`{"title":"genuine"}`))
 	path := writeLog(t,

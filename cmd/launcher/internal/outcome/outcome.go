@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/logscan"
@@ -486,25 +487,25 @@ func lastSelfReportAcrossLogs(logs []PassLog) (SelfReport, bool, error) {
 	return winner, found, lastErr
 }
 
-// Rejections summarises the token-bearing lines a signal scan refused, split
+// Rejections summarises the token occurrences a signal scan refused, split
 // by cause so a caller can say what was actually wrong instead of reporting
 // every rejection as a nonce mismatch (issue #3670).
 type Rejections struct {
 	NonceMismatch int
 	Malformed     int
-	// LongestPayload is the longest base64-alphabet run seen on a Malformed
-	// line, the length a human needs to recognise a payload the Box's Bash
+	// LongestPayload is the longest base64-alphabet run seen in a Malformed
+	// occurrence, the length a human needs to recognise a payload the Box's Bash
 	// output cap cut mid-stream.
 	LongestPayload int
 }
 
-// Total is the count of rejected lines across both causes.
+// Total is the count of rejected occurrences across both causes.
 func (r Rejections) Total() int { return r.NonceMismatch + r.Malformed }
 
 // Cause names the adjective for a warning that reports how many lines were
 // rejected, without the length detail Detail carries. The zero-value answer
-// matches the pre-#3670 wording, so a caller that never saw a Malformed line
-// reads unchanged.
+// matches the pre-#3670 wording, so a caller that never saw a Malformed
+// occurrence reads unchanged.
 func (r Rejections) Cause() string {
 	switch {
 	case r.NonceMismatch > 0 && r.Malformed > 0:
@@ -517,7 +518,7 @@ func (r Rejections) Cause() string {
 }
 
 // Detail is the sentence a scanner error / failure note reports: which
-// cause(s) were seen and, when any line was Malformed, the longest base64 run
+// cause(s) were seen and, when any occurrence was Malformed, the longest base64 run
 // length it carried — not the Box's Bash output cap itself (that number
 // belongs to the Box, not this repo), but the size a human needs to recognise
 // a payload the cap cut mid-stream.
@@ -535,11 +536,11 @@ func (r Rejections) Detail() string {
 	}
 }
 
-// LastCommentLineInLog decodes the last verifying line in the file at path
+// LastCommentLineInLog decodes the last verifying occurrence in the file at path
 // carrying the grammar SPINDRIFT_COMMENT <nonce> <base64-body> (issue #1940).
 // See lastVerifiedSignalInLog for the verify-then-prefer selection, which
 // differs from lastInLog's take-the-last-line behaviour. err is set only when
-// every token-bearing line fails to verify, never when there was no comment.
+// every token occurrence fails to verify, never when there was no comment.
 func LastCommentLineInLog(path, expectedNonce string) (string, bool, Rejections, error) {
 	return lastVerifiedSignalInLog(path, CommentToken, expectedNonce,
 		"comment line found but did not verify")
@@ -561,7 +562,7 @@ func isBase64Char(b byte) bool {
 	return ('A' <= b && b <= 'Z') || ('a' <= b && b <= 'z') || ('0' <= b && b <= '9') || b == '+' || b == '/' || b == '='
 }
 
-// LastPRIntentInLog decodes the last verifying line in the file at path
+// LastPRIntentInLog decodes the last verifying occurrence in the file at path
 // carrying SPINDRIFT_PR_INTENT <nonce> <base64-payload> (issue #1938): the
 // "title\n\nbody" a read-only Box hands the launcher in place of its own
 // `gh pr create` (issue #1919). The grammar is single-line because stream-json
@@ -571,10 +572,10 @@ func LastPRIntentInLog(path, expectedNonce string) (string, bool, Rejections, er
 		"PR-intent line found but did not verify")
 }
 
-// AllIssueIntentLinesInLog decodes every verifying line in the file at path
+// AllIssueIntentLinesInLog decodes every verifying occurrence in the file at path
 // carrying SPINDRIFT_ISSUE_INTENT <nonce> <base64-payload> (issue #2018), in
 // encounter order, deduped by decoded bytes because a Filer subagent echoes its
-// one intent line twice (issue #2068). A non-verifying line is dropped, so an
+// one intent line twice (issue #2068). A non-verifying occurrence is dropped, so an
 // untrusted author's echo is never filed, but counted in the returned
 // Rejections (#2976, #3670).
 func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, Rejections, error) {
@@ -582,8 +583,8 @@ func AllIssueIntentLinesInLog(path, expectedNonce string) ([]string, Rejections,
 }
 
 // lastVerifiedSignalInLog is the shared "last verifying signal wins" scanner
-// behind LastCommentLineInLog and LastPRIntentInLog: the last verifying line
-// wins over a later line that merely carries the token, because an untrusted
+// behind LastCommentLineInLog and LastPRIntentInLog: the last verifying
+// occurrence wins over a later one that merely carries the token, because an untrusted
 // author wrote their echo before this run's nonce was minted. notVerifiedPrefix
 // is combined with Rejections.Detail() to build the "found but none verified"
 // error text (issue #3670): callers must keep this prefix stable, since
@@ -603,10 +604,10 @@ func lastVerifiedSignalInLog(path, token, expectedNonce, notVerifiedPrefix strin
 }
 
 // scanSignalLines is the one scanning skeleton behind all three public signal
-// scanners (issue #2976). collectAll false is "last verifying line wins"; true
-// collects every verifying line, deduped by decoded payload identity, in
-// encounter order (issue #2018/#2068). A non-verifying line is never an error
-// here: last-wins and collect-all callers weigh the returned Rejections
+// scanners (issue #2976). collectAll false is "last verifying occurrence wins"
+// (so of two markers on one line the later wins); true collects every verifying
+// occurrence, deduped by decoded payload identity, in encounter order (issue
+// #2018/#2068). A non-verifying occurrence is never an error here: last-wins and collect-all callers weigh the returned Rejections
 // differently.
 func scanSignalLines(path, token, expectedNonce string, collectAll bool) (matches []string, rejected Rejections, err error) {
 	// seen dedups collectAll's payloads by decoded byte identity (issue #2068,
@@ -616,30 +617,35 @@ func scanSignalLines(path, token, expectedNonce string, collectAll bool) (matche
 		seen = make(map[string]bool)
 	}
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		body, cause, payloadLen := classifySignalLine(line, token, expectedNonce)
-		switch cause {
-		case causeNonceMismatch:
-			rejected.NonceMismatch++
-			return
-		case causeMalformed:
-			rejected.Malformed++
-			if payloadLen > rejected.LongestPayload {
-				rejected.LongestPayload = payloadLen
+		// One stream-json text message is one physical line, so a prose mention
+		// of the token must not hide a later genuine marker on that line
+		// (issue #6023): classify every standalone occurrence.
+		for idx := tokenIndexFrom(line, token, 0); idx >= 0; idx = tokenIndexFrom(line, token, idx+1) {
+			body, cause, payloadLen := classifySignalAt(line, idx, token, expectedNonce)
+			switch cause {
+			case causeNonceMismatch:
+				rejected.NonceMismatch++
+				continue
+			case causeMalformed:
+				rejected.Malformed++
+				if payloadLen > rejected.LongestPayload {
+					rejected.LongestPayload = payloadLen
+				}
+				continue
 			}
-			return
-		}
-		if body == "" {
-			// Not a signal attempt at all: no token, a one-field doc example,
-			// or a non-leading mention that fails a leading-only reject rule.
-			return
-		}
-		if collectAll {
-			if seen[body] {
-				return
+			if body == "" {
+				// Not a signal attempt at all: a one-field doc example, or a
+				// non-leading mention that fails a leading-only reject rule.
+				continue
 			}
-			seen[body] = true
+			if collectAll {
+				if seen[body] {
+					continue
+				}
+				seen[body] = true
+			}
+			matches = append(matches, body)
 		}
-		matches = append(matches, body)
 	})
 	if scanErr != nil {
 		if errors.Is(scanErr, os.ErrNotExist) {
@@ -660,7 +666,7 @@ const (
 )
 
 // tokenLeads reports whether the token occurrence at idx (as found by
-// tokenIndex) leads line: only whitespace, or a stream-json-escaped `\n`
+// tokenIndexFrom) leads line: only whitespace, or a stream-json-escaped `\n`
 // (backslash then 'n'), sits before it. Preserved verbatim from the
 // pre-#3670 looksLikeSignalAttempt prefix rule.
 func tokenLeads(line string, idx int) bool {
@@ -668,28 +674,23 @@ func tokenLeads(line string, idx int) bool {
 	return prefix == "" || strings.HasSuffix(prefix, "\\n")
 }
 
-// classifySignalLine decides whether line verifies the single-line
-// "<token> <nonce> <base64-payload>" control-signal grammar against
-// expectedNonce and, when it does not, why (issue #3670 collapses the old
-// looksLikeSignalAttempt/parseSignalLine split into one decision so the cause
-// is derived once). The strict standard decoder rejects any decode error
+// classifySignalAt decides whether the token occurrence at idx in line (as found
+// by tokenIndexFrom) verifies the single-line "<token> <nonce> <base64-payload>"
+// control-signal grammar against expectedNonce and, when it does not, why
+// (issue #3670 collapses the old looksLikeSignalAttempt/parseSignalLine split
+// into one decision so the cause is derived once). The strict standard decoder rejects any decode error
 // outright rather than stripping whitespace or decoding best-effort; a
 // verified body is never the empty string (issue #3668).
-func classifySignalLine(line, token, expectedNonce string) (body string, cause rejectCause, payloadLen int) {
-	idx := tokenIndex(line, token)
-	if idx < 0 {
-		return "", causeNone, 0
-	}
-	// strings.Fields is already word-bounded and never yields an empty token,
-	// so an empty expectedNonce can never match: no separate LineHasNonce gate
-	// is needed here.
-	fields := strings.Fields(line[idx+len(token):])
-	if len(fields) < 2 {
+func classifySignalAt(line string, idx int, token, expectedNonce string) (body string, cause rejectCause, payloadLen int) {
+	// leadingFields never yields an empty field, so an empty expectedNonce can
+	// never match: no separate LineHasNonce gate is needed here.
+	nonce, rawPayload, ok := leadingFields(line[idx+len(token):])
+	if !ok {
 		// A one-field doc example (issue #2089): not a signal attempt at all.
 		return "", causeNone, 0
 	}
 	leads := tokenLeads(line, idx)
-	if fields[0] != expectedNonce {
+	if nonce != expectedNonce {
 		// Without this run's nonce there is no freshness proof, so prose
 		// merely naming the token — wherever it sits — must keep not warning
 		// (issue #2089). Only a leading-token line, the Box's own output
@@ -699,7 +700,7 @@ func classifySignalLine(line, token, expectedNonce string) (body string, cause r
 		}
 		return "", causeNone, 0
 	}
-	payload := base64AlphabetPrefix(fields[1])
+	payload := base64AlphabetPrefix(rawPayload)
 	if payload == "" {
 		// An echoed `printf 'SPINDRIFT_COMMENT <nonce> %s\n' ...` command, a
 		// `grep -o "..."` diagnostic, and the prompt's own
@@ -724,6 +725,23 @@ func classifySignalLine(line, token, expectedNonce string) (body string, cause r
 	return string(decoded), causeNone, 0
 }
 
+// leadingFields returns the first two whitespace-delimited fields of s
+// (strings.Fields semantics), ok false when fewer than two exist. Unlike
+// strings.Fields it stops after two, so each token occurrence costs only its
+// own two fields, not the rest of the line.
+func leadingFields(s string) (first, second string, ok bool) {
+	next := func(s string) (field, rest string) {
+		s = strings.TrimLeftFunc(s, unicode.IsSpace)
+		if i := strings.IndexFunc(s, unicode.IsSpace); i >= 0 {
+			return s[:i], s[i:]
+		}
+		return s, ""
+	}
+	first, s = next(s)
+	second, _ = next(s)
+	return first, second, second != ""
+}
+
 // LineHasNonce reports whether line carries expected as a standalone token
 // (issue #1937): the check that separates a control-signal line produced by
 // this run's own Box from one an untrusted issue/comment author echoed
@@ -743,12 +761,19 @@ func containsToken(line, token string) bool {
 }
 
 // tokenIndex returns the index of token's first standalone-word occurrence in
-// line, or -1. A literal `\n` (backslash then 'n') immediately before the
-// token counts as a left boundary alongside a genuine non-token character: it
-// is JSON's escaping of a real newline the Box wrote, and without this its
-// trailing 'n' would look like it extends the token into a longer identifier.
+// line, or -1.
 func tokenIndex(line, token string) int {
-	for start := 0; ; {
+	return tokenIndexFrom(line, token, 0)
+}
+
+// tokenIndexFrom returns the index of token's first standalone-word occurrence
+// beginning at or after from, or -1. A literal `\n` (backslash then 'n')
+// immediately before the token counts as a left boundary alongside a genuine
+// non-token character: it is JSON's escaping of a real newline the Box wrote,
+// and without this its trailing 'n' would look like it extends the token into a
+// longer identifier.
+func tokenIndexFrom(line, token string, from int) int {
+	for start := from; ; {
 		i := strings.Index(line[start:], token)
 		if i < 0 {
 			return -1
