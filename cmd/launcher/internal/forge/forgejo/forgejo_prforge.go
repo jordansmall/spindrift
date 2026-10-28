@@ -271,25 +271,19 @@ var forgejoFailingStatusStates = map[string]bool{
 	"error":   true,
 }
 
-// FailureDetail renders the head commit's failing statuses, read across every
-// page of the statuses endpoint via walkPages (issue #4458) and reduced to the
-// newest status per context (issue #4473), into a bounded excerpt, returning "" when nothing is failing. forge.RenderFailureDetail owns
-// the formatting and the forge.MaxFailureDetailBytes truncation. Callers should
-// treat a non-nil error as "detail unavailable".
-func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
-	p, err := f.getPull(prURL)
-	if err != nil {
-		return "", err
-	}
+// latestStatuses reads every page of sha's statuses via walkPages (issue
+// #4458) and reduces them to the newest status per context (issue #4473), in
+// first-seen order.
+func (f *forgejoCodeForge) latestStatuses(sha string) ([]forgejoStatus, error) {
 	// Keyed on ID, not Context: the endpoint lists every status ever reported
 	// for the sha, so one context repeats across pages and would end the walk.
-	statuses, err := walkPages(f.rest, f.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/statuses", nil, func(s forgejoStatus) int64 { return s.ID })
+	statuses, err := walkPages(f.rest, f.repoPath()+"/commits/"+url.PathEscape(sha)+"/statuses", nil, func(s forgejoStatus) int64 { return s.ID })
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	// Only the newest status per context counts (as in CheckState's combined
-	// status), so a failure a later success superseded is not reported. IDs
-	// are global and increasing; first seen wins on equal or missing IDs.
+	// Only the newest status per context counts (as in the combined status),
+	// so a state a later status superseded is ignored. IDs are global and
+	// increasing; first seen wins on equal or missing IDs.
 	latest := map[string]forgejoStatus{}
 	var order []string
 	for _, s := range statuses {
@@ -301,9 +295,28 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 			latest[s.Context] = s
 		}
 	}
-	var entries []forge.FailureDetailEntry
+	out := make([]forgejoStatus, 0, len(order))
 	for _, c := range order {
-		s := latest[c]
+		out = append(out, latest[c])
+	}
+	return out, nil
+}
+
+// FailureDetail renders the failing entries of latestStatuses into a bounded
+// excerpt, returning "" when nothing is failing. forge.RenderFailureDetail owns
+// the formatting and the forge.MaxFailureDetailBytes truncation. Callers should
+// treat a non-nil error as "detail unavailable".
+func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
+	p, err := f.getPull(prURL)
+	if err != nil {
+		return "", err
+	}
+	statuses, err := f.latestStatuses(p.Head.Sha)
+	if err != nil {
+		return "", err
+	}
+	var entries []forge.FailureDetailEntry
+	for _, s := range statuses {
 		if !forgejoFailingStatusStates[s.State] {
 			continue
 		}
