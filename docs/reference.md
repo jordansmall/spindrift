@@ -8511,7 +8511,9 @@ probe-then-lock shape over its closure generation (issue #6008, [ADR
 0042](adr/0042-the-bwrap-box-gets-in-box-nix-from-an-ephemeral-overlay-store.md)).
 It is warm when every realized store path (agent files, agent env, passwd,
 group, nix config, syscall filter) exists and, with `nixInBox` on, the
-generation's nix-var snapshot `db.sqlite` does too; it then returns without
+nix-var snapshot for the host DB's current version (`max(ValidPaths.id)`, at
+`<generation>/db-<V>/nix/db/db.sqlite`) does too; a host DB that has moved
+past the newest snapshot is cold. It then returns without
 building anything and sends no `image_build` records. Otherwise it realizes
 the agent store closures (`nix build <drv>^* --no-link`, under no spindrift
 lock) and, with `nixInBox` on, writes the snapshot only if absent, sending
@@ -8532,15 +8534,23 @@ After a cold prepare the run path reclaims stale snapshot generations
 exactly as `launcher build` does: a non-blocking exclusive probe on each
 generation's lock, so never a generation a Box holds (including a Box whose
 launcher survived a Daemon in-place restart), and never on the legacy flat
-generation-less path. The warm path does not reclaim. This differs from the
+generation-less path. It also sweeps superseded versions inside every
+surviving generation, keeping the host DB's current version and removing the
+others only under an exclusive non-blocking probe on their own `db-<V>.lock`.
+The warm path does not reclaim generations, but `Run` sweeps superseded
+versions of its own generation the same way once it holds its version. This differs from the
 OCI runner, which never deletes images, because snapshots are about 100 MB
 each, share nothing, and live in spindrift's own state directory where
-nothing else removes them. If reclaim removes the generation's `db.sqlite`
-between readiness and launch, `Run` re-registers the GC roots and recreates
-the snapshot (write-if-absent) while holding the generation's shared lock,
-so reclaim cannot remove it again before the Box starts. `--no-build` is
-unchanged: it prepares nothing, and fails with `nix store snapshot not
-found at ...; run "launcher build" first` when the snapshot is missing.
+nothing else removes them. `Run` always resolves the host DB's current version at
+Box start and mounts that version's snapshot, writing it first
+(write-if-absent) if reclaim or a moved-on host DB left it missing, and
+re-registering the GC roots if reclaim dropped them. It holds the generation's
+shared lock and the version's shared lock for the Box's life, so reclaim cannot
+remove either before the Box exits. If the version probe fails, it reuses the
+newest existing snapshot. `--no-build` prepares nothing: any existing version
+(or a pre-#6072 flat `<generation>/nix/db/db.sqlite`) passes, `Run` refreshes
+it, and it fails with `nix store snapshot not found at ...; run "launcher
+build" first` when there is none.
 
 **Child environment.** Every child the daemon starts — a dispatch child, a
 research child, and the doctor preflight below — execs with the daemon's own
