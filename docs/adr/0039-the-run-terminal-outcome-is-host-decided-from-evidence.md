@@ -200,6 +200,20 @@ outbox. This leniency is scoped to the local push-only shape alone; every
 other shape (PR-shaped adopt) keeps requiring a self-report exactly as
 before — this amendment widens no other consume-gate arm.
 
+*Amended by issue #5984:* this narrows that trust. A signal-killed run
+with no success self-report (none at all, or a blocked or ambiguous
+one) still needs a bundle, but its pass manifest must not show the
+review loop stopping in implement or fix: the manifest's last
+implement, fix, or land entry has to be `land`, or there must be no
+such entry at all (legacy loop, older manifests). #2363's bundle came
+from a land pass, which had already cleared review, so it still
+qualifies. A bundle from a run killed before review approved is the
+same unreviewed work #5973 refuses to land behind a stale ready, and a
+missing self-report makes it no more trustworthy. `SettleRelayedBranch`
+declines such a run, so a hand-run `spindrift recover` lands nothing;
+`tryMarkRecoverable` reads the same `Situation.Unreviewed` and fails it
+`unreviewed` rather than marking it `Recoverable`.
+
 ## Amendment (issue #2380): `outcomebackstop.Run` derives `ready` from its own already-verified evidence
 
 The Context section above named the defect directly — "`outcomebackstop.Run`
