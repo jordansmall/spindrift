@@ -1,27 +1,20 @@
 {
   "lastSwept": "2e63264c525ef17004a7ded5494eb9614a4b82dd",
   "cursor": "cmd/launcher/internal/settle/merge_test.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6110",
-    "https://github.com/jordansmall/spindrift/issues/6111",
-    "https://github.com/jordansmall/spindrift/issues/6112",
-    "https://github.com/jordansmall/spindrift/issues/6113",
-    "https://github.com/jordansmall/spindrift/issues/6114"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/6110",
-    "https://github.com/jordansmall/spindrift/issues/6111",
-    "https://github.com/jordansmall/spindrift/issues/6112"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-28T09:03:17.796060546-04:00"
+  },
   "usage": {
-    "input_tokens": 108,
-    "output_tokens": 29805,
-    "cache_read_input_tokens": 4958594,
-    "cache_creation_input_tokens": 137650,
-    "total_cost_usd": 8.700067460000001,
-    "duration_ms": 437950,
-    "duration_api_ms": 677206,
-    "num_turns": 62
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
