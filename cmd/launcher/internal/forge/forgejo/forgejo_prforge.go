@@ -165,6 +165,9 @@ func (f *forgejoCodeForge) HeadCommitSHA(prURL string) (string, error) {
 
 // Mergeable returns the pull's content-mergeability state. Forgejo's mergeable
 // field is a boolean, so this never reports forge.MergeableUnknown on success.
+// That boolean is also false while the conflict check runs and on a draft pull,
+// so MergeableConflicting here is not proof of a conflict; Merge's refusal
+// classification is what disambiguates those.
 func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {

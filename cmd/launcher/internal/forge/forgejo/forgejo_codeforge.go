@@ -62,8 +62,8 @@ type ForgejoCodeForgeConfig struct {
 
 // errMergeRefused signals that Forgejo's merge endpoint refused the merge as
 // "not mergeable" (405 and 409 both mean that). classifyMergeFailure turns it
-// into forge.ErrMergeConflict or forge.ErrMergeBlockedByChecks, so it never
-// escapes this file.
+// into forge.ErrMergeConflict or forge.ErrMergeBlockedByChecks where it can,
+// and otherwise wraps it (draft pull, failed lookup, undetermined state).
 var errMergeRefused = errors.New("forgejo: merge refused")
 
 // forgejoStatusMap is the HTTP-status to sentinel-error table shared by every
@@ -90,7 +90,14 @@ type forgejoCodeForge struct {
 	// remote is the token-authenticated clone/push URL the git adapter uses, kept
 	// here so the read-only wrapper can clone it directly for RelayBundle.
 	remote string
+	// mergeRecheckDelay is the pause before Merge re-reads a pull that
+	// reported mergeable=false after a refusal.
+	mergeRecheckDelay time.Duration
 }
+
+// defaultMergeRecheckDelay covers Forgejo's async conflict check, which
+// re-queues after a push or base move and typically settles within seconds.
+const defaultMergeRecheckDelay = 5 * time.Second
 
 func (f *forgejoCodeForge) repoPath() string {
 	return "/api/v1/repos/" + f.repo
@@ -140,7 +147,7 @@ func newForgejoCodeForge(cfg ForgejoCodeForgeConfig, tracker forge.IssueTracker,
 	}
 
 	gitCF := git.NewGitClient(remote, cfg.BaseBranch, cfg.UserName, cfg.UserEmail, cfg.BranchPrefix)
-	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote}
+	return &forgejoCodeForge{rest: restCli, repo: cfg.Repo, git: gitCF, mergeMethod: cfg.MergeMethod, remote: remote, mergeRecheckDelay: defaultMergeRecheckDelay}
 }
 
 func (f *forgejoCodeForge) AgentBranch(num string) string { return f.git.AgentBranch(num) }
@@ -198,20 +205,37 @@ func (f *forgejoCodeForge) Merge(prURL string) error {
 // mergeable state to forge.ClassifyMergeFailure. Only the 405 and 409 refusals
 // reach here; every other status (403 without merge scope, 429, 500) is a real
 // failure Merge returns as-is rather than masking it as a conflict. A PR already
-// reporting merged landed by another path, so the refusal is success (nil).
+// reporting merged landed by another path, so the refusal is success (nil). A
+// draft pull is an error with no sentinel. A non-draft pull reporting
+// mergeable=false is re-read once after mergeRecheckDelay before it is called
+// a conflict.
 func (f *forgejoCodeForge) classifyMergeFailure(prURL string, cause error) error {
-	p, err := f.getPull(prURL)
-	if err != nil {
-		return fmt.Errorf("forgejo: merge %s: %w (PR lookup failed: %w)", prURL, cause, err)
+	for recheck := false; ; recheck = true {
+		p, err := f.getPull(prURL)
+		if err != nil {
+			return fmt.Errorf("forgejo: merge %s: %w (PR lookup failed: %w)", prURL, cause, err)
+		}
+		if p.Merged {
+			return nil
+		}
+		// Draft or WIP-titled: neither waiting nor rebasing clears it, so it is
+		// neither a conflict nor blocked by checks.
+		if isDraftPull(p) {
+			return fmt.Errorf("forgejo: merge %s: %w (pull is a draft)", prURL, cause)
+		}
+		if !p.Mergeable && !recheck {
+			// mergeable is also false while Forgejo's async conflict check still
+			// runs after a push or base move, so re-read once before calling it
+			// a conflict.
+			time.Sleep(f.mergeRecheckDelay)
+			continue
+		}
+		state := p.mergeableState()
+		if sentinel, ok := forge.ClassifyMergeFailure(state); ok {
+			return sentinel
+		}
+		return fmt.Errorf("forgejo: merge %s: %w (mergeable state %q undetermined)", prURL, cause, state)
 	}
-	if p.Merged {
-		return nil
-	}
-	state := p.mergeableState()
-	if sentinel, ok := forge.ClassifyMergeFailure(state); ok {
-		return sentinel
-	}
-	return fmt.Errorf("forgejo: merge %s: %w (mergeable state %q undetermined)", prURL, cause, state)
 }
 
 // Rebase resolves prURL to its head branch via REST, then delegates to the git

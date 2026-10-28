@@ -61,6 +61,7 @@ func newForgejoCodeForgeHarness(t *testing.T) *forgejoCodeForgeHarness {
 		UserEmail:    "bot@example.com",
 		BranchPrefix: "agent/issue-",
 	}, nil, repo.Bare)
+	forgejo.SetMergeRecheckDelay(cf, 0)
 	h := &forgejoCodeForgeHarness{t: t, repo: repo, fake: fake, cf: cf}
 	fake.mergeHook = h.realMerge
 	return h
