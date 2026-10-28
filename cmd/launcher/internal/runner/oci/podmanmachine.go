@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"time"
 )
@@ -31,8 +32,10 @@ func PodmanMachineMemoryMiB() (mib int, found bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), podmanMachineInspectTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, cliPodman, "machine", "inspect").Output()
-	if err != nil || len(out) == 0 {
+	cmd := exec.CommandContext(ctx, cliPodman, "machine", "inspect")
+	cmd.WaitDelay = cliWaitDelay
+	out, err := cmd.Output()
+	if (err != nil && !errors.Is(err, exec.ErrWaitDelay)) || len(out) == 0 {
 		return 0, false
 	}
 	return parsePodmanMachineMemoryMiB(out)

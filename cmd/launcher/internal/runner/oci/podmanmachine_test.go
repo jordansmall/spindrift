@@ -1,6 +1,9 @@
 package oci
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestParsePodmanMachineMemoryMiB verifies the pure decode helper against
 // realistic `podman machine inspect` fixtures, including the shapes that
@@ -116,5 +119,39 @@ func TestParsePodmanMachineMemoryMiB(t *testing.T) {
 				t.Errorf("parsePodmanMachineMemoryMiB() found = %v, want %v", gotOK, tt.wantOK)
 			}
 		})
+	}
+}
+
+// A grandchild inheriting stdout must not hold PodmanMachineMemoryMiB open
+// past WaitDelay; the bytes the CLI wrote before exiting 0 still parse.
+func TestPodmanMachineMemoryMiBGrandchildHoldsStdout(t *testing.T) {
+	fakePodman(t, "echo '[{\"Resources\":{\"Memory\":4096}}]'\n"+holdStdoutBackground+"\nexit 0")
+
+	start := time.Now()
+	mib, found := PodmanMachineMemoryMiB()
+	if elapsed := time.Since(start); elapsed > cliWaitDelay+time.Second {
+		t.Errorf("returned after %v, want within %v", elapsed, cliWaitDelay+time.Second)
+	}
+	if !found || mib != 4096 {
+		t.Errorf("got (%d, %v), want (4096, true)", mib, found)
+	}
+}
+
+// A wedged podman whose grandchild holds stdout must still return at the
+// timeout plus WaitDelay, not when the grandchild exits.
+func TestPodmanMachineMemoryMiBTimeoutWithGrandchild(t *testing.T) {
+	old := podmanMachineInspectTimeout
+	podmanMachineInspectTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { podmanMachineInspectTimeout = old })
+	fakePodman(t, holdStdoutBackground+"\nexec sleep 10")
+
+	budget := podmanMachineInspectTimeout + cliWaitDelay + time.Second
+	start := time.Now()
+	_, found := PodmanMachineMemoryMiB()
+	if elapsed := time.Since(start); elapsed > budget {
+		t.Errorf("returned after %v, want within %v", elapsed, budget)
+	}
+	if found {
+		t.Error("found = true, want false on timeout")
 	}
 }
