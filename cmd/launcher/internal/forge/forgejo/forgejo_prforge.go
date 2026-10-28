@@ -233,12 +233,14 @@ var forgejoRollupStates = map[string]forge.RollupState{
 	"pending": forge.StatePending,
 	"failure": forge.StateFailure,
 	"error":   forge.StateError,
+	// Skipped ranks best, so it is the combined state only when every context
+	// was skipped.
+	"skipped": forge.StateSuccess,
 }
 
 // CheckState returns the aggregate CI status of the PR's head commit. The
-// combined endpoint already aggregates, so this does not recompute from the
-// individual statuses. An empty state or a zero total_count means no statuses
-// are registered, reported as forge.StateNone.
+// combined state is the worst newest status per context, so "warning" can mask
+// a pending context and is resolved from the statuses instead.
 func (f *forgejoCodeForge) CheckState(prURL string) (forge.RollupState, error) {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -248,13 +250,39 @@ func (f *forgejoCodeForge) CheckState(prURL string) (forge.RollupState, error) {
 	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/status", nil, &combined); err != nil {
 		return forge.StateNone, err
 	}
-	if combined.State == "" || combined.TotalCount == 0 {
+	if combined.TotalCount == 0 {
 		return forge.StateNone, nil
 	}
 	if rs, ok := forgejoRollupStates[combined.State]; ok {
 		return rs, nil
 	}
-	return forge.StateNone, nil
+	if combined.State == "warning" {
+		return f.resolveWarning(p.Head.Sha)
+	}
+	return forge.StateNone, fmt.Errorf("forgejo: unrecognized combined commit status state %q", combined.State)
+}
+
+// resolveWarning reports red if any context is (the statuses may be newer than
+// the combined read), pending if any still runs, and otherwise success:
+// warnings are advisory.
+func (f *forgejoCodeForge) resolveWarning(sha string) (forge.RollupState, error) {
+	statuses, err := f.latestStatuses(sha)
+	if err != nil {
+		return forge.StateNone, err
+	}
+	if len(statuses) == 0 {
+		return forge.StateNone, fmt.Errorf("forgejo: combined commit status is warning but no statuses are listed")
+	}
+	state := forge.StateSuccess
+	for _, s := range statuses {
+		if forgejoFailingStatusStates[s.State] {
+			return forgejoRollupStates[s.State], nil
+		}
+		if s.State == "pending" {
+			state = forge.StatePending
+		}
+	}
+	return state, nil
 }
 
 // forgejoStatus is one entry of /commits/{sha}/statuses, a single reported

@@ -493,6 +493,118 @@ func TestCheckState_NoneZeroTotalCount(t *testing.T) {
 	}
 }
 
+// Forgejo's combined state is the worst newest-per-context status, so "warning"
+// can hide a still-pending context and must be resolved from the statuses.
+func TestCheckState_WarningSkippedAndUnknown(t *testing.T) {
+	const base = "/api/v1/repos/owner/repo/commits/abc123"
+	tests := []struct {
+		name     string
+		combined string
+		statuses string
+		// statusCode, when set, is the /statuses response code.
+		statusCode int
+		want       forge.RollupState
+		wantErr    string
+	}{
+		{
+			name:     "warning settled",
+			combined: `{"state":"warning","total_count":2}`,
+			statuses: `[{"id":2,"context":"lint","state":"warning"},{"id":1,"context":"build","state":"success"}]`,
+			want:     forge.StateSuccess,
+		},
+		{
+			name:     "warning with a pending context",
+			combined: `{"state":"warning","total_count":3}`,
+			statuses: `[{"id":3,"context":"lint","state":"warning"},{"id":2,"context":"deploy","state":"pending"},{"id":1,"context":"build","state":"success"}]`,
+			want:     forge.StatePending,
+		},
+		{
+			name:     "warning ignores a superseded pending",
+			combined: `{"state":"warning","total_count":2}`,
+			statuses: `[{"id":2,"context":"lint","state":"warning"},{"id":1,"context":"lint","state":"pending"}]`,
+			want:     forge.StateSuccess,
+		},
+		{
+			name:     "warning with a context failed since the combined read",
+			combined: `{"state":"warning","total_count":3}`,
+			statuses: `[{"id":3,"context":"deploy","state":"failure"},{"id":2,"context":"lint","state":"warning"},{"id":1,"context":"deploy","state":"pending"}]`,
+			want:     forge.StateFailure,
+		},
+		{
+			name:     "warning with an erroring context",
+			combined: `{"state":"warning","total_count":2}`,
+			statuses: `[{"id":2,"context":"build","state":"error"},{"id":1,"context":"lint","state":"warning"}]`,
+			want:     forge.StateError,
+		},
+		{
+			name:     "warning with no statuses listed",
+			combined: `{"state":"warning","total_count":1}`,
+			statuses: `[]`,
+			wantErr:  "no statuses are listed",
+		},
+		{
+			name:       "warning with a statuses read error",
+			combined:   `{"state":"warning","total_count":1}`,
+			statuses:   `{"message":"boom"}`,
+			statusCode: http.StatusInternalServerError,
+			wantErr:    "500",
+		},
+		{
+			name:     "skipped",
+			combined: `{"state":"skipped","total_count":2}`,
+			want:     forge.StateSuccess,
+		},
+		{
+			name:     "zero count with a state",
+			combined: `{"state":"warning","total_count":0}`,
+			want:     forge.StateNone,
+		},
+		{
+			name:     "unrecognized state",
+			combined: `{"state":"bogus","total_count":2}`,
+			wantErr:  `"bogus"`,
+		},
+		{
+			name:     "empty state with statuses",
+			combined: `{"state":"","total_count":2}`,
+			wantErr:  `unrecognized combined commit status state ""`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case base + "/status":
+					w.Write([]byte(tt.combined))
+				case base + "/statuses":
+					if tt.statuses == "" {
+						t.Errorf("unexpected request to %s", r.URL.Path)
+					}
+					if tt.statusCode != 0 {
+						w.WriteHeader(tt.statusCode)
+					}
+					w.Write([]byte(tt.statuses))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			got, err := pr.CheckState("https://forge.test/owner/repo/pulls/206")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("CheckState(...) error = %v, want one containing %s", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CheckState(...) unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("CheckState(...) = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFailureDetail_Empty(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/commits/abc123/statuses" {
