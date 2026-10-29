@@ -122,9 +122,9 @@ func WriteAssembly(env Env, reg Registry, markers []ValidateMarkerRow, p Passthr
 	return result, nil
 }
 
-// ScanSkillsFound lists, ", "-joined in byte-sorted order, the subdirectories
-// of dir that hold a SKILL.md regular file, for SKILLS_FOUND. A flat <name>.md
-// never counts; a missing dir yields "".
+// ScanSkillsFound lists, ", "-joined in byte-sorted order, the skills in dir
+// that SkillBaked counts (human-only ones are dropped), for SKILLS_FOUND. A
+// flat <name>.md never counts; a missing dir yields "".
 func ScanSkillsFound(dir string) string {
 	entries, err := os.ReadDir(dir) // sorted by filename
 	if err != nil {
@@ -136,7 +136,7 @@ func ScanSkillsFound(dir string) string {
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if skillBaked(dir, e.Name()) {
+		if SkillBaked(dir, e.Name()) {
 			found = append(found, e.Name())
 		}
 	}

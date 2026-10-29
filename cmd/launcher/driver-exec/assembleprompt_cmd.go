@@ -84,18 +84,18 @@ func runAssemblePrompt(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stdout)
 
 	// BEGIN GENERATED SKILL-BAKED FLAGS -- nix run .#regen -- DO NOT EDIT
-	cavemanSkillBaked := fs.Bool("caveman-skill-baked", false, "true when DRIVER_SKILLS_DIR/caveman/SKILL.md was baked")
-	tddSkillBaked := fs.Bool("tdd-skill-baked", false, "true when DRIVER_SKILLS_DIR/tdd/SKILL.md was baked")
-	commitSkillBaked := fs.Bool("commit-skill-baked", false, "true when DRIVER_SKILLS_DIR/commit/SKILL.md was baked")
-	codeReviewSkillBaked := fs.Bool("code-review-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-review/SKILL.md was baked")
-	autoFormatSkillBaked := fs.Bool("auto-format-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-format/SKILL.md was baked")
-	autoLintSkillBaked := fs.Bool("auto-lint-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-lint/SKILL.md was baked")
-	checkHygieneSkillBaked := fs.Bool("check-hygiene-skill-baked", false, "true when DRIVER_SKILLS_DIR/check-hygiene/SKILL.md was baked")
-	codeCommentsSkillBaked := fs.Bool("code-comments-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-comments/SKILL.md was baked")
-	nixChecksSkillBaked := fs.Bool("nix-checks-skill-baked", false, "true when DRIVER_SKILLS_DIR/nix-checks/SKILL.md was baked")
-	principleFixRootCausesSkillBaked := fs.Bool("principle-fix-root-causes-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md was baked")
-	principleLazinessProtocolSkillBaked := fs.Bool("principle-laziness-protocol-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md was baked")
-	principleRedesignFromFirstPrinciplesSkillBaked := fs.Bool("principle-redesign-from-first-principles-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md was baked")
+	cavemanSkillBaked := fs.Bool("caveman-skill-baked", false, "true when DRIVER_SKILLS_DIR/caveman/SKILL.md was baked and is not human-only")
+	tddSkillBaked := fs.Bool("tdd-skill-baked", false, "true when DRIVER_SKILLS_DIR/tdd/SKILL.md was baked and is not human-only")
+	commitSkillBaked := fs.Bool("commit-skill-baked", false, "true when DRIVER_SKILLS_DIR/commit/SKILL.md was baked and is not human-only")
+	codeReviewSkillBaked := fs.Bool("code-review-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-review/SKILL.md was baked and is not human-only")
+	autoFormatSkillBaked := fs.Bool("auto-format-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-format/SKILL.md was baked and is not human-only")
+	autoLintSkillBaked := fs.Bool("auto-lint-skill-baked", false, "true when DRIVER_SKILLS_DIR/auto-lint/SKILL.md was baked and is not human-only")
+	checkHygieneSkillBaked := fs.Bool("check-hygiene-skill-baked", false, "true when DRIVER_SKILLS_DIR/check-hygiene/SKILL.md was baked and is not human-only")
+	codeCommentsSkillBaked := fs.Bool("code-comments-skill-baked", false, "true when DRIVER_SKILLS_DIR/code-comments/SKILL.md was baked and is not human-only")
+	nixChecksSkillBaked := fs.Bool("nix-checks-skill-baked", false, "true when DRIVER_SKILLS_DIR/nix-checks/SKILL.md was baked and is not human-only")
+	principleFixRootCausesSkillBaked := fs.Bool("principle-fix-root-causes-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md was baked and is not human-only")
+	principleLazinessProtocolSkillBaked := fs.Bool("principle-laziness-protocol-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md was baked and is not human-only")
+	principleRedesignFromFirstPrinciplesSkillBaked := fs.Bool("principle-redesign-from-first-principles-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md was baked and is not human-only")
 	// END GENERATED SKILL-BAKED FLAGS
 
 	var af promptassembly.AssemblyFlags

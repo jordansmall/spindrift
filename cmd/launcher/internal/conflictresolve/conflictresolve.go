@@ -109,7 +109,8 @@ func SubstNames(reg promptassembly.Registry) []string {
 // through. SKILLS_FOUND, SKILL_PREAMBLE and the baked-skill steps
 // (CAVEMAN_STEP, CHECK_HYGIENE_STEP, NIX_CHECKS_STEP) are computed here from
 // skillsDir and override lookup. A baked skill whose fragment is missing is an
-// error rather than a silently thinner prompt.
+// error rather than a silently thinner prompt. A skill counts as baked by
+// promptassembly.SkillBaked, so a human-only skill renders no step.
 func RenderPrompt(promptsDir, skillsDir string, names []string, lookup func(string) string) (string, error) {
 	rows := []struct{ skill, fragment, stepVar string }{
 		{"caveman", "caveman-default.md", "CAVEMAN_STEP"},
@@ -126,7 +127,7 @@ func RenderPrompt(promptsDir, skillsDir string, names []string, lookup func(stri
 
 	for _, s := range rows {
 		vars[s.stepVar] = ""
-		if _, err := os.Stat(filepath.Join(skillsDir, s.skill, "SKILL.md")); err != nil {
+		if !promptassembly.SkillBaked(skillsDir, s.skill) {
 			continue
 		}
 		text, err := render(filepath.Join(promptsDir, "fragments", s.fragment), vars)

@@ -1155,7 +1155,7 @@ rec {
   # lib/baked-skills.nix row, 1-tab indent inside ProbeBakedSkills.
   renderBakedSkillProbesGo =
     bakedSkills:
-    concatStrings (map (s: "\te.${s.field} = skillBaked(dir, \"${s.name}\")\n") bakedSkills);
+    concatStrings (map (s: "\te.${s.field} = SkillBaked(dir, \"${s.name}\")\n") bakedSkills);
 
   # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
   # flag declarations (issue #2532).
@@ -1164,7 +1164,7 @@ rec {
     concatStrings (
       map (
         s:
-        "\t${s.goVar} := fs.Bool(\"${s.name}-skill-baked\", false, \"true when DRIVER_SKILLS_DIR/${s.name}/SKILL.md was baked\")\n"
+        "\t${s.goVar} := fs.Bool(\"${s.name}-skill-baked\", false, \"true when DRIVER_SKILLS_DIR/${s.name}/SKILL.md was baked and is not human-only\")\n"
       ) bakedSkills
     );
 
@@ -1222,7 +1222,7 @@ rec {
     bakedSkills:
     concatStrings (
       map (
-        s: "\t${s.field} bool // -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" (${s.gate})\n"
+        s: "\t${s.field} bool // SkillBaked(DRIVER_SKILLS_DIR, \"${s.name}\") (${s.gate})\n"
       ) bakedSkills
     );
 
