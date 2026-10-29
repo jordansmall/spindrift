@@ -816,6 +816,10 @@ overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
 `fragments/*.md` file, exactly as it already must ship `filer-prompt.md` when
 the filer is configured — box reads the fragment unconditionally once its gate
 is on, with no baked-in fallback.
+The skill preamble lists only skills a Box can invoke: a skill whose
+`SKILL.md` sets `disable-model-invocation: true` is human-only (see
+[Dogfood Consumer config](#dogfood-consumer-config)), so it is left out of the
+list even though it is baked.
 
 A row may carry an `axis` (`"tracker"`, `"filer"` or `"forge"`, issues #5646
 and #5647, [ADR 0068](adr/0068-backends-are-strategy-literals-with-row-owned-knobs.md)):
@@ -866,8 +870,8 @@ for the three cases.
 
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
-runtime, the issue pass and the fix pass (via the shared COMMS block, see
-below), both conflict-resolve prompts, the orchestrator's review pass, and
+runtime and not human-only, the issue pass and the fix pass (via the shared
+COMMS block, see below), both conflict-resolve prompts, the orchestrator's review pass, and
 the research prompts (both the repo-backed and self-contained variants)
 direct the agent to use `/caveman` for narration and prose, exempting code,
 commands, error messages, and commit messages, plus the machine-parsed
@@ -8123,7 +8127,7 @@ the `skills` row and `skillsDirRelative` entry above for the build-time
 `/agent/skills` path and the runtime copy into the Driver's actual skills
 dir), each as a `<name>/SKILL.md` directory — the only layout Claude Code
 discovers, so a flat `<name>.md` file is silently ignored — so the in-box
-agent can invoke them as slash commands:
+agent can invoke them as slash commands (except a human-only skill, below):
 
 - [`caveman`](https://github.com/juliusbrussee/caveman) — `/caveman`. The
   rendered issue-pass and fix-pass prompts direct the agent to default to it
@@ -8134,7 +8138,9 @@ agent can invoke them as slash commands:
 - [`tdd`](https://github.com/mattpocock/skills) and
   [`to-tickets`](https://github.com/mattpocock/skills) — `/tdd`,
   `/to-tickets` (pinned at tag `v1.1.0`). The IMPLEMENT section defers its
-  test-first workflow to `/tdd` when baked.
+  test-first workflow to `/tdd` when baked. `to-tickets` sets
+  `disable-model-invocation: true`, so it is human-only: it is baked, but the
+  skill preamble does not list it (rationale below).
 - [`commit`](https://github.com/jordansmall/skills) — `/commit`. The COMMIT
   section defers commit-message formatting to `/commit` when baked.
 - [`code-review`](https://github.com/mattpocock/skills) — `/code-review`
@@ -8169,6 +8175,11 @@ wired. To opt out of a skill, drop it from the consumer's `skills` list; each
 of the nine Consumer-configured deferrals above is rendered only when that
 skill's `SKILL.md` is actually present at the baked skills path, so a
 consumer that skips a skill gets prompts with zero residue for it.
+A skill whose `SKILL.md` frontmatter sets `disable-model-invocation: true` is
+human-only and counts as not baked for these gates and the preamble list: only
+a person typing `/name` can invoke it, and a Box has no human, so the
+deferral renders its inline fallback instead. Unreadable or malformed
+frontmatter leaves the skill counted as baked.
 `auto-format`, `auto-lint`, `check-hygiene`, and `code-comments` (see the
 `skills` row above) are the harness-owned skills among the mix — they bake
 into every image unconditionally. The `auto-format`/`auto-lint` deferrals gate

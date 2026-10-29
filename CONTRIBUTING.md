@@ -220,8 +220,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   ISSUE_TRACKER/CODE_FORGE backend, each in its own `backends/<name>.nix`
   file; `env-schema.nix`'s tracker/forge choices derive from it),
   `baked-skills.nix` (the registry of skills `box` probes at
-  `DRIVER_SKILLS_DIR/<name>/SKILL.md` — one row per skill drives every
-  hand-mirrored consumer copy), `labels.nix` (the label registry — one row
+  `DRIVER_SKILLS_DIR/<name>/SKILL.md`, skipping human-only skills — one row
+  per skill drives every hand-mirrored consumer copy), `labels.nix` (the label registry — one row
   per label family/role, rendered into
   `cmd/launcher/internal/doctor/labelmeta_gen.go` by `renderers.nix`'s
   `renderLabelRegistryGo`, drift-guarded by `nix/checks/schema-drift.nix`'s
