@@ -542,6 +542,16 @@ let
     else
       true;
 
+  # nixStoreWritable needs nixInBox (issue #6136): the OCI image's nix/store
+  # directory (which lib/image.nix chowns) only exists inside the nixInBox
+  # block, and bwrap would silently ignore the knob. Checked here rather than
+  # in image.nix so it fires on every runner, not just the ones that build it.
+  nixStoreWritableCoherenceOk =
+    if nixStoreWritable && !nixInBox then
+      throw "mkHarness: nixStoreWritable (infra.nix.storeWritable) requires nixInBox (infra.nix.inBox) -- without in-box nix there is no store DB or nix.conf, so a writable /nix/store has no effect; set nixInBox = true or drop nixStoreWritable"
+    else
+      true;
+
   # The backend-specific CLI packages (nixpkgs attribute names) the selected
   # tracker and forge rows declare (issue #1963), which lib/image.nix bakes so
   # an image never carries a CLI its backends do not use. An unregistered
@@ -1636,6 +1646,7 @@ else
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
   assert networkModeCoherenceOk;
+  assert nixStoreWritableCoherenceOk;
   assert readOnlyCapabilityOk;
   assert backendKnobsOk;
   assert daemonAwakeWindowOk;
