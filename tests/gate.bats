@@ -234,6 +234,47 @@ workers_for() {
   done
 }
 
+@test "a stale-DB fchmodat2 eval error prints one hint naming the path, even across jobs" {
+  for a in a b; do
+    printf '{"attr":"%s","attrPath":["%s"],"error":"error: fchmodat2 \\"%s/x-source\\": Operation not permitted"}\n' \
+      "$a" "$a" "$NIX_STORE_DIR" >>"$NEJ_JOBS"
+  done
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [ "$(grep -c "exist in this Box's store but not in its database" <<<"$output")" -eq 1 ]
+  [[ "$output" == *"gate: these paths exist in this Box's store but not in its database: $NIX_STORE_DIR/x-source;"* ]]
+  [[ "$output" == *"fresh Box"* ]]
+}
+
+@test "a stale-DB fchmodat2 build error prints the hint naming the path" {
+  job a
+  STUB_NIX_STATUS=1
+  STUB_NIX_STDERR="error: fchmodat2 \"$NIX_STORE_DIR/x-go-modules\": Operation not permitted"
+  export STUB_NIX_STDERR
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [ "$(grep -c "exist in this Box's store but not in its database" <<<"$output")" -eq 1 ]
+  [[ "$output" == *"database: $NIX_STORE_DIR/x-go-modules;"* ]]
+}
+
+@test "a fchmodat2 EPERM on a non-store path prints no stale-DB hint" {
+  job a
+  STUB_NIX_STATUS=1
+  STUB_NIX_STDERR='error: fchmodat2 "/tmp/nix-build-x": Operation not permitted'
+  export STUB_NIX_STDERR
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"not in its database"* ]]
+}
+
+@test "an ordinary failure prints no stale-DB hint" {
+  job a
+  STUB_NIX_STATUS=1
+  run bash "$GATE_SH"
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"not in its database"* ]]
+}
+
 @test "a builder failure named in the batch log is reported without a second build" {
   job bad
   job other

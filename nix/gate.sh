@@ -120,6 +120,7 @@ while :; do
     # One build client at a time keeps the Box's nix.conf max-jobs/cores authoritative.
     # Piping makes stderr a non-tty, so nix's progress bar is lost; -L covers it.
     if ! "${build[@]}" "${drvs[@]}" 2>&1 | tee "$work/build.log" >&2; then
+      cat "$work/build.log" >>"$work/all-builds.log"
       # A fatal store error aborts the invocation, and --keep-going does not
       # survive that: independent jobs are left unbuilt, so invalid outputs are
       # not a reliable list of the jobs that failed.
@@ -173,6 +174,16 @@ eval_pid=
 if ((eval_status != 0)); then
   echo "gate: nix-eval-jobs exited $eval_status" >&2
   failed+=("nix-eval-jobs")
+fi
+
+# Stale-DB EPERM (issue #6095): name the cause once, not per job.
+store_dir=${NIX_STORE_DIR:-/nix/store}
+stale=$({
+  jq -r 'select(has("error")) | .error' "$work/jobs"
+  cat "$work/all-builds.log" 2>/dev/null
+} | sed -n "s|.*fchmodat2 \"\\($store_dir/[^\"/]*\\)\": Operation not permitted.*|\\1|p" | sort -u | paste -sd' ' || true)
+if [ -n "$stale" ]; then
+  echo "gate: these paths exist in this Box's store but not in its database: $stale; the host realised them after the Box started (ADR 0042, issue #6095), so nix cannot replace them: start a fresh Box, or leave the check to CI" >&2
 fi
 
 if ((${#failed[@]} > 0)); then
