@@ -2848,12 +2848,13 @@ denies exactly the following syscalls (`SCMP_ACT_ERRNO(EPERM)`) and allows
 everything else —
 
 `acct`, `add_key`, `bpf`, `clock_adjtime`, `clock_settime`, `create_module`,
-`delete_module`, `finit_module`, `get_kernel_syms`, `init_module`, `ioperm`,
-`iopl`, `kexec_file_load`, `kexec_load`, `keyctl`, `lookup_dcookie`, `mount`,
-`nfsservctl`, `open_by_handle_at`, `perf_event_open`, `pivot_root`,
-`process_vm_readv`, `process_vm_writev`, `ptrace`, `query_module`, `reboot`,
-`request_key`, `settimeofday`, `stime`, `swapoff`, `swapon`, `syslog`,
-`umount2`, `ustat`, `vm86`, `vm86old`.
+`delete_module`, `finit_module`, `fsconfig`, `fsmount`, `fsopen`, `fspick`,
+`get_kernel_syms`, `init_module`, `ioperm`, `iopl`, `kexec_file_load`,
+`kexec_load`, `keyctl`, `lookup_dcookie`, `mount`, `mount_setattr`,
+`move_mount`, `nfsservctl`, `open_by_handle_at`, `open_tree`,
+`perf_event_open`, `pivot_root`, `process_vm_readv`, `process_vm_writev`,
+`ptrace`, `query_module`, `reboot`, `request_key`, `settimeofday`, `stime`,
+`swapoff`, `swapon`, `syslog`, `umount2`, `ustat`, `vm86`, `vm86old`.
 
 A denylist is deliberately the opposite risk profile from podman's own
 allowlist default: enumerating every syscall an arbitrary Driver's or

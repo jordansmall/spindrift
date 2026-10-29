@@ -99,7 +99,9 @@ against every misuse ADR 0042's mount/namespace isolation already excludes
 (reading the host's `/nix/store`, escaping to the host network namespace,
 etc.) — those remain that ADR's job. This filter's contribution is the
 kernel-level syscalls namespace/mount isolation alone does not reach:
-`ptrace`, `mount`/`umount2`/`pivot_root`, module loading, raw device I/O, and
+`ptrace`, `mount`/`umount2`/`pivot_root` and (amended by issue #6140) the
+new mount API (`open_tree`, `fsopen`, `fsmount`, ...; Linux 5.2+,
+`mount_setattr` 5.12), module loading, raw device I/O, and
 time-of-day/log manipulation, per the list in `lib/seccomp.nix`.
 
 ## Amendment (issue #5982): the filter reaches bwrap through pasta by path, not by fd
