@@ -138,7 +138,9 @@ func TestReclaimStaleSnapshots_SweepsOrphanedVersionLock(t *testing.T) {
 	assertExists(t, v3, true)
 }
 
-func TestReclaimStaleSnapshots_LeavesLegacyFlatSnapshotAlone(t *testing.T) {
+// A flat nix/ marks an older launcher's lower that the version dirs sit inside,
+// so reclaim sweeps none of them, the superseded db-1 included (issue #6100).
+func TestReclaimStaleSnapshots_LeavesLegacyFlatSnapshotAndItsVersionsAlone(t *testing.T) {
 	stubHostVersion(t, func() (string, error) { return "2", nil })
 	root := t.TempDir()
 	gen := filepath.Join(root, "gen-a")
@@ -156,7 +158,7 @@ func TestReclaimStaleSnapshots_LeavesLegacyFlatSnapshotAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertExists(t, snapshotDBPath(gen), true)
-	assertExists(t, v1, false)
+	assertExists(t, v1, true)
 	assertExists(t, v2, true)
 }
 
@@ -200,21 +202,29 @@ func TestSweepStaleSnapshotVersions_KeepsNamedVersionBelowHigherOnes(t *testing.
 }
 
 func TestSweepStaleSnapshotVersions_NoKeepSparesNothingUnlocked(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		keep func(gen string) string
-	}{
-		{"empty keep", func(string) string { return "" }},
-		{"flat genDir keep", func(gen string) string { return gen }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			gen := t.TempDir()
-			v1 := mkVersion(t, gen, "1", true)
-			sweepStaleSnapshotVersions(gen, tc.keep(gen))
-			assertExists(t, v1, false)
-			assertExists(t, SnapshotLockPath(v1), false)
-		})
+	gen := t.TempDir()
+	v1 := mkVersion(t, gen, "1", true)
+	sweepStaleSnapshotVersions(gen, "")
+	assertExists(t, v1, false)
+	assertExists(t, SnapshotLockPath(v1), false)
+}
+
+// A flat pre-#6072 nix/ in genDir is a lower an older launcher's Box may mount,
+// so the db-N dirs inside it go only with the whole generation (issue #6100).
+func TestSweepStaleSnapshotVersions_FlatGenDirSweepsNothing(t *testing.T) {
+	gen := t.TempDir()
+	seedSnapshotDir(t, gen, "flat")
+	v1 := mkVersion(t, gen, "1", true)
+	orphanLock := SnapshotLockPath(snapshotVersionDir(gen, "2"))
+	if err := os.WriteFile(orphanLock, nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
+
+	sweepStaleSnapshotVersions(gen, "")
+
+	assertExists(t, v1, true)
+	assertExists(t, SnapshotLockPath(v1), true)
+	assertExists(t, orphanLock, true)
 }
 
 func TestReclaimStaleSnapshots_KeepsHostCurrentVersionNotNewest(t *testing.T) {

@@ -284,14 +284,17 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 	overlay := c.runtime == "bwrap" && bwrapStoreOverlay(doc)
 	if overlay {
 		// The nix-var snapshot a `launcher build` leaves behind, which --no-build
-		// requires; the generation mirrors bwrap.ClosureGeneration's
-		// SafePathComponent (an unusable tag yields the flat legacy path).
+		// requires. It is a versioned db-<N> snapshot: with no sqlite3 here the
+		// host probe fails, and Run never falls back to a pre-#6072 unversioned
+		// one. The generation mirrors bwrap.ClosureGeneration's
+		// SafePathComponent (an unusable tag yields a path with no generation
+		// segment).
 		tag := doc.Artifacts["IMAGE_TAG"]
 		gen := filepath.Base(tag)
 		if tag == "" || gen == "." || gen == ".." || gen == string(filepath.Separator) {
 			gen = ""
 		}
-		db := filepath.Join(workDir, ".spindrift", "nix-var-snapshot", gen, "nix", "db", "db.sqlite")
+		db := filepath.Join(workDir, ".spindrift", "nix-var-snapshot", gen, "db-1", "nix", "db", "db.sqlite")
 		if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
 			t.Fatal(err)
 		}

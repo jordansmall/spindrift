@@ -677,8 +677,8 @@ func TestNewestSnapshotDir(t *testing.T) {
 	t.Run("legacy flat layout", func(t *testing.T) {
 		gen := t.TempDir()
 		seedSnapshotDir(t, gen, "a")
-		if got := newestSnapshotDir(gen); got != gen {
-			t.Errorf("newestSnapshotDir = %q, want the flat gen dir %q", got, gen)
+		if got := newestSnapshotDir(gen); got != "" {
+			t.Errorf("newestSnapshotDir = %q, want empty: a flat gen dir is never a mount lower", got)
 		}
 	})
 	t.Run("versioned beats legacy", func(t *testing.T) {

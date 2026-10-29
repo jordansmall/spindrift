@@ -134,10 +134,10 @@ func TestBwrapRun_SweepsSupersededUnlockedVersionAndKeepsCurrent(t *testing.T) {
 	assertExists(t, snapshotDBPath(snapshotVersionDir(genDir, "2")), true)
 }
 
-// A Box that mounts a flat genDir snapshot (the host probe failed, no complete
-// db-N) must not sweep: an incomplete unlocked db-N is inside the lower that this
-// Box and its siblings mount as /nix/var (issue #6072).
-func TestBwrapRun_DoesNotSweepVersionDirsInsideFlatGenDirLower(t *testing.T) {
+// A flat pre-#6072 genDir holds an older launcher's Box lower, so a failed host
+// probe must not fall back to mounting it as /nix/var's lower, nor sweep the
+// db-N dirs inside it (issue #6100): Run fails before any Box launches.
+func TestBwrapRun_FlatGenDirWithFailedProbeIsRefusedAndNotSwept(t *testing.T) {
 	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
 	seedSnapshotDir(t, genDir, "flat")
 	partialDir := snapshotVersionDir(genDir, "1")
@@ -148,13 +148,27 @@ func TestBwrapRun_DoesNotSweepVersionDirsInsideFlatGenDirLower(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The payload is inert: the flat snapshot already exists, so no VACUUM runs.
-	a, done, argv := startFakeBoxWith(t, genDir, "agent-issue-flat", "unused", func() (string, error) {
-		return "", errors.New("no host db")
-	})
-	t.Cleanup(func() { killFakeBox(t, a, done, "agent-issue-flat") })
+	launched := filepath.Join(t.TempDir(), "launched")
+	script := filepath.Join(t.TempDir(), "fake-bwrap")
+	body := "#!/bin/sh\n" + lookTool(t, "touch") + " " + launched + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeVacuumInto(t, script, "unused", 0, nil)
+	stubHostVersion(t, func() (string, error) { return "", errors.New("no host db") })
 
-	assertOverlaySrc(t, argv, genDir)
+	a := &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: genDir,
+	}
+	err := a.Run(runner.Box{Name: "agent-issue-flat", Env: map[string]string{}})
+	if err == nil || !strings.Contains(err.Error(), "read host nix store db version") {
+		t.Fatalf("Run = %v, want the host-probe error", err)
+	}
+	assertExists(t, launched, false)
 	assertExists(t, partialDir, true)
 	assertExists(t, SnapshotLockPath(partialDir), true)
 }
