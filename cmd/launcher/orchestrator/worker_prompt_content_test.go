@@ -11,7 +11,7 @@ func TestWorkerPromptOperativeContract(t *testing.T) {
 	assertPromptClauses(t, "worker-prompt.md", []promptClause{
 		{
 			name:   "#3225 stay inside the slice, no scope expansion",
-			clause: "Stay inside the slice you were handed. Do not expand scope, refactor beyond what the task requires, or touch files outside the delegation's stated area",
+			clause: "Stay inside the slice you were handed, any redesign included. Do not expand scope, refactor beyond what the task requires, or touch files outside the delegation's stated area",
 		},
 		{
 			name:   "#3225 nearing the turn budget, stop cleanly rather than pushing on",

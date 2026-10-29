@@ -754,6 +754,68 @@ func TestAssembleWorkerPromptScoutBrief(t *testing.T) {
 	})
 }
 
+// Issue #6182: the worker writes the code, so the test-first pair and the
+// laziness / redesign principle anchors render into worker-prompt.md too,
+// gated like the coordinator's. The worker prompt never carries the
+// coordinator's outcome-protocol or verdict vocabulary.
+func TestAssembleWorkerPromptTestFirstAndPrinciples(t *testing.T) {
+	reg := loadTestRegistry(t)
+	cases := []struct {
+		name     string
+		tdd      bool
+		laziness bool
+		redesign bool
+	}{
+		{name: "all baked", tdd: true, laziness: true, redesign: true},
+		{name: "none baked", tdd: false, laziness: false, redesign: false},
+		{name: "tdd only", tdd: true, laziness: false, redesign: false},
+		{name: "principles only", tdd: false, laziness: true, redesign: true},
+		{name: "laziness only", tdd: false, laziness: true, redesign: false},
+		{name: "redesign only", tdd: false, laziness: false, redesign: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.TDDSkillBaked = tc.tdd
+			env.PrincipleLazinessProtocolSkillBaked = tc.laziness
+			env.PrincipleRedesignFromFirstPrinciplesSkillBaked = tc.redesign
+			env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+			env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			prompt := agentPromptFromJSON(t, result.AgentsJSON, "worker")
+
+			wantAnchor, wantInline := 0, 1
+			if tc.tdd {
+				wantAnchor, wantInline = 1, 0
+			}
+			if got := strings.Count(prompt, tddAnchorClause); got != wantAnchor {
+				t.Errorf("worker.prompt has %d tddAnchorClause, want %d (TDDSkillBaked=%v): %q", got, wantAnchor, tc.tdd, prompt)
+			}
+			if got := strings.Count(prompt, tddInlineClause); got != wantInline {
+				t.Errorf("worker.prompt has %d tddInlineClause, want %d (TDDSkillBaked=%v): %q", got, wantInline, tc.tdd, prompt)
+			}
+			for _, a := range []struct {
+				anchor string
+				want   bool
+			}{{lazinessAnchor, tc.laziness}, {redesignAnchor, tc.redesign}} {
+				if has := strings.Contains(prompt, a.anchor); has != a.want {
+					t.Errorf("worker.prompt contains %s = %v, want %v", a.anchor, has, a.want)
+				}
+			}
+			for _, banned := range []string{"SPINDRIFT_OUTCOME", "VERDICT:", "${"} {
+				if strings.Contains(prompt, banned) {
+					t.Errorf("worker.prompt contains %q, want absent: %q", banned, prompt)
+				}
+			}
+		})
+	}
+}
+
 // Issue #3159's worker-side counterpart to coordinator.md's budget and
 // checkpoint guidance, plus issue #3420's batched-edit directive. Both are
 // scout-independent, so this asserts against coveredEnv() rather than
@@ -2856,6 +2918,13 @@ func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 const (
 	tddAnchorClause = "Work test-first: run `/tdd` for each slice."
 	tddInlineClause = "RED: write ONE failing test"
+)
+
+// The laziness and redesign principle anchors, each unique to its own
+// fragment so the two gates can be asserted independently.
+const (
+	lazinessAnchor = "`/principle-laziness-protocol`"
+	redesignAnchor = "`/principle-redesign-from-first-principles`"
 )
 
 // Issue #3219's tracer: the IMPLEMENT section's test-first prose is an

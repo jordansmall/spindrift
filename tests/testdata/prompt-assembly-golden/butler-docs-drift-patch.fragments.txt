@@ -7,3 +7,4 @@ filer-label-relay-butler.md
 github/filer-dedup.md
 scout-issue-read.md
 skill-preamble.md
+tdd-baked.md

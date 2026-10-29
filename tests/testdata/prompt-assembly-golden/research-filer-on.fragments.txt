@@ -9,3 +9,4 @@ research-outcome-landing-relayed.md
 research-verdict-relay.md
 scout-issue-read.md
 skill-preamble.md
+tdd-baked.md

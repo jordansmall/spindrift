@@ -9,3 +9,4 @@ research-outcome-landing-relayed-socket.md
 research-verdict-relay-socket.md
 scout-issue-read.md
 skill-preamble.md
+tdd-baked.md
