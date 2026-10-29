@@ -1905,6 +1905,26 @@ func TestAssemblePrompt_SkillProbesFollowTheSkillsDir(t *testing.T) {
 	}
 }
 
+// A skill whose SKILL.md sets disable-model-invocation is human-only: the
+// prompt takes its unbaked arm and leaves it out of the preamble list.
+func TestAssemblePrompt_HumanOnlySkillRendersUnbaked(t *testing.T) {
+	in := assemblyFixture(t, "caveman", "tdd")
+	flagged := "---\nname: tdd\ndisable-model-invocation: true\n---\n"
+	if err := os.WriteFile(filepath.Join(in.SkillsDir, "tdd", "SKILL.md"), []byte(flagged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, prompt := assembledPrompt(t, in)
+	if strings.Contains(prompt, "run `/tdd`") {
+		t.Error("the baked /tdd anchor rendered for a human-only skill")
+	}
+	if !strings.Contains(prompt, "1. RED: write ONE failing test") {
+		t.Error("the inline red/green/refactor arm did not render")
+	}
+	if !strings.Contains(prompt, "Skills available: caveman.") {
+		t.Errorf("skill preamble should list only caveman:\n%s", prompt)
+	}
+}
+
 func TestAssemblePrompt_UnreadableRegistryFailsBeforeWritingAnything(t *testing.T) {
 	in := assemblyFixture(t)
 	in.RegistryFile = filepath.Join(t.TempDir(), "absent.json")

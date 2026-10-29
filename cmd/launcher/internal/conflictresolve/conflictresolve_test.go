@@ -212,19 +212,22 @@ func TestResolveSetupFailureAborts(t *testing.T) {
 	}
 }
 
-func skillsDirWith(t *testing.T, names ...string) string {
+// skillsDirWith bakes each named skill with the given SKILL.md body.
+func skillsDirWith(t *testing.T, body string, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, n := range names {
 		if err := os.MkdirAll(filepath.Join(dir, n), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, n, "SKILL.md"), []byte("x"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, n, "SKILL.md"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return dir
 }
+
+const humanOnlyBody = "---\nname: x\ndisable-model-invocation: true\n---\n"
 
 var testNames = append(append([]string{}, BaseVars...), "SKILLS_FOUND", "CAVEMAN_STEP", "CHECK_HYGIENE_STEP", "NIX_CHECKS_STEP", "SKILL_PREAMBLE", "OTHER")
 
@@ -236,7 +239,7 @@ func TestRenderPrompt(t *testing.T) {
 	env := map[string]string{"BASE_BRANCH": "main", "BRANCH": "agent/issue-9"}
 
 	t.Run("caveman baked", func(t *testing.T) {
-		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "caveman"), testNames, lookup(env))
+		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "x", "caveman"), testNames, lookup(env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,8 +277,21 @@ func TestRenderPrompt(t *testing.T) {
 		}
 	})
 
+	t.Run("human-only skills are not baked", func(t *testing.T) {
+		dir := skillsDirWith(t, humanOnlyBody, "caveman", "check-hygiene", "nix-checks")
+		got, err := RenderPrompt(repopath.PromptsDir(), dir, testNames, lookup(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, bad := range []string{"/caveman", "/check-hygiene", "/nix-checks", "Skills available"} {
+			if strings.Contains(got, bad) {
+				t.Errorf("prompt contains %q for a human-only skill", bad)
+			}
+		}
+	})
+
 	t.Run("check skills baked", func(t *testing.T) {
-		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "check-hygiene", "nix-checks"), testNames, lookup(env))
+		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "x", "check-hygiene", "nix-checks"), testNames, lookup(env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -290,7 +306,7 @@ func TestRenderPrompt(t *testing.T) {
 	})
 
 	t.Run("skills without caveman", func(t *testing.T) {
-		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "tdd", "commit"), testNames, lookup(env))
+		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "x", "tdd", "commit"), testNames, lookup(env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +317,7 @@ func TestRenderPrompt(t *testing.T) {
 
 	t.Run("missing caveman fragment names the path", func(t *testing.T) {
 		prompts := t.TempDir()
-		_, err := RenderPrompt(prompts, skillsDirWith(t, "caveman"), testNames, lookup(env))
+		_, err := RenderPrompt(prompts, skillsDirWith(t, "x", "caveman"), testNames, lookup(env))
 		if err == nil || !strings.Contains(err.Error(), filepath.Join("fragments", "caveman-default.md")) {
 			t.Fatalf("err = %v, want one naming fragments/caveman-default.md", err)
 		}
@@ -312,7 +328,7 @@ func TestRenderPrompt(t *testing.T) {
 		{"nix-checks-default.md", "nix-checks"},
 	} {
 		t.Run("missing "+tc.fragment+" names the path", func(t *testing.T) {
-			_, err := RenderPrompt(t.TempDir(), skillsDirWith(t, tc.skill), testNames, lookup(env))
+			_, err := RenderPrompt(t.TempDir(), skillsDirWith(t, "x", tc.skill), testNames, lookup(env))
 			if err == nil || !strings.Contains(err.Error(), filepath.Join("fragments", tc.fragment)) {
 				t.Fatalf("err = %v, want one naming fragments/%s", err, tc.fragment)
 			}
@@ -384,7 +400,7 @@ func TestRenderPrompt(t *testing.T) {
 				[]byte("${TDD_STEP}"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := RenderPrompt(prompts, skillsDirWith(t, tc.skill), testNames, lookup(env))
+			_, err := RenderPrompt(prompts, skillsDirWith(t, "x", tc.skill), testNames, lookup(env))
 			if err == nil {
 				t.Fatal("want an error for a removed var")
 			}

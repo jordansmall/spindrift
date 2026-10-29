@@ -23,20 +23,20 @@ var defaultDispatchKind = dispatchkind.Default.Name
 // subset feeds Gates's computed booleans; the rest are passthrough values
 // Assemble renders.
 type Env struct {
-	// Each flag is true only when DRIVER_SKILLS_DIR/<name>/SKILL.md exists.
+	// Each flag is true only when DRIVER_SKILLS_DIR/<name>/SKILL.md exists and is not human-only (see SkillBaked).
 	// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT
-	CavemanSkillBaked                              bool // -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" (CAVEMAN_BAKED)
-	TDDSkillBaked                                  bool // -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" (TDD_BAKED)
-	CommitSkillBaked                               bool // -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" (COMMIT_BAKED)
-	CodeReviewSkillBaked                           bool // -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" (CODE_REVIEW_BAKED)
-	AutoFormatSkillBaked                           bool // -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" (AUTO_FORMAT_BAKED)
-	AutoLintSkillBaked                             bool // -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
-	CheckHygieneSkillBaked                         bool // -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
-	CodeCommentsSkillBaked                         bool // -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
-	NixChecksSkillBaked                            bool // -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" (NIX_CHECKS_BAKED)
-	PrincipleFixRootCausesSkillBaked               bool // -f "$DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md" (PRINCIPLE_FIX_ROOT_CAUSES_BAKED)
-	PrincipleLazinessProtocolSkillBaked            bool // -f "$DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md" (PRINCIPLE_LAZINESS_PROTOCOL_BAKED)
-	PrincipleRedesignFromFirstPrinciplesSkillBaked bool // -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" (PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED)
+	CavemanSkillBaked                              bool // SkillBaked(DRIVER_SKILLS_DIR, "caveman") (CAVEMAN_BAKED)
+	TDDSkillBaked                                  bool // SkillBaked(DRIVER_SKILLS_DIR, "tdd") (TDD_BAKED)
+	CommitSkillBaked                               bool // SkillBaked(DRIVER_SKILLS_DIR, "commit") (COMMIT_BAKED)
+	CodeReviewSkillBaked                           bool // SkillBaked(DRIVER_SKILLS_DIR, "code-review") (CODE_REVIEW_BAKED)
+	AutoFormatSkillBaked                           bool // SkillBaked(DRIVER_SKILLS_DIR, "auto-format") (AUTO_FORMAT_BAKED)
+	AutoLintSkillBaked                             bool // SkillBaked(DRIVER_SKILLS_DIR, "auto-lint") (AUTO_LINT_BAKED)
+	CheckHygieneSkillBaked                         bool // SkillBaked(DRIVER_SKILLS_DIR, "check-hygiene") (CHECK_HYGIENE_BAKED)
+	CodeCommentsSkillBaked                         bool // SkillBaked(DRIVER_SKILLS_DIR, "code-comments") (CODE_COMMENTS_BAKED)
+	NixChecksSkillBaked                            bool // SkillBaked(DRIVER_SKILLS_DIR, "nix-checks") (NIX_CHECKS_BAKED)
+	PrincipleFixRootCausesSkillBaked               bool // SkillBaked(DRIVER_SKILLS_DIR, "principle-fix-root-causes") (PRINCIPLE_FIX_ROOT_CAUSES_BAKED)
+	PrincipleLazinessProtocolSkillBaked            bool // SkillBaked(DRIVER_SKILLS_DIR, "principle-laziness-protocol") (PRINCIPLE_LAZINESS_PROTOCOL_BAKED)
+	PrincipleRedesignFromFirstPrinciplesSkillBaked bool // SkillBaked(DRIVER_SKILLS_DIR, "principle-redesign-from-first-principles") (PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED)
 	// END GENERATED SKILL-BAKED FIELDS
 
 	// AgentsJSONTemplate is the nix-baked --agents JSON template, empty when no
