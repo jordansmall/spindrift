@@ -367,6 +367,7 @@ rec {
             "Write"
             "Glob"
             "Grep"
+            "Skill"
           ];
           promptFile = "worker-prompt.md";
           prompt = null;

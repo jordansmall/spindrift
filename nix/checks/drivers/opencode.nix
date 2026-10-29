@@ -161,6 +161,9 @@ in
         (opencodePermissionOf rendered agent).task == "deny"
       ) "opencode ${agent} holds no Agent tool and must render task: deny"
     ) (filter (a: a != "reviewer") (builtins.attrNames expectedEdit));
+    # Issue #6182: the worker's roster Skill grant reaches opencode as skill.
+    assert assertMsg ((opencodePermissionOf rendered "worker").skill == "allow")
+      "opencode worker must render skill: allow, got: ${builtins.toJSON (opencodePermissionOf rendered "worker")}";
     pkgs.runCommand "drivers-opencode-agent-files-default-roster-permissions" { } "touch $out";
 
   # An explicit tool list maps to exactly the allow set; every other mapped

@@ -644,8 +644,8 @@ func TestAssembleScoutPromptWritesBriefToDisk(t *testing.T) {
 }
 
 // Issue #4562: worker-prompt.md carries no caveman anchor whether or not
-// CAVEMAN_BAKED is set (a roster subagent with no Skill tool under the claude
-// Driver), while SKILL_PREAMBLE still follows SKILLS_FOUND.
+// CAVEMAN_BAKED is set (its only output is a final report, not narration),
+// while SKILL_PREAMBLE still follows SKILLS_FOUND.
 func TestAssembleWorkerPromptNoCavemanWithSkillPreamble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
