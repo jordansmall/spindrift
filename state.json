@@ -1,21 +1,24 @@
 {
   "lastSwept": "86c6c40b59a1422b161340304ed747adde8677de",
-  "cursor": "cmd/launcher/testdata/golden/stats.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-29T04:14:40.579984961-04:00"
-  },
+  "cursor": "docs/adr/0009-agent-cli-is-a-pluggable-driver.md",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6143",
+    "https://github.com/jordansmall/spindrift/issues/6144",
+    "https://github.com/jordansmall/spindrift/issues/6145"
+  ],
+  "promoted": [
+    "https://github.com/jordansmall/spindrift/issues/6143",
+    "https://github.com/jordansmall/spindrift/issues/6144"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
-  },
-  "reserved": 2
+    "input_tokens": 94,
+    "output_tokens": 18776,
+    "cache_read_input_tokens": 3662521,
+    "cache_creation_input_tokens": 124186,
+    "total_cost_usd": 2.358628325,
+    "duration_ms": 202369,
+    "duration_api_ms": 209649,
+    "num_turns": 51
+  }
 }
