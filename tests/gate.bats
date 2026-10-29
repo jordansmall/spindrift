@@ -2,6 +2,8 @@
 # Issue #5862: nix/gate.sh streams nix-eval-jobs output into builds. The
 # nix-eval-jobs, nix and nix-store binaries are PATH stubs; only the script's
 # own decisions (worker count, failure attribution, exit code) are under test.
+# nix-hash is a stub too, and NIX_STORE_DIR/NIX_STATE_DIR point at temp dirs so
+# the stale-source pre-step (issue #6095) never touches the real store or DB.
 
 bats_require_minimum_version 1.5.0
 
@@ -14,6 +16,11 @@ setup() {
   export NEJ_JOBS="$BATS_TEST_TMPDIR/jobs.jsonl"
   export STUB_NIX_STATUS=0
   export STUB_INVALID=""
+  export NIX_STORE_DIR="$BATS_TEST_TMPDIR/store"
+  export NIX_STATE_DIR="$BATS_TEST_TMPDIR/state"
+  export LOADDB_LOG="$BATS_TEST_TMPDIR/loaddb.log"
+  export HASH_LOG="$BATS_TEST_TMPDIR/hash.log"
+  mkdir -p "$NIX_STORE_DIR" "$NIX_STATE_DIR/db"
   : >"$NEJ_JOBS"
 
   cat >"$STUBS/nix-eval-jobs" <<'STUB'
@@ -59,8 +66,34 @@ exit "$STUB_NIX_STATUS"
 STUB
   cat >"$STUBS/nix-store" <<'STUB'
 #!/usr/bin/env bash
-[ -z "$STUB_INVALID" ] || printf '%s\n' "$STUB_INVALID"
+case "$1" in
+--print-fixed-path)
+  # The fixed path of a NAR hash H is $NIX_STORE_DIR/H-<name>.
+  printf '%s/%s-%s\n' "$NIX_STORE_DIR" "${@: -2:1}" "${@: -1}"
+  ;;
+--dump) printf 'NARDATA' ;;
+--load-db)
+  cat >>"$LOADDB_LOG"
+  exit "${STUB_LOADDB_STATUS:-0}"
+  ;;
+*)
+  [ -z "$STUB_INVALID" ] || printf '%s\n' "$STUB_INVALID"
+  exit "${STUB_VALIDITY_STATUS:-0}"
+  ;;
+esac
 exit 0
+STUB
+  # The "NAR hash" of a path is the content of its `hash` file; a path without
+  # one makes nix-hash fail.
+  cat >"$STUBS/nix-hash" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+*--to-base16*) printf 'b16-%s\n' "${@: -1}" ;;
+*)
+  printf '%s\n' "${@: -1}" >>"$HASH_LOG"
+  cat "${@: -1}/hash"
+  ;;
+esac
 STUB
   # A sandboxed build host has no /usr/bin/env.
   sed -i "1s|.*|#!$BASH|" "$STUBS"/*
@@ -344,4 +377,105 @@ STUB
   [ -e "$WC_MARK" ]
   [[ "$output" == *"all 2 jobs passed"* ]]
   grep -qF -- '/nix/store/b.drv^*' "$NIX_ARGV"
+}
+
+# A -source dir under $NIX_STORE_DIR whose stub NAR hash is $2 (default: its
+# own store hash, so its fixed path matches it).
+source_path() {
+  local p="$NIX_STORE_DIR/$1-source"
+  mkdir -p "$p"
+  printf '%s\n' "${2:-$1}" >"$p/hash"
+  printf '%s\n' "$p"
+}
+
+@test "an invalid content-addressed -source path is registered before eval" {
+  p=$(source_path aaa)
+  cat >"$STUBS/nix-eval-jobs" <<'STUB'
+#!/usr/bin/env bash
+if [ -s "$LOADDB_LOG" ]; then echo registered; else echo not-yet; fi >"$EVAL_SAW"
+cat "$NEJ_JOBS"
+STUB
+  sed -i "1s|.*|#!$BASH|" "$STUBS/nix-eval-jobs"
+  chmod +x "$STUBS/nix-eval-jobs"
+  export EVAL_SAW="$BATS_TEST_TMPDIR/eval.saw"
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gate: registered $p"* ]]
+  [ "$(cat "$LOADDB_LOG")" = "$(printf '%s\n%s\n%s\n\n0' "$p" b16-aaa 7)" ]
+  # Registration must precede eval, or eval's source copy hits the stale path.
+  [ "$(cat "$EVAL_SAW")" = registered ]
+}
+
+@test "an invalid -source path that is not content-addressed is left alone" {
+  p=$(source_path bbb other)
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"registered"* ]]
+  [ ! -s "$LOADDB_LOG" ]
+}
+
+@test "no registration is attempted when the store DB is not writable" {
+  p=$(source_path ccc)
+  job a
+  STUB_INVALID=$p
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ ! -s "$LOADDB_LOG" ]
+  [ ! -e "$HASH_LOG" ]
+}
+
+@test "valid -source paths are not hashed" {
+  valid=$(source_path ddd)
+  stale=$(source_path eee)
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$stale
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HASH_LOG")" = "$stale" ]
+  [[ "$(cat "$LOADDB_LOG")" != *"$valid"* ]]
+}
+
+@test "a failing --load-db reports no registration and the gate still runs" {
+  p=$(source_path fff)
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  export STUB_LOADDB_STATUS=1
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"gate: registered"* ]]
+  [[ "$output" == *"all 1 jobs passed"* ]]
+}
+
+@test "a -source path nix-hash cannot hash is skipped without a load-db record" {
+  p="$NIX_STORE_DIR/ggg-source"
+  mkdir -p "$p"
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HASH_LOG")" = "$p" ]
+  [ ! -s "$LOADDB_LOG" ]
+  [[ "$output" != *"gate: registered"* ]]
+}
+
+@test "a failed validity listing warns, still registers what it printed, and the gate runs" {
+  p=$(source_path hhh)
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  export STUB_VALIDITY_STATUS=1
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gate: could not list invalid -source paths"* ]]
+  [[ "$output" == *"gate: registered $p"* ]]
+  [[ "$output" == *"all 1 jobs passed"* ]]
 }
