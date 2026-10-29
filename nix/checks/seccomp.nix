@@ -5,6 +5,43 @@
 { pkgs, ... }:
 let
   seccompFilter = import ../../lib/seccomp.nix { inherit pkgs; };
+
+  # The mount family from lib/seccomp.nix's deniedSyscalls: add a name there
+  # and its number here too. The new mount API (Linux 5.2+, mount_setattr
+  # 5.12) is numbered 428-433 and 442 on both x86_64 and aarch64; the older
+  # three differ, as does unshare, which ADR 0054 keeps allowed. Any other
+  # arch throws at evaluation rather than letting the check pass without
+  # asserting anything.
+  archNrs =
+    if pkgs.stdenv.hostPlatform.isx86_64 then
+      {
+        classicMount = [
+          155 # pivot_root
+          165 # mount
+          166 # umount2
+        ];
+        unshare = 272;
+      }
+    else if pkgs.stdenv.hostPlatform.isAarch64 then
+      {
+        classicMount = [
+          39 # umount2
+          40 # mount
+          41 # pivot_root
+        ];
+        unshare = 97;
+      }
+    else
+      throw "seccomp-filter-denies-mount-syscalls: no syscall table for ${pkgs.stdenv.hostPlatform.system}";
+  expectedDenied = archNrs.classicMount ++ [
+    428 # open_tree
+    429 # move_mount
+    430 # fsopen
+    431 # fsconfig
+    432 # fsmount
+    433 # fspick
+    442 # mount_setattr
+  ];
 in
 {
   seccomp-filter-is-regular-file-multiple-of-8-bytes =
@@ -127,4 +164,30 @@ in
         EOF
         touch $out
       '';
+  # Decodes the compiled filter rather than grepping lib/seccomp.nix: libseccomp
+  # silently skips names it cannot resolve, so an old libseccomp drops the new
+  # mount-API names with no error. od reads each 8-byte sock_filter as two
+  # words: {code u16, jt u8, jf u8}, then k. A denied syscall is a JEQ (code
+  # 0x15, the word's low u16) with the syscall number in k; the bound
+  # k < 0x40000000 skips the arch-check JEQs (AUDIT_ARCH_* is 0xc000xxxx).
+  # Assumes libseccomp's default linear JEQ chain: a binary-tree filter
+  # (SCMP_FLTATR_CTL_OPTIMIZE=2) would fail here even though it is correct.
+  seccomp-filter-denies-mount-syscalls = pkgs.runCommand "seccomp-filter-denies-mount-syscalls" { } ''
+    od -An -v -tu4 -w4 ${seccompFilter} |
+      awk 'BEGIN { BPF_JEQ = 1 * 16 + 5; ARCH_FLOOR = 4 * 16 ^ 7 } # 0x15, 0x40000000
+           { w[NR - 1] = $1 }
+           END { for (i = 0; i + 1 < NR; i += 2)
+                   if (w[i] % 65536 == BPF_JEQ && w[i + 1] < ARCH_FLOOR) print w[i + 1] }' >denied
+    for nr in ${toString expectedDenied}; do
+      if ! grep -qx "$nr" denied; then
+        echo "seccomp filter does not deny syscall $nr" >&2
+        exit 1
+      fi
+    done
+    if grep -qx ${toString archNrs.unshare} denied; then
+      echo "seccomp filter denies unshare (${toString archNrs.unshare})" >&2
+      exit 1
+    fi
+    touch $out
+  '';
 }
