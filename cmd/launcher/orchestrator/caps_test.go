@@ -1,13 +1,17 @@
 package main
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // TestValidateCaps guards the incoherent-cap-pair detection (issue #2460):
 // passmachine checks maxSlices ahead of maxReviewRounds, so a maxSlices
 // value too small to ever let reviewRounds reach maxReviewRounds silently
 // shadows the review-round cap as the stop reason. caps.go derives the
 // threshold by simulating the passmachine loop; this test pins its 2N+3
-// (review pass) and N+2 (legacy) boundaries.
+// (review pass) and N+2 (legacy) boundaries, and the clamp that keeps the
+// threshold below MaxInt (issue #6107).
 func TestValidateCaps(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -26,6 +30,8 @@ func TestValidateCaps(t *testing.T) {
 		{"legacy: coherent pair matching real loop math", 3, 5, false, false},
 		{"legacy: boundary exactly N+2 is coherent", 3, 5, false, false},
 		{"legacy: boundary one less than N+2 is incoherent", 3, 4, false, true},
+		{"legacy: MaxInt-1 rounds clamps instead of wrapping", math.MaxInt - 1, 5, false, true},
+		{"legacy: MaxInt rounds takes the overflow clamp", math.MaxInt, 5, false, true},
 	}
 
 	for _, tt := range tests {

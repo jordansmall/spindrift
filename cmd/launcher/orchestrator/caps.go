@@ -65,11 +65,12 @@ func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) (in
 		return 0, fmt.Errorf("orchestrator: internal error: cap probe found a non-positive per-round pass cost (%d) between review-round caps 1 and 2", perRound)
 	}
 	extraRounds := maxReviewRounds - 1
-	if extraRounds > (math.MaxInt-pass1)/perRound {
-		// The real threshold would overflow int, so return MaxInt-1:
-		// validateCaps' minSlices then lands exactly on MaxInt and the
-		// comparison still rejects the pair instead of passing on a wrapped
-		// negative.
+	if extraRounds >= (math.MaxInt-pass1)/perRound {
+		// The real threshold would overflow int or come within perRound-1
+		// of MaxInt (where validateCaps' simPass+1 could wrap), so return
+		// MaxInt-1: minSlices then lands exactly on MaxInt and the
+		// comparison rejects every maxSlices below MaxInt instead of
+		// passing on a wrapped negative.
 		return math.MaxInt - 1, nil
 	}
 	return pass1 + extraRounds*perRound, nil
