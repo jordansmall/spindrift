@@ -747,7 +747,7 @@ func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "SPIN-7", Title: "slug", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "15", Title: "numeric-again", Labels: []string{c.label}})
 
-	issues, unlabeled, err := fetchSelectiveIssues(c, fc, []string{"12", "SPIN-7", "15"})
+	issues, unlabeled, _, err := fetchSelectiveIssues(c, fc, []string{"12", "SPIN-7", "15"})
 	if err != nil {
 		t.Fatalf("fetchSelectiveIssues: %v", err)
 	}
@@ -763,5 +763,119 @@ func TestFetchSelectiveIssues_MixedNumericAndSlugIDs_PreservesOrder(t *testing.T
 		if issues[i].number != num {
 			t.Errorf("issues[%d].number = %q, want %q (order not preserved)", i, issues[i].number, num)
 		}
+	}
+}
+
+// normalizingTracker is a test fixture whose Issue strips leading zeros, so
+// "012" resolves to issue 12.
+type normalizingTracker struct{ forge.IssueTracker }
+
+func (n normalizingTracker) Issue(num string) (forge.Issue, error) {
+	return n.IssueTracker.Issue(strings.TrimLeft(num, "0"))
+}
+
+// Issue #6120: a repeated number would claim and run the issue twice.
+func TestFetchSelectiveIssues_RepeatedUnlabeledCountedOnce(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "bare"})
+	issues, unlabeled, repeated, err := fetchSelectiveIssues(c, fc, []string{"12", "12"})
+	if err != nil {
+		t.Fatalf("fetchSelectiveIssues: %v", err)
+	}
+	if len(issues) != 1 || len(unlabeled) != 1 {
+		t.Errorf("issues=%d unlabeled=%v, want 1 and 1", len(issues), unlabeled)
+	}
+	if len(repeated) != 1 || repeated[0] != "12" {
+		t.Errorf("repeated = %v, want [12]", repeated)
+	}
+}
+
+func TestFetchSelectiveIssues_RepeatedKeepsFirstOccurrenceOrder(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{c.label}})
+	issues, _, repeated, err := fetchSelectiveIssues(c, fc, []string{"12", "15", "12"})
+	if err != nil {
+		t.Fatalf("fetchSelectiveIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].number != "12" || issues[1].number != "15" {
+		t.Errorf("issues = %v, want [12 15]", issues)
+	}
+	if len(repeated) != 1 || repeated[0] != "12" {
+		t.Errorf("repeated = %v, want [12]", repeated)
+	}
+}
+
+func TestFetchSelectiveIssues_TrackerNormalizedNumberCollapses(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Labels: []string{c.label}})
+	issues, _, repeated, err := fetchSelectiveIssues(c, normalizingTracker{fc}, []string{"12", "012"})
+	if err != nil {
+		t.Fatalf("fetchSelectiveIssues: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Errorf("issues = %v, want 1", issues)
+	}
+	if len(repeated) != 1 || repeated[0] != "12" {
+		t.Errorf("repeated = %v, want the normalized [12]", repeated)
+	}
+}
+
+// Issue #6120: end to end, a repeated number runs one Box, not two.
+func TestSelectiveListDispatch_RepeatedNumberRunsOnce(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 1
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "first", Labels: []string{c.label}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := testNewSettle(c, fc, testWired(fc), fc)
+
+	stdin := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "12"}, false, true, stdin, stdout)
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Errorf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if !strings.Contains(stdout.String(), "⚠ #12 listed more than once; dispatching once") {
+		t.Errorf("expected repeated-issue notice, got: %s", stdout.String())
+	}
+}
+
+func TestSelectiveListDispatch_RepeatedUnlabeledPromptsOnce(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 1
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "12", Title: "bare"})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := testNewSettle(c, fc, testWired(fc), fc)
+
+	stdin := strings.NewReader("y\n")
+	stdout := &bytes.Buffer{}
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "12"}, false, true, stdin, stdout)
+	if err != nil {
+		t.Fatalf("selectiveListDispatch: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Dispatch 1 unlabeled issue(s)?") || strings.Contains(out, "Dispatch 2") {
+		t.Errorf("expected a single-issue prompt, got: %s", out)
 	}
 }

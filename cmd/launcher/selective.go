@@ -29,9 +29,13 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
 
-	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
+	issues, unlabeled, repeated, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return signalledOr(stopCh, abortCh, err)
+	}
+
+	for _, num := range repeated {
+		fmt.Fprintf(stdout, "⚠ #%s listed more than once; dispatching once\n", num)
 	}
 
 	if len(unlabeled) > 0 {
@@ -72,21 +76,28 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 }
 
 // fetchSelectiveIssues returns the fetched issues plus the numbers of those
-// missing the ready-for-agent label.
-func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) ([]issue, []string, error) {
-	var issues []issue
-	var unlabeled []string
+// missing the ready-for-agent label. A number the tracker resolves to an
+// issue already fetched is dropped, first occurrence winning, since a repeat
+// would claim and run that issue twice; the dropped numbers come back as
+// repeated so callers can say so.
+func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) (issues []issue, unlabeled, repeated []string, err error) {
+	seen := make(map[string]bool, len(nums))
 	for _, num := range nums {
 		fi, err := it.Issue(num)
 		if err != nil {
-			return nil, nil, fmt.Errorf("issue %s: %w", num, err)
+			return nil, nil, nil, fmt.Errorf("issue %s: %w", num, err)
 		}
+		if seen[fi.Number] {
+			repeated = append(repeated, fi.Number)
+			continue
+		}
+		seen[fi.Number] = true
 		issues = append(issues, newIssue(fi))
 		if !containsLabel(fi.Labels, c.label) {
 			unlabeled = append(unlabeled, fi.Number)
 		}
 	}
-	return issues, unlabeled, nil
+	return issues, unlabeled, repeated, nil
 }
 
 var errUnlabeledNotConfirmed = errors.New("aborted: unlabeled issue(s) not confirmed")
