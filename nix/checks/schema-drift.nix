@@ -2806,6 +2806,71 @@ checkedMerge {
         touch $out
       '';
 
+  # splice must fail loudly unless it sees the begin line exactly once and one
+  # end line after it. A silent pass-through let a re-indented BEGIN marker
+  # (gofmt) leave a stale span unflagged and made `nix run .#regen` a no-op;
+  # a BEGIN with no END truncated the target at EOF (issue #6137). The harness
+  # is a standalone `set -e` script, as regen's own, so a failing splice
+  # aborts write_between before its mv.
+  regen-write-between-rejects-bad-markers =
+    pkgs.runCommand "regen-write-between-rejects-bad-markers"
+      {
+        nativeBuildInputs = [ pkgs.gawk ];
+      }
+      ''
+        cat > harness.sh <<'HARNESS'
+        set -euo pipefail
+        ${documentedFactChecker.spliceShellFn}
+        ${regen.writeBetweenShellFn}
+        root="$PWD"
+        write_between fixture '	// BEGIN GENERATED' '	// END GENERATED' 'new content
+        '
+        HARNESS
+
+        check_rejected() {
+          local label="$1"
+          cp fixture fixture.orig
+          if bash harness.sh >out.log 2>&1; then
+            echo "regen-write-between-rejects-bad-markers (issue #6137): $label: write_between succeeded on a malformed marker layout" >&2
+            exit 1
+          fi
+          cmp -s fixture fixture.orig || {
+            echo "regen-write-between-rejects-bad-markers (issue #6137): $label: target file was modified by a failed splice" >&2
+            exit 1
+          }
+          [ ! -e fixture.regen-tmp ] || {
+            echo "regen-write-between-rejects-bad-markers (issue #6137): $label: fixture.regen-tmp left behind" >&2
+            exit 1
+          }
+          grep -q 'BEGIN GENERATED' out.log || {
+            echo "regen-write-between-rejects-bad-markers (issue #6137): $label: error does not name the marker" >&2
+            cat out.log >&2
+            exit 1
+          }
+        }
+
+        printf 'before\n\t\t// BEGIN GENERATED\nold\n\t// END GENERATED\nafter\n' > fixture
+        check_rejected "BEGIN re-indented"
+
+        printf 'before\n\t// BEGIN GENERATED\nold\nafter\n' > fixture
+        check_rejected "END missing"
+
+        printf 'before\n\t// BEGIN GENERATED\nold\n\t\t// END GENERATED\nafter\n' > fixture
+        check_rejected "END re-indented"
+
+        printf 'a\n\t// BEGIN GENERATED\nx\n\t// END GENERATED\n\t// BEGIN GENERATED\ny\n\t// END GENERATED\nb\n' > fixture
+        check_rejected "BEGIN twice"
+
+        printf 'a\n\t// END GENERATED\n\t// BEGIN GENERATED\nx\n\t// END GENERATED\nb\n' > fixture
+        check_rejected "END before BEGIN"
+
+        printf 'before\n\t// BEGIN GENERATED\nold\n\t// END GENERATED\nafter\n' > fixture
+        bash harness.sh >/dev/null
+        printf 'before\n\t// BEGIN GENERATED\nnew content\n\t// END GENERATED\nafter\n' > fixture.expected
+        diff -u fixture.expected fixture
+        touch $out
+      '';
+
   # write_between's mktemp'd content file must not survive a failed splice:
   # its own `rm -f` sits after the splice, so the EXIT trap is the only
   # cleanup there (issue #3128 review finding). The harness must be a
