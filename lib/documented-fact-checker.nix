@@ -72,16 +72,25 @@ rec {
     docSrc;
 
   # The awk keeps both marker lines and replaces only the text between them.
+  # Markers match whole lines, so a re-indented marker matches nothing: splice
+  # fails unless begin occurs exactly once with exactly one end after it, rather
+  # than passing the input through (stale span) or skipping to EOF (truncation).
   spliceShellFn = ''
     splice() {
       local committed="$1" beginMarker="$2" endMarker="$3" rawfile="$4" outfile="$5"
-      awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$rawfile" '
+      awk -v begin="$beginMarker" -v end="$endMarker" -v rawfile="$rawfile" -v committed="$committed" '
         BEGIN { while ((getline line < rawfile) > 0) content = content line "\n" }
-        $0 == begin { print; printf "%s", content; skip=1; next }
-        $0 == end { skip=0 }
+        $0 == begin { nb++; print; printf "%s", content; skip=1; next }
+        $0 == end { ne++; if (!skip) stray=1; skip=0 }
         skip { next }
         { print }
-      ' "$committed" > "$outfile"
+        END {
+          if (nb != 1 || ne != 1 || stray) {
+            printf "splice: %s: want begin marker exactly once and one end marker after it, got %d begin / %d end, end-before-begin=%d (begin: \"%s\", end: \"%s\")\n", committed, nb, ne, stray, begin, end > "/dev/stderr"
+            exit 1
+          }
+        }
+      ' "$committed" > "$outfile" || { rm -f "$outfile"; return 1; }
     }
   '';
 
