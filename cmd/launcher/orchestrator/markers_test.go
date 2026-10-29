@@ -224,8 +224,8 @@ func TestScoutBriefPathMatchesPromptProse(t *testing.T) {
 	// prose-parity loop below would pass even if the constant moved in-repo.
 	assertOutsideRepo(t, repoRoot, defaultScoutBriefPath)
 
-	// Other hardcoded copies of the path (docs/reference.md, run.go,
-	// runstate.go) are deliberately outside this loop.
+	// Other hardcoded copies of the path (e.g. docs/reference.md, runstate.go)
+	// are deliberately outside this loop.
 	for _, promptFile := range []string{
 		"scout-prompt.md",
 		filepath.Join("fragments", "scout-delegate.md"),
