@@ -4519,3 +4519,65 @@ func TestAssembleScoutPromptMatchesAcrossDrivers(t *testing.T) {
 		t.Errorf("opencode scout.md body differs from claude's scout prompt:\nopencode: %q\nclaude:   %q", got, want)
 	}
 }
+
+// The FILE ISSUES triage recap is the same paragraph in every filer cell's
+// step fragment (issue #6184), so it is pinned once here and asserted against
+// each cell's rendered prompt.
+const fileIssuesTriageRecap = `REVIEW's triage has three outcomes, and two of them are already settled by
+the time the filer runs: what was cheap and in scope was fixed inline, and
+what was trivial and out of scope was dropped without filing. Escalation is
+the third, and it is this step. Delegate to the filer subagent only the
+findings that survived that triage — the ones that genuinely need a human
+(a design trade-off, out-of-scope work, or a change too large to fold in),
+plus, from the second review round on and only when fixing it would widen
+the diff, an ambiguous finding REVIEW's own round-aware tiebreak deferred
+rather than fixed — one whose fix is small and stays inside what the branch
+already touches is still fixed inline, at every round. An uncertain finding
+on a surface the branch never touched arrives here at every round instead:
+fixing it inline was never an available outcome. If none survived, skip this
+step; do not re-file what you just fixed or dropped.`
+
+func TestAssembleWorkPromptFileIssuesTriageRecapPerFilerCell(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	cases := []struct {
+		name      string
+		filer     bool
+		writable  bool
+		carrier   string
+		wantRecap bool
+	}{
+		{name: "direct", filer: true, writable: true, wantRecap: true},
+		{name: "relay log", filer: true, carrier: "log", wantRecap: true},
+		{name: "relay socket", filer: true, carrier: "socket", wantRecap: true},
+		{name: "no filer", writable: true, wantRecap: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.FilerEnabled = tc.filer
+			env.BoxWriteEnabled = tc.writable
+			env.SignalCarrier = tc.carrier
+			env.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
+			env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			got := strings.Count(result.Prompt, fileIssuesTriageRecap)
+			if !tc.wantRecap {
+				if got != 0 {
+					t.Errorf("recap appears %d times with no filer, want 0", got)
+				}
+				return
+			}
+			if got != 1 {
+				t.Fatalf("recap appears %d times, want exactly 1; prompt: %q", got, result.Prompt)
+			}
+			want := "# FILE ISSUES\n\n" + fileIssuesTriageRecap + "\n\nIt is pre-provisioned;"
+			if !strings.Contains(result.Prompt, want) {
+				t.Errorf("recap not directly after the FILE ISSUES heading and before \"It is pre-provisioned;\"; prompt: %q", result.Prompt)
+			}
+		})
+	}
+}
