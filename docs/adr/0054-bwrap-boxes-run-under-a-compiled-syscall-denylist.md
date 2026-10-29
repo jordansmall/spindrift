@@ -66,7 +66,9 @@ its fd via `cmd.ExtraFiles`. Three questions had to be settled to get there.
   32-bit binaries under compat syscall entry points, for instance) gets no
   coverage from this filter today. Extending to multiarch means adding
   `seccomp_arch_add` calls for each compat ABI the Box might exercise and is
-  left as a documented follow-up, not attempted in this cut.
+  left as a documented follow-up, not attempted in this cut. (Amended by
+  issue #6139: the filter now covers the compat ABIs; see the amendment
+  below.)
 
 - **Missing/unreadable filter file warns and proceeds without it, matching
   ADR 0042's own degrade-don't-lie precedent for cgroup delegation.** The
@@ -81,9 +83,10 @@ its fd via `cmd.ExtraFiles`. Three questions had to be settled to get there.
 
 A Box's set of deniable syscalls is fixed at nix-build time — `deniedSyscalls`
 in `lib/seccomp.nix` — and Consumers cannot extend or shrink it per-flake.
-Closing the four excluded syscalls, or extending coverage to compat
-architectures, means editing that list and its generator, not exposing a new
-knob.
+Closing the four excluded syscalls, or changing which architectures the
+filter covers, means editing that list, its generator, and (for an
+architecture) the per-arch probes in `nix/checks/seccomp.nix`, not exposing a
+new knob.
 
 The filter denies with `EPERM` (`SCMP_ACT_ERRNO(EPERM)`), not `SCMP_ACT_KILL`:
 a Dispatch that trips a denied syscall gets a normal syscall failure its own
@@ -118,3 +121,30 @@ the trampoline's redirect, which would fail the whole launch. The trampoline
 reopens the path, so there is a small window where the file could vanish
 between the launcher's open and the trampoline's. We accept it: the filter is
 a nix store path, which does not change under a running launcher.
+
+## Amendment (issue #6139): the filter covers the compat ABIs
+
+The "Native architecture only" bullet above said a multiarch Box would get no
+coverage from the filter. That was wrong: libseccomp's default bad-architecture
+action is `SCMP_ACT_KILL`, so a process entering the kernel through a compat
+ABI was not left unfiltered, it was killed with `SIGSYS` on its first syscall.
+That broke the contract in `lib/seccomp.nix`, that the filter never breaks a
+working Box outright.
+
+The generator now calls `seccomp_arch_add` for the compat ABIs: i386 and x32
+on x86_64, AArch32 on aarch64. Compat processes get the same denylist as native
+ones, `EPERM` on a denied syscall and allow otherwise. Only a truly foreign
+architecture still hits the kill default.
+
+The denylist is the same only because it also names each compat-only form of a
+denied syscall: `umount` (i386) for `umount2`, and `clock_settime64` and
+`clock_adjtime64` (i386, AArch32) for their native counterparts. Without them
+those calls reach ALLOW in the compat section. `vm86`, `vm86old`, and `stime`,
+which are on the list but do not exist on x86_64, likewise now take effect on
+i386, where they do. Adding a denied syscall therefore also means adding any
+compat-only alias of it; the per-arch probes in `nix/checks/seccomp.nix` pin
+only the aliases named today.
+
+We did not set the bad-architecture action to `SCMP_ACT_ALLOW`. That would let
+the i386 form of a denied syscall, such as `mount` or `ptrace` through
+`int $0x80`, skip the denylist entirely, which defeats the filter.
