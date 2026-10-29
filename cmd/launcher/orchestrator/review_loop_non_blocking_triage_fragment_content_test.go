@@ -249,49 +249,35 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		}
 	})
 
-	t.Run("FILE ISSUES fragments name the round-2-on deferral category", func(t *testing.T) {
+	t.Run("shared FILE ISSUES triage recap names the round-2-on deferral category", func(t *testing.T) {
 		// AC3: a finding escalated by REVIEW's own round-aware tiebreak must not
-		// be silently dropped once it reaches FILE ISSUES. All three filer
-		// variants — direct, relay, and relay-socket — carry this addition, kept
-		// identical to each other (issue #2701).
-		directRecap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-direct.md"))
-		relayRecap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-relay.md"))
-		relaySocketRecap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-relay-socket.md"))
+		// be silently dropped once it reaches FILE ISSUES. The recap lives once,
+		// in file-issues-triage-recap.md, and all three filer variants (direct,
+		// relay, relay-socket) splice it in (issues #2701, #6184).
+		const recapVar = "${FILE_ISSUES_TRIAGE_RECAP_STEP}"
+		for _, name := range []string{"file-issues-direct.md", "file-issues-relay.md", "file-issues-relay-socket.md"} {
+			if !strings.Contains(readPromptFile(t, repoRoot, "fragments/"+name), recapVar) {
+				t.Errorf("%s does not splice the shared triage recap: want it to contain %q", name, recapVar)
+			}
+		}
+		recap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-triage-recap.md"))
 		// Regression pin (issue #3610 review finding): the recap must name
 		// escalation as a third outcome, not revert to the old binary
 		// fix/escalate triage wording — that binary framing reads as
 		// "nothing ever survives triage but a fix" and would make an agent
 		// skip FILE ISSUES even with a genuine escalated finding in hand.
 		wantThirdOutcome := "Escalation is the third, and it is this step"
-		if !strings.Contains(directRecap, wantThirdOutcome) {
-			t.Errorf("file-issues-direct.md missing the third-outcome framing: want it to contain %q", wantThirdOutcome)
-		}
-		if !strings.Contains(relayRecap, wantThirdOutcome) {
-			t.Errorf("file-issues-relay.md missing the third-outcome framing: want it to contain %q", wantThirdOutcome)
-		}
-		if !strings.Contains(relaySocketRecap, wantThirdOutcome) {
-			t.Errorf("file-issues-relay-socket.md missing the third-outcome framing: want it to contain %q", wantThirdOutcome)
+		if !strings.Contains(recap, wantThirdOutcome) {
+			t.Errorf("file-issues-triage-recap.md missing the third-outcome framing: want it to contain %q", wantThirdOutcome)
 		}
 		binaryTriageWording := "already fixed inline every non-blocking finding"
-		if strings.Contains(directRecap, binaryTriageWording) {
-			t.Errorf("file-issues-direct.md still contains the old binary-triage wording %q", binaryTriageWording)
-		}
-		if strings.Contains(relayRecap, binaryTriageWording) {
-			t.Errorf("file-issues-relay.md still contains the old binary-triage wording %q", binaryTriageWording)
-		}
-		if strings.Contains(relaySocketRecap, binaryTriageWording) {
-			t.Errorf("file-issues-relay-socket.md still contains the old binary-triage wording %q", binaryTriageWording)
+		if strings.Contains(recap, binaryTriageWording) {
+			t.Errorf("file-issues-triage-recap.md still contains the old binary-triage wording %q", binaryTriageWording)
 		}
 
 		want := "an ambiguous finding REVIEW's own round-aware tiebreak deferred rather than fixed"
-		if !strings.Contains(directRecap, want) {
-			t.Errorf("file-issues-direct.md missing the round-2-on deferral category: want it to contain %q", want)
-		}
-		if !strings.Contains(relayRecap, want) {
-			t.Errorf("file-issues-relay.md missing the round-2-on deferral category: want it to contain %q", want)
-		}
-		if !strings.Contains(relaySocketRecap, want) {
-			t.Errorf("file-issues-relay-socket.md missing the round-2-on deferral category: want it to contain %q", want)
+		if !strings.Contains(recap, want) {
+			t.Errorf("file-issues-triage-recap.md missing the round-2-on deferral category: want it to contain %q", want)
 		}
 
 		// Issue #3816: an uncertain finding on a surface the branch never
@@ -299,19 +285,13 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// deferral category above -- it arrives here at every round, not
 		// only from round 2.
 		wantUntouchedSurface := "An uncertain finding on a surface the branch never touched arrives here at every round instead"
-		if !strings.Contains(directRecap, wantUntouchedSurface) {
-			t.Errorf("file-issues-direct.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
-		}
-		if !strings.Contains(relayRecap, wantUntouchedSurface) {
-			t.Errorf("file-issues-relay.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
-		}
-		if !strings.Contains(relaySocketRecap, wantUntouchedSurface) {
-			t.Errorf("file-issues-relay-socket.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
+		if !strings.Contains(recap, wantUntouchedSurface) {
+			t.Errorf("file-issues-triage-recap.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
 		}
 	})
 
 	t.Run("FILE ISSUES fragments share a byte-identical head", func(t *testing.T) {
-		// The shared head is the triage recap plus the filer-provisioning
+		// The shared head is the triage-recap splice plus the filer-provisioning
 		// sentence up to its provenance clause (issue #3827). That clause is
 		// the first divergence: only the direct carrier can ever hold a PR
 		// URL, so the read-only relay carriers offer the branch alone (issue

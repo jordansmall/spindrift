@@ -8,6 +8,7 @@ commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
 file-issues-relay-socket.md
+file-issues-triage-recap.md
 filer-file-relay-socket.md
 filer-label-relay.md
 github/filer-dedup.md
