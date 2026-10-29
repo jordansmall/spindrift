@@ -99,7 +99,8 @@ func (r Readiness) Ready(it forge.IssueTracker, cf forge.CodeForge, caps forge.C
 
 // detectCycle runs Kahn's algorithm over the in-batch portion of the graph. An
 // edge counts only when both endpoints appear in nums, so a blocker outside the
-// batch cannot register as a cycle.
+// batch cannot register as a cycle. The returned node lies on a cycle, not
+// merely downstream of one.
 func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 	inBatch := make(map[string]bool, len(nums))
 	for _, n := range nums {
@@ -130,11 +131,9 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 			queue = append(queue, n)
 		}
 	}
-	done := 0
 	for len(queue) > 0 {
 		node := queue[0]
 		queue = queue[1:]
-		done++
 		for _, dep := range adj[node] {
 			indegree[dep]--
 			if indegree[dep] == 0 {
@@ -142,14 +141,37 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 			}
 		}
 	}
-	if done < len(nums) {
-		for _, n := range nums {
-			if indegree[n] > 0 {
-				return n, true
+	return cycleMember(edges, indegree, inBatch, nums)
+}
+
+// cycleMember names a node on a cycle from the indegrees Kahn's pass left, or
+// reports false when none is residual. Residual nodes include ones merely
+// downstream of a cycle, but each has an undrained in-batch blocker, so walking
+// blockers from any of them must revisit a node, and the first revisit is on a
+// cycle. Residual indegree, not Kahn's drained count, is the cycle signal, so
+// duplicate entries in nums are harmless.
+func cycleMember(edges map[string][]string, indegree map[string]int, inBatch map[string]bool, nums []string) (string, bool) {
+	cur, found := "", false
+	for _, n := range nums {
+		if indegree[n] > 0 {
+			cur, found = n, true
+			break
+		}
+	}
+	if !found {
+		return "", false
+	}
+	seen := make(map[string]bool, len(nums))
+	for !seen[cur] {
+		seen[cur] = true
+		for _, b := range edges[cur] {
+			if inBatch[b] && indegree[b] > 0 {
+				cur = b
+				break
 			}
 		}
 	}
-	return "", false
+	return cur, true
 }
 
 // blockerReady is Readiness.Ready's logic, plus the forge.Issue it fetched. fi
