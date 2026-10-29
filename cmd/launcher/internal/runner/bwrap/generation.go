@@ -553,9 +553,10 @@ func isDecimal(s string) bool {
 
 // newestSnapshotDir is the complete snapshot under genDir with the newest
 // version in snapshotVersionRank order, so a failed host probe can still reuse
-// what a prior run wrote. Failing that it is genDir itself when it holds a
-// flat pre-#6072 snapshot (what an older launcher's build left); "" when there
-// is none.
+// what a prior run wrote. "" when there is none. A flat pre-#6072 snapshot in
+// genDir never counts: it is a lower an older launcher's Box may mount, and
+// mounting it here would put this launcher's db-<V> dirs inside that lower
+// (issue #6100).
 func newestSnapshotDir(genDir string) string {
 	entries, err := os.ReadDir(genDir)
 	if err != nil && !os.IsNotExist(err) {
@@ -577,13 +578,7 @@ func newestSnapshotDir(genDir string) string {
 			best, bestV = dir, ver
 		}
 	}
-	if best != "" {
-		return best
-	}
-	if _, err := os.Stat(snapshotDBPath(genDir)); err == nil {
-		return genDir
-	}
-	return ""
+	return best
 }
 
 // currentSnapshotDir is the snapshot dir a Box should mount for the host DB as

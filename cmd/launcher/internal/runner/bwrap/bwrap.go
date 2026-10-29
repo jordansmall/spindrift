@@ -221,7 +221,9 @@ func (a *bwrapAdapter) IsReady() error {
 	// moved on must not fail --no-build, and Run refreshes it (issue #6072).
 	snapDir := newestSnapshotDir(a.nixVarSnapshotDir)
 	if snapDir == "" {
-		// Only shapes the not-found error below, which names the expected path.
+		// A flat pre-#6072 snapshot still counts as built (--no-build only asks
+		// whether one exists; Run never mounts it), and with none this names the
+		// expected path in the not-found error below.
 		snapDir = a.nixVarSnapshotDir
 	}
 	dbPath := snapshotDBPath(snapDir)
@@ -911,11 +913,8 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 			}
 			nixVarLower, nixVarVersionLock = dir, vlf
 			// A daemon reclaims only at bootstrap, so versions its later
-			// registrations superseded are swept here, per Box. Not when the
-			// Box mounts a flat genDir: the version dirs are inside its lower.
-			if nixVarLower != genDir {
-				sweepStaleSnapshotVersions(genDir, nixVarLower)
-			}
+			// registrations superseded are swept here, per Box.
+			sweepStaleSnapshotVersions(genDir, nixVarLower)
 		} else if lockErr == nil {
 			a.reRootIfReclaimed(box)
 		}
@@ -1531,7 +1530,8 @@ func reclaimGeneration(root, gcRootsRoot, name string, lock lockDisposition) {
 // currentVersionKeeper probes the host DB version once and returns, per
 // generation dir, the version dir a reclaim pass spares: the host's current one,
 // not the newest on disk (a GC that lowers max(id) leaves that one stale). A
-// failed probe falls back to the newest complete snapshot on disk.
+// failed probe falls back to the newest complete db-<V> snapshot on disk, or ""
+// when there is none; never a flat genDir.
 func currentVersionKeeper() func(genDir string) string {
 	v, err := hostStoreDBVersion()
 	if err != nil {
@@ -1547,11 +1547,15 @@ func currentVersionKeeper() func(genDir string) string {
 // incomplete one included (a crashed write), goes only under an exclusive
 // non-blocking flock on its own lock, which fails while a Box or a mid-VACUUM
 // writer holds it shared. A db-<V>.lock with no db-<V> dir is removed the same
-// way. keep may be "" or genDir itself (a flat snapshot), sparing no db-<V>.
-// V is "<max>-<count>" or a bare decimal from a pre-#6101 launcher, which goes
-// as superseded. Entries not shaped db-<V>, such as a flat pre-#6072 "nix" dir
-// an older launcher's Box may mount, go only with the whole generation.
+// way. keep may be "", sparing no db-<V>. V is "<max>-<count>" or a bare
+// decimal from a pre-#6101 launcher, which goes as superseded. A genDir holding
+// a flat pre-#6072 "nix" dir an older launcher's Box may mount is not swept at
+// all (issue #6100): its db-<V> dirs sit inside that Box's lower, and go only
+// with the whole generation, as does any other entry not shaped db-<V>.
 func sweepStaleSnapshotVersions(genDir, keep string) {
+	if _, err := os.Lstat(filepath.Join(genDir, "nix")); err == nil {
+		return
+	}
 	entries, err := os.ReadDir(genDir)
 	if err != nil {
 		return
