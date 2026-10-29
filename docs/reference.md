@@ -8559,7 +8559,10 @@ Box start and mounts that version's snapshot, writing it first
 re-registering the GC roots if reclaim dropped them. It holds the generation's
 shared lock and the version's shared lock for the Box's life, so reclaim cannot
 remove either before the Box exits. If the version probe fails, it reuses the
-newest existing snapshot. `--no-build` prepares nothing: any existing version
+newest existing `db-<V>` snapshot. A pre-#6072 flat snapshot is never mounted:
+the build and `Run` remove it once no Box holds the generation's lock, and
+refuse to write a version beside one that is still held, since an older
+launcher's Box may mount it. `--no-build` prepares nothing: any existing version
 (or a pre-#6072 flat `<generation>/nix/db/db.sqlite`) passes, `Run` refreshes
 it, and it fails with `nix store snapshot not found at ...; run "launcher
 build" first` when there is none.
