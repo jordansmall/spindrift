@@ -360,6 +360,36 @@ let
     packages = p: [ p.hello ];
   };
 
+  # The `byName.worker.model` shorthand set bare under opencode (issue #6142);
+  # no roster and no legacy knob, so the drop must still warn.
+  opencodeByNameBareWorkerHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "opencode";
+    defaults = opencodeNamespacedDefaults;
+    byName.worker.model = "gpt-4o";
+    packages = p: [ p.hello ];
+  };
+
+  # An effort-only `byName.worker` leaves the model at the inherited schema
+  # default, whose drop is the expected silent path.
+  opencodeByNameEffortOnlyHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "opencode";
+    defaults = opencodeNamespacedDefaults;
+    byName.worker.effort = "high";
+    packages = p: [ p.hello ];
+  };
+
+  # The #392 `""` opt-out via byName: dropOptedOut removes the worker before
+  # the bareWorker filter sees it, so nothing warns.
+  opencodeByNameOptOutHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "opencode";
+    defaults = opencodeNamespacedDefaults;
+    byName.worker.model = "";
+    packages = p: [ p.hello ];
+  };
+
   # Proves the opt-in, default-empty filer model composes on its own rather
   # than needing scout or reviewer set. Eval-only, consumed by
   # agents-json-baked.
@@ -678,6 +708,9 @@ in
     opencodeBareWorkerRosterHarness
     opencodeNamespacedWorkerRosterHarness
     opencodeLegacyBareWorkerHarness
+    opencodeByNameBareWorkerHarness
+    opencodeByNameEffortOnlyHarness
+    opencodeByNameOptOutHarness
     opencodeWorkerRosterHarness
     filerOnlyHarness
     workerOnlyHarness
