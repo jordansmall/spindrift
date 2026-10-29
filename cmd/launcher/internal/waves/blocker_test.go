@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -240,6 +241,14 @@ func TestReadinessStatus_LocalTracker_HoldsAndReportsUnfetchableBlocker(t *testi
 	}
 }
 
+// assertCycleMember fails t unless node is one of members, the cycle's nodes.
+func assertCycleMember(t *testing.T, node string, members ...string) {
+	t.Helper()
+	if !slices.Contains(members, node) {
+		t.Errorf("returned node %q is not on the cycle %v", node, members)
+	}
+}
+
 func TestDetectCycle_Empty(t *testing.T) {
 	_, hasCycle := detectCycle(map[string][]string{}, []string{})
 	if hasCycle {
@@ -274,10 +283,11 @@ func TestDetectCycle_DirectCycle(t *testing.T) {
 		"1": {"2"},
 		"2": {"1"},
 	}
-	_, hasCycle := detectCycle(edges, []string{"1", "2"})
+	node, hasCycle := detectCycle(edges, []string{"1", "2"})
 	if !hasCycle {
-		t.Error("expected cycle, got none")
+		t.Fatal("expected cycle, got none")
 	}
+	assertCycleMember(t, node, "1", "2")
 }
 
 func TestDetectCycle_TransitiveCycle(t *testing.T) {
@@ -286,9 +296,63 @@ func TestDetectCycle_TransitiveCycle(t *testing.T) {
 		"2": {"3"},
 		"3": {"1"},
 	}
-	_, hasCycle := detectCycle(edges, []string{"1", "2", "3"})
+	node, hasCycle := detectCycle(edges, []string{"1", "2", "3"})
 	if !hasCycle {
-		t.Error("expected cycle, got none")
+		t.Fatal("expected cycle, got none")
+	}
+	assertCycleMember(t, node, "1", "2", "3")
+}
+
+// TestDetectCycle_ReturnsCycleMemberNotDownstream guards #6097: a node
+// downstream of a cycle keeps residual indegree after Kahn's pass but is not
+// itself on the cycle; detectCycle must name a true member.
+func TestDetectCycle_ReturnsCycleMemberNotDownstream(t *testing.T) {
+	cases := []struct {
+		name  string
+		edges map[string][]string
+		nums  []string
+	}{
+		{
+			name: "one hop",
+			edges: map[string][]string{
+				"A": {"B"},
+				"B": {"A"},
+				"C": {"A"},
+			},
+			nums: []string{"C", "A", "B"},
+		},
+		{
+			name: "two hops",
+			edges: map[string][]string{
+				"A": {"B"},
+				"B": {"A"},
+				"C": {"A"},
+				"D": {"C"},
+			},
+			nums: []string{"D", "C", "A", "B"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			node, hasCycle := detectCycle(tc.edges, tc.nums)
+			if !hasCycle {
+				t.Fatal("expected cycle, got none")
+			}
+			assertCycleMember(t, node, "A", "B")
+		})
+	}
+}
+
+// TestDetectCycle_DuplicateNumsNoCycle: duplicate entries in nums can leave
+// Kahn's drained count short of len(nums) with no residual node, which must not
+// read as a cycle.
+func TestDetectCycle_DuplicateNumsNoCycle(t *testing.T) {
+	edges := map[string][]string{"2": {"1"}}
+	for _, nums := range [][]string{{"2", "1", "1"}, {"1", "2", "2"}} {
+		node, hasCycle := detectCycle(edges, nums)
+		if hasCycle {
+			t.Errorf("nums %v: expected no cycle, got cycle member %q", nums, node)
+		}
 	}
 }
 
