@@ -71,10 +71,11 @@ let
       fragment = "caveman-default-research.md";
       var = "CAVEMAN_STEP_RESEARCH";
     }
-    # The IMPLEMENT test-first step (issue #3219), an exactly-one-on pair.
-    # Baking the tdd skill subtracts prose rather than adding a deferral: the
-    # on arm is a bare anchor pointing at `/tdd`, and the red/green/refactor
-    # fallback moves out of issue-prompt.md into the off arm.
+    # The IMPLEMENT and worker-persona test-first step (issues #3219, #6182),
+    # an exactly-one-on pair. Baking the tdd skill subtracts prose rather than
+    # adding a deferral: the on arm is a bare anchor pointing at `/tdd`, and
+    # the red/green/refactor fallback moves out of issue-prompt.md into the
+    # off arm, which worker-prompt.md also splices.
     {
       gate = "TDD_BAKED";
       fragment = "tdd-baked.md";
@@ -152,8 +153,9 @@ let
       fragment = "principle-fix-root-causes-default.md";
       var = "PRINCIPLE_FIX_ROOT_CAUSES_STEP";
     }
-    # The other two anchor IMPLEMENT only, never fix-prompt.md, which already
-    # says to make the smallest change and not to refactor or redesign.
+    # The other two anchor IMPLEMENT and the worker persona (worker-prompt.md,
+    # issue #6182), never fix-prompt.md, which already says to make the
+    # smallest change and not to refactor or redesign.
     {
       gate = "PRINCIPLE_LAZINESS_PROTOCOL_BAKED";
       fragment = "principle-laziness-protocol-default.md";
