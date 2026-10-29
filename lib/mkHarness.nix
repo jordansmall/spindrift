@@ -1505,12 +1505,17 @@ let
   missingReviewAxisMsg = "spindrift: the explicit `roster` carries a `reviewer` entry but no `review-axis` entry, so the /code-review fan-out runs on the Driver's ungoverned `general-purpose` default instead of a rostered agent (issue #3447); compose the roster from `rosterLib.defaultRoster { }`, or add a `review-axis` entry to it by hand.";
 
   # Under a Driver with Provider-namespaced model ids, a bare worker model the
-  # Consumer set on purpose, via `roster` or the legacy `defaults.workerModel`
-  # knob, is otherwise dropped silently (issue #5331). The inherited schema
-  # default is not warned: that drop is the expected path. Worker names are
-  # unique (normalizeRoster rejects duplicates), so at most one entry drops.
+  # Consumer set on purpose, via `roster`, `byName.worker.model`, or the legacy
+  # `defaults.workerModel` knob, is otherwise dropped silently (issues #5331,
+  # #6142). The inherited schema default is not warned: that drop is the
+  # expected path. Worker names are unique (normalizeRoster rejects
+  # duplicates), so at most one entry drops. `byName` is tested for a non-null
+  # model, not presence: the flake module passes every `byName.<name>.model`
+  # through, defaulting to null.
+  workerModelSetOnPurpose =
+    roster != null || defaults ? workerModel || (byName.worker.model or null) != null;
   droppedBareWorkers = lib.optionals (
-    (roster != null || defaults ? workerModel) && (driverEntry.providerNamespacedModels or false)
+    workerModelSetOnPurpose && (driverEntry.providerNamespacedModels or false)
   ) (lib.filter bareWorker keptRoster);
   droppedBareWorkerMsg = "spindrift: the worker model ${builtins.toJSON (lib.head droppedBareWorkers).model} is not a `<provider>/<model>` id, which this Driver requires, so the worker is not provisioned (issue #5331).";
 
