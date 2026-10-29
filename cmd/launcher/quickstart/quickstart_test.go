@@ -3199,7 +3199,7 @@ func TestQuickstartStrategies_ExcludeBlocklessBackends(t *testing.T) {
 	}
 }
 
-// Covers the six ways acquireForgejoToken's single, no-retry prompt can fail,
+// Covers the six ways forgejo.acquireToken's single, no-retry prompt can fail,
 // each asserting its own guidance wording: a token the API rejects; a non-auth
 // probe failure (Probe cannot tell an unreachable host from a wrong repo slug,
 // so both share one message); a genuine 404, which must not fall into the
@@ -3222,7 +3222,7 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 		{
 			// An unreachable host: Do never gets an HTTP response, so the error
 			// chain carries neither StatusError nor DecodeError. This is the
-			// one case acquireForgejoToken cannot tell from a wrong repo slug.
+			// one case forgejo.acquireToken cannot tell from a wrong repo slug.
 			name:           "NonAuthProbeFailure",
 			token:          "some-token",
 			probeErr:       fmt.Errorf("%w: %w", forge.ErrRepoNotFound, errors.New("dial tcp: connection refused")),
