@@ -578,8 +578,18 @@ the lower a running Box mounts is never touched.
   hot-swap, so it never touches a snapshot a running Box mounts.)
 - `--no-build`'s `IsReady` accepts any existing version, or a pre-#6072 flat
   `<generation>/nix/db/db.sqlite`, and prepares nothing. `Run` refreshes.
-- A failed host version probe degrades to the newest existing snapshot rather
-  than failing the launch.
+- A failed host version probe degrades to the newest existing `db-<V>`
+  snapshot rather than failing the launch. A flat snapshot is never mounted
+  (issue #6100): an older launcher's Box may mount it, so the build and `Run`
+  remove it only once no Box holds the generation's lock, and refuse to write
+  a version beside one that is still held. Three limits are accepted. An older
+  launcher's build holding the generation's lock shared can create a flat
+  `nix/` after the check, beside the `db-<V>` written next. While any
+  current Box holds that lock, a flat `nix/` an older build writes cannot be
+  retired, so every `Run` on the generation fails until those Boxes exit. And
+  once a flat snapshot is retired, a host probe or VACUUM that then fails in
+  the same build or `Run` leaves the generation with no snapshot, so
+  `--no-build` fails until `launcher build` writes a `db-<V>`.
 - Reclaim also sweeps superseded versions of every surviving generation, kept
   or held by a Box. It keeps the host DB's current version (the newest
   complete one when the probe fails) and removes the rest only under an
