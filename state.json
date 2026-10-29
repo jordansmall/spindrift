@@ -1,24 +1,20 @@
 {
   "lastSwept": "53ce65ae83db21e304117a0bca841870b095de03",
   "cursor": "cmd/launcher/orchestrator/caps_simulate_test.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6123",
-    "https://github.com/jordansmall/spindrift/issues/6124",
-    "https://github.com/jordansmall/spindrift/issues/6125"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/6123",
-    "https://github.com/jordansmall/spindrift/issues/6124"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-28T20:00:35.398348889-04:00"
+  },
   "usage": {
-    "input_tokens": 58,
-    "output_tokens": 13687,
-    "cache_read_input_tokens": 1931820,
-    "cache_creation_input_tokens": 81620,
-    "total_cost_usd": 1.58836667,
-    "duration_ms": 151222,
-    "duration_api_ms": 154027,
-    "num_turns": 33
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
