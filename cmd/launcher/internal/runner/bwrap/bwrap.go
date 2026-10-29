@@ -221,9 +221,9 @@ func (a *bwrapAdapter) IsReady() error {
 	// moved on must not fail --no-build, and Run refreshes it (issue #6072).
 	snapDir := newestSnapshotDir(a.nixVarSnapshotDir)
 	if snapDir == "" {
-		// A flat pre-#6072 snapshot still counts as built (--no-build only asks
-		// whether one exists; Run never mounts it), and with none this names the
-		// expected path in the not-found error below.
+		// A flat pre-#6072 snapshot counts as built, since --no-build only asks
+		// whether one exists. With none, this names the expected path in the
+		// not-found error below.
 		snapDir = a.nixVarSnapshotDir
 	}
 	dbPath := snapshotDBPath(snapDir)
@@ -896,6 +896,9 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 	genDir := a.snapshotDirFor(box)
 	nixVarLower := genDir
 	if genDir != "" && (a.nixConfigFile != "" || a.generationFor(box) != "") {
+		if a.nixConfigFile != "" {
+			retireFlatSnapshot(genDir)
+		}
 		lf, lockErr := LockSnapshotShared(genDir)
 		if lockErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); reclaim cannot detect box %q is using this generation\n", SnapshotLockPath(genDir), lockErr, box.Name)
@@ -1034,11 +1037,14 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 // that version's shared lock still held, for Run to keep for the Box's life.
 // Call it with the generation's shared lock held when it could be taken (a
 // failed take only warns). When a sibling's reclaim removed the whole
-// generation, the GC roots went with it, so they are re-registered first. The
-// write is install-if-absent and takes no realize lock: the held locks keep
-// reclaim out, and the link covers a concurrent writer.
+// generation dir, the GC roots went with it, so they are re-registered first;
+// a dir that merely holds no complete snapshot (a just-retired flat one) kept
+// its roots. The write is install-if-absent and takes no realize lock: the held
+// locks keep reclaim out, and the link covers a concurrent writer.
 func (a *bwrapAdapter) ensureRunSnapshot(box runner.Box, genDir string) (string, *os.File, error) {
-	if newestSnapshotDir(genDir) == "" {
+	if _, err := os.Stat(genDir); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("==> bwrap runner: warning: could not check nix-var snapshot %s (%v); not re-registering GC roots\n", genDir, err)
+	} else if err != nil {
 		fmt.Printf("==> bwrap runner: nix-var snapshot %s was reclaimed before box %q launched; recreating it\n", genDir, box.Name)
 		closureSide := []string{a.agentFiles, a.agentEnv, a.nixConfigFile}
 		// Root the closure itself, as SnapshotGeneration does, so both writers keep
@@ -1365,6 +1371,9 @@ func (a *bwrapBuildAdapter) publishSnapshot() error {
 			}
 			defer UnlockSnapshot(rl)
 		}
+		if a.nixConfigFileDrv != "" {
+			retireFlatSnapshot(a.nixVarSnapshotDir)
+		}
 		// A concurrent build skips only its own keepGeneration, so its exclusive
 		// probe would drop this generation's roots (and, with nix-in-box,
 		// RemoveAll the snapshot mid-VACUUM, #2680). Failing to lock must never
@@ -1553,7 +1562,7 @@ func currentVersionKeeper() func(genDir string) string {
 // all (issue #6100): its db-<V> dirs sit inside that Box's lower, and go only
 // with the whole generation, as does any other entry not shaped db-<V>.
 func sweepStaleSnapshotVersions(genDir, keep string) {
-	if _, err := os.Lstat(filepath.Join(genDir, "nix")); err == nil {
+	if _, err := os.Lstat(flatSnapshotPath(genDir)); err == nil {
 		return
 	}
 	entries, err := os.ReadDir(genDir)

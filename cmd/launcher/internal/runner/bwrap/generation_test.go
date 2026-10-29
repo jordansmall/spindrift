@@ -880,3 +880,126 @@ func TestSnapshotGeneration_WritesIntoCurrentVersionDir(t *testing.T) {
 		t.Errorf("db-4 db.sqlite = %q, %v; want it untouched", got, err)
 	}
 }
+
+func TestRetireFlatSnapshot_LockFreeRemovesOnlyTheFlatNix(t *testing.T) {
+	gen := filepath.Join(t.TempDir(), "gen")
+	seedSnapshotDir(t, gen, "flat")
+	v1 := mkVersion(t, gen, "1", true)
+
+	retireFlatSnapshot(gen)
+
+	assertExists(t, filepath.Join(gen, "nix"), false)
+	assertExists(t, v1, true)
+	assertExists(t, SnapshotLockPath(v1), true)
+}
+
+// A Box of either launcher version holds genDir.lock shared, so a held lock
+// means one may still mount the flat nix/ as its lower (issue #6100).
+func TestRetireFlatSnapshot_HeldLockLeavesFlatNix(t *testing.T) {
+	gen := filepath.Join(t.TempDir(), "gen")
+	flat := seedSnapshotDir(t, gen, "flat")
+	holdShared(t, SnapshotLockPath(gen))
+
+	retireFlatSnapshot(gen)
+
+	assertExists(t, flat, true)
+}
+
+// A failed probe means no db-<V> is written this run, so a flat-only generation
+// keeps its sole snapshot for --no-build.
+func TestRetireFlatSnapshot_FailedProbeFlatOnlyKeepsFlatNix(t *testing.T) {
+	stubHostVersion(t, func() (string, error) { return "", errors.New("no host db") })
+	gen := filepath.Join(t.TempDir(), "gen")
+	flat := seedSnapshotDir(t, gen, "flat")
+
+	retireFlatSnapshot(gen)
+
+	assertExists(t, flat, true)
+}
+
+func TestRetireFlatSnapshot_FailedProbeWithCompleteVersionRemovesFlatNix(t *testing.T) {
+	stubHostVersion(t, func() (string, error) { return "", errors.New("no host db") })
+	gen := filepath.Join(t.TempDir(), "gen")
+	seedSnapshotDir(t, gen, "flat")
+	v1 := mkVersion(t, gen, "1", true)
+
+	retireFlatSnapshot(gen)
+
+	assertExists(t, filepath.Join(gen, "nix"), false)
+	assertExists(t, v1, true)
+}
+
+func TestRetireFlatSnapshot_NoFlatNixCreatesNoLockFile(t *testing.T) {
+	gen := filepath.Join(t.TempDir(), "gen")
+	mkVersion(t, gen, "1", true)
+
+	retireFlatSnapshot(gen)
+
+	assertExists(t, SnapshotLockPath(gen), false)
+}
+
+func TestPrepareSnapshotVersion_FlatNixRefusesWithoutWriting(t *testing.T) {
+	fakeVacuumInto(t, "true", "v1", 0, nil)
+	stubHostVersion(t, func() (string, error) { return "1", nil })
+	gen := filepath.Join(t.TempDir(), "gen")
+	flat := seedSnapshotDir(t, gen, "flat")
+
+	dir, lf, err := prepareSnapshotVersion(gen)
+	if err == nil || !strings.Contains(err.Error(), "#6100") || lf != nil {
+		t.Fatalf("prepareSnapshotVersion = %q, %v, %v; want the flat-snapshot refusal and no lock", dir, lf, err)
+	}
+	v1 := snapshotVersionDir(gen, "1")
+	assertExists(t, v1, false)
+	assertExists(t, SnapshotLockPath(v1), false)
+	assertExists(t, flat, true)
+}
+
+func TestSnapshotGeneration_RetiresIdleFlatSnapshotThenWritesVersion(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	fakeVacuumInto(t, script, "v9", 0, nil)
+	stubHostVersion(t, func() (string, error) { return "9", nil })
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	genDir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
+	flat := seedSnapshotDir(t, genDir, "flat")
+
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	assertExists(t, flat, false)
+	assertExists(t, snapshotDBPath(snapshotVersionDir(genDir, "9")), true)
+}
+
+// Accepted limit (ADR 0042): once the flat nix/ is retired, a VACUUM that then
+// fails leaves a flat-only generation with no snapshot until a build writes one.
+func TestSnapshotGeneration_VacuumFailureAfterRetireLeavesNoSnapshot(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	fakeVacuumInto(t, script, "", 1, nil)
+	stubHostVersion(t, func() (string, error) { return "9", nil })
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	genDir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
+	flat := seedSnapshotDir(t, genDir, "flat")
+
+	if err := SnapshotGeneration(swapCfg, pwd, closure); err == nil {
+		t.Fatal("SnapshotGeneration = nil, want the VACUUM error")
+	}
+	assertExists(t, flat, false)
+	assertExists(t, filepath.Join(genDir, "nix"), false)
+	assertExists(t, snapshotDBPath(snapshotVersionDir(genDir, "9")), false)
+}
+
+// The build path retires an idle flat snapshot before it writes db-<V>.
+func TestPublishSnapshot_RetiresIdleFlatSnapshotThenWritesVersion(t *testing.T) {
+	fakeVacuumInto(t, "true", "v1", 0, nil)
+	stubHostVersion(t, func() (string, error) { return "1", nil })
+	fx := newReadyFixture(t)
+	b := fx.a.prepare
+	flat := seedSnapshotDir(t, b.nixVarSnapshotDir, "flat")
+
+	if err := b.publishSnapshot(); err != nil {
+		t.Fatal(err)
+	}
+	assertExists(t, flat, false)
+	assertExists(t, snapshotDBPath(snapshotVersionDir(b.nixVarSnapshotDir, "1")), true)
+}

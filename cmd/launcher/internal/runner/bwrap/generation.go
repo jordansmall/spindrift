@@ -261,6 +261,9 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
 	}
+	if cfg.NixConfigFile != "" {
+		retireFlatSnapshot(dir)
+	}
 	lf, lockErr := LockSnapshotShared(dir)
 	if lockErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not acquire generation lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", SnapshotLockPath(dir), lockErr)
@@ -607,6 +610,11 @@ func prepareSnapshotVersion(genDir string) (dir string, lf *os.File, err error) 
 	if err != nil {
 		return "", nil, err
 	}
+	// Survives when retireFlatSnapshot could not retire it: a live Box may still
+	// mount it, or the lock, probe or removal failed.
+	if _, err := os.Lstat(flatSnapshotPath(genDir)); err == nil {
+		return "", nil, fmt.Errorf("pre-#6072 flat snapshot %s could not be retired (a live Box may still mount it); refusing to write a versioned snapshot beside it (issue #6100)", flatSnapshotPath(genDir))
+	}
 	// The version lock is a sibling of the version dir, so genDir must exist.
 	if err := os.MkdirAll(genDir, 0o755); err != nil {
 		return "", nil, fmt.Errorf("mkdir nix-var-snapshot generation dir: %w", err)
@@ -627,4 +635,55 @@ func prepareSnapshotVersion(genDir string) (dir string, lf *os.File, err error) 
 	}
 	fmt.Printf("==> bwrap runner: nix-var snapshot %s already exists; skipping vacuum\n", dir)
 	return dir, lf, nil
+}
+
+// flatSnapshotPath is the pre-#6072 snapshot root directly under genDir. An
+// older launcher's Box mounts genDir itself as its /nix/var lower, so a nix/
+// there means db-<V> dirs written beside it would land inside that lower
+// (issue #6100).
+func flatSnapshotPath(genDir string) string {
+	return filepath.Join(genDir, "nix")
+}
+
+// retireFlatSnapshot removes a pre-#6072 flat nix/ under genDir once nothing
+// can be mounting it. Every Box, old or new, holds genDir's lock shared for its
+// life, so a non-blocking exclusive flock succeeding proves no Box does; held
+// means one may, and the flat snapshot stays. Best effort: callers go on to
+// prepareSnapshotVersion, which refuses to write beside a surviving flat nix/.
+// A failed host probe with no complete db-<V> keeps it: --no-build's IsReady
+// still counts the flat snapshot, and nothing will replace it this run.
+// Call it before taking genDir's shared lock, which it would conflict with.
+func retireFlatSnapshot(genDir string) {
+	flat := flatSnapshotPath(genDir)
+	if _, err := os.Lstat(flat); err != nil {
+		return
+	}
+	if _, err := hostStoreDBVersion(); err != nil && newestSnapshotDir(genDir) == "" {
+		fmt.Printf("==> bwrap runner: warning: could not read host nix store db version (%v); leaving flat nix-var snapshot %s in place\n", err, flat)
+		return
+	}
+	lockPath := SnapshotLockPath(genDir)
+	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not open generation lock %s (%v); leaving flat nix-var snapshot %s in place\n", lockPath, err, flat)
+		return
+	}
+	lockRaceWindowHook()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lf.Close()
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			fmt.Printf("==> bwrap runner: warning: could not lock generation %s (%v); leaving flat nix-var snapshot %s in place\n", lockPath, err, flat)
+		}
+		return
+	}
+	defer UnlockSnapshot(lf)
+	if !LockedFDMatchesPath(lf, lockPath) {
+		fmt.Printf("==> bwrap runner: warning: generation lock %s was replaced or removed; leaving flat nix-var snapshot %s in place\n", lockPath, flat)
+		return
+	}
+	if err := os.RemoveAll(flat); err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not remove flat nix-var snapshot %s: %v\n", flat, err)
+		return
+	}
+	fmt.Printf("==> bwrap runner: removed pre-#6072 flat nix-var snapshot %s; versioned snapshots replace it\n", flat)
 }

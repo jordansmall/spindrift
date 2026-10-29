@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // startFakeBox runs a Box under genDir against a fake bwrap that records its
@@ -21,6 +22,27 @@ import (
 func startFakeBox(t *testing.T, genDir, name, host string) (*bwrapAdapter, chan error, []string) {
 	t.Helper()
 	return startFakeBoxWith(t, genDir, name, "v"+host, func() (string, error) { return host, nil })
+}
+
+// newRefusalAdapter returns an adapter whose fake bwrap only touches the
+// returned path, so a test expecting Run to fail before launching asserts the
+// path stays absent.
+func newRefusalAdapter(t *testing.T, genDir, payload string) (*bwrapAdapter, string) {
+	t.Helper()
+	launched := filepath.Join(t.TempDir(), "launched")
+	script := filepath.Join(t.TempDir(), "fake-bwrap")
+	body := "#!/bin/sh\n" + lookTool(t, "touch") + " " + launched + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeVacuumInto(t, script, payload, 0, nil)
+	return &bwrapAdapter{
+		agentFiles:        "/fake/agent",
+		agentEnv:          "/fake/env",
+		bakedPrefetch:     "echo ok",
+		nixConfigFile:     "/fake/nix.conf",
+		nixVarSnapshotDir: genDir,
+	}, launched
 }
 
 // startFakeBoxWith is startFakeBox with both inputs explicit: the host-version
@@ -148,22 +170,9 @@ func TestBwrapRun_FlatGenDirWithFailedProbeIsRefusedAndNotSwept(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	launched := filepath.Join(t.TempDir(), "launched")
-	script := filepath.Join(t.TempDir(), "fake-bwrap")
-	body := "#!/bin/sh\n" + lookTool(t, "touch") + " " + launched + "\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fakeVacuumInto(t, script, "unused", 0, nil)
+	a, launched := newRefusalAdapter(t, genDir, "unused")
 	stubHostVersion(t, func() (string, error) { return "", errors.New("no host db") })
 
-	a := &bwrapAdapter{
-		agentFiles:        "/fake/agent",
-		agentEnv:          "/fake/env",
-		bakedPrefetch:     "echo ok",
-		nixConfigFile:     "/fake/nix.conf",
-		nixVarSnapshotDir: genDir,
-	}
 	err := a.Run(runner.Box{Name: "agent-issue-flat", Env: map[string]string{}})
 	if err == nil || !strings.Contains(err.Error(), "read host nix store db version") {
 		t.Fatalf("Run = %v, want the host-probe error", err)
@@ -171,6 +180,8 @@ func TestBwrapRun_FlatGenDirWithFailedProbeIsRefusedAndNotSwept(t *testing.T) {
 	assertExists(t, launched, false)
 	assertExists(t, partialDir, true)
 	assertExists(t, SnapshotLockPath(partialDir), true)
+	// The only snapshot --no-build can still use once the probe recovers.
+	assertExists(t, snapshotDBPath(genDir), true)
 }
 
 func lookTool(t *testing.T, name string) string {
@@ -189,4 +200,47 @@ func assertOverlaySrc(t *testing.T, argv []string, want string) {
 	if i < 0 || i+1 >= len(argv) || argv[i+1] != want {
 		t.Errorf("--overlay-src = %v, want %s", argv, want)
 	}
+}
+
+// A flat pre-#6072 genDir no Box holds is retired and the Box mounts the
+// versioned snapshot instead (issue #6100).
+func TestBwrapRun_IdleFlatGenDirIsRetiredThenMountsVersionSnapshot(t *testing.T) {
+	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
+	flat := seedSnapshotDir(t, genDir, "flat")
+
+	var a *bwrapAdapter
+	var done chan error
+	var argv []string
+	out := runnertest.CaptureStdoutDuring(t, func() {
+		a, done, argv = startFakeBox(t, genDir, "agent-issue-retire", "2")
+	})
+	t.Cleanup(func() { killFakeBox(t, a, done, "agent-issue-retire") })
+
+	if strings.Contains(out, "was reclaimed") {
+		t.Errorf("retiring a flat generation was reported as a reclaim: %q", out)
+	}
+	assertExists(t, flat, false)
+	assertOverlaySrc(t, argv, snapshotVersionDir(genDir, "2"))
+}
+
+// A held genDir lock may be an older launcher's Box mounting the flat nix/ as
+// its lower; writing db-<V> beside it would put it inside that lower, so Run
+// fails instead.
+func TestBwrapRun_HeldFlatGenDirIsRefusedAndNothingWritten(t *testing.T) {
+	genDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "gen")
+	flat := seedSnapshotDir(t, genDir, "flat")
+	holdShared(t, SnapshotLockPath(genDir))
+
+	a, launched := newRefusalAdapter(t, genDir, "v2")
+	stubHostVersion(t, func() (string, error) { return "2", nil })
+
+	err := a.Run(runner.Box{Name: "agent-issue-held-flat", Env: map[string]string{}})
+	if err == nil || !strings.Contains(err.Error(), "#6100") {
+		t.Fatalf("Run = %v, want the flat-snapshot refusal", err)
+	}
+	v2 := snapshotVersionDir(genDir, "2")
+	assertExists(t, launched, false)
+	assertExists(t, v2, false)
+	assertExists(t, SnapshotLockPath(v2), false)
+	assertExists(t, flat, true)
 }
