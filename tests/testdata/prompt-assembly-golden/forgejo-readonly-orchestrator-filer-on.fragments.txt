@@ -8,6 +8,7 @@ commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
 file-issues-relay.md
+file-issues-triage-recap.md
 filer-file-relay.md
 filer-label-relay.md
 forgejo/filer-dedup.md

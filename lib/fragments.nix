@@ -267,6 +267,15 @@ let
       fragment = "worker-scout-brief.md";
       var = "WORKER_SCOUT_BRIEF_STEP";
     }
+    # The triage recap opening all three FILE ISSUES rows below, spliced in
+    # rather than copied three times (issue #6184); issue-prompt.md never
+    # names its var.
+    {
+      gate = "FILER_ENABLED";
+      fragment = "file-issues-triage-recap.md";
+      var = "FILE_ISSUES_TRIAGE_RECAP_STEP";
+    }
+
     # The write-mechanism split (issue #2019): a filer under read-only holds
     # no write token, so its label and file steps emit the host-mediated
     # SPINDRIFT_ISSUE_INTENT relay instead of gh label create/gh issue create.

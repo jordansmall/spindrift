@@ -4520,36 +4520,24 @@ func TestAssembleScoutPromptMatchesAcrossDrivers(t *testing.T) {
 	}
 }
 
-// The FILE ISSUES triage recap is the same paragraph in every filer cell's
-// step fragment (issue #6184), so it is pinned once here and asserted against
-// each cell's rendered prompt.
-const fileIssuesTriageRecap = `REVIEW's triage has three outcomes, and two of them are already settled by
-the time the filer runs: what was cheap and in scope was fixed inline, and
-what was trivial and out of scope was dropped without filing. Escalation is
-the third, and it is this step. Delegate to the filer subagent only the
-findings that survived that triage — the ones that genuinely need a human
-(a design trade-off, out-of-scope work, or a change too large to fold in),
-plus, from the second review round on and only when fixing it would widen
-the diff, an ambiguous finding REVIEW's own round-aware tiebreak deferred
-rather than fixed — one whose fix is small and stays inside what the branch
-already touches is still fixed inline, at every round. An uncertain finding
-on a surface the branch never touched arrives here at every round instead:
-fixing it inline was never an available outcome. If none survived, skip this
-step; do not re-file what you just fixed or dropped.`
-
+// The FILE ISSUES triage recap is one shared fragment the direct, relay, and
+// relay-socket step fragments splice in (issue #6184), so each cell asserts
+// it from the fragment itself rather than a copy.
 func TestAssembleWorkPromptFileIssuesTriageRecapPerFilerCell(t *testing.T) {
 	reg := loadTestRegistry(t)
+	fileIssuesTriageRecap := fragmentText(t, "file-issues-triage-recap.md")
 
 	cases := []struct {
-		name      string
-		filer     bool
-		writable  bool
-		carrier   string
-		wantRecap bool
+		name        string
+		filer       bool
+		writable    bool
+		carrier     string
+		wantRecap   bool
+		wantVariant string
 	}{
-		{name: "direct", filer: true, writable: true, wantRecap: true},
-		{name: "relay log", filer: true, carrier: "log", wantRecap: true},
-		{name: "relay socket", filer: true, carrier: "socket", wantRecap: true},
+		{name: "direct", filer: true, writable: true, wantRecap: true, wantVariant: "the issue number, and the branch (or PR URL, once one is open) for provenance."},
+		{name: "relay log", filer: true, carrier: "log", wantRecap: true, wantVariant: "`SPINDRIFT_ISSUE_INTENT` lines instead"},
+		{name: "relay socket", filer: true, carrier: "socket", wantRecap: true, wantVariant: "each one over the Signal socket via `driver-exec signal issue-intent`"},
 		{name: "no filer", writable: true, wantRecap: false},
 	}
 	for _, tc := range cases {
@@ -4573,6 +4561,9 @@ func TestAssembleWorkPromptFileIssuesTriageRecapPerFilerCell(t *testing.T) {
 			}
 			if got != 1 {
 				t.Fatalf("recap appears %d times, want exactly 1; prompt: %q", got, result.Prompt)
+			}
+			if !strings.Contains(result.Prompt, tc.wantVariant) {
+				t.Errorf("prompt missing the %s variant sentence %q", tc.name, tc.wantVariant)
 			}
 			want := "# FILE ISSUES\n\n" + fileIssuesTriageRecap + "\n\nIt is pre-provisioned;"
 			if !strings.Contains(result.Prompt, want) {
