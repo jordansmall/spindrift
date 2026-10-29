@@ -188,6 +188,7 @@ let
     # package 'libseccomp'" before the check derivation itself ever runs.
     "seccomp-filter-is-regular-file-multiple-of-8-bytes"
     "seccomp-filter-covers-compat-architectures"
+    "seccomp-filter-denies-mount-syscalls"
   ];
 
   portableSourceChecks =
