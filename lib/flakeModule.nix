@@ -431,16 +431,6 @@ in
     let
       cfg = config.spindrift;
 
-      # Where the legacy settings shim points: a Driver-valued key goes
-      # straight to its agents.drivers.<name> path, not via the deprecated
-      # top-level one.
-      newPathFor =
-        key: entry:
-        let
-          path = resolveNixPath key entry;
-        in
-        lib.concatStringsSep "." (driverMap.placeEntry "<name>" entry (lib.splitString "." path));
-
       # New domain-tree path wins, old settings.<section>.<knob> path is the
       # fallback (ADR 0037 Pass 1, issue #2179). `lib.warn` returns the value
       # unchanged, so a Consumer entirely on old paths still gets
@@ -453,11 +443,14 @@ in
             newVal = lib.attrByPath (lib.splitString "." (resolveNixPath key entry)) null cfg;
             sectionAttr = legacySettingsSection.${key} or null;
             oldVal = if sectionAttr == null then null else cfg.settings.${sectionAttr}.${key} or null;
+            # placedPath, not resolveNixPath: a Driver-valued key points straight
+            # at its agents.drivers.<name> path, not the deprecated top-level one.
+            newPath = driverMap.placedPath "<name>" key entry;
           in
           if newVal != null then
             newVal
           else if oldVal != null then
-            lib.warn "perSystem.spindrift.settings.${sectionAttr}.${key} is deprecated; use perSystem.spindrift.${newPathFor key entry}" oldVal
+            lib.warn "perSystem.spindrift.settings.${sectionAttr}.${key} is deprecated; use perSystem.spindrift.${newPath}" oldVal
           else
             null
         ) flakeOptionEntries
