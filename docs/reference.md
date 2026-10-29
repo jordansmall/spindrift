@@ -3974,7 +3974,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   <n>` opens the PR from the preserved bundle. A missing bundle, a wiring
   error, or a missing PR intent with no fallback still posts "merge blocked"
   and leaves the issue `agent-in-progress`.
-- **A ready that skipped the land pass never lands.** A review-loop run
+- **A run that skipped the land pass never lands.** A review-loop run
   whose `status=ready` did not come from its land pass never cleared
   review: the pass manifest's last implement, fix, or land entry is not
   `land`, or that land pass and every pass after it printed no outcome.
@@ -3990,9 +3990,12 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   one), such as a Box killed by a signal, is judged by where its loop
   stopped: if the last implement, fix, or land entry is not `land`, a
   hand-run `spindrift recover <n>` declines its bundle instead of landing
-  it. A land pass killed mid-check already cleared review, so recover
-  still lands its bundle, and a manifest with no such entries still
-  trusts the bundle alone (issue #5984).
+  it. On `CODE_FORGE=local`, settle swaps a signal-killed run of that shape
+  that left a bundle in the outbox to `agent-failed` with reason
+  `unreviewed` rather than marking it Recoverable. A land pass killed
+  mid-check already cleared review, so recover still lands its bundle, and
+  a manifest with no such entries still trusts the bundle alone
+  (issue #5984).
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
@@ -5251,7 +5254,8 @@ landing: "https://github.com/owner/repo/pull/123"
   appear: `agent-ambiguous-spec` after a `status=ambiguous` stop, and the
   local-only `agent-recoverable` marker when a `CODE_FORGE=local` run that
   self-reported success (or was killed by a signal) leaves a bundle in the
-  outbox for `spindrift recover` (ADR 0039).
+  outbox for `spindrift recover` (ADR 0039), unless its review loop stopped
+  before its land pass finished (`agent-failed`, reason `unreviewed`).
 - `parent` is optional and opaque — the local tracker is standalone; any
   linkage to an upstream tracker (a GitHub URL, a Jira key, another local
   issue's slug) is out of scope (ADR 0013) and never resolved by spindrift
@@ -7192,8 +7196,11 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   contradicted; a read that keeps failing never produces it), `no-pr`
   (`status=merged` named a branch with no PR to verify), `box-failed` (the Box
   failed before settle), `research-failed`, `chore-failed`,
-  `ledger-finish-failed`, `stopped`, and `unreviewed` (a review-loop run's
-  `status=ready` did not come from its land pass, so nothing landed);
+  `ledger-finish-failed`, `stopped`, and `unreviewed` (the review loop
+  stopped before its land pass finished, so nothing landed: a `status=ready`
+  from another pass, or a signal-killed `CODE_FORGE=local` run with no
+  success self-report and a bundle in the outbox whose loop stopped in
+  implement or fix);
 - `ambiguous` and `recoverable` each name their own state.
 
 A Record's `outcome` comes only from that op, and `outcome_source` says so:

@@ -40,8 +40,10 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   comment naming `spindrift recover <n>`), or a read-only fix pass's bundle
   relay failed (its PR is already open, so the daemon's recover kind skips it
   and a hand-run `spindrift recover <n>` re-gates that PR instead of relaying
-  the bundle), or a review-loop run reported `status=ready` from a pass other
-  than its land pass (settled reason `unreviewed`: nothing is landed, and
+  the bundle), or a run's review loop stopped before its land pass finished,
+  whether it reported `status=ready` from another pass or, killed by a
+  signal on `CODE_FORGE=local` with a bundle in the outbox, stopped in
+  implement or fix (settled reason `unreviewed`: nothing is landed, and
   recover skips it); needs human triage, re-label to retry.
 - `agent-ambiguous-spec` — the pre-implement gate found the issue internally
   contradictory and the Box halted on purpose (`status=ambiguous`), posting
