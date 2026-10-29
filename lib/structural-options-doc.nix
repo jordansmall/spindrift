@@ -93,7 +93,8 @@ in
       Bake nix (binary + registered store DB + sandbox-off, cores=4-bounded
       config) into the box so `nix flake check` and `nix develop` work
       inside the container. Defaults to true (the nix-centric baseline);
-      set to false for a lean, nix-free image.
+      set to false for a lean, nix-free image. `storeWritable` requires
+      it.
     '';
     docType = "bool";
     docDefault = "`true`";
@@ -108,6 +109,8 @@ in
       copy-on-write layer. Defaults to false; the entrypoint prints a loud
       warning when enabled. Both runtimes support it now (ADR 0042): bwrap
       overlays an ephemeral tmpfs upper on the store at run time instead.
+      Requires `infra.nix.inBox`; enabling it without in-box nix is
+      rejected at evaluation.
     '';
     docType = "bool";
     docDefault = "`false`";
