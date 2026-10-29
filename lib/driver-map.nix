@@ -143,6 +143,12 @@ let
     driverName: entry: segments:
     if isDriverValued entry then underDriver driverName segments else segments;
 
+  # A schema knob's placed canonical flake path: its nixpath, moved under the
+  # Driver when the entry is Driver-valued. Name this, never the bare nixpath.
+  placedPath =
+    driverName: key: entry:
+    builtins.concatStringsSep "." (placeEntry driverName entry (splitDots (nixpath key entry)));
+
   # Where a flat structural shim's replacement lives: a Driver-valued knob
   # goes straight to its Driver entry, not via the deprecated top-level path.
   driverEntryPath =
@@ -171,6 +177,7 @@ in
     underDriver
     isDriverValued
     placeEntry
+    placedPath
     driverEntryPath
     ;
   # Where the module declares the map and its default-Driver name; read by

@@ -344,6 +344,18 @@ in
     ) "lib/driver-map.nix: placeEntry must place only driverValued entries under the Driver";
     pkgs.runCommand "driver-valued-marking" { } "touch $out";
 
+  driver-map-placed-path =
+    assert assertMsg
+      (
+        driverMap.placedPath "<name>" "model" schema.model == "agents.drivers.<name>.models.default"
+        &&
+          driverMap.placedPath "<name>" "driverBashTimeoutMs" schema.driverBashTimeoutMs
+          == "agents.drivers.<name>.bashTimeoutMs"
+        && driverMap.placedPath "<name>" "autoFormat" schema.autoFormat == "agents.format.enable"
+      )
+      "lib/driver-map.nix: placedPath must place Driver-valued keys under the Driver and leave other keys on their resolveNixPath path";
+    pkgs.runCommand "driver-map-placed-path" { } "touch $out";
+
   driver-map-resolve =
     assert expectOk "shorthand" (resolve {
       drivers = { };
