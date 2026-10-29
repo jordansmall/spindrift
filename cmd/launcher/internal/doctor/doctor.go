@@ -125,8 +125,11 @@ type tierResult struct {
 // advisoryTiers is the single place a tier's report metadata — noun, ref,
 // names, and print order — lives. A new tier still needs a row in
 // lib/labels.nix. nix/checks/dispatch-labels.nix only sees names written as a
-// `return []string{"..."}` literal here; names sourced elsewhere (as priority's
-// come from forge) escape that extraction silently.
+// `return []string{"..."}` literal here, and a non-literal item inside such a
+// span fails that check closed. Every such span in this file is scanned,
+// comments included, so prose quoting the marker must keep the quote after
+// its brace. Names sourced outside any such span (as priority's come from
+// forge) escape that extraction silently.
 var advisoryTiers = []labelTier{
 	{noun: "research", ref: "(ADR 0022 / ADR 0041)", names: func(c Config) []string { return ResearchLabelNamesFor(c.ResearchVerdicts) }},
 	{noun: "priority", ref: "(ADR 0040)", names: func(Config) []string { return PriorityLabelNames() }},

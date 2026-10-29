@@ -290,23 +290,30 @@ let
     in
     concatMap labelFromSegment (builtins.tail (splitString marker src));
   # Like labelLiteralAfterMarker, but for a Go `[]string{"a", "b"}` literal:
-  # every quoted item up to the closing brace, not just the first. The segment
-  # starts just after the marker's opening quote, so splitting the span on `"`
-  # puts the items at the even indices and the separators at the odd ones. A
-  # separator holding anything but whitespace and commas (say a named
-  # constant) makes the whole extraction [ ], so emptyOffenders fires.
+  # every quoted item up to the closing brace, not just the first. The marker
+  # stops before any quote, so the span's first item is checked here: after
+  # optional whitespace it must open with a quote, else (a named constant in
+  # the first slot, or an empty `{}`, deliberately) the whole extraction is
+  # [ ] and emptyOffenders fires.
+  # With that opening quote dropped, splitting on `"` puts the items at the
+  # even indices and the separators at the odd ones. A separator holding
+  # anything but whitespace and commas (say a named constant) also makes the
+  # whole extraction [ ].
   labelLiteralsInSpanAfterMarker =
     marker: src:
     let
       labelsFromSegment =
         segment:
         let
-          quoteParts = splitString "\"" (builtins.head (splitString "}" segment));
+          opened = builtins.match "[ \t\n]*\"([^}]*)" (builtins.head (splitString "}" segment));
+          quoteParts = splitString "\"" (builtins.head opened);
           at = builtins.elemAt quoteParts;
           items = builtins.genList (i: at (2 * i)) ((builtins.length quoteParts + 1) / 2);
           separators = builtins.genList (i: at (2 * i + 1)) (builtins.length quoteParts / 2);
         in
-        if builtins.all (sep: builtins.match "[ \t\n,]*" sep != null) separators then
+        if opened == null then
+          null
+        else if builtins.all (sep: builtins.match "[ \t\n,]*" sep != null) separators then
           filter (value: builtins.match "[a-z0-9-]+" value != null) items
         else
           null;
@@ -318,14 +325,14 @@ let
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
   # doctor.go's AmbiguousLabelNames() literal (issue #2817). A separate
   # extractor because the two Go shapes differ and so need distinct markers.
-  # This marker matches every `return []string{"..."}` span in doctor.go —
+  # This marker matches every `return []string{...}` span in doctor.go —
   # AmbiguousLabelNames() and ButlerLabelNames() (ADR 0056) both share the
   # shape — so it cannot cross-match ResearchLabelNamesFor()'s different
   # `append(names, "...")` shape. Every literal in each span is extracted
   # (ButlerLabelNames() lists three); all are registered (labels.ambiguous,
   # labels.butlerFinding, labels.butlerPatch, labels.tuningFinding). A
-  # non-literal item in a span empties the whole result.
-  extractReturnStringSliceLabels = labelLiteralsInSpanAfterMarker ''return []string{"'';
+  # non-literal item in a span, first slot included, empties the whole result.
+  extractReturnStringSliceLabels = labelLiteralsInSpanAfterMarker "return []string{";
   # extractLabelCreateTokens and extractNameFieldTokens scan line by line, so a
   # shell `\`-continued `gh label create` would leave the marker and its
   # literal on different lines and match neither. Folding backslash-newline
@@ -772,7 +779,7 @@ mapAttrs (
         registryLabels = allRegistryLabels;
       });
     in
-    # The shared `return []string{"` marker also matches ButlerLabelNames()'s
+    # The shared `return []string{` marker also matches ButlerLabelNames()'s
     # untouched "agent-butler-finding", "agent-butler-patch" and
     # "agent-tuning-finding" literals (ADRs 0056, 0057, 0062), so the doctored
     # source yields all four, in file order.
@@ -835,5 +842,28 @@ mapAttrs (
         needle = ''"agent-butler-patch"'';
         constant = "butlerPatchLabel";
         what = "ButlerLabelNames()'s agent-butler-patch literal";
+      };
+
+  # Proves a named constant as the sole item of a `return []string{...}` span
+  # fails closed rather than yielding no segment (issue #6146).
+  label-registry-covers-harness-writes-ambiguous-named-constant-regression =
+    expectNamedConstantRejection
+      {
+        name = "label-registry-covers-harness-writes-ambiguous-named-constant-regression";
+        path = "cmd/launcher/internal/doctor/doctor.go";
+        needle = ''"agent-ambiguous-spec"'';
+        constant = "ambiguousSpecLabel";
+        what = "AmbiguousLabelNames()'s agent-ambiguous-spec literal";
+      };
+
+  # Same, for a named constant in the FIRST slot with literals after it (issue #6146).
+  label-registry-covers-harness-writes-butler-finding-named-constant-regression =
+    expectNamedConstantRejection
+      {
+        name = "label-registry-covers-harness-writes-butler-finding-named-constant-regression";
+        path = "cmd/launcher/internal/doctor/doctor.go";
+        needle = ''"agent-butler-finding"'';
+        constant = "butlerFindingLabel";
+        what = "ButlerLabelNames()'s agent-butler-finding literal";
       };
 }
