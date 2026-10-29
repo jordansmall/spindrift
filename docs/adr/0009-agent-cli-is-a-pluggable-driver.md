@@ -124,7 +124,7 @@ once switched on the Driver), with the `github-copilot/` prefix on any model tie
 prefix-gated rule on `lib/drivers/opencode.nix`, so each leg below is one added
 rule there rather than new machinery. What
 is still missing is the env-var-content→file primitive one leg needs
-(`cmd/launcher/internal/runner/bwrap.go`'s `offArgvKeys` only keeps values
+(`cmd/launcher/internal/runner/offargv.go`'s `offArgvKeys` only keeps values
 off argv, it never writes files). These are findings and a design fork,
 to be wired once that primitive exists. The Providers are a **runtime
 `MODEL` prefix** on the one opencode Driver (`amazon-bedrock/<model>`,
@@ -207,9 +207,10 @@ one `awsBedrockBearerToken` (`AWS_BEARER_TOKEN_BEDROCK`) secret + non-secret
 `GOOGLE_CLOUD_PROJECT`/`VERTEX_LOCATION`. Azure: reuse `opencodeAuthContent`
 (pending the spike) + non-secret `AZURE_RESOURCE_NAME`, or a fallback
 `azureAPIKey` secret. Each secret env var named in a rule's `env` gets its
-off-argv entry from that rule: `bwrap.go`'s `offArgvKeys` takes the Driver credential half from
-`credentialenv_gen.go`, rendered from those rules (regenerate with
-`nix run .#regen`), so no hand edit to `bwrap.go` is owed.
+off-argv entry from that rule: `offargv.go`'s `offArgvKeys` takes the
+Driver credential half from `credentialenv_gen.go`, rendered from those
+rules (regenerate with `nix run .#regen`), so no hand edit to
+`offargv.go` is owed.
 
 **Egress / netns:** none of the three needs new runner-netns wiring under the
 current coarse network model (`lib/env-schema.nix:268-283`'s `NETWORK_MODE` is a
