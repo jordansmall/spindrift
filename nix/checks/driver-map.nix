@@ -502,9 +502,18 @@ in
         "agents.driver"
       ]
       ++ map (segs: "agents." + concatStringsSep "." segs) (builtins.attrValues driverMap.paths);
-      # Line by line: hasInfix's `.*pattern.*` regex over the ~100KB file
-      # backtracks and segfaults CI's Nix (see nix/checks/changelog.nix).
+      # Line by line, so hasPrefix anchors each row's first cell.
       migratingLines = splitString "\n" (builtins.readFile ../../MIGRATING.md);
+      # The cell ends at its closing backtick, or at ` = ` for agents.driver's
+      # `agents.driver = "<name>"`, so a longer path sharing the prefix or a
+      # right-hand cell never stands in for a missing row.
+      missingRows = filter (
+        p:
+        let
+          cell = "| `perSystem.spindrift.${p}";
+        in
+        !builtins.any (l: hasPrefix "${cell}` |" l || hasPrefix "${cell} = " l) migratingLines
+      ) oldPaths;
       msgsFor =
         topLevel:
         driverMap.deprecations {
@@ -537,9 +546,8 @@ in
       builtins.length (msgsFor (top oldPaths)) == builtins.length oldPaths
     ) "deprecations: setting every path must warn once per path";
     # MIGRATING.md's table is hand-written; every old option must have a row.
-    assert assertMsg (builtins.all (
-      p: builtins.any (hasInfix "| `perSystem.spindrift.${p}") migratingLines
-    ) oldPaths) "MIGRATING.md: the issue #5055 table must map every single-Driver option";
+    assert assertMsg (missingRows == [ ])
+      "MIGRATING.md: the issue #5055 table must map every single-Driver option, missing: ${concatStringsSep ", " missingRows}";
     assert assertMsg (msgsFor [ ] == [ ]) "deprecations: no settings, no warnings";
     assert assertMsg (has (builtins.head (msgsFor (top [ "agents.driver" ]))) [
       "perSystem.spindrift.agents.defaultDriver"
