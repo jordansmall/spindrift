@@ -3044,9 +3044,9 @@ checkedMerge {
       inherit (pkgs.lib) assertMsg;
       beginMarker = "<!-- BEGIN (TEST).* -->\n";
       endMarker = "<!-- END (TEST).* -->";
-      generated = "committed content line";
+      generated = "committed content line\n";
       okDocSrc = beginMarker + generated + endMarker + "\n";
-      driftedDocSrc = beginMarker + "drifted content line" + endMarker + "\n";
+      driftedDocSrc = beginMarker + "drifted content line\n" + endMarker + "\n";
       okResult = builtins.tryEval (assertMarkedBlockOk {
         blockName = "TEST";
         sourceDesc = "synthetic";

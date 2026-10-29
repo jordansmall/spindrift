@@ -9,11 +9,12 @@
 # endMarker carries none.
 { pkgs }:
 rec {
-  # Isolates the text strictly between a literal begin/end marker line pair
-  # inside docSrc, else throws naming docPath and blockName. escapeRegex is
-  # required because builtins.split reads its pattern as a POSIX extended
-  # regex: a marker holding ".", "(", or "*" would otherwise mis-split
-  # instead of matching itself literally (issue #2948).
+  # Isolates the text strictly between a begin/end marker line pair inside
+  # docSrc, else throws naming docPath and blockName. Each marker must be a
+  # whole line occurring exactly once, begin before end: the same condition
+  # spliceShellFn's awk enforces, so a marker this guard accepts is one the
+  # splice finds. Lines are compared literally, so markers holding regex
+  # metacharacters need no escaping (issue #2948).
   splitMarkedBlock =
     {
       blockName,
@@ -23,25 +24,34 @@ rec {
       docPath,
     }:
     let
-      inherit (pkgs.lib) escapeRegex;
-      afterBegin =
+      inherit (pkgs.lib)
+        concatMapStrings
+        imap0
+        filter
+        removeSuffix
+        sublist
+        splitString
+        ;
+      lines = splitString "\n" docSrc;
+      indicesOf = marker: filter (i: i != null) (imap0 (i: l: if l == marker then i else null) lines);
+      locate =
+        kind: marker:
         let
-          parts = builtins.split (escapeRegex beginMarker) docSrc;
+          found = indicesOf marker;
         in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 2
+        if found == [ ] then
+          throw "${docPath}: ${kind} GENERATED ${blockName} marker not found"
+        else if builtins.length found > 1 then
+          throw "${docPath}: ${kind} GENERATED ${blockName} marker must appear exactly once as a whole line (found ${toString (builtins.length found)})"
         else
-          throw "${docPath}: BEGIN GENERATED ${blockName} marker not found";
-      committed =
-        let
-          parts = builtins.split (escapeRegex endMarker) afterBegin;
-        in
-        if builtins.length parts >= 3 then
-          builtins.elemAt parts 0
-        else
-          throw "${docPath}: END GENERATED ${blockName} marker not found";
+          builtins.head found;
+      begin = locate "BEGIN" (removeSuffix "\n" beginMarker);
+      end = locate "END" endMarker;
     in
-    committed;
+    if end < begin then
+      throw "${docPath}: END GENERATED ${blockName} marker precedes its BEGIN marker"
+    else
+      concatMapStrings (l: l + "\n") (sublist (begin + 1) (end - begin - 1) lines);
 
   assertMarkedBlockOk =
     {
@@ -158,8 +168,9 @@ rec {
             touch $out
           '';
     in
-    # Forcing markersPresent fails a missing marker at eval time. Otherwise the
-    # awk splice falls through silently and the diff below reports no drift.
+    # Forcing markersPresent proves each marker is a whole line occurring once,
+    # so the awk splice cannot fall through silently and let the diff below
+    # report no drift.
     builtins.seq markersPresent (
       pkgs.runCommand name
         {

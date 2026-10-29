@@ -350,7 +350,36 @@ in
           gofmt = true;
         }
       );
+
+      # The guard must agree with the awk splice, which matches whole lines
+      # only: a re-indented or repeated marker is rejected here, not left to
+      # fall through silently at build time.
+      guardRejects =
+        docSrc:
+        !(builtins.tryEval (
+          documentedFactChecker.assertMarkedBlockOk {
+            inherit (probesRow)
+              blockName
+              sourceDesc
+              beginMarker
+              endMarker
+              docPath
+              generated
+              ;
+            inherit docSrc;
+          }
+        )).success;
+      inherit (probesRow) beginMarker endMarker generated;
     in
+    assert assertMsg (guardRejects (replaceStrings [ beginMarker ] [ ("\t" + beginMarker) ] probesSrc))
+      "baked-skills-marker-guard: expected a re-indented BEGIN marker to be rejected, but it evaluated successfully";
+    assert assertMsg
+      (guardRejects (replaceStrings [ beginMarker ] [ (beginMarker + beginMarker) ] probesSrc))
+      "baked-skills-marker-guard: expected a repeated BEGIN marker to be rejected, but it evaluated successfully";
+    assert assertMsg (guardRejects (beginMarker + generated + endMarker + "\n" + endMarker + "\n"))
+      "baked-skills-marker-guard: expected a repeated END marker to be rejected, but it evaluated successfully";
+    assert assertMsg (guardRejects (endMarker + "\n" + beginMarker + generated))
+      "baked-skills-marker-guard: expected an END marker before BEGIN to be rejected, but it evaluated successfully";
     assert assertMsg (!spanResult.success)
       "baked-skills-marker-guard: expected assertMarkedBlockOk to reject a synthetic file whose BEGIN GENERATED SKILL-BAKED PROBES marker is missing, but it evaluated successfully";
     assert assertMsg (!goSpanResult.success)
