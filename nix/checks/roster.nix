@@ -1797,6 +1797,30 @@ in
       "a bare worker set via the legacy workerModel knob must produce a warning naming it, got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-opencode-legacy-bare-worker-warns" { } "touch $out";
 
+  roster-opencode-byname-bare-worker-warns =
+    let
+      warnings = fixtures.opencodeByNameBareWorkerHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (builtins.any (w: hasInfix "gpt-4o" w && hasInfix "<provider>/<model>" w) warnings)
+      "a bare worker set via byName.worker.model must produce a warning naming it, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-opencode-byname-bare-worker-warns" { } "touch $out";
+
+  roster-opencode-byname-effort-only-silent =
+    let
+      warnings = fixtures.opencodeByNameEffortOnlyHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (warnings == [ ])
+      "byName.worker.effort alone inherits the schema default model, whose drop is the expected silent path, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-opencode-byname-effort-only-silent" { } "touch $out";
+
+  roster-opencode-byname-opt-out-silent =
+    let
+      warnings = fixtures.opencodeByNameOptOutHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (warnings == [ ])
+      "byName.worker.model = \"\" opts the worker out before the bare-worker drop, so it must not warn, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-opencode-byname-opt-out-silent" { } "touch $out";
+
   roster-opencode-namespaced-worker-does-not-warn =
     let
       warnings = fixtures.opencodeNamespacedWorkerRosterHarness.internals.rosterWarnings;
