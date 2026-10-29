@@ -50,9 +50,11 @@ func startFakeBoxWith(t *testing.T, genDir, name, payload string, probe func() (
 	done := make(chan error, 1)
 	go func() { done <- a.Run(runner.Box{Name: name, Env: map[string]string{}}) }()
 
+	// Run tracks the process only after Start returns, so argv alone can land
+	// first; a Kill in that gap is a silent miss.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if b, err := os.ReadFile(argsFile); err == nil {
+		if b, err := os.ReadFile(argsFile); err == nil && a.tracked(name) {
 			return a, done, strings.Split(strings.TrimSpace(string(b)), "\n")
 		} else if time.Now().After(deadline) {
 			t.Fatal("fake bwrap never ran")
