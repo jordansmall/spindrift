@@ -60,7 +60,8 @@ accurately poisons every downstream slice before a human or a stronger
 model ever sees the work, so the floor is not zero.
 
 **Worker** (`lib/roster.nix`). Tools: `Read`, `Bash`, `Edit`,
-`Write`, `Glob`, `Grep`. Description: "Implement a scoped slice of work
+`Write`, `Glob`, `Grep`, `Skill` (issue #6182: the persona names `/tdd`
+and the principle skills). Description: "Implement a scoped slice of work
 delegated to it, with full implement-capable tools." The worker prompt
 demands tool-use reliability across long edit/write/bash sequences,
 discipline under context-window pressure (grep logs instead of reading them

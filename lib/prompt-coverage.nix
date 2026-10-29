@@ -87,6 +87,6 @@ in
     promptFile = "worker-prompt.md";
     coverage = "exempt";
     cavemanVar = null;
-    reason = "${noSkillTool}, and its only output is a final report to the coordinator, not narration (issue #4562)";
+    reason = "its only output is a final report to the coordinator, not narration (issue #4562)";
   }
 ]

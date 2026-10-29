@@ -877,9 +877,10 @@ direct the agent to use `/caveman` for narration and prose, exempting code,
 commands, error messages, and commit messages, plus the machine-parsed
 marker grammar (the `SPINDRIFT_OUTCOME` line and its `note=` field, the
 `VERDICT:` line, and host-relay signal lines like `SPINDRIFT_PR_INTENT`) —
-see `fragments/caveman-default.md`. The worker and scout prompts, roster
-subagents with no Skill tool under the claude Driver, carry no caveman
-directive (issue #4562).
+see `fragments/caveman-default.md`. The scout prompt, a roster subagent
+with no Skill tool under the claude Driver, carries no caveman directive,
+nor does the worker prompt, whose only output is a final report to the
+coordinator (issue #4562).
 The review prompt carries the marker-grammar paragraph minus
 `SPINDRIFT_ISSUE_INTENT`, which the reviewer agent itself never emits (issue
 #2707) — only the Filer subagent it spawns does — plus two additions of its
@@ -8137,10 +8138,10 @@ agent can invoke them as slash commands (except a human-only skill, below):
   verdict line, and host-relay signal lines).
 - [`tdd`](https://github.com/mattpocock/skills) and
   [`to-tickets`](https://github.com/mattpocock/skills) — `/tdd`,
-  `/to-tickets` (pinned at tag `v1.1.0`). The IMPLEMENT section defers its
-  test-first workflow to `/tdd` when baked. `to-tickets` sets
-  `disable-model-invocation: true`, so it is human-only: it is baked, but the
-  skill preamble does not list it (rationale below).
+  `/to-tickets` (pinned at tag `v1.1.0`). The IMPLEMENT section and the worker
+  persona defer their test-first workflow to `/tdd` when baked. `to-tickets`
+  sets `disable-model-invocation: true`, so it is human-only: it is baked, but
+  the skill preamble does not list it (rationale below).
 - [`commit`](https://github.com/jordansmall/skills) — `/commit`. The COMMIT
   section defers commit-message formatting to `/commit` when baked.
 - [`code-review`](https://github.com/mattpocock/skills) — `/code-review`
@@ -8153,7 +8154,8 @@ agent can invoke them as slash commands (except a human-only skill, below):
   [`pstack`](https://github.com/cursor/plugins/tree/main/pstack) plugin. The
   fix pass and the worker path's CHECK section defer to
   `/principle-fix-root-causes` before code changes that make a failing check
-  pass; IMPLEMENT defers to the other two. `/principle-laziness-protocol` and
+  pass; IMPLEMENT and the worker persona defer to the other two.
+  `/principle-laziness-protocol` and
   `/principle-redesign-from-first-principles` are deliberately absent from the
   fix pass, which already scopes itself to the smallest change and forbids
   redesign.

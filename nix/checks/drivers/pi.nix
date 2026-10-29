@@ -335,7 +335,9 @@ in
       names = map (e: e.name) roster;
       # Rendered at eval rather than read from internals.agentFiles, which is
       # built for Linux and so cannot be realized by a darwin flake check.
-      agentFiles = builtins.attrNames (driverEntry.agentFilesTemplate { inherit roster; });
+      rendered = driverEntry.agentFilesTemplate { inherit roster; };
+      agentFiles = builtins.attrNames rendered;
+      workerFile = rendered.".pi/agent/agents/worker.md" or "";
       roles = [
         "scout"
         "reviewer"
@@ -349,6 +351,9 @@ in
     assert assertMsg (builtins.all (
       n: builtins.elem ".pi/agent/agents/${n}.md" agentFiles
     ) roles) "pi agentFiles must hold an agent file per role: ${builtins.toJSON agentFiles}";
+    # Issue #6182: the worker's Skill grant maps to no pi tool, so its line is unchanged.
+    assert assertMsg (hasInfix "tools: \"read, bash, edit, write, find, ls, grep\"\n" workerFile)
+      "pi worker must keep its tools line, got: ${workerFile}";
     pkgs.runCommand "drivers-pi-provisions-full-roster" { } ''
       runDoc=${piFullRosterHarness.internals.runInputDocumentFile}
 

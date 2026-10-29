@@ -348,6 +348,11 @@ in
       "claude agentsJsonTemplate must render defaultRoster's worker effort default (${rosterHelper.rosterDefaults.worker.effort}), got: ${
         builtins.toJSON (parsed.worker or { })
       }";
+    # Issue #6182: the worker's roster Skill grant reaches claude's --agents tools.
+    assert assertMsg (builtins.elem "Skill" (parsed.worker.tools or [ ]))
+      "claude agentsJsonTemplate must render the worker's Skill tool, got: ${
+        builtins.toJSON (parsed.worker or { })
+      }";
     pkgs.runCommand "drivers-claude-agents-json-default-roster-effort" { } "touch $out";
 
   # Pins the real claude entry's argvShape rather than stubDriverBase's, so

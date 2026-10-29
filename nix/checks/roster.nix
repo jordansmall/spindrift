@@ -1720,6 +1720,9 @@ in
         "Write"
         "Glob"
         "Grep"
+        # Issue #6182: the worker's persona names /tdd and the principle
+        # skills, which it can only load through the Skill tool.
+        "Skill"
       ])
       "defaultRoster's worker entry must keep the implement-capable tool set, got: ${builtins.toJSON workerTools}";
     pkgs.runCommand "roster-default-roster-worker-has-no-webfetch" { } "touch $out";
