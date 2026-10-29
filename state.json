@@ -1,20 +1,15 @@
 {
   "lastSwept": "86c6c40b59a1422b161340304ed747adde8677de",
-  "cursor": "cmd/launcher/testdata/golden/stats-by-agent.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-29T02:13:50.682158976-04:00"
-  },
+  "cursor": "cmd/launcher/testdata/golden/stats.txt",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 26,
+    "output_tokens": 3485,
+    "cache_read_input_tokens": 566266,
+    "cache_creation_input_tokens": 46756,
+    "total_cost_usd": 0.5571052000000001,
+    "duration_ms": 36464,
+    "duration_api_ms": 35198,
+    "num_turns": 14
   }
 }
