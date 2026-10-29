@@ -270,6 +270,11 @@ single-threaded one. The `gate:` lines name each failing attr (or
 and end in a one-line summary, and the exit code is non-zero on any failure.
 `nix build .#checks-inbox` builds the same set as one aggregate and stays for
 CI and humans, but evaluates single-threaded, so a Box should use the gate.
+A `gate:` line saying paths "exist in this Box's store but not in its
+database" means the host realised them after the Box started (ADR 0042, issue
+#6095), not that the branch regressed: do not chase it. Start a fresh Box or
+leave the check to CI; the gate already registers the content-addressed
+`-source` ones itself when the Box's store database is writable.
 
 The gate builds with `-L` (`--print-build-logs`) already, so it is complete
 as written. Keep `-L` on every single-attr `nix build`: without it a failure

@@ -36,7 +36,12 @@ limit), and builds each check as it evaluates. The `gate:` lines name each
 failing attr (or `nix-eval-jobs` / `nix build (batch)` when a failure cannot be
 pinned to one) and end in a one-line summary, and the exit code is non-zero on
 any failure. `checks-inbox` stays for CI and humans; its evaluation is
-single-threaded, so a Box should use the gate.
+single-threaded, so a Box should use the gate. A `gate:` line saying paths
+"exist in this Box's store but not in its database" means the host realised
+them after the Box started (ADR 0042, issue #6095), not that the branch
+regressed: do not chase it. Start a fresh Box or leave the check to CI; the
+gate already registers the content-addressed `-source` ones itself when the
+Box's store database is writable.
 
 The gate builds with `-L` (`--print-build-logs`) already. Keep `-L` on every
 single-attr `nix build`: without it a failure prints only the failing

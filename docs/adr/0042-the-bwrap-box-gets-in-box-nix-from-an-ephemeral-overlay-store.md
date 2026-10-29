@@ -589,3 +589,38 @@ and a host-side diff of the store against the snapshot on every launch.
 
 The cost is a VACUUM of a roughly 100 MB database, a few seconds, once per
 host-database change rather than once per Box start.
+
+## Amendment (issue #6095): paths the host realises while a Box runs
+
+The #6072 snapshot is keyed on the host database's version as resolved once,
+at Box start. A path the host realises afterwards is physically in the live
+`/nix/store` lower but invalid in the Box's database again, with the same
+unmapped-owner EPERM when in-box nix tries to replace it. The common case is
+the daemon realising a fetched tip (#6008) that the Box then rebases onto: the
+gate's eval-time flake source copies hit it, failing 63 gate jobs in one run.
+
+The gate handles this in the Box, in two parts. Before evaluating, and only
+when the store database is writable, it finds top-level `*-source` store
+entries that are invalid in the database, hashes each as a NAR, and registers
+it with `nix-store --load-db` only if `nix-store --print-fixed-path
+--recursive sha256` of that hash and the path's name reproduces the path. That
+proves the entry is content-addressed with no references, so the NAR hash and
+size are all a registration needs. A full scan was rejected as too costly (346
+invalid paths, 3.7 GB in one Box); `-source` entries are what eval fails on,
+and a rerun costs under a second. After the run, any `fchmodat2 ... Operation
+not permitted` in an eval error or build log makes the gate print one line
+naming the paths and saying the host realised them after the Box started.
+
+This differs from the rejected top-up above in what it needs. There is no
+startup hook and no host-side diff of the store against the snapshot: the gate
+registers lazily, in the Box, only the paths whose content it can verify
+itself. `nix-store --register-validity` was rejected because it canonicalises
+metadata, so it would try to chmod and lchown the host-owned directory and hit
+the same EPERM; `--load-db` records the hash and size without touching the
+path.
+
+Input-addressed outputs and flat-hash fetches stay out of scope. Their
+references and content cannot be verified from inside the Box, so registering
+them blindly could poison the database. The gate diagnoses them instead, and
+the remedy is a fresh Box (whose snapshot is taken at its own start) or
+leaving the check to CI.
