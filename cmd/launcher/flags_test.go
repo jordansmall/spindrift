@@ -69,6 +69,22 @@ func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
 	t.Fatal("SPINDRIFT_PROMPT_DIR entry not found in schemaFlags")
 }
 
+// A Driver-valued knob's settingsPath is its placed path (lib/driver-map.nix
+// placedPath, ADR 0064), not the deprecated top-level agents.models.* one
+// (issue #6141).
+func TestSchemaFlags_ModelSettingsPathIsPlaced(t *testing.T) {
+	const want = "agents.drivers.<name>.models.default"
+	for _, e := range schemaFlags {
+		if e.env == "MODEL" {
+			if e.settingsPath != want {
+				t.Errorf("MODEL settingsPath = %q, want %q", e.settingsPath, want)
+			}
+			return
+		}
+	}
+	t.Fatal("MODEL entry not found in schemaFlags")
+}
+
 // Issue #2146 slice 1 converted these five knobs from strings to
 // presence-style bools.
 func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {

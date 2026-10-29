@@ -1757,11 +1757,11 @@ Full alias-to-domain mapping:
 | `perSystem.spindrift.settings.lifecycleLabels.failedLabel` | `perSystem.spindrift.issues.labels.failed` |
 | `perSystem.spindrift.settings.lifecycleLabels.inProgressLabel` | `perSystem.spindrift.issues.labels.inProgress` |
 | `perSystem.spindrift.settings.lifecycleLabels.jiraStatusMapping` | `perSystem.spindrift.issues.jira.statusMapping` |
-| `perSystem.spindrift.settings.models.filerModel` | `perSystem.spindrift.agents.models.filer` |
-| `perSystem.spindrift.settings.models.model` | `perSystem.spindrift.agents.models.default` |
-| `perSystem.spindrift.settings.models.reviewModel` | `perSystem.spindrift.agents.models.review` |
-| `perSystem.spindrift.settings.models.scoutModel` | `perSystem.spindrift.agents.models.scout` |
-| `perSystem.spindrift.settings.models.workerModel` | `perSystem.spindrift.agents.models.worker` |
+| `perSystem.spindrift.settings.models.filerModel` | `perSystem.spindrift.agents.drivers.<name>.models.filer` |
+| `perSystem.spindrift.settings.models.model` | `perSystem.spindrift.agents.drivers.<name>.models.default` |
+| `perSystem.spindrift.settings.models.reviewModel` | `perSystem.spindrift.agents.drivers.<name>.models.review` |
+| `perSystem.spindrift.settings.models.scoutModel` | `perSystem.spindrift.agents.drivers.<name>.models.scout` |
+| `perSystem.spindrift.settings.models.workerModel` | `perSystem.spindrift.agents.drivers.<name>.models.worker` |
 | `perSystem.spindrift.settings.promptSkillIteration.autoFormat` | `perSystem.spindrift.agents.format.enable` |
 | `perSystem.spindrift.settings.promptSkillIteration.autoLint` | `perSystem.spindrift.agents.lint.enable` |
 | `perSystem.spindrift.settings.repository.boxForgeAndIssueAccess` | `perSystem.spindrift.forge.boxAccess` |
