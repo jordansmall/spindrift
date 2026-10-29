@@ -2866,8 +2866,11 @@ only ever be too narrow — a documented gap to close later, not an outage.
 argument-based restrictions to some of them — bare `clone(2)` backs ordinary
 thread creation everywhere, and scoping a deny to just the dangerous flag/
 value combinations needs argument-aware BPF rules this cut does not attempt.
-The filter also covers the **native architecture only** (libseccomp's
-`seccomp_init` default) — no 32-bit/multiarch compat-syscall coverage.
+The filter also covers the compat ABIs (i386 and x32 on x86_64, AArch32 on
+aarch64) with the same denylist as the native one, so 32-bit processes are
+filtered rather than killed. The list names the compat-only aliases (`umount`,
+`clock_settime64`, `clock_adjtime64`) so those cannot slip past it. Only a
+truly foreign architecture hits libseccomp's kill default.
 
 **Failure posture.** If the compiled filter file is missing or unreadable,
 the launcher warns and proceeds without it rather than refusing to launch
