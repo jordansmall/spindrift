@@ -72,9 +72,13 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 // previewSelectiveList dry-runs the selective-list dispatch path: it starts no
 // Box, prompts for nothing, and makes no forge mutations.
 func previewSelectiveList(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, w io.Writer, nums []string) error {
-	issues, unlabeled, err := fetchSelectiveIssues(c, it, nums)
+	issues, unlabeled, repeated, err := fetchSelectiveIssues(c, it, nums)
 	if err != nil {
 		return err
+	}
+
+	for _, num := range repeated {
+		fmt.Fprintf(w, "⚠ #%s listed more than once; dispatching once\n", num)
 	}
 
 	for _, num := range unlabeled {
