@@ -14,12 +14,16 @@
 # combinations needs argument-aware BPF rules this first cut does not attempt.
 { pkgs }:
 let
+  # A denied syscall's compat-only alias (umount, clock_*64) must be listed too,
+  # or compat processes reach it unfiltered (issue #6139).
   deniedSyscalls = [
     "acct"
     "add_key"
     "bpf"
     "clock_adjtime"
+    "clock_adjtime64"
     "clock_settime"
+    "clock_settime64"
     "create_module"
     "delete_module"
     "finit_module"
@@ -47,6 +51,7 @@ let
     "swapoff"
     "swapon"
     "syslog"
+    "umount"
     "umount2"
     "ustat"
     "vm86"
@@ -59,6 +64,7 @@ let
     #include <errno.h>
     #include <fcntl.h>
     #include <seccomp.h>
+    #include <stdint.h>
     #include <stdio.h>
     #include <stdlib.h>
     #include <unistd.h>
@@ -77,11 +83,31 @@ let
         return 1;
       }
 
+      /* Default BADARCH is KILL, so without compat arches every i386/x32 or
+         AArch32 process dies on its first syscall (issue #6139). Do not set
+         BADARCH to ALLOW: that would let those syscalls bypass the denylist. */
+      static const struct { uint32_t arch; const char *name; } compat[] = {
+    #if defined(__x86_64__)
+        { SCMP_ARCH_X86, "x86" }, { SCMP_ARCH_X32, "x32" },
+    #elif defined(__aarch64__)
+        { SCMP_ARCH_ARM, "arm" },
+    #endif
+        { 0, NULL }
+      };
+      for (size_t i = 0; compat[i].name != NULL; i++) {
+        int arc = seccomp_arch_add(ctx, compat[i].arch);
+        if (arc != 0) {
+          fprintf(stderr, "seccomp_arch_add(%s) failed: %d\n", compat[i].name, arc);
+          exit(1);
+        }
+      }
+
       size_t n = sizeof(denylist) / sizeof(denylist[0]);
       for (size_t i = 0; i < n; i++) {
         int sysno = seccomp_syscall_resolve_name(denylist[i]);
         if (sysno == __NR_SCMP_ERROR) {
-          /* Doesn't exist on this arch/kernel -- not an error. */
+          /* Unknown to libseccomp. A name missing only on the native arch
+             resolves to a pseudo-number and still filters the compat arches. */
           continue;
         }
         int rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), sysno, 0);

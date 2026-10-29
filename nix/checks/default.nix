@@ -187,6 +187,7 @@ let
     # Linux-only, so evaluating it on darwin throws "Refusing to evaluate
     # package 'libseccomp'" before the check derivation itself ever runs.
     "seccomp-filter-is-regular-file-multiple-of-8-bytes"
+    "seccomp-filter-covers-compat-architectures"
   ];
 
   portableSourceChecks =
