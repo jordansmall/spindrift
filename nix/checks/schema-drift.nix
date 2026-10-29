@@ -13,7 +13,7 @@ let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
   driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
-  inherit (import ../../lib/driver-map.nix) placeEntry exampleDriver;
+  inherit (import ../../lib/driver-map.nix) placedPath exampleDriver;
   schema = import ../../lib/env-schema.nix;
   # Shared with nix/regen.nix's marker-splice loop so a block's marker
   # literals and renderer call are typed exactly once (issue #2948).
@@ -438,8 +438,8 @@ let
   inherit (documentedFactChecker) assertMarkedBlockOk;
 
   # Every key in `keys` must appear in `generated` as a line whose left-hand
-  # path is exactly resolveNixPath's output. The expected path is re-derived
-  # through resolveNixPath rather than by calling the renderer again, so this
+  # path is exactly placedPath's output. The expected path is re-derived
+  # through placedPath rather than by calling the renderer again, so this
   # catches a renderer reverting to a hand-typed literal (issue #2557 review).
   assertRendererPathsResolveOk =
     { generated, keys }:
@@ -458,18 +458,13 @@ let
       actualPaths = map linePath lines;
       # A Driver-valued key's example renders under agents.drivers.claude
       # (ADR 0064), so the expected path moves with it.
-      expectedPath =
-        key:
-        let
-          resolved = resolveNixPath key schema.${key};
-        in
-        concatStringsSep "." (placeEntry exampleDriver schema.${key} (splitString "." resolved));
+      expectedPath = key: placedPath exampleDriver key schema.${key};
       missing = filter (key: !(builtins.elem (expectedPath key) actualPaths)) keys;
     in
     if missing == [ ] then
       true
     else
-      throw "assertRendererPathsResolveOk: generated output is missing the resolveNixPath-derived path for env-schema key(s): ${concatStringsSep ", " missing}";
+      throw "assertRendererPathsResolveOk: generated output is missing the placedPath-derived path for env-schema key(s): ${concatStringsSep ", " missing}";
 
   # The env-schema keys each settings-example renderer emits, shared between
   # settings-example-paths-resolve-nix-path and its guard sibling below.
@@ -3007,23 +3002,18 @@ checkedMerge {
     assert (assertLegacySettingsMappingDocOk { inherit docSrc generated; }) == docSrc;
     pkgs.runCommand "legacy-settings-mapping-doc" { } "touch $out";
 
-  # Regression guard (issue #2558): drifts `filerModel`'s row to a wrong
-  # canonical path, the shape a `group`/`nixSubPath` rename would leave, so
-  # the assertion above is known to reject drift rather than pass vacuously.
+  # Regression guard (issue #2558): swaps `filerModel`'s placed path in the
+  # table for its deprecated top-level one, the shape of issue #6141, so the
+  # assertion above is known to reject drift rather than pass vacuously.
   legacy-settings-mapping-doc-guard =
     let
       inherit (pkgs.lib) assertMsg replaceStrings;
       generated = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
       beginMarker = "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->\n";
       endMarker = "<!-- END GENERATED LEGACY SETTINGS MAPPING -->";
-      filerModelPath = "perSystem.spindrift.${resolveNixPath "filerModel" schema.filerModel}";
-      driftedFilerModelPath =
-        if filerModelPath == "perSystem.spindrift.agents.models.filerModel" then
-          "perSystem.spindrift.agents.models.wrongPath"
-        else
-          "perSystem.spindrift.agents.models.filerModel";
+      filerModelPath = "perSystem.spindrift.${placedPath "<name>" "filerModel" schema.filerModel}";
       driftedGenerated =
-        replaceStrings [ "`${filerModelPath}`" ] [ "`${driftedFilerModelPath}`" ]
+        replaceStrings [ "`${filerModelPath}`" ] [ "`perSystem.spindrift.agents.models.filer`" ]
           generated;
       driftedDocSrc = beginMarker + driftedGenerated + endMarker + "\n";
       result = builtins.tryEval (assertLegacySettingsMappingDocOk {

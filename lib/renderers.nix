@@ -45,6 +45,7 @@ let
     underDriver
     isDriverValued
     placeEntry
+    placedPath
     exampleDriver
     deprecationNote
     ;
@@ -675,9 +676,10 @@ rec {
 
   # MIGRATING.md's "Flag names re-cut to domains" table (issue #2558): one row
   # per lib/legacy-settings-section.nix entry, mapping a frozen settings alias to
-  # its current home. Both columns carry the full `perSystem.spindrift.` prefix
-  # so the paths read exactly as flakeModule.nix's deprecation warning and
-  # docs/flake-options.md spell them. Sorted so rows group by section.
+  # its current home. Both columns carry the full `perSystem.spindrift.` prefix.
+  # The right column is the placed path (Driver-valued knobs under
+  # agents.drivers.<name>) that flakeModule.nix's deprecation warning names,
+  # not the deprecated top-level one. Sorted so rows group by section.
   renderLegacySettingsMappingDoc =
     legacySettingsSection: schema:
     let
@@ -688,7 +690,7 @@ rec {
       row =
         knob:
         "| `perSystem.spindrift.settings.${legacySettingsSection.${knob}}.${knob}` | `perSystem.spindrift.${
-          resolveNixPath knob schema.${knob}
+          placedPath "<name>" knob schema.${knob}
         }` |\n";
     in
     "| Legacy alias | Canonical replacement |\n" + "| --- | --- |\n" + concatStrings (map row knobs);
@@ -1854,10 +1856,11 @@ rec {
           ", choices: []string{${builtins.concatStringsSep ", " (map (c: "\"${c}\"") e.choices)}}"
         else
           "";
-      # The knob's derived domain-tree flake path. Since ADR 0037 Pass 1 the
-      # settings path is that path. Empty for a knob with no flake-settings
-      # surface, such as ISSUE_NUMBER or SPINDRIFT_PROMPT_DIR.
-      flagSettingsPath = key: e: if e.flakeOption or false then resolveNixPath key e else "";
+      # The knob's placed flake path (Driver-valued knobs land under
+      # agents.drivers.<name>). Since ADR 0037 Pass 1 the settings path is that
+      # path. Empty for a knob with no flake-settings surface, such as
+      # ISSUE_NUMBER or SPINDRIFT_PROMPT_DIR.
+      flagSettingsPath = key: e: if e.flakeOption or false then placedPath "<name>" key e else "";
       # Mirrors flagEntry.launcherIgnores in cmd/launcher/flags.go, where the
       # axis is documented (issue #3698).
       flagLauncherIgnores = e: if e.launcherIgnores or false then ", launcherIgnores: true" else "";

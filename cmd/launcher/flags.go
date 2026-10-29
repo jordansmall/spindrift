@@ -135,14 +135,16 @@ func extractInputFlag(args []string) (path string, remaining []string, err error
 // schemaFlags table from lib/env-schema.nix, via lib/renderers.nix's
 // renderFlagTableGo.
 type flagEntry struct {
-	env             string // SCREAMING_SNAKE_CASE
-	flag            string // kebab-case, no leading dashes
-	alias           string // kebab-case, no leading dashes; empty when absent
-	kind            string // "string", "int", or "bool"
-	doc             string
-	dflt            string // empty when there is none
-	group           string
-	settingsPath    string // derived flake path, e.g. git.merge.policy; empty for a non-flakeOption knob
+	env   string // SCREAMING_SNAKE_CASE
+	flag  string // kebab-case, no leading dashes
+	alias string // kebab-case, no leading dashes; empty when absent
+	kind  string // "string", "int", or "bool"
+	doc   string
+	dflt  string // empty when there is none
+	group string
+	// canonical placed flake path, e.g. git.merge.policy (Driver-valued knobs:
+	// agents.drivers.<name>.*); empty for a non-flakeOption knob
+	settingsPath    string
 	deprecatedAlias string // empty unless the canonical flag was renamed (ADR 0037 Pass 2)
 	choices         []string
 	// launcherIgnores marks a knob the launcher generates a flag for (1:1
