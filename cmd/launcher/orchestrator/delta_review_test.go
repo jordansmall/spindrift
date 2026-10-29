@@ -126,8 +126,8 @@ func TestSeedDeltaReviewPromptIncludesTriggerAndDelta(t *testing.T) {
 		t.Fatalf("read seeded delta review prompt: %v", err)
 	}
 	gotStr := string(got)
-	if !strings.Contains(strings.ToUpper(gotStr), "NOT") {
-		t.Errorf("seeded delta review prompt = %q, want it to state this is NOT a fresh whole-branch review", gotStr)
+	if want := "NOT a fresh review of the whole branch"; !strings.Contains(gotStr, want) {
+		t.Errorf("seeded delta review prompt = %q, want it to state %q", gotStr, want)
 	}
 	if !strings.Contains(gotStr, trigger.Reason) {
 		t.Errorf("seeded delta review prompt = %q, want the trigger reason %q", gotStr, trigger.Reason)
@@ -168,8 +168,10 @@ func TestSeedDeltaReviewPromptFencesFindingsAndStatesTerminal(t *testing.T) {
 	if !strings.Contains(gotStr, promptfence.Block(state.ReviewFindings)) {
 		t.Errorf("seeded delta review prompt = %q, want the fenced findings block", gotStr)
 	}
-	if !strings.Contains(gotStr, "BLOCK") || !strings.Contains(gotStr, "APPROVE") {
-		t.Errorf("seeded delta review prompt = %q, want it to name both terminal verdicts", gotStr)
+	for _, want := range []string{"BLOCK stops the run", "APPROVE settles it"} {
+		if !strings.Contains(gotStr, want) {
+			t.Errorf("seeded delta review prompt = %q, want it to name both terminal verdicts (missing %q)", gotStr, want)
+		}
 	}
 	if !strings.Contains(strings.ToLower(gotStr), "no further fix lap") {
 		t.Errorf("seeded delta review prompt = %q, want it to say there is no further fix lap", gotStr)
