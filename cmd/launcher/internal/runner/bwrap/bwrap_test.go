@@ -758,7 +758,7 @@ func TestBwrapRun_HoldsSharedLockOnNixVarSnapshotDirWhileRunning(t *testing.T) {
 	}
 
 	snapshotDir := filepath.Join(t.TempDir(), "nix-var-snapshot", "abc123-agent-closure")
-	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, "1")), "snapshot")
+	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, testHostVersion)), "snapshot")
 	lockPath := snapshotDir + ".lock"
 
 	a := &bwrapAdapter{
@@ -903,7 +903,7 @@ func TestBwrapRun_LockAcquireFailureDoesNotFailRun(t *testing.T) {
 	}
 
 	snapshotDir := filepath.Join(t.TempDir(), "abc123-agent-closure")
-	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, "1")), "snapshot")
+	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, testHostVersion)), "snapshot")
 	if err := os.Mkdir(SnapshotLockPath(snapshotDir), 0o755); err != nil {
 		t.Fatalf("Mkdir: %v", err)
 	}
@@ -965,7 +965,7 @@ func TestBwrapRun_SnapshotReclaimedBeforeRunIsRecreatedUnderTheLock(t *testing.T
 	if !strings.Contains(out, "was reclaimed before box") {
 		t.Errorf("Run output missing recreate notice: %q", out)
 	}
-	if got, err := os.ReadFile(snapshotDBPath(snapshotVersionDir(snapshotDir, "1"))); err != nil || string(got) != "recreated" {
+	if got, err := os.ReadFile(snapshotDBPath(snapshotVersionDir(snapshotDir, testHostVersion))); err != nil || string(got) != "recreated" {
 		t.Errorf("db.sqlite = %q, %v; want the recreated snapshot", got, err)
 	}
 	if got := runnertest.CallCount(t, dir); got != 1 {
@@ -995,7 +995,7 @@ func TestBwrapRun_HotSwappedSnapshotGoneIsRecreatedInItsOwnGenerationDir(t *test
 	if err := a.Run(runner.Box{Name: "agent-issue-swap", Env: map[string]string{}, ClosureGeneration: &gen}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if _, err := os.Stat(snapshotDBPath(snapshotVersionDir(filepath.Join(root, "gen2"), "1"))); err != nil {
+	if _, err := os.Stat(snapshotDBPath(snapshotVersionDir(filepath.Join(root, "gen2"), testHostVersion))); err != nil {
 		t.Errorf("gen2 db.sqlite: want recreated, got %v", err)
 	}
 	if _, err := os.Stat(bakedDir); !os.IsNotExist(err) {
@@ -1068,7 +1068,7 @@ func TestBwrapRun_StartFailureReleasesNixVarSnapshotLock(t *testing.T) {
 	}
 
 	snapshotDir := t.TempDir()
-	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, "1")), "snapshot")
+	seedSnapshot(t, snapshotDBPath(snapshotVersionDir(snapshotDir, testHostVersion)), "snapshot")
 
 	a := &bwrapAdapter{
 		agentFiles:        "/fake/agent",
@@ -1115,7 +1115,7 @@ func TestBwrapRun_LocksPerLaunchSnapshotDirWhenClosureGenerationSet(t *testing.T
 	gen1Dir := filepath.Join(root, "gen1")
 	gen2Dir := filepath.Join(root, "gen2")
 	for _, d := range []string{gen1Dir, gen2Dir} {
-		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(d, "1")), "snapshot")
+		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(d, testHostVersion)), "snapshot")
 	}
 
 	a := &bwrapAdapter{

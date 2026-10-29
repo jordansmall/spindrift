@@ -244,3 +244,66 @@ func TestReclaimStaleSnapshots_FailedProbeKeepsNewestVersion(t *testing.T) {
 	assertExists(t, v2, false)
 	assertExists(t, v9, true)
 }
+
+// Dirs and locks a pre-#6101 launcher wrote as db-<max> are superseded by the
+// db-<max>-<count> shape and go like any other unlocked version.
+func TestSweepStaleSnapshotVersions_SweepsLegacyBareVersions(t *testing.T) {
+	gen := t.TempDir()
+	cur := mkVersion(t, gen, "5-3", true)
+	legacy := mkVersion(t, gen, "5", true)
+	heldLegacy := mkVersion(t, gen, "4", true)
+	holdShared(t, SnapshotLockPath(heldLegacy))
+	orphan := snapshotVersionDir(gen, "3")
+	if err := os.WriteFile(SnapshotLockPath(orphan), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sweepStaleSnapshotVersions(gen, cur)
+
+	assertExists(t, cur, true)
+	assertExists(t, legacy, false)
+	assertExists(t, SnapshotLockPath(legacy), false)
+	assertExists(t, orphan, false)
+	assertExists(t, SnapshotLockPath(orphan), false)
+	assertExists(t, heldLegacy, true)
+}
+
+func TestParseSnapshotVersion(t *testing.T) {
+	for _, tc := range []struct {
+		in         string
+		max, count int
+		ok         bool
+	}{
+		{"12-7", 12, 7, true},
+		{"0-0", 0, 0, true},
+		{"12", 0, 0, false},
+		{"12-", 0, 0, false},
+		{"-7", 0, 0, false},
+		{"1-2-3", 0, 0, false},
+		{"99999999999999999999-1", 0, 0, false},
+	} {
+		got, ok := parseSnapshotVersion(tc.in)
+		if got.maxID != tc.max || got.count != tc.count || ok != tc.ok {
+			t.Errorf("parseSnapshotVersion(%q) = %+v, %v; want %d, %d, %v", tc.in, got, ok, tc.max, tc.count, tc.ok)
+		}
+	}
+}
+
+func TestSnapshotVersionNewerThan(t *testing.T) {
+	v := func(m, c int) snapshotVersion { return snapshotVersion{m, c} }
+	for _, tc := range []struct {
+		name string
+		a, b snapshotVersion
+		want bool
+	}{
+		{"higher max", v(11, 9), v(10, 1), true},
+		{"lower max", v(9, 1), v(10, 9), false},
+		{"same max, lower count", v(10, 5), v(10, 40), true},
+		{"same max, higher count", v(10, 40), v(10, 5), false},
+		{"equal", v(10, 5), v(10, 5), false},
+	} {
+		if got := tc.a.newerThan(tc.b); got != tc.want {
+			t.Errorf("%s: %+v.newerThan(%+v) = %v, want %v", tc.name, tc.a, tc.b, got, tc.want)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -488,23 +489,72 @@ func checkHostNixDB() error {
 	return nil
 }
 
-// hostStoreDBVersion is the host DB's version: max(ValidPaths.id), which nix
-// autoincrements, so every new registration raises it. A GC deletion can at most
-// lower it, costing one harmless extra refresh. Its own seam, apart from
+// hostStoreDBVersion is the host DB's version, "<max>-<count>" over
+// ValidPaths. nix autoincrements ids and never reuses one, so for a fixed max the
+// row set only shrinks: (max, count) names exactly one ValidPaths set over the
+// DB's history (the key, not the file: the probe runs before VACUUM INTO, so a
+// registration landing in between leaves the snapshot slightly newer than its
+// key). A registration raises max; a GC deletion changes count (or max),
+// so every host GC lands in a fresh db-<V> dir rather than reusing a snapshot
+// that still lists deleted paths (issue #6101). Its own seam, apart from
 // execCommand, so tests counting sqlite3 calls need not model the probe.
 var hostStoreDBVersion = func() (string, error) {
 	if err := checkHostNixDB(); err != nil {
 		return "", err
 	}
-	out, err := execCommand("sqlite3", hostNixDBPath, "SELECT coalesce(max(id), 0) FROM ValidPaths;").Output()
+	out, err := execCommand("sqlite3", hostNixDBPath, "SELECT coalesce(max(id), 0) || '-' || count(*) FROM ValidPaths;").Output()
 	if err != nil {
 		return "", fmt.Errorf("sqlite3 probe of host nix store db version: %w", err)
 	}
 	v := strings.TrimSpace(string(out))
-	if !isDecimal(v) {
-		return "", fmt.Errorf("host nix store db version %q is not a decimal number", v)
+	if _, ok := parseSnapshotVersion(v); !ok {
+		return "", fmt.Errorf("host nix store db version %q is not <max>-<count>", v)
 	}
 	return v, nil
+}
+
+// snapshotVersion is a host DB version: the max id and row count of ValidPaths.
+type snapshotVersion struct{ maxID, count int }
+
+// newerThan orders versions newest first: max descending, then count ascending,
+// since at a fixed max rows are only ever deleted.
+func (v snapshotVersion) newerThan(o snapshotVersion) bool {
+	return v.maxID > o.maxID || (v.maxID == o.maxID && v.count < o.count)
+}
+
+// legacyVersionCount is the count a bare "<max>" gets, ranking a pre-#6101
+// db-<max> behind any "<max>-<count>" at the same max as the older write.
+const legacyVersionCount = math.MaxInt
+
+// parseSnapshotVersion splits a "<max>-<count>" host DB version.
+func parseSnapshotVersion(v string) (snapshotVersion, bool) {
+	m, c, found := strings.Cut(v, "-")
+	if !found || !isDecimal(m) || !isDecimal(c) {
+		return snapshotVersion{}, false
+	}
+	maxID, err1 := strconv.Atoi(m)
+	count, err2 := strconv.Atoi(c)
+	if err1 != nil || err2 != nil { // both halves are digits: overflow only
+		return snapshotVersion{}, false
+	}
+	return snapshotVersion{maxID, count}, true
+}
+
+// snapshotVersionRank parses the V of a db-<V> dir name. It also takes the
+// bare "<max>" a pre-#6101 launcher wrote (see legacyVersionCount). ok is false
+// for any other shape.
+func snapshotVersionRank(v string) (snapshotVersion, bool) {
+	if isDecimal(v) {
+		n, err := strconv.Atoi(v)
+		return snapshotVersion{n, legacyVersionCount}, err == nil
+	}
+	return parseSnapshotVersion(v)
+}
+
+// isSnapshotVersion reports whether v is a V the launcher writes or once wrote.
+func isSnapshotVersion(v string) bool {
+	_, ok := snapshotVersionRank(v)
+	return ok
 }
 
 // isDecimal reports whether s is a non-empty run of ASCII digits.
@@ -520,28 +570,30 @@ func isDecimal(s string) bool {
 	return true
 }
 
-// newestSnapshotDir is the complete snapshot under genDir with the numerically
-// largest version, so a failed host probe can still reuse what a prior run wrote.
-// Failing that it is genDir itself when it holds a flat pre-#6072 snapshot (what
-// an older launcher's build left); "" when there is none.
+// newestSnapshotDir is the complete snapshot under genDir with the newest
+// version in snapshotVersionRank order, so a failed host probe can still reuse
+// what a prior run wrote. Failing that it is genDir itself when it holds a
+// flat pre-#6072 snapshot (what an older launcher's build left); "" when there
+// is none.
 func newestSnapshotDir(genDir string) string {
 	entries, err := os.ReadDir(genDir)
 	if err != nil && !os.IsNotExist(err) {
 		fmt.Printf("==> bwrap runner: warning: could not read nix-var snapshot dir %s (%v); treating it as having no snapshot\n", genDir, err)
 	}
-	best, bestN := "", -1
+	var best string
+	var bestV snapshotVersion
 	for _, e := range entries {
 		v, ok := strings.CutPrefix(e.Name(), snapshotVersionPrefix)
-		if !ok || !e.IsDir() || !isDecimal(v) {
+		if !ok || !e.IsDir() {
 			continue
 		}
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= bestN {
+		ver, ok := snapshotVersionRank(v)
+		if !ok || (best != "" && !ver.newerThan(bestV)) {
 			continue
 		}
 		dir := filepath.Join(genDir, e.Name())
 		if _, err := os.Stat(snapshotDBPath(dir)); err == nil {
-			best, bestN = dir, n
+			best, bestV = dir, ver
 		}
 	}
 	if best != "" {

@@ -563,18 +563,21 @@ func stubHostVersion(t *testing.T, v func() (string, error)) {
 	hostStoreDBVersion = v
 }
 
-func TestHostStoreDBVersion_ParsesMaxID(t *testing.T) {
+func TestHostStoreDBVersion_ParsesMaxAndCount(t *testing.T) {
 	for _, tc := range []struct {
 		name, out string
 		want      string
 		wantErr   bool
 	}{
-		{"plain", "4217\n", "4217", false},
-		{"empty table", "0\n", "0", false},
+		{"plain", "4217-3900\n", "4217-3900", false},
+		{"empty table", "0-0\n", "0-0", false},
 		{"empty output", "", "", true},
 		{"non-numeric", "Error: database is locked\n", "", true},
-		{"negative", "-3\n", "", true},
-		{"two rows", "1\n2\n", "", true},
+		{"legacy bare max", "4217\n", "", true},
+		{"missing count", "4217-\n", "", true},
+		{"missing max", "-3\n", "", true},
+		{"extra field", "1-2-3\n", "", true},
+		{"two rows", "1-1\n2-2\n", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			origStat := statHostNixDB
@@ -591,8 +594,8 @@ func TestHostStoreDBVersion_ParsesMaxID(t *testing.T) {
 			if (err != nil) != tc.wantErr || got != tc.want {
 				t.Errorf("hostStoreDBVersion() = %q, %v; want %q, wantErr=%v", got, err, tc.want, tc.wantErr)
 			}
-			if len(gotArgs) != 3 || gotArgs[0] != "sqlite3" || gotArgs[1] != hostNixDBPath || !strings.Contains(gotArgs[2], "ValidPaths") {
-				t.Errorf("execCommand argv = %v, want sqlite3 on the host db querying ValidPaths", gotArgs)
+			if len(gotArgs) != 3 || gotArgs[0] != "sqlite3" || gotArgs[1] != hostNixDBPath || !strings.Contains(gotArgs[2], "ValidPaths") || !strings.Contains(gotArgs[2], "max(id)") || !strings.Contains(gotArgs[2], "count(*)") {
+				t.Errorf("execCommand argv = %v, want sqlite3 on the host db querying max(id) and count(*) of ValidPaths", gotArgs)
 			}
 		})
 	}
@@ -633,6 +636,31 @@ func TestNewestSnapshotDir(t *testing.T) {
 		seedSnapshotDir(t, snapshotVersionDir(gen, "x"), "c")
 		seedSnapshotDir(t, snapshotVersionDir(gen, "99x"), "d")
 		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "10"); got != want {
+			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("orders by max then lowest count", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, snapshotVersionDir(gen, "9-1"), "a")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "10-5"), "b")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "10-40"), "c")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "10-x"), "d")
+		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "10-5"); got != want {
+			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("new shape beats legacy at the same max", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, snapshotVersionDir(gen, "10-999"), "new")
+		seedSnapshotDir(t, snapshotVersionDir(gen, "10"), "legacy")
+		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "10-999"); got != want {
+			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
+		}
+	})
+	t.Run("legacy bare version still found", func(t *testing.T) {
+		gen := t.TempDir()
+		seedSnapshotDir(t, snapshotVersionDir(gen, "4"), "legacy")
+		if got, want := newestSnapshotDir(gen), snapshotVersionDir(gen, "4"); got != want {
 			t.Errorf("newestSnapshotDir = %q, want %q", got, want)
 		}
 	})
@@ -814,7 +842,7 @@ func TestPrepareSnapshotVersion_VacuumFailureReleasesLock(t *testing.T) {
 // testHostVersion is the host DB version every test sees unless it re-stubs
 // hostStoreDBVersion, so no test reaches the real host DB or counts the probe as
 // a sqlite3 call.
-const testHostVersion = "1"
+const testHostVersion = "1-1"
 
 // realHostStoreDBVersion is the production probe, for the tests of the probe itself.
 var realHostStoreDBVersion = hostStoreDBVersion

@@ -64,14 +64,14 @@ func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	t.Cleanup(stubResolvConfPresent())
 
 	// Run locks the generation it mounts and writes a missing current-version
-	// snapshot, so each carries a db-1 (the stubbed host version) db.sqlite.
+	// snapshot, so each carries a db-1-1 (the stubbed host version) db.sqlite.
 	snapshotRoot := t.TempDir()
 	dirs := []string{bakedGeneration}
 	if g := l.Box.ClosureGeneration; g != nil {
 		dirs = append(dirs, g.Generation)
 	}
 	for _, d := range dirs {
-		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(filepath.Join(snapshotRoot, d), "1")), "snapshot")
+		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(filepath.Join(snapshotRoot, d), testHostVersion)), "snapshot")
 	}
 
 	a := &bwrapAdapter{

@@ -1531,7 +1531,7 @@ func reclaimGeneration(root, gcRootsRoot, name string, lock lockDisposition) {
 
 // currentVersionKeeper probes the host DB version once and returns, per
 // generation dir, the version dir a reclaim pass spares: the host's current one,
-// not the numerically largest (a GC lowering max(id) leaves that one stale). A
+// not the newest on disk (a GC that lowers max(id) leaves that one stale). A
 // failed probe falls back to the newest complete snapshot on disk.
 func currentVersionKeeper() func(genDir string) string {
 	v, err := hostStoreDBVersion()
@@ -1542,15 +1542,16 @@ func currentVersionKeeper() func(genDir string) string {
 	return func(genDir string) string { return snapshotVersionDir(genDir, v) }
 }
 
-// sweepStaleSnapshotVersions removes the db-<N> version dirs under genDir that no
-// Box mounts, sparing keep (issue #6072): the version the caller mounts or is
-// about to, which may be unlocked in between. Every other version, an
+// sweepStaleSnapshotVersions removes the db-<V> version dirs under genDir that
+// no Box mounts, sparing keep (issue #6072): the version the caller mounts or
+// is about to, which may be unlocked in between. Every other version, an
 // incomplete one included (a crashed write), goes only under an exclusive
 // non-blocking flock on its own lock, which fails while a Box or a mid-VACUUM
-// writer holds it shared. A db-<N>.lock with no db-<N> dir is removed the same
-// way. keep may be "" or genDir itself (a flat snapshot), sparing no db-<N>.
-// Entries not shaped db-<decimal>, such as a flat pre-#6072 "nix" dir an
-// older launcher's Box may mount, go only with the whole generation.
+// writer holds it shared. A db-<V>.lock with no db-<V> dir is removed the same
+// way. keep may be "" or genDir itself (a flat snapshot), sparing no db-<V>.
+// V is "<max>-<count>" or a bare decimal from a pre-#6101 launcher, which goes
+// as superseded. Entries not shaped db-<V>, such as a flat pre-#6072 "nix" dir
+// an older launcher's Box may mount, go only with the whole generation.
 func sweepStaleSnapshotVersions(genDir, keep string) {
 	entries, err := os.ReadDir(genDir)
 	if err != nil {
@@ -1558,7 +1559,7 @@ func sweepStaleSnapshotVersions(genDir, keep string) {
 	}
 	dirs := map[string]bool{}
 	for _, e := range entries {
-		if v, ok := strings.CutPrefix(e.Name(), snapshotVersionPrefix); ok && e.IsDir() && isDecimal(v) {
+		if v, ok := strings.CutPrefix(e.Name(), snapshotVersionPrefix); ok && e.IsDir() && isSnapshotVersion(v) {
 			dirs[e.Name()] = true
 		}
 	}
@@ -1574,7 +1575,7 @@ func sweepStaleSnapshotVersions(genDir, keep string) {
 		if !ok || dirs[base] || e.IsDir() {
 			continue
 		}
-		if v, ok := strings.CutPrefix(base, snapshotVersionPrefix); ok && isDecimal(v) && filepath.Join(genDir, base) != keep {
+		if v, ok := strings.CutPrefix(base, snapshotVersionPrefix); ok && isSnapshotVersion(v) && filepath.Join(genDir, base) != keep {
 			removeSnapshotVersion(filepath.Join(genDir, base), false)
 		}
 	}
