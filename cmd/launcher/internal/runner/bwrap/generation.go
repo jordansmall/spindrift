@@ -272,7 +272,7 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	if cfg.NixConfigFile == "" {
 		return nil
 	}
-	_, vlf, err := prepareSnapshotVersion(dir, InstallIfAbsent)
+	_, vlf, err := prepareSnapshotVersion(dir)
 	UnlockSnapshot(vlf)
 	return err
 }
@@ -282,29 +282,18 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 // It is the one Go call site that reaches into live host store metadata.
 const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 
-// SnapshotInstall is how VacuumStoreDBInto lands the finished temp on db.sqlite.
-type SnapshotInstall int
-
-const (
-	// InstallReplace renames over an existing db.sqlite: the build path, which
-	// owns the generation.
-	InstallReplace SnapshotInstall = iota
-	// InstallIfAbsent links only if db.sqlite is absent, never disturbing one a
-	// running Box may be reading (SnapshotGeneration, ADR 0043).
-	InstallIfAbsent
-)
-
 // VacuumStoreDBInto does the VACUUM INTO and install work against an explicit
 // dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it rather
 // than reaching it only through a bwrapBuildAdapter's baked field (issue
 // #2682). Writes dir/nix/db/db.sqlite; callers pass a version dir (see
-// prepareSnapshotVersion). mode picks how the finished temp lands on db.sqlite.
+// prepareSnapshotVersion). The finished temp is linked in only if db.sqlite is
+// absent, never replacing one a running Box may be reading (ADR 0043).
 // It compacts in the same step (ADR 0042: ~302MB raw vs ~104MB compacted, and an
 // overlay copy-up rewrites a file whole, so the compacted size is what lands in
 // the Box's tmpfs upper on first touch). VACUUM INTO fills a temp the launcher
 // itself created, so the snapshot is owned by the invoking uid and needs no
 // chown.
-func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
+func VacuumStoreDBInto(dir string) error {
 	if err := checkHostNixDB(); err != nil {
 		return err
 	}
@@ -348,14 +337,6 @@ func VacuumStoreDBInto(dir string, mode SnapshotInstall) error {
 	if err := vacuumInto.Run(); err != nil {
 		removeVacuumTemp(tmp)
 		return fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
-	}
-
-	if mode == InstallReplace {
-		if err := os.Rename(tmp, dest); err != nil {
-			removeVacuumTemp(tmp)
-			return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
-		}
-		return nil
 	}
 
 	// Link, never rename: a concurrent launcher may have installed dest and
@@ -622,11 +603,11 @@ func currentSnapshotDir(genDir string) (string, error) {
 }
 
 // prepareSnapshotVersion resolves the current version dir under genDir, takes
-// its shared lock and writes the snapshot unless one is already there (or mode is
-// InstallReplace). The returned lock is still held for the caller to release,
-// since a Box keeps it for its life; on error it is released here. A lock that
-// cannot be taken warns and yields a nil lf, as the other callers do.
-func prepareSnapshotVersion(genDir string, mode SnapshotInstall) (dir string, lf *os.File, err error) {
+// its shared lock and writes the snapshot unless one is already there. The
+// returned lock is still held for the caller to release, since a Box keeps it
+// for its life; on error it is released here. A lock that cannot be taken warns
+// and yields a nil lf, as the other callers do.
+func prepareSnapshotVersion(genDir string) (dir string, lf *os.File, err error) {
 	dir, err = currentSnapshotDir(genDir)
 	if err != nil {
 		return "", nil, err
@@ -641,9 +622,9 @@ func prepareSnapshotVersion(genDir string, mode SnapshotInstall) (dir string, lf
 		lf = nil
 	}
 	sweepStaleVacuumTemps(filepath.Dir(snapshotDBPath(dir)))
-	if _, statErr := os.Stat(snapshotDBPath(dir)); mode == InstallReplace || statErr != nil {
+	if _, statErr := os.Stat(snapshotDBPath(dir)); statErr != nil {
 		fmt.Printf("==> bwrap runner: snapshotting host nix store DB (VACUUMed) into %s\n", dir)
-		if err := VacuumStoreDBInto(dir, mode); err != nil {
+		if err := VacuumStoreDBInto(dir); err != nil {
 			UnlockSnapshot(lf)
 			return "", nil, err
 		}

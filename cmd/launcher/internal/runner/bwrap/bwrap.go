@@ -198,7 +198,7 @@ func (a *bwrapAdapter) EnsureReady() error {
 		fmt.Printf("==> bwrap runner: closure generation %s already realized\n", gen)
 		return nil
 	}
-	if err := a.prepare.ensureReady(InstallIfAbsent); err != nil {
+	if err := a.prepare.ensureReady(); err != nil {
 		return err
 	}
 	a.prepare.reclaimStale()
@@ -1036,7 +1036,7 @@ func (a *bwrapAdapter) Run(box runner.Box) error {
 // Call it with the generation's shared lock held when it could be taken (a
 // failed take only warns). When a sibling's reclaim removed the whole
 // generation, the GC roots went with it, so they are re-registered first. The
-// write is InstallIfAbsent and takes no realize lock: the held locks keep
+// write is install-if-absent and takes no realize lock: the held locks keep
 // reclaim out, and the link covers a concurrent writer.
 func (a *bwrapAdapter) ensureRunSnapshot(box runner.Box, genDir string) (string, *os.File, error) {
 	if newestSnapshotDir(genDir) == "" {
@@ -1050,7 +1050,7 @@ func (a *bwrapAdapter) ensureRunSnapshot(box runner.Box, genDir string) (string,
 		}
 		registerMountedArtifactRoots(a.nixGCRootsRoot, a.generationFor(box), closureSide, a.passwdFile, a.groupFile, a.syscallFilterPath)
 	}
-	dir, lf, err := prepareSnapshotVersion(genDir, InstallIfAbsent)
+	dir, lf, err := prepareSnapshotVersion(genDir)
 	if err != nil {
 		return "", nil, fmt.Errorf("prepare nix-var snapshot under %s: %w", genDir, err)
 	}
@@ -1274,7 +1274,7 @@ type closureSpec struct {
 // set (nixInBox on) it also realizes the nix-config closure and snapshots the
 // host nix store DB (ADR 0042) for the run adapter's /nix/var overlay to mount.
 func (a *bwrapBuildAdapter) EnsureReady() error {
-	if err := a.ensureReady(InstallReplace); err != nil {
+	if err := a.ensureReady(); err != nil {
 		return err
 	}
 	a.reclaimStale()
@@ -1302,10 +1302,10 @@ func (a *bwrapBuildAdapter) reclaimStale() {
 
 // ensureReady is the preparation both adapters share: realize the closures,
 // lock and root the generation and, when nixInBox is on, write the snapshot
-// with mode. It reports the image_build pair even when everything is already
+// if absent. It reports the image_build pair even when everything is already
 // realized: nix is then fast and the pair clears near-instantly, and a failure
 // still clears via the defer.
-func (a *bwrapBuildAdapter) ensureReady(mode SnapshotInstall) error {
+func (a *bwrapBuildAdapter) ensureReady() error {
 	report.ImageBuild(report.ImageBuildStarted)
 	defer report.ImageBuild(report.ImageBuildFinished)
 
@@ -1313,7 +1313,7 @@ func (a *bwrapBuildAdapter) ensureReady(mode SnapshotInstall) error {
 	if err := a.realizeClosures(); err != nil {
 		return err
 	}
-	return a.publishSnapshot(mode)
+	return a.publishSnapshot()
 }
 
 func (a *bwrapBuildAdapter) realizeClosures() error {
@@ -1339,10 +1339,10 @@ func (a *bwrapBuildAdapter) realizeClosures() error {
 
 // publishSnapshot locks and roots the generation's artifacts and, when nixInBox
 // is on, writes its store-DB snapshot for the host DB's current version (ADR
-// 0042, issue #6072). With InstallIfAbsent an existing db.sqlite for that
-// version is kept and not re-vacuumed, since a running Box may be reading it;
-// an older version's snapshot is never touched.
-func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
+// 0042, issues #6072, #6101). An existing db.sqlite for that version is kept
+// and not re-vacuumed, since a running Box may be reading it; a host GC moves
+// the version key, so a refresh lands in a fresh dir instead.
+func (a *bwrapBuildAdapter) publishSnapshot() error {
 	// Guarded like Run: an adapter not built by NewBuild has no dir, and
 	// SnapshotLockPath("") would be a cwd-relative ".lock". Likewise no lock on
 	// the flat path with nixInBox off (nothing rooted, never swept).
@@ -1353,12 +1353,11 @@ func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
 		if mkErr := os.MkdirAll(a.nixVarSnapshotRoot, 0o755); mkErr != nil {
 			fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", a.nixVarSnapshotRoot, mkErr)
 		}
-		// Concurrent cold starts serialize their snapshot write here; the run
-		// path only, as a build owns its generation and replaces the snapshot
-		// regardless. A failed lock degrades to an unserialized write, which
-		// InstallIfAbsent keeps safe: the loser's link finds db.sqlite already
-		// installed.
-		if mode == InstallIfAbsent && a.nixConfigFileDrv != "" && a.nixVarSnapshotRoot != "" {
+		// Concurrent cold starts serialize their snapshot write here, build and
+		// run alike since both share <generation>/db-<V>. A failed lock degrades
+		// to an unserialized write, which the link-if-absent install keeps safe:
+		// the loser's link finds db.sqlite already installed.
+		if a.nixConfigFileDrv != "" && a.nixVarSnapshotRoot != "" {
 			rl, rlErr := lockRealize(a.nixVarSnapshotRoot, func() {
 				fmt.Printf("==> bwrap runner: a sibling launcher is writing a nix-var snapshot under %s; waiting\n", a.nixVarSnapshotRoot)
 			})
@@ -1385,7 +1384,7 @@ func (a *bwrapBuildAdapter) publishSnapshot(mode SnapshotInstall) error {
 		return nil
 	}
 	// The version lock is dropped on return: a Box takes it itself for its life.
-	_, vlf, err := prepareSnapshotVersion(a.nixVarSnapshotDir, mode)
+	_, vlf, err := prepareSnapshotVersion(a.nixVarSnapshotDir)
 	UnlockSnapshot(vlf)
 	return err
 }

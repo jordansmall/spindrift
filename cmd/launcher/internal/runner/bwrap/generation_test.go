@@ -81,7 +81,7 @@ func TestVacuumStoreDBInto_SweepsOnlyUnlockedTemps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := VacuumStoreDBInto(dir, InstallReplace); err != nil {
+	if err := VacuumStoreDBInto(dir); err != nil {
 		t.Fatalf("VacuumStoreDBInto = %v, want nil", err)
 	}
 
@@ -113,7 +113,7 @@ func TestVacuumStoreDBInto_SweepLeavesLiveVacuumJournal(t *testing.T) {
 		}
 	})
 
-	if err := VacuumStoreDBInto(dir, InstallReplace); err != nil {
+	if err := VacuumStoreDBInto(dir); err != nil {
 		t.Fatalf("VacuumStoreDBInto = %v, want nil", err)
 	}
 }
@@ -196,7 +196,7 @@ func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
 		}
 	})
 
-	if err := VacuumStoreDBInto(dir, InstallReplace); err == nil {
+	if err := VacuumStoreDBInto(dir); err == nil {
 		t.Fatal("VacuumStoreDBInto = nil, want the sqlite3 failure")
 	}
 	if left := tempSiblings(t, filepath.Join(dir, "nix", "db")); len(left) != 0 {
@@ -735,7 +735,7 @@ func TestPrepareSnapshotVersion_NewVersionLeavesOldUntouched(t *testing.T) {
 	stubHostVersion(t, func() (string, error) { return version, nil })
 	gen := filepath.Join(t.TempDir(), "gen")
 
-	dir1, lf1, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	dir1, lf1, err := prepareSnapshotVersion(gen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +750,7 @@ func TestPrepareSnapshotVersion_NewVersionLeavesOldUntouched(t *testing.T) {
 	}
 
 	version = "2"
-	dir2, lf2, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	dir2, lf2, err := prepareSnapshotVersion(gen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -772,38 +772,36 @@ func TestPrepareSnapshotVersion_NewVersionLeavesOldUntouched(t *testing.T) {
 	}
 }
 
+// A snapshot already present for the current version is never re-vacuumed or
+// replaced: a running Box may mount it (issue #6101).
 func TestPrepareSnapshotVersion_SkipsVacuumWhenVersionExists(t *testing.T) {
 	stubHostVersion(t, func() (string, error) { return "7", nil })
 	gen := filepath.Join(t.TempDir(), "gen")
 	existing := seedSnapshotDir(t, snapshotVersionDir(gen, "7"), "keep")
+	before, err := os.Stat(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		t.Errorf("execCommand(%q) called, want no vacuum for an existing version", name)
 		return exec.Command("true")
 	}
-	dir, lf, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	dir, lf, err := prepareSnapshotVersion(gen)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer UnlockSnapshot(lf)
-	if got, _ := os.ReadFile(existing); string(got) != "keep" || dir != snapshotVersionDir(gen, "7") {
-		t.Errorf("dir=%q content=%q, want the existing snapshot kept", dir, got)
+	if want := snapshotVersionDir(gen, "7"); dir != want {
+		t.Errorf("dir = %q, want %q", dir, want)
 	}
-}
-
-func TestPrepareSnapshotVersion_ReplaceRevacuumsExistingVersion(t *testing.T) {
-	fakeVacuumInto(t, "true", "fresh", 0, nil)
-	stubHostVersion(t, func() (string, error) { return "7", nil })
-	gen := filepath.Join(t.TempDir(), "gen")
-	existing := seedSnapshotDir(t, snapshotVersionDir(gen, "7"), "stale")
-	_, lf, err := prepareSnapshotVersion(gen, InstallReplace)
-	if err != nil {
-		t.Fatal(err)
+	after, err := os.Stat(existing)
+	if err != nil || !os.SameFile(before, after) {
+		t.Errorf("db identity changed (err=%v), want it untouched", err)
 	}
-	defer UnlockSnapshot(lf)
-	if got, _ := os.ReadFile(existing); string(got) != "fresh" {
-		t.Errorf("db = %q, want InstallReplace to refresh it", got)
+	if got, err := os.ReadFile(existing); err != nil || string(got) != "keep" {
+		t.Errorf("db = %q, %v; want %q untouched", got, err, "keep")
 	}
 }
 
@@ -811,7 +809,7 @@ func TestPrepareSnapshotVersion_ProbeErrorReusesNewest(t *testing.T) {
 	stubHostVersion(t, func() (string, error) { return "", errors.New("locked") })
 	gen := filepath.Join(t.TempDir(), "gen")
 	seedSnapshotDir(t, snapshotVersionDir(gen, "3"), "keep")
-	dir, lf, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	dir, lf, err := prepareSnapshotVersion(gen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -825,7 +823,7 @@ func TestPrepareSnapshotVersion_VacuumFailureReleasesLock(t *testing.T) {
 	fakeVacuumInto(t, "true", "", 1, nil)
 	stubHostVersion(t, func() (string, error) { return "1", nil })
 	gen := filepath.Join(t.TempDir(), "gen")
-	dir, lf, err := prepareSnapshotVersion(gen, InstallIfAbsent)
+	dir, lf, err := prepareSnapshotVersion(gen)
 	if err == nil || lf != nil {
 		t.Fatalf("prepareSnapshotVersion = %q, %v, %v; want an error and no held lock", dir, lf, err)
 	}
