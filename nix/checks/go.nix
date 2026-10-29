@@ -928,7 +928,8 @@ driverGoTests
   # route-resolution file; the whole tree is copied, so a Driver edit reruns
   # this. It also gofmts and vets those packages (not the adapters', which
   # their own go-test does), so launcher-go-fmt and launcher-go-vet need not
-  # see them.
+  # see them. Each full-tree guard must run and print its PASS line: go test
+  # exits 0 with "[no tests to run]" when -run matches nothing (a renamed guard).
   launcher-binaries-go-test =
     let
       binaryPkgs = ". ${
@@ -953,8 +954,18 @@ driverGoTests
         )}
         go vet ${binaryPkgs}
         go test ${binaryPkgs}
-        SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 go test ./internal/forge -run '^TestEveryBackendRunsItsContracts$'
-        SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 go test ./internal/hostprofile -run '^TestAdvisoryBoundaryHoldsOnRealTree$'
+        guard() {
+          local pkg=$1 name=$2 log status=0
+          log=$(go test -v "$pkg" -run "^$name\$" 2>&1) || status=$?
+          printf '%s\n' "$log"
+          [ "$status" -eq 0 ] || exit "$status"
+          if ! grep -q "^--- PASS: $name " <<<"$log"; then
+            echo "launcher-binaries-go-test: $name did not pass (renamed, skipped, or -run matched nothing)" >&2
+            exit 1
+          fi
+        }
+        SPINDRIFT_CONTRACT_GUARD_FULL_TREE=1 guard ./internal/forge TestEveryBackendRunsItsContracts
+        SPINDRIFT_HOSTPROFILE_GUARD_FULL_TREE=1 guard ./internal/hostprofile TestAdvisoryBoundaryHoldsOnRealTree
         touch $out
       '';
 
