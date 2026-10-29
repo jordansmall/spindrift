@@ -458,33 +458,10 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 	}
 }
 
-// dest must only ever name a complete snapshot (issue #4817): VACUUM INTO writes
-// a temp sibling and renames over dest after success, so a pre-existing
-// snapshot stays untouched while sqlite3 runs and is replaced atomically after.
-func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *testing.T) {
-	script, _ := runnertest.NewFakeCLI(t,
-		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
-		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
-	)
-	snapshotDir := t.TempDir() + "/nix-var-snapshot"
-	dest := versionedDBPath(snapshotDir)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) = %v, want nil", filepath.Dir(dest), err)
-	}
-	if err := os.WriteFile(dest, []byte("stale"), 0o644); err != nil {
-		t.Fatalf("WriteFile(%q) = %v, want nil", dest, err)
-	}
-
-	fakeVacuumInto(t, script, "fresh snapshot", 0, func(tmp string) {
-		if tmp == dest {
-			t.Errorf("VACUUM INTO targets dest %q directly, want a temp sibling", dest)
-		}
-		if got, err := os.ReadFile(dest); err != nil || string(got) != "stale" {
-			t.Errorf("dest during sqlite3 = %q, %v; want the previous snapshot untouched", got, err)
-		}
-	})
-
-	a := &bwrapBuildAdapter{
+// newSnapshotBuildAdapter is a nix-in-box build adapter whose closures all
+// realize through the scripted fake CLI.
+func newSnapshotBuildAdapter(snapshotDir string) *bwrapBuildAdapter {
+	return &bwrapBuildAdapter{
 		agentFilesDrv:     "/fake/files.drv",
 		agentEnvDrv:       "/fake/env.drv",
 		passwdFileDrv:     "/fake/passwd.drv",
@@ -492,7 +469,29 @@ func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *test
 		nixConfigFileDrv:  "/fake/nix-config.drv",
 		nixVarSnapshotDir: snapshotDir,
 	}
-	if err := a.EnsureReady(); err != nil {
+}
+
+// dest must only ever name a complete snapshot (issue #4817): VACUUM INTO writes
+// a temp sibling and links it in after success, so dest is absent while sqlite3
+// runs and complete once it returns.
+func TestBwrapBuildEnsureReady_InstallsSnapshotAtomicallyAfterVacuumInto(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+	)
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	dest := versionedDBPath(snapshotDir)
+
+	fakeVacuumInto(t, script, "fresh snapshot", 0, func(tmp string) {
+		if tmp == dest {
+			t.Errorf("VACUUM INTO targets dest %q directly, want a temp sibling", dest)
+		}
+		if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("dest during sqlite3 stat err = %v, want not-exist until the temp is complete", err)
+		}
+	})
+
+	if err := newSnapshotBuildAdapter(snapshotDir).EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady() = %v, want nil", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -510,11 +509,99 @@ func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *test
 	}
 }
 
-// A failed VACUUM INTO must not destroy a previously-working snapshot. dest
-// is seeded with known content, and the scripted sqlite3 failure (which also
-// leaves partial bytes in the temp) must leave that exact content in place and
-// no temp sibling behind.
-func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.T) {
+// A build must never replace a db.sqlite a running Box may mount (issue
+// #6101): with the current version's snapshot already present it keeps the
+// same inode and bytes and runs no VACUUM.
+func TestBwrapBuildEnsureReady_KeepsExistingSnapshotForCurrentVersion(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t,
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
+	)
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	dest := seedSnapshotDir(t, snapshotVersionDir(snapshotDir, testHostVersion), "live")
+	before, err := os.Stat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vacuumed := false
+	fakeVacuumInto(t, script, "fresh", 0, func(string) { vacuumed = true })
+
+	if err := newSnapshotBuildAdapter(snapshotDir).EnsureReady(); err != nil {
+		t.Fatalf("EnsureReady() = %v, want nil", err)
+	}
+	after, err := os.Stat(dest)
+	if err != nil || !os.SameFile(before, after) {
+		t.Errorf("dest identity changed (err=%v), want the same inode a Box may mount", err)
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != "live" {
+		t.Errorf("dest content = %q, %v; want %q untouched", got, err, "live")
+	}
+	if vacuumed {
+		t.Error("sqlite3 VACUUM ran, want none for an existing current-version snapshot")
+	}
+}
+
+// A host GC that deletes rows below the max id changes the count, so the version
+// key moves and the build refreshes into a fresh db-<V> dir; the previous
+// version's snapshot, which a Box may still mount, is left alone until its
+// lock is released, then the next build sweeps it (issue #6101).
+func TestBwrapBuildEnsureReady_PostGCRefreshesIntoFreshVersionDir(t *testing.T) {
+	const (
+		preGCVersion  = "50-40"
+		postGCVersion = "50-35"
+	)
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	version := preGCVersion
+	stubHostVersion(t, func() (string, error) { return version, nil })
+	fakeVacuumInto(t, script, "pre-gc", 0, nil)
+	a := newSnapshotBuildAdapter(snapshotDir)
+
+	if err := a.EnsureReady(); err != nil {
+		t.Fatalf("first EnsureReady() = %v, want nil", err)
+	}
+	preGCDir := snapshotVersionDir(snapshotDir, preGCVersion)
+	preGC := snapshotDBPath(preGCDir)
+	before, err := os.Stat(preGC)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	version = postGCVersion
+	fakeVacuumInto(t, script, "post-gc", 0, nil)
+	// Hold the pre-GC version as a running Box does, so the build's sweep keeps it.
+	held, lockErr := LockSnapshotShared(preGCDir)
+	if lockErr != nil {
+		t.Fatal(lockErr)
+	}
+	defer UnlockSnapshot(held)
+	if err := a.EnsureReady(); err != nil {
+		t.Fatalf("post-GC EnsureReady() = %v, want nil", err)
+	}
+
+	postGC := snapshotDBPath(snapshotVersionDir(snapshotDir, postGCVersion))
+	if got, err := os.ReadFile(postGC); err != nil || string(got) != "post-gc" {
+		t.Errorf("post-GC db = %q, %v; want a fresh snapshot in its own version dir", got, err)
+	}
+	after, err := os.Stat(preGC)
+	if err != nil || !os.SameFile(before, after) {
+		t.Errorf("pre-GC db changed identity (err=%v), want it untouched", err)
+	}
+	if got, err := os.ReadFile(preGC); err != nil || string(got) != "pre-gc" {
+		t.Errorf("pre-GC db = %q, %v; want %q untouched", got, err, "pre-gc")
+	}
+
+	UnlockSnapshot(held)
+	if err := a.EnsureReady(); err != nil {
+		t.Fatalf("post-release EnsureReady() = %v, want nil", err)
+	}
+	assertExists(t, preGCDir, false)
+	assertExists(t, postGC, true)
+}
+
+// A failed VACUUM INTO must neither destroy a previous version's working
+// snapshot nor leave a partial dest or temp behind for the current version.
+func TestBwrapBuildEnsureReady_KeepsPreviousSnapshotOnVacuumIntoFailure(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0}, runnertest.Call{Exit: 0},
 		runnertest.Call{Exit: 0},
@@ -522,24 +609,11 @@ func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.
 	fakeVacuumInto(t, script, "partial", 1, nil)
 
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
-	dest := versionedDBPath(snapshotDir)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) = %v, want nil", filepath.Dir(dest), err)
-	}
-	wantContent := []byte("previously-working snapshot")
-	if err := os.WriteFile(dest, wantContent, 0o644); err != nil {
-		t.Fatalf("WriteFile(%q) = %v, want nil", dest, err)
-	}
+	wantContent := "previously-working snapshot"
+	// Any version other than the host's current one stands in for an earlier build.
+	prev := seedSnapshotDir(t, snapshotVersionDir(snapshotDir, "0-9"), wantContent)
 
-	a := &bwrapBuildAdapter{
-		agentFilesDrv:     "/fake/files.drv",
-		agentEnvDrv:       "/fake/env.drv",
-		passwdFileDrv:     "/fake/passwd.drv",
-		groupFileDrv:      "/fake/group.drv",
-		nixConfigFileDrv:  "/fake/nix-config.drv",
-		nixVarSnapshotDir: snapshotDir,
-	}
-	err := a.EnsureReady()
+	err := newSnapshotBuildAdapter(snapshotDir).EnsureReady()
 
 	if err == nil {
 		t.Fatal("EnsureReady() = nil, want error from scripted sqlite3 failure")
@@ -547,12 +621,12 @@ func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.
 	if got := runnertest.CallCount(t, dir); got != 5 {
 		t.Errorf("callCount = %d, want 5 (the sqlite3 call goes through the stub)", got)
 	}
-	gotContent, readErr := os.ReadFile(dest)
-	if readErr != nil {
-		t.Fatalf("os.ReadFile(%q) after failed EnsureReady = %v, want the previous snapshot kept", dest, readErr)
+	if got, readErr := os.ReadFile(prev); readErr != nil || string(got) != wantContent {
+		t.Errorf("previous snapshot = %q, %v; want %q kept", got, readErr, wantContent)
 	}
-	if string(gotContent) != string(wantContent) {
-		t.Errorf("dest content after failed EnsureReady = %q, want original %q", gotContent, wantContent)
+	dest := versionedDBPath(snapshotDir)
+	if _, statErr := os.Stat(dest); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("dest stat err = %v, want not-exist after a failed vacuum", statErr)
 	}
 	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
 		t.Errorf("leftover siblings after failure: %v, want none", left)
@@ -566,7 +640,7 @@ func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
 	fakeVacuumInto(t, script, "partial", 1, nil)
 
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
-	if err := VacuumStoreDBInto(snapshotDir, InstallReplace); err == nil {
+	if err := VacuumStoreDBInto(snapshotDir); err == nil {
 		t.Fatal("VacuumStoreDBInto = nil, want error from scripted sqlite3 failure")
 	}
 

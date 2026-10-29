@@ -322,3 +322,57 @@ func TestBwrapRunEnsureReady_WarmNeverReclaims(t *testing.T) {
 		t.Errorf("stale generation Stat = %v, want a warm start to leave it", err)
 	}
 }
+
+// The build adapter takes the realize lock too: a launcher build that finds it
+// held waits, then skips the copy once the holder has installed the snapshot.
+func TestBwrapBuildEnsureReady_WaiterSkipsVacuumAfterSiblingInstalls(t *testing.T) {
+	script, _ := runnertest.NewFakeCLI(t, runnertest.Call{Exit: 0})
+	var vacuums atomic.Int32
+	fakeVacuumInto(t, script, "must not be written", 0, func(string) { vacuums.Add(1) })
+	root := filepath.Join(t.TempDir(), "nix-var-snapshot")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const generation = "gen1"
+	genDir := filepath.Join(root, generation)
+	a := newSnapshotBuildAdapter(genDir)
+	a.nixVarSnapshotRoot = root
+	a.nixVarGeneration = generation
+	a.nixGCRootsRoot = t.TempDir()
+	held, err := lockRealize(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { UnlockSnapshot(held) })
+
+	errc := make(chan error, 1)
+	out := runnertest.CaptureStdoutDuring(t, func() {
+		go func() { errc <- a.EnsureReady() }()
+		select {
+		case err := <-errc:
+			t.Errorf("EnsureReady returned %v while the realize lock was held", err)
+			return
+		case <-time.After(300 * time.Millisecond):
+		}
+		seedSnapshot(t, versionedDBPath(genDir), "sibling's snapshot")
+		UnlockSnapshot(held)
+		select {
+		case err := <-errc:
+			if err != nil {
+				t.Errorf("EnsureReady: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("EnsureReady did not resume after the realize lock was released")
+		}
+	})
+	if !strings.Contains(out, "a sibling launcher is writing a nix-var snapshot under "+root) {
+		t.Errorf("output lacks the waiting line:\n%s", out)
+	}
+	if got := vacuums.Load(); got != 0 {
+		t.Errorf("VACUUM INTO ran %d times, want 0 for a waiter", got)
+	}
+	got, _ := os.ReadFile(versionedDBPath(genDir))
+	if string(got) != "sibling's snapshot" {
+		t.Errorf("db.sqlite = %q, want the sibling's", got)
+	}
+}
