@@ -8522,24 +8522,25 @@ probe-then-lock shape over its closure generation (issue #6008, [ADR
 0042](adr/0042-the-bwrap-box-gets-in-box-nix-from-an-ephemeral-overlay-store.md)).
 It is warm when every realized store path (agent files, agent env, passwd,
 group, nix config, syscall filter) exists and, with `nixInBox` on, the
-nix-var snapshot for the host DB's current version (`max(ValidPaths.id)`, at
-`<generation>/db-<V>/nix/db/db.sqlite`) does too; a host DB that has moved
-past the newest snapshot is cold. It then returns without
-building anything and sends no `image_build` records. Otherwise it realizes
-the agent store closures (`nix build <drv>^* --no-link`, under no spindrift
-lock) and, with `nixInBox` on, writes the snapshot only if absent, sending
-the `image_build` pair around the work. That is what lets a Daemon child on
-a fetched tip with a new agent closure start without a prior `launcher
-build`. Concurrent cold starts serialize their snapshot write on a
-dedicated realize lock, `.spindrift/nix-var-snapshot.realize.lock`, a
-sibling of the snapshot root that is never removed. It is exclusive and
-held only around that write: a launcher that finds it held prints a waiting
-line, re-checks for the snapshot once it holds the lock, and skips the
-VACUUM when a sibling already wrote it. It is deliberately not the
-per-generation `<generation>.lock`, which a running Box holds shared for
-its whole lifetime, so a running Box never blocks a sibling's readiness.
-`launcher build` does not take the realize lock: it always realizes and
-replaces the snapshot.
+nix-var snapshot for the host DB's current version
+(`(max(ValidPaths.id), count(*))`, at `<generation>/db-<V>/nix/db/db.sqlite`)
+does too; a host DB that has moved past the newest snapshot is cold. It then
+returns without building anything and sends no `image_build` records.
+Otherwise it realizes the agent store closures (`nix build <drv>^*
+--no-link`, under no spindrift lock) and, with `nixInBox` on, writes
+the snapshot only if absent, sending the `image_build` pair around
+the work. That is what lets a Daemon child on a fetched tip with a new
+agent closure start without a prior `launcher build`. Concurrent cold
+starts serialize their snapshot write on a dedicated realize lock,
+`.spindrift/nix-var-snapshot.realize.lock`, a sibling of the snapshot
+root that is never removed. It is exclusive and held only around that
+write: a launcher that finds it held prints a waiting line, re-checks
+for the snapshot once it holds the lock, and skips the VACUUM when a
+sibling already wrote it. It is deliberately not the per-generation
+`<generation>.lock`, which a running Box holds shared for its whole
+lifetime, so a running Box never blocks a sibling's readiness. `launcher
+build` takes the same realize lock and writes the snapshot only if absent
+(issue #6101).
 
 After a cold prepare the run path reclaims stale snapshot generations
 exactly as `launcher build` does: a non-blocking exclusive probe on each

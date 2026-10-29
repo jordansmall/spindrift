@@ -522,6 +522,9 @@ the snapshot root, then re-check, so a loser skips the VACUUM. It is not the
 per-generation lock a running Box holds shared for its lifetime, so a running
 Box never blocks a sibling's readiness. `launcher build` takes neither the
 realize lock nor the write-if-absent path: it still replaces the snapshot.
+(Amended by issue #6101: `launcher build` now takes the same realize lock and
+the same write-if-absent path, so it never renames over a snapshot a running
+Box may mount.)
 
 After a cold prepare the run path reclaims stale generations under the same
 exclusive-flock liveness probe as `launcher build`. That departs from OCI,
@@ -555,6 +558,9 @@ build. A path the host itself holds invalid is out of scope: no database sync
 fixes it.
 
 The snapshot is now keyed on the host database's version, `max(ValidPaths.id)`.
+(Amended by issue #6101: the version is `(max(ValidPaths.id), count(*))`,
+named `db-<max>-<count>`, so a host GC that deletes rows below the max also
+gets a fresh snapshot; a legacy bare `db-<N>` is swept as superseded.)
 Each version is its own directory,
 `<root>/<generation>/db-<V>/nix/db/db.sqlite`, with its own shared lock,
 `<generation>/db-<V>.lock`. A newer host database lands in a new directory, so
@@ -567,7 +573,9 @@ the lower a running Box mounts is never touched.
 - `EnsureReady`'s warm check requires the snapshot for the current version. A
   host database that has moved on is cold, so the cold path writes the new
   version and then reclaims. The hot-swap's `SnapshotGeneration` and
-  `launcher build` write into the current version as well.
+  `launcher build` write into the current version as well. (Amended by issue
+  #6101: `launcher build` now installs only if absent, like `Run` and the
+  hot-swap, so it never touches a snapshot a running Box mounts.)
 - `--no-build`'s `IsReady` accepts any existing version, or a pre-#6072 flat
   `<generation>/nix/db/db.sqlite`, and prepares nothing. `Run` refreshes.
 - A failed host version probe degrades to the newest existing snapshot rather
