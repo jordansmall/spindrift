@@ -40,6 +40,37 @@ trap cleanup EXIT
 
 echo "gate: $workers eval workers" >&2
 
+# Issue #6095, ADR 0042: the Box's /nix/var DB is a snapshot taken at start, so a
+# `-source` path the host realised since is on disk (in the overlay's lower) yet
+# invalid. Eval's source copy then deletes it before re-adding, and the lower's
+# host-owned dir cannot be chmodded. Registering a path whose NAR hash proves it
+# content-addressed (no references) makes nix reuse it. Only top-level -source
+# entries: hashing every invalid path is too slow. A daemon client cannot
+# --load-db, hence the writable-DB guard.
+register_stale_sources() {
+  local store=${NIX_STORE_DIR:-/nix/store} p name narhash size invalid
+  [ -w "${NIX_STATE_DIR:-/nix/var/nix}/db/db.sqlite" ] || return 0
+  if ! invalid=$(find "$store" -maxdepth 1 -name '*-source' -print0 |
+    xargs -0 -r nix-store --check-validity --print-invalid); then
+    echo "gate: could not list invalid -source paths; registration skipped for some" >&2
+  fi
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    name=${p##*/}
+    name=${name#*-}
+    narhash=$(nix-hash --type sha256 --base32 "$p") || continue
+    [ "$(nix-store --print-fixed-path --recursive sha256 "$narhash" "$name")" = "$p" ] || continue
+    size=$(nix-store --dump "$p" | wc -c) || continue
+    # --load-db record: path, base16 NAR hash, NAR size, empty deriver, reference count 0.
+    if printf '%s\n%s\n%s\n\n0\n' "$p" "$(nix-hash --type sha256 --to-base16 "$narhash")" "$size" |
+      nix-store --load-db; then
+      echo "gate: registered $p, realised by the host after this Box started" >&2
+    fi
+  done <<<"$invalid"
+  return 0
+}
+register_stale_sources
+
 # Created here, not by the background job's own redirect, which can lose the
 # race against the first poll's read.
 : >"$work/jobs"

@@ -11,6 +11,7 @@ pkgs.writeShellApplication {
     pkgs.nix-eval-jobs
     pkgs.jq
     pkgs.coreutils
+    pkgs.findutils
     pkgs.gnused
     pkgs.gnugrep
   ];
