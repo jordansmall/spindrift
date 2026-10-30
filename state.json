@@ -1,21 +1,25 @@
 {
-  "lastSwept": "bc8460609d6302f1e8888c0fa1b6eea26c29ef27",
-  "cursor": "lib/nixpkgs-shared.nix",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-30T00:20:20.155809473-04:00"
-  },
+  "lastSwept": "07d8779cd04d3f0a67448feed1bb30cae48518d7",
+  "cursor": "nix/checks/bats.nix",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6201",
+    "https://github.com/jordansmall/spindrift/issues/6202",
+    "https://github.com/jordansmall/spindrift/issues/6203",
+    "https://github.com/jordansmall/spindrift/issues/6204",
+    "https://github.com/jordansmall/spindrift/issues/6205"
+  ],
+  "promoted": [
+    "https://github.com/jordansmall/spindrift/issues/6201"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
-  },
-  "reserved": 1
+    "input_tokens": 28,
+    "output_tokens": 9537,
+    "cache_read_input_tokens": 516619,
+    "cache_creation_input_tokens": 42556,
+    "total_cost_usd": 4.525698070000002,
+    "duration_ms": 313779,
+    "duration_api_ms": 610412,
+    "num_turns": 18
+  }
 }
