@@ -2230,10 +2230,10 @@ in
     pkgs.runCommand "build-time-reject-forbidden-marker-template" { } "touch $out";
 
   # Same as above, but exercising `reviewPrompt` instead of `prompt`.
-  # templateContentByFile's three entries are hand-written attrset keys
-  # (lib/mkHarness.nix), so a check that only overrides `prompt` would never
-  # notice the `reviewPrompt` (or `filerPrompt`, below) entry being silently
-  # dropped or mis-keyed.
+  # templateHitsByFile's review and filer entries are hand-written attrset
+  # keys (lib/mkHarness.nix), so a check that only overrides `prompt` would
+  # never notice the `reviewPrompt` (or `filerPrompt`, below) entry being
+  # silently dropped or mis-keyed.
   build-time-reject-forbidden-marker-review-template =
     let
       inherit (pkgs.lib) assertMsg;
