@@ -4085,7 +4085,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   that adopts nothing parks on the last terminal label its timeline shows
   removed, else `agent-failed`.
 
-Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
+Rename any of these with the `inProgress` / `failed` / `complete`
 knobs under `issues.labels` (baked) or the
 `IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` env vars (runtime).
 
