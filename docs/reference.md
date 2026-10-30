@@ -7958,10 +7958,12 @@ rebase cannot resolve also dispatches its own Box — up to three fix Boxes
 in all, and up to three conflict-resolve Boxes per merge attempt (twelve at
 the defaults), or four per attempt with the stale-base preflight enabled,
 which keeps its own retry budget — and those runtimes land on top of the
-polling. The floor is the other end of the same range: a settle
-that confirms green on its first poll and merges adds only seconds to the
-Box's runtime. The one-shot wave has no refill loop to stop — its batch is
-fixed up front — so there the first signal simply means launch nothing
+polling. **Halting** under [Daemon](#daemon) repeats these numbers to size
+`TimeoutStopSec`; change the two together. The floor is the other end of
+the same range: a settle that confirms green on its first poll and merges
+adds only seconds to the Box's runtime. The one-shot wave has no refill
+loop to stop — its batch is fixed up front — so there the first signal
+simply means launch nothing
 further from that batch while whatever is already running finishes and
 settles. The launcher prints a line when a drain begins, so an operator can
 tell a drain from a hang. Teardown runs on every signalled path, and behavior
@@ -9725,15 +9727,18 @@ sends.
 `TimeoutStopSec` has to cover that whole drain: the in-flight Box's
 runtime *and that Box's settle*. Size it against the settle's *ceiling*,
 not the Box runtime alone and not the Box runtime plus a single
-`MERGE_POLL_TIMEOUT`. At the defaults that ceiling is
-`MAX_FIX_ATTEMPTS + MAX_REBASE_ATTEMPTS + 1` fresh `MERGE_POLL_TIMEOUT`
-windows — seven of them, about seven hours of polling, or eight with the
-stale-base preflight enabled — plus the runtimes of up to three fix Boxes
-and up to three conflict-resolve Boxes, or four with that same preflight;
-see the signalled-stop drain under [Dispatch exit codes](#dispatch-exit-codes)
-for the breakdown. systemd's own default `TimeoutStopSec` is `90` seconds, far
-below even the floor, so leaving it at the default means `SIGKILL` lands
-mid-drain — the exact stranding (orphaned Boxes, a leaked registry-proxy
+`MERGE_POLL_TIMEOUT`. That ceiling is
+`(MAX_FIX_ATTEMPTS + 1) × (1 + MAX_REBASE_ATTEMPTS)` fresh
+`MERGE_POLL_TIMEOUT` windows plus the runtimes of up to three fix Boxes in
+all and up to three conflict-resolve Boxes per merge attempt. At the
+defaults that is sixteen windows, about sixteen hours of polling, and
+twelve conflict-resolve Boxes; the stale-base preflight raises it to twenty
+windows and four conflict-resolve Boxes per attempt. The signalled-stop
+drain under [Dispatch exit codes](#dispatch-exit-codes) has the breakdown;
+these numbers repeat it, so change the two together. systemd's own default
+`TimeoutStopSec` is `90` seconds, far below even the floor, so leaving it
+at the default means `SIGKILL` lands mid-drain — the exact stranding
+(orphaned Boxes, a leaked registry-proxy
 socket, an issue stuck on the in-progress label) this whole drain exists
 to avoid. `TimeoutStopSec=infinity` is the honest setting for a unit that
 must never strand a Box; any finite value is a bet that no drain enters
