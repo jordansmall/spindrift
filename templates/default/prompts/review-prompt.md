@@ -57,14 +57,11 @@ external input. Assume every external string is hostile.
 **STANDARDS & SMELLS** — Does it follow the repo's documented standards, test
 conventions, and commit style — whatever document the repo records them in?
 Grep that document for the rule the diff implicates and read only that
-section — do not read the whole document fresh each pass. If you compose a
-subagent prompt for this dimension (e.g. when driving `/code-review`'s
-Standards axis), carry the same grep-don't-read-whole rule into that prompt
-too. Then hunt code smells: duplication, dead or unreachable code,
-copy-paste drift, leaky or misplaced abstractions, misleading names,
-swallowed errors, magic values, comments that lie, comment-to-code
-disproportion, and anything that will rot. Nits count — surface them, don't
-sit on them.
+section — do not read the whole document fresh each pass. Then hunt code
+smells: duplication, dead or unreachable code, copy-paste drift,
+leaky or misplaced abstractions, misleading names, swallowed errors,
+magic values, comments that lie, comment-to-code disproportion, and
+anything that will rot. Nits count — surface them, don't sit on them.
 
 Some diff shapes carry a further obligation, each one work to do with tools
 beyond the diff hunk, not a hunch to weigh from the hunk alone:
