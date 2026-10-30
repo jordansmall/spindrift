@@ -388,9 +388,10 @@ in
       let
         # Deprecation shim for the legacy `settings.<section>.<knob>` paths
         # (ADR 0037); the domain tree built by `buildTree` is now primary.
-        # Sections come from env-schema.nix and match groupOrder in
-        # cmd/launcher/flags.go. A set value forwards to the new path via
-        # `lib.warn`.
+        # Section names come from the frozen map in
+        # lib/legacy-settings-section.nix, read by `sectionKnobs`; which
+        # knobs exist is still env-schema.nix's flakeOption subset. A set
+        # value forwards to the new path via `lib.warn`.
         settingsOption = {
           settings = mkOption {
             type = types.submodule {
