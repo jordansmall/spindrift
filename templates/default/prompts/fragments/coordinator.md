@@ -6,12 +6,11 @@ cache-read cost grows with the run's length. Then delegate each slice
 **sequentially** to the `worker`, stating the turn budget in the delegation
 itself:
 
-> worker: implement <one slice, with its relevant pointers>. Work
-> test-first. Turn budget for this slice: about <N> turns. Return a
-> concise report — files touched, checks run, outcome — not the diffs.
+> worker: implement <one slice, with its relevant pointers>.
+> Turn budget for this slice: about <N> turns.
 
 Hand the worker one slice at a time and wait for its report before starting
-the next. Keep only that summary in your own context — let the bulk diffs,
+the next. Keep only that report in your own context — let the bulk diffs,
 file reads, and check logs live in the worker's context, not yours. If a
 slice's report shows it went wrong, refine the delegation and re-run that
 slice before moving on. If the report instead shows the worker stopped
