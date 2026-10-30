@@ -203,6 +203,12 @@ func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
 	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "review-prompt.md"))
 
+	// #6183: review-axis-prompt.md owns the grep-don't-read-whole rule for
+	// composed axis subagents, so the reviewer must not restate it.
+	if dropped := "If you compose a subagent prompt for this dimension"; strings.Contains(normalized, dropped) {
+		t.Errorf("review-prompt.md still carries the composed-subagent instruction %q", dropped)
+	}
+
 	cases := []struct {
 		name   string
 		clause string
@@ -218,10 +224,6 @@ func TestReviewPromptStandardsGrepGuidance(t *testing.T) {
 		{
 			name:   "#3215 finding 1: 'that document' has a real antecedent",
 			clause: "whatever document the repo records them in",
-		},
-		{
-			name:   "#3215 finding 2: carry the grep-don't-read-whole rule into composed subagent prompts",
-			clause: "If you compose a subagent prompt for this dimension (e.g. when driving `/code-review`'s Standards axis), carry the same grep-don't-read-whole rule into that prompt too",
 		},
 		{
 			name:   "#2880 STANDARDS & SMELLS names comment-to-code disproportion as a smell to hunt",
