@@ -42,13 +42,13 @@ let
   #      is scanned like any other file.
   #   2. launchgates.go may write only to w or checkW — permitted by design,
   #      not by accident: a gate's own Check (whose signature binds its writer
-  #      as `w`, launchgates.go:26) writing its own operator-facing output is
-  #      exactly what AC7 protects, so it must pass this guard even though no
-  #      gate does so today. checkW is walkGateRegistry's pass-through name for
-  #      the same writer.
+  #      as `w`, launchGate.Check in launchgates.go) writing its own
+  #      operator-facing output is exactly what AC7 protects, so it must pass
+  #      this guard even though no gate does so today. checkW is
+  #      walkGateRegistry's pass-through name for the same writer.
   #   3. every write left in cmd/launcher/doctor.go must target stderr —
   #      stdout is the report stream and reaches it only via
-  #      doctor.NewReporter(stdout).
+  #      doctor.NewReporter(stdout, opts.verbose).
   # Rules 2 and 3 stay pinned to these two filenames rather than widening to
   # all of cmd/launcher: most files there legitimately write to stdout, and
   # only these two sit in the doctor report call graph this guard protects.
@@ -124,7 +124,7 @@ let
     fi
 
     if [ -f "$dir/doctor.go" ]; then
-      scan_files "stderr os.Stderr" "stdout is the report stream and must go through Reporter in cmd/launcher/internal/doctor/report.go via doctor.NewReporter(stdout)" "$dir/doctor.go"
+      scan_files "stderr os.Stderr" "stdout is the report stream and must go through Reporter in cmd/launcher/internal/doctor/report.go via doctor.NewReporter(stdout, opts.verbose)" "$dir/doctor.go"
     else
       echo "doctor-report-routing: $dir/doctor.go not found — vacuous pass"
     fi
@@ -156,8 +156,9 @@ in
     let
       leakFn = "\n\nfunc doctorReportRoutingLeak() {\n\tfmt.Fprintln(nil, \"leak\")\n}\n";
       # All three permitted idioms, written to the gate Check signature's own
-      # writer name (launchgates.go:26). Fixture sources are only ever grepped,
-      # never compiled, so an unused parameter or import does not matter.
+      # writer name (launchGate.Check in launchgates.go). Fixture sources are
+      # only ever grepped, never compiled, so an unused parameter or import
+      # does not matter.
       permittedFn = "\n\nfunc doctorReportRoutingPermitted(w io.Writer) {\n\tfmt.Fprintln(w, \"note\")\n\tio.WriteString(w, \"note\")\n\tw.Write([]byte(\"note\"))\n}\n";
 
       fixtures = [
