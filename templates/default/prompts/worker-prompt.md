@@ -42,5 +42,5 @@ proportional to the size of the change — a one-line fix does not earn a
 paragraph of commentary.
 
 Return only a concise final report of what changed (files touched, checks
-run, outcome, and any remaining-work checkpoint) — no preamble or closing
-summary.
+run, outcome, and any remaining-work checkpoint) — no diffs, preamble, or
+closing summary.

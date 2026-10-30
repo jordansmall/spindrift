@@ -58,8 +58,8 @@ func TestWorkerPromptOperativeContract(t *testing.T) {
 			clause: "Do not narrate between tool calls — emit no text until the final report",
 		},
 		{
-			name:   "#3225 final report shape: files touched, checks run, outcome, checkpoint",
-			clause: "Return only a concise final report of what changed (files touched, checks run, outcome, and any remaining-work checkpoint) — no preamble or closing summary",
+			name:   "#3225/#6183 final report shape: files touched, checks run, outcome, checkpoint, no diffs",
+			clause: "Return only a concise final report of what changed (files touched, checks run, outcome, and any remaining-work checkpoint) — no diffs, preamble, or closing summary",
 		},
 		{
 			name:   "#3419 code-comments policy phrase present",

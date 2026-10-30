@@ -991,6 +991,37 @@ func TestAssembleScoutDelegateReSearchClause(t *testing.T) {
 	})
 }
 
+// Issue #6183: the worker delegation template carries inputs only; the
+// test-first rule and the report shape are owned by worker-prompt.md.
+func TestAssembleCoordinatorDelegationCarriesInputsOnly(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.WorkerProvisioned = true
+	env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
+	env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	// Strip the blockquote markers so the wrapped template reads as one line.
+	prompt := strings.Join(strings.Fields(strings.ReplaceAll(result.Prompt, "\n> ", "\n")), " ")
+
+	for _, want := range []string{
+		"worker: implement <one slice, with its relevant pointers>. Turn budget for this slice: about <N> turns.",
+		"Each delegated slice must satisfy the one-slice, test-first discipline below",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("Prompt missing %q (issue #6183):\n%s", want, result.Prompt)
+		}
+	}
+	for _, dropped := range []string{"Work test-first. Turn", "Return a concise report", "not the diffs"} {
+		if strings.Contains(prompt, dropped) {
+			t.Errorf("Prompt still restates persona rule %q in the delegation (issue #6183):\n%s", dropped, result.Prompt)
+		}
+	}
+}
+
 // Issue #3157's COORDINATOR_SCOUT_BRIEF gate. coordinator.md went
 // scout-neutral and dropped the slice-from-the-brief instruction, so a
 // scout-present run loses it entirely unless coordinator-scout-brief.md
