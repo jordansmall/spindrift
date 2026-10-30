@@ -872,11 +872,22 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 		}
 		// Issue #3449: the scout writes the brief itself; the session
 		// reads it back from disk and never persists it.
-		if !strings.Contains(result.Prompt, "The scout writes that brief itself, to `/tmp/brief.md`") {
+		if !strings.Contains(result.Prompt, "The scout writes its brief itself, to `/tmp/brief.md`") {
 			t.Errorf("Prompt missing scout-delegate.md's scout-writes-it wording (issue #3449):\n%s", result.Prompt)
 		}
 		if !strings.Contains(result.Prompt, "read it back from disk before you start work") {
 			t.Errorf("Prompt missing scout-delegate.md's reads-from-disk wording (issue #3163):\n%s", result.Prompt)
+		}
+		// Issue #6183: the delegation is the request alone; scout-prompt.md
+		// owns the citation, brief-location, pointer and no-implement rules.
+		if !strings.Contains(result.Prompt, "> scout: map the files, seams, and existing tests relevant to this issue.\n") {
+			t.Errorf("Prompt missing the reduced scout delegation line (issue #6183):\n%s", result.Prompt)
+		}
+		flat := strings.Join(strings.Fields(strings.ReplaceAll(result.Prompt, "\n> ", "\n")), " ")
+		for _, restated := range []string{"Write the brief to", "pointer to it", "cited with a verbatim excerpt", "Do not implement"} {
+			if strings.Contains(flat, restated) {
+				t.Errorf("Prompt restates scout persona rule %q in the delegation (issue #6183):\n%s", restated, result.Prompt)
+			}
 		}
 		if strings.Contains(result.Prompt, "Persist what it returns") {
 			t.Errorf("Prompt still contains scout-delegate.md's dropped persist-what-it-returns wording (issue #3449):\n%s", result.Prompt)
@@ -940,11 +951,10 @@ func TestAssembleIssuePromptScoutSection(t *testing.T) {
 	})
 }
 
-// Issue #3216's addition to scout-delegate.md: the delegation asks for a
-// cited verbatim excerpt per load-bearing claim, not just paths and line
-// refs, and the coordinator re-searches only when a citation itself is
-// wrong or missing, not on any wrong pointer.
-func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
+// Issue #3216: the coordinator re-searches only when a citation itself is
+// wrong or missing, not on any wrong pointer. The cited-excerpt request
+// itself lives in scout-prompt.md since issue #6183.
+func TestAssembleScoutDelegateReSearchClause(t *testing.T) {
 	reg := loadTestRegistry(t)
 
 	t.Run("scout provisioned", func(t *testing.T) {
@@ -956,14 +966,9 @@ func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		for _, want := range []string{
-			"cited with a verbatim excerpt",
-			"path:line anchor",
-			"Re-search only when a citation is wrong",
-		} {
-			if !strings.Contains(result.Prompt, want) {
-				t.Errorf("Prompt missing scout-delegate.md cited-excerpt text %q (issue #3216):\n%s", want, result.Prompt)
-			}
+		const want = "Re-search only when a citation is wrong"
+		if !strings.Contains(result.Prompt, want) {
+			t.Errorf("Prompt missing scout-delegate.md re-search text %q (issue #3216):\n%s", want, result.Prompt)
 		}
 	})
 
@@ -976,13 +981,9 @@ func TestAssembleScoutDelegateCitedExcerpts(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		for _, unwanted := range []string{
-			"cited with a verbatim excerpt",
-			"Re-search only when a citation is wrong",
-		} {
-			if strings.Contains(result.Prompt, unwanted) {
-				t.Errorf("Prompt contains scout-delegate.md cited-excerpt text %q, want absent (SCOUT_DELEGATE gate off):\n%s", unwanted, result.Prompt)
-			}
+		const unwanted = "Re-search only when a citation is wrong"
+		if strings.Contains(result.Prompt, unwanted) {
+			t.Errorf("Prompt contains scout-delegate.md re-search text %q, want absent (SCOUT_DELEGATE gate off):\n%s", unwanted, result.Prompt)
 		}
 		if strings.Contains(result.Prompt, "${SCOUT_DELEGATE_STEP}") || strings.Contains(result.Prompt, "${SCOUT_ABSENT_STEP}") {
 			t.Errorf("Prompt still contains an unsubstituted SCOUT step token:\n%s", result.Prompt)
