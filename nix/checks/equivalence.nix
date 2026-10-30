@@ -849,7 +849,7 @@ in
         assert assertMsg (
           severity == "removed" -> replacement == null
         ) "${name} is removed, so it must not name a replacement";
-        # Not lib.hasInfix: see mentions in lib/mkHarness.nix.
+        # Not lib.hasInfix: see scan in lib/prompt-corpus-scan.nix.
         assert assertMsg (builtins.length (builtins.split "\\$[{]${name}[}]" templateText) == 1)
           "templates/default/prompts still references \${${name}}; a removed or deprecated fragment variable must not appear in shipped text";
         true;
@@ -2087,8 +2087,8 @@ in
       '';
 
   # Neither check above would catch a `prefetch`-only regression, and that is
-  # still a Box-behavior change freshness must detect (issue #2954; the
-  # agentClosure comment in lib/mkHarness.nix says how `prefetch` reaches the
+  # still a Box-behavior change freshness must detect (issue #2954;
+  # runArtifacts in lib/runners/bwrap.nix is where `prefetch` reaches the bwrap
   # Box as BAKED_PREFETCH). An A/B twin differing only in `prefetch` must give a
   # different agent-closure path, and that entry must hold the Box's own string.
   mkharness-agent-closure-tracks-prefetch =
