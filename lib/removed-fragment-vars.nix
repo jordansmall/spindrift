@@ -15,7 +15,7 @@
 # cmd/launcher/internal/promptassembly/removed_vars.go, pinned to this file by
 # nix/checks/equivalence.nix. A targeted list on purpose, never a reject of
 # every unknown token: legitimate pass-through text such as ${FORGEJO_TOKEN}
-# in the filer-*-forgejo.md fragments must keep rendering.
+# in the forgejo/filer-*.md fragments must keep rendering.
 {
   CAVEMAN_STEP_WORKER = {
     issue = 4562;
