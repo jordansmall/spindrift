@@ -1,6 +1,6 @@
 # TASK
 
-Fix box for GitHub issue #7: Do the thing
+Fix box for issue #7: Do the thing
 
 Branch `agent/issue-7` is already checked out with prior work from an earlier run
 that opened a pull request against `main` — CI came back red on it.

@@ -1,6 +1,6 @@
 # TASK
 
-Implement GitHub issue #7: Do the thing
+Implement issue #7: Do the thing
 
 Fresh clone, new branch `agent/issue-7` cut from `main`. This issue only.
 

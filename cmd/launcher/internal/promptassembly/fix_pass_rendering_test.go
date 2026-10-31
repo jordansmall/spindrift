@@ -127,7 +127,7 @@ func TestAssembleRendersIssuePlaceholders(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 	for _, want := range []string{
-		"Implement GitHub issue #2349: Add promptassembly.Assemble",
+		"Implement issue #2349: Add promptassembly.Assemble",
 		"agent/issue-2349", "cut from",
 	} {
 		if !strings.Contains(result.Prompt, want) {
