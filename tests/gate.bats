@@ -73,6 +73,10 @@ case "$1" in
   ;;
 --dump) printf 'NARDATA' ;;
 --load-db)
+  # With LOCK_SAW set, records whether GC could have started meanwhile.
+  if [ -n "${LOCK_SAW:-}" ]; then
+    if flock -n -x "$NIX_STATE_DIR/gc.lock" true; then echo gc-could-run; else echo excluded; fi >"$LOCK_SAW"
+  fi
   cat >>"$LOADDB_LOG"
   exit "${STUB_LOADDB_STATUS:-0}"
   ;;
@@ -104,6 +108,10 @@ STUB
   export GATE_POLL_SECONDS=0.05
   export GATE_MEMORY_MAX_FILE="$BATS_TEST_TMPDIR/memory.max"
   echo max >"$GATE_MEMORY_MAX_FILE"
+}
+
+teardown() {
+  [ -z "${HOLDER_PID:-}" ] || kill "$HOLDER_PID" 2>/dev/null || true
 }
 
 job() {
@@ -518,5 +526,64 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"gate: could not list invalid -source paths"* ]]
   [[ "$output" == *"gate: registered $p"* ]]
+  [[ "$output" == *"all 1 jobs passed"* ]]
+}
+
+@test "registration is skipped, with one stderr line, while Nix GC holds gc.lock" {
+  p=$(source_path jjj)
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  # GC takes gc.lock exclusive for its whole run.
+  # exec makes HOLDER_PID the holder itself, so teardown's kill frees the lock.
+  (flock -x 8 && exec sleep 30) 8>"$NIX_STATE_DIR/gc.lock" >/dev/null 2>&1 3>&- &
+  HOLDER_PID=$!
+  for _ in $(seq 100); do
+    flock -n -s "$NIX_STATE_DIR/gc.lock" true 2>/dev/null || break
+    sleep 0.05
+  done
+  run ! flock -n -s "$NIX_STATE_DIR/gc.lock" true
+  export GATE_GC_LOCK_WAIT=1
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'registration skipped' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"gate: could not take"*"gc.lock"* ]]
+  [ ! -s "$LOADDB_LOG" ]
+  [ ! -e "$HASH_LOG" ]
+  [[ "$output" == *"all 1 jobs passed"* ]]
+}
+
+@test "registration holds a shared gc.lock only until eval starts" {
+  p=$(source_path kkk)
+  cat >"$STUBS/nix-eval-jobs" <<'STUB'
+#!/usr/bin/env bash
+if flock -n -x "$NIX_STATE_DIR/gc.lock" true; then echo free; else echo held; fi >"$EVAL_SAW"
+cat "$NEJ_JOBS"
+STUB
+  sed -i "1s|.*|#!$BASH|" "$STUBS/nix-eval-jobs"
+  chmod +x "$STUBS/nix-eval-jobs"
+  export EVAL_SAW="$BATS_TEST_TMPDIR/eval.saw"
+  export LOCK_SAW="$BATS_TEST_TMPDIR/lock.saw"
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  job a
+  STUB_INVALID=$p
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$LOCK_SAW")" = excluded ]
+  [ "$(cat "$EVAL_SAW")" = free ]
+}
+
+@test "an unopenable gc.lock skips registration without blaming GC" {
+  p=$(source_path lll)
+  touch "$NIX_STATE_DIR/db/db.sqlite"
+  mkdir "$NIX_STATE_DIR/gc.lock"
+  job a
+  STUB_INVALID=$p
+  run bash "$GATE_SH"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'registration skipped' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"gate: cannot open $NIX_STATE_DIR/gc.lock"* ]]
+  [[ "$output" != *"GC running"* ]]
+  [ ! -s "$LOADDB_LOG" ]
   [[ "$output" == *"all 1 jobs passed"* ]]
 }

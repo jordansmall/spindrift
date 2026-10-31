@@ -8,11 +8,14 @@
 #   GATE_INSTALLABLE      flake installable of the checks set (required)
 #   GATE_MEMORY_MAX_FILE  cgroup memory limit source (default: the cgroup v2 file)
 #   GATE_POLL_SECONDS     idle poll interval while eval runs (default 1)
+#   GATE_GC_LOCK_WAIT     seconds to wait for Nix GC before skipping stale-source
+#                         registration (default 30)
 set -euo pipefail
 
 : "${GATE_INSTALLABLE:?GATE_INSTALLABLE must name the checks set, e.g. .#legacyPackages.<system>.checks-inbox-set}"
 memory_max_file="${GATE_MEMORY_MAX_FILE:-/sys/fs/cgroup/memory.max}"
 poll="${GATE_POLL_SECONDS:-1}"
+gc_lock_wait="${GATE_GC_LOCK_WAIT:-30}"
 
 # The root cgroup and darwin have no memory.max, and a cgroup with no limit
 # reads `max`: both mean uncapped.
@@ -47,26 +50,45 @@ echo "gate: $workers eval workers" >&2
 # content-addressed (no references) makes nix reuse it. Only top-level -source
 # entries: hashing every invalid path is too slow. A daemon client cannot
 # --load-db, hence the writable-DB guard.
+#
+# The guard also passes for a host user, whose concurrent GC could delete a path
+# --load-db just re-registered. Serialised against GC rather than restricted to a
+# Box, which has no reliable signal (#6163, ADR 0042): a shared gc.lock is held
+# across listing and registration and dropped before eval.
 register_stale_sources() {
-  local store=${NIX_STORE_DIR:-/nix/store} p name narhash size invalid
-  [ -w "${NIX_STATE_DIR:-/nix/var/nix}/db/db.sqlite" ] || return 0
-  if ! invalid=$(find "$store" -maxdepth 1 -name '*-source' -print0 |
-    xargs -0 -r nix-store --check-validity --print-invalid); then
-    echo "gate: could not list invalid -source paths; registration skipped for some" >&2
+  local store=${NIX_STORE_DIR:-/nix/store} state=${NIX_STATE_DIR:-/nix/var/nix}
+  [ -w "$state/db/db.sqlite" ] || return 0
+  if ! { : >>"$state/gc.lock"; } 2>/dev/null; then
+    echo "gate: cannot open $state/gc.lock; registration skipped" >&2
+    return 0
   fi
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    name=${p##*/}
-    name=${name#*-}
-    narhash=$(nix-hash --type sha256 --base32 "$p") || continue
-    [ "$(nix-store --print-fixed-path --recursive sha256 "$narhash" "$name")" = "$p" ] || continue
-    size=$(nix-store --dump "$p" | wc -c) || continue
-    # --load-db record: path, base16 NAR hash, NAR size, empty deriver, reference count 0.
-    if printf '%s\n%s\n%s\n\n0\n' "$p" "$(nix-hash --type sha256 --to-base16 "$narhash")" "$size" |
-      nix-store --load-db; then
-      echo "gate: registered $p, realised by the host after this Box started" >&2
+  local rc=0
+  (
+    flock -s -E 75 -w "$gc_lock_wait" 9 || exit
+    local p name narhash size invalid
+    if ! invalid=$(find "$store" -maxdepth 1 -name '*-source' -print0 |
+      xargs -0 -r nix-store --check-validity --print-invalid); then
+      echo "gate: could not list invalid -source paths; registration skipped for some" >&2
     fi
-  done <<<"$invalid"
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      name=${p##*/}
+      name=${name#*-}
+      narhash=$(nix-hash --type sha256 --base32 "$p") || continue
+      [ "$(nix-store --print-fixed-path --recursive sha256 "$narhash" "$name")" = "$p" ] || continue
+      size=$(nix-store --dump "$p" | wc -c) || continue
+      # --load-db record: path, base16 NAR hash, NAR size, empty deriver, reference count 0.
+      if printf '%s\n%s\n%s\n\n0\n' "$p" "$(nix-hash --type sha256 --to-base16 "$narhash")" "$size" |
+        nix-store --load-db; then
+        echo "gate: registered $p, realised by the host after this Box started" >&2
+      fi
+    done <<<"$invalid"
+  ) 9>>"$state/gc.lock" || rc=$?
+  case $rc in
+  0) ;;
+  75) echo "gate: could not take the shared $state/gc.lock within ${gc_lock_wait}s (GC running?); registration skipped" >&2 ;;
+  *) echo "gate: could not lock $state/gc.lock (exit $rc); registration skipped" >&2 ;;
+  esac
   return 0
 }
 register_stale_sources
