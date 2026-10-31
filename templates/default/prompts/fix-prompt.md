@@ -1,6 +1,6 @@
 # TASK
 
-Fix box for GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+Fix box for issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
 Branch `${BRANCH}` is already checked out with prior work from an earlier run
 that opened a pull request against `${BASE_BRANCH}` — CI came back red on it.

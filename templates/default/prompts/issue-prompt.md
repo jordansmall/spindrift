@@ -1,6 +1,6 @@
 # TASK
 
-Implement GitHub issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+Implement issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
 
 Fresh clone, new branch `${BRANCH}` cut from `${BASE_BRANCH}`. This issue only.
 

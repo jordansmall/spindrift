@@ -118,7 +118,7 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 		t.Fatal("Prompt is empty")
 	}
 
-	if !strings.Contains(result.Prompt, "Implement GitHub issue #2349: Add promptassembly.Assemble") {
+	if !strings.Contains(result.Prompt, "Implement issue #2349: Add promptassembly.Assemble") {
 		t.Errorf("Prompt missing substituted ISSUE_NUMBER/ISSUE_TITLE:\n%s", result.Prompt)
 	}
 	if !strings.Contains(result.Prompt, "new branch `agent/issue-2349` cut from `main`") {
@@ -1422,7 +1422,7 @@ func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if !strings.Contains(result.Prompt, "Research GitHub issue #2349: Add promptassembly.Assemble") {
+	if !strings.Contains(result.Prompt, "Research issue #2349: Add promptassembly.Assemble") {
 		t.Errorf("Prompt missing research-prompt.md's substituted ISSUE_NUMBER/ISSUE_TITLE:\n%s", result.Prompt)
 	}
 	if !strings.Contains(result.Prompt, "This is a research\ndispatch (ADR 0022)") {
@@ -2089,7 +2089,7 @@ func TestAssembleFixPassRendersFixPrompt(t *testing.T) {
 				t.Fatalf("Assemble: %v", err)
 			}
 
-			if !strings.Contains(result.Prompt, "Fix box for GitHub issue #2349: Add promptassembly.Assemble") {
+			if !strings.Contains(result.Prompt, "Fix box for issue #2349: Add promptassembly.Assemble") {
 				t.Errorf("Prompt missing fix-prompt.md's substituted ISSUE_NUMBER/ISSUE_TITLE:\n%s", result.Prompt)
 			}
 			if !strings.Contains(result.Prompt, "This is a warm fix pass, not a fresh implementation") {
@@ -2196,7 +2196,7 @@ func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(promptsFixtureDir, "issue-prompt.md"),
-		[]byte("# TASK\n\nImplement GitHub issue #${ISSUE_NUMBER}.\n\n# COMMS\n\nalready here\n"),
+		[]byte("# TASK\n\nImplement issue #${ISSUE_NUMBER}.\n\n# COMMS\n\nalready here\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -2378,7 +2378,7 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(promptsFixtureDir, "research-prompt.md"),
-		[]byte("# TASK\n\nResearch GitHub issue #${ISSUE_NUMBER}.\n"),
+		[]byte("# TASK\n\nResearch issue #${ISSUE_NUMBER}.\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -3808,7 +3808,7 @@ func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
 			t.Errorf("Prompt missing %q:\n%s", want, result.Prompt)
 		}
 	}
-	for _, unwanted := range []string{"${CHORE_", "Research GitHub issue"} {
+	for _, unwanted := range []string{"${CHORE_", "Research issue #"} {
 		if strings.Contains(result.Prompt, unwanted) {
 			t.Errorf("Prompt contains %q, want absent:\n%s", unwanted, result.Prompt)
 		}

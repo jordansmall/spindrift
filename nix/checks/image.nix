@@ -511,7 +511,7 @@ in
       ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/issue-prompt.md
     grep -q 'git rebase' \
       ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/conflict-resolve-prompt.md
-    grep -q 'Fix box for GitHub issue' \
+    grep -q 'Fix box for issue' \
       ${promptHarness.internals.agentFiles}${agentPaths.PROMPTS_DIR}/fix-prompt.md
     # fix-prompt.md's fix-specific preamble is baked as-is, but the shared
     # outcome contract (LAND THE CHANGE onward) only ever reaches it via
