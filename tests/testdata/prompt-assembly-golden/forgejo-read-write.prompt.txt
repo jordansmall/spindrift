@@ -591,8 +591,8 @@ Then:
    open one as a draft with `fj pr create --base main --head agent/issue-7 --body "<summary>" "WIP: <conventional title>"`
    (the title is positional and last; the `WIP: ` prefix is what opens it as
    a draft). If it does, leave it as-is — the Driver never flips a PR to
-   ready, so it is already draft and there is nothing to revert. Do NOT run
-   `gh`.
+   ready, so it is already draft and there is nothing to revert. Do NOT use
+   `gh` for the pull request — it targets GitHub, not this Forgejo instance.
 
 3. Leave the issue in-progress — do NOT close it.
 4. Comment on the issue with what's done and what remains:
