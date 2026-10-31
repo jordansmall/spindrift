@@ -14,7 +14,7 @@
 #     number,title,body,state,labels` shapes; the issue is always OPEN with an
 #     empty body.
 #   * `pr view --json isDraft` reads FAKE_GH_PR_DRAFT_<n>; `pr ready` flips it to
-#     false in $GH_STATE.
+#     false and `pr ready --undo` back to true in $GH_STATE.
 #   * Every other call is recorded, no-op.
 set -euo pipefail
 
@@ -140,14 +140,17 @@ EOF
         esac
         ;;
       ready)
-        # Models the launcher's MarkReady shelling out to `gh pr ready
-        # <prURL>` to flip a draft PR to ready, and MarkDraft's `gh pr ready
-        # --undo <prURL>` variant, which shifts the URL one slot further
-        # right. The URL is always the last argument either way, so parse it
-        # from there rather than a fixed positional index (issue #2423).
+        # Models MarkReady (`gh pr ready <prURL>`, flips to non-draft) and
+        # MarkDraft (`gh pr ready --undo <prURL>`, flips back to draft). The URL
+        # is always the last argument either way, so parse it from there rather
+        # than a fixed positional index (issue #2423).
         pr_ref="${*: -1}"
         pr_num="${pr_ref##*/}"
-        printf 'pr-draft-%s\tfalse\n' "$pr_num" >>"$GH_STATE"
+        is_draft=false
+        for a in "$@"; do
+          [ "$a" = "--undo" ] && is_draft=true
+        done
+        printf 'pr-draft-%s\t%s\n' "$pr_num" "$is_draft" >>"$GH_STATE"
         ;;
     esac
     ;;

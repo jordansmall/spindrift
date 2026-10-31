@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 # Covers the `pr ready` arm of tests/fakes/gh (issue #2423), which models the
-# launcher's MarkReady (cmd/launcher/internal/forge/github/exec_pr.go). These
-# tests invoke the fake directly rather than through tests/helper.bash, because
-# the contract under test is the fake's own GH_LOG/GH_STATE behaviour.
+# launcher's MarkReady and MarkDraft (`pr ready --undo`) in
+# cmd/launcher/internal/forge/github/exec_pr.go. These tests invoke the fake
+# directly rather than through tests/helper.bash, because the contract under
+# test is the fake's own GH_LOG/GH_STATE behaviour.
 
 setup() {
   GH_BIN="${FAKES_DIR:-$BATS_TEST_DIRNAME/fakes}/gh"
@@ -26,6 +27,31 @@ setup() {
 @test "isDraft falls back to the static FAKE_GH_PR_DRAFT_N env var when no ready flip was recorded" {
   export FAKE_GH_PR_DRAFT_43="true"
   run bash "$GH_BIN" pr view https://github.com/owner/repo/pull/43 --json isDraft
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "gh pr ready --undo records the invocation and flips a subsequent isDraft query to true" {
+  export FAKE_GH_PR_DRAFT_42="false"
+  run bash "$GH_BIN" pr ready --undo https://github.com/owner/repo/pull/42
+  [ "$status" -eq 0 ]
+  grep -qF "pr ready --undo https://github.com/owner/repo/pull/42" "$GH_LOG"
+
+  run bash "$GH_BIN" pr view https://github.com/owner/repo/pull/42 --json isDraft
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
+@test "gh pr ready then pr ready --undo on the same PR leaves isDraft true (last write wins)" {
+  run bash "$GH_BIN" pr ready https://github.com/owner/repo/pull/44
+  [ "$status" -eq 0 ]
+  run bash "$GH_BIN" pr view https://github.com/owner/repo/pull/44 --json isDraft
+  [ "$output" = "false" ]
+
+  run bash "$GH_BIN" pr ready --undo https://github.com/owner/repo/pull/44
+  [ "$status" -eq 0 ]
+
+  run bash "$GH_BIN" pr view https://github.com/owner/repo/pull/44 --json isDraft
   [ "$status" -eq 0 ]
   [ "$output" = "true" ]
 }
