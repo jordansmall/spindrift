@@ -161,7 +161,7 @@ CI-green decision, the ready flip, any merge, and the complete-label swap.
 `CODE_FORGE=local` already printed their outcome line and stopped under LAND
 THE CHANGE above.)
 
-${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>`
+${OUTCOME_LANDING_READ_WRITE_STEP}${OUTCOME_LANDING_READ_ONLY_STEP}${OUTCOME_LANDING_READ_ONLY_SOCKET_STEP}Grammar: `SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
 spaces and `=`). The only valid `status` values here are `ready` and `blocked`
 — no other word belongs in that field (`status=ambiguous` and
@@ -190,7 +190,7 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
+${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}${OUTCOME_READY_MEANS_READ_ONLY_SOCKET_STEP}
 # IF BLOCKED
 
 If you can't finish (review never clears, checks stay red after repeated fixes,

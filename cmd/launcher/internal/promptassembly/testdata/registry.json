@@ -660,9 +660,14 @@
     "var": "OUTCOME_LANDING_READ_WRITE_STEP"
   },
   {
-    "gate": "BOX_ACCESS_READ_ONLY",
+    "gate": "BOX_ACCESS_READ_ONLY_LOG",
     "fragment": "outcome-landing-outbox.md",
     "var": "OUTCOME_LANDING_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY_SOCKET",
+    "fragment": "outcome-landing-outbox-socket.md",
+    "var": "OUTCOME_LANDING_READ_ONLY_SOCKET_STEP"
   },
   {
     "gate": "BOX_ACCESS_READ_WRITE",
@@ -670,9 +675,14 @@
     "var": "OUTCOME_READY_MEANS_READ_WRITE_STEP"
   },
   {
-    "gate": "BOX_ACCESS_READ_ONLY",
+    "gate": "BOX_ACCESS_READ_ONLY_LOG",
     "fragment": "outcome-ready-means-outbox.md",
     "var": "OUTCOME_READY_MEANS_READ_ONLY_STEP"
+  },
+  {
+    "gate": "BOX_ACCESS_READ_ONLY_SOCKET",
+    "fragment": "outcome-ready-means-outbox-socket.md",
+    "var": "OUTCOME_READY_MEANS_READ_ONLY_SOCKET_STEP"
   },
   {
     "gate": "BOX_PUSH_READ_WRITE",
