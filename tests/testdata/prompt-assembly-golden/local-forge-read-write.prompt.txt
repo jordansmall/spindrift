@@ -196,11 +196,12 @@ verdict:` line the REVIEW section below reads.
   rewriting that history here is expected.
 
 **Always rebase onto the latest base immediately before finishing** — never
-leave the branch on a stale base. This keeps the branch's tested tree current
-with any siblings that landed while you worked: the launcher merges your
-branch as-is and does not re-rebase it for you, so a fresh base is the
-branch's freshness guarantee (a stale base also produces phantom diffs that
-trip push guards):
+leave the branch on a stale base. The launcher lands your branch by rebasing
+it onto the Integration branch's tip and fast-forwarding, without re-running
+any checks, and a branch that conflicts with that tip does not land at all:
+the landing is blocked, and no Box is sent to resolve it. Rebasing here
+surfaces any conflict while you can still resolve it, and keeps your checks
+running against the current base rather than a stale one:
 
 ```
 git fetch origin
