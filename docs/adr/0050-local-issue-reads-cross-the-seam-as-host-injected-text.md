@@ -93,31 +93,26 @@ section, which this ADR does not revisit).
   `ISSUE_TITLE` already did, through the same per-dispatch env map every
   other injected box value travels through — no `*-prompt.md` fragment
   builds a command line out of it.
-- **`ISSUE_TEXT` is to reach the runner process's own environment, never the
-  runner's command line — pending, tracked by #3470.** A container's or
-  sandbox's argv is world-readable through `ps` and `/proc/<pid>/cmdline` for
-  the Box's whole lifetime, and ADR 0032 kept local issue content off the
-  host-Box seam's readable-by-anyone surface on purpose; this ADR's
-  injection makes that property *more* load-bearing than it was under the
-  mount, since the whole linked-issue chain — not just the subject body —
-  now rides the one `ISSUE_TEXT` value. The decision was taken in #3468's
-  grilling alongside the rest of this ADR's contract, but it has not
-  landed: today `ISSUE_TEXT` is not a member of either runner's small
-  named-credential env-only set (`bwrapSecrets` in
-  `cmd/launcher/internal/runner/bwrap.go` — `GH_TOKEN`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`,
-  `REGISTRY_PROXY_TCP_SECRET`, `FORGEJO_TOKEN`), so it rides the ordinary
-  per-dispatch `box.Env` loop onto the runner's command line like any other
-  non-secret value: `--setenv ISSUE_TEXT …` under bwrap (that `box.Env` loop
-  in `cmd/launcher/internal/runner/bwrap.go`, gated only by
-  `!bwrapSecrets[k]`) and bare `-e ISSUE_TEXT=…` under OCI (the same loop in
-  `cmd/launcher/internal/runner/oci.go`, where the same `bwrapSecrets[k]`
-  check gates the argv-free `-e KEY` form vs. the OCI `-e KEY=VALUE` form).
-  Closing #3470 moves `ISSUE_TEXT` into that set, so it instead ships to the
-  sandboxed process through `resolvedRunEnv`
-  (`cmd/launcher/internal/runner/bwrap.go`) or `ociRunEnv`
-  (`cmd/launcher/internal/runner/oci.go`) the same way the named
-  credentials already do.
+- **`ISSUE_TEXT` reaches the runner process's own environment, never the
+  runner's command line — landed by #3470.** A container's or sandbox's argv is
+  world-readable through `ps` and `/proc/<pid>/cmdline` for the Box's whole
+  lifetime, and ADR 0032 kept local issue content off the host-Box seam's
+  readable-by-anyone surface on purpose; this ADR's injection makes that
+  property *more* load-bearing than it was under the mount, since the whole
+  linked-issue chain — not just the subject body — now rides the one
+  `ISSUE_TEXT` value. The decision was taken in #3468's grilling alongside
+  the rest of this ADR's contract. `ISSUE_TEXT` is a member of the runner's
+  off-argv set, `offArgvKeys` (`cmd/launcher/internal/runner/offargv.go`),
+  which admits a key for being unfit for argv rather than for being a
+  credential: a private issue body is sensitive without being a secret. Each runner's
+  `box.Env` loop keeps off-argv keys off its command line — bwrap leaves
+  them out of its `--setenv` flags, and OCI renders a bare `-e ISSUE_TEXT`
+  — and the value rides the runner process's own environment instead:
+  bwrap's, set by `resolvedRunEnv`
+  (`cmd/launcher/internal/runner/bwrap/bwrap.go`), or the docker/podman
+  CLI's, set by `ociRunEnv` (`cmd/launcher/internal/runner/oci/oci.go`),
+  which the bare `-e` forwards into the container — the same way the
+  credentials in that set do.
 
 ## Considered Options
 
