@@ -3049,12 +3049,17 @@ only where applicable — see [Issue Tracker backends](#issue-tracker-backends))
 ```
 
 With `OVERLAP_GATE=defer` (the default), dispatch holds a Dispatchable issue
-whose declared touch-set intersects the declared touch-set of any currently
-`agent-in-progress` issue, retrying once the colliding issue
-completes. An issue with no `## Touches` section, or one whose touches never
-intersect an in-progress issue's, dispatches immediately — the gate only ever
-delays dispatch, it never fails an issue. Set `OVERLAP_GATE=off` to disable
-the check entirely.
+whose declared touch-set intersects the touch-set of any currently
+`agent-in-progress` issue (its declared `## Touches` plus the files changed in
+its open PR), retrying once the colliding issue completes. An issue with no
+`## Touches` section, or one whose touches never intersect an in-progress
+issue's, dispatches immediately — the gate only ever delays dispatch, it never
+fails an issue. A claimed issue (`spindrift dispatch
+--issue-number`, as `agent-dispatch.yml` runs it) has already left the
+Dispatchable label, so instead of holding it the launcher writes the
+blocked-claim marker naming the collider and the workflow releases it to
+`ready-for-agent` for a human re-trigger. Advise-only kinds (research, butler)
+skip the gate. Set `OVERLAP_GATE=off` to disable the check entirely.
 
 This bounds wasted work from parallel issues that rewrite the same generated
 surface (schema-derived artifacts, a shared config file) and collide
