@@ -1930,9 +1930,9 @@ checkedMerge {
       "structural-template-examples-byname-valid (issue #2572): lib/structural-template-examples.nix's byName example must survive rosterLib.defaultRoster { byName = ...; } without throwing";
     pkgs.runCommand "structural-template-examples-byname-valid" { } "touch $out";
 
-  # The generated man page must parse under mandoc and cover the schema in
-  # full: every SH section, every OPTIONS group, every non-secret flag, and
-  # every secret env var.
+  # The generated man page must render under mandoc with no ERROR-level
+  # finding and cover the schema in full: every SH section, every OPTIONS
+  # group, every non-secret flag, and every secret env var.
   launcher-manpage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -1951,7 +1951,7 @@ checkedMerge {
       groups = unique (map (e: e.group) nonSecret);
       groupChecks = concatMapStrings (g: "need -F '.SS ${g}'\n") groups;
       flagChecks = concatMapStrings (e: "need -F '${roffFlag e}'\n") nonSecret;
-      secretChecks = concatMapStrings (e: "need -F '${e.env}'\n") secretEntries;
+      secretChecks = concatMapStrings (e: "needEntry '.B ${e.env}'\n") secretEntries;
       # Non-schema flags (lib/cli-flags.nix) each get a described .TP entry under
       # COMMAND FLAGS, so a row added there can never miss the man page.
       # -x: a bare prefix would also match every `.B \-\-butler\-...` schema knob.
@@ -1973,8 +1973,17 @@ checkedMerge {
       }
       ''
         need() { grep -q "$@" "$man" || { echo "man page missing: $*" >&2; exit 1; }; }
-        # Renders without a fatal parse error.
-        mandoc -man -Tascii "$man" >/dev/null
+        # Pair `.TP` with `.B <ENV>` exactly, inside ENVIRONMENT: BOX_GH_TOKEN,
+        # GH_TOKEN_REFRESH_FILE and the prose `.B GH_TOKEN` line would all pass
+        # a substring match. One awk read, not `grep | grep -q`, which pipefail
+        # fails on SIGPIPE once -q exits early.
+        needEntry() {
+          awk -v e="$1" '/^\.SH /{s = ($2 == "ENVIRONMENT")} s && p && $0 == e {f = 1} {p = ($0 == ".TP")} END {exit !f}' "$man" \
+            || { echo "man page missing ENVIRONMENT entry: $1" >&2; exit 1; }
+        }
+        # mandoc recovers from everything and exits 0 unless a -W level is set;
+        # -Werror, not -Wwarning, since the real page has a WARNING-level .TH date.
+        mandoc -man -Tascii -Werror "$man" >/dev/null
         for s in NAME SYNOPSIS DESCRIPTION SUBCOMMANDS "COMMAND FLAGS" OPTIONS ENVIRONMENT FILES EXAMPLES; do
           grep -Eq "^\.SH \"?$s" "$man" || { echo "man page missing .SH $s" >&2; exit 1; }
         done
