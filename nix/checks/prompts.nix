@@ -1352,14 +1352,18 @@ in
   filer-prompt-dedup-forgejo-searches = pkgs.runCommand "filer-prompt-dedup-forgejo-searches" { } ''
     f=${../../templates/default/prompts/fragments/forgejo/filer-dedup.md}
     # Each search spans several lines, so judge it as one curl..jq block: emit
-    # one "<state> <labels> <jq>" record per curl, flushed at its jq line (or
-    # at the next curl / EOF when the jq pipe is missing).
+    # one "<state> <labels> <jq> [sel]" record per curl, flushed at its jq line
+    # (or at the next curl / EOF when the jq pipe is missing). "sel" marks a
+    # jq filter that selects on the search's own label name, pinned in full so
+    # a bare comparison that filters nothing cannot pass: Forgejo drops an
+    # undefined labels= name, so only that filter keeps the search label-scoped.
     awk '
       function flush() {
         if (!on) return
         s = (b ~ /state=open/) ? "open" : (b ~ /state=closed/) ? "closed" : "none"
         l = match(b, /labels=[a-z-]+/) ? substr(b, RSTART + 7, RLENGTH - 7) : "-"
-        print s, l, (b ~ /jq -r/) ? "jq" : "nojq"
+        sel = (l != "-" && index(b, "select(any(.labels[]?; .name == \"" l "\"))")) ? " sel" : ""
+        print s, l, ((b ~ /jq -r/) ? "jq" : "nojq") sel
         on = 0; b = ""
       }
       /curl /{flush(); on = 1}
@@ -1372,7 +1376,7 @@ in
       echo "expected 6 curl searches (site key, all-open, 4 closed), found $total" >&2
       exit 1
     }
-    if grep -qv ' jq$' blocks; then
+    if grep -qvE ' jq( sel)?$' blocks; then
       echo "expected every curl search to pipe through jq -r" >&2
       exit 1
     fi
@@ -1384,8 +1388,8 @@ in
       exit 1
     }
     for l in agent-review-finding agent-research-reject agent-research-finding agent-butler-finding; do
-      grep -q "^closed $l jq\$" blocks || {
-        echo "expected a closed-issue dedup search for labels=$l" >&2
+      grep -q "^closed $l jq sel\$" blocks || {
+        echo "expected a closed-issue dedup search for labels=$l whose jq filter is select(any(.labels[]?; .name == \"$l\"))" >&2
         exit 1
       }
     done

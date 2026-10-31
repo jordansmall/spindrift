@@ -16,27 +16,29 @@
    - Search closed issues carrying `agent-review-finding`,
      `agent-research-reject`, `agent-research-finding`, OR
      `agent-butler-finding` — all four mark a deliberate triage decision, and
-     none of them is ever refiled:
+     none of them is ever refiled. Forgejo ignores a `labels=` name the repo
+     does not define and returns every closed issue matching `q=`, so each
+     `jq` keeps only results that carry that search's label:
        curl -fsS -G -H "Authorization: token ${FORGEJO_TOKEN}" \
          "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues" \
          --data-urlencode "type=issues" --data-urlencode "state=closed" \
          --data-urlencode "labels=agent-review-finding" --data-urlencode "q=<terms>" \
-         | jq -r '.[] | "#\(.number) \(.title)"'
+         | jq -r '.[] | select(any(.labels[]?; .name == "agent-review-finding")) | "#\(.number) \(.title)"'
        curl -fsS -G -H "Authorization: token ${FORGEJO_TOKEN}" \
          "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues" \
          --data-urlencode "type=issues" --data-urlencode "state=closed" \
          --data-urlencode "labels=agent-research-reject" --data-urlencode "q=<terms>" \
-         | jq -r '.[] | "#\(.number) \(.title)"'
+         | jq -r '.[] | select(any(.labels[]?; .name == "agent-research-reject")) | "#\(.number) \(.title)"'
        curl -fsS -G -H "Authorization: token ${FORGEJO_TOKEN}" \
          "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues" \
          --data-urlencode "type=issues" --data-urlencode "state=closed" \
          --data-urlencode "labels=agent-research-finding" --data-urlencode "q=<terms>" \
-         | jq -r '.[] | "#\(.number) \(.title)"'
+         | jq -r '.[] | select(any(.labels[]?; .name == "agent-research-finding")) | "#\(.number) \(.title)"'
        curl -fsS -G -H "Authorization: token ${FORGEJO_TOKEN}" \
          "${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/issues" \
          --data-urlencode "type=issues" --data-urlencode "state=closed" \
          --data-urlencode "labels=agent-butler-finding" --data-urlencode "q=<terms>" \
-         | jq -r '.[] | "#\(.number) \(.title)"'
+         | jq -r '.[] | select(any(.labels[]?; .name == "agent-butler-finding")) | "#\(.number) \(.title)"'
    - A plain closed issue carrying none of these labels does NOT suppress
      filing — a problem that was fixed and later regressed can still be
      refiled.
