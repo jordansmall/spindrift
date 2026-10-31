@@ -7,45 +7,82 @@ set -euo pipefail
 
 # Masks quoted and backslash-escaped characters with 'x' so the caller can
 # match operators like & without tripping on a quoted or escaped literal such
-# as "foo & bar" or foo\&bar.
+# as "foo & bar" or foo\&bar. Command substitution inside double quotes runs in
+# bash, so $(...) and backticks there are scanned live, and $'...' honours \'.
+# Returns 1 (after printing what it masked) when an open substitution,
+# backtick, or $'...' remains anywhere on the stack at end of input, so the
+# caller can fail closed. A lone ' or " outside any substitution does not:
+# heredoc bodies routinely hold an apostrophe. Accepted false positive: a
+# heredoc inside "$(...)" (git commit -m "$(cat <<'EOF' ...)") is scanned as
+# code, so an apostrophe or & in its body denies, and an unbalanced $(, $' or
+# backtick in any heredoc body's prose fails closed. Unmodeled fail-open:
+# inside $(...) any ) closes the substitution, including a case pattern's a)
+# or a ) in a # comment, so what follows up to the closing " is masked.
 mask_command() {
   local cmd="$1"
   local -i i=0
   local -i len=${#cmd}
-  local -i in_squote=0
-  local -i in_dquote=0
-  local ch backslash=$'\\'
+  # One char per open context, top last: p paren (from $( or a bare "("),
+  # b backtick, s single quote, a ANSI-C $'...', d double quote. An empty
+  # stack, p and b are all code, where every rule below applies.
+  local stack="" top
+  local ch two backslash=$'\\'
   local masked=""
 
   while (( i < len )); do
     ch="${cmd:i:1}"
+    two="${cmd:i:2}"
+    top="${stack: -1}"
 
-    if (( in_squote )); then
-      if [[ "$ch" == "'" ]]; then
-        in_squote=0
-        masked+="'"
-      else
-        masked+="x"
-      fi
-      i=$((i + 1))
+    # A backslash escapes the next char in "..." and $'...' but is literal in
+    # '...'; code contexts have their own rule below.
+    if [[ "$ch" == "$backslash" && ( "$top" == a || "$top" == d ) ]]; then
+      masked+="xx"
+      i=$((i + 2))
       continue
     fi
 
-    if (( in_dquote )); then
-      if [[ "$ch" == "$backslash" ]]; then
-        masked+="xx"
-        i=$((i + 2))
+    case "$top" in
+      s)
+        if [[ "$ch" == "'" ]]; then
+          stack="${stack%?}"
+          masked+="'"
+        elif [[ "$ch" == '`' && "$stack" == *b* ]]; then
+          # Bash ends a backtick substitution at the next backtick even with a
+          # quote still open inside it, so drop everything above that b.
+          stack="${stack%b*}"
+          masked+='`'
+        else
+          masked+="x"
+        fi
+        i=$((i + 1))
         continue
-      fi
-      if [[ "$ch" == '"' ]]; then
-        in_dquote=0
-        masked+='"'
-      else
-        masked+="x"
-      fi
-      i=$((i + 1))
-      continue
-    fi
+        ;;
+      a)
+        if [[ "$ch" == "'" ]]; then
+          stack="${stack%?}"
+          masked+="'"
+        else
+          masked+="x"
+        fi
+        i=$((i + 1))
+        continue
+        ;;
+      d)
+        if [[ "$ch" == '"' ]]; then
+          stack="${stack%?}"
+          masked+='"'
+          i=$((i + 1))
+          continue
+        elif [[ "$two" != "\$(" && "$ch" != '`' ]]; then
+          # $' stays literal here; only $( and a backtick fall through to the
+          # code rules below.
+          masked+="x"
+          i=$((i + 1))
+          continue
+        fi
+        ;;
+    esac
 
     if [[ "$ch" == "$backslash" ]]; then
       # Before a metacharacter the backslash neutralizes the operator, so mask
@@ -62,36 +99,71 @@ mask_command() {
       i=$((i + 2))
       continue
     fi
-    if [[ "$ch" == "'" ]]; then
-      in_squote=1
-      masked+="'"
-      i=$((i + 1))
+    if [[ "$two" == "\$'" ]]; then
+      stack+="a"
+      masked+="\$'"
+      i=$((i + 2))
       continue
     fi
-    if [[ "$ch" == '"' ]]; then
-      in_dquote=1
-      masked+='"'
-      i=$((i + 1))
+    if [[ "$two" == "\$(" ]]; then
+      stack+="p"
+      masked+="\$("
+      i=$((i + 2))
       continue
     fi
-
-    masked+="$ch"
+    case "$ch" in
+      "'")
+        stack+="s"
+        masked+="'"
+        ;;
+      '"')
+        stack+="d"
+        masked+='"'
+        ;;
+      "(")
+        # Nests inside a substitution; at top level it stays literal, since
+        # heredoc prose like ":-(" would otherwise leave a paren open.
+        if [[ -n "$stack" ]]; then
+          stack+="p"
+        fi
+        masked+="("
+        ;;
+      ")")
+        if [[ "$top" == "p" ]]; then
+          stack="${stack%?}"
+        fi
+        masked+=")"
+        ;;
+      '`')
+        if [[ "$top" == "b" ]]; then
+          stack="${stack%?}"
+        else
+          stack+="b"
+        fi
+        masked+='`'
+        ;;
+      *)
+        masked+="$ch"
+        ;;
+    esac
     i=$((i + 1))
   done
 
   printf '%s' "$masked"
+  [[ "$stack" != *[pba]* ]]
 }
 
 # True if the command backgrounds a process at the shell level. The strip below
 # removes &&, >&, <&, &> and |&, which are foreground fd juggling. Three accepted
-# false positives: a bitwise & in $((...)) and an & inside a heredoc body both
-# read as the background operator, since mask_command models neither, and a
-# redirect to a file named after a keyword (cmd >&nohup) reads as that keyword.
-# All deny a safe call, which is the fail-closed direction.
+# false positives: a bitwise & in $((...)) reads as the background operator
+# because the paren scan sees it as code, an & inside a heredoc body does too,
+# since mask_command does not model heredocs, and a redirect to a file named
+# after a keyword (cmd >&nohup) reads as that keyword. All deny a safe call,
+# which is the fail-closed direction.
 command_backgrounds() {
   local cmd="$1"
   local masked
-  masked="$(mask_command "$cmd")"
+  masked="$(mask_command "$cmd")" || return 0
 
   local stripped="$masked"
   stripped="${stripped//&&/}"

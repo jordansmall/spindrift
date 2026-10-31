@@ -238,3 +238,131 @@ setup() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
+
+@test "denies nohup inside command substitution within double quotes" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"$(nohup sleep 300 >/dev/null 2>&1 &)\""}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies backgrounding inside backticks within double quotes" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"`sleep 300 &`\""}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies nohup glued to a backtick inside double quotes" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"`nohup sleep 300`\""}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies setsid inside command substitution within double quotes" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"$(setsid sleep 300)\""}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a trailing & after an ANSI-C string holding an escaped quote" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"echo $'it\\'s'; sleep 300 &"}}
+JSON
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies an unterminated command substitution inside double quotes" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"$(sleep 300 &"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies an unterminated ANSI-C string (fail closed)" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo $'"'"'abc"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows a harmless command substitution inside double quotes" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"$(date)\""}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a quoted & nested in a double-quoted command substitution" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"x=\"$(echo \"a & b\")\""}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows an & inside an ANSI-C string" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"echo $'a & b'"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows an ANSI-C string holding an escaped quote" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"echo $'it\\'s'"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a heredoc body with a lone apostrophe (no fail-closed on plain quotes)" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\ndon't\nEOF"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a heredoc body with a parenthesised aside holding an apostrophe" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\n(don't do this)\nEOF"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a heredoc body with an unbalanced open paren" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\nsad :-(\nEOF"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "allows a heredoc body with a backtick span holding an apostrophe" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"cat <<EOF\nthe `it's` case\nEOF"}}
+JSON
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "denies a trailing & after a commit-message heredoc holding an apostrophe" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"git commit -m \"$(cat <<'EOF'\nfix: don't\nEOF\n)\"; sleep 300 &"}}
+JSON
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a trailing & after a comment with an apostrophe inside a double-quoted substitution" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"echo \"$(echo hi # it's\n)\"; sleep 300 &"}}
+JSON
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a trailing & after a backtick span holding an unclosed apostrophe" {
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<'JSON'
+{"tool_name":"Bash","tool_input":{"command":"echo `echo it's`; sleep 300 &"}}
+JSON
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
