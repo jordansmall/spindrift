@@ -113,10 +113,11 @@ type Config struct {
 	SettledLabels []string
 	FailedLabel   string
 
-	// IgnoreBlockers skips blocker-edge gating for the research dispatch kind
-	// (ADR 0022): research lands no code, so it is never held on an unmerged
-	// dependency, a sibling's Failed label never cascades to it, and
-	// OriginClaimed never writes .spindrift/logs/blocked.txt. Caps still apply.
+	// IgnoreBlockers skips blocker-edge gating for the advise-only dispatch
+	// kinds (research, ADR 0022; butler): they land no code, so they are never
+	// held on an unmerged dependency, a sibling's Failed label never cascades
+	// to them, the touch-overlap gate never defers them, and OriginClaimed
+	// never writes .spindrift/logs/blocked.txt. Caps still apply.
 	IgnoreBlockers bool
 
 	// Verb is the CLI subcommand a selective wave's rerun hint tells the operator
