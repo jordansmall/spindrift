@@ -1,20 +1,15 @@
 {
-  "lastSwept": "19e5d0258aa0f3a56c25d68ae5a7656fdc6a1bd0",
-  "cursor": "tests/testdata/prompt-assembly-golden/local-tracker-no-issue-ref.prompt.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-31T11:12:24.31813806-04:00"
-  },
+  "lastSwept": "d8cc3cc2104dd334df7266e5ec3c4c04dc438c41",
+  "cursor": "tests/testdata/prompt-assembly-golden/orchestrator-skills-absent.handoff.json",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 60,
+    "output_tokens": 8455,
+    "cache_read_input_tokens": 1817905,
+    "cache_creation_input_tokens": 76079,
+    "total_cost_usd": 1.1445667149999996,
+    "duration_ms": 104257,
+    "duration_api_ms": 95354,
+    "num_turns": 31
   }
 }
