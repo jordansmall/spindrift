@@ -642,3 +642,20 @@ references and content cannot be verified from inside the Box, so registering
 them blindly could poison the database. The gate diagnoses them instead, and
 the remedy is a fresh Box (whose snapshot is taken at its own start) or
 leaving the check to CI.
+
+### Serialised against host GC (issue #6163)
+
+The writable-database guard does not mean "this is a Box": a single-user host
+whose operator owns `/nix/var/nix/db` passes it too, and there an invalid
+`-source` path is most likely one a running `nix-collect-garbage` has just
+invalidated and is about to delete. `--load-db` takes no temp root and no GC
+lock, so registering it would leave a valid row with no path behind it. The
+registration therefore holds a shared `flock` on Nix's own
+`$NIX_STATE_DIR/gc.lock`, which the collector holds exclusively for its whole
+run, across the listing, hashing and `--load-db` calls, and releases it before
+eval. It waits at most `GATE_GC_LOCK_WAIT` seconds (default 30), then skips
+registration with one `gate:` line. In a Box the lock lives in the Box's own
+`/nix/var` and is uncontended, so the #6095 behaviour is unchanged.
+Restricting the step to a Box was rejected: no reliable in-Box signal exists
+(`NIX_STORE_WRITABLE` is not forwarded into bwrap Boxes, issue #6103), and a
+new one would need launcher plumbing for a dev tool.
