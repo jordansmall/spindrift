@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -195,6 +196,30 @@ type goldenCell struct {
 	check func(t *testing.T, prompt string)
 }
 
+// blanketGhBan matches a sentence that forbids `gh` outright ("Do NOT run
+// `gh`.", "Never use gh."), but not a scoped one such as "Do NOT use `gh` for
+// the pull request".
+var blanketGhBan = regexp.MustCompile("(?i)\\b(do not|don't|never)\\s+(run|use)\\s+`?gh`?\\s*[.;!]")
+
+// checkForgejoBlockedKeepsTrackerGh guards the Forgejo IF BLOCKED section
+// (#6229): the default GitHub tracker still comments through `gh issue
+// comment`, so the PR step must not ban `gh` wholesale. The ban wraps across
+// lines in the fragment, hence the whitespace normalisation.
+func checkForgejoBlockedKeepsTrackerGh(t *testing.T, prompt string) {
+	t.Helper()
+	_, blocked, ok := strings.Cut(prompt, "# IF BLOCKED")
+	if !ok {
+		t.Fatal("prompt lacks an IF BLOCKED section")
+	}
+	if !strings.Contains(blocked, "gh issue comment 7") {
+		t.Error("IF BLOCKED lacks the tracker gh issue comment step")
+	}
+	flat := strings.Join(strings.Fields(blocked), " ")
+	if ban := blanketGhBan.FindString(flat); ban != "" {
+		t.Errorf("IF BLOCKED bans gh outright (%q), contradicting the tracker comment step", ban)
+	}
+}
+
 func goldenCells() []goldenCell {
 	return []goldenCell{
 		{name: "covered-cell-issue-text", mode: modeInitial, setup: func(c *cellInputs) {
@@ -253,7 +278,7 @@ func goldenCells() []goldenCell {
 		}},
 		{name: "forgejo-read-write", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoForge()
-		}},
+		}, check: checkForgejoBlockedKeepsTrackerGh},
 		{name: "git-read-write", mode: modeInitial, setup: func(c *cellInputs) {
 			c.gitForge()
 		}, check: func(t *testing.T, prompt string) {
@@ -437,7 +462,7 @@ func goldenCells() []goldenCell {
 		{name: "forgejo-fix-pass", mode: modeResume, setup: func(c *cellInputs) {
 			c.export("FIX_PASS", "1")
 			c.forgejoForge()
-		}},
+		}, check: checkForgejoBlockedKeepsTrackerGh},
 		{name: "principle-skills-baked", mode: modeInitial, setup: func(c *cellInputs) {
 			c.provisionAgents(roster)
 			// Dogfood-only, like nix-checks: no stock Consumer image bakes them.
