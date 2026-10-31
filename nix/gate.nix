@@ -14,6 +14,7 @@ pkgs.writeShellApplication {
     pkgs.findutils
     pkgs.gnused
     pkgs.gnugrep
+    pkgs.util-linux
   ];
   text = ''
     : "''${GATE_INSTALLABLE:=.#legacyPackages.${system}.checks-inbox-set}"

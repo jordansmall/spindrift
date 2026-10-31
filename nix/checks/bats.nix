@@ -41,6 +41,7 @@ let
     pkgs.gettext
     pkgs.coreutils
     pkgs.gnugrep
+    pkgs.util-linux
     pkgs.gnused
     pkgs.jq
     # ci-changes.sh's comment-only parsers (issue #5158).
