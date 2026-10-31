@@ -1,15 +1,20 @@
 {
   "lastSwept": "19e5d0258aa0f3a56c25d68ae5a7656fdc6a1bd0",
   "cursor": "tests/testdata/prompt-assembly-golden/forgejo-fix-pass.prompt.txt",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-31T06:18:52.511491704-04:00"
+  },
   "usage": {
-    "input_tokens": 78,
-    "output_tokens": 9606,
-    "cache_read_input_tokens": 2440172,
-    "cache_creation_input_tokens": 89350,
-    "total_cost_usd": 1.3952664000000001,
-    "duration_ms": 146020,
-    "duration_api_ms": 143149,
-    "num_turns": 41
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
