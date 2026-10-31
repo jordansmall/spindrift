@@ -156,18 +156,7 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueSkipsOverlapGate(t *testing.T) 
 	c.IgnoreBlockers = true
 	c.OverlapGate = "defer"
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{
-		Number: "10",
-		Body:   "## Touches\n- lib/foo.nix",
-		Labels: []string{testInProgressLabel},
-	})
-	fc.SetIssue(forge.Issue{
-		Number: "20",
-		Body:   "## Touches\n- lib/foo.nix",
-		State:  "OPEN",
-		Labels: []string{testInProgressLabel},
-	})
+	fc := claimedOverlapFixture()
 
 	fr := runner.NewFake()
 

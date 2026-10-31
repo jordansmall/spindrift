@@ -47,15 +47,26 @@ func writeBlockedMarker(pwd string, blockers []string, sources map[string]forge.
 	for i, b := range blockers {
 		refs[i] = forge.Ref(b, sources[b])
 	}
-	path := filepath.Join(dispatch.HostLogDirFor(pwd), blockedMarker)
-	return os.WriteFile(path, []byte(strings.Join(refs, ", ")), 0o644)
+	return writeMarker(pwd, strings.Join(refs, ", "))
 }
 
 // writeDepsOfFailedMarker records a transient DepsOf failure (#1103) in place
 // of a named blocker, so the workflow's release-the-claim step still fires.
 func writeDepsOfFailedMarker(pwd string) error {
+	return writeMarker(pwd, "a transient blocker check failure (will retry)")
+}
+
+// writeOverlapMarker names the in-progress collider that deferred a claimed
+// issue. The text must end on the collider: the release workflow interpolates
+// it into "blocked by ${blockers} (not yet agent-complete or closed)". The
+// collider's touch-set is its declared touches plus its open PR's changed files.
+func writeOverlapMarker(pwd, collider string) error {
+	return writeMarker(pwd, "overlapping touches with in-progress #"+collider)
+}
+
+func writeMarker(pwd, text string) error {
 	path := filepath.Join(dispatch.HostLogDirFor(pwd), blockedMarker)
-	return os.WriteFile(path, []byte("a transient blocker check failure (will retry)"), 0o644)
+	return os.WriteFile(path, []byte(text), 0o644)
 }
 
 // dispatchWave dispatches a batch of issues in parallel, up to cfg.MaxParallel
@@ -207,6 +218,10 @@ func drainMaxJobs(cfg Config, it forge.IssueTracker, cf forge.CodeForge, pwd str
 	// never the descriptor fields.
 	caps := forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 	var selected []Issue
+	// Colliders recorded by the selection loop, so the claimed-path marker does
+	// not re-fetch the touch-set: a failed re-fetch fails open and would strand
+	// the claim.
+	deferredBy := map[string]string{}
 outer:
 	for _, iss := range issues {
 		// A transient DepsOf error is indistinguishable from confirmed zero
@@ -230,6 +245,7 @@ outer:
 		default:
 			if collider, overlapped := checkOverlap(iss.Number); overlapped {
 				fmt.Printf("    ~~ #%s touches overlap in-progress #%s; deferring\n", iss.Number, collider)
+				deferredBy[iss.Number] = collider
 				continue
 			}
 			selected = append(selected, iss)
@@ -241,7 +257,8 @@ outer:
 	if len(selected) == 0 {
 		// The caller already swapped a claimed issue onto the in-progress
 		// label, so a bare skip would strand it there. The marker naming the
-		// unmet blockers is what makes the pipeline release the claim.
+		// unmet blockers or the overlap collider is what makes the pipeline
+		// release the claim.
 		if origin == OriginClaimed && len(issues) > 0 {
 			num := issues[0].Number
 			if !cfg.IgnoreBlockers {
@@ -260,6 +277,11 @@ outer:
 							return err
 						}
 						fmt.Printf("==> #%s blocked; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, blockedMarker)
+					} else if collider, ok := deferredBy[num]; ok {
+						if err := writeOverlapMarker(pwd, collider); err != nil {
+							return err
+						}
+						fmt.Printf("==> #%s overlaps in-progress #%s; wrote .spindrift/logs/%s for the pipeline to release the claim\n", num, collider, blockedMarker)
 					}
 				}
 			}
