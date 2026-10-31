@@ -730,3 +730,111 @@ func TestDrainMaxJobs_ClaimedIssue_DepsOfFailedWritesRetryMarker(t *testing.T) {
 		t.Errorf("RunCalls: got %d, want 0 (must not dispatch on a DepsOf check failure)", len(fr.RunCalls))
 	}
 }
+
+// A claimed issue the overlap gate defers has left its Dispatchable label, so
+// without a marker the workflow never releases the claim.
+func TestDrainMaxJobs_Claimed_OverlapDeferral_WritesBlockedMarker(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+	c.OverlapGate = "defer"
+
+	fc := claimedOverlapFixture()
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, "ready-for-agent", testInProgressLabel)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "10", Title: "claimed issue"},
+	}, nil, nil, nil, OriginClaimed, claimer, nil); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	if len(fr.RunCalls) != 0 {
+		t.Fatalf("RunCalls: got %d, want 0 (overlap must defer the claimed issue)", len(fr.RunCalls))
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".spindrift", "logs", blockedMarker))
+	if err != nil {
+		t.Fatalf("blocked marker not written: %v", err)
+	}
+	const want = "overlapping touches with in-progress #20"
+	if string(b) != want {
+		t.Errorf("marker = %q, want %q", b, want)
+	}
+}
+
+// touchesFailOnRefetch fails TouchesOf for num from its third call on (the
+// in-progress snapshot and the selection loop each fetch it once),
+// modelling a transient forge error between the selection loop and the
+// claimed-path fallback.
+type touchesFailOnRefetch struct {
+	forge.IssueTracker
+	num   string
+	calls int
+}
+
+func (f *touchesFailOnRefetch) TouchesOf(num string) ([]string, error) {
+	if num != f.num {
+		return f.IssueTracker.TouchesOf(num)
+	}
+	f.calls++
+	if f.calls > 2 {
+		return nil, errors.New("transient 403")
+	}
+	return f.IssueTracker.TouchesOf(num)
+}
+
+// The marker comes from the collider the selection loop recorded, so a second
+// failing touch-set fetch cannot strand the claimed issue on in-progress.
+func TestDrainMaxJobs_Claimed_OverlapDeferral_MarkerSurvivesRefetchFailure(t *testing.T) {
+	c := baseConfig()
+	c.MaxParallel = 1
+	c.OverlapGate = "defer"
+
+	fc := claimedOverlapFixture()
+	it := &touchesFailOnRefetch{IssueTracker: fc, num: "10"}
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, "ready-for-agent", testInProgressLabel)
+	if err := drainMaxJobs(c, it, fc, dir, f, s, []Issue{
+		{Number: "10", Title: "claimed issue"},
+	}, nil, nil, nil, OriginClaimed, claimer, nil); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(dir, ".spindrift", "logs", blockedMarker))
+	if err != nil {
+		t.Fatalf("blocked marker not written: %v", err)
+	}
+	if !strings.Contains(string(b), "in-progress #20") {
+		t.Errorf("marker = %q, want it to name collider #20", b)
+	}
+	// The fake fails from the third fetch on; any other count means it no
+	// longer models a re-fetch and must be re-pinned.
+	if it.calls != 2 {
+		t.Errorf("TouchesOf(10) calls = %d, want 2", it.calls)
+	}
+}
+
+// claimedOverlapFixture holds claimed #10 and in-progress #20, both declaring
+// lib/foo.nix.
+func claimedOverlapFixture() *forge.Fake {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{
+		Number: "10",
+		Body:   "## Touches\n- lib/foo.nix",
+		Labels: []string{testInProgressLabel},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "20",
+		Body:   "## Touches\n- lib/foo.nix",
+		State:  "OPEN",
+		Labels: []string{testInProgressLabel},
+	})
+	return fc
+}
