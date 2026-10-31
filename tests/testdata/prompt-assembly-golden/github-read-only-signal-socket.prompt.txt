@@ -541,8 +541,8 @@ SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
 
 landing is your branch name here, not a PR URL — your token is read-only, so
 you never open the PR and never learn its URL. The launcher opens the draft
-PR host-side from your PR-intent line above and records the real PR URL as
-this seam's landing itself.
+PR host-side from the intent your `driver-exec signal pr-intent` call queued
+and records the real PR URL as this seam's landing itself.
 
 Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<text>`
 — one line, space-delimited fields, `note` last (`note` may itself contain
@@ -573,11 +573,14 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-`status=ready` = your branch is written to the outbox and your PR-intent
-line above is ready to open — not that a PR already exists. The launcher
-relays your branch, opens the draft PR from your PR-intent line, then takes
-it from there as OPEN A PULL REQUEST above describes. You never run
-`gh pr create`, `gh pr ready`,
+`status=ready` = your branch is written to the outbox and
+`driver-exec signal pr-intent` exited zero (`signal pr-intent accepted: ...`),
+so your PR intent is queued — not that a PR already exists. The launcher
+relays your branch, opens the draft PR from that intent, then takes it from
+there as OPEN A PULL REQUEST above describes. If the command never exited
+zero, even after you fixed each rejection's reason and sent it again, no
+intent is queued: print `status=blocked` instead, with a `note=` naming the
+rejection. You never run `gh pr create`, `gh pr ready`,
 `gh issue edit ... --add-label agent-complete`, or `gh pr merge` — your
 token cannot.
 
