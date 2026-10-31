@@ -99,3 +99,18 @@ func TestIssuePromptIfBlockedIntroIsPushNeutral(t *testing.T) {
 		t.Errorf("issue-prompt.md IF BLOCKED intro must not mention a push; got %q", intro)
 	}
 }
+
+// Issue #6238: the push-triage fragment renders on every BOX_PUSH_READ_WRITE
+// tracker, including jira and local where the Box cannot comment. Reporting is
+// deferred to step 4 of IF BLOCKED, which forks per tracker.
+func TestIfBlockedTriageGitDefersReportToStep4(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/if-blocked-triage-git.md"))
+
+	if strings.Contains(strings.ToLower(normalized), "comment on the issue") {
+		t.Error("if-blocked-triage-git.md tells the agent to comment on the issue; jira/local Boxes cannot, so defer to step 4")
+	}
+	if !strings.Contains(normalized, "step 4") {
+		t.Error("if-blocked-triage-git.md must defer the workflow-scope report to step 4")
+	}
+}

@@ -573,8 +573,8 @@ git diff origin/main -- '.github/workflows/'
   error output.
 - **Genuine `.github/workflows/` change:** The agent's token intentionally
   lacks `workflow` scope — this is a deliberate security boundary. Do NOT
-  attempt to acquire broader scope or route around it. Comment on the issue
-  explaining what changes were made and why they require human review with
+  attempt to acquire broader scope or route around it. Through step 4 below,
+  report which changes were made and why they require human review with
   `workflow` scope, then emit `status=blocked`.
 - **Any other rejection:** Report the literal push error output. Never
   attribute a failure to a cause you have not verified.
