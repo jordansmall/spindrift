@@ -1797,15 +1797,23 @@ explanation, not enforcement):
   the same hook to also parse `tool_input.command` for that: it masks quoted
   and backslash-escaped characters, then denies any standalone `&` control
   operator (as opposed to `&&`, a `>&`/`<&`/`&>` redirection token, or the
-  `|&` pipe operator) or a `nohup` invocation. Issue #1635 further widens the
-  same hook to also deny `setsid` and bash's `coproc` keyword, two more
+  `|&` pipe operator) or a `nohup` invocation. Issue #1635 further widens
+  the same hook to also deny `setsid` and bash's `coproc` keyword, two more
   concrete shell-level detachment mechanisms; other detachment tools
   (`disown`, `at`, `systemd-run`, `screen -d`, `tmux new-session -d`, etc.)
-  remain a deliberately out-of-scope judgment call for future work. Two edge
-  cases are accepted false positives rather than chased: a literal `&` in
-  arithmetic context (`$((3 & 4))`) and a literal `&` inside a heredoc body
-  both deny a call that was actually safe, since the parser isn't
-  `$((...))`- or line-aware.
+  remain a deliberately out-of-scope judgment call for future work. Issue
+  #6216 stops the masker treating everything inside double quotes as inert
+  text: bash runs command substitution (`$(...)` and backticks) there, so
+  the masker scans it as live code and `echo "$(nohup cmd &)"` denies while
+  `echo "foo & bar"` still allows. It also honours `\'` inside ANSI-C
+  `$'...'` quoting, and a `$(...)`, backtick, or `$'...'` left unclosed at
+  end of input fails closed (denies). Two edge cases are accepted false
+  positives rather than chased: a literal `&` in arithmetic context
+  (`$((3 & 4))`, including inside double quotes), and a heredoc body. The
+  scan isn't heredoc- or `$((...))`-aware, so a literal `&` in a heredoc
+  body (or, inside `"$(...)"` as in `git commit -m "$(cat <<'EOF' ...)"`,
+  an apostrophe) or an unbalanced `$(`, backtick, or `$'...'` anywhere in
+  it denies a call that was actually safe.
 
 Issue #2011 found a second, unclosed vector for the same failure mode:
 the async `Agent`/`Task` subagent-launch tool backgrounds *by default*
