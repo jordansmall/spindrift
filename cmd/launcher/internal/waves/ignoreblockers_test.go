@@ -145,3 +145,46 @@ func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueWritesNoBlockedMarker(t *testin
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
 	}
 }
+
+// A research claim has no release step, so deferring a claimed issue on a
+// ## Touches overlap would strand it in-progress. IgnoreBlockers skips the
+// overlap gate too.
+func TestDrainMaxJobs_IgnoreBlockers_ClaimedIssueSkipsOverlapGate(t *testing.T) {
+	c := baseConfig()
+	label := "agent-research"
+	c.MaxParallel = 1
+	c.IgnoreBlockers = true
+	c.OverlapGate = "defer"
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{
+		Number: "10",
+		Body:   "## Touches\n- lib/foo.nix",
+		Labels: []string{testInProgressLabel},
+	})
+	fc.SetIssue(forge.Issue{
+		Number: "20",
+		Body:   "## Touches\n- lib/foo.nix",
+		State:  "OPEN",
+		Labels: []string{testInProgressLabel},
+	})
+
+	fr := runner.NewFake()
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	if err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+		{Number: "10", Title: "claimed issue"},
+	}, nil, nil, nil, OriginClaimed, claimer, nil); err != nil {
+		t.Fatalf("drainMaxJobs: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, ".spindrift", "logs", blockedMarker)); !os.IsNotExist(err) {
+		t.Errorf("blocked marker must not be written when IgnoreBlockers is set; stat err = %v", err)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1 (overlap must not defer an advise-only issue)", len(fr.RunCalls))
+	}
+}

@@ -29,10 +29,12 @@ type inProgressTouches struct {
 // waveOverlapCheck binds the overlap check to one snapshot of InProgress issues
 // and their open PRs, fetched once per wave/drain call rather than once per
 // candidate. Any gate setting other than "defer", or a failed fetch, yields a
-// check that always reports no overlap, leaving dispatch unaffected.
+// check that always reports no overlap, leaving dispatch unaffected. So does
+// IgnoreBlockers: an advise-only run lands no code, and a research claim
+// has no release step, so a deferral would strand the issue.
 func waveOverlapCheck(cfg Config, it forge.IssueTracker, cf forge.CodeForge) func(num string) (string, bool) {
 	noOverlap := func(string) (string, bool) { return "", false }
-	if cfg.OverlapGate != "defer" {
+	if cfg.OverlapGate != "defer" || cfg.IgnoreBlockers {
 		return noOverlap
 	}
 	inProgress, err := it.ListIssues(forge.InProgress)
