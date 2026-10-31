@@ -963,8 +963,8 @@ let
       var = "COMMIT_PUSH_READ_ONLY_STEP";
     }
     # The IF BLOCKED push-failure triage block (issue #2462): it presupposes a
-    # push was attempted and tells the agent to comment on the issue, neither
-    # of which applies to a read-only Box. A denied push there is the expected
+    # push was attempted, which never applies to a read-only Box, and defers
+    # its report to step 4 (issue #6238). A denied push there is the expected
     # result of holding no write token, not evidence of a broken or
     # under-scoped one, so it must never be triaged or escalated as such.
     {
