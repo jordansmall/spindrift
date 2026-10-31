@@ -429,6 +429,31 @@ let
       }
     }
   '';
+
+  # Shell function for prompt-templates-never-name-issues-mount and its
+  # negative test: `issues_scan DIR` fails if a template in the prompts dir DIR
+  # or a fragment at any depth under DIR/fragments (issue #6159) names /issues
+  # outside an api/v1 URL. `sed` strips the one legitimate api/v1 URL from the
+  # line rather than dropping the line whole; nothing here is `grep -q`, whose
+  # SIGPIPE under pipefail makes `!` a false pass.
+  issuesMountScan = ''
+    issues_scan() {
+      n=0
+      while IFS= read -r f; do
+        n=$((n + 1))
+        hits=$(grep -n '/issues' "$f" | sed 's|api/v1[^ ]*issues||g' | grep '/issues' || true)
+        [ -z "$hits" ] || {
+          echo "$f: expected no /issues (removed host mount) outside an api/v1 URL, found:" >&2
+          echo "$hits" >&2
+          return 1
+        }
+      done < <(find "$1" -maxdepth 1 -name '*.md'; find "$1"/fragments -name '*.md')
+      [ "$n" -gt 0 ] || {
+        echo "expected at least one prompt template or fragment under $1, found none" >&2
+        return 1
+      }
+    }
+  '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and, by
@@ -1521,28 +1546,28 @@ in
 
   # The /issues host mount is removed (issue #3471): local issue content
   # arrives as host-injected ISSUE_TEXT, so a template naming /issues is that
-  # directory-read guidance creeping back. `sed` strips the one legitimate
-  # api/v1 URL from the line rather than dropping the line whole; nothing
-  # here is `grep -q`, whose SIGPIPE under pipefail makes `!` a false pass.
+  # directory-read guidance creeping back.
   prompt-templates-never-name-issues-mount =
     pkgs.runCommand "prompt-templates-never-name-issues-mount" { }
       ''
-        shopt -s nullglob
-        dir=${../../templates/default/prompts}
-        n=0
-        for f in "$dir"/*.md "$dir"/fragments/*.md; do
-          n=$((n + 1))
-          hits=$(grep -n '/issues' "$f" | sed 's|api/v1[^ ]*issues||g' | grep '/issues' || true)
-          [ -z "$hits" ] || {
-            echo "$f: expected no /issues (removed host mount) outside an api/v1 URL, found:" >&2
-            echo "$hits" >&2
-            exit 1
-          }
-        done
-        [ "$n" -gt 0 ] || {
-          echo "expected at least one prompt template or fragment under templates/default/prompts, found none" >&2
+        ${issuesMountScan}
+        issues_scan ${../../templates/default/prompts}
+        touch $out
+      '';
+
+  # Negative test: the scan must fail on a planted /issues read in a
+  # per-backend fragment (issue #6159).
+  prompt-templates-never-name-issues-mount-catches-copy =
+    pkgs.runCommand "prompt-templates-never-name-issues-mount-catches-copy" { }
+      ''
+        ${issuesMountScan}
+        cp -r ${../../templates/default/prompts} prompts
+        chmod -R u+w prompts
+        echo 'see /issues/42.md' >> prompts/fragments/local/issue-read.md
+        if (issues_scan prompts) 2>/dev/null; then
+          echo "scan passed despite /issues planted in fragments/local/issue-read.md" >&2
           exit 1
-        }
+        fi
         touch $out
       '';
 
