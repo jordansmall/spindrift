@@ -1919,7 +1919,8 @@ in
   # .bats fixtures use for apostrophes. An empty description is skipped: it
   # would match every file. The scan runs at build time, with grep -F: reading
   # and regex-matching every fixture file at eval time segfaulted CI's
-  # evaluator.
+  # evaluator. The scan covers exactly the fileset below; a fixture placed
+  # elsewhere must be added to it.
   roster-fixtures-carry-no-live-descriptions =
     let
       inherit (pkgs.lib)
@@ -1939,6 +1940,8 @@ in
         root = ../..;
         fileset = pkgs.lib.fileset.unions [
           ../../nix/checks
+          ../../nix/fixtures.nix
+          ../../nix/fixtures
           ../../tests
         ];
       };
@@ -1951,7 +1954,7 @@ in
       ''
         cd ${src}
         status=0
-        grep -rnF -f "$needlesPath" nix/checks tests >"$TMPDIR/hits" || status=$?
+        grep -rnF -f "$needlesPath" . >"$TMPDIR/hits" || status=$?
         if [ "$status" -eq 0 ]; then
           echo "fixtures must not copy live defaultRoster descriptions; use a synthetic description such as \"fixture <role> description\". Offenders:" >&2
           cat "$TMPDIR/hits" >&2
