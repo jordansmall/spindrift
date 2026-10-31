@@ -34,10 +34,12 @@
 # markerChannels ("comment" | "pr-intent" | "issue-intent") a _LOG/_SOCKET
 # fragment pair's row belongs to, so buildTimeSignalFragmentViolations can
 # derive the required marker/verb from that registry instead of a
-# hand-listed per-file table. Only the _LOG/_SOCKET-paired rows carry it;
-# every other row is silently skipped by that check, and
-# buildTimeSignalFragmentPairViolations (issue #3754) asserts each keeps its
-# partner.
+# hand-listed per-file table. Only _LOG/_SOCKET-paired rows that send or
+# print the signal carry it; every other row is silently skipped by that
+# check, and buildTimeSignalFragmentPairViolations (issue #3754) asserts each
+# keeps its partner. The read-only OUTCOME pairs (issue #6232) only refer
+# back to the PR intent, so they leave it off and nothing asserts their
+# pairing.
 let
   rows = [
     {
@@ -916,15 +918,23 @@ let
     # (issue #1919): a read-only Box never opens the PR, so it never learns a
     # URL. Its landing= carries the branch name, and "status=ready" means
     # "branch relayed, PR-intent ready to open" rather than "PR already open".
+    # The read-only rows fork on the carrier (issue #6232): the socket Box
+    # prints no PR-intent line, so its status=ready rests on an accepted
+    # `driver-exec signal pr-intent` call instead.
     {
       gate = "BOX_ACCESS_READ_WRITE";
       fragment = "outcome-landing-git.md";
       var = "OUTCOME_LANDING_READ_WRITE_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "outcome-landing-outbox.md";
       var = "OUTCOME_LANDING_READ_ONLY_STEP";
+    }
+    {
+      gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+      fragment = "outcome-landing-outbox-socket.md";
+      var = "OUTCOME_LANDING_READ_ONLY_SOCKET_STEP";
     }
     {
       gate = "BOX_ACCESS_READ_WRITE";
@@ -932,9 +942,14 @@ let
       var = "OUTCOME_READY_MEANS_READ_WRITE_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "BOX_ACCESS_READ_ONLY_LOG";
       fragment = "outcome-ready-means-outbox.md";
       var = "OUTCOME_READY_MEANS_READ_ONLY_STEP";
+    }
+    {
+      gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+      fragment = "outcome-ready-means-outbox-socket.md";
+      var = "OUTCOME_READY_MEANS_READ_ONLY_SOCKET_STEP";
     }
     # The COMMIT section's push step (issue #2462): a read-only Box has no
     # push-capable token, so the rebase+push+retry block must not render for

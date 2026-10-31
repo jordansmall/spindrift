@@ -400,9 +400,20 @@ func TestPromptBytes_OpenPullRequestOpensAsDraft(t *testing.T) {
 // OUTCOME_LANDING_READ_*_STEP fragments checked here.
 func TestPromptBytes_OutcomeLeavesPRDraftAndNeverFlipsReady(t *testing.T) {
 	section := pbOutcomeSection(t)
-	pbMatch(t, section, `OUTCOME_LANDING_READ_WRITE_STEP`, `OUTCOME_LANDING_READ_ONLY_STEP`)
+	pbMatch(t, section,
+		`OUTCOME_LANDING_READ_WRITE_STEP`,
+		`OUTCOME_LANDING_READ_ONLY_STEP`,
+		`OUTCOME_LANDING_READ_ONLY_SOCKET_STEP`)
 	pbContains(t, pbPrompt(t, filepath.Join("fragments", "outcome-landing-git.md")), "status=ready")
 	pbContains(t, pbPrompt(t, filepath.Join("fragments", "outcome-landing-outbox.md")), "status=ready")
+	// The socket carrier prints no PR-intent marker line, so its fragments
+	// must not point back at one.
+	landingSocket := pbPrompt(t, filepath.Join("fragments", "outcome-landing-outbox-socket.md"))
+	readySocket := pbPrompt(t, filepath.Join("fragments", "outcome-ready-means-outbox-socket.md"))
+	pbContains(t, landingSocket, "status=ready")
+	pbContains(t, readySocket, "signal pr-intent accepted", "status=blocked")
+	pbNoContains(t, landingSocket, "PR-intent line", "SPINDRIFT_PR_INTENT")
+	pbNoContains(t, readySocket, "PR-intent line", "SPINDRIFT_PR_INTENT")
 	// Anchored to a bare invocation line, not the prose forbidding it below.
 	pbNoMatch(t, section, `^gh pr ready`)
 }
