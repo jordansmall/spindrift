@@ -2794,8 +2794,8 @@ rec {
         coding agent inside it, and drives each resulting pull request through a
         merge gate. Issues come from GitHub, Jira, Forgejo, or a purely local
         tracker; pull requests go to GitHub, Forgejo, a plain git remote, or a
-        local bundle. The agent CLI is a swappable Driver \(em Claude Code or
-        opencode. Every runtime knob is set by flag, by the Consumer
+        local bundle. The agent CLI is a swappable Driver \(em Claude Code,
+        opencode, or pi. Every runtime knob is set by flag, by the Consumer
         flake's settings, or by baked default, in that precedence order; a knob
         env var still wins over the flake setting this release, deprecated and
         warned on (ADR 0020). Secrets are read from the environment or from a
