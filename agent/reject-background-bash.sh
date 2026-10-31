@@ -83,10 +83,11 @@ mask_command() {
 }
 
 # True if the command backgrounds a process at the shell level. The strip below
-# removes &&, >&, <&, &> and |&, which are foreground fd juggling. Two accepted
+# removes &&, >&, <&, &> and |&, which are foreground fd juggling. Three accepted
 # false positives: a bitwise & in $((...)) and an & inside a heredoc body both
-# read as the background operator, since mask_command models neither. Both deny
-# a safe call, which is the fail-closed direction.
+# read as the background operator, since mask_command models neither, and a
+# redirect to a file named after a keyword (cmd >&nohup) reads as that keyword.
+# All deny a safe call, which is the fail-closed direction.
 command_backgrounds() {
   local cmd="$1"
   local masked
@@ -102,19 +103,24 @@ command_backgrounds() {
     return 0
   fi
 
+  # A keyword counts only at a command boundary. & and ` are in the class
+  # because the keyword checks run on the unstripped string, where a glued &&
+  # or a backtick substitution sits right before the keyword (#6215).
+  local kw_lead='(^|[[:space:];|(&`])'
+
   # nohup survives the calling shell exiting, the hazard this hook exists to
   # catch, so it is rejected even without an accompanying &.
-  local nohup_re='(^|[[:space:];|(])nohup([[:space:]]|$)'
+  local nohup_re="${kw_lead}nohup([[:space:]]|$)"
   [[ "$masked" =~ $nohup_re ]] && return 0
 
   # setsid detaches into a new session, surviving the calling shell the same
   # way nohup does.
-  local setsid_re='(^|[[:space:];|(])setsid([[:space:]]|$)'
+  local setsid_re="${kw_lead}setsid([[:space:]]|$)"
   [[ "$masked" =~ $setsid_re ]] && return 0
 
   # coproc spawns a bash coprocess as a background job. The regex covers both
   # the named and unnamed forms.
-  local coproc_re='(^|[[:space:];|(])coproc([[:space:]]|$)'
+  local coproc_re="${kw_lead}coproc([[:space:]]|$)"
   [[ "$masked" =~ $coproc_re ]] && return 0
 
   # #1635 closed setsid and coproc. Other ways to detach from the calling
