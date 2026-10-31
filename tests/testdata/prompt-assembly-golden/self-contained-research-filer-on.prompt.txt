@@ -29,7 +29,7 @@ intact — never reworded, reflowed, or line-wrapped: the leading token,
 the outcome line's key=value pairs, and the SPINDRIFT_COMMENT line's
 nonce and base64 payload as one unbroken token.
 
-Research GitHub issue #7: Do the thing
+Research issue #7: Do the thing
 
 This is a self-contained research dispatch (ADR 0022, issue #2202): NO repo —
 all content to analyze lives in the issue itself. No branch cut, no commits.
