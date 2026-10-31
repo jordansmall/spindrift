@@ -1,20 +1,14 @@
 {
   "lastSwept": "19e5d0258aa0f3a56c25d68ae5a7656fdc6a1bd0",
-  "cursor": "tests/testdata/prompt-assembly-golden/orchestrator-review-effort-set.prompt.txt",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-31T00:07:17.46027575-04:00"
-  },
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 50,
+    "output_tokens": 8948,
+    "cache_read_input_tokens": 1398432,
+    "cache_creation_input_tokens": 86523,
+    "total_cost_usd": 1.1510303999999998,
+    "duration_ms": 116899,
+    "duration_api_ms": 115091,
+    "num_turns": 27
   }
 }
