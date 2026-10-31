@@ -6274,12 +6274,13 @@ of a Dockerfile. The trade-offs:
   issue body only when the native lookup yields nothing or errors — native
   wins whenever it returns any relationships, body text is never merged in.
   The launcher dispatches in dependency waves from the resolved edges, holding
-  a dependent until its blockers reach `agent-complete`; a cycle aborts the
-  run. Independent issues
-  still run concurrently up to `MAX_PARALLEL`. A declared `## Touches`
-  section gets the same wave-and-retry treatment when it overlaps an
-  in-progress issue's (`OVERLAP_GATE`, default `defer`) — see [Declared
-  touch-set overlap](#declared-touch-set-overlap).
+  a dependent until each blocker's agent PR merges or, with no open agent PR,
+  the blocker issue closes (see
+  [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go)); a cycle
+  aborts the run. Independent issues still run concurrently up to
+  `MAX_PARALLEL`. A declared `## Touches` section gets the same wave-and-retry
+  treatment when it overlaps an in-progress issue's (`OVERLAP_GATE`, default
+  `defer`) — see [Declared touch-set overlap](#declared-touch-set-overlap).
 - **Reproducible toolchain by construction** via the pinned flake, rather than a
   floating language-runtime base image.
 
