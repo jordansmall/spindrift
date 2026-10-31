@@ -4299,7 +4299,10 @@ the filer fragments (`forgejo/filer-direct-file.md`,
 `forgejo/filer-direct-label.md`) fall back to a `curl` call against the
 Forgejo REST API directly rather than an `fj` porcelain command.
 `forgejo/filer-dedup.md` likewise searches over REST
-(`GET .../issues`), since `fj` has no confirmed issue-search verb.
+(`GET .../issues`), since `fj` has no confirmed issue-search verb; each closed
+search's `jq` keeps only results carrying that search's label, because Forgejo
+ignores a `labels=` name the repo does not define and returns every closed
+issue matching the `q=` terms.
 
 #### Forgejo integration harness
 
