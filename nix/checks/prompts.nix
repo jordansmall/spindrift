@@ -417,10 +417,11 @@ let
     '';
 
   # Shell function for merge-mode-clause-stated-once and its negative test:
-  # `scan DIR` fails unless only the two land-git-stop fragments name MERGE_MODE.
+  # `merge_mode_scan DIR` fails unless only the two land-git-stop fragments
+  # under DIR, at any depth, name MERGE_MODE (issue #6159).
   mergeModeScan = ''
-    scan() {
-      got=$(cd "$1" && grep -l 'MERGE_MODE' -- *.md | LC_ALL=C sort)
+    merge_mode_scan() {
+      got=$(cd "$1" && grep -rl --include='*.md' 'MERGE_MODE' . | sed 's|^\./||' | LC_ALL=C sort)
       want=$(printf '%s\n' land-git-stop-read-only.md land-git-stop-read-write.md)
       [ "$got" = "$want" ] || {
         echo "fragments naming MERGE_MODE: '$got', want '$want'; point at OPEN A PULL REQUEST instead of restating it (issue #5312)" >&2
@@ -1851,11 +1852,11 @@ in
   # A PULL REQUEST paragraph (issue #5312); the forgejo create step and the
   # outcome-ready fragments point at it. Only the two land-git-stop fragments
   # name MERGE_MODE, for the different CODE_FORGE=git push-mode clause. The
-  # scan covers only fragments/, and a copy worded without the token still
-  # slips past it.
+  # scan covers fragments/ and its per-backend subdirectories (issue #6159),
+  # but a copy worded without the token still slips past it.
   merge-mode-clause-stated-once = pkgs.runCommand "merge-mode-clause-stated-once" { } ''
     ${mergeModeScan}
-    scan ${../../templates/default/prompts/fragments}
+    merge_mode_scan ${../../templates/default/prompts/fragments}
     touch $out
   '';
 
@@ -1864,13 +1865,16 @@ in
     pkgs.runCommand "merge-mode-clause-stated-once-catches-copy" { }
       ''
         ${mergeModeScan}
-        cp -r ${../../templates/default/prompts/fragments} frags
-        chmod -R u+w frags
-        echo 'Honour MERGE_MODE here.' >> frags/outcome-ready-means-git.md
-        if (scan frags) 2>/dev/null; then
-          echo "scan passed despite a MERGE_MODE copy in outcome-ready-means-git.md" >&2
-          exit 1
-        fi
+        for plant in outcome-ready-means-git.md forgejo/open-pr-create.md; do
+          rm -rf frags
+          cp -r ${../../templates/default/prompts/fragments} frags
+          chmod -R u+w frags
+          echo 'Honour MERGE_MODE here.' >> "frags/$plant"
+          if (merge_mode_scan frags) 2>/dev/null; then
+            echo "scan passed despite a MERGE_MODE copy in $plant" >&2
+            exit 1
+          fi
+        done
         touch $out
       '';
 
