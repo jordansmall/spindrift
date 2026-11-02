@@ -1,6 +1,7 @@
 package console
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -705,5 +706,152 @@ func TestQueue_Discover_SameNumberTwoKinds_DissolveTargetsOwnKindRow(t *testing.
 	}
 	if snap[1].State != PickQueued || snap[1].Reason != "" {
 		t.Errorf("work row = %+v, want it untouched at PickQueued", snap[1])
+	}
+}
+
+// Close drops queued and held picks but keeps claimed and settled rows, and
+// latches: Discover afterwards claims nothing, never touching the tracker.
+func TestQueue_Close_DropsUnclaimedAndLatchesDiscover(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "queued", State: PickQueued})
+	q.Add(Pick{Number: "43", Title: "held", State: PickHeld})
+	q.Add(Pick{Number: "44", Title: "running", State: PickRunning})
+	q.Add(Pick{Number: "45", Title: "done", State: PickDissolved})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	q.Close()
+	q.Close() // idempotent
+
+	snap := q.Snapshot()
+	if len(snap) != 2 || snap[0].Number != "44" || snap[1].Number != "45" {
+		t.Fatalf("snapshot = %+v, want only #44 (running) and #45 (settled)", snap)
+	}
+	batch, err := q.Discover(f, f, "", KindWork)
+	if err != nil || len(batch.Issues) != 0 {
+		t.Fatalf("Discover after Close = %+v, %v, want empty batch", batch, err)
+	}
+	iss, _ := f.Issue("42")
+	if !slices.Contains(iss.Labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want ready-for-agent untouched", iss.Labels)
+	}
+	if len(f.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionState calls = %+v, want none", f.TransitionStateCalls)
+	}
+}
+
+func TestQueue_Add_AfterClose_IsNoOp(t *testing.T) {
+	q := NewQueue()
+	q.Close()
+	q.Add(Pick{Number: "42", Title: "late", State: PickQueued})
+
+	if len(q.Snapshot()) != 0 {
+		t.Errorf("snapshot = %+v, want empty", q.Snapshot())
+	}
+	if !q.Empty() {
+		t.Error("Empty = false, want true")
+	}
+}
+
+// closeInClaim wraps a *forge.Fake so the queue closes right after the
+// Dispatchable->InProgress claim lands, inside Discover's claiming window.
+type closeInClaim struct {
+	*forge.Fake
+	q *Queue
+}
+
+func (c closeInClaim) TransitionState(num string, from, to forge.DispatchState) error {
+	err := c.Fake.TransitionState(num, from, to)
+	if from == forge.Dispatchable && to == forge.InProgress {
+		c.q.Close()
+	}
+	return err
+}
+
+// A Close that lands between the tracker claim and the PickRunning promotion
+// must win: the claim is reverted, the pick never runs, and nothing launches.
+func TestQueue_Discover_CloseDuringClaim_RevertsClaim(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "racing quit", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	batch, err := q.Discover(closeInClaim{Fake: f, q: q}, f, "", KindWork)
+
+	if err != nil || len(batch.Issues) != 0 {
+		t.Fatalf("Discover = %+v, %v, want empty batch", batch, err)
+	}
+	iss, _ := f.Issue("42")
+	if !slices.Contains(iss.Labels, "ready-for-agent") {
+		t.Errorf("labels = %v, want back at ready-for-agent", iss.Labels)
+	}
+	for _, p := range q.Snapshot() {
+		if p.State == PickRunning {
+			t.Errorf("pick %+v is running after Close", p)
+		}
+	}
+	if slices.Contains(iss.Labels, "agent-in-progress") {
+		t.Errorf("labels = %v, want agent-in-progress gone", iss.Labels)
+	}
+	if !slices.Contains(f.TransitionStateCalls, forge.TransitionStateCall{Num: "42", From: forge.InProgress, To: forge.Dispatchable}) {
+		t.Errorf("TransitionStateCalls = %+v, want the InProgress to Dispatchable revert", f.TransitionStateCalls)
+	}
+	snap := q.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickDissolved || !strings.HasPrefix(snap[0].Reason, "dropped: session quit") {
+		t.Errorf("snapshot = %+v, want #42 dissolved with a \"dropped: session quit\" reason", snap)
+	}
+}
+
+// Close drops the newest queued row, so a Discover racing it can reach an
+// older terminated row of the same number via newestIndex. Neither revival
+// path may turn that row claimable again.
+func TestQueue_AfterClose_DoesNotReviveStaleRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", State: PickTerminated})
+	q.Add(Pick{Number: "42", State: PickQueued})
+	q.Close()
+
+	q.setHeld("42", KindWork, []string{"41"}, nil, nil)
+	q.setState("42", KindWork, PickHeld, "x")
+	q.setState("42", KindWork, PickQueued, "")
+
+	snap := q.Snapshot()
+	if len(snap) != 1 || snap[0].State != PickTerminated {
+		t.Errorf("snapshot = %+v, want only the #42 row, still terminated", snap)
+	}
+	if !q.Empty() {
+		t.Error("Empty() = false, want true: nothing claimable after Close")
+	}
+	q.setState("42", KindWork, PickSettled, "")
+	if got := q.Snapshot()[0].State; got != PickSettled {
+		t.Errorf("state after settle = %v, want settled: other writes still work", got)
+	}
+}
+
+// CloseIfIdle closes only when nothing is claiming or running; a refused call
+// leaves the queue open and its unclaimed rows intact.
+func TestQueue_CloseIfIdle(t *testing.T) {
+	for _, busy := range []PickState{PickClaiming, PickRunning} {
+		q := NewQueue()
+		q.Add(Pick{Number: "42", State: busy})
+		q.Add(Pick{Number: "43", State: PickQueued})
+		if q.CloseIfIdle() {
+			t.Errorf("CloseIfIdle with a %v pick = true, want false", busy)
+		}
+		q.Add(Pick{Number: "44", State: PickQueued})
+		if len(q.Snapshot()) != 3 {
+			t.Errorf("snapshot = %+v, want all three rows: queue open, nothing dropped", q.Snapshot())
+		}
+	}
+
+	q := NewQueue()
+	q.Add(Pick{Number: "43", State: PickQueued})
+	q.Add(Pick{Number: "45", State: PickDissolved})
+	if !q.CloseIfIdle() {
+		t.Fatal("CloseIfIdle on an idle queue = false, want true")
+	}
+	q.Add(Pick{Number: "46", State: PickQueued})
+	if snap := q.Snapshot(); len(snap) != 1 || snap[0].Number != "45" {
+		t.Errorf("snapshot = %+v, want only the settled #45", snap)
 	}
 }

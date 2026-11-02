@@ -16,10 +16,13 @@ import (
 // Queue is the session's thread-safe operator queue, backing the
 // operator-queue Discoverer the continuous engine drains. Unlike Model.Picks,
 // which is a pure snapshot, Queue is mutated directly by Add, Remove, and
-// Discover, because those calls come from outside the pure core.
+// Discover, because those calls come from outside the pure core. Close latches
+// it shut for good: a console quit drops what has not claimed and nothing new
+// may claim afterwards.
 type Queue struct {
-	mu    sync.Mutex
-	picks []Pick
+	mu     sync.Mutex
+	picks  []Pick
+	closed bool
 }
 
 // NewQueue returns an empty Queue.
@@ -29,10 +32,14 @@ func NewQueue() *Queue {
 
 // Add appends a queued pick, stamping QueuedAt to now. It is the single choke
 // point every pick lands through, so Age always has a real source moment to
-// format from (issue #1500).
+// format from (issue #1500). It is a no-op once the queue is closed: a late
+// pick would make Empty false while Discover claims nothing, spinning drain.
 func (q *Queue) Add(p Pick) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
 	p.QueuedAt = time.Now()
 	q.picks = append(q.picks, p)
 }
@@ -51,6 +58,42 @@ func (q *Queue) Remove(num string) bool {
 		}
 	}
 	return false
+}
+
+// Close drops every queued or held pick and latches the queue shut, so no
+// Discover claims again, even a held pick whose blocker clears later. Picks
+// already claiming or running are left alone. It makes no tracker call: an
+// unclaimed pick never left its dispatchable state. Idempotent.
+func (q *Queue) Close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.closeLocked()
+}
+
+// CloseIfIdle is Close, but only when no pick is claiming or running, reporting
+// whether it closed. The check and the close share one q.mu hold, so a claim
+// cannot be promoted in between and leave a Box the quit never asked about.
+func (q *Queue) CloseIfIdle() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, p := range q.picks {
+		if p.State.live() {
+			return false
+		}
+	}
+	q.closeLocked()
+	return true
+}
+
+func (q *Queue) closeLocked() {
+	q.closed = true
+	kept := q.picks[:0]
+	for _, p := range q.picks {
+		if !p.State.unclaimed() {
+			kept = append(kept, p)
+		}
+	}
+	q.picks = kept
 }
 
 // hasQueuedForKinds reports whether any pick at PickQueued has an
@@ -143,7 +186,16 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			q.dissolve(pick.Number, kind, reason)
 			continue
 		}
-		q.setState(pick.Number, kind, PickRunning, "")
+		if !q.promoteUnlessClosed(pick.Number, kind) {
+			// Close landed inside the claiming window: nothing new may launch,
+			// so hand the issue back rather than strand it at InProgress.
+			reason := "dropped: session quit"
+			if err := tracker.TransitionState(pick.Number, forge.InProgress, forge.Dispatchable); err != nil {
+				reason += " (claim revert failed: " + err.Error() + ")"
+			}
+			q.dissolve(pick.Number, kind, reason)
+			return waves.Batch{}, nil
+		}
 		// Edges/Sources/Failed left nil, not zero-value maps, matching the
 		// fallback below and runContinuousDispatch's sibling Discoverer
 		// (#903). The engine's own blocker gate is then a no-op, so nothing
@@ -180,6 +232,9 @@ func (q *Queue) claimable() []Pick {
 func (q *Queue) setHeld(num string, kind Kind, unready, failed []string, sources map[string]forge.DepSource) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
 	if i := q.newestIndex(num, kind); i >= 0 {
 		q.picks[i].State = PickHeld
 		q.picks[i].BlockedBy = refList(unready, sources)
@@ -216,6 +271,20 @@ func (q *Queue) tryMarkClaiming(num string, kind Kind) bool {
 	return true
 }
 
+// promoteUnlessClosed marks the claiming pick numbered num of kind PickRunning
+// unless the queue is closed, reporting whether it did. The check and the
+// promotion share one q.mu hold, so a pick is either running before Close (and
+// visible to what reads live picks after it) or reverted by the caller.
+func (q *Queue) promoteUnlessClosed(num string, kind Kind) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return false
+	}
+	q.setStateLocked(num, kind, PickRunning, "")
+	return true
+}
+
 // setState updates the newest pick numbered num of kind in place. A terminated
 // pick's row (ADR 0024, issue #649) is never removed, so a re-pick appends a
 // second row for the same number and only the newest of a kind is that kind's
@@ -225,6 +294,15 @@ func (q *Queue) tryMarkClaiming(num string, kind Kind) bool {
 func (q *Queue) setState(num string, kind Kind, state PickState, reason string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	q.setStateLocked(num, kind, state, reason)
+}
+
+func (q *Queue) setStateLocked(num string, kind Kind, state PickState, reason string) {
+	// Close dropped the newest unclaimed row; newestIndex would now land on an
+	// older terminal row of the same number and make it claimable again.
+	if q.closed && state.unclaimed() {
+		return
+	}
 	if i := q.newestIndex(num, kind); i >= 0 {
 		q.picks[i].State = state
 		q.picks[i].Reason = reason

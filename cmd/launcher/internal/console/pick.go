@@ -68,8 +68,9 @@ const (
 	PickHeld
 	// PickSettled is a pick whose Dispatch reached settle.
 	PickSettled
-	// PickDissolved is a pick whose claim failed (raced, closed, relabeled)
-	// and so never launched. Reason names why.
+	// PickDissolved is a pick that never launched: its claim failed (raced,
+	// closed, relabeled), or succeeded but was handed back because the session
+	// quit mid-claim ("dropped: session quit"). Reason names why.
 	PickDissolved
 	// PickTerminated ran and the operator reclaimed it mid-flight (ADR 0024,
 	// issue #649).
@@ -89,6 +90,11 @@ const blockerFailedPrefix = "blocker "
 // Queue.Remove and removePick drop.
 func (s PickState) unclaimed() bool {
 	return s == PickQueued || s == PickHeld
+}
+
+// live reports whether s is a claim in flight or a running Box.
+func (s PickState) live() bool {
+	return s == PickClaiming || s == PickRunning
 }
 
 // String renders s as the word View shows on a queue row.
