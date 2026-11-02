@@ -114,6 +114,10 @@ func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, la
 	// later ReleaseTerminal would re-emit escapes.
 	unset()
 	if launch != nil {
+		// Covers routes that bypass Update's Quitting close (bubbletea's own
+		// signal handling, a p.Run error): Wait would otherwise let the drain
+		// goroutine claim queued picks once a slot frees.
+		launch.CloseQueue()
 		launch.Wait()
 	}
 	return err
@@ -348,6 +352,10 @@ func (t teaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// its single event-loop goroutine, never concurrently.
 		default:
 			close(t.done)
+			if t.launch != nil {
+				// Idempotent: terminate-all and the idle quit already closed.
+				t.launch.CloseQueue()
+			}
 			if t.watcher != nil {
 				_ = t.watcher.Close()
 			}
@@ -711,11 +719,13 @@ func (t teaModel) unpickDetailModalIssue() teaModel {
 	return t
 }
 
-// quitOrConfirmMsg picks QuitRequestedMsg over QuitMsg whenever live Dispatches
-// exist, so any quit path arms the drain/terminate-all/stay confirm instead of
-// exiting outright (issue #1216, ADR 0023).
-func (t teaModel) quitOrConfirmMsg() Msg {
-	if t.launch != nil && len(t.launch.LiveIssues()) > 0 {
+// closeOrConfirmQuit picks QuitRequestedMsg over QuitMsg whenever a Dispatch is
+// live or mid-claim, so any quit path arms the drain/terminate-all/stay confirm
+// instead of exiting outright (issue #1216, ADR 0023). It closes the queue
+// itself when it returns QuitMsg: a separate idle check could lose to a claim
+// promoting before the Quitting branch closes, launching a Box unseen.
+func (t teaModel) closeOrConfirmQuit() Msg {
+	if t.launch != nil && !t.launch.CloseQueueIfIdle() {
 		return QuitRequestedMsg{}
 	}
 	return QuitMsg{}

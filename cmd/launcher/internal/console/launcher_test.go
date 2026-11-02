@@ -2,12 +2,16 @@ package console
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
@@ -546,5 +550,206 @@ func TestLauncher_SignalRefresh_SnapshotNeverStale(t *testing.T) {
 				t.Fatalf("iteration %d: stale snapshot, pick %s is %v", i, p.Number, p.State)
 			}
 		}
+	}
+}
+
+// quitDropHarness runs #42 live at cap 1 behind a blocking Box, with #43 left
+// as a pick the test queues or holds, so a confirmed quit has an unclaimed pick
+// to drop (issue #6266).
+type quitDropHarness struct {
+	f       *forge.Fake
+	launch  *Launcher
+	dir     string
+	runs    atomic.Int32
+	release chan struct{}
+}
+
+func newQuitDropHarness(t *testing.T, held bool) *quitDropHarness {
+	t.Helper()
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "running", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "43", Title: "next", Labels: []string{"ready-for-agent"}})
+	if held {
+		f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+		f.NativeDeps = map[string][]string{"43": {"41"}}
+	}
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	h := new(quitDropHarness)
+	h.f, h.dir, h.release = f, dir, make(chan struct{})
+	fr := runner.NewFake()
+	fr.RunFunc = func(runner.Box) error {
+		h.runs.Add(1)
+		<-h.release
+		return nil
+	}
+	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+
+	h.launch = new(Launcher)
+	h.launch.CodeForge, h.launch.Factory, h.launch.Settle = f, factory, settle.NewFake()
+	h.launch.MaxParallel, h.launch.queue = 1, NewQueue()
+	if held {
+		// Queued ahead of #42, so the first Discover holds it before claiming #42.
+		h.launch.queue.Add(Pick{Number: "43", Title: "next", State: PickQueued})
+	}
+	h.launch.queue.Add(Pick{Number: "42", Title: "running", State: PickQueued})
+	h.launch.tryLaunch(f, dir)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(h.launch.LiveIssues()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("#42 never went live")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !held {
+		h.launch.queue.Add(Pick{Number: "43", Title: "next", State: PickQueued})
+	} else if p, _ := h.launch.queue.liveRow("43"); p.State != PickHeld {
+		t.Fatalf("#43 state = %v, want PickHeld before the quit", p.State)
+	}
+	return h
+}
+
+// confirmQuit drives the real quit-confirm binding for key.
+func (h *quitDropHarness) confirmQuit(key string) {
+	tm := newTeaModel(h.f, h.dir, h.launch)
+	tm.m.Mode = ModeQuitConfirm
+	tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)})
+}
+
+func (h *quitDropHarness) assertDropped(t *testing.T) {
+	t.Helper()
+	waitDone := make(chan struct{})
+	go func() {
+		h.launch.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait never returned after the running Box finished")
+	}
+	if got := h.runs.Load(); got != 1 {
+		t.Errorf("Box runs = %d, want 1 (#43 must never launch after quit)", got)
+	}
+	for _, c := range h.f.TransitionStateCalls {
+		if c.Num == "43" {
+			t.Errorf("tracker transition for #43 = %+v, want none (never claimed)", c)
+		}
+	}
+	iss, err := h.f.Issue("43")
+	if err != nil {
+		t.Fatalf("Issue(43): %v", err)
+	}
+	if !slices.Contains(iss.Labels, "ready-for-agent") || slices.Contains(iss.Labels, "agent-in-progress") {
+		t.Errorf("#43 labels = %v, want ready-for-agent and no agent-in-progress", iss.Labels)
+	}
+}
+
+func TestLauncher_QuitDrain_DropsQueuedPick(t *testing.T) {
+	h := newQuitDropHarness(t, false)
+	h.confirmQuit("d")
+	close(h.release)
+	h.assertDropped(t)
+}
+
+// Drives the binding's Action directly, not tm.Update, so Update's Quitting
+// close cannot mask a missing close before the terminate loop: terminating #42
+// frees the only slot, and an open queue would refill it with #43.
+func TestLauncher_QuitTerminateAll_DropsQueuedPick(t *testing.T) {
+	h := newQuitDropHarness(t, false)
+	// The terminate must end #42's Box; nothing releases it by hand. A killed
+	// Fake Run returns without waiting on RunFunc, so this only frees its goroutine.
+	t.Cleanup(func() { close(h.release) })
+	tm := newTeaModel(h.f, h.dir, h.launch)
+	tm.m.Mode = ModeQuitConfirm
+	var act func(teaModel, tea.KeyMsg, Mode) (teaModel, tea.Cmd)
+	for _, b := range globalBindings {
+		if slices.Contains(b.Modes, ModeQuitConfirm) && slices.Contains(b.Keys, "t") {
+			act = b.Action
+		}
+	}
+	if act == nil {
+		t.Fatal("no ModeQuitConfirm binding for t")
+	}
+	act(tm, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")}, ModeQuitConfirm)
+	h.assertDropped(t)
+	got := PickState(-1)
+	for _, p := range h.launch.queue.Snapshot() {
+		if p.Number == "42" {
+			got = p.State
+		}
+	}
+	if got != PickTerminated {
+		t.Errorf("#42 state = %v, want PickTerminated", got)
+	}
+}
+
+func TestLauncher_QuitDrain_DropsHeldPickEvenAfterBlockerClears(t *testing.T) {
+	h := newQuitDropHarness(t, true)
+	h.confirmQuit("d")
+	h.f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
+	close(h.release)
+	h.assertDropped(t)
+}
+
+// A quit that skips the dialog (no live Dispatch) still drops what is queued.
+func TestTea_QuitKeyWithoutLiveDispatch_ClosesLauncherQueue(t *testing.T) {
+	launch := new(Launcher)
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "43", State: PickQueued})
+	tm := newTeaModel(nil, "", launch)
+	tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if !launch.queue.Empty() {
+		t.Error("queue still holds a pick after a no-dialog quit, want it dropped")
+	}
+}
+
+// A pick mid-claim is a Box about to go live, so the no-dialog quit key must
+// arm the confirm and leave the queue open rather than quit past it.
+func TestTea_QuitKeyWithClaimingPick_ArmsConfirmAndKeepsQueueOpen(t *testing.T) {
+	launch := new(Launcher)
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "42", State: PickClaiming})
+	tm := newTeaModel(nil, "", launch)
+
+	tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if tm.m.Mode != ModeQuitConfirm || tm.m.Quitting {
+		t.Errorf("Mode = %v, Quitting = %v, want ModeQuitConfirm and not quitting", tm.m.Mode, tm.m.Quitting)
+	}
+	launch.queue.Add(Pick{Number: "43", State: PickQueued})
+	if got := len(launch.queue.Snapshot()); got != 2 {
+		t.Errorf("queue holds %d picks, want 2: the queue must stay open", got)
+	}
+}
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
+
+// A failing input makes p.Run return without any quit key reaching Update, so
+// only Run's own close stands between a still-queued pick and the drain
+// goroutine claiming it during launch.Wait.
+func TestRun_ProgramErrorClosesLauncherQueue(t *testing.T) {
+	launch := new(Launcher)
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "43", State: PickQueued})
+	err := Run(forge.NewFake(), t.TempDir(), errReader{errors.New("input gone")}, io.Discard, launch)
+	if err == nil {
+		t.Fatal("Run returned nil, want the program's input error")
+	}
+	if !launch.queue.Empty() {
+		t.Error("queue still holds a pick after Run returned, want it dropped")
 	}
 }

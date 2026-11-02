@@ -16,7 +16,7 @@ var globalBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			switch mode {
 			case ModeList:
-				t = t.apply(t.quitOrConfirmMsg())
+				t = t.apply(t.closeOrConfirmQuit())
 			case ModeTerminateConfirm:
 				// A quit keystroke declines the terminate (returning to
 				// ModeList so the next keypress reaches ModeQuitConfirm
@@ -53,6 +53,9 @@ var globalBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if msg.String() == "t" {
 				if t.launch != nil {
+					// Closed early on purpose so a slot a termination frees cannot
+					// refill; the Quitting branch's close is then a no-op.
+					t.launch.CloseQueue()
 					for _, num := range t.launch.LiveIssues() {
 						t.launch.TerminateAsync(t.tracker, num)
 					}
