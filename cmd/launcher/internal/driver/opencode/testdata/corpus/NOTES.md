@@ -40,6 +40,12 @@ The real cases' result goldens follow #5354's last-message rule, and
 `TestDecode_CorpusLines` pins the `part.messageID` on every real text event
 that the rule groups by, which the one-part-per-message goldens cannot.
 
+`pass-model-op` is synthetic: `real-fix-pass` with the `pass_model` op
+driver-exec prints after each `pass_start` (issue #6270), so it pins
+per-pass model attribution, a review pass on its own model included. The
+`real-*` cases predate that op, so their usage still attributes to
+`unknown`.
+
 `subagent-task-fixture` is synthetic. It covers a `task` call to the reviewer
 subagent whose result renders tagged `[reviewer]`, the form the legacy-loop
 verdict scan reads.

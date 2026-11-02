@@ -1,0 +1,19 @@
+Review fixes are folded into the branch's single `feat` commit, but the review pass still has to re-check it. The 12 tests in `python -m unittest discover -s tests -t .` pass.
+
+All five blocking findings are fixed:
+- **Non-text codecs:** `hex`, `base64` and the like are now rejected with `tally: unknown encoding: <NAME>` and exit 2.
+- **Newlines:** `\r\n` and lone `\r` are normalised to `\n` after decoding. Default utf-8 counts match origin/main again, so `ab\r\ncd\r\n` is 6 chars and `a\rb\r` is 2 lines.
+- **`--encoding=NAME`:** the form is removed.
+- **Missing value:** `--encoding` with no value now prints `tally: --encoding requires a NAME` and exits 2, with a test.
+- **New tests:** non-text codec, missing value, and default-encoding newlines. The unknown-codec test now uses a nonexistent path, which shows no file is read.
+
+Non-blocking findings:
+- **Codec check order:** the unknown-codec check now runs before the no-file usage check.
+- **BOM comment:** the comment now notes that the utf-16/32 decoders consume their own BOM.
+- **Flag position (not fixed):** `--encoding` is still only recognised as the first argument.
+
+One test change to be aware of: normalising newlines means the latin-1 CRLF test now expects 7 chars instead of 9, and the utf-16 test expects 6 instead of 7. The issue's "counted as is" for non-utf-8 encodings could be read as wanting raw CRLF counted, so the reviewer may want to confirm this reading.
+
+I haven't run the full check gate beyond the unit tests.
+
+SPINDRIFT_OUTCOME issue=encoding landing=agent/issue-encoding status=ready note=review blocks fixed and folded into feat commit; tests green

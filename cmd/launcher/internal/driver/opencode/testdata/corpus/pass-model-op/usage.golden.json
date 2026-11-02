@@ -1,0 +1,45 @@
+{
+  "EarliestEventMs": 1792195463917,
+  "Found": true,
+  "HasEventSpan": true,
+  "LatestEventMs": 1792195565286,
+  "OutputIsMainLoopOnly": false,
+  "SummedByAgent": [
+    {
+      "APICalls": 17,
+      "Agent": "main",
+      "CacheCreationInputTokens": 36041,
+      "CacheReadInputTokens": 368205,
+      "OutputTokens": 10070,
+      "UncachedInputTokens": 40
+    }
+  ],
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 118245,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 11302,
+      "Model": "github-copilot/claude-opus-5.5",
+      "OutputTokens": 4704,
+      "UncachedInputTokens": 16
+    },
+    {
+      "CacheReadInputTokens": 249960,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 24739,
+      "Model": "github-copilot/claude-sonnet-5.5",
+      "OutputTokens": 5366,
+      "UncachedInputTokens": 24
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 36041,
+    "cache_read_input_tokens": 368205,
+    "duration_api_ms": 0,
+    "duration_ms": 101369,
+    "input_tokens": 40,
+    "num_turns": 17,
+    "output_tokens": 10070,
+    "total_cost_usd": 0.3148545
+  }
+}
