@@ -119,7 +119,8 @@ func TestWriter_SanitizesAndBoundsHeartbeat(t *testing.T) {
 }
 
 // OnModel fires once per change of the model named by step_finish events,
-// reports no role, and leaves the raw bytes and heartbeat output untouched.
+// reports no role absent a pass_start, and leaves the raw bytes and heartbeat
+// output untouched.
 func TestWriter_OnModelFiresOnChangeOnly(t *testing.T) {
 	type call struct{ model, role string }
 	step := func(model string) string {
@@ -167,7 +168,7 @@ func TestWriter_NilOnModelDoesNotPanic(t *testing.T) {
 }
 
 // Host-op lines ride every Driver's stream; the heartbeat renders them as
-// claude's does, and a pass_start does not change the role OnModel reports.
+// claude's does, and a pass_start names the role OnModel reports.
 func TestWriter_RendersHostOpLine(t *testing.T) {
 	type call struct{ model, role string }
 	var got []call
@@ -183,7 +184,7 @@ func TestWriter_RendersHostOpLine(t *testing.T) {
 	if want := "#42 ○ pass 2 (review) started\n"; out.String() != want {
 		t.Errorf("out = %q, want %q", out.String(), want)
 	}
-	if want := []call{{"A", ""}}; !slices.Equal(got, want) {
+	if want := []call{{"A", "reviewer"}}; !slices.Equal(got, want) {
 		t.Errorf("OnModel calls = %v, want %v", got, want)
 	}
 }

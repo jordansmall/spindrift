@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 )
@@ -15,9 +16,46 @@ import (
 // WriteTool is the opencode CLI's file-write tool name.
 const WriteTool = "write"
 
-// NewDecoder returns the opencode decoder. Decode is stateless, so every call
-// shares it.
-func NewDecoder() driverkit.Decoder { return Decode }
+// NewDecoder returns an opencode decoder with fresh state for one scan. Real
+// opencode never puts modelID on step_finish, so the decoder remembers the
+// model and effort driver-exec announces in a pass_model op and attributes each
+// untagged step_finish to them until the next pass_start. It also tracks the
+// pass role a pass_start names, through dispatchkind.PassRole, and stamps it on
+// the KindModel and KindUsage events it tags. A scan over a log uses
+// NewDecoder; Decode alone is stateless and never sees an announced model or
+// role.
+func NewDecoder() driverkit.Decoder {
+	var model, effort, role string
+	// lastEmitted is the (model, effort, role) the last KindModel carried, so
+	// only a change re-emits one; pass_start and pass_model clear it so a new
+	// pass re-emits.
+	type modelTag struct{ model, effort, role string }
+	var lastEmitted modelTag
+	return func(line string) []driverkit.Event {
+		events := Decode(line)
+		for i, e := range events {
+			switch {
+			case e.Kind == driverkit.KindHostOp && e.HostOp.Op == hostop.OpPassStart:
+				model, effort, lastEmitted = "", "", modelTag{}
+				// An unmapped role leaves the current one in force.
+				if r := dispatchkind.PassRole(e.HostOp.Role); r != "" {
+					role = r
+				}
+			case e.Kind == driverkit.KindHostOp && e.HostOp.Op == hostop.OpPassModel:
+				model, effort, lastEmitted = e.HostOp.Model, e.HostOp.Effort, modelTag{}
+			case e.Kind == driverkit.KindModel || (e.Kind == driverkit.KindUsage && e.Model != ""):
+				events[i].Role = role
+			case e.Kind == driverkit.KindUsage && e.Model == "" && model != "":
+				events[i].Model, events[i].Effort, events[i].Role = model, effort, role
+				if cur := (modelTag{model, effort, role}); cur != lastEmitted {
+					lastEmitted = cur
+					events = append(events, driverkit.Event{Kind: driverkit.KindModel, Timestamp: e.Timestamp, MessageID: e.MessageID, Model: model, Effort: effort, Role: role})
+				}
+			}
+		}
+		return events
+	}
+}
 
 // isErrorEvent reports whether line is a type:"error" event, for ResolveExit.
 // It is deliberately narrower than Decode: it decodes only type and part.text,
