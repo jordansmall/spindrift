@@ -602,7 +602,7 @@ invocation across every pass. The `/code-comments` skill itself is
 unaffected: it still bakes into every image unconditionally and stays
 invocable, it just no longer backs a prompt-side anchor.
 
-If you override the prompt directory (`perSystem.spindrift.agents.prompt` or
+If you override the prompt directory (`perSystem.spindrift.agents.promptDir` or
 `SPINDRIFT_PROMPT_DIR`) and your copy of any of these four prompts, or a
 fragment it reads, still ships `${CODE_COMMENTS_STEP}` or
 `fragments/code-comments-default.md`: drop the fragment file, and replace
@@ -914,7 +914,7 @@ it has no repo and nothing to run, so the line would be dead text. Do not
 
 ### If you override the prompt directory
 
-A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.promptDir`) override
 that ships its own `research-prompt.md` keeps working — the harness does not
 rewrite it — but silently loses the `/check-hygiene` anchor on baked runs,
 the same silent-loss failure mode the #3226 entry documents for the review
@@ -1048,7 +1048,7 @@ unchanged.
 
 ### If you override the prompt directory
 
-A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.promptDir`) override
 that ships its own `review-prompt.md` predating this issue keeps rendering
 its old text — nothing fails, the assembled prompt is still valid, so
 there's no error to notice. It silently loses all four mechanisms above:
@@ -1097,7 +1097,7 @@ wording churn in those spots and no behaviour change.
 
 ### If you override the prompt directory
 
-A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.prompt`) override
+A `SPINDRIFT_PROMPT_DIR` (or `perSystem.spindrift.agents.promptDir`) override
 that ships its own `fragments/code-review-unbaked.md` carrying the old
 four-dimension prose, but takes the bundled `review-prompt.md`, now renders
 the dimensions twice on unbaked runs — once inline, once from the stale
