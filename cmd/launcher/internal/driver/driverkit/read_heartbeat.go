@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // HeartbeatWriter decodes the Pass log stream it is written and emits
@@ -13,7 +15,8 @@ import (
 // TrimNarration. That event narrates only when it is top-level (not
 // InSubagent) and non-empty after trimming; a later text event never stands
 // in for an empty or subagent first one. It emits one line for each
-// KindHostOp event carrying a payload, rendered by FormatSpindriftOp. With
+// KindHostOp event carrying a payload, rendered by FormatSpindriftOp, except
+// pass_model, which only the opencode decoder acts on. With
 // Track set it also groups tool calls into per-role phases and count lines,
 // and prints a turn line at each KindResult. Every byte is forwarded to raw
 // unchanged; the heartbeat is a side effect.
@@ -150,7 +153,9 @@ func (w *HeartbeatWriter) parseLine(line string) {
 			}
 			w.emit()
 		case KindHostOp:
-			if ev.HostOp != nil {
+			// pass_model is not a heartbeat line: a Driver's decoder consumes it
+			// itself, so the writer skips it.
+			if ev.HostOp != nil && ev.HostOp.Op != hostop.OpPassModel {
 				fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.HostOp))
 			}
 		}

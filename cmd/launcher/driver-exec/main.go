@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -127,6 +128,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "driver-exec:", err)
 		return 1
+	}
+
+	// Stdout only: run.go treats an empty log as a Driver that never started.
+	if model != "" {
+		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassModel, Model: model, Effort: effort}))
 	}
 
 	rc, err := run(execConfig{
