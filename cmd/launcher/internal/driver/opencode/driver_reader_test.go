@@ -47,7 +47,7 @@ func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 }
 
-// opencode's heartbeat carries no role attribution, so topLevelRole must
+// opencode takes its role from pass_start, not topLevelRole, so topLevelRole must
 // change nothing (issue #2092).
 func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	d := newDriver()

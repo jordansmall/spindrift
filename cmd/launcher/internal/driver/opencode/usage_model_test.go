@@ -1,6 +1,7 @@
 package opencode_test
 
 import (
+	"maps"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/opencode"
@@ -159,5 +160,26 @@ func TestExtractUsageByModel_FileNotFound(t *testing.T) {
 	got := report.SummedByModel
 	if got != nil {
 		t.Errorf("got = %+v, want nil", got)
+	}
+}
+
+// Each pass's own pass_model buckets its usage: a review pass on a different
+// model yields its own SummedByModel row.
+func TestExtractUsage_PassModelPerPass(t *testing.T) {
+	path := opencode.WriteLog(t,
+		passStart1, passModelA, stepFinish("m1"),
+		passStart2, passModelB, stepFinish("m2"),
+	)
+	report, err := newDriver().ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	got := map[string]int{}
+	for _, m := range report.SummedByModel {
+		got[m.Model] = m.UncachedInputTokens
+	}
+	want := map[string]int{modelA: 10, modelB: 10}
+	if !maps.Equal(got, want) {
+		t.Fatalf("SummedByModel = %v, want %v", got, want)
 	}
 }

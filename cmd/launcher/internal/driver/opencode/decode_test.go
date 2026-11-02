@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -303,5 +304,96 @@ func TestExtractUsage_DropsMalformedStepFinishWhole(t *testing.T) {
 	}
 	if rep.Found {
 		t.Errorf("ExtractUsage reported Found for a log whose only step_finish is malformed: %+v", rep)
+	}
+}
+
+const (
+	passStart1 = `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}`
+	passStart2 = `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}`
+	modelA     = "github-copilot/claude-sonnet-5.5"
+	modelB     = "github-copilot/claude-opus-5.5"
+	passModelA = `{"type":"spindrift_op","spindrift_op":{"op":"pass_model","model":"` + modelA + `","effort":"high"}}`
+	passModelB = `{"type":"spindrift_op","spindrift_op":{"op":"pass_model","model":"` + modelB + `"}}`
+)
+
+func stepFinish(id string) string {
+	return `{"type":"step_finish","part":{"messageID":"` + id + `","tokens":{"input":10,"output":5}}}`
+}
+
+// usageAndModel feeds lines through one decoder and returns the KindUsage and
+// KindModel events, in order.
+func usageAndModel(lines ...string) (usage, models []driverkit.Event) {
+	dec := opencode.NewDecoder()
+	for _, l := range lines {
+		for _, e := range dec(l) {
+			switch e.Kind {
+			case driverkit.KindUsage:
+				usage = append(usage, e)
+			case driverkit.KindModel:
+				models = append(models, e)
+			}
+		}
+	}
+	return usage, models
+}
+
+// Real opencode never puts modelID on step_finish; the pass_model op that
+// driver-exec prints after pass_start is the only source of the pass's model.
+func TestNewDecoder_PassModelAttributesStepFinish(t *testing.T) {
+	usage, models := usageAndModel(passStart1, passModelA, stepFinish("m1"), stepFinish("m2"))
+	if len(usage) != 2 || usage[0].Model != modelA || usage[1].Model != usage[0].Model {
+		t.Fatalf("usage = %+v", usage)
+	}
+	for _, u := range usage {
+		if u.Effort != "high" || u.Role != "implementor" {
+			t.Errorf("usage effort/role = %q/%q, want high/implementor", u.Effort, u.Role)
+		}
+	}
+	// Both step_finish lines share one (model, effort, role), so one KindModel.
+	if len(models) != 1 || models[0].Model != usage[0].Model || models[0].Effort != "high" || models[0].Role != "implementor" {
+		t.Fatalf("KindModel events = %+v", models)
+	}
+}
+
+// A pass that announces no model must not inherit the previous pass's.
+func TestNewDecoder_PassStartClearsModel(t *testing.T) {
+	usage, models := usageAndModel(passStart1, passModelA, stepFinish("m1"), passStart2, stepFinish("m2"))
+	if len(usage) != 2 || usage[0].Model == "" || usage[1].Model != "" {
+		t.Fatalf("usage = %+v, want second model empty", usage)
+	}
+	if len(models) != 1 {
+		t.Fatalf("KindModel events = %+v, want only the first pass's", models)
+	}
+}
+
+// A step_finish that names its own modelID beats the model a pass_model op
+// announced, and carries no effort.
+func TestNewDecoder_ModelIDWinsOverOp(t *testing.T) {
+	line := `{"type":"step_finish","part":{"messageID":"m1","modelID":"gpt-5","tokens":{"input":1}}}`
+	usage, models := usageAndModel(passStart1, passModelA, line)
+	if len(usage) != 1 || usage[0].Model != "gpt-5" {
+		t.Fatalf("usage = %+v", usage)
+	}
+	if len(models) != 1 || models[0].Model != "gpt-5" || models[0].Effort != "" {
+		t.Fatalf("KindModel events = %+v, want gpt-5 with no effort", models)
+	}
+}
+
+// pass_start's role maps through dispatchkind.PassRole; an unmapped role keeps
+// the prior one, and a repeated pass re-announces its model.
+func TestNewDecoder_PassRoleOnModel(t *testing.T) {
+	unmapped := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"bogus"}}`
+	_, models := usageAndModel(
+		passStart1, passModelA, stepFinish("m1"),
+		passStart2, passModelB, stepFinish("m2"),
+		unmapped, passModelB, stepFinish("m3"),
+		passStart2, passModelB, stepFinish("m4"),
+	)
+	var roles []string
+	for _, m := range models {
+		roles = append(roles, m.Role)
+	}
+	if want := []string{"implementor", "reviewer", "reviewer", "reviewer"}; !slices.Equal(roles, want) {
+		t.Fatalf("KindModel roles = %v, want %v", roles, want)
 	}
 }
