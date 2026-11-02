@@ -38,9 +38,12 @@ func accessForgeGates(e Env) map[string]bool {
 	// mount and the launcher lands the branch host-side, so a read-write Box
 	// there never pushes (issue #5251); the no-PR gates above already cover
 	// its PR step and landing line. Keyed on the bit, never on the CODE_FORGE
-	// name.
+	// name. A read-only Box on such a forge lands the same way (issue #6259),
+	// so the COMMIT push step forks on host mediation, not write access.
 	g["BOX_PUSH_READ_WRITE"] = e.BoxWriteEnabled && !e.HostMediatedRemote
 	g["HOST_MEDIATED_READ_WRITE"] = e.BoxWriteEnabled && e.HostMediatedRemote
+	g["HOST_MEDIATED_PUSH"] = e.HostMediatedRemote
+	g["OUTBOX_PUSH_READ_ONLY"] = !e.BoxWriteEnabled && !e.HostMediatedRemote
 
 	// The fix-pass CI-read step forks on backend regardless of box access.
 	g["FIX_CI_READ_GH"] = backend == "GH"

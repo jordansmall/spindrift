@@ -960,20 +960,22 @@ let
       fragment = "commit-push-git.md";
       var = "COMMIT_PUSH_READ_WRITE_STEP";
     }
-    # Host-mediated read-write (issue #5251): the clone source is read-only.
+    # Host-mediated, read-write or read-only (issues #5251, #6259): the clone
+    # source is read-only and the launcher lands the branch host-side, whatever
+    # the Box's write access.
     {
-      gate = "HOST_MEDIATED_READ_WRITE";
+      gate = "HOST_MEDIATED_PUSH";
       fragment = "commit-push-host-mediated.md";
       var = "COMMIT_PUSH_HOST_MEDIATED_STEP";
     }
     {
-      gate = "HOST_MEDIATED_READ_WRITE";
+      gate = "HOST_MEDIATED_PUSH";
       fragment = "commit-push-host-mediated.md";
       legacyFragment = "commit-push-local.md";
       var = "COMMIT_PUSH_LOCAL_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "OUTBOX_PUSH_READ_ONLY";
       fragment = "commit-push-outbox.md";
       var = "COMMIT_PUSH_READ_ONLY_STEP";
     }

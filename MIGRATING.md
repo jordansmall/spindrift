@@ -1,5 +1,15 @@
 # Migration Guide
 
+## A read-only Box on `CODE_FORGE=local` renders the host-mediated commit step (issue #6259)
+
+A read-only Box on a host-mediated forge (`CODE_FORGE=local`) now renders
+`commit-push-host-mediated.md` for its COMMIT push step, the same fragment a
+read-write Box there gets, instead of `commit-push-outbox.md`. The outbox copy
+now renders only for a read-only Box on a PR forge. If your prompt directory
+overrides `commit-push-outbox.md` and you run read-only on `local`, move that
+override to `commit-push-host-mediated.md`, or a read-only local Box will no
+longer see it.
+
 ## The pi Driver enforces `spawns` (issue #5809)
 
 Under the pi Driver the hook bridge now refuses a `subagent` call naming an
