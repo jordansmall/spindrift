@@ -606,7 +606,9 @@ func newQuitDropHarness(t *testing.T, held bool) *quitDropHarness {
 	h.launch.queue.Add(Pick{Number: "42", Title: "running", State: PickQueued})
 	h.launch.tryLaunch(f, dir)
 	deadline := time.Now().Add(2 * time.Second)
-	for len(h.launch.LiveIssues()) == 0 {
+	// LiveIssues lists #42 before its Box enters RunFunc, and a terminate in
+	// that gap kills it without ever counting a run.
+	for len(h.launch.LiveIssues()) == 0 || h.runs.Load() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("#42 never went live")
 		}
