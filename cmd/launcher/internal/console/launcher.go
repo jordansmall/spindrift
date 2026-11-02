@@ -323,15 +323,19 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 // operator's confirm key does not block the Update loop on tracker I/O,
 // returning the snapshot as it stands at initiation (issue #1542). A second call
 // for a num already in flight is a no-op: the pick stays PickRunning until
-// Terminate ends, so a second confirm cannot race a duplicate Kill/Comment.
+// Terminate ends, so a second confirm cannot race a duplicate Kill/Comment. A
+// num whose row is no longer PickRunning is a no-op too: a Dispatch that settled
+// since the operator armed the confirm has nothing to reclaim (issue #6265).
 func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick {
 	// terminating() takes l.mu itself to lazily construct the map, so the
 	// check-and-set below re-takes it. Splitting the two is safe: the atomicity
 	// that matters is the check-and-set, not its adjacency to the lazy init.
 	inFlight := l.terminating()
 
+	// Read before taking l.mu: queueRef takes it too.
+	row, ok := l.queueRef().liveRow(num)
 	l.mu.Lock()
-	if inFlight[num] {
+	if inFlight[num] || !ok || row.State != PickRunning {
 		l.mu.Unlock()
 		return l.queueRef().Snapshot()
 	}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -356,6 +357,44 @@ func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
 	}
 	if len(fr.KillCalls) != 1 {
 		t.Errorf("KillCalls = %v, want exactly one kill", fr.KillCalls)
+	}
+}
+
+// TestLauncher_TerminateAsync_SettledRow_IsNoOp pins issue #6265: a row that
+// already left PickRunning (settled or failed) has nothing to reclaim, so
+// TerminateAsync starts nothing and leaves the verdict intact.
+func TestLauncher_TerminateAsync_SettledRow_IsNoOp(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		state  PickState
+		reason string
+		labels []string
+	}{
+		{"settled", PickSettled, "merged", []string{"agent-complete"}},
+		{"failed", PickFailed, "ci red", []string{"agent-failed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			launch, fc, fr, _ := newTermTestLauncher(t)
+			fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: tc.labels})
+			launch.queue.setState("42", orDefault(nil), tc.state, tc.reason)
+
+			picks := launch.TerminateAsync(fc, "42")
+			launch.Wait()
+
+			if len(fr.KillCalls) != 0 || len(fc.CommentCalls) != 0 || len(fc.TransitionStateCalls) != 0 {
+				t.Errorf("kills=%v comments=%+v transitions=%+v, want none", fr.KillCalls, fc.CommentCalls, fc.TransitionStateCalls)
+			}
+			iss, err := fc.Issue("42")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(iss.Labels, tc.labels) {
+				t.Errorf("labels = %v, want %v untouched", iss.Labels, tc.labels)
+			}
+			if len(picks) != 1 || picks[0].State != tc.state || picks[0].Reason != tc.reason {
+				t.Errorf("picks = %+v, want one pick kept at %v %q", picks, tc.state, tc.reason)
+			}
+		})
 	}
 }
 
