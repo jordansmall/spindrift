@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -4170,6 +4171,61 @@ func TestTea_TerminateKey_ConfirmThenYes_ReclaimsHighlightedDispatch(t *testing.
 
 	if len(fr.KillCalls) != 1 || fr.KillCalls[0] != "agent-issue-42" {
 		t.Errorf("KillCalls = %v, want exactly one kill of agent-issue-42", fr.KillCalls)
+	}
+}
+
+// TestTea_TerminateKey_YesAfterDispatchSettled_IsNoOp pins issue #6265: a
+// Dispatch that settles while the confirm prompt is open must not be reclaimed
+// by the late "y", which would re-add the dispatch label and overwrite the
+// settled verdict with PickTerminated.
+func TestTea_TerminateKey_YesAfterDispatchSettled_IsNoOp(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		state  PickState
+		reason string
+		labels []string
+	}{
+		{"settled", PickSettled, "merged", []string{"agent-complete"}},
+		{"failed", PickFailed, "ci red", []string{"agent-failed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			launch, fc, fr, _ := newTermTestLauncher(t)
+			fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: tc.labels})
+			tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+			waitForOutput(t, tm, "fix the thing")
+
+			sendKey(tm, "X")
+			waitForOutput(t, tm, "terminate #42?", "y/N")
+
+			launch.queue.setState("42", orDefault(nil), tc.state, tc.reason)
+			sendKey(tm, "y")
+			waitForOutput(t, tm, "already finished")
+			launch.Wait()
+
+			sendKey(tm, "q")
+			waitFinished(t, tm)
+
+			if len(fr.KillCalls) != 0 {
+				t.Errorf("KillCalls = %v, want none", fr.KillCalls)
+			}
+			if len(fc.TransitionStateCalls) != 0 {
+				t.Errorf("TransitionStateCalls = %+v, want none", fc.TransitionStateCalls)
+			}
+			if len(fc.CommentCalls) != 0 {
+				t.Errorf("CommentCalls = %+v, want none", fc.CommentCalls)
+			}
+			iss, err := fc.Issue("42")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(iss.Labels, tc.labels) {
+				t.Errorf("labels = %v, want %v untouched", iss.Labels, tc.labels)
+			}
+			picks := launch.queue.Snapshot()
+			if len(picks) != 1 || picks[0].State != tc.state || picks[0].Reason != tc.reason {
+				t.Errorf("picks = %+v, want one pick kept at %v %q", picks, tc.state, tc.reason)
+			}
+		})
 	}
 }
 

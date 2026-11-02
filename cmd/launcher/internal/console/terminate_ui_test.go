@@ -29,6 +29,22 @@ func TestUpdate_TerminateConfirmedMsg_ClearsPending(t *testing.T) {
 	}
 }
 
+func TestUpdate_TerminateStaleMsg_ClosesConfirmWithToast(t *testing.T) {
+	m := NewModel()
+	m = Update(m, TerminateRequestedMsg{Number: "42"})
+	m = Update(m, TerminateStaleMsg{Number: "42"})
+
+	if m.Mode != ModeList {
+		t.Errorf("Mode = %v, want ModeList", m.Mode)
+	}
+	if m.TerminateConfirm != (TerminateConfirmState{}) {
+		t.Errorf("TerminateConfirm = %+v, want zero", m.TerminateConfirm)
+	}
+	if want := "#42 already finished"; m.Toast != want {
+		t.Errorf("Toast = %q, want %q", m.Toast, want)
+	}
+}
+
 func TestUpdate_TerminateCancelledMsg_ClearsPending(t *testing.T) {
 	m := NewModel()
 	m = Update(m, TerminateRequestedMsg{Number: "42"})
