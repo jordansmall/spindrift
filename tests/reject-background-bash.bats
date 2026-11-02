@@ -366,3 +366,280 @@ JSON
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 }
+
+# Runs the hook on a multi-line command; JSON-encoding it with jq avoids
+# hand-escaping newlines and tabs in the heredoc cases below.
+run_command() {
+  local payload
+  payload="$(jq -n --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}')"
+  run bash "$REJECT_BACKGROUND_BASH_SCRIPT" <<<"$payload"
+  [ "$status" -eq 0 ]
+}
+
+assert_allowed() {
+  [ -z "$output" ]
+}
+
+assert_denied() {
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "allows a & in a single-quoted-delimiter heredoc body" {
+  run_command $'driver-exec signal comment <<\'SPINDRIFT_SIGNAL_EOF\'\nrepro: sleep 300 &\nSPINDRIFT_SIGNAL_EOF'
+  assert_allowed
+}
+
+@test "allows a & in a double-quoted-delimiter heredoc body" {
+  run_command $'cat <<"D"\nrepro: sleep 300 &\nD'
+  assert_allowed
+}
+
+@test "allows a & in a backslash-delimiter heredoc body" {
+  run_command $'cat <<\\D\nrepro: sleep 300 &\nD'
+  assert_allowed
+}
+
+@test "allows a & in a dash-form quoted heredoc with a tab-indented terminator" {
+  run_command $'cat <<-\'D\'\n\trepro: sleep 300 &\n\tD'
+  assert_allowed
+}
+
+@test "allows nohup as a bare word in a quoted heredoc body" {
+  run_command $'cat <<\'D\'\nnohup cmd\nD'
+  assert_allowed
+}
+
+@test "allows an apostrophe and & in a heredoc inside a double-quoted substitution" {
+  run_command $'git commit -m "$(cat <<\'EOF\'\nfix: don\'t & stop\nEOF\n)"'
+  assert_allowed
+}
+
+@test "allows a & only inside the second of two heredocs on one line" {
+  run_command $'cat <<\'A\' <<\'B\'\nx\nA\ny & z\nB'
+  assert_allowed
+}
+
+@test "denies a & substitution in an unquoted heredoc body" {
+  run_command $'cat <<D\n$(sleep 300 &)\nD'
+  assert_denied
+}
+
+@test "denies a trailing & after a quoted heredoc body holding an apostrophe" {
+  run_command $'cat <<\'E\'\ndon\'t\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a trailing & after an unquoted heredoc body holding an apostrophe" {
+  run_command $'cat <<E\nit\'s\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a trailing & after two heredocs on one line" {
+  run_command $'cat <<\'A\' <<\'B\'\nx\nA\ny\nB\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a here-string" {
+  run_command 'cat <<< foo &'
+  assert_denied
+}
+
+@test "allows a quoted & inside a here-string" {
+  run_command "cat <<<'a & b'"
+  assert_allowed
+}
+
+@test "denies a trailing & after an unterminated quote in a heredoc delimiter" {
+  run_command $'cat <<\'EOF\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a quoted heredoc opener inside a # comment" {
+  run_command $'echo hi # <<\'E\'\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a quoted heredoc opener inside a parameter expansion" {
+  run_command $'echo ${x:-<<\'E\'}\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a << inside arithmetic expansion" {
+  run_command $'echo $((1<<\'E\'))\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a << inside a (( )) command" {
+  run_command $'((1<<\'E\'))\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a << inside double-quoted arithmetic expansion" {
+  run_command $'echo "$((1<<\'E\'))"\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a << inside a legacy dollar-bracket expansion" {
+  run_command $'echo $[1<<\'E\']\nsleep 300 &'
+  assert_denied
+}
+
+@test "allows a quoted heredoc after a closed length expansion" {
+  run_command $'x=${#y}; cat <<\'E\'\nsleep 300 &\nE'
+  assert_allowed
+}
+
+@test "allows a bit shift in arithmetic expansion" {
+  run_command 'echo $(( 1 << 2 ))'
+  assert_allowed
+}
+
+@test "allows a quoted heredoc after a closed arithmetic expansion" {
+  run_command $'echo $((1+2)); cat <<\'E\'\nsleep 300 &\nE'
+  assert_allowed
+}
+
+@test "allows a quoted heredoc inside a command substitution" {
+  run_command $'echo $(cat <<\'E\'\nsleep 300 &\nE\n)'
+  assert_allowed
+}
+
+@test "allows a quoted heredoc on the line after a # comment" {
+  run_command $'echo hi # note\ncat <<\'E\'\nsleep 300 &\nE'
+  assert_allowed
+}
+
+@test "denies a & after a << following an array subscript in arithmetic expansion" {
+  run_command $'echo $((a[1]<<\'E\'))\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a << following an array subscript in legacy bracket arithmetic" {
+  run_command $'echo $[a[1]<<\'E\']\nsleep 300 &'
+  assert_denied
+}
+
+@test "allows a bit shift after an array subscript in arithmetic expansion" {
+  run_command 'echo $(( a[1] << 2 ))'
+  assert_allowed
+}
+
+@test "allows a & in a \$'E'-delimiter heredoc body" {
+  run_command $'cat <<$\'E\'\nsleep 300 &\nE'
+  assert_allowed
+}
+
+@test "allows a & in a \$\"E\"-delimiter heredoc body" {
+  run_command $'cat <<$"E"\nsleep 300 &\nE'
+  assert_allowed
+}
+
+@test "denies a trailing & after a \$'E'-delimiter heredoc terminator" {
+  run_command $'cat <<$\'E\'\nbody\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a trailing & after a \$\"E\"-delimiter heredoc terminator" {
+  run_command $'cat <<$"E"\nbody\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a heredoc delimiter holding an ANSI-C escape" {
+  run_command $'cat <<$\'E\\x41\'\nbody\nEA\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a backslash-newline continuation after a quoted heredoc delimiter" {
+  run_command $'cat <<\'E\'\\\n\nx\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a backslash-newline continuation inside a bare heredoc delimiter" {
+  run_command $'cat <<E\\\nF\nbody\nEF\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a backslash-newline continuation inside a double-quoted heredoc delimiter" {
+  run_command $'cat <<"E\\\nF"\nbody\nEF\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a double-quoted delimiter whose backslash bash keeps" {
+  run_command $'cat <<"E\\a"\nhi\nE\\a\nsleep 300 &\nEa'
+  assert_denied
+}
+
+@test "allows a & in a body closed by a double-quoted delimiter that keeps its backslash" {
+  run_command $'cat <<"E\\a"\nsleep 300 &\nE\\a'
+  assert_allowed
+}
+
+@test "allows a & in a body closed by a double-quoted delimiter whose backslash escapes a dollar" {
+  run_command $'cat <<"E\\$"\nsleep 300 &\nE$'
+  assert_allowed
+}
+
+@test "denies a & after an unquoted body line joined into the terminator" {
+  run_command $'cat <<EOF 3<<\'Q\'\nEO\\\nF\nQ\nEOF\nsleep 300 &\nQ'
+  assert_denied
+}
+
+@test "denies a & hidden by a quote after a continued unquoted body line" {
+  run_command $'cat <<E\nfoo\\\nE\ndon\'t\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a continued tab-indented dash-form body line" {
+  run_command $'cat <<-E\nfoo\\\n\tE\ndon\'t\n\tE\nsleep 300 &'
+  assert_denied
+}
+
+@test "allows a continued line in an unquoted heredoc body" {
+  run_command $'cat <<EOF\nfoo \\\nbar\nEOF'
+  assert_allowed
+}
+
+@test "denies a & in a tab-indented unquoted dash-form heredoc body" {
+  run_command $'cat <<-EOF\n\tsleep 300 &\nEOF'
+  assert_denied
+}
+
+@test "denies a trailing & after a tab-indented unquoted dash-form terminator" {
+  run_command $'cat <<-EOF\nok\n\tEOF\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after a \$(( that closes as a command substitution" {
+  run_command 'echo "$((sleep 1) )"; sleep 300 &'
+  assert_denied
+}
+
+@test "denies nohup after a \$(( that closes as a command substitution" {
+  run_command 'x="$((sleep 1) )"; nohup sleep 300'
+  assert_denied
+}
+
+@test "allows a \$(( that closes as a command substitution with no backgrounding" {
+  run_command 'echo "$((sleep 1) )"'
+  assert_allowed
+}
+
+@test "allows arithmetic with a parenthesised group" {
+  run_command 'echo $(( (1+2)*3 ))'
+  assert_allowed
+}
+
+@test "denies a heredoc-opening << after a \$(( that closes as a command substitution" {
+  run_command $'x=$((echo a) ); cat <<\'E\'\ndon\'t\nE\nsleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after an unclosed \$((" {
+  run_command 'echo "$((1+2)" ; sleep 300 &'
+  assert_denied
+}
+
+@test "denies a & after an unclosed \${" {
+  run_command 'echo ${x" ; sleep 300 &'
+  assert_denied
+}
