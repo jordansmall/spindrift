@@ -234,15 +234,24 @@ a pane showing the rebuild's own output once one has run.
 
 ## Quit
 
-**Quit** (`q`/`ctrl+c`): with no live Dispatches, quit exits immediately —
-no dialog. With one or more live Dispatches, it instead offers a choice:
-`drain (d, default) / terminate-all (t) / stay (s)`. Drain launches nothing
-new — every queued-but-unlaunched pick is dropped (it was already
-`Dispatchable` on the tracker, so dropping is a pure session-queue edit with
-no tracker call, exactly like Unpick) — and Run doesn't return until every
-still-running Dispatch settles on its own. Terminate-all additionally applies
-Terminate (above) to every live Dispatch before exiting. Anything else,
-including a bare "stay", cancels the pending quit and keeps the session running.
+**Quit** (`q`/`ctrl+c`): from the list view with no live Dispatches, quit
+exits immediately — no dialog. From the list view with one or more live
+Dispatches, or a pick mid-claim, it instead offers a choice:
+`drain (d, default) / terminate-all (t) / stay (s)`. In the detail modal,
+sidebar, or rebuild-output view, quit exits straight away with no dialog.
+Drain launches nothing new — every queued-but-unlaunched pick is dropped (it
+was already `Dispatchable` on the tracker, so dropping is a pure
+session-queue edit with no tracker call, exactly like Unpick) — and Run
+doesn't return until every still-running Dispatch settles on its own. Held
+picks are dropped too, even one whose blocker resolves later, and the drop
+applies on every quit route, including the no-dialog quit. A pick caught
+mid-claim at quit is not launched either: its claim is handed back
+(`InProgress` reverts to `Dispatchable`), the one tracker write on this path.
+Unlike Terminate's handback it posts no comment, so a brief
+`agent-in-progress` flip is the only trace on the issue. Terminate-all
+additionally applies Terminate (above) to every live Dispatch before exiting.
+Anything else, including a bare "stay", cancels the pending quit and keeps the
+session running.
 
 Once quit, the Console ignores SIGTERM and SIGINT — through the drain and the
 teardown that follows — so a stray `kill` cannot cut cleanup short. SIGKILL is
