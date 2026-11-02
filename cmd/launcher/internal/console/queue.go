@@ -162,7 +162,7 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			// A transient DepsOf failure looks identical to confirmed zero
 			// blockers in edges alone, so hold rather than launch: a blocked
 			// pick must never claim on a tracker hiccup (#752).
-			q.setState(pick.Number, kind, PickHeld, "blocker check failed, will retry")
+			q.hold(pick.Number, kind, "", "blocker check failed, will retry")
 			continue
 		}
 		cfg := waves.Config{FailedLabel: failedLabel}
@@ -228,21 +228,29 @@ func (q *Queue) claimable() []Pick {
 // BlockedBy badge and failed as Reason. failed is the unready blockers carrying
 // the Failed label (a satisfied blocker never holds, #4911). Holding rather than
 // dissolving the pick is deliberate: the Console never auto-unpicks (#650).
-// It targets the newest row numbered num of kind, like setState.
 func (q *Queue) setHeld(num string, kind Kind, unready, failed []string, sources map[string]forge.DepSource) {
+	reason := ""
+	if len(failed) > 0 {
+		reason = fmt.Sprintf("%s%s failed", blockerFailedPrefix, refList(failed, sources))
+	}
+	q.hold(num, kind, refList(unready, sources), reason)
+}
+
+// hold marks the newest row numbered num of kind PickHeld with blockedBy and
+// reason, only if it is still unclaimed. Like tryMarkClaiming it is guarded,
+// because Discover holds after dropping the lock for tracker calls: an Unpick
+// landing mid-check must win, not resurrect an older terminal row (#6267).
+// Close drops every unclaimed row, so the guard also covers a closed queue.
+func (q *Queue) hold(num string, kind Kind, blockedBy, reason string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed {
+	i := q.newestIndex(num, kind)
+	if i < 0 || !q.picks[i].State.unclaimed() {
 		return
 	}
-	if i := q.newestIndex(num, kind); i >= 0 {
-		q.picks[i].State = PickHeld
-		q.picks[i].BlockedBy = refList(unready, sources)
-		q.picks[i].Reason = ""
-		if len(failed) > 0 {
-			q.picks[i].Reason = fmt.Sprintf("%s%s failed", blockerFailedPrefix, refList(failed, sources))
-		}
-	}
+	q.picks[i].State = PickHeld
+	q.picks[i].BlockedBy = blockedBy
+	q.picks[i].Reason = reason
 }
 
 // refList formats a blocker-ref list for display, e.g. "#41 (native), #43 (body)".
@@ -289,7 +297,7 @@ func (q *Queue) promoteUnlessClosed(num string, kind Kind) bool {
 // pick's row (ADR 0024, issue #649) is never removed, so a re-pick appends a
 // second row for the same number and only the newest of a kind is that kind's
 // live claim; a row of the other kind may share the number (issue #4230).
-// BlockedBy is cleared here because it is PickHeld-only data setHeld sets
+// BlockedBy is cleared here because it is PickHeld-only data hold sets
 // directly.
 func (q *Queue) setState(num string, kind Kind, state PickState, reason string) {
 	q.mu.Lock()
@@ -298,8 +306,9 @@ func (q *Queue) setState(num string, kind Kind, state PickState, reason string) 
 }
 
 func (q *Queue) setStateLocked(num string, kind Kind, state PickState, reason string) {
-	// Close dropped the newest unclaimed row; newestIndex would now land on an
-	// older terminal row of the same number and make it claimable again.
+	// Defence in depth: no caller passes an unclaimed state now that holds go
+	// through hold, but on a closed queue newestIndex would land on an older
+	// terminal row of the same number and make it claimable again.
 	if q.closed && state.unclaimed() {
 		return
 	}

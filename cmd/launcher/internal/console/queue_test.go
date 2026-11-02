@@ -491,6 +491,68 @@ func TestQueue_Discover_UnpickDuringClaimCheck_NeverLaunches(t *testing.T) {
 	}
 }
 
+// An Unpick landing while a hold's tracker call is in flight must not flip the
+// older terminal row for the same number to PickHeld, or a later Discover
+// would claim and launch the very pick the operator just unpicked (#6267).
+func TestQueue_Discover_UnpickDuringHoldCheck_LeavesTerminalRowUntouched(t *testing.T) {
+	priors := []Pick{
+		{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"},
+		{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "skipped"},
+		{Number: "42", Title: "fix the thing", State: PickSettled, Reason: "merged"},
+		{Number: "42", Title: "fix the thing", State: PickFailed, Reason: "boom"},
+	}
+	paths := []struct {
+		name    string
+		tracker func(f *forge.Fake, q *Queue) forge.IssueTracker
+	}{
+		{"open blocker", func(f *forge.Fake, q *Queue) forge.IssueTracker {
+			return removeOnDepsOf{Fake: f, q: q, num: "42"}
+		}},
+		{"depsof failure", func(f *forge.Fake, q *Queue) forge.IssueTracker {
+			return removeOnDepsOf{Fake: f, q: q, num: "42", err: errBoom}
+		}},
+	}
+	for _, prior := range priors {
+		for _, path := range paths {
+			t.Run(prior.State.String()+"/"+path.name, func(t *testing.T) {
+				q := NewQueue()
+				q.Add(prior)
+				q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+				f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+				f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}, Body: "Blocked by #41"})
+				f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+				oldRowUntouched := func(snap []Pick) {
+					t.Helper()
+					if len(snap) != 1 {
+						t.Fatalf("Snapshot = %+v, want only the old terminal row", snap)
+					}
+					if got := snap[0]; got.State != prior.State || got.Reason != prior.Reason || got.BlockedBy != "" {
+						t.Errorf("old row = %+v, want it untouched at %v %q", got, prior.State, prior.Reason)
+					}
+				}
+
+				if _, err := q.Discover(path.tracker(f, q), f, "", KindWork); err != nil {
+					t.Fatalf("Discover: %v", err)
+				}
+				oldRowUntouched(q.Snapshot())
+
+				f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
+				batch, err := q.Discover(f, f, "", KindWork)
+				if err != nil {
+					t.Fatalf("Discover: %v", err)
+				}
+				if len(batch.Issues) != 0 {
+					t.Errorf("issues = %+v, want none — the pick was unpicked", batch.Issues)
+				}
+				if len(f.TransitionStateCalls) != 0 {
+					t.Errorf("TransitionStateCalls = %+v, want none", f.TransitionStateCalls)
+				}
+				oldRowUntouched(q.Snapshot())
+			})
+		}
+	}
+}
+
 // A pick whose DepsOf call fails holds at PickHeld with a reason distinct
 // from a real open blocker, rather than launching on a transient tracker
 // failure such as a rate limit or timeout (#752).
@@ -571,16 +633,21 @@ func (r failDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
 // removeOnDepsOf wraps a *forge.Fake so its first DepsOf call for num
 // synchronously Removes that pick from q, simulating an operator's Unpick
 // landing in Discover's window between reading a pick as a candidate and
-// claiming it.
+// claiming it. A non-nil err is returned in place of num's deps, so the
+// Unpick lands in the same window as the blocker-check failure hold.
 type removeOnDepsOf struct {
 	*forge.Fake
 	q   *Queue
 	num string
+	err error
 }
 
 func (r removeOnDepsOf) DepsOf(num string) ([]forge.Dependency, error) {
 	if num == r.num {
 		r.q.Remove(num)
+		if r.err != nil {
+			return nil, r.err
+		}
 	}
 	return r.Fake.DepsOf(num)
 }
