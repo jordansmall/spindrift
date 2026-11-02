@@ -1290,6 +1290,40 @@ index = "sparse+http://127.0.0.1:27182/r0/"
 	}
 }
 
+// Two replacements naming one upstream SourceName must not repeat its
+// [source.…] table: the first replacement's replace-with wins and the output
+// stays valid TOML.
+func TestCargoConfigTOMLWithReplacements_SharedUpstreamSourceEmittedOnce(t *testing.T) {
+	const shared = "spindrift-upstream-othercorp"
+	replacements := []cargoSourceReplacement{
+		{
+			Prefix:        "r0",
+			ProxySource:   "spindrift-registry-proxy-r0-a",
+			LocalIndexURL: "sparse+http://127.0.0.1:27182/r0/a/",
+			Upstreams:     []cargoUpstreamSource{{SourceName: shared, IndexURL: "sparse+https://cargo.example.test/index/"}},
+		},
+		{
+			Prefix:        "r0",
+			ProxySource:   "spindrift-registry-proxy-r0-b",
+			LocalIndexURL: "sparse+http://127.0.0.1:27182/r0/b/",
+			Upstreams:     []cargoUpstreamSource{{SourceName: shared, IndexURL: "sparse+https://cargo.example.test/index/"}},
+		},
+	}
+
+	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
+
+	decodeCargoSourceRegistries(t, "home", got)
+	if n := strings.Count(got, "[source."+shared+"]"); n != 1 {
+		t.Errorf("config contains %d [source.%s] tables, want exactly 1:\n%s", n, shared, got)
+	}
+	if want := "[source." + shared + "]\nregistry = \"sparse+https://cargo.example.test/index/\"\nreplace-with = \"spindrift-registry-proxy-r0-a\"\n"; !strings.Contains(got, want) {
+		t.Errorf("config lacks first replacement's stanza %q:\n%s", want, got)
+	}
+	if strings.Contains(got, "replace-with = \"spindrift-registry-proxy-r0-b\"") {
+		t.Errorf("config carries the second replacement's replace-with for the shared upstream:\n%s", got)
+	}
+}
+
 // With two Upstreams on one route, each gets its own
 // [source.spindrift-upstream-…] stanza, but the [source.…]/[registries.…]
 // proxy pair is emitted once, after both upstreams.
