@@ -305,6 +305,11 @@ func goldenCells() []goldenCell {
 			c.localForge()
 			c.localTracker()
 		}},
+		{name: "local-forge-read-only", mode: modeInitial, setup: func(c *cellInputs) {
+			c.localForge()
+			c.localTracker()
+			c.readOnly()
+		}},
 		{name: "forgejo-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoForge()
 			c.readOnly()
