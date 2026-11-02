@@ -15,8 +15,7 @@ type Kind string
 
 const (
 	// KindStart marks a model call (turn) beginning. Fills Timestamp and
-	// MessageID. The usage reader anchors the run's event span on the first
-	// one, and the classifier counts it as agent progress. A CLI with no
+	// MessageID. The classifier counts it as agent progress. A CLI with no
 	// per-call start record (claude) emits one per assistant or user turn as
 	// its progress marker, even for a line with no decodable content.
 	KindStart Kind = "start"

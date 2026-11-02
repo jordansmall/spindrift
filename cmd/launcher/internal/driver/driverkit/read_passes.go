@@ -75,10 +75,10 @@ type passState struct {
 	pending map[string]string // write ToolID -> content, until its result
 
 	// PerCallTotals only.
-	firstStart, lastUsage int64
-	haveStart             bool
-	sawCall               bool // a KindUsage or KindResult
-	msg                   lastMessage
+	anchor    spanAnchor
+	lastUsage int64
+	sawCall   bool // a KindUsage or KindResult
+	msg       lastMessage
 }
 
 func newPassState() *passState {
@@ -94,9 +94,8 @@ func (s *passState) finish(src TotalsSource) PassTally {
 		t.Agents = withMainLoopOutput(t.Agents, t.Usage.OutputTokens)
 	}
 	if src == PerCallTotals {
-		// A start with no usage event would yield a negative epoch figure.
-		if s.haveStart && t.Usage.NumTurns > 0 {
-			t.Usage.DurationMs = s.lastUsage - s.firstStart
+		if span, ok := s.anchor.span(s.lastUsage); ok && t.Usage.NumTurns > 0 {
+			t.Usage.DurationMs = span.DurationMs()
 		}
 		if s.sawCall {
 			t.Results = []string{s.msg.String()}
@@ -156,12 +155,9 @@ func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
 	perCall := opts.Totals == PerCallTotals
 	if perCall {
 		s.msg.apply(ev)
+		s.anchor.see(ev.Timestamp)
 	}
 	switch ev.Kind {
-	case KindStart:
-		if !s.haveStart {
-			s.firstStart, s.haveStart = ev.Timestamp, true
-		}
 	case KindUsage:
 		s.sawCall = true
 		if firstSighting(s.seenIDs, ev.MessageID) {

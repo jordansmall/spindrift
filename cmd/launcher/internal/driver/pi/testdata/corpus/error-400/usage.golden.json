@@ -1,8 +1,8 @@
 {
-  "EarliestEventMs": 0,
+  "EarliestEventMs": 1792330257317,
   "Found": true,
-  "HasEventSpan": false,
-  "LatestEventMs": 0,
+  "HasEventSpan": true,
+  "LatestEventMs": 1792330257352,
   "OutputIsMainLoopOnly": false,
   "SummedByAgent": [
     {
@@ -28,7 +28,7 @@
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 0,
     "duration_api_ms": 0,
-    "duration_ms": 0,
+    "duration_ms": 35,
     "input_tokens": 0,
     "num_turns": 1,
     "output_tokens": 0,

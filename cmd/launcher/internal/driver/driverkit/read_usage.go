@@ -129,6 +129,9 @@ type EventSpan struct {
 	Have             bool
 }
 
+// DurationMs is the span length in milliseconds.
+func (s EventSpan) DurationMs() int64 { return s.Latest - s.Earliest }
+
 // SumTotals returns the run totals of the log at path from src, the event
 // span, and whether the log carries any totals at all; a missing log, or one
 // with none, reports found=false and no error.
@@ -139,22 +142,41 @@ func SumTotals(path string, newDecoder func() Decoder, src TotalsSource) (usage.
 	return sumPerCall(path, newDecoder)
 }
 
+// spanAnchor tracks the earliest non-zero event Timestamp of any kind. A
+// PerCallTotals span anchors on it, not on KindStart: a run whose attempts all
+// errored emits no start event yet still has a measurable span.
+type spanAnchor struct {
+	first int64
+	have  bool
+}
+
+func (a *spanAnchor) see(ts int64) {
+	if ts != 0 && (!a.have || ts < a.first) {
+		a.first, a.have = ts, true
+	}
+}
+
+// span closes the anchor at the last usage Timestamp; ok is false without an
+// anchor or a stamped usage, so a raw epoch figure is never reported: an
+// unstamped last usage yields no span even when earlier events were stamped.
+func (a spanAnchor) span(lastUsage int64) (EventSpan, bool) {
+	if !a.have || lastUsage < a.first {
+		return EventSpan{}, false
+	}
+	return EventSpan{Earliest: a.first, Latest: lastUsage, Have: true}, true
+}
+
 // sumPerCall counts every KindUsage as one turn with no MessageID
 // deduplication (only the breakdowns dedup), leaves DurationApiMs zero, and
-// spans the first KindStart to the last KindUsage; without a KindStart the
-// span and DurationMs stay unset rather than reporting a raw epoch figure.
+// spans the earliest event Timestamp to the last KindUsage; with no timestamp
+// the span and DurationMs stay unset.
 func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, error) {
 	var u usage.Usage
-	var firstStart, lastUsage int64
-	haveStart := false
+	var anchor spanAnchor
+	var lastUsage int64
 	err := scanEvents(path, newDecoder, func(ev Event) {
-		switch ev.Kind {
-		case KindStart:
-			if !haveStart {
-				firstStart = ev.Timestamp
-				haveStart = true
-			}
-		case KindUsage:
+		anchor.see(ev.Timestamp)
+		if ev.Kind == KindUsage {
 			addTokens(&u, ev.Tokens)
 			u.NumTurns++
 			lastUsage = ev.Timestamp
@@ -163,10 +185,9 @@ func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 	if err != nil || u.NumTurns == 0 {
 		return usage.Usage{}, EventSpan{}, false, err
 	}
-	var span EventSpan
-	if haveStart {
-		u.DurationMs = lastUsage - firstStart
-		span = EventSpan{Earliest: firstStart, Latest: lastUsage, Have: true}
+	span, ok := anchor.span(lastUsage)
+	if ok {
+		u.DurationMs = span.DurationMs()
 	}
 	return u, span, true, nil
 }
@@ -204,8 +225,8 @@ func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 		return usage.Usage{}, EventSpan{}, false, err
 	}
 	u.DurationMs = maxDurationMs
-	if results > 1 && span.Latest > span.Earliest {
-		u.DurationMs = max(span.Latest-span.Earliest, maxDurationMs)
+	if results > 1 && span.DurationMs() > 0 {
+		u.DurationMs = max(span.DurationMs(), maxDurationMs)
 	}
 	return u, span, true, nil
 }

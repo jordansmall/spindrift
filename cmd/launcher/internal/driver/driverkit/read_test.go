@@ -327,8 +327,18 @@ func TestExtractUsageSummedByAgent(t *testing.T) {
 	}
 }
 
-func TestExtractUsageNoStartLeavesSpanUnset(t *testing.T) {
-	path, nd := evLines(t, usageEv("", "", 5000, Tokens{Input: 1}))
+func TestExtractUsageNoTimestampLeavesSpanUnset(t *testing.T) {
+	path, nd := evLines(t, usageEv("", "", 0, Tokens{Input: 1}))
+	r, _ := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
+	if !r.Found || r.Totals.DurationMs != 0 || r.HasEventSpan || r.EarliestEventMs != 0 || r.LatestEventMs != 0 {
+		t.Errorf("report = %+v", r)
+	}
+}
+
+// The epoch guard: a stamped earlier event must not let an unstamped last
+// usage report a negative or raw-epoch span.
+func TestExtractUsageUnstampedUsageAfterStampedEventLeavesSpanUnset(t *testing.T) {
+	path, nd := evLines(t, Event{Kind: KindModel, Timestamp: 1000}, usageEv("", "", 0, Tokens{Input: 1}))
 	r, _ := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
 	if !r.Found || r.Totals.DurationMs != 0 || r.HasEventSpan || r.EarliestEventMs != 0 || r.LatestEventMs != 0 {
 		t.Errorf("report = %+v", r)
@@ -681,5 +691,19 @@ func TestUsageByModelPerCallIgnoresResultOutput(t *testing.T) {
 	want := []usage.ModelUsage{{Model: "a", OutputTokens: 3}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, %v; want %+v", got, err, want)
+	}
+}
+
+// An all-attempts-errored run has no KindStart; the first stamped event of any
+// kind anchors the span (issue #6271).
+func TestExtractUsageAnchorsOnEarliestEventWithoutStart(t *testing.T) {
+	path, nd := evLines(t,
+		Event{Kind: KindModel, Timestamp: 1000},
+		Event{Kind: KindError, Timestamp: 1050},
+		usageEv("", "", 1200, Tokens{Input: 1}),
+	)
+	r, _ := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
+	if !r.Found || r.Totals.DurationMs != 200 || !r.HasEventSpan || r.EarliestEventMs != 1000 || r.LatestEventMs != 1200 {
+		t.Errorf("report = %+v", r)
 	}
 }

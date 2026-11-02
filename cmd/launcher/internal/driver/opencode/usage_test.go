@@ -177,8 +177,8 @@ func TestExtractUsage_EventSpan(t *testing.T) {
 	}
 }
 
-// A step_finish with no preceding step_start leaves the window unanchored, the
-// same condition DurationMs's own haveStart check guards against.
+// A step_finish with no preceding step_start anchors the window on its own
+// timestamp (issue #6271), so the span is a single point, not an epoch figure.
 func TestExtractUsage_EventSpan_NoStepStart(t *testing.T) {
 	logPath := opencode.WriteLog(t,
 		`{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":3,"output":120,"reasoning":0,"cache":{"write":800,"read":6400}},"cost":0.012}}`,
@@ -191,13 +191,13 @@ func TestExtractUsage_EventSpan_NoStepStart(t *testing.T) {
 	if !report.Found {
 		t.Fatalf("Found: got false, want true")
 	}
-	if report.HasEventSpan {
-		t.Errorf("HasEventSpan: got true, want false")
+	if !report.HasEventSpan {
+		t.Errorf("HasEventSpan: got false, want true")
 	}
-	if got, want := report.EarliestEventMs, int64(0); got != want {
+	if got, want := report.EarliestEventMs, int64(1500); got != want {
 		t.Errorf("EarliestEventMs: got %d, want %d", got, want)
 	}
-	if got, want := report.LatestEventMs, int64(0); got != want {
+	if got, want := report.LatestEventMs, int64(1500); got != want {
 		t.Errorf("LatestEventMs: got %d, want %d", got, want)
 	}
 	if got, want := report.Totals.DurationMs, int64(0); got != want {
