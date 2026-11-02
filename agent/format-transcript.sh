@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Reads Claude Code stream-json (NDJSON) from stdin and renders it on the host:
 #   format-transcript.sh < .spindrift/logs/issue-<n>.log
-# Keep it out of the entrypoint's live pipe: claude.Classify scans that log for
-# transient-failure markers (#123), so it must stay byte-exact raw stream-json.
+# Keep it out of the entrypoint's live pipe: driverkit.Classify scans that log
+# for transient-failure markers (#123), so it must stay byte-exact raw
+# stream-json.
 set -euo pipefail
 
 BOLD=$'\033[1m'
@@ -38,9 +39,13 @@ _render_content_block() {
       printf '%s\xe2\x8f\xba %s%s\n' "$BOLD" "$(_trunc "$line" 120)" "$RESET"
       ;;
     tool_result)
-      # Mirrors summarizeResult in cmd/launcher/internal/driver/claude/
-      # transcript_render.go. Collapsing control characters keeps the result
-      # on one line and stops untrusted tool output driving the terminal.
+      # Loosely follows the Go renderer: resultText in
+      # cmd/launcher/internal/driver/claude/decode_content.go extracts the
+      # text, and SummarizeToolOutput in
+      # cmd/launcher/internal/driver/driverkit/read_transcript.go adds the
+      # placeholder and error prefix (its "[" escape and rune cut are not
+      # copied here). Collapsing control characters keeps the result on one
+      # line and stops untrusted tool output driving the terminal.
       local content=""
       content="$(printf '%s' "$block" | jq -r '
         (if (.content | type) == "array" then
