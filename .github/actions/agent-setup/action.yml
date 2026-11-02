@@ -51,7 +51,7 @@ inputs:
   git-user-name:
     description: >-
       Bot git user.name. Empty falls back to the default baked into this
-      action's "Export shared env" step, the sole definition of that literal.
+      action's "Resolve bot identity" step, the sole definition of that literal.
     required: false
     default: ""
   git-user-email:
