@@ -27,8 +27,12 @@ func writeRunLog(t *testing.T, d *Dispatch, lines ...string) {
 
 // sessionResult is one canonical session summary, the totals a
 // fakeDriver{SessionTotals: true} sums.
-func sessionResult(turns int, durationMs, apiMs int64, tok driverkit.Tokens) string {
-	return eventLine(driverkit.Event{Kind: driverkit.KindResult, NumTurns: turns, DurationMs: durationMs, DurationAPIMs: apiMs, Tokens: tok})
+func sessionResult(turns int, durationMs, apiMs int64, tok driverkit.Tokens, modelOutput ...map[string]int) string {
+	ev := driverkit.Event{Kind: driverkit.KindResult, NumTurns: turns, DurationMs: durationMs, DurationAPIMs: apiMs, Tokens: tok}
+	if len(modelOutput) > 0 {
+		ev.ModelOutput = modelOutput[0]
+	}
+	return eventLine(ev)
 }
 
 func TestUsageReport_HumanReadableDurations(t *testing.T) {
@@ -395,7 +399,7 @@ func TestUsageReport_FullFormatLocksExactMarkdown(t *testing.T) {
 	opus1 := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 100, Output: 50, CacheRead: 1000, CacheWrite5m: 200, CacheWrite1h: 100}})
 	haiku1 := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-haiku-4-5-20251001", Tokens: driverkit.Tokens{Input: 10, Output: 5, CacheRead: 500, CacheWrite5m: 50}})
 	opus2 := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 40, Output: 20, CacheRead: 2000, CacheWrite5m: 60, CacheWrite1h: 40}})
-	resultEvent := sessionResult(3, 3665000, 65000, driverkit.Tokens{Input: 40, Output: 20, CostUSD: 0.30})
+	resultEvent := sessionResult(3, 3665000, 65000, driverkit.Tokens{Input: 40, Output: 20, CostUSD: 0.30}, map[string]int{"claude-opus-4-8": 70, "claude-haiku-4-5-20251001": 5})
 	writeRunLog(t, d, opus1, haiku1, opus2, resultEvent)
 
 	body := d.UsageReport()
@@ -601,5 +605,74 @@ func TestModelBreakdownSection(t *testing.T) {
 
 	if got := modelBreakdownSection(nil); got != "" {
 		t.Errorf("modelBreakdownSection(nil) = %q, want empty string", got)
+	}
+}
+
+func TestModelBreakdownSection_UnavailableOutputRendersNA(t *testing.T) {
+	body := modelBreakdownSection([]usage.ModelUsage{
+		{Model: "claude-opus-4-8", UncachedInputTokens: 140, OutputUnavailable: true, CacheReadInputTokens: 3000},
+	})
+
+	if !strings.Contains(body, "| claude-opus-4-8 | 140 | n/a | 3000 | 0 | 0 |") {
+		t.Errorf("unavailable output should render n/a; got: %q", body)
+	}
+}
+
+// A partial sum over attempts that lack per-model output would understate the
+// column, so one unavailable attempt makes the merged row unavailable.
+func TestAggregatedReport_UnavailableOutputPoisonsMergedRow(t *testing.T) {
+	for _, order := range []string{"available-first", "unavailable-first"} {
+		avail := usage.ModelUsage{Model: "claude-opus-4-8", UncachedInputTokens: 10, OutputTokens: 5}
+		unavail := usage.ModelUsage{Model: "claude-opus-4-8", UncachedInputTokens: 20, OutputUnavailable: true}
+		rows := []usage.ModelUsage{avail, unavail}
+		if order == "unavailable-first" {
+			rows = []usage.ModelUsage{unavail, avail}
+		}
+		found := []usage.Report{
+			{Found: true, SummedByModel: []usage.ModelUsage{rows[0]}},
+			{Found: true, SummedByModel: []usage.ModelUsage{rows[1]}},
+		}
+
+		got := aggregatedReport(found).SummedByModel
+
+		if len(got) != 1 || !got[0].OutputUnavailable || got[0].OutputTokens != 0 {
+			t.Errorf("%s: SummedByModel = %+v, want one row OutputUnavailable with OutputTokens 0", order, got)
+		}
+		if len(got) == 1 && got[0].UncachedInputTokens != 30 {
+			t.Errorf("%s: UncachedInputTokens = %d, want 30 (other columns still sum)", order, got[0].UncachedInputTokens)
+		}
+	}
+}
+
+func TestAggregatedReport_AvailableOutputStillSums(t *testing.T) {
+	found := []usage.Report{
+		{Found: true, SummedByModel: []usage.ModelUsage{{Model: "m", OutputTokens: 5}}},
+		{Found: true, SummedByModel: []usage.ModelUsage{{Model: "m", OutputTokens: 7}}},
+	}
+
+	got := aggregatedReport(found).SummedByModel
+
+	if len(got) != 1 || got[0].OutputUnavailable || got[0].OutputTokens != 12 {
+		t.Errorf("SummedByModel = %+v, want one available row with OutputTokens 12", got)
+	}
+}
+
+// A session-totals result with no per-model output leaves only the per-call
+// placeholder, so the Per-model Output cell says n/a instead of printing it.
+func TestUsageReport_EmptyModelUsageRendersOutputNA(t *testing.T) {
+	dir := tempLogDir(t)
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fakeDriver{SessionTotals: true}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("6269", "test issue")
+	opus := eventLine(driverkit.Event{Kind: driverkit.KindUsage, Model: "claude-opus-4-8", Tokens: driverkit.Tokens{Input: 80, Output: 26, CacheRead: 3000}})
+	writeRunLog(t, d, opus, sessionResult(2, 1000, 900, driverkit.Tokens{Input: 80, Output: 33815}))
+
+	body := d.UsageReport()
+
+	if want := "| claude-opus-4-8 | 80 | n/a | 3000 | 0 | 0 |"; !strings.Contains(body, want) {
+		t.Errorf("report should contain %q; got: %q", want, body)
 	}
 }
