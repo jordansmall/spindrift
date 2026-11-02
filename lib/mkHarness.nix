@@ -778,8 +778,11 @@ let
   # The fragment rows the forbidden-marker scan reaches (issue #2510): every
   # row except those whose gate name already proves the fragment is
   # access-mode-aware, so a legitimate negation ("do NOT `git push`") in the
-  # read-only half of a pair is never mistaken for a leak. Unconditional: such
-  # a marker in the corpus is a problem for any Consumer, not just this build.
+  # read-only half of a pair is never mistaken for a leak. A HOST_MEDIATED*
+  # gate qualifies under either access mode (issue #6259): the clone source is
+  # read-only there, so its "do NOT `git push`" is always a negation.
+  # Unconditional: such a marker in the corpus is a problem for any Consumer,
+  # not just this build.
   readOnlyReachableFragmentRows = builtins.filter (
     row:
     !(
@@ -788,6 +791,7 @@ let
       || lib.hasInfix "READWRITE" row.gate
       || lib.hasInfix "READ_WRITE" row.gate
       || lib.hasInfix "_RW_" row.gate
+      || lib.hasInfix "HOST_MEDIATED" row.gate
       || isDirectFileGate row
     )
   ) fragments;

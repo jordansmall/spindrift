@@ -193,7 +193,11 @@ a token that holds none of those capabilities.
 `BOX_ACCESS_READ_ONLY` gate the push/create steps above use: under
 `read-only`, the Box writes the outbox bundle and a `SPINDRIFT_PR_INTENT`
 line instead, and reports `landing=` as the branch name rather than a PR URL
-it never learns. Settle's `blocked` outcome case now also relays that bundle
+it never learns. (Amended by issue #6259: the COMMIT push step no longer
+forks on write access. It forks on `BOX_PUSH_READ_WRITE`,
+`OUTBOX_PUSH_READ_ONLY` and `HOST_MEDIATED_PUSH`, so a read-only Box on a
+host-mediated forge gets the host-mediated copy; `IF BLOCKED` still forks
+on write access.) Settle's `blocked` outcome case now also relays that bundle
 (and opens the draft PR, if a PR-intent line was left) the same way
 `hostMediateDraftPR` does for `ready` — without this, a blocked-but-real
 bundle/PR-intent the Box left behind would be silently dropped the moment the

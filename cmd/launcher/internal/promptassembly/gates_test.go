@@ -638,7 +638,9 @@ func TestGatesChoreInput(t *testing.T) {
 
 // A host-mediated remote (a read-only clone source, ADR 0033) never lets a
 // read-write Box push, so the push gates flip to the host-mediated arm, while
-// the unset relay bit puts its PR step on the no-PR arm (issue #5251).
+// the unset relay bit puts its PR step on the no-PR arm (issue #5251). The
+// COMMIT push-row gates (HOST_MEDIATED_PUSH, OUTBOX_PUSH_READ_ONLY) are pinned
+// here too.
 func TestGatesHostMediatedReadWrite(t *testing.T) {
 	cases := []struct {
 		name string
@@ -649,6 +651,8 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 			name: "host-mediated read-write",
 			env:  Env{BoxWriteEnabled: true, HostMediatedRemote: true},
 			want: map[string]bool{
+				"HOST_MEDIATED_PUSH":       true,
+				"OUTBOX_PUSH_READ_ONLY":    false,
 				"BOX_PUSH_READ_WRITE":      false,
 				"HOST_MEDIATED_READ_WRITE": true,
 				"IF_BLOCKED_PR_RW_GH":      false,
@@ -659,6 +663,8 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 			name: "github read-write",
 			env:  Env{BoxWriteEnabled: true, ForgeBackend: "GH", OutboxRelayCapable: true},
 			want: map[string]bool{
+				"HOST_MEDIATED_PUSH":       false,
+				"OUTBOX_PUSH_READ_ONLY":    false,
 				"BOX_PUSH_READ_WRITE":      true,
 				"HOST_MEDIATED_READ_WRITE": false,
 				"IF_BLOCKED_PR_RW_GH":      true,
@@ -668,6 +674,8 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 			name: "forgejo read-write",
 			env:  Env{BoxWriteEnabled: true, ForgeBackend: "FORGEJO", OutboxRelayCapable: true},
 			want: map[string]bool{
+				"HOST_MEDIATED_PUSH":       false,
+				"OUTBOX_PUSH_READ_ONLY":    false,
 				"BOX_PUSH_READ_WRITE":      true,
 				"HOST_MEDIATED_READ_WRITE": false,
 			},
@@ -676,6 +684,8 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 			name: "read-only",
 			env:  Env{BoxWriteEnabled: false},
 			want: map[string]bool{
+				"HOST_MEDIATED_PUSH":       false,
+				"OUTBOX_PUSH_READ_ONLY":    true,
 				"BOX_PUSH_READ_WRITE":      false,
 				"HOST_MEDIATED_READ_WRITE": false,
 			},
@@ -684,6 +694,8 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 			name: "read-only host-mediated",
 			env:  Env{BoxWriteEnabled: false, HostMediatedRemote: true},
 			want: map[string]bool{
+				"HOST_MEDIATED_PUSH":       true,
+				"OUTBOX_PUSH_READ_ONLY":    false,
 				"BOX_PUSH_READ_WRITE":      false,
 				"HOST_MEDIATED_READ_WRITE": false,
 			},
@@ -698,6 +710,26 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Exactly one COMMIT push fragment renders per env (lib/fragments.nix), so
+// exactly one of the three push-row gates must be on for every access combo.
+func TestGatesCommitPushRowsPartition(t *testing.T) {
+	for _, write := range []bool{false, true} {
+		for _, mediated := range []bool{false, true} {
+			env := Env{BoxWriteEnabled: write, HostMediatedRemote: mediated}
+			got := Gates(env)
+			n := 0
+			for _, g := range []string{"BOX_PUSH_READ_WRITE", "HOST_MEDIATED_PUSH", "OUTBOX_PUSH_READ_ONLY"} {
+				if got[g] {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("Gates(%+v): %d push-row gates on, want exactly 1", env, n)
+			}
+		}
 	}
 }
 
