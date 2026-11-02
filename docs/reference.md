@@ -1612,7 +1612,9 @@ no Driver and no github, forgejo or jira adapter (ADR 0066 decision 8, ADR
   `SessionTotals` sums the `result` events instead, for a CLI whose
   per-session summary is the ground truth for output tokens, cost, turns and
   durations (`claude`); `usage` events then feed only the per-model and
-  per-role breakdowns.
+  per-role breakdowns, minus their output tokens: a per-model row's output
+  comes from the `result` events' per-model summary (issue #6269), and reads
+  `n/a` in the Run usage comment when that summary names no figure for it.
 - `WriteTool` — the CLI's file-write tool name; empty tracks no writes.
 - `Heartbeat` — a `driverkit.HeartbeatTracking` opting the heartbeat into
   phase, tool-kind count and model-family labels (`claude` fills it,
