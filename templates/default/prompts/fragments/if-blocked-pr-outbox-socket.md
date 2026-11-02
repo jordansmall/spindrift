@@ -35,3 +35,8 @@ SPINDRIFT_SIGNAL_EOF
 
    Sending the command again replaces the earlier intent rather than racing
    it, so correcting a title or body costs one more call, never the run.
+
+   If it never exits zero, even after you fixed each rejection's reason and
+   sent it again — here or before you reached IF BLOCKED — stop resending
+   and go on to step 5, naming the rejection in `note=` alongside what's
+   done and what remains.

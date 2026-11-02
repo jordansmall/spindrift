@@ -667,9 +667,9 @@ it is missing, the run is wasted.
 so your PR intent is queued — not that a PR already exists. The launcher
 relays your branch, opens the draft PR from that intent, then takes it from
 there as OPEN A PULL REQUEST above describes. If the command never exited
-zero, even after you fixed each rejection's reason and sent it again, no
-intent is queued: print `status=blocked` instead, with a `note=` naming the
-rejection. You never run `gh pr create`, `gh pr ready`,
+zero, no intent is queued: follow IF BLOCKED below instead, which ends in
+`status=blocked` with a `note=` naming the rejection. You never run
+`gh pr create`, `gh pr ready`,
 `gh issue edit ... --add-label agent-complete`, or `gh pr merge` — your
 token cannot.
 
@@ -735,6 +735,11 @@ SPINDRIFT_SIGNAL_EOF
 
    Sending the command again replaces the earlier intent rather than racing
    it, so correcting a title or body costs one more call, never the run.
+
+   If it never exits zero, even after you fixed each rejection's reason and
+   sent it again — here or before you reached IF BLOCKED — stop resending
+   and go on to step 5, naming the rejection in `note=` alongside what's
+   done and what remains.
 
 3. Leave the issue in-progress — do NOT close it.
 4. Your GitHub token is read-only here — you cannot comment on the issue
