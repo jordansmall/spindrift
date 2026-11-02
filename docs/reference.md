@@ -3499,6 +3499,18 @@ roles), so the pass's API-call count reaches
 or produced no usage events emits a zero-valued summary rather than
 nothing, so the marker is present for every pass.
 
+Between a pass's `pass_start` and its first Driver line, `driver-exec`
+emits a `pass_model` marker (issue #6270) naming the exact model id and
+effort it hands the Driver, after the reviewer pass's `ReviewModel`
+override, and nothing when the pass runs on the Driver's default model.
+It goes to stdout only, never the pass's own log. opencode's stream never
+names a step's model, so its decoder attributes each step's usage to the
+model this marker announced until the next `pass_start`, and takes the role
+from that `pass_start`, so the host reports a review pass's model under
+`reviewer`. The heartbeat prints no line for the marker; the role header
+carries `model:effort`. A log from before the marker existed still
+attributes opencode usage to `unknown`.
+
 Right after the terminal land pass returns, the orchestrator emits a
 `land_delta` marker (issue #3244) carrying what landing changed relative to
 the tree the reviewer APPROVEd (`runstate.ReviewedCommitAnchor`, issue
