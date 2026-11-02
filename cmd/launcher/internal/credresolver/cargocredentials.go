@@ -33,8 +33,8 @@ func cargoCredentialsToken(content []byte, sourceName, registryName string) (str
 		return "", fmt.Errorf("cargo credentials file %s has no [registries.%s] table", sourceName, registryName)
 	}
 	if entry.Token == "" {
-		// Unlike netrc.go's strings.Fields(), TOML can represent an empty
-		// value, so an empty quoted string has to fail closed here.
+		// TOML can represent an empty value, so an empty quoted string has to
+		// fail closed here.
 		return "", fmt.Errorf("cargo credentials file %s has table [registries.%s] but no token field", sourceName, registryName)
 	}
 	if hasDisallowedTokenChars(entry.Token) {
