@@ -1807,13 +1807,21 @@ explanation, not enforcement):
   the masker scans it as live code and `echo "$(nohup cmd &)"` denies while
   `echo "foo & bar"` still allows. It also honours `\'` inside ANSI-C
   `$'...'` quoting, and a `$(...)`, backtick, or `$'...'` left unclosed at
-  end of input fails closed (denies). Two edge cases are accepted false
-  positives rather than chased: a literal `&` in arithmetic context
-  (`$((3 & 4))`, including inside double quotes), and a heredoc body. The
-  scan isn't heredoc- or `$((...))`-aware, so a literal `&` in a heredoc
-  body (or, inside `"$(...)"` as in `git commit -m "$(cat <<'EOF' ...)"`,
-  an apostrophe) or an unbalanced `$(`, backtick, or `$'...'` anywhere in
-  it denies a call that was actually safe.
+  end of input fails closed (denies). Issue #6240 makes the masker read
+  heredocs: a quoted-delimiter body (`<<'EOF'`, `<<"EOF"`, `<<\EOF`,
+  `<<-'EOF'`, `<<$'EOF'`) is inert text, so a signal body quoting
+  `sleep 300 &` passes, including inside `"$(cat <<'EOF' ...)"`. A
+  heredoc delimiter holding a `$'...'` escape, an unclosed quote, or a
+  backslash-newline fails closed, and an unquoted body line ending in a
+  backslash joins the next line before the terminator test, as in bash.
+  A `<<` in a `#` comment, `${...}`, or arithmetic opens no heredoc, so
+  the lines after it are still scanned, and an unclosed `${...}` or
+  `$((...))` fails closed too. An unquoted body is still scanned, since bash expands `$(...)` and
+  backticks there; `<<<` stays a here-string scanned as code. Two edge
+  cases are accepted false positives rather than chased: a literal `&` in
+  arithmetic context (`$((3 & 4))`, including inside double quotes), and
+  an `&` or keyword in an unquoted heredoc body, which denies a call that
+  was actually safe.
 
 Issue #2011 found a second, unclosed vector for the same failure mode:
 the async `Agent`/`Task` subagent-launch tool backgrounds *by default*
