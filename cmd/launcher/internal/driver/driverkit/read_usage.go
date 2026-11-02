@@ -20,10 +20,31 @@ import (
 // family rank (ascending) then exact id when family is non-nil, by id alone
 // when it is nil: family is the Driver's heartbeat hook, which supplies the
 // rank, so a Driver whose ids are not a ranked model family passes nil.
-func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily) ([]usage.ModelUsage, error) {
+//
+// Under PerCallTotals OutputTokens are summed per call. Under SessionTotals
+// the per-call output is a placeholder (#3183) and is never used: a row's
+// OutputTokens is instead the sum of its model's per-model figure over the
+// KindResult events (issue #6269). That holds only when the log has a result
+// and every result carries per-model figures; otherwise every row is
+// OutputUnavailable. A row whose model no result names is OutputUnavailable
+// too (such as `<synthetic>` or unknown, which no result names), and a model
+// only a result names gets a row of its own. A NoTotals result is skipped
+// entirely, as SumTotals does.
+func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily, src TotalsSource) ([]usage.ModelUsage, error) {
 	buckets := make(map[string]*usage.ModelUsage)
 	seenIDs := make(map[string]bool)
+	resultOutput := make(map[string]int)
+	results, complete := 0, true
 	err := scanEvents(path, newDecoder, func(ev Event) {
+		if ev.Kind == KindResult && !ev.NoTotals && src == SessionTotals {
+			results++
+			if len(ev.ModelOutput) == 0 {
+				complete = false
+			}
+			for model, out := range ev.ModelOutput {
+				resultOutput[model] += out
+			}
+		}
 		if ev.Kind != KindUsage {
 			return
 		}
@@ -34,19 +55,32 @@ func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily) ([
 		if model == "" {
 			model = usage.UnknownModel
 		}
-		b, ok := buckets[model]
-		if !ok {
-			b = &usage.ModelUsage{Model: model}
-			buckets[model] = b
-		}
+		b := modelBucket(buckets, model)
 		b.UncachedInputTokens += ev.Tokens.Input
-		b.OutputTokens += ev.Tokens.Output
+		if src == PerCallTotals {
+			b.OutputTokens += ev.Tokens.Output
+		}
 		b.CacheReadInputTokens += ev.Tokens.CacheRead
 		b.CacheWrite5mTokens += ev.Tokens.CacheWrite5m
 		b.CacheWrite1hTokens += ev.Tokens.CacheWrite1h
 	})
 	if err != nil {
 		return nil, err
+	}
+	if src == SessionTotals {
+		outputKnown := complete && results > 0
+		if outputKnown {
+			for model := range resultOutput {
+				modelBucket(buckets, model)
+			}
+		}
+		for model, b := range buckets {
+			if out, named := resultOutput[model]; outputKnown && named {
+				b.OutputTokens = out
+			} else {
+				b.MarkOutputUnavailable()
+			}
+		}
 	}
 	models := make([]string, 0, len(buckets))
 	for model := range buckets {
@@ -331,4 +365,13 @@ func firstSighting(seen map[string]bool, id string) bool {
 	}
 	seen[id] = true
 	return true
+}
+
+func modelBucket(buckets map[string]*usage.ModelUsage, model string) *usage.ModelUsage {
+	b, ok := buckets[model]
+	if !ok {
+		b = &usage.ModelUsage{Model: model}
+		buckets[model] = b
+	}
+	return b
 }

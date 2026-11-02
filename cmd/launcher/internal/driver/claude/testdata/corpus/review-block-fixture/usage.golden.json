@@ -20,7 +20,8 @@
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 0,
       "Model": "claude-sonnet-5",
-      "OutputTokens": 30,
+      "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 60
     }
   ],

@@ -208,6 +208,19 @@ func (d *decoder) decodeLine(line string, top *topLevel) []driverkit.Event {
 	if json.Unmarshal([]byte(line), &mu) == nil {
 		result.Models = slices.Sorted(maps.Keys(mu.ModelUsage))
 	}
+	// Per-model output, decoded apart again: one mistyped figure drops them
+	// all (the log then reads as having none) without touching Models.
+	var mo struct {
+		ModelUsage map[string]struct {
+			OutputTokens int `json:"outputTokens"`
+		} `json:"modelUsage"`
+	}
+	if json.Unmarshal([]byte(line), &mo) == nil && len(mo.ModelUsage) > 0 {
+		result.ModelOutput = make(map[string]int, len(mo.ModelUsage))
+		for model, u := range mo.ModelUsage {
+			result.ModelOutput[model] = u.OutputTokens
+		}
+	}
 	out := []driverkit.Event{result}
 	// An is_error result is a genuine failure, never an echo of preceding content.
 	if d.echoPending && textOK && notError {

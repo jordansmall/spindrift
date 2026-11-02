@@ -449,6 +449,35 @@ func TestDecodeResultMistypedModelUsageKeepsTotals(t *testing.T) {
 	}
 }
 
+func TestDecodeResultModelOutputFromModelUsage(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"ok","num_turns":2,"modelUsage":{"claude-sonnet":{"outputTokens":7},"claude-haiku":{"outputTokens":0}}}`)
+	want := map[string]int{"claude-sonnet": 7, "claude-haiku": 0}
+	if !reflect.DeepEqual(evs[0].ModelOutput, want) {
+		t.Errorf("ModelOutput = %v, want %v", evs[0].ModelOutput, want)
+	}
+}
+
+// A per-model figure that fails to decode leaves the result without any, yet
+// Models and the totals stay intact.
+func TestDecodeResultMistypedModelOutputKeepsModels(t *testing.T) {
+	for _, tc := range []struct {
+		mu         string
+		wantModels []string
+	}{
+		{`{}`, nil},
+		{`"oops"`, nil},
+		{`{"claude-opus":{"outputTokens":"many"}}`, []string{"claude-opus"}},
+	} {
+		evs := newDecoderAt(decodeNow)(`{"type":"result","result":"ok","num_turns":2,"modelUsage":` + tc.mu + `}`)
+		if evs[0].ModelOutput != nil || evs[0].NoTotals || evs[0].NumTurns != 2 {
+			t.Errorf("modelUsage %s: event = %+v, want nil ModelOutput and intact totals", tc.mu, evs[0])
+		}
+		if !reflect.DeepEqual(evs[0].Models, tc.wantModels) {
+			t.Errorf("modelUsage %s: Models = %v, want %v", tc.mu, evs[0].Models, tc.wantModels)
+		}
+	}
+}
+
 // BenchmarkDecode runs a fresh decoder over every corpus pass log, so the
 // per-line decode cost stays measurable (issue #5438).
 func BenchmarkDecode(b *testing.B) {

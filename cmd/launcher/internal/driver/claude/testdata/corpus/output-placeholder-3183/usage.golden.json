@@ -28,7 +28,8 @@
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 150,
       "Model": "claude-opus-4-8",
-      "OutputTokens": 26,
+      "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 80
     },
     {
@@ -36,7 +37,8 @@
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 30,
       "Model": "claude-haiku-4-5",
-      "OutputTokens": 11,
+      "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 25
     }
   ],

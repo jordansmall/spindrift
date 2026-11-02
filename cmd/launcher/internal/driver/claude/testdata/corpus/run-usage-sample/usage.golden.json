@@ -36,7 +36,8 @@
       "CacheWrite1hTokens": 140,
       "CacheWrite5mTokens": 260,
       "Model": "claude-opus-4-8",
-      "OutputTokens": 70,
+      "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 140
     },
     {
@@ -44,7 +45,8 @@
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 70,
       "Model": "claude-haiku-4-5-20251001",
-      "OutputTokens": 9,
+      "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 18
     },
     {
@@ -52,7 +54,8 @@
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 0,
       "Model": "claude-sonnet-5",
-      "OutputTokens": 15,
+      "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 30
     }
   ],

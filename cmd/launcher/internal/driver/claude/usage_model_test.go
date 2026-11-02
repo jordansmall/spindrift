@@ -53,8 +53,8 @@ func TestExtractUsage_ModelBreakdown_Fixture(t *testing.T) {
 	if opus.UncachedInputTokens != 140 {
 		t.Errorf("opus.UncachedInputTokens = %d, want 140", opus.UncachedInputTokens)
 	}
-	if opus.OutputTokens != 70 {
-		t.Errorf("opus.OutputTokens = %d, want 70", opus.OutputTokens)
+	if opus.OutputTokens != 0 || !opus.OutputUnavailable {
+		t.Errorf("opus output = %d, unavailable = %v; want 0, true (no modelUsage in fixture, issue #6269)", opus.OutputTokens, opus.OutputUnavailable)
 	}
 	if opus.CacheReadInputTokens != 3000 {
 		t.Errorf("opus.CacheReadInputTokens = %d, want 3000", opus.CacheReadInputTokens)
@@ -70,8 +70,8 @@ func TestExtractUsage_ModelBreakdown_Fixture(t *testing.T) {
 	if haiku.UncachedInputTokens != 18 {
 		t.Errorf("haiku.UncachedInputTokens = %d, want 18", haiku.UncachedInputTokens)
 	}
-	if haiku.OutputTokens != 9 {
-		t.Errorf("haiku.OutputTokens = %d, want 9", haiku.OutputTokens)
+	if haiku.OutputTokens != 0 || !haiku.OutputUnavailable {
+		t.Errorf("haiku output = %d, unavailable = %v; want 0, true (no modelUsage in fixture, issue #6269)", haiku.OutputTokens, haiku.OutputUnavailable)
 	}
 	if haiku.CacheReadInputTokens != 800 {
 		t.Errorf("haiku.CacheReadInputTokens = %d, want 800", haiku.CacheReadInputTokens)
@@ -87,8 +87,8 @@ func TestExtractUsage_ModelBreakdown_Fixture(t *testing.T) {
 	if sonnet.UncachedInputTokens != 30 {
 		t.Errorf("sonnet.UncachedInputTokens = %d, want 30", sonnet.UncachedInputTokens)
 	}
-	if sonnet.OutputTokens != 15 {
-		t.Errorf("sonnet.OutputTokens = %d, want 15", sonnet.OutputTokens)
+	if sonnet.OutputTokens != 0 || !sonnet.OutputUnavailable {
+		t.Errorf("sonnet output = %d, unavailable = %v; want 0, true (no modelUsage in fixture, issue #6269)", sonnet.OutputTokens, sonnet.OutputUnavailable)
 	}
 	if sonnet.CacheReadInputTokens != 700 {
 		t.Errorf("sonnet.CacheReadInputTokens = %d, want 700", sonnet.CacheReadInputTokens)
@@ -164,8 +164,8 @@ func TestExtractUsage_ModelBreakdown_DedupByMessageID(t *testing.T) {
 	if opus.UncachedInputTokens != 140 {
 		t.Errorf("opus.UncachedInputTokens = %d, want 140", opus.UncachedInputTokens)
 	}
-	if opus.OutputTokens != 70 {
-		t.Errorf("opus.OutputTokens = %d, want 70", opus.OutputTokens)
+	if opus.OutputTokens != 0 || !opus.OutputUnavailable {
+		t.Errorf("opus output = %d, unavailable = %v; want 0, true (no modelUsage in fixture, issue #6269)", opus.OutputTokens, opus.OutputUnavailable)
 	}
 	if opus.CacheReadInputTokens != 3000 {
 		t.Errorf("opus.CacheReadInputTokens = %d, want 3000", opus.CacheReadInputTokens)
