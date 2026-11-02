@@ -6,6 +6,7 @@
 package console
 
 import (
+	"fmt"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -85,10 +86,13 @@ type Model struct {
 	// ModeList rather than claiming the keyboard (issue #998).
 	QueueEnterNotice string
 	// Toast is a one-shot message rendered after a queued pick transitions to
-	// running, settled, failed, or held (issue #1830). QueueSnapshotMsg's
-	// handler diffs the snapshot against the outgoing m.Picks, since that
-	// snapshot is Update's only signal of a Queue-side change. It clears on a
-	// generation-pinned tick, so a stale timer cannot clear a newer toast.
+	// running, settled, failed, or held (issue #1830), or when the terminate
+	// confirm's "y" finds the pick already finished (issue #6265).
+	// The pick-transition toasts come from QueueSnapshotMsg's handler, which
+	// diffs the snapshot against the outgoing m.Picks, since that snapshot is
+	// Update's only signal of a Queue-side change; the terminate one comes from
+	// TerminateStaleMsg. It clears on a generation-pinned tick, so a stale
+	// timer cannot clear a newer toast.
 	Toast string
 	// Cursor indexes the highlighted row within the active Section's own row
 	// list (ADR 0030, issue #784). Always clamped into [0, len(rows)-1], 0
@@ -569,6 +573,10 @@ func updateLayout(m Model, msg Msg) (Model, layout) {
 	case TerminateCancelledMsg:
 		m.Mode = ModeList
 		m.TerminateConfirm = TerminateConfirmState{}
+	case TerminateStaleMsg:
+		m.Mode = ModeList
+		m.TerminateConfirm = TerminateConfirmState{}
+		m.Toast = fmt.Sprintf("#%s already finished", msg.Number)
 	case CapMsg:
 		m.Cap = msg.Cap
 		m.Live = msg.Live

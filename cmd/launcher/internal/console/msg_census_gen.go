@@ -64,6 +64,7 @@ var msgCensus = []string{
 	"TerminateCancelledMsg",
 	"TerminateConfirmedMsg",
 	"TerminateRequestedMsg",
+	"TerminateStaleMsg",
 	"ToastDismissedMsg",
 	"UnpickMsg",
 }

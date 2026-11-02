@@ -23,3 +23,11 @@ func (TerminateConfirmedMsg) isConsoleMsg() {}
 type TerminateCancelledMsg struct{}
 
 func (TerminateCancelledMsg) isConsoleMsg() {}
+
+// TerminateStaleMsg reports that the confirm's "y" found the pick already
+// finished (issue #6265). Update closes the prompt and raises a toast.
+type TerminateStaleMsg struct {
+	Number string
+}
+
+func (TerminateStaleMsg) isConsoleMsg() {}
