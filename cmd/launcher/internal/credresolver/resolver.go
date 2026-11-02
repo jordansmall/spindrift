@@ -166,7 +166,16 @@ func (r netrcFileResolver) Peek() (string, error) {
 	}
 	// u.Hostname() strips any port, so a netrc entry keyed "machine host:port"
 	// never matches; the match is host-only.
-	return netrcCredential(b, r.path, u.Hostname())
+	v, err := netrcCredential(b, r.path, u.Hostname())
+	if err != nil {
+		return "", err
+	}
+	// Quoted \n and \r escapes decode to real newlines, which would split the
+	// header the credential is injected into; mirror the raw-file guard.
+	if strings.ContainsAny(v, "\r\n") {
+		return "", fmt.Errorf("registry proxy credential file %s has netrc entry for host %s with an embedded newline", r.path, u.Hostname())
+	}
+	return v, nil
 }
 
 type cargoFileResolver struct {
