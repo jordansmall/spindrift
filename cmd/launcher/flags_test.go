@@ -457,7 +457,7 @@ func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
 	}
 }
 
-// The equals form is on for "1" and "true", off for "", "0" and "false"
+// The equals form takes strconv.ParseBool spellings, plus "" as off
 // (issue #2145 slice B).
 func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 	cases := []struct {
@@ -466,8 +466,11 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 	}{
 		{"--bwrap-unshare-net=1", "1"},
 		{"--bwrap-unshare-net=true", "1"},
+		{"--bwrap-unshare-net=True", "1"},
 		{"--bwrap-unshare-net=0", ""},
 		{"--bwrap-unshare-net=false", ""},
+		{"--bwrap-unshare-net=False", ""},
+		{"--bwrap-unshare-net=FALSE", ""},
 		{"--bwrap-unshare-net=", ""},
 	}
 	for _, c := range cases {
@@ -479,6 +482,28 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 			}
 			if got := os.Getenv("BWRAP_UNSHARE_NET"); got != c.want {
 				t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// A value ParseBool rejects is an error naming the typed flag, not a silent
+// "on"; the env var is left untouched.
+func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
+	cases := []struct{ arg, env, wantErr string }{
+		{"--bwrap-unshare-net=no", "BWRAP_UNSHARE_NET", `flag --bwrap-unshare-net: invalid boolean value "no"`},
+		{"--bwrap-unshare-net=yes", "BWRAP_UNSHARE_NET", `flag --bwrap-unshare-net: invalid boolean value "yes"`},
+		{"--continuous=no", "CONTINUOUS_DISPATCH", `flag --continuous: invalid boolean value "no"`},
+	}
+	for _, c := range cases {
+		t.Run(c.arg, func(t *testing.T) {
+			t.Setenv(c.env, "keep")
+			_, err := parseFlags([]string{c.arg})
+			if err == nil || err.Error() != c.wantErr {
+				t.Fatalf("err = %v, want %q", err, c.wantErr)
+			}
+			if got := os.Getenv(c.env); got != "keep" {
+				t.Errorf("%s = %q, want it unchanged", c.env, got)
 			}
 		})
 	}

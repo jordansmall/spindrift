@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/term"
@@ -435,7 +436,13 @@ func parseFlags(args []string) ([]string, error) {
 		if entry, ok := byBool[name]; ok {
 			var on bool
 			if hasEquals {
-				on = value != "" && value != "0" && value != "false"
+				if value != "" {
+					b, err := strconv.ParseBool(value)
+					if err != nil {
+						return nil, fmt.Errorf("flag %s: invalid boolean value %q", name, value)
+					}
+					on = b
+				}
 			} else {
 				on = true
 			}
