@@ -418,20 +418,52 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 	var replacements []cargoSourceReplacement
 	var warnings []string
 
+	// routeCandidate is the one filter both the ownership pre-pass and the
+	// binding loop apply, so an owner is always a route that goes on to bind
+	// the registry. undeclared is a host match the route's explicit registries
+	// list excludes.
+	routeCandidate := func(d hostedDecl, route registrymanifest.Route, routeRegistries []string) (binds, undeclared bool) {
+		if !cargoRouteHostMatches(d.host, route) || !cargoBareKeyPattern.MatchString(d.name) {
+			return false, false
+		}
+		if len(routeRegistries) > 0 && !slices.Contains(routeRegistries, d.name) {
+			return false, true
+		}
+		return true, false
+	}
+
+	// A [source.X] carries one replace-with, so one route must own each
+	// upstream source (issue #6272): the first route that explicitly declares
+	// a matching registry, else the first unrestricted route on its host.
+	ownerPrefix := make(map[string]string)
+	ownerRegistry := make(map[string]string)
+	ownerIsExplicit := make(map[string]bool)
+	for _, route := range routes {
+		if route.Prefix == "" || route.UpstreamHost == "" {
+			continue
+		}
+		routeRegistries := cargoRouteRegistries(route.Ecosystems)
+		explicit := len(routeRegistries) > 0
+		for _, d := range hosted {
+			if binds, _ := routeCandidate(d, route, routeRegistries); !binds {
+				continue
+			}
+			key := cargoCanonicalSourceURLKey(d.index)
+			if _, owned := ownerPrefix[key]; owned && (ownerIsExplicit[key] || !explicit) {
+				continue
+			}
+			ownerPrefix[key] = route.Prefix
+			ownerRegistry[key] = d.name
+			ownerIsExplicit[key] = explicit
+		}
+	}
+
 	for _, route := range routes {
 		if route.Prefix == "" || route.UpstreamHost == "" {
 			continue
 		}
 
 		routeRegistries := cargoRouteRegistries(route.Ecosystems)
-
-		var declared map[string]bool
-		if len(routeRegistries) > 0 {
-			declared = make(map[string]bool, len(routeRegistries))
-			for _, name := range routeRegistries {
-				declared[name] = true
-			}
-		}
 
 		type matchedDecl struct {
 			name       string
@@ -443,14 +475,11 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 		bound := make(map[string]bool)
 		var matched []matchedDecl
 		for _, d := range hosted {
-			if !cargoRouteHostMatches(d.host, route) {
-				continue
-			}
-			if !cargoBareKeyPattern.MatchString(d.name) {
-				continue
-			}
-			if declared != nil && !declared[d.name] {
+			binds, undeclared := routeCandidate(d, route, routeRegistries)
+			if undeclared {
 				warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(d.name)+" matches route prefix "+strconv.Quote(route.Prefix)+"'s upstream host but is not declared in that route's [routes.ecosystems."+nameCargo+"] "+ecosystem.CargoRouteRegistriesKey)
+			}
+			if !binds {
 				continue
 			}
 			// Marked before the dedupe check on purpose: a name collapsed
@@ -464,6 +493,10 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 				continue
 			}
 			seenIndexURL[canonicalIndexURL] = true
+			if owner := ownerPrefix[canonicalIndexURL]; owner != route.Prefix {
+				warnings = append(warnings, "==> WARNING: cargo registry "+strconv.Quote(d.name)+" matches route prefix "+strconv.Quote(route.Prefix)+"'s upstream host but is already bound to route prefix "+strconv.Quote(owner)+" as registry "+strconv.Quote(ownerRegistry[canonicalIndexURL])+", which shares that upstream host; one cargo source can be replaced through only one route, so route prefix "+strconv.Quote(route.Prefix)+" will not serve it")
+				continue
+			}
 			// Reuse the repo's own claiming source name (issue #3248) when
 			// one exists for this canonical index URL, so a repo spelling
 			// that differs only on the axes above still reuses instead of

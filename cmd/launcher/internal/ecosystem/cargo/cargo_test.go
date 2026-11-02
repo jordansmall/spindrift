@@ -1022,6 +1022,97 @@ index = "sparse+https://corp-b.example.test/index/"
 	}
 }
 
+// Two routes sharing one UpstreamHost must not both bind the same repo
+// registry: a [source.X] carries one replace-with, so a second route would
+// repeat the table (issue #6272).
+func TestCargoRepoAwareConfig_RoutesSharingUpstreamHostBindOnce(t *testing.T) {
+	routes := func(r1, r2 registryvocab.RouteEcosystems) []registrymanifest.Route {
+		return []registrymanifest.Route{
+			{Prefix: "r0", UpstreamHost: "crates.io"},
+			{Prefix: "r1", UpstreamHost: "cargo.example.test", Ecosystems: r1},
+			{Prefix: "r2", UpstreamHost: "cargo.example.test", Ecosystems: r2},
+		}
+	}
+	const registries = "[registries.acme]\nindex = \"sparse+https://cargo.example.test/index/\"\n"
+
+	cases := []struct {
+		name       string
+		routes     []registrymanifest.Route
+		repoConfig string
+		header     string
+		owner      string
+		loser      string
+	}{
+		{
+			name:       "both unrestricted, first owns",
+			routes:     routes(nil, nil),
+			repoConfig: registries,
+			header:     "[source.spindrift-upstream-acme]",
+			owner:      "r1",
+			loser:      "r2",
+		},
+		{
+			name:       "claimed source name reused once",
+			routes:     routes(nil, nil),
+			repoConfig: registries + "\n[source.acme-src]\nregistry = \"sparse+https://cargo.example.test/index/\"\n",
+			header:     "[source.acme-src]",
+			owner:      "r1",
+			loser:      "r2",
+		},
+		{
+			name:       "explicit declaration beats unrestricted",
+			routes:     routes(nil, cargoRouteBlock("acme")),
+			repoConfig: registries,
+			header:     "[source.spindrift-upstream-acme]",
+			owner:      "r2",
+			loser:      "r1",
+		},
+		{
+			name:       "two explicit declarations, first owns",
+			routes:     routes(cargoRouteBlock("acme"), cargoRouteBlock("acme")),
+			repoConfig: registries,
+			header:     "[source.spindrift-upstream-acme]",
+			owner:      "r1",
+			loser:      "r2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, warnings := cargoRepoAwareConfig(8080, "r0", tc.routes, tc.repoConfig)
+
+			assertNoDuplicateCargoSourceTables(t, tc.repoConfig, got)
+			if n := strings.Count(got, tc.header+"\n"); n != 1 {
+				t.Errorf("content declares %s %d times, want exactly 1: %q", tc.header, n, got)
+			}
+			var cfg struct {
+				Source map[string]struct {
+					ReplaceWith string `toml:"replace-with"`
+				} `toml:"source"`
+			}
+			if err := toml.Unmarshal([]byte(got), &cfg); err != nil {
+				t.Fatalf("content is not valid TOML: %v", err)
+			}
+			upstream := strings.TrimSuffix(strings.TrimPrefix(tc.header, "[source."), "]")
+			ownerProxy := "spindrift-registry-proxy-" + tc.owner + "-acme"
+			if rw := cfg.Source[upstream].ReplaceWith; rw != ownerProxy {
+				t.Errorf("[source.%s] replace-with = %q, want %q: %q", upstream, rw, ownerProxy, got)
+			}
+			if loserProxy := "spindrift-registry-proxy-" + tc.loser + "-acme"; strings.Contains(got, loserProxy) {
+				t.Errorf("content names the losing route's %s: %q", loserProxy, got)
+			}
+			if len(warnings) != 1 {
+				t.Fatalf("warnings = %v, want exactly one", warnings)
+			}
+			w := warnings[0]
+			for _, want := range []string{`"acme"`, `route prefix "` + tc.loser + `"`, `route prefix "` + tc.owner + `" as registry "acme"`, "already bound"} {
+				if !strings.Contains(w, want) {
+					t.Errorf("warning %q lacks %q", w, want)
+				}
+			}
+		})
+	}
+}
+
 // registrymanifest.Route.UpstreamHost is minted as u.Host (box.go), which
 // keeps a port when the upstream URL has one, so the decl's parsed host must
 // keep it too or a ported upstream never matches its route.
