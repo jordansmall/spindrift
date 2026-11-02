@@ -20,7 +20,7 @@
       "CacheWrite1hTokens": 33293,
       "CacheWrite5mTokens": 0,
       "Model": "claude-opus-5-5",
-      "OutputTokens": 204,
+      "OutputTokens": 4878,
       "UncachedInputTokens": 20
     }
   ],

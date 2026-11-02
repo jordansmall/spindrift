@@ -362,7 +362,7 @@ func TestUsageByModel(t *testing.T) {
 		usageEv("m2", "alpha", 5, Tokens{Output: 9}),
 		Event{Kind: KindModel, Model: "ignored"},
 	)
-	got, err := UsageByModel(path, nd, nil)
+	got, err := UsageByModel(path, nd, nil, PerCallTotals)
 	want := []usage.ModelUsage{
 		{Model: "alpha", OutputTokens: 9},
 		{Model: usage.UnknownModel, UncachedInputTokens: 5, CacheWrite1hTokens: 6},
@@ -371,7 +371,7 @@ func TestUsageByModel(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, %v; want %+v", got, err, want)
 	}
-	if got, err := UsageByModel(missingLog(t), fakeDecoder(nil), nil); got != nil || err != nil {
+	if got, err := UsageByModel(missingLog(t), fakeDecoder(nil), nil, PerCallTotals); got != nil || err != nil {
 		t.Errorf("missing log: %v, %v", got, err)
 	}
 }
@@ -393,7 +393,7 @@ func TestUsageByModelFamilyOrder(t *testing.T) {
 		}
 		return m, 3
 	}
-	got, err := UsageByModel(path, nd, family)
+	got, err := UsageByModel(path, nd, family, PerCallTotals)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +490,7 @@ func TestHeartbeatWriterCallbackRunsOutsideLock(t *testing.T) {
 }
 
 func byModelOf(nd func() Decoder) func(string) ([]usage.ModelUsage, error) {
-	return func(path string) ([]usage.ModelUsage, error) { return UsageByModel(path, nd, nil) }
+	return func(path string) ([]usage.ModelUsage, error) { return UsageByModel(path, nd, nil, PerCallTotals) }
 }
 
 func TestHeartbeatWriterRendersHostOp(t *testing.T) {
@@ -595,5 +595,75 @@ func TestHeartbeatWriterHeaderCarriesEffortOnModelStaysBare(t *testing.T) {
 		if got := strings.Count(out.String(), label); got != 1 {
 			t.Errorf("header label %q appears %d times, want 1:\n%s", label, got, out.String())
 		}
+	}
+}
+
+func modelOutEv(out map[string]int) Event { return Event{Kind: KindResult, ModelOutput: out} }
+
+// TestUsageByModelSessionOutputFromResults pins that under SessionTotals the
+// output column comes from the results' per-model figures, never from the
+// per-call placeholder (issue #6269).
+func TestUsageByModelSessionOutputFromResults(t *testing.T) {
+	path, nd := evLines(t,
+		usageEv("m1", "a", 1, Tokens{Input: 1, Output: 3}),
+		usageEv("m2", "b", 2, Tokens{Input: 2, Output: 4}),
+		modelOutEv(map[string]int{"a": 100, "c": 7}),
+		modelOutEv(map[string]int{"a": 20}),
+	)
+	got, err := UsageByModel(path, nd, nil, SessionTotals)
+	want := []usage.ModelUsage{
+		{Model: "a", UncachedInputTokens: 1, OutputTokens: 120},
+		{Model: "b", UncachedInputTokens: 2, OutputUnavailable: true},
+		{Model: "c", OutputTokens: 7},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, %v; want %+v", got, err, want)
+	}
+}
+
+func TestUsageByModelSessionIncompleteIsUnavailable(t *testing.T) {
+	for name, results := range map[string][]Event{
+		"no result":         nil,
+		"empty modelUsage":  {modelOutEv(map[string]int{"a": 5}), modelOutEv(nil)},
+		"only empty result": {modelOutEv(nil)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			evs := append([]Event{usageEv("m1", "a", 1, Tokens{Input: 1, Output: 3})}, results...)
+			path, nd := evLines(t, evs...)
+			got, err := UsageByModel(path, nd, nil, SessionTotals)
+			want := []usage.ModelUsage{{Model: "a", UncachedInputTokens: 1, OutputUnavailable: true}}
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("got %+v, %v; want %+v", got, err, want)
+			}
+		})
+	}
+}
+
+// A NoTotals result is skipped entirely: its output is not summed, and an
+// empty one does not force every row unavailable.
+func TestUsageByModelSessionSkipsNoTotalsResults(t *testing.T) {
+	noTotals := func(out map[string]int) Event { e := modelOutEv(out); e.NoTotals = true; return e }
+	path, nd := evLines(t,
+		usageEv("m1", "a", 1, Tokens{Input: 1, Output: 3}),
+		modelOutEv(map[string]int{"a": 5}),
+		noTotals(map[string]int{"a": 100, "c": 7}),
+		noTotals(nil),
+	)
+	got, err := UsageByModel(path, nd, nil, SessionTotals)
+	want := []usage.ModelUsage{{Model: "a", UncachedInputTokens: 1, OutputTokens: 5}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, %v; want %+v", got, err, want)
+	}
+}
+
+func TestUsageByModelPerCallIgnoresResultOutput(t *testing.T) {
+	path, nd := evLines(t,
+		usageEv("m1", "a", 1, Tokens{Output: 3}),
+		modelOutEv(map[string]int{"a": 100, "c": 7}),
+	)
+	got, err := UsageByModel(path, nd, nil, PerCallTotals)
+	want := []usage.ModelUsage{{Model: "a", OutputTokens: 3}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, %v; want %+v", got, err, want)
 	}
 }

@@ -66,6 +66,18 @@ type ModelUsage struct {
 	CacheReadInputTokens int
 	CacheWrite5mTokens   int // cache_creation.ephemeral_5m_input_tokens, summed
 	CacheWrite1hTokens   int // cache_creation.ephemeral_1h_input_tokens, summed
+	// OutputUnavailable is true when the Driver's session summary attributes
+	// no output to this model (or not every result in the log carries
+	// per-model figures): OutputTokens is then 0 and must not be shown as a
+	// real figure. omitempty keeps other Drivers' serialized rows unchanged.
+	OutputUnavailable bool `json:",omitempty"`
+}
+
+// MarkOutputUnavailable flags the row's output as unknown, zeroing
+// OutputTokens so the two fields cannot disagree.
+func (m *ModelUsage) MarkOutputUnavailable() {
+	m.OutputUnavailable = true
+	m.OutputTokens = 0
 }
 
 // MainLoopAgent is the Agent label SummedByAgent uses for messages with no
@@ -98,7 +110,10 @@ func (a AgentUsage) TotalTokens() int {
 // per-agent breakdowns. Found is false when the log has no result event or
 // does not exist, and Totals is then zero-valued. Totals sums whole sessions,
 // whereas SummedByModel and SummedByAgent sum per call and deduplicate by
-// message id, so they deliberately do not reconcile numerically.
+// message id, so they deliberately do not reconcile numerically. The exception
+// is SummedByModel's OutputTokens under session totals: the per-call output is
+// a placeholder (issue #6269), so it comes from the result events' per-model
+// summary, and ModelUsage.OutputUnavailable marks a row with no such figure.
 type Report struct {
 	Totals        Usage
 	Found         bool

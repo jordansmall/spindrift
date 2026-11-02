@@ -185,6 +185,12 @@ type Event struct {
 	// heartbeat) nor a KindUsage.Model (which includes synthetic turns).
 	Models []string
 
+	// ModelOutput is the output tokens the CLI's session summary attributes
+	// to each model id, meaningful on KindResult only. Nil when the summary
+	// carries no usable per-model figure (absent, empty or mistyped), which
+	// is distinct from a model whose figure is 0.
+	ModelOutput map[string]int
+
 	// NoTotals marks a KindResult whose session totals failed to decode: it
 	// still carries Text, but the usage reader skips it entirely.
 	NoTotals bool

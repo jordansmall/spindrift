@@ -36,7 +36,7 @@
       "CacheWrite1hTokens": 166943,
       "CacheWrite5mTokens": 49856,
       "Model": "claude-opus-5-5",
-      "OutputTokens": 1645,
+      "OutputTokens": 25296,
       "UncachedInputTokens": 100
     },
     {
@@ -44,7 +44,7 @@
       "CacheWrite1hTokens": 0,
       "CacheWrite5mTokens": 12773,
       "Model": "claude-sonnet-5-5",
-      "OutputTokens": 16,
+      "OutputTokens": 683,
       "UncachedInputTokens": 2
     }
   ],

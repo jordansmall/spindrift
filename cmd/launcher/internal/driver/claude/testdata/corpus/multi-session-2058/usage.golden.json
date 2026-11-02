@@ -21,6 +21,7 @@
       "CacheWrite5mTokens": 0,
       "Model": "unknown",
       "OutputTokens": 0,
+      "OutputUnavailable": true,
       "UncachedInputTokens": 0
     }
   ],

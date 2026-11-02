@@ -62,7 +62,7 @@ func (d Driver) NewStreamFilter(w io.Writer) StreamFilter {
 
 func (d Driver) ExtractUsage(logPath string) (usage.Report, error) {
 	byModel := func(p string) ([]usage.ModelUsage, error) {
-		return usageByModel(p, d.s.NewDecoder, d.s.Heartbeat.Family)
+		return usageByModel(p, d.s.NewDecoder, d.s.Heartbeat.Family, d.s.Totals)
 	}
 	byAgent := func(p string) ([]usage.AgentUsage, error) {
 		return usageByAgent(p, d.s.NewDecoder, d.s.Totals)
