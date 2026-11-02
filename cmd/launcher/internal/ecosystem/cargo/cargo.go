@@ -571,11 +571,19 @@ func cargoConfigTOMLWithReplacements(port int, prefix string, replacements []car
 
 	// Two replacements can share one ProxySource, and repeating a table name
 	// in one file is a duplicate-table TOML error, not a merge, so the pair is
-	// emitted with the first replacement that claims the name.
+	// emitted with the first replacement that claims the name. The planner
+	// already gives each upstream one owning route (issue #6272), so the same
+	// guard on upstream sources only keeps a regression there from emitting
+	// invalid TOML.
 	emittedProxySources := make(map[string]bool)
+	emittedUpstreamSources := make(map[string]bool)
 
 	for _, rep := range replacements {
 		for _, up := range rep.Upstreams {
+			if emittedUpstreamSources[up.SourceName] {
+				continue
+			}
+			emittedUpstreamSources[up.SourceName] = true
 			fmt.Fprintf(&b, "\n[source.%s]\nregistry = %q\nreplace-with = %q\n", up.SourceName, up.IndexURL, rep.ProxySource)
 		}
 
