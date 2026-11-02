@@ -195,6 +195,22 @@ func (l *Launcher) Unpick(num string) ([]Pick, bool) {
 	return l.queueRef().Snapshot(), removed
 }
 
+// CloseQueue drops every unclaimed pick and stops the queue accepting more, so
+// nothing claims after a confirmed quit (issue #6266). Dropped picks were
+// already Dispatchable on the tracker, so this makes no tracker call; only a
+// pick caught mid-claim has its claim handed back (see Queue.Discover).
+func (l *Launcher) CloseQueue() {
+	l.queueRef().Close()
+	l.signalRefresh()
+}
+
+// CloseQueueIfIdle is CloseQueue, but only when no pick is claiming or running,
+// reporting whether it closed. It signals no refresh: its caller quits at once,
+// and a snapshot landing ahead of the quit would blank the final model.
+func (l *Launcher) CloseQueueIfIdle() bool {
+	return l.queueRef().CloseIfIdle()
+}
+
 // Cap returns the session's current live parallelism cap.
 func (l *Launcher) Cap() int {
 	return l.limiter().Cap()
