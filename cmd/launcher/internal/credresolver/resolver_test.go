@@ -490,6 +490,47 @@ func TestNew_NetrcFormatFileMissingIsError(t *testing.T) {
 	}
 }
 
+func TestNew_NetrcFormatEmbeddedNewlineIsError(t *testing.T) {
+	for name, escape := range map[string]string{"lf": `\n`, "cr": `\r`} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "netrc")
+			content := `machine registry.example.com password "s3kr` + escape + `1tval"` + "\n"
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("failed to write temp cred file: %v", err)
+			}
+
+			_, err := New(Config{FromFile: path, FileFormat: "netrc", UpstreamURL: "https://registry.example.com/x"}).Peek()
+			if err == nil {
+				t.Fatal("expected error when netrc password decodes to an embedded newline, got nil")
+			}
+			for _, want := range []string{"newline", path, "registry.example.com"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("expected error to mention %q, got: %v", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "s3kr") || strings.Contains(err.Error(), "1tval") {
+				t.Errorf("error leaks credential fragments: %v", err)
+			}
+		})
+	}
+}
+
+func TestNew_NetrcFormatEscapedTabStillResolves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "netrc")
+	content := `machine registry.example.com password "a\tb"` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write temp cred file: %v", err)
+	}
+
+	got, err := New(Config{FromFile: path, FileFormat: "netrc", UpstreamURL: "https://registry.example.com/x"}).Peek()
+	if err != nil {
+		t.Fatalf("Peek: %v", err)
+	}
+	if got != "a\tb" {
+		t.Errorf("got %q, want %q", got, "a\tb")
+	}
+}
+
 func TestNew_ExecResolvesFromTrimmedStdout(t *testing.T) {
 	r := New(Config{ExecArgv: []string{"/bin/sh", "-c", "echo tok"}, MatchHost: "registry.example.com"})
 	for _, call := range []struct {
