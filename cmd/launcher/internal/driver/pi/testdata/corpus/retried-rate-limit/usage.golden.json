@@ -1,5 +1,5 @@
 {
-  "EarliestEventMs": 1792330261111,
+  "EarliestEventMs": 1792330261058,
   "Found": true,
   "HasEventSpan": true,
   "LatestEventMs": 1792330261122,
@@ -28,7 +28,7 @@
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 40,
     "duration_api_ms": 0,
-    "duration_ms": 11,
+    "duration_ms": 64,
     "input_tokens": 80,
     "num_turns": 2,
     "output_tokens": 30,

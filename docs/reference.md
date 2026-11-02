@@ -1645,7 +1645,7 @@ that recognises a `result` line echoing a marker the agent already quoted.
 
 | Kind | Fills (besides `Role`, `MessageID`, `Timestamp` where the line has them) | Read by |
 |------|------|------|
-| `start` | none; `claude` emits one per assistant or user turn as its progress marker | usage (anchors the run's span), classifier (progress) |
+| `start` | none; `claude` emits one per assistant or user turn as its progress marker | classifier (progress) |
 | `text` | `Text`, and `Synthetic` for a turn the CLI wrote itself | result, transcript, heartbeat; classifier (progress, unless `Synthetic`) |
 | `reasoning` | `Text` | classifier (progress) only, never narration or result |
 | `tool_call` | `ToolID`, `ToolName`, `ToolInput`, `ToolTarget` | transcript; heartbeat (first call per message, counted and phased only with a `HeartbeatTracking` `Kind` hook); classifier (progress) |
@@ -1659,6 +1659,8 @@ that recognises a `result` line echoing a marker the agent already quoted.
 
 The progress kinds are `driverkit.IsProgress`; opencode's `ResolveExit`
 reads the same set to tell a recovered `error` from an unrecovered one.
+A per-call usage span runs from the earliest stamped event of any kind to
+the last `usage` event.
 
 `driverkit/event.go` holds the field-level contract, including what each
 reader does with an event. A few conventions matter to a decoder author.

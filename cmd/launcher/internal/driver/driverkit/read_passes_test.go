@@ -190,12 +190,35 @@ func TestReadPassesPerCallTotals(t *testing.T) {
 	}
 }
 
-func TestReadPassesPerCallNoStartLeavesDurationUnset(t *testing.T) {
+func TestReadPassesPerCallNoTimestampLeavesDurationUnset(t *testing.T) {
 	got := readPasses(t, PassOptions{Totals: PerCallTotals}, "", nil,
-		[]Event{{Kind: KindUsage, Timestamp: 5000}},
+		[]Event{{Kind: KindUsage}},
 	)
 	if got[0].Usage.DurationMs != 0 {
-		t.Errorf("DurationMs = %d, want 0 without a KindStart", got[0].Usage.DurationMs)
+		t.Errorf("DurationMs = %d, want 0 without a timestamp", got[0].Usage.DurationMs)
+	}
+}
+
+func TestReadPassesPerCallUnstampedUsageAfterStampedEventLeavesDurationUnset(t *testing.T) {
+	got := readPasses(t, PassOptions{Totals: PerCallTotals}, "", nil,
+		[]Event{{Kind: KindModel, Timestamp: 1000}},
+		[]Event{{Kind: KindUsage}},
+	)
+	if got[0].Usage.DurationMs != 0 {
+		t.Errorf("DurationMs = %d, want 0 for an unstamped usage", got[0].Usage.DurationMs)
+	}
+}
+
+// An all-attempts-errored run has no KindStart; the first stamped event of any
+// kind anchors the span (issue #6271).
+func TestReadPassesPerCallAnchorsOnEarliestEventWithoutStart(t *testing.T) {
+	got := readPasses(t, PassOptions{Totals: PerCallTotals}, "", nil,
+		[]Event{{Kind: KindModel, Timestamp: 1000}},
+		[]Event{{Kind: KindError, Timestamp: 1050}},
+		[]Event{{Kind: KindUsage, Timestamp: 1200}},
+	)
+	if got[0].Usage.DurationMs != 200 {
+		t.Errorf("DurationMs = %d, want 200", got[0].Usage.DurationMs)
 	}
 }
 
