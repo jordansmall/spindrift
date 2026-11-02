@@ -515,6 +515,22 @@ func TestHeartbeatWriterRendersHostOp(t *testing.T) {
 	}
 }
 
+// pass_model reaches every Driver's stream; printing it would change claude's
+// and pi's heartbeats, which have no model line.
+func TestHeartbeatWriterSkipsPassModelOp(t *testing.T) {
+	table := map[string][]Event{
+		"op": {{Kind: KindHostOp, HostOp: &hostop.SpindriftOp{Op: hostop.OpPassModel, Model: "m", Effort: "high"}}},
+	}
+	var raw, out bytes.Buffer
+	w := NewHeartbeatWriter(&raw, "7", &out, fakeDecoder(table), "")
+	if _, err := w.Write([]byte("op\n")); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("pass_model op wrote %q, want nothing", out.String())
+	}
+}
+
 func TestHeartbeatWriterTrackingGroupsByLineNotBlockOrder(t *testing.T) {
 	call := func(name string) Event { return Event{Kind: KindToolCall, ToolName: name} }
 	table := map[string][]Event{

@@ -34,6 +34,10 @@ type SpindriftOp struct {
 	// single-loop path that never distinguishes roles.
 	Role    string `json:"role,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
+	// Model and Effort name the exact model id and effort the pass runs with
+	// on a pass_model op (issue #6270). Empty on every other op kind.
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 	// Kind names the signal kind on a "signal" op (issue #3724): "comment",
 	// "pr-intent", "issue-intent", "status", or "unknown" (the sentinel for
 	// a path outside the four routes). Empty on every other op kind.
@@ -93,6 +97,10 @@ const TypeSpindriftOp = "spindrift_op"
 const (
 	// OpPassStart marks the start of a pass; Role names the pass's role.
 	OpPassStart = "pass_start"
+	// OpPassModel names the model and effort a pass runs with. driver-exec
+	// prints it on stdout just before it runs the Driver, after the reviewer
+	// override; opencode's stream never carries the model (issue #6270).
+	OpPassModel = "pass_model"
 	// OpVerdict records a pass's verdict.
 	OpVerdict = "verdict"
 	// OpPassNoOutcome records a pass that ended without a usable outcome.

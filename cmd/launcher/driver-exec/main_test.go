@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -169,6 +170,61 @@ func TestMainRunRoleAwareModelEffort(t *testing.T) {
 			}
 			if !strings.Contains(got, "--effort "+tc.wantEffort) {
 				t.Errorf("driver argv = %q, want it to contain \"--effort %s\"", got, tc.wantEffort)
+			}
+		})
+	}
+}
+
+// TestMainRunAnnouncesPassModel pins issue #6270: the pass's resolved model and
+// effort reach stdout as a pass_model op, never the per-pass log (a log line
+// would defeat run.go's empty-log check for a Driver that never started).
+func TestMainRunAnnouncesPassModel(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	driverBin := writeFakeDriver(t, dir, "fake-driver", "exit 0\n")
+
+	op := func(model, effort string) string {
+		return hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassModel, Model: model, Effort: effort})
+	}
+	cases := []struct {
+		name   string
+		role   string
+		model  string
+		effort string
+		want   string
+	}{
+		{"no-model", "", "", "", ""},
+		{"implementor", "", "opus", "high", op("opus", "high")},
+		{"reviewer", driverkit.ReviewerRole, "opus", "high", op("sonnet", "low")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := filepath.Join(dir, tc.name+"-stream.log")
+			handoffPath := writeHandoffFile(t, promptassembly.Handoff{
+				PromptFile:   promptFile,
+				DriverBin:    driverBin,
+				Model:        tc.model,
+				Effort:       tc.effort,
+				ReviewModel:  "sonnet",
+				ReviewEffort: "low",
+				ArgvShape:    claudeArgvShape,
+			})
+			argv := []string{"-handoff-file", handoffPath, "-log-path", logPath}
+			if tc.role != "" {
+				argv = append(argv, "-top-level-role", tc.role)
+			}
+			var stdout, stderr bytes.Buffer
+			if rc := mainRun(argv, &stdout, &stderr); rc != 0 {
+				t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+			}
+			if got := stdout.String(); got != tc.want {
+				t.Errorf("stdout = %q, want %q", got, tc.want)
+			}
+			if log, err := os.ReadFile(logPath); err != nil || strings.Contains(string(log), "pass_model") {
+				t.Errorf("log = %q (err %v), want no pass_model op", log, err)
 			}
 		})
 	}

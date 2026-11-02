@@ -42,6 +42,7 @@ func TestWireConstants(t *testing.T) {
 	tests := []struct{ name, got, want string }{
 		{"TypeSpindriftOp", hostop.TypeSpindriftOp, "spindrift_op"},
 		{"OpPassStart", hostop.OpPassStart, "pass_start"},
+		{"OpPassModel", hostop.OpPassModel, "pass_model"},
 		{"OpVerdict", hostop.OpVerdict, "verdict"},
 		{"OpPassNoOutcome", hostop.OpPassNoOutcome, "pass_no_outcome"},
 		{"OpDecision", hostop.OpDecision, "decision"},
