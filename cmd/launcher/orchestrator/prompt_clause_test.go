@@ -151,6 +151,20 @@ func sharedSpanFrom(t *testing.T, raw, marker string) string {
 	return raw[idx:]
 }
 
+// sharedSpanThrough returns raw from marker through the end of the first
+// occurrence of end after it, for pinning a shared span that one fragment
+// extends with its own trailing prose.
+func sharedSpanThrough(t *testing.T, raw, marker, end string) string {
+	t.Helper()
+
+	rest := sharedSpanFrom(t, raw, marker)
+	idx := strings.Index(rest, end)
+	if idx == -1 {
+		t.Fatalf("end %q not found after marker %q", end, marker)
+	}
+	return rest[:idx+len(end)]
+}
+
 // sharedSpanBetween returns raw from the start of the line beginning with
 // marker through the following blank line, for pinning a shared paragraph
 // byte-for-byte even when the surrounding fragments diverge before and
