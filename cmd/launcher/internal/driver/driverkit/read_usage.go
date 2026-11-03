@@ -327,12 +327,11 @@ func addAgentCall(agents map[string]*usage.AgentUsage, ev Event, src TotalsSourc
 // stderr WARNING naming the path, not the totals already summed (issue #674).
 //
 // Under SessionTotals the result events are the only ground truth for output
-// tokens, so the main-loop row takes their usage.output_tokens and
-// Report.OutputIsMainLoopOnly is set; subagent output beyond it lands on a
-// usage.SubagentsAgent row. SkipOversized drops lines over 4 MiB, so a run
-// whose main-loop lines were all oversized arrives with subagent rows only:
-// the row is then synthesized, prepended to keep main-loop first. A nil agents
-// slice stays nil, with no row added.
+// tokens, so the main-loop row takes their usage.output_tokens; subagent
+// output beyond it lands on a usage.SubagentsAgent row. SkipOversized drops
+// lines over 4 MiB, so a run whose main-loop lines were all oversized arrives
+// with subagent rows only: the row is then synthesized, prepended to keep
+// main-loop first. A nil agents slice stays nil, with no row added.
 func ExtractUsage(
 	logPath string,
 	newDecoder func() Decoder,
@@ -362,7 +361,6 @@ func ExtractUsage(
 	}
 	report := usage.Report{
 		Totals: u, Found: true, SummedByModel: models, SummedByAgent: agents,
-		OutputIsMainLoopOnly: src == SessionTotals,
 	}
 	if span.Have {
 		report.EarliestEventMs = span.Earliest

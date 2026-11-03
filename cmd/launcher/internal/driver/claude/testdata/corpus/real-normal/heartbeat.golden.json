@@ -16,7 +16,7 @@
     "#42 [explore] SPINDRIFT_OUTCOME issue=5246 landing=none status=reject note=already resolved on main by 57643e01, which regenerated...",
     "#42 [explore] · 1 bash",
     "#42 [explore] · 11 turns",
-    "#42 ○ pass 1 usage: 7 calls, 14 in, 2404 out (main loop), 194186 cache read, 24278 cache write · main 220882",
+    "#42 ○ pass 1 usage: 7 calls, 14 in, 2404 out, 194186 cache read, 24278 cache write · main 220882",
     "#42 ○ stop: outcome reached",
     "#42 ○ dispatch_settled"
   ],

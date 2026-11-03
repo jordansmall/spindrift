@@ -39,9 +39,6 @@ func TestSessionTotalsSumResultsOnly(t *testing.T) {
 	if !r.Found || r.Totals != want {
 		t.Errorf("totals = %+v, want %+v", r.Totals, want)
 	}
-	if !r.OutputIsMainLoopOnly {
-		t.Error("OutputIsMainLoopOnly = false, want true")
-	}
 	if !r.HasEventSpan || r.EarliestEventMs != 100 || r.LatestEventMs != 200 {
 		t.Errorf("span = %v %d %d", r.HasEventSpan, r.EarliestEventMs, r.LatestEventMs)
 	}

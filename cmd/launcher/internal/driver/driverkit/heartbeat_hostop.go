@@ -47,18 +47,12 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 		if op.Usage != nil {
 			u = *op.Usage
 		}
-		// Only a payload that claims main-loop-only output gets the caveat, so
-		// this never understates a driver that reports whole-pass output. See
-		// usage.Report.OutputIsMainLoopOnly.
-		out := "out"
-		if u.OutputIsMainLoopOnly {
-			out = "out (main loop)"
-		}
-		fmt.Fprintf(&sb, "%d calls, %d in, %d %s, %d cache read, %d cache write",
-			u.APICalls, u.UncachedInputTokens, u.OutputTokens, out, u.CacheReadInputTokens, u.CacheCreationInputTokens)
+		fmt.Fprintf(&sb, "%d calls, %d in, %d out, %d cache read, %d cache write",
+			u.APICalls, u.UncachedInputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
 		if len(u.Agents) > 0 {
 			// Render in the payload's given order (main loop first, then
-			// costliest subagent per UsageByAgent); do not re-sort.
+			// costliest subagent per UsageByAgent, with the (subagents) row last
+			// whatever its cost); do not re-sort.
 			parts := make([]string, len(u.Agents))
 			for i, a := range u.Agents {
 				parts[i] = fmt.Sprintf("%s %d", SanitizeLine(a.Agent), a.TotalTokens())

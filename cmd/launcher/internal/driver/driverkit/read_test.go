@@ -285,9 +285,6 @@ func TestExtractUsageSumsEveryEventAndSpans(t *testing.T) {
 	if !reflect.DeepEqual(r.SummedByAgent, wantAgents) {
 		t.Errorf("SummedByAgent = %+v, want %+v", r.SummedByAgent, wantAgents)
 	}
-	if r.OutputIsMainLoopOnly {
-		t.Error("OutputIsMainLoopOnly = true, want false: per-call output is real")
-	}
 }
 
 func TestExtractUsageSummedByAgent(t *testing.T) {

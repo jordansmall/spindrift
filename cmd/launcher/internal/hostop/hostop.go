@@ -177,10 +177,6 @@ type PassUsage struct {
 	CacheReadInputTokens     int                `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int                `json:"cache_creation_input_tokens,omitempty"`
 	Agents                   []usage.AgentUsage `json:"agents,omitempty"`
-	// OutputIsMainLoopOnly carries usage.Report's flag of the same name onto
-	// the wire so the renderer does not have to assume it. A driver whose
-	// report leaves it false reports whole-pass output.
-	OutputIsMainLoopOnly bool `json:"output_is_main_loop_only,omitempty"`
 }
 
 // EncodeSpindriftOp returns one newline-terminated stream-json line encoding op

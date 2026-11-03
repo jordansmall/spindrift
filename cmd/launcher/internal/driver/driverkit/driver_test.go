@@ -208,8 +208,8 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExtractUsage: %v", err)
 		}
-		if !report.Found || report.Totals.OutputTokens != 50 || !report.OutputIsMainLoopOnly {
-			t.Errorf("report = %+v, want output 50 from the result event, main-loop-only", report)
+		if !report.Found || report.Totals.OutputTokens != 50 {
+			t.Errorf("report = %+v, want output 50 from the result event", report)
 		}
 		if len(report.SummedByModel) != 2 {
 			t.Errorf("SummedByModel = %+v, want 2 rows", report.SummedByModel)
@@ -221,7 +221,7 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ExtractUsage: %v", err)
 		}
-		if report.Totals.OutputTokens != 3 || report.Totals.InputTokens != 30 || report.OutputIsMainLoopOnly {
+		if report.Totals.OutputTokens != 3 || report.Totals.InputTokens != 30 {
 			t.Errorf("report = %+v, want 30 in / 3 out summed per call", report)
 		}
 	})

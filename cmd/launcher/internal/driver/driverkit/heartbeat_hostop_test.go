@@ -173,7 +173,6 @@ func TestFormatSpindriftOpPassUsage(t *testing.T) {
 			OutputTokens:             240000,
 			CacheReadInputTokens:     65000000,
 			CacheCreationInputTokens: 1200000,
-			OutputIsMainLoopOnly:     true,
 		},
 	})
 	if !strings.HasPrefix(got, "#42 ") {
@@ -191,34 +190,14 @@ func TestFormatSpindriftOpPassUsage(t *testing.T) {
 	if !strings.Contains(got, "1200000") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain the cache-write total %d", got, 1200000)
 	}
-	if !strings.Contains(got, "240000") {
-		t.Errorf("FormatSpindriftOp = %q, want it to contain the output-token total %d", got, 240000)
+	if !strings.Contains(got, "240000 out,") {
+		t.Errorf("FormatSpindriftOp = %q, want an unqualified %q column", got, "240000 out,")
 	}
-	if !strings.Contains(got, "out (main loop)") {
-		t.Errorf("FormatSpindriftOp = %q, want the out column marked main-loop-only (issue #3213)", got)
+	if strings.Contains(got, "main loop") {
+		t.Errorf("FormatSpindriftOp = %q, want no main-loop caveat", got)
 	}
 	if strings.Contains(got, "\n") {
 		t.Errorf("FormatSpindriftOp = %q, want a single line", got)
-	}
-}
-
-// The "(main loop)" caveat comes from the payload's own flag, not a hardcoded
-// string: a driver whose report carries whole-pass output (opencode) renders
-// an unqualified out column, or the caveat would understate real data.
-func TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly(t *testing.T) {
-	got := FormatSpindriftOp("42", hostop.SpindriftOp{
-		Op:   "pass_usage",
-		Pass: 2,
-		Usage: &hostop.PassUsage{
-			APICalls:     7,
-			OutputTokens: 4242,
-		},
-	})
-	if !strings.Contains(got, "4242 out,") {
-		t.Errorf("FormatSpindriftOp = %q, want an unqualified %q column", got, "4242 out,")
-	}
-	if strings.Contains(got, "main loop") {
-		t.Errorf("FormatSpindriftOp = %q, want no main-loop-only caveat when the payload does not assert it", got)
 	}
 }
 

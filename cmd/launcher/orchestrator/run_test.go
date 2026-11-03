@@ -130,12 +130,12 @@ func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
 // TestAgentUsagePayloadSumsAgentRows pins agentUsagePayload's totals to the sum
 // of usage.Report.SummedByAgent's rows, not Report.Totals, which is separately
 // sourced and documented not to reconcile (issue #3156). OutputTokens is the
-// exception (issue #3213): the result event's own output_tokens lands on the
-// MainLoopAgent row alone, flagged by OutputIsMainLoopOnly. The 999 is
-// deliberately far from either per-message placeholder (5, 8) and the scout
-// row's output is zeroed, so the total is 999, not 5+8; a result output of 5
-// (the main row's per-message value) or 13 (their sum) would let per-message
-// output pass as result-sourced.
+// exception (issues #3213, #6273): the result event's own output_tokens lands
+// on the MainLoopAgent row (this result has no modelUsage, so no (subagents)
+// row appears). The 999 is deliberately far from either per-message
+// placeholder (5, 8) and the scout row's output is zeroed, so the total is
+// 999, not 5+8; a result output of 5 (the main row's per-message value) or 13
+// (their sum) would let per-message output pass as result-sourced.
 func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
@@ -158,7 +158,6 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 			{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 10, OutputTokens: 999, CacheReadInputTokens: 1, CacheCreationInputTokens: 2},
 			{Agent: "scout", APICalls: 1, UncachedInputTokens: 20, OutputTokens: 0, CacheReadInputTokens: 3, CacheCreationInputTokens: 4},
 		},
-		OutputIsMainLoopOnly: true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want %+v", got, want)
@@ -169,7 +168,7 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 // opencode pass's pass_usage payload carries a role-neutral main row with the
 // pass's distinct API calls, which is what Records' APICalls (and so
 // `spindrift stats --by role`) read. Opencode's per-call output is real, so
-// the payload never flags OutputIsMainLoopOnly.
+// the payload sums it per call.
 func TestAgentUsagePayloadOpencodeCarriesAPICalls(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "stream.log")
 	content := `{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}
@@ -526,9 +525,7 @@ exit 0
 			{Op: "pass_usage", Pass: 2, Role: "review", Usage: &hostop.PassUsage{}},
 			{Op: "pass_usage", Pass: 3, Role: "fix", Usage: &hostop.PassUsage{}},
 			{Op: "pass_usage", Pass: 4, Role: "review", Usage: &hostop.PassUsage{}},
-			// The land pass's log ends in a result event, which marks its output
-			// count main-loop-only even with no usage fields.
-			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &hostop.PassUsage{OutputIsMainLoopOnly: true}},
+			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &hostop.PassUsage{}},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("pass_usage ops = %+v, want %+v", got, want)
