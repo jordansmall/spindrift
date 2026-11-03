@@ -22,11 +22,11 @@ import (
 // Every knob below is chosen to make the report deterministic on any machine:
 //   - c.runtime is cleared, so the runtime row takes the fixed
 //     "advisory: RUNTIME not set — skipping runtime check" line
-//     (cmd/launcher/internal/doctor/doctor.go:257) rather than a PATH-dependent
-//     "ok: runtime ... found on PATH" one.
+//     doctor.Run emits (cmd/launcher/internal/doctor/doctor.go) rather than a
+//     PATH-dependent "ok: runtime ... found on PATH" one.
 //   - c.boxForgeAndIssueAccess stays "read-write" (minimalValidConfig's
 //     default), so runDoctor prints the fixed token-gate no-op line
-//     (cmd/launcher/doctor.go:108) and skips every read-only-token gate, which
+//     (cmd/launcher/doctor.go) and skips every read-only-token gate, which
 //     would otherwise make a live network call.
 //   - f.Labels carries every triage and advisory-tier label name
 //     (doctor.AdvisoryLabelNames) the doctor.Run label check enumerates, so
