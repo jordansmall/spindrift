@@ -61,7 +61,7 @@
   }
   {
     flag = "research";
-    doc = "make doctor also require the research labels (exit 4 if missing); the daemon preflight passes it when the research kind runs";
+    doc = "make doctor also require the research labels (exit 4 if missing); the daemon preflight passes it only when the research kind is explicitly selected";
     verb = "doctor";
     arg = null;
   }
