@@ -165,7 +165,7 @@ func resolveGate(deps GateDeps) Gate {
 }
 
 // resolveHomeConfigPath resolves row's HomeConfig to an on-disk path and creates its
-// parent directory, shared by BindHomes and repoAwareHomeConfigs
+// parent directory, shared by BindHomes and applyRepoAwareHomeConfigs
 // so the two writes cannot drift (issue #3201). It returns ok == false, having
 // printed why, when both the Strategy's home var and $HOME are unset: concatenation would
 // otherwise resolve under the cwd, or to "/.gradle", which MkdirAll creates as root.
