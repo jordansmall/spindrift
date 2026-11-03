@@ -12,7 +12,12 @@ import { execFileSync } from "node:child_process";
 
 // Baked for every Driver by lib/image.nix's homeLayoutScript.
 const HOOKS_DIR = "/home/agent/.claude/hooks";
+// Bounds a hung guard like lib/image.nix's guardBound and pi-hook-bridge.js:
+// Claude's own hook timeout is non-blocking, so unbounded it would let the call run.
 const GUARD_TIMEOUT_MS = 10_000;
+// The summary hook is a PostToolUse hook, which lib/image.nix leaves at
+// Claude's default timeout.
+const SUMMARY_TIMEOUT_MS = 60_000;
 
 // Generated from lib/bash-hooks.nix, which documents the run order, `tools`
 // and `rewrites`.
@@ -66,7 +71,7 @@ function requireJq() {
   jqWorks = true;
 }
 
-function runHook(script, toolName, args, onFailure = "") {
+function runHook(script, toolName, args, timeout, onFailure = "") {
   const tool = CLAUDE_TOOLS[toolName];
   const payload = JSON.stringify({ tool_name: tool.name, tool_input: tool.input(args) });
   let out;
@@ -75,7 +80,7 @@ function runHook(script, toolName, args, onFailure = "") {
     out = execFileSync(`${HOOKS_DIR}/${script}`, [], {
       input: payload,
       encoding: "utf8",
-      timeout: GUARD_TIMEOUT_MS,
+      timeout,
     });
     parsed = out.trim() === "" ? {} : JSON.parse(out);
   } catch (err) {
@@ -103,7 +108,7 @@ export const SpindriftGuards = async () => ({
       if (!tools.includes(input.tool)) continue;
       // Fail closed: a hook that cannot run or answer must not wave the call
       // through with its credentials intact or without the log the tee keeps.
-      const decision = runHook(script, input.tool, output.args, ", refusing the call");
+      const decision = runHook(script, input.tool, output.args, GUARD_TIMEOUT_MS, ", refusing the call");
       if (decision.permissionDecision === "deny") {
         throw new Error(decision.permissionDecisionReason ?? `Guard ${script} denied the call`);
       }
@@ -122,7 +127,7 @@ export const SpindriftGuards = async () => ({
   "tool.execute.after": async (input, output) => {
     if (input.tool !== "bash") return;
     try {
-      const updated = runHook(SUMMARY_HOOK, input.tool, input.args).updatedToolOutput;
+      const updated = runHook(SUMMARY_HOOK, input.tool, input.args, SUMMARY_TIMEOUT_MS).updatedToolOutput;
       if (typeof updated === "string") {
         // The last opener, anchored at the end: an earlier one is command output.
         const text = String(output.output);
