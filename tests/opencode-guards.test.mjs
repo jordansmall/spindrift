@@ -3,7 +3,8 @@
 // PLUGIN (wired to the staged hooks), PLUGIN_MISSING, PLUGIN_GARBAGE and
 // PLUGIN_SILENT (wired to a missing dir, to hooks that print non-JSON, and to
 // hooks that exit 0 printing nothing), PLUGIN_SILENT_TEE (the real hooks,
-// except a tee that exits 0 printing nothing), CREDENTIAL_PATHS (the JSON of
+// except a tee that exits 0 printing nothing), PLUGIN_SLOW_SUMMARY (a 1 s guard
+// bound over a summary hook that takes 2 s), CREDENTIAL_PATHS (the JSON of
 // lib/credential-paths.nix), PLUGIN_UNMAPPED (a hook row naming an unmapped
 // tool), HOOKS_DIR, BASH_TIMEOUT_CAP_ENV (the opencode registry's
 // bashTimeoutEnv name, which the timeout-cap cases set). The summary hook reads
@@ -311,6 +312,15 @@ for (const [label, env] of [
     assert.equal(output.output, raw);
   });
 }
+
+// The summary hook has its own bound, so one slower than the guard bound still
+// lands (issue #6299).
+test("a summary slower than the guard bound is still applied", async () => {
+  const slow = await load(process.env.PLUGIN_SLOW_SUMMARY);
+  const output = { title: "t", output: "x", metadata: {} };
+  await slow.after({ tool: "bash", sessionID: "s", callID: "c", args: { command: "true" } }, output);
+  assert.equal(output.output, "slow summary");
+});
 
 // opencode skips a plugin whose load throws, leaving every guard off; a hook row
 // naming an unmapped tool must still import and refuse every call, guarded or not.
