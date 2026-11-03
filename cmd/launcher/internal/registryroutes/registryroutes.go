@@ -816,7 +816,10 @@ func validateAllowPatterns(label string, patterns []string) error {
 // block. It bans "$", "`", and "\" because a declared path can land in a
 // Groovy double-quoted literal, where "$" interpolates at load time, or in a
 // shell-sourced export line; it also bans whitespace (any Unicode space),
-// control characters, "?", and "#".
+// control characters, "?", and "#". It bans "," and "|" because Go reads
+// GOPROXY as a list split on them, so one would add a fallback past the Forwarder;
+// every ecosystem shares that ban, since no registry path needs either and a
+// Strategy's RouteDeclaration hook never sees this key to ban them for go alone.
 // It strips every trailing "/", so "//" cannot pass the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
 	if err := rejectURLDelimiters(label, field, value); err != nil {
@@ -830,6 +833,9 @@ func validateDeclaredPath(label, field, value string) (string, error) {
 	}
 	if strings.ContainsAny(value, "$`\\") {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain %q, %q, or %q", label, field, value, "$", "`", "\\")
+	}
+	if strings.ContainsAny(value, ",|") {
+		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain %q or %q", label, field, value, ",", "|")
 	}
 	if !strings.HasPrefix(value, "/") {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must start with \"/\"", label, field, value)
