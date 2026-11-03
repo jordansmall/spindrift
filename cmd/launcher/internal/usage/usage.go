@@ -99,8 +99,10 @@ type AgentUsage struct {
 	Agent               string // MainLoopAgent, or a subagent_type (e.g. "scout"); driverkit.DefaultRole ("subagent") when a Task carried none
 	APICalls            int    // count of distinct (deduplicated) messages attributed to this agent
 	UncachedInputTokens int
-	// OutputTokens breaks its sibling fields' per-message-sum rule when
-	// the report sets Report.OutputIsMainLoopOnly; see that field.
+	// OutputTokens breaks its sibling fields' per-message-sum rule under
+	// session totals: the per-message figure is a placeholder, so the main
+	// row takes the result events' main-loop output and the (subagents) row
+	// the rest of the session's.
 	OutputTokens             int
 	CacheReadInputTokens     int
 	CacheCreationInputTokens int
@@ -125,13 +127,6 @@ type Report struct {
 	Found         bool
 	SummedByModel []ModelUsage
 	SummedByAgent []AgentUsage
-
-	// OutputIsMainLoopOnly marks SummedByAgent's OutputTokens column as the
-	// main loop's alone (issue #3213): claude-code's per-message
-	// output_tokens is a message_start placeholder around 100x too low
-	// (#3183), and only the main loop gets a result event, so its row
-	// carries that figure and every subagent row carries 0.
-	OutputIsMainLoopOnly bool
 
 	// EarliestEventMs and LatestEventMs are the earliest and latest
 	// top-level event timestamps in the log, in unix milliseconds, and are

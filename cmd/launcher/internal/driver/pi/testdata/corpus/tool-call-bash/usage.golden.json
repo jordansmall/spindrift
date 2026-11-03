@@ -3,7 +3,6 @@
   "Found": true,
   "HasEventSpan": true,
   "LatestEventMs": 1792330260629,
-  "OutputIsMainLoopOnly": false,
   "SummedByAgent": [
     {
       "APICalls": 2,

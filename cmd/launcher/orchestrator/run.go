@@ -931,7 +931,7 @@ func passReport(logPath, driverName string) usage.Report {
 // discrepancy, issue #2078), and #3156 wants a total matching billed usage
 // after dedup. A zero-value r produces the zero hostop.PassUsage.
 func agentUsagePayload(r usage.Report) hostop.PassUsage {
-	p := hostop.PassUsage{Agents: r.SummedByAgent, OutputIsMainLoopOnly: r.OutputIsMainLoopOnly}
+	p := hostop.PassUsage{Agents: r.SummedByAgent}
 	for _, a := range r.SummedByAgent {
 		p.APICalls += a.APICalls
 		p.UncachedInputTokens += a.UncachedInputTokens

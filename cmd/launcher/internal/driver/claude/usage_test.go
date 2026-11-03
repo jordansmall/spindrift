@@ -464,24 +464,6 @@ func TestExtractUsage_Totals_OversizedLine(t *testing.T) {
 	}
 }
 
-// The claude driver reports the issue #3213 semantics as OutputIsMainLoopOnly,
-// the flag every downstream consumer (pass_usage payload, heartbeat caveat)
-// keys off.
-func TestExtractUsage_OutputIsMainLoopOnly(t *testing.T) {
-	path := claude.WriteLog(t,
-		`{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`,
-		`{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`,
-	)
-
-	report, err := newDriver().ExtractUsage(path)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !report.OutputIsMainLoopOnly {
-		t.Errorf("report.OutputIsMainLoopOnly = false, want true: %+v", report)
-	}
-}
-
 func TestExtractUsage_Totals_MistypedTotalsResultIsSkipped(t *testing.T) {
 	bad := `{"type":"result","result":"x","num_turns":"3","total_cost_usd":9,"duration_ms":999,"usage":{"input_tokens":50}}`
 	good := `{"type":"result","num_turns":2,"total_cost_usd":0.5,"duration_ms":100,"usage":{"input_tokens":7}}`

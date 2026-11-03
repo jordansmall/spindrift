@@ -3,7 +3,6 @@
   "Found": false,
   "HasEventSpan": false,
   "LatestEventMs": 0,
-  "OutputIsMainLoopOnly": false,
   "SummedByAgent": null,
   "SummedByModel": null,
   "Totals": {

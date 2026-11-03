@@ -205,8 +205,9 @@ func MeanChurnPercent(records []dispatchrecord.Record) (pct float64, filled int)
 // total, as do output tokens and API calls. Input and cache tokens sum to the
 // agent rows instead, which can exceed it: a Driver's own pass totals may leave
 // a subagent's input and cache tokens out (claude's result usage covers only
-// the main loop's input and cache tokens). Output is the main loop's alone
-// under claude, whose Driver records subagent output as 0 (issue #3213). A pass
+// the main loop's input and cache tokens). Under claude the main loop's
+// output is its own and named subagents' is 0, since no per-role figure exists;
+// the rest of the session's output sits on a (subagents) row. A pass
 // with no Agents lands whole in the (none) group, as does a Record with no
 // passes. The main loop comes first, then agents in first-appearance order,
 // (none) last.

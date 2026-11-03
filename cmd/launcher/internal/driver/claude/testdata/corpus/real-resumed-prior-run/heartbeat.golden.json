@@ -10,7 +10,7 @@
     "#42 [explore] SPINDRIFT_OUTCOME issue=4994 landing=none status=recommend note=Still accurate on main: docs/reference.md:4628-4630 a...",
     "#42 [explore] · 2 bashes",
     "#42 [explore] · 6 turns",
-    "#42 ○ pass 1 usage: 4 calls, 8 in, 1648 out (main loop), 100889 cache read, 23558 cache write · main 126103",
+    "#42 ○ pass 1 usage: 4 calls, 8 in, 1648 out, 100889 cache read, 23558 cache write · main 126103",
     "#42 ○ stop: outcome reached",
     "#42 ○ dispatch_settled"
   ],
