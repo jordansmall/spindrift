@@ -243,7 +243,7 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 		}
 	})
 
-	// SessionTotals matters for the agent section: withMainLoopOutput must not
+	// SessionTotals matters for the agent section: withSessionOutput must not
 	// invent a main-loop row when the agent rows are absent (issue #674).
 	for _, totals := range []struct {
 		name string

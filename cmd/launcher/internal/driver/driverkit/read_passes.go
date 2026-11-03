@@ -30,7 +30,7 @@ type PassTally struct {
 	// APICalls counts KindUsage events, deduped by non-empty MessageID.
 	APICalls int
 	// Usage is the segment's own totals, summed per result (SessionTotals) or
-	// per call (PerCallTotals); unlike SumTotals, durations are never a
+	// per call (PerCallTotals); unlike sumTotals, durations are never a
 	// whole-log span or maximum.
 	Usage usage.Usage
 	// Models is the sorted, deduped model ids the segment named.
@@ -41,8 +41,9 @@ type PassTally struct {
 	// Agents is the segment's per-agent breakdown, keyed, deduped and sorted as
 	// UsageByAgent does the whole log, so rows summed across segments are its
 	// rows. Under SessionTotals the main-loop row's OutputTokens is the
-	// segment's own result output; subagent rows stay 0. Nil when the segment
-	// saw no usage event.
+	// segment's output less its subagent residual, and a non-zero
+	// usage.SubagentsAgent row holds that residual. Nil when the segment saw no
+	// usage event.
 	Agents []usage.AgentUsage
 	// Results is each result's text in order: one per result whose totals
 	// decoded under SessionTotals (a NoTotals result contributes nothing), and
@@ -74,6 +75,9 @@ type passState struct {
 	agents  map[string]*usage.AgentUsage
 	pending map[string]string // write ToolID -> content, until its result
 
+	// SessionTotals only: subagent output folded into tally.Usage.OutputTokens.
+	residual int
+
 	// PerCallTotals only.
 	anchor    spanAnchor
 	lastUsage int64
@@ -91,7 +95,7 @@ func (s *passState) finish(src TotalsSource) PassTally {
 	t.Efforts = slices.Sorted(maps.Keys(s.efforts))
 	t.Agents = sortedAgents(s.agents)
 	if src == SessionTotals {
-		t.Agents = withMainLoopOutput(t.Agents, t.Usage.OutputTokens)
+		t.Agents = withSessionOutput(t.Agents, t.Usage.OutputTokens, s.residual)
 	}
 	if src == PerCallTotals {
 		if span, ok := s.anchor.span(s.lastUsage); ok && t.Usage.NumTurns > 0 {
@@ -181,7 +185,7 @@ func (s *passState) apply(ev Event, opts PassOptions, trackWrite string) {
 			return
 		}
 		u := &s.tally.Usage
-		addTokens(u, ev.Tokens)
+		s.residual += addResultTokens(u, ev)
 		u.DurationMs += ev.DurationMs
 		u.DurationApiMs += ev.DurationAPIMs
 		u.NumTurns += ev.NumTurns

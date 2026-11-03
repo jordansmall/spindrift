@@ -86,6 +86,12 @@ func (m *ModelUsage) MarkOutputUnavailable() {
 // accurate here. The orchestrator's spindrift_op carries the pass's role.
 const MainLoopAgent = "main"
 
+// SubagentsAgent is the synthetic SummedByAgent row holding subagent output
+// the session summary reports but cannot attribute to a role: modelUsage is
+// keyed by model, not agent. The parens keep it from colliding with a
+// subagent_type.
+const SubagentsAgent = "(subagents)"
+
 // AgentUsage holds token usage aggregated across every turn for one agent,
 // either the main loop (MainLoopAgent) or one spawned subagent keyed by its
 // subagent_type.

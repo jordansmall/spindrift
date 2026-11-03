@@ -75,3 +75,30 @@ func TestReadPassesAgentsPerSegment(t *testing.T) {
 		}
 	})
 }
+
+func TestReadPassesSubagentResidual(t *testing.T) {
+	result := func(out int, mo map[string]int) []Event {
+		return []Event{{Kind: KindResult, Tokens: Tokens{Output: out}, ModelOutput: mo}}
+	}
+	got := readPasses(t, PassOptions{Totals: SessionTotals}, "", nil,
+		[]Event{{Kind: KindUsage, MessageID: "m1", Tokens: Tokens{Input: 1}}},
+		result(100, map[string]int{"m": 300}),
+		result(50, nil),
+		[]Event{passStartEv()},
+		[]Event{{Kind: KindUsage, MessageID: "m2", Tokens: Tokens{Input: 1}}},
+		result(10, map[string]int{"m": 10}),
+	)
+	if got[0].Usage.OutputTokens != 350 {
+		t.Errorf("segment 0 OutputTokens = %d, want 350 (150 main loop + 200 residual)", got[0].Usage.OutputTokens)
+	}
+	want0 := []usage.AgentUsage{
+		{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 1, OutputTokens: 150},
+		{Agent: usage.SubagentsAgent, OutputTokens: 200},
+	}
+	if !reflect.DeepEqual(got[0].Agents, want0) {
+		t.Errorf("segment 0 Agents = %+v, want %+v", got[0].Agents, want0)
+	}
+	if got[1].Usage.OutputTokens != 10 || len(got[1].Agents) != 1 {
+		t.Errorf("segment 1 = %+v, want 10 output and no residual row", got[1])
+	}
+}

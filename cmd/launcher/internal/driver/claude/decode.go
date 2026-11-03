@@ -176,6 +176,10 @@ func (d *decoder) decodeLine(line string, top *topLevel) []driverkit.Event {
 	if json.Unmarshal([]byte(line), &tot) == nil {
 		// A result's usage header carries only the flat cache_creation_input_tokens
 		// total, so it lands in the 5m bucket like a pre-split assistant message.
+		// Output stays the main loop's usage.output_tokens. Whole-session output
+		// is the modelUsage outputTokens sum carried in ModelOutput (subagents
+		// included); the reader falls back to Output per result when modelUsage
+		// is empty or missing (issue #6273).
 		result.Tokens = driverkit.Tokens{
 			Input:        tot.Usage.InputTokens,
 			Output:       tot.Usage.OutputTokens,

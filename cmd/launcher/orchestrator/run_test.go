@@ -87,7 +87,7 @@ func streamJSONFinalResult(text string) string {
 }
 
 // streamJSONResultLine appends a stream-json "result" event, the shape
-// driverkit.SumTotals scans for, so a fixture can control passReport's
+// driverkit.ExtractUsage scans for, so a fixture can control passReport's
 // contribution for that pass (issue #2694). The transcript reader switches on
 // decoded event kinds, so scanPassLog and scanReviewLog never see this line;
 // ExtractUsage and Driver.ResultText read it.

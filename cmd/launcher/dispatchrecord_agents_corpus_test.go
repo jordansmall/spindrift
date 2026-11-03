@@ -76,22 +76,26 @@ func TestParseLogRealClaudeSubagentsBreakDownThePass(t *testing.T) {
 			t.Fatalf("pass %d agents = %+v, want the main loop first", p.Ordinal, p.Agents)
 		}
 		// The pass's own input and cache totals are the main row's, subagent
-		// output is 0 (issue #3213), and API calls sum across rows.
+		// output is 0 (issue #3213) bar the (subagents) residual row, and API
+		// calls sum across rows.
 		m := p.Agents[0]
 		if m.InputTokens != p.InputTokens || m.CacheReadInputTokens != p.CacheReadInputTokens ||
 			m.CacheCreationInputTokens != p.CacheCreationInputTokens {
 			t.Errorf("pass %d main row = %+v, want input/cache totals %d/%d/%d", p.Ordinal, m,
 				p.InputTokens, p.CacheReadInputTokens, p.CacheCreationInputTokens)
 		}
-		if m.OutputTokens != p.OutputTokens {
-			t.Errorf("pass %d main row output = %d, want the pass's %d", p.Ordinal, m.OutputTokens, p.OutputTokens)
-		}
+		rowOutput := m.OutputTokens
 		calls := m.APICalls
 		for _, a := range p.Agents[1:] {
-			if a.OutputTokens != 0 {
+			if a.Agent == usage.SubagentsAgent {
+				rowOutput += a.OutputTokens
+			} else if a.OutputTokens != 0 {
 				t.Errorf("pass %d subagent %q output = %d, want 0", p.Ordinal, a.Agent, a.OutputTokens)
 			}
 			calls += a.APICalls
+		}
+		if rowOutput != p.OutputTokens {
+			t.Errorf("pass %d agent rows output sums to %d, want the pass's %d", p.Ordinal, rowOutput, p.OutputTokens)
 		}
 		if calls != p.APICalls {
 			t.Errorf("pass %d agent rows sum to %d API calls; pass has %d", p.Ordinal, calls, p.APICalls)

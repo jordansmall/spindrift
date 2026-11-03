@@ -147,3 +147,49 @@ func TestSessionTotalsSkipNoTotalsResult(t *testing.T) {
 		t.Errorf("report = %+v, want not found", r)
 	}
 }
+
+func TestSessionTotalsSubagentResidual(t *testing.T) {
+	withModels := func(ev Event, mo map[string]int) Event { ev.ModelOutput = mo; return ev }
+	sub := usageEv("c", "m", 1, Tokens{Input: 5})
+	sub.Role, sub.InSubagent = "scout", true
+	evs := []Event{
+		usageEv("a", "m", 1, Tokens{Input: 1}),
+		sub,
+		withModels(resultEv(10, 5, Tokens{Output: 100}), map[string]int{"m1": 250, "m2": 50}), // residual 200
+		resultEv(20, 5, Tokens{Output: 50}),                                                   // nil ModelOutput: falls back to usage.output_tokens
+		withModels(resultEv(30, 5, Tokens{Output: 40}), map[string]int{"m1": 10}),             // sum below main loop: no residual
+	}
+	r := sessionReport(t, evs...)
+	if r.Totals.OutputTokens != 390 {
+		t.Errorf("Totals.OutputTokens = %d, want 390 (190 main loop + 200 residual)", r.Totals.OutputTokens)
+	}
+	want := []usage.AgentUsage{
+		{Agent: usage.MainLoopAgent, APICalls: 1, UncachedInputTokens: 1, OutputTokens: 190},
+		{Agent: "scout", APICalls: 1, UncachedInputTokens: 5},
+		{Agent: usage.SubagentsAgent, OutputTokens: 200},
+	}
+	if !reflect.DeepEqual(r.SummedByAgent, want) {
+		t.Errorf("SummedByAgent = %+v, want %+v", r.SummedByAgent, want)
+	}
+
+	t.Run("no residual row without agent rows", func(t *testing.T) {
+		r := sessionReport(t, withModels(resultEv(10, 5, Tokens{Output: 100}), map[string]int{"m1": 250}))
+		if r.Totals.OutputTokens != 250 || r.SummedByAgent != nil {
+			t.Errorf("totals = %d, agents = %+v, want 250 and nil", r.Totals.OutputTokens, r.SummedByAgent)
+		}
+	})
+	t.Run("no residual row when every result lacks a surplus", func(t *testing.T) {
+		r := sessionReport(t, usageEv("a", "m", 1, Tokens{Input: 1}), resultEv(10, 5, Tokens{Output: 50}))
+		if r.Totals.OutputTokens != 50 || len(r.SummedByAgent) != 1 {
+			t.Errorf("totals = %d, agents = %+v", r.Totals.OutputTokens, r.SummedByAgent)
+		}
+	})
+	t.Run("PerCallTotals ignores ModelOutput", func(t *testing.T) {
+		ev := withModels(usageEv("a", "m", 1, Tokens{Output: 7}), map[string]int{"m": 900})
+		path, nd := evLines(t, ev)
+		r, err := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
+		if err != nil || r.Totals.OutputTokens != 7 || len(r.SummedByAgent) != 1 {
+			t.Errorf("report = %+v, err = %v", r, err)
+		}
+	})
+}
