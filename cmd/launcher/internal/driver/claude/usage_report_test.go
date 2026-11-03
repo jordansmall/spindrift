@@ -134,7 +134,7 @@ func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 	}
 	_, sub := agentRows(t, report.SummedByAgent, "scout")
 	if sub.OutputTokens != 0 {
-		t.Errorf("subagent OutputTokens = %d, want 0 (no ground truth for subagent output)", sub.OutputTokens)
+		t.Errorf("subagent OutputTokens = %d, want 0 (modelUsage is keyed by model, not role, so no per-role output)", sub.OutputTokens)
 	}
 	if sub.UncachedInputTokens != 20 {
 		t.Errorf("subagent UncachedInputTokens = %d, want 20 (unchanged by this fix)", sub.UncachedInputTokens)
