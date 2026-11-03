@@ -1,0 +1,3 @@
+{
+  "refused": "registryroutes: route \"repo.acme.test\": ecosystems.go.path \"/g\\U000e0001o\" must not contain a non-printable character"
+}
