@@ -35,8 +35,8 @@ help
               (while the sidebar has focus)
   gg          detach follow and jump to the sidebar's top (while it
               has focus; same "g" leader as the list body's gg)
-  z           toggle the sidebar's fullscreen zoom (while it has
-              focus)
+  z           toggle the sidebar's zoom into the floating modal
+              (fullscreen if the terminal is too small; while it has focus)
   esc         close the ticket detail modal (while it is open)
   j/k, up/down  scroll the ticket detail modal's body (while it is
               open)
