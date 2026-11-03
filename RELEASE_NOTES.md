@@ -9,6 +9,50 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.30.1 — 2026-11-03
+
+Mostly a fix-up release: the bwrap runner works end to end, Box prompts
+stop misdescribing non-GitHub setups, and the registry groundwork for NuGet
+is in place.
+
+No breaking changes.
+
+- **The bwrap runner actually runs.** Several launch blockers are gone: pasta
+  networking, the missing `/bin` and the seccomp filter all work now, and
+  the Box root goes read-only once it's set up. Each closure generation
+  keeps its own GC roots and a versioned store snapshot, so a Box launched
+  after a rebuild or a garbage collection finds what it needs.
+- **Steadier settling and landing.** A review-loop run that reports ready
+  from any pass but its land pass now fails instead of landing unreviewed,
+  and recover leaves it alone. Sibling seams that land at the same moment
+  on a local forge retry instead of ending merge-blocked. Forgejo no longer
+  reads draft PRs as conflicts, and podman calls can't hang.
+- **Tighter sandbox and credentials.** seccomp now blocks the newer mount
+  syscalls, not just `mount(2)`. A go registry route can't slip a `direct`
+  fallback past the proxy with a `,` or `|` in its path. `doctor` stops
+  echoing the token in a credential-bearing remote URL, quickstart flags
+  every classic token scope beyond `public_repo`, and the background-bash
+  hook catches `nohup`, `setsid` and `coproc` glued to `&&` or a backtick.
+- **Prompts that match your setup.** Read-only, local and Forgejo Boxes were
+  told things that only hold on GitHub, like a Forgejo Box opening its own
+  PR. Those steps now describe the forge and tracker you actually run.
+  Workers also get the Skill tool and the test-first guidance that used to
+  reach only the coordinator, since they're the ones writing the code.
+- **Usage numbers add up.** claude session totals now include subagent
+  output (on its own "(subagents)" row), and opencode credits usage to the
+  model the pass actually ran.
+- **pi on self-hosted models.** `PI_MODELS_CONTENT` and `PI_SETTINGS_CONTENT`
+  let a pi Box talk to a self-hosted OpenAI-compatible server and give a
+  slow prefill more time before pi gives up. pi Pass logs also drop the
+  streaming deltas of finished messages, so they're much smaller.
+- **Registry groundwork for NuGet.** Each package ecosystem is now its own
+  module, and `registry discover` and `doctor` know about common registry
+  hosts, starting with Artifactory. Discover fills in the auth scheme,
+  allowed paths and credential hints, and doctor warns when a route departs
+  from them. NuGet support builds on this but isn't in this release yet.
+
+---
+
 ## 0.29.1 — 2026-10-21
 
 A hardening and speed patch: opencode's credential guard closes its gaps,
