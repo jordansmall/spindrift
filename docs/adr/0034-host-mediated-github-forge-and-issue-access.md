@@ -196,15 +196,19 @@ line instead, and reports `landing=` as the branch name rather than a PR URL
 it never learns. (Amended by issue #6259: the COMMIT push step no longer
 forks on write access. It forks on `BOX_PUSH_READ_WRITE`,
 `OUTBOX_PUSH_READ_ONLY` and `HOST_MEDIATED_PUSH`, so a read-only Box on a
-host-mediated forge gets the host-mediated copy; `IF BLOCKED` still forks
-on write access.) Settle's `blocked` outcome case now also relays that bundle
-(and opens the draft PR, if a PR-intent line was left) the same way
+host-mediated forge gets the host-mediated copy. Amended by issue #6281:
+`IF BLOCKED`'s triage and push steps fork on those same three gates, and
+its PR step and `landing=` line fork on whether the forge has pull
+requests: `PR_FORGE_READ_ONLY` carries the outbox PR-intent and landing
+rows, `NO_PR_FORGE` the no-PR rows at either access.) Settle's `blocked`
+outcome case now also relays that bundle (and opens the draft PR, if a
+PR-intent line was left) the same way
 `hostMediateDraftPR` does for `ready` — without this, a blocked-but-real
 bundle/PR-intent the Box left behind would be silently dropped the moment the
 container exits, rather than reaching the host at all.
 (Amended by issue #5233: a read-write Box on a Code Forge with no pull
 requests — `git`, `local` — also reports the branch name, and its `IF BLOCKED`
-PR step opens none.)
+PR step opens none; issue #6281 extends that to a read-only `local` Box.)
 
 ## Amendment (issue #1951): the Box-side gate fails closed
 
