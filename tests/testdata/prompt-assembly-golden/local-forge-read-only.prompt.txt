@@ -570,35 +570,21 @@ token cannot.
 If you can't finish (review never clears, checks stay red after repeated fixes,
 or any other blocker):
 
-**A denied `git push` here is expected, not itself the blocker.** A read-only
-Box holds no push-capable token in the failure path any more than in the
-happy path, so a 403 or other permission denial on a write is the outcome you
-were always going to get — never diagnose it as a broken or under-scoped
-token, and never report it to a human as a token-permission problem needing
-`workflow` or any other scope. Skip the `.github/workflows/` diff triage the
-read-write path runs; step 4 below already covers reporting what's done and
-what remains. Look instead for the actual
-reason you can't finish — review never clearing, CI staying red after
-repeated fixes, or similar — and report that.
+**There is no push to fail here.** The repo you cloned from is mounted
+read-only and the harness bundles your committed branch out after you exit, so
+never diagnose a push or token problem. Look instead for the actual reason you
+can't finish — review never clearing, checks staying red after repeated fixes,
+or similar — and report that.
 
 Then:
 
-1. Your token is read-only and you take no code-out action yourself — do NOT
-   `git push` and do NOT run `git bundle create` (or note if you have nothing
-   committed to hand off). Leave what you have committed on the branch: after
-   you exit the harness relays your committed branch out and the launcher
-   pushes it host-side with its own token.
+1. Do NOT `git push` and do NOT run `git bundle create` — the repo you cloned
+   from is mounted read-only. Leave what you have committed on the branch (or
+   note if you have nothing committed to hand off): after you exit the harness
+   bundles it out and the launcher lands it host-side.
 
-2. Your token is read-only — do NOT `gh pr view` or `gh pr create`. Print
-   your intended draft PR's title and body as a single nonce-guarded line
-   instead — the launcher finds it by this run's nonce, decodes it, and
-   opens the draft PR host-side, once you exit:
-
-   SPINDRIFT_PR_INTENT test-run-nonce-0001 <base64-encoded title, a blank line,
-   then the body>
-
-   Build the payload the same way the OPEN A PULL REQUEST section above
-   describes.
+2. Open no pull request — this Code Forge has none, so your branch is the
+   landing.
 
 3. Leave the issue in-progress — do NOT close it.
 4. This is a local issue: you have no tracker client to post a comment
@@ -611,5 +597,5 @@ Then:
 
    SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=<short reason>
 
-   landing is your branch name here, not a PR URL — your token is read-only,
-   so you never open the PR and never learn its URL.
+   landing is your branch name here, not a PR URL — this Code Forge has no
+   pull requests.

@@ -1,6 +1,7 @@
 package promptassembly
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -525,9 +526,10 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 	}
 }
 
-// A git Code Forge has no PR, so a read-write git Box must not be told to run
-// `gh pr view` or report landing=<pr-url> on the IF BLOCKED path (issue
-// #5233). OutboxRelayCapable stands in for "this forge has PRs".
+// A git Code Forge has no PR, so a git Box must not be told to run `gh pr view`
+// or report landing=<pr-url> on the IF BLOCKED path (issue #5233); a no-PR forge
+// gets the no-PR step at any access (issue #6281). OutboxRelayCapable stands in
+// for "this forge has PRs".
 func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 	cases := []struct {
 		name string
@@ -538,7 +540,7 @@ func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 			name: "github read-write",
 			env:  Env{ForgeBackend: "GH", BoxWriteEnabled: true, OutboxRelayCapable: true},
 			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": true, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": true, "NO_PR_FORGE_READ_WRITE": false,
+				"IF_BLOCKED_PR_RW_GH": true, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": true, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": false,
 				"OPEN_PR_CREATE_RW_GH": true,
 			},
 		},
@@ -546,7 +548,7 @@ func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 			name: "forgejo read-write",
 			env:  Env{ForgeBackend: "FORGEJO", BoxWriteEnabled: true, OutboxRelayCapable: true},
 			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": true, "PR_FORGE_READ_WRITE": true, "NO_PR_FORGE_READ_WRITE": false,
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": true, "PR_FORGE_READ_WRITE": true, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": false,
 			},
 		},
 		{
@@ -556,7 +558,7 @@ func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 			name: "git read-write",
 			env:  Env{ForgeBackend: "GH", CodeForge: "git", BoxWriteEnabled: true},
 			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": true,
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true,
 				"OPEN_PR_CREATE_RW_GH": true,
 			},
 		},
@@ -564,21 +566,21 @@ func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
 			name: "forgejo read-write without relay bit",
 			env:  Env{ForgeBackend: "FORGEJO", BoxWriteEnabled: true},
 			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": true,
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true,
 			},
 		},
 		{
 			name: "github read-only",
 			env:  Env{ForgeBackend: "GH", OutboxRelayCapable: true},
 			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": false,
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": true, "NO_PR_FORGE": false,
 			},
 		},
 		{
 			name: "git read-only",
 			env:  Env{ForgeBackend: "GH", CodeForge: "git"},
 			want: map[string]bool{
-				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": false,
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "PR_FORGE_READ_ONLY": false, "NO_PR_FORGE": true,
 			},
 		},
 	}
@@ -643,8 +645,9 @@ func TestGatesChoreInput(t *testing.T) {
 // read-write Box push, so the push gates flip to the host-mediated arm, while
 // the unset relay bit puts its PR step on the no-PR arm (issue #5251). The
 // COMMIT push-row gates (HOST_MEDIATED_PUSH, OUTBOX_PUSH_READ_ONLY) are pinned
-// here too.
-func TestGatesHostMediatedReadWrite(t *testing.T) {
+// here too. A read-only host-mediated row lands the same way and its PR step
+// goes no-PR as well (issue #6281), so the PR-step gates are pinned too.
+func TestGatesHostMediatedLanding(t *testing.T) {
 	cases := []struct {
 		name string
 		env  Env
@@ -654,53 +657,49 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 			name: "host-mediated read-write",
 			env:  Env{BoxWriteEnabled: true, HostMediatedRemote: true},
 			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":       true,
-				"OUTBOX_PUSH_READ_ONLY":    false,
-				"BOX_PUSH_READ_WRITE":      false,
-				"HOST_MEDIATED_READ_WRITE": true,
-				"IF_BLOCKED_PR_RW_GH":      false,
-				"NO_PR_FORGE_READ_WRITE":   true,
+				"HOST_MEDIATED_PUSH":    true,
+				"OUTBOX_PUSH_READ_ONLY": false,
+				"BOX_PUSH_READ_WRITE":   false,
+				"IF_BLOCKED_PR_RW_GH":   false,
+				"NO_PR_FORGE":           true,
 			},
 		},
 		{
 			name: "github read-write",
 			env:  Env{BoxWriteEnabled: true, ForgeBackend: "GH", OutboxRelayCapable: true},
 			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":       false,
-				"OUTBOX_PUSH_READ_ONLY":    false,
-				"BOX_PUSH_READ_WRITE":      true,
-				"HOST_MEDIATED_READ_WRITE": false,
-				"IF_BLOCKED_PR_RW_GH":      true,
+				"HOST_MEDIATED_PUSH":    false,
+				"OUTBOX_PUSH_READ_ONLY": false,
+				"BOX_PUSH_READ_WRITE":   true,
+				"IF_BLOCKED_PR_RW_GH":   true,
 			},
 		},
 		{
 			name: "forgejo read-write",
 			env:  Env{BoxWriteEnabled: true, ForgeBackend: "FORGEJO", OutboxRelayCapable: true},
 			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":       false,
-				"OUTBOX_PUSH_READ_ONLY":    false,
-				"BOX_PUSH_READ_WRITE":      true,
-				"HOST_MEDIATED_READ_WRITE": false,
+				"HOST_MEDIATED_PUSH":    false,
+				"OUTBOX_PUSH_READ_ONLY": false,
+				"BOX_PUSH_READ_WRITE":   true,
 			},
 		},
 		{
 			name: "read-only",
 			env:  Env{BoxWriteEnabled: false},
 			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":       false,
-				"OUTBOX_PUSH_READ_ONLY":    true,
-				"BOX_PUSH_READ_WRITE":      false,
-				"HOST_MEDIATED_READ_WRITE": false,
+				"HOST_MEDIATED_PUSH":    false,
+				"OUTBOX_PUSH_READ_ONLY": true,
+				"BOX_PUSH_READ_WRITE":   false,
 			},
 		},
 		{
 			name: "read-only host-mediated",
 			env:  Env{BoxWriteEnabled: false, HostMediatedRemote: true},
 			want: map[string]bool{
-				"HOST_MEDIATED_PUSH":       true,
-				"OUTBOX_PUSH_READ_ONLY":    false,
-				"BOX_PUSH_READ_WRITE":      false,
-				"HOST_MEDIATED_READ_WRITE": false,
+				"HOST_MEDIATED_PUSH":    true,
+				"OUTBOX_PUSH_READ_ONLY": false,
+				"BOX_PUSH_READ_WRITE":   false,
+				"NO_PR_FORGE":           true,
 			},
 		},
 	}
@@ -761,6 +760,87 @@ func TestGatesPushRowsPartition(t *testing.T) {
 				}
 				if len(on) != 1 {
 					t.Errorf("%s* family (write=%v mediated=%v): gates on = %v, want exactly 1", prefix, write, mediated, on)
+				}
+			}
+		}
+	}
+}
+
+// Every IF BLOCKED slot renders exactly one fragment per reachable env (issue
+// #6281): a read-only Box on a no-PR host-mediated forge gets the same
+// host-mediated triage/push and no-PR step/landing as a read-write one, never
+// the outbox text. Slot gate sets derive from the registry by Var prefix, like
+// TestGatesPushRowsPartition, so a regate needs no edit here; the PR slot's
+// read-only rows are the log/socket carrier pair.
+func TestGatesIfBlockedSlotsPartition(t *testing.T) {
+	reg, err := LoadRegistryFile("testdata/registry.json")
+	if err != nil {
+		t.Fatalf("LoadRegistryFile: %v", err)
+	}
+	// IF_BLOCKED_PR_READ_WRITE_STEP / _FORGEJO_STEP are a nested per-backend
+	// fork rendered alongside IF_BLOCKED_PR_DIRECT_STEP inside the read-write
+	// arm, not slot alternatives.
+	nested := map[string]bool{"IF_BLOCKED_PR_RW_GH": true, "IF_BLOCKED_PR_RW_FORGEJO": true}
+	slotPrefixes := map[string][]string{
+		"triage":  {"IF_BLOCKED_TRIAGE_"},
+		"push":    {"IF_BLOCKED_PUSH_"},
+		"landing": {"IF_BLOCKED_OUTCOME_LANDING_"},
+		"pr":      {"IF_BLOCKED_PR_", "IF_BLOCKED_NO_PR_"},
+	}
+	slots := map[string][]string{}
+	for slot, prefixes := range slotPrefixes {
+		// Legacy *_LOCAL_STEP rows share a gate with *_HOST_MEDIATED_STEP.
+		seen := map[string]bool{}
+		for _, row := range reg.Rows {
+			for _, prefix := range prefixes {
+				if strings.HasPrefix(row.Var, prefix) && !nested[row.Gate] && !seen[row.Gate] {
+					seen[row.Gate] = true
+					slots[slot] = append(slots[slot], row.Gate)
+				}
+			}
+		}
+		if len(slots[slot]) == 0 {
+			t.Fatalf("slot %s derived no gates from prefixes %v", slot, prefixes)
+		}
+	}
+	cells := []struct {
+		name       string
+		env        Env
+		triagePush string
+		pr         string
+		landing    string
+	}{
+		{"github read-write", Env{BoxWriteEnabled: true, ForgeBackend: "GH", OutboxRelayCapable: true}, "BOX_PUSH_READ_WRITE", "PR_FORGE_READ_WRITE", "PR_FORGE_READ_WRITE"},
+		{"forgejo read-write", Env{BoxWriteEnabled: true, ForgeBackend: "FORGEJO", OutboxRelayCapable: true}, "BOX_PUSH_READ_WRITE", "PR_FORGE_READ_WRITE", "PR_FORGE_READ_WRITE"},
+		{"git read-write", Env{BoxWriteEnabled: true, ForgeBackend: "GH", CodeForge: "git"}, "BOX_PUSH_READ_WRITE", "NO_PR_FORGE", "NO_PR_FORGE"},
+		{"local read-write", Env{BoxWriteEnabled: true, CodeForge: "local", HostMediatedRemote: true}, "HOST_MEDIATED_PUSH", "NO_PR_FORGE", "NO_PR_FORGE"},
+		{"github read-only", Env{ForgeBackend: "GH", OutboxRelayCapable: true}, "OUTBOX_PUSH_READ_ONLY", "PR_FORGE_READ_ONLY", "PR_FORGE_READ_ONLY"},
+		{"forgejo read-only", Env{ForgeBackend: "FORGEJO", OutboxRelayCapable: true}, "OUTBOX_PUSH_READ_ONLY", "PR_FORGE_READ_ONLY", "PR_FORGE_READ_ONLY"},
+		{"local read-only", Env{CodeForge: "local", HostMediatedRemote: true}, "HOST_MEDIATED_PUSH", "NO_PR_FORGE", "NO_PR_FORGE"},
+	}
+	for _, c := range cells {
+		for _, carrier := range []string{"", "socket"} {
+			env := c.env
+			env.SignalCarrier = carrier
+			pr := c.pr
+			// gates.go splits this base gate into a _LOG/_SOCKET pair by carrier.
+			if pr == "PR_FORGE_READ_ONLY" {
+				if carrier == "socket" {
+					pr += "_SOCKET"
+				} else {
+					pr += "_LOG"
+				}
+			}
+			want := map[string]string{"triage": c.triagePush, "push": c.triagePush, "pr": pr, "landing": c.landing}
+			got := Gates(env)
+			for slot, gates := range slots {
+				if !slices.Contains(gates, want[slot]) {
+					t.Errorf("%s carrier=%q slot %s: expected gate %s not among registry gates %v", c.name, carrier, slot, want[slot], gates)
+				}
+				for _, g := range gates {
+					if got[g] != (g == want[slot]) {
+						t.Errorf("%s carrier=%q slot %s: gate %s = %v, want %v", c.name, carrier, slot, g, got[g], g == want[slot])
+					}
 				}
 			}
 		}

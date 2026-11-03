@@ -34,8 +34,9 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 
 	// The read-only PR-intent hand-off (issue #2045, the #2036 fix): unlike
 	// outcome.Token above, this marker never appears in issue-prompt.md
-	// itself. The two Conditional fragments the BOX_ACCESS_READ_ONLY_LOG
-	// gate selects (lib/fragments.nix) write it, so check each one directly.
+	// itself. The two Conditional fragments (open-pr-create-outbox.md on the
+	// BOX_ACCESS_READ_ONLY_LOG gate, if-blocked-pr-outbox.md on PR_FORGE_READ_ONLY_LOG;
+	// lib/fragments.nix) write it, so check each one directly.
 	for _, fragment := range []string{
 		filepath.Join("fragments", "open-pr-create-outbox.md"),
 		filepath.Join("fragments", "if-blocked-pr-outbox.md"),

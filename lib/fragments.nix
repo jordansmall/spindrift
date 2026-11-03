@@ -865,6 +865,11 @@ let
       fragment = "open-pr-push-git.md";
       var = "OPEN_PR_PUSH_READ_WRITE_STEP";
     }
+    # Ungated by host mediation though its text is false on local read-only
+    # (issue #6281): LAND THE CHANGE tells CODE_FORGE=local to skip OPEN A PULL
+    # REQUEST, and open-pr-create-outbox.md below is that Box's last PR-intent
+    # marker carrier once the IF BLOCKED PR-intent rows stop rendering there
+    # (prompt-contract.nix's `pr-intent` row warns without one).
     {
       gate = "BOX_ACCESS_READ_ONLY";
       fragment = "open-pr-push-outbox.md";
@@ -984,25 +989,28 @@ let
     # its report to step 4 (issue #6238). A denied push there is the expected
     # result of holding no write token, not evidence of a broken or
     # under-scoped one, so it must never be triaged or escalated as such.
+    # These IF BLOCKED rows key on host mediation and PR-ness, never on
+    # BOX_ACCESS_READ_ONLY, so a read-only local Box gets the host-mediated
+    # text (issue #6281).
     {
       gate = "BOX_PUSH_READ_WRITE";
       fragment = "if-blocked-triage-git.md";
       var = "IF_BLOCKED_TRIAGE_READ_WRITE_STEP";
     }
-    # Host-mediated read-write (issue #5251): no push exists to triage.
+    # Host-mediated at either access (#5251, #6281): no push exists to triage.
     {
-      gate = "HOST_MEDIATED_READ_WRITE";
+      gate = "HOST_MEDIATED_PUSH";
       fragment = "if-blocked-triage-host-mediated.md";
       var = "IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP";
     }
     {
-      gate = "HOST_MEDIATED_READ_WRITE";
+      gate = "HOST_MEDIATED_PUSH";
       fragment = "if-blocked-triage-host-mediated.md";
       legacyFragment = "if-blocked-triage-local.md";
       var = "IF_BLOCKED_TRIAGE_LOCAL_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "OUTBOX_PUSH_READ_ONLY";
       fragment = "if-blocked-triage-outbox.md";
       var = "IF_BLOCKED_TRIAGE_READ_ONLY_STEP";
     }
@@ -1014,20 +1022,20 @@ let
       fragment = "if-blocked-push-git.md";
       var = "IF_BLOCKED_PUSH_READ_WRITE_STEP";
     }
-    # Host-mediated read-write (issue #5251): hand the branch to the harness.
+    # Host-mediated at either access (#5251, #6281): hand the branch to the harness.
     {
-      gate = "HOST_MEDIATED_READ_WRITE";
+      gate = "HOST_MEDIATED_PUSH";
       fragment = "if-blocked-push-host-mediated.md";
       var = "IF_BLOCKED_PUSH_HOST_MEDIATED_STEP";
     }
     {
-      gate = "HOST_MEDIATED_READ_WRITE";
+      gate = "HOST_MEDIATED_PUSH";
       fragment = "if-blocked-push-host-mediated.md";
       legacyFragment = "if-blocked-push-local.md";
       var = "IF_BLOCKED_PUSH_LOCAL_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "OUTBOX_PUSH_READ_ONLY";
       fragment = "if-blocked-push-outbox.md";
       var = "IF_BLOCKED_PUSH_READ_ONLY_STEP";
     }
@@ -1057,19 +1065,19 @@ let
       var = "IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP";
     }
     {
-      gate = "NO_PR_FORGE_READ_WRITE";
+      gate = "NO_PR_FORGE";
       fragment = "if-blocked-pr-none.md";
       var = "IF_BLOCKED_NO_PR_STEP";
     }
     # Same carrier fork (issue #3726) on the IF BLOCKED path's PR-intent send.
     {
-      gate = "BOX_ACCESS_READ_ONLY_LOG";
+      gate = "PR_FORGE_READ_ONLY_LOG";
       fragment = "if-blocked-pr-outbox.md";
       var = "IF_BLOCKED_PR_READ_ONLY_STEP";
       signalChannel = "pr-intent";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+      gate = "PR_FORGE_READ_ONLY_SOCKET";
       fragment = "if-blocked-pr-outbox-socket.md";
       var = "IF_BLOCKED_PR_READ_ONLY_SOCKET_STEP";
       signalChannel = "pr-intent";
@@ -1084,12 +1092,12 @@ let
       var = "IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP";
     }
     {
-      gate = "NO_PR_FORGE_READ_WRITE";
+      gate = "NO_PR_FORGE";
       fragment = "if-blocked-outcome-landing-branch.md";
       var = "IF_BLOCKED_OUTCOME_LANDING_BRANCH_STEP";
     }
     {
-      gate = "BOX_ACCESS_READ_ONLY";
+      gate = "PR_FORGE_READ_ONLY";
       fragment = "if-blocked-outcome-landing-outbox.md";
       var = "IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP";
     }
