@@ -1516,19 +1516,20 @@ func TestNoteTipMovedNoEventWithNothingJammed(t *testing.T) {
 
 // TestLoopMultiSlotSiblingResolveClearsJam pins the invariant the #3625
 // review finding actually turns on: Tip.Moved is Runner-global
-// (cmd/launcher/daemon/runner.go:52-57, lastRevision/haveLastRevision), so
-// exactly one resolution ever observes a given move — whichever slot that
-// is must report it, or the move is lost for the whole pool. Two slots,
-// dispatch seeded jammed before either starts and research left runnable,
-// so pickKind hands both slots research (the only runnable kind, whichever
-// preference order slotOrder gives them) and both reach the post-pickKind
-// resolve concurrently — the baton no longer gates ResolveTip (issue
-// #3625's structural fix moved acquisition past it). Both resolutions are
-// scripted to observe the same Moved=true/rev2 answer, modelling the
-// shared result concurrent callers of a coalesced flight would get in
-// production; only one of the two noteTipMoved calls this produces should
-// find dispatch still jammed and actually reset it, so exactly one
-// tip_moved event should reach the stream.
+// (hostRunner.lastRevision/haveLastRevision in
+// cmd/launcher/daemon/runner.go), so exactly one resolution ever observes
+// a given move — whichever slot that is must report it, or the move is
+// lost for the whole pool. Two slots, dispatch seeded jammed before either
+// starts and research left runnable, so pickKind hands both slots research
+// (the only runnable kind, whichever preference order slotOrder gives
+// them) and both reach the post-pickKind resolve concurrently — the
+// baton no longer gates ResolveTip (issue #3625's structural fix moved
+// acquisition past it). Both resolutions are scripted to observe the
+// same Moved=true/rev2 answer, modelling the shared result concurrent
+// callers of a coalesced flight would get in production; only one of
+// the two noteTipMoved calls this produces should find dispatch still
+// jammed and actually reset it, so exactly one tip_moved event should
+// reach the stream.
 func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 	const slots = 2
 	cfg := dualKindConfig(slots, 0)
