@@ -78,8 +78,8 @@ appear on disk.
 | key | effect |
 |-----|--------|
 | `t` | cycle the sidebar's activity feed -> transcript -> raw JSONL -> activity feed (while the sidebar has focus) |
-| `z` | toggle the sidebar's fullscreen zoom (while it has focus) |
-| `h`/`left` | move focus back to the list (while the sidebar has focus and isn't zoomed — a zoomed sidebar has no list to return to) |
+| `z` | toggle the sidebar's zoom into the floating modal, or fullscreen if the terminal is too small for it (while the sidebar has focus) |
+| `h`/`left` | move focus back to the list (while the sidebar has focus and is docked) |
 | `l`/`right` | move focus to the sidebar (from the list, while a sidebar is open) |
 | `x`/`esc` | close the sidebar (while it has focus) |
 | `j`/`k`, `ctrl+f`/`ctrl+b`, `pgup`/`pgdown` | scroll the sidebar (while it has focus); its page jump is fixed, unlike the ticket detail modal's live-viewport-derived one; scrolling up detaches the running Activity feed's live follow |

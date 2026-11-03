@@ -100,8 +100,8 @@ var sidebarBindings = []Binding{
 	},
 	{
 		Keys: []string{"z"}, Modes: []Mode{ModeSidebar},
-		Help: "  z           toggle the sidebar's fullscreen zoom (while it has\n" +
-			"              focus)",
+		Help: "  z           toggle the sidebar's zoom into the floating modal\n" +
+			"              (fullscreen if the terminal is too small; while it has focus)",
 		Footer: "[z] zoom",
 		// Shortened to fit the docked footer's "H/L" hint inside the 42-column
 		// sidebarWidth floor (issue #1846).
