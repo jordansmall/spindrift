@@ -104,7 +104,7 @@ func TestExtractUsage_OutputTokenPlaceholderFixture(t *testing.T) {
 		t.Errorf("main.OutputTokens = %d, want %d (the result event's figure)", main.OutputTokens, resultOutputTokens)
 	}
 	if scout.OutputTokens != 0 {
-		t.Errorf("scout.OutputTokens = %d, want 0 (no ground truth for subagent output)", scout.OutputTokens)
+		t.Errorf("scout.OutputTokens = %d, want 0 (modelUsage is keyed by model, not role, so no per-role output)", scout.OutputTokens)
 	}
 
 	// This issue leaves the other four columns alone: each is the row's own
