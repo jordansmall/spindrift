@@ -1,20 +1,18 @@
 {
-  "lastSwept": "c1869bc461e95e675c5f8f3eab17519d4a262e54",
-  "cursor": "cmd/launcher/internal/ecosystem/ecosystem.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-11-02T20:52:33.379855517-05:00"
-  },
+  "lastSwept": "14fe1b57e8b4f5c606d943e983df6a73759c0d97",
+  "cursor": "cmd/launcher/internal/ecosystem/gomod/testdata/corpus/declared-path-trailing-slashes/lockfile-scan.golden.txt",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6310"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 32,
+    "output_tokens": 7204,
+    "cache_read_input_tokens": 664118,
+    "cache_creation_input_tokens": 59090,
+    "total_cost_usd": 0.7539046699999999,
+    "duration_ms": 93858,
+    "duration_api_ms": 92484,
+    "num_turns": 17
   }
 }
