@@ -119,9 +119,10 @@ func TestUsageByAgent_SessionTotalsLeavesMainLoopOutputZero(t *testing.T) {
 	}
 }
 
-// Issue #3213: only the main loop gets a result event, so no ground-truth
-// output figure exists for a subagent. A subagent row's OutputTokens stays 0
-// even when its assistant messages carry non-zero placeholder output_tokens.
+// Issue #3213: the result's modelUsage reports subagent output in aggregate
+// (the (subagents) row, #6273) but no per-role split, so a named subagent
+// row's OutputTokens stays 0 even when its assistant messages carry non-zero
+// placeholder output_tokens.
 func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 	spawnLine, result := scoutSpawnAndResultLines()
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
@@ -266,5 +267,25 @@ func TestExtractUsage_NoResultEventReturnsZeroReport(t *testing.T) {
 	}
 	if report.SummedByModel != nil {
 		t.Errorf("SummedByModel: got %+v, want nil", report.SummedByModel)
+	}
+}
+
+// A result whose modelUsage is empty (a rate-limited session) has no per-model
+// output to widen it, so its output_tokens stands as the whole-session figure
+// and no subagent residual row appears.
+func TestExtractUsage_EmptyModelUsageFallsBackToResultOutput(t *testing.T) {
+	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`
+	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":52972},"modelUsage":{}}`
+	path := claude.WriteLog(t, mainLine, result)
+
+	report, err := newDriver().ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.Totals.OutputTokens != 52972 {
+		t.Errorf("Totals.OutputTokens = %d, want 52972", report.Totals.OutputTokens)
+	}
+	if len(report.SummedByAgent) != 1 || report.SummedByAgent[0].OutputTokens != 52972 {
+		t.Errorf("SummedByAgent = %+v, want only the main row at 52972", report.SummedByAgent)
 	}
 }

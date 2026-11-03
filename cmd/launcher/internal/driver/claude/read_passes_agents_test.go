@@ -48,3 +48,35 @@ func TestClaudeDriverReadPassesAgentsSumToUsageBreakdown(t *testing.T) {
 		}
 	}
 }
+
+// The fix pass's subagents' output is in the result's modelUsage but not its
+// usage.output_tokens: Totals carry the whole session, the main row only the
+// main loop, and the (subagents) row the difference.
+func TestClaudeDriverRealFixPassSubagentsOutputTotals(t *testing.T) {
+	report, err := newDriver().ExtractUsage(filepath.Join("testdata", "corpus", "real-fix-pass-subagents", "pass.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Totals.OutputTokens; got != 25979 {
+		t.Errorf("Totals.OutputTokens = %d, want 25979", got)
+	}
+	byModel := 0
+	for _, m := range report.SummedByModel {
+		byModel += m.OutputTokens
+	}
+	if byModel != report.Totals.OutputTokens {
+		t.Errorf("SummedByModel output = %d, want Totals %d", byModel, report.Totals.OutputTokens)
+	}
+	rows := map[string]int{}
+	byAgent := 0
+	for _, a := range report.SummedByAgent {
+		rows[a.Agent] = a.OutputTokens
+		byAgent += a.OutputTokens
+	}
+	if rows[usage.MainLoopAgent] != 16556 || rows[usage.SubagentsAgent] != 9423 {
+		t.Errorf("agent output = %+v, want main 16556 and (subagents) 9423", rows)
+	}
+	if byAgent != report.Totals.OutputTokens {
+		t.Errorf("agent rows sum to %d, want Totals %d", byAgent, report.Totals.OutputTokens)
+	}
+}

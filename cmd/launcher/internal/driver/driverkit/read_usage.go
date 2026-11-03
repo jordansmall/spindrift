@@ -29,7 +29,7 @@ import (
 // OutputUnavailable. A row whose model no result names is OutputUnavailable
 // too (such as `<synthetic>` or unknown, which no result names), and a model
 // only a result names gets a row of its own. A NoTotals result is skipped
-// entirely, as SumTotals does.
+// entirely, as sumTotals does.
 func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily, src TotalsSource) ([]usage.ModelUsage, error) {
 	buckets := make(map[string]*usage.ModelUsage)
 	seenIDs := make(map[string]bool)
@@ -132,14 +132,17 @@ type EventSpan struct {
 // DurationMs is the span length in milliseconds.
 func (s EventSpan) DurationMs() int64 { return s.Latest - s.Earliest }
 
-// SumTotals returns the run totals of the log at path from src, the event
+// sumTotals returns the run totals of the log at path from src, the event
 // span, and whether the log carries any totals at all; a missing log, or one
-// with none, reports found=false and no error.
-func SumTotals(path string, newDecoder func() Decoder, src TotalsSource) (usage.Usage, EventSpan, bool, error) {
+// with none, reports found=false and no error. It also returns the subagent
+// residual already folded into u.OutputTokens (always 0 under PerCallTotals),
+// so ExtractUsage can tell it from the main loop's output.
+func sumTotals(path string, newDecoder func() Decoder, src TotalsSource) (usage.Usage, EventSpan, bool, int, error) {
 	if src == SessionTotals {
 		return sumSession(path, newDecoder)
 	}
-	return sumPerCall(path, newDecoder)
+	u, span, found, err := sumPerCall(path, newDecoder)
+	return u, span, found, 0, err
 }
 
 // spanAnchor tracks the earliest non-zero event Timestamp of any kind. A
@@ -193,16 +196,19 @@ func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 }
 
 // sumSession reports found only for a log with a KindResult that has totals.
+// Each result's subagent residual (resultResidual) is added to OutputTokens
+// and returned apart.
+//
 // Wall time is not additive across sessions: they can overlap (issue #2058) or
 // idle between runs, so with several results DurationMs is the span of every
 // non-zero event Timestamp, floored by the longest session's own DurationMs
 // (the floor also covers a log with no timestamps, or a span narrower than a
 // session that provably ran longer). One result reports its own DurationMs.
-func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, error) {
+func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, int, error) {
 	var u usage.Usage
 	var span EventSpan
 	var maxDurationMs int64
-	results := 0
+	results, residual := 0, 0
 	err := scanEvents(path, newDecoder, func(ev Event) {
 		if ev.Timestamp != 0 {
 			if !span.Have || ev.Timestamp < span.Earliest {
@@ -215,20 +221,46 @@ func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan,
 		}
 		if ev.Kind == KindResult && !ev.NoTotals {
 			results++
-			addTokens(&u, ev.Tokens)
+			residual += addResultTokens(&u, ev)
 			u.DurationApiMs += ev.DurationAPIMs
 			u.NumTurns += ev.NumTurns
 			maxDurationMs = max(maxDurationMs, ev.DurationMs)
 		}
 	})
 	if err != nil || results == 0 {
-		return usage.Usage{}, EventSpan{}, false, err
+		return usage.Usage{}, EventSpan{}, false, 0, err
 	}
 	u.DurationMs = maxDurationMs
 	if results > 1 && span.DurationMs() > 0 {
 		u.DurationMs = max(span.DurationMs(), maxDurationMs)
 	}
-	return u, span, true, nil
+	return u, span, true, residual, nil
+}
+
+// resultResidual is the output a session result reports beyond its main loop:
+// the modelUsage outputTokens sum (subagents included) less usage.output_tokens.
+// A result without a per-model figure has none, so it counts only its own.
+// The max floor keeps the main-loop figure when the modelUsage sum falls below
+// the result's own usage.output_tokens, so the main row never goes negative
+// and the agent rows still sum to Totals.
+func resultResidual(ev Event) int {
+	if len(ev.ModelOutput) == 0 {
+		return 0
+	}
+	sum := 0
+	for _, n := range ev.ModelOutput {
+		sum += n
+	}
+	return max(0, sum-ev.Tokens.Output)
+}
+
+// addResultTokens adds a session result's tokens to u, its subagent residual
+// included in OutputTokens, and returns that residual.
+func addResultTokens(u *usage.Usage, ev Event) int {
+	addTokens(u, ev.Tokens)
+	r := resultResidual(ev)
+	u.OutputTokens += r
+	return r
 }
 
 func addTokens(u *usage.Usage, t Tokens) {
@@ -245,7 +277,8 @@ func addTokens(u *usage.Usage, t Tokens) {
 // own name for it, not the Transcript's ImplementorRole default. An InSubagent
 // event's row is its Role; any other event is the main loop whatever pass Role
 // it carries. Under PerCallTotals OutputTokens are summed; under SessionTotals
-// they stay 0 on every row for ExtractUsage to patch from the session totals.
+// they stay 0 on every row for ExtractUsage to patch from the session totals,
+// split between the main-loop row and a usage.SubagentsAgent row.
 func UsageByAgent(path string, newDecoder func() Decoder, src TotalsSource) ([]usage.AgentUsage, error) {
 	agents := make(map[string]*usage.AgentUsage)
 	seenIDs := make(map[string]bool)
@@ -283,10 +316,10 @@ func addAgentCall(agents map[string]*usage.AgentUsage, ev Event, src TotalsSourc
 	a.CacheCreationInputTokens += ev.Tokens.CacheWrite5m + ev.Tokens.CacheWrite1h
 }
 
-// ExtractUsage returns the totals of the log at logPath (see SumTotals) with
+// ExtractUsage returns the totals of the log at logPath (see sumTotals) with
 // its per-model and per-agent breakdowns as one usage.Report; Found is false
 // when the log has no totals or is absent. EarliestEventMs, LatestEventMs and
-// HasEventSpan carry the SumTotals span.
+// HasEventSpan carry the sumTotals span.
 //
 // byModel and byAgent supply the breakdowns, normally UsageByModel and
 // UsageByAgent over the same decoder; a Driver passes its own so a test can
@@ -294,11 +327,12 @@ func addAgentCall(agents map[string]*usage.AgentUsage, ev Event, src TotalsSourc
 // stderr WARNING naming the path, not the totals already summed (issue #674).
 //
 // Under SessionTotals the result events are the only ground truth for output
-// tokens, so the main-loop row takes them and Report.OutputIsMainLoopOnly is
-// set. SkipOversized drops lines over 4 MiB, so a run whose main-loop lines
-// were all oversized arrives with subagent rows only: the row is then
-// synthesized, prepended to keep main-loop first. A nil agents slice stays
-// nil, with no row added.
+// tokens, so the main-loop row takes their usage.output_tokens and
+// Report.OutputIsMainLoopOnly is set; subagent output beyond it lands on a
+// usage.SubagentsAgent row. SkipOversized drops lines over 4 MiB, so a run
+// whose main-loop lines were all oversized arrives with subagent rows only:
+// the row is then synthesized, prepended to keep main-loop first. A nil agents
+// slice stays nil, with no row added.
 func ExtractUsage(
 	logPath string,
 	newDecoder func() Decoder,
@@ -306,7 +340,7 @@ func ExtractUsage(
 	byModel func(path string) ([]usage.ModelUsage, error),
 	byAgent func(path string) ([]usage.AgentUsage, error),
 ) (usage.Report, error) {
-	u, span, found, err := SumTotals(logPath, newDecoder, src)
+	u, span, found, residual, err := sumTotals(logPath, newDecoder, src)
 	if err != nil {
 		return usage.Report{}, err
 	}
@@ -324,7 +358,7 @@ func ExtractUsage(
 		agents = nil
 	}
 	if src == SessionTotals {
-		agents = withMainLoopOutput(agents, u.OutputTokens)
+		agents = withSessionOutput(agents, u.OutputTokens, residual)
 	}
 	report := usage.Report{
 		Totals: u, Found: true, SummedByModel: models, SummedByAgent: agents,
@@ -338,17 +372,30 @@ func ExtractUsage(
 	return report, nil
 }
 
-func withMainLoopOutput(agents []usage.AgentUsage, output int) []usage.AgentUsage {
-	for i := range agents {
-		if agents[i].Agent == usage.MainLoopAgent {
-			agents[i].OutputTokens = output
-			return agents
-		}
-	}
+// withSessionOutput patches the main-loop row to total less residual,
+// synthesizing it when absent, and appends the usage.SubagentsAgent row for the
+// residual. A nil agents slice stays nil, so its output, residual included,
+// reaches no row.
+func withSessionOutput(agents []usage.AgentUsage, total, residual int) []usage.AgentUsage {
 	if len(agents) == 0 {
 		return agents
 	}
-	return append([]usage.AgentUsage{{Agent: usage.MainLoopAgent, OutputTokens: output}}, agents...)
+	mainOut := total - residual
+	patched := false
+	for i := range agents {
+		if agents[i].Agent == usage.MainLoopAgent {
+			agents[i].OutputTokens = mainOut
+			patched = true
+			break
+		}
+	}
+	if !patched {
+		agents = append([]usage.AgentUsage{{Agent: usage.MainLoopAgent, OutputTokens: mainOut}}, agents...)
+	}
+	if residual > 0 {
+		agents = append(agents, usage.AgentUsage{Agent: usage.SubagentsAgent, OutputTokens: residual})
+	}
+	return agents
 }
 
 // sortedAgents orders usage.MainLoopAgent first, then the rest by descending
