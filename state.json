@@ -1,15 +1,20 @@
 {
   "lastSwept": "1ae7353e9a300b9426c20c7c9a1683c4b16d37df",
   "cursor": "cmd/launcher/internal/ecosystem/gomod/testdata/corpus/lockfile-forwarder-pin/summary.golden.txt",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-03T00:55:30.449454502-05:00"
+  },
   "usage": {
-    "input_tokens": 22,
-    "output_tokens": 3187,
-    "cache_read_input_tokens": 432748,
-    "cache_creation_input_tokens": 42244,
-    "total_cost_usd": 0.48832960000000003,
-    "duration_ms": 31019,
-    "duration_api_ms": 30081,
-    "num_turns": 13
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
