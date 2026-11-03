@@ -3489,13 +3489,14 @@ usage. The output-token figure is the one exception: the stream's
 per-message `output_tokens` is a placeholder, not ground truth
 (issue #3213) — summing it under-counts by roughly two orders of
 magnitude on a real run — so `output` is sourced from the pass's own
-result event instead, is reported for the main loop only, and every
-subagent row's output is always `0` since the stream carries no
-ground-truth figure for a subagent's own output. The payload states
-that itself via `output_is_main_loop_only`, and only then does the
-heartbeat mark the figure `out (main loop)` — a driver whose own
-stream does carry whole-pass output (opencode) leaves the flag unset
-and its `out` column unqualified. That driver's payload is built from
+result events instead. Under `claude` the `main` row carries the
+result's main-loop `usage.output_tokens`, each named subagent row
+shows `0` since no per-role figure exists, and a `(subagents)` row
+carries the rest of the session output the result's per-model summary
+(`modelUsage`) reports, so `output` covers the whole pass. A result
+with no per-model summary contributes only its main-loop figure.
+opencode's stream carries real per-call output, so its `out` column
+is summed per call like the other columns. That driver's payload is built from
 its decoded usage events by the shared reader, deduplicated by message
 id like the above: one `main` row (opencode attributes no subagent
 roles), so the pass's API-call count reaches
@@ -7511,7 +7512,9 @@ described under Output. The others:
   exceed it: `claude`'s result usage, which supplies a Pass's own input and
   cache token totals, covers the main loop only, so its subagents' input and
   cache tokens appear in agent rows but never in the ungrouped totals. Under
-  `claude` a subagent's output is unrecorded: its rows show 0 output. A Pass
+  `claude` a subagent's output cannot be split per role: its rows show 0
+  output, and the session output beyond the main loop's lands in a
+  `(subagents)` group instead. A Pass
   with no agent rows (no usage, or a log no longer on disk to re-read) lands
   whole in `(none)`. Groups run `main` first, then by first appearance,
   `(none)` last.
@@ -7565,9 +7568,13 @@ Driver named in `dispatch_start`: one for the main loop (`main`) plus one per
 subagent role. They are additive per call (deduped by message id), so the
 `main` row never includes subagent usage. A Driver that does not attribute
 subagents (`opencode` today) shows only `main`. Under `claude` output tokens
-come from the result event, which covers the main loop only, so `main`'s
-output is the main loop's alone and subagent rows show 0 output; subagents'
-output is recorded nowhere, neither in the agent rows nor in the totals.
+come from the result event, so `main`'s output is the main loop's alone and
+named subagent rows show 0 output. A `(subagents)` row holds the rest of the
+session's output, which the result's per-model summary reports but cannot
+attribute to a role; it has no API calls or input, and the totals include it.
+A result whose per-model output sum is below its own `usage.output_tokens`
+keeps the main-loop figure (no negative residual), so the totals can then
+exceed the per-model output sum.
 
 Text output prints the role and agent table cells, and every `--by` group key,
 as recorded unless the label is empty, starts or ends with a space, or holds a
