@@ -290,6 +290,8 @@ credential = { netrc = "~/.netrc" }
 //   - whitespace (any Unicode space) and control characters, and "$", "`"
 //     and "\" which flow into shell-sourced exports and init-script string
 //     literals downstream;
+//   - any rune unicode.IsPrint refuses (Cf, private use, unassigned), whose Go
+//     %q escape can be a \U form that a Groovy literal rejects;
 //   - "?" and "#", which would cut a URL short (issue #3321);
 //   - "," and "|", which Go reads as GOPROXY list separators (issue #6310);
 //   - ".", ".." and an interior doubled slash, which the path.Clean-based
@@ -303,6 +305,7 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 	const urlDelimiter = `must not contain "?" or "#"`
 	const whitespace = "must not contain whitespace"
 	const control = "must not contain a control character"
+	const nonPrintable = "must not contain a non-printable character"
 	const listSeparator = `must not contain "," or "|"`
 	for _, tc := range []struct {
 		name     string
@@ -321,6 +324,9 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 		{"interior SOH", `path = "/mir\u0001ror"`, control},
 		{"interior unit separator", `path = "/mir\u001fror"`, control},
 		{"interior DEL", `path = "/mir\u007fror"`, control},
+		{"interior astral format char", `path = "/mir\U000E0001ror"`, nonPrintable},
+		{"interior zero-width space", `path = "/mir\u200bror"`, nonPrintable},
+		{"interior astral private use", `path = "/mir\U000F0000ror"`, nonPrintable},
 		{"dot-dot segment", `path = "/mirror/../etc"`, host},
 		{"dot segment", `path = "/mirror/./release"`, host},
 		{"empty segment", `path = "/mirror//release"`, host},
