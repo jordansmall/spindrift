@@ -1598,7 +1598,7 @@ func TestTea_SidebarActivityTick_AdvancesTranscriptView(t *testing.T) {
 }
 
 // TestTea_SidebarActivityTick_AdvancesTranscriptViewWhileZoomed verifies the
-// tick keeps refreshing the Transcript view after "z" zooms it fullscreen. Zoom
+// tick keeps refreshing the Transcript view after "z" zooms it. Zoom
 // is passive reading with no keypresses of its own, the same
 // frozen-until-keypress symptom #1735 fixed for Activity, extended to
 // Transcript by #1736 AC2 ("works while zoomed").
@@ -1692,7 +1692,7 @@ func TestTea_SidebarActivityTick_AdvancesRawTranscriptView(t *testing.T) {
 }
 
 // TestTea_SidebarActivityTick_AdvancesWhileZoomed verifies the live-tail tick
-// keeps refreshing the sidebar's activity feed after "z" zooms it fullscreen.
+// keeps refreshing the sidebar's activity feed after "z" zooms it.
 // Zoom is passive reading with no keypresses of its own, exactly the
 // frozen-until-keypress symptom issue #1735 reports.
 func TestTea_SidebarActivityTick_AdvancesWhileZoomed(t *testing.T) {
@@ -2132,7 +2132,8 @@ func TestTea_HandleKey_ArrowKeys_MirrorHAndL(t *testing.T) {
 }
 
 // TestTea_HandleKey_ZKey_TogglesSidebarZoom verifies "z" forces the sidebar
-// into its fullscreen zoom, and a second "z" releases it back to docked. It
+// off docked into the floating modal, and a second "z" releases it back to
+// docked. It
 // runs on a terminal wide enough to dock so the toggle's effect is not masked
 // by sidebarFits' own narrow-terminal fallback (issue #1502, ADR 0030).
 func TestTea_HandleKey_ZKey_TogglesSidebarZoom(t *testing.T) {
