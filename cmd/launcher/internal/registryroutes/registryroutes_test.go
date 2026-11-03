@@ -291,6 +291,7 @@ credential = { netrc = "~/.netrc" }
 //     and "\" which flow into shell-sourced exports and init-script string
 //     literals downstream;
 //   - "?" and "#", which would cut a URL short (issue #3321);
+//   - "," and "|", which Go reads as GOPROXY list separators (issue #6310);
 //   - ".", ".." and an interior doubled slash, which the path.Clean-based
 //     consumers downstream can never produce or match;
 //   - the whole host ("/" or "//"): path only adds a subtree on top of an
@@ -302,6 +303,7 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 	const urlDelimiter = `must not contain "?" or "#"`
 	const whitespace = "must not contain whitespace"
 	const control = "must not contain a control character"
+	const listSeparator = `must not contain "," or "|"`
 	for _, tc := range []struct {
 		name     string
 		pathLine string
@@ -329,6 +331,8 @@ func TestParse_BlockPathInvalidIsError(t *testing.T) {
 		{"double slash whole host", `path = "//"`, wholeHost},
 		{"query", `path = "/mirror/?x"`, urlDelimiter},
 		{"fragment", `path = "/mirror/#x"`, urlDelimiter},
+		{"comma", `path = "/go,direct"`, listSeparator},
+		{"pipe", `path = "/go|direct"`, listSeparator},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parse([]byte(syntheticPathDoc(tc.pathLine)))

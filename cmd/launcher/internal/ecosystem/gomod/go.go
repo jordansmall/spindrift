@@ -67,7 +67,7 @@ func computeBindings(port int, prefix string, routes []registrymanifest.Route, e
 	// Parse validation of the [routes.ecosystems.go] path key rejects a bare "/"
 	// (registryroutes.go's validateDeclaredPath), so unlike npm's whole-host case
 	// this path can never normalize to "", and the URL below concatenates it
-	// as-is.
+	// as-is; the same validation bans "," and "|", so it cannot split GOPROXY.
 	if path := ecosystemkit.DeclaredPath(routes, nameGo); path != "" {
 		result.Exports = append(result.Exports, ecosystem.EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
 		goProxyBound = true
