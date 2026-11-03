@@ -4,7 +4,8 @@
 # hooks' own messages, a broken hook or jq fails closed, and a long Bash result
 # is bounded to a tail by the baked summary hook (issue #5358). A bash timeout
 # above the Driver's bashTimeoutEnv value is capped at it, a shorter or unset
-# one kept (issue #5381). Runs under opencode's own runtime (BUN_BE_BUN=1) so
+# one kept (issue #5381). A summary slower than the guard bound still applies
+# (issue #6299). Runs under opencode's own runtime (BUN_BE_BUN=1) so
 # no separate JS engine is needed.
 { pkgs, ... }:
 let
@@ -41,6 +42,17 @@ in
         chmod -R u+w $TMPDIR/silent-tee
         cp -f $TMPDIR/silent/bash-output-tee.sh $TMPDIR/silent-tee/bash-output-tee.sh
 
+        # The real hooks, except a summary that takes 2 s before answering.
+        cp -r $hooks $TMPDIR/slow-summary
+        chmod -R u+w $TMPDIR/slow-summary
+        printf '#!%s\n' "$(command -v bash)" > $TMPDIR/slow-summary/bash-output-summary.sh
+        cat >> $TMPDIR/slow-summary/bash-output-summary.sh <<'EOF'
+        cat >/dev/null
+        sleep 2
+        echo '{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"slow summary"}}'
+        EOF
+        chmod +x $TMPDIR/slow-summary/bash-output-summary.sh
+
         stage() {
           sed "s|^const HOOKS_DIR = .*|const HOOKS_DIR = \"$2\";|" ${../../agent/opencode-guards.js} > "$1"
           grep -qF "const HOOKS_DIR = \"$2\";" "$1"
@@ -50,6 +62,12 @@ in
         stage $TMPDIR/guards-garbage.js $TMPDIR/garbage
         stage $TMPDIR/guards-silent.js $TMPDIR/silent
         stage $TMPDIR/guards-silent-tee.js $TMPDIR/silent-tee
+
+        # A 1 s guard bound makes the 2 s summary outlast it, so only a summary
+        # bound of its own lets it land.
+        stage $TMPDIR/guards-slow-summary.js $TMPDIR/slow-summary
+        sed -i 's|^const GUARD_TIMEOUT_MS = 10_000;|const GUARD_TIMEOUT_MS = 1_000;|' $TMPDIR/guards-slow-summary.js
+        grep -qF 'const GUARD_TIMEOUT_MS = 1_000;' $TMPDIR/guards-slow-summary.js
 
         sed 's|tools: \["bash"\], rewrites: false|tools: ["bash", "nosuchtool"], rewrites: false|' $TMPDIR/guards.js > $TMPDIR/guards-unmapped.js
         grep -qF '"nosuchtool"' $TMPDIR/guards-unmapped.js
@@ -64,6 +82,7 @@ in
         export PLUGIN_GARBAGE=$TMPDIR/guards-garbage.js
         export PLUGIN_SILENT=$TMPDIR/guards-silent.js
         export PLUGIN_SILENT_TEE=$TMPDIR/guards-silent-tee.js
+        export PLUGIN_SLOW_SUMMARY=$TMPDIR/guards-slow-summary.js
         export PLUGIN_UNMAPPED=$TMPDIR/guards-unmapped.js
         export BASH_TIMEOUT_CAP_ENV=${capEnv}
         export CREDENTIAL_PATHS='${builtins.toJSON (import ../../lib/credential-paths.nix)}'
