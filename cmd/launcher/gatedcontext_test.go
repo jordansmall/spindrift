@@ -46,7 +46,7 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 
 // newGatedContext must thread its kind param through to newReadContext's
 // applyDispatchKind call (issue #2944 slice 1), so the label comes from the
-// fixed research family, not from the ambient GH_LABEL_DISPATCHABLE for work.
+// fixed research family, not from the ambient LABEL knob for work.
 func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("CODE_FORGE", "local")
@@ -57,6 +57,7 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	t.Setenv("RUNTIME", "echo")
+	t.Setenv("LABEL", "ready-for-agent")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Research, false)
