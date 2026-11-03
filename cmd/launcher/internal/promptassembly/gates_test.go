@@ -1,6 +1,9 @@
 package promptassembly
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Each *_BAKED gate (box prompt assembly) fires only when the
 // CLI boundary found the skill at DRIVER_SKILLS_DIR/<name>/SKILL.md, so Gates
@@ -713,21 +716,52 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 	}
 }
 
-// Exactly one COMMIT push fragment renders per env (lib/fragments.nix), so
-// exactly one of the three push-row gates must be on for every access combo.
-func TestGatesCommitPushRowsPartition(t *testing.T) {
-	for _, write := range []bool{false, true} {
-		for _, mediated := range []bool{false, true} {
-			env := Env{BoxWriteEnabled: write, HostMediatedRemote: mediated}
-			got := Gates(env)
-			n := 0
-			for _, g := range []string{"BOX_PUSH_READ_WRITE", "HOST_MEDIATED_PUSH", "OUTBOX_PUSH_READ_ONLY"} {
-				if got[g] {
-					n++
-				}
+// Exactly one fragment of each push/triage family renders per env: the
+// template slots are bare placeholder runs, so the gates alone enforce
+// exclusivity. This lives in Go, not lib/fragment-pairs.nix: that registry
+// only checks the declaration shape of two-way inverseOf pairs at eval time.
+// Gates computes these gates, so only a Go test proves exactly-one-on (issue
+// #6303). Families are picked by registry Var prefix, so a regate needs no
+// edit here.
+func TestGatesPushRowsPartition(t *testing.T) {
+	reg, err := LoadRegistryFile("testdata/registry.json")
+	if err != nil {
+		t.Fatalf("LoadRegistryFile: %v", err)
+	}
+
+	// The Var prefix is the family key: a new row under one of these
+	// prefixes joins that family and must keep it at three distinct gates.
+	for _, prefix := range []string{"COMMIT_PUSH_", "IF_BLOCKED_PUSH_", "IF_BLOCKED_TRIAGE_"} {
+		// Legacy *_LOCAL_STEP rows share a gate with *_HOST_MEDIATED_STEP.
+		seen := map[string]bool{}
+		var gates []string
+		for _, row := range reg.Rows {
+			if strings.HasPrefix(row.Var, prefix) && !seen[row.Gate] {
+				seen[row.Gate] = true
+				gates = append(gates, row.Gate)
 			}
-			if n != 1 {
-				t.Errorf("Gates(%+v): %d push-row gates on, want exactly 1", env, n)
+		}
+		if len(gates) != 3 {
+			t.Fatalf("%s* family has %d distinct gates %v, want 3", prefix, len(gates), gates)
+		}
+
+		for _, write := range []bool{false, true} {
+			for _, mediated := range []bool{false, true} {
+				env := Env{BoxWriteEnabled: write, HostMediatedRemote: mediated}
+				got := Gates(env)
+				var on []string
+				for _, g := range gates {
+					v, ok := got[g]
+					if !ok {
+						t.Fatalf("%s* gate %q missing from Gates (write=%v mediated=%v)", prefix, g, write, mediated)
+					}
+					if v {
+						on = append(on, g)
+					}
+				}
+				if len(on) != 1 {
+					t.Errorf("%s* family (write=%v mediated=%v): gates on = %v, want exactly 1", prefix, write, mediated, on)
+				}
 			}
 		}
 	}
