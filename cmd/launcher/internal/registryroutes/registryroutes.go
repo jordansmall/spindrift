@@ -816,10 +816,14 @@ func validateAllowPatterns(label string, patterns []string) error {
 // block. It bans "$", "`", and "\" because a declared path can land in a
 // Groovy double-quoted literal, where "$" interpolates at load time, or in a
 // shell-sourced export line; it also bans whitespace (any Unicode space),
-// control characters, "?", and "#". It bans "," and "|" because Go reads
+// control characters, any other rune unicode.IsPrint refuses, "?", and "#". It
+// bans "," and "|" because Go reads
 // GOPROXY as a list split on them, so one would add a fallback past the Forwarder;
 // every ecosystem shares that ban, since no registry path needs either and a
 // Strategy's RouteDeclaration hook never sees this key to ban them for go alone.
+// The IsPrint ban exists because Go's %q writes an astral non-printable rune as
+// \UXXXXXXXX, which a Groovy literal rejects; with every rune printable and "\"
+// banned, %q emits no escape Groovy rejects.
 // It strips every trailing "/", so "//" cannot pass the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
 	if err := rejectURLDelimiters(label, field, value); err != nil {
@@ -830,6 +834,10 @@ func validateDeclaredPath(label, field, value string) (string, error) {
 	}
 	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain a control character", label, field, value)
+	}
+	// Subsumes the two checks above; it runs after them so they keep their messages.
+	if strings.IndexFunc(value, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
+		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain a non-printable character", label, field, value)
 	}
 	if strings.ContainsAny(value, "$`\\") {
 		return "", fmt.Errorf("registryroutes: %s: %s %q must not contain %q, %q, or %q", label, field, value, "$", "`", "\\")
