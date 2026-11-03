@@ -374,7 +374,6 @@ func goldenCells() []goldenCell {
 		{name: "github-read-only-research-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
 			c.readOnly()
-			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 		}},
 		{name: "local-tracker-research-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
@@ -386,18 +385,15 @@ func goldenCells() []goldenCell {
 			c.dispatch("research")
 			c.forgejoTracker()
 			c.readOnly()
-			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 		}},
 		{name: "github-read-only-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.readOnly()
-			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 		}},
 		{name: "orchestrator-filer-on-read-only", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
 			c.readOnly()
-			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 		}, check: func(t *testing.T, prompt string) {
 			// Guards the cell's reason to exist against an update-mode
 			// regeneration silently flipping it to the socket fragment.
@@ -409,7 +405,6 @@ func goldenCells() []goldenCell {
 		{name: "orchestrator-filer-on-signal-socket", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
 			c.readOnly()
-			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
 			c.export("BOX_SIGNAL_CARRIER", "socket")
 		}},
 		{name: "research-filer-on-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
