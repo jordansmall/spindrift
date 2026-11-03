@@ -24,8 +24,9 @@ type Model struct {
 	// Picks is the session's operator queue, in pick order.
 	Picks []Pick
 	// Sidebar is the open live-tail sidebar, nil when none is open. It docks
-	// beside the still-visible list on a wide enough terminal and goes
-	// fullscreen otherwise (ADR 0030, #1500, #1501).
+	// beside the still-visible list on a wide enough terminal and otherwise
+	// floats as a modal box over it, or goes fullscreen when the terminal is
+	// too small for the box (ADR 0030, #1500, #1501, #1845).
 	Sidebar *SidebarState
 	// Focus is which pane keyboard input drives while Sidebar is open, moved
 	// with h/l (and left/right). Meaningless while Sidebar is nil, where every
@@ -120,10 +121,11 @@ type Model struct {
 	// 0030, issue #1502), so a Dispatch selected again resumes where it was
 	// left instead of at the top with Follow re-armed.
 	SidebarPositions map[string]SidebarPosition
-	// SidebarZoom is whether the operator forced the sidebar fullscreen with
-	// "z", regardless of sidebarFits' width check (ADR 0030, issue #1502).
-	// SidebarCloseMsg resets it so a later open on a wide terminal starts
-	// docked.
+	// SidebarZoom is whether the operator forced the sidebar off the docked
+	// layout with "z", regardless of sidebarFits' width check. It lands on the
+	// floating modal box, or fullscreen when sidebarModalFits is false (ADR
+	// 0030, issues #1502, #1845). SidebarCloseMsg resets it so a later open on
+	// a wide terminal starts docked.
 	SidebarZoom bool
 	// DetailModal is the open Backlog row's ticket detail modal, nil when none
 	// is open. It floats as a bordered box over the still-rendered list (issue

@@ -1537,8 +1537,8 @@ func TestUpdate_SidebarCloseMsg_RetainsPositionForReopen(t *testing.T) {
 	}
 }
 
-// The fullscreen zoom toggle for deep reading is independent of the
-// narrow-terminal fallback (issue #1502, ADR 0030).
+// The zoom toggle for deep reading is independent of the narrow-terminal
+// fallback (issue #1502, ADR 0030).
 func TestUpdate_SidebarZoomToggleMsg_TogglesZoom(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "hi"}}})

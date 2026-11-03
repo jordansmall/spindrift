@@ -90,9 +90,10 @@ type SidebarJumpToBeginningMsg struct{}
 
 func (SidebarJumpToBeginningMsg) isConsoleMsg() {}
 
-// SidebarZoomToggleMsg ("z") toggles Model.SidebarZoom, forcing the sidebar
-// fullscreen or releasing that force back to sidebarFits' own width check,
-// independent of the narrow-terminal fallback (ADR 0030, issue #1502).
+// SidebarZoomToggleMsg ("z") toggles Model.SidebarZoom, forcing the sidebar off
+// the docked layout into the floating modal box (fullscreen only when the
+// terminal is too small for the box) or releasing that force back to
+// sidebarFits' own width check (ADR 0030, issues #1502, #1845).
 type SidebarZoomToggleMsg struct{}
 
 func (SidebarZoomToggleMsg) isConsoleMsg() {}
