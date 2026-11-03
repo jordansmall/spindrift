@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/usage"
 )
 
 func keysOf(gs []Group) []string {
@@ -174,6 +175,32 @@ func TestGroupAgentsSumsToUngroupedTotalPlusSubagentTokens(t *testing.T) {
 	// Ungrouped: 31/42/50/60 and 8 calls; the worker row adds 20/0/30/30 of its own.
 	if in != 51 || out != 42 || cr != 80 || cc != 90 || calls != 8 {
 		t.Errorf("tokens across groups = %d/%d/%d/%d calls %d, want 51/42/80/90 calls 8", in, out, cr, cc, calls)
+	}
+}
+
+// Under claude the pass total includes subagent output the result event
+// reports only in aggregate; the (subagents) row carries the remainder over the
+// main loop, so output across groups still equals the ungrouped total.
+func TestGroupAgentsOutputSumsWithSubagentsRow(t *testing.T) {
+	recs := []dispatchrecord.Record{{DispatchKey: "1", Passes: []dispatchrecord.Pass{{
+		Ordinal: 1, Role: "implement", InputTokens: 30, OutputTokens: 100, APICalls: 5,
+		Agents: []dispatchrecord.PassAgent{
+			{Agent: usage.MainLoopAgent, APICalls: 3, InputTokens: 30, OutputTokens: 40},
+			{Agent: "scout", APICalls: 2},
+			{Agent: usage.SubagentsAgent, OutputTokens: 60},
+		},
+	}}}}
+	var out, calls int
+	for _, g := range GroupAgents(recs) {
+		for _, r := range g.Records {
+			for _, p := range r.Passes {
+				out += p.OutputTokens
+				calls += p.APICalls
+			}
+		}
+	}
+	if out != 100 || calls != 5 {
+		t.Errorf("across groups output %d calls %d, want 100 and 5", out, calls)
 	}
 }
 
