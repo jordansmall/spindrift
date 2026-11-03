@@ -30,18 +30,24 @@ func accessForgeGates(e Env) map[string]bool {
 	// tell them apart. backend.Descriptor.OutboxRelayCapable names the test
 	// that ties the bit to a forge with PRs.
 	g["PR_FORGE_READ_WRITE"] = e.BoxWriteEnabled && e.OutboxRelayCapable
-	g["NO_PR_FORGE_READ_WRITE"] = e.BoxWriteEnabled && !e.OutboxRelayCapable
+	g["PR_FORGE_READ_ONLY"] = !e.BoxWriteEnabled && e.OutboxRelayCapable
+	// A read-only Box on a no-PR forge has no PR step either (issue #6281).
+	// The name carries no access infix, so lib/mkHarness.nix's
+	// readOnlyReachableFragmentRows scans its fragments (if-blocked-pr-none.md,
+	// if-blocked-outcome-landing-branch.md) for forbidden markers: keep them
+	// free of `git push`/`gh pr` text.
+	g["NO_PR_FORGE"] = !e.OutboxRelayCapable
 	g["IF_BLOCKED_PR_RW_GH"] = g["OPEN_PR_CREATE_RW_GH"] && g["PR_FORGE_READ_WRITE"]
 	g["IF_BLOCKED_PR_RW_FORGEJO"] = g["OPEN_PR_CREATE_RW_FORGEJO"] && g["PR_FORGE_READ_WRITE"]
 
 	// On a host-mediated forge (ADR 0033) the clone source is a read-only
 	// mount and the launcher lands the branch host-side, so a read-write Box
-	// there never pushes (issue #5251); the no-PR gates above already cover
+	// there never pushes (issue #5251); NO_PR_FORGE above already covers
 	// its PR step and landing line. Keyed on the bit, never on the CODE_FORGE
-	// name. A read-only Box on such a forge lands the same way (issue #6259),
-	// so the COMMIT push step forks on host mediation, not write access.
+	// name. A read-only Box on such a forge lands the same way (issues #6259,
+	// #6281), so the COMMIT push step and the IF BLOCKED triage and push steps
+	// fork on host mediation, not write access.
 	g["BOX_PUSH_READ_WRITE"] = e.BoxWriteEnabled && !e.HostMediatedRemote
-	g["HOST_MEDIATED_READ_WRITE"] = e.BoxWriteEnabled && e.HostMediatedRemote
 	g["HOST_MEDIATED_PUSH"] = e.HostMediatedRemote
 	g["OUTBOX_PUSH_READ_ONLY"] = !e.BoxWriteEnabled && !e.HostMediatedRemote
 
