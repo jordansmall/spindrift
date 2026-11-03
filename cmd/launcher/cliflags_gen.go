@@ -10,7 +10,7 @@ var cliFlags = []cliFlag{
 	{flag: "self-contained", verb: "", arg: "", short: "", doc: "research only: review the issue from its body and comments alone, cloning no Target repo and needing no REPO_SLUG or GH_TOKEN", intercepted: false},
 	{flag: "verbose", verb: "doctor", arg: "", short: "v", doc: "show the full doctor report, every check and gate row, not just failures", intercepted: false},
 	{flag: "butler", verb: "doctor", arg: "", short: "", doc: "make doctor also validate the butler config (exit 2 on failure) and require the butler labels (exit 4 if missing)", intercepted: false},
-	{flag: "research", verb: "doctor", arg: "", short: "", doc: "make doctor also require the research labels (exit 4 if missing); the daemon preflight passes it when the research kind runs", intercepted: false},
+	{flag: "research", verb: "doctor", arg: "", short: "", doc: "make doctor also require the research labels (exit 4 if missing); the daemon preflight passes it only when the research kind is explicitly selected", intercepted: false},
 	{flag: "chore", verb: "butler", arg: "name", short: "", doc: "sweep only the named butler Chore instead of the first due one", intercepted: false},
 	{flag: "json", verb: "stats", arg: "", short: "", doc: "emit one Dispatch Record per line as JSON instead of the summary table", intercepted: false},
 	{flag: "reingest", verb: "stats", arg: "", short: "", doc: "re-parse every log still on disk, even unchanged ones, so a parser fix repairs the history that remains", intercepted: false},
