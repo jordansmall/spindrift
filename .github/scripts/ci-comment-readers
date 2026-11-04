@@ -21,6 +21,7 @@ cmd/launcher/quickstart/testdata/golden/*/flake.nix
 flake.nix
 lib/flakeModule.nix
 lib/image.nix
+lib/jira-status-mapping.nix
 lib/mkHarness.nix
 lib/structural-paths.nix
 nix/checks/equivalence.nix

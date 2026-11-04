@@ -30,7 +30,7 @@
    "want": {"failed": {"status": "", "resolution": ""}}},
   {"name": "unknown top-level key",
    "input": "{\"disptchable\":\"To Do\"}",
-   "error": "JIRA_STATUS_MAPPING: unknown key \"disptchable\" (want one of dispatchable, inProgress, complete, failed)"},
+   "error": "JIRA_STATUS_MAPPING: unknown key \"disptchable\" (want one of dispatchable, inProgress, complete, failed, ambiguous)"},
   {"name": "top-level array",
    "input": "[\"a\"]",
    "error": "JIRA_STATUS_MAPPING: expected a JSON object, got array"},
@@ -93,5 +93,23 @@
    "error": "JIRA_STATUS_MAPPING: key \"complete\": expected a status name or a {\"status\", \"resolution\"} object, got number"},
   {"name": "float resolution",
    "input": "{\"complete\":{\"status\":\"Done\",\"resolution\":2.5}}",
-   "error": "JIRA_STATUS_MAPPING: key \"complete\": field \"resolution\" must be a string, got number"}
+   "error": "JIRA_STATUS_MAPPING: key \"complete\": field \"resolution\" must be a string, got number"},
+  {"name": "failed and ambiguous share an object-valued status",
+   "input": "{\"failed\":{\"status\":\"Blocked\",\"resolution\":\"Won't Do\"},\"ambiguous\":\"blocked\"}",
+   "error": "",
+   "want": {
+     "failed": {"status": "Blocked", "resolution": "Won't Do"},
+     "ambiguous": {"status": "blocked", "resolution": ""}}},
+  {"name": "complete and failed share an object-valued status",
+   "input": "{\"failed\":\"Done\",\"complete\":{\"status\":\"done\",\"resolution\":\"Fixed\"}}",
+   "error": "JIRA_STATUS_MAPPING: keys \"complete\" and \"failed\" both map to status \"done\" (only failed and ambiguous may share a status)"},
+  {"name": "dispatchable and inProgress share a status",
+   "input": "{\"dispatchable\":\"To Do\",\"inProgress\":\"to do\"}",
+   "error": "JIRA_STATUS_MAPPING: keys \"dispatchable\" and \"inProgress\" both map to status \"To Do\" (only failed and ambiguous may share a status)"},
+  {"name": "three-way share, ambiguous reported against complete",
+   "input": "{\"ambiguous\":\"X\",\"failed\":\"X\",\"complete\":\"x\"}",
+   "error": "JIRA_STATUS_MAPPING: keys \"ambiguous\" and \"complete\" both map to status \"X\" (only failed and ambiguous may share a status)"},
+  {"name": "shared status containing a quote and a backslash",
+   "input": "{\"dispatchable\":\"A \\\"q\\\" \\\\b\",\"inProgress\":\"a \\\"q\\\" \\\\b\"}",
+   "error": "JIRA_STATUS_MAPPING: keys \"dispatchable\" and \"inProgress\" both map to status \"A \\\"q\\\" \\\\b\" (only failed and ambiguous may share a status)"}
 ]

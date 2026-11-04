@@ -24,3 +24,16 @@ func TestValidateJiraEnv_RequiresBaseURLProjectKeyToken(t *testing.T) {
 		t.Errorf("ValidateJiraEnv should require JIRA_TOKEN, got: %v", err)
 	}
 }
+
+// A status-mapping share other than failed+ambiguous fails startup, naming both
+// keys; failed and ambiguous may share one status.
+func TestValidateJiraEnv_StatusMappingSharing(t *testing.T) {
+	const url, proj, tok = "https://example.atlassian.net", "PROJ", "tok"
+	err := jira.ValidateJiraEnv(url, proj, tok, `{"dispatchable":"To Do","inProgress":"to do"}`)
+	if err == nil || !strings.Contains(err.Error(), "dispatchable") || !strings.Contains(err.Error(), "inProgress") {
+		t.Errorf("want an error naming dispatchable and inProgress, got: %v", err)
+	}
+	if err := jira.ValidateJiraEnv(url, proj, tok, `{"failed":"Blocked","ambiguous":"Blocked"}`); err != nil {
+		t.Errorf("failed and ambiguous may share a status, got: %v", err)
+	}
+}

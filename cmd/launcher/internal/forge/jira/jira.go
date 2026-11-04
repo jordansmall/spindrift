@@ -53,6 +53,7 @@ var statusMappingKeys = map[string]forge.DispatchState{
 	"inProgress":   forge.InProgress,
 	"complete":     forge.Complete,
 	"failed":       forge.Failed,
+	"ambiguous":    forge.Ambiguous,
 }
 
 // StatusTarget is what a canonical state maps to in Jira: the native status
@@ -98,7 +99,12 @@ func jsonTypeName(v any) string {
 // statusMappingKeys to a native Jira status name or a {"status", "resolution"}
 // object. An unknown key or field is an error so a typo fails fast at startup
 // instead of silently dropping the mapping. Keys are checked in sorted order so
-// the first error is deterministic; the Nix mirror reports the same one.
+// the first error is deterministic; the Nix mirror reports the same one. Two
+// keys may share a status (compared with strings.EqualFold, as the claim check
+// is) only if they are failed and ambiguous, which both mean a human must act
+// and fit one Blocked column; any other share would, say, make every ready card
+// look claimed. The Nix eval-time mirror folds ASCII only, so a non-ASCII
+// case-only share is caught at startup only.
 func ParseStatusMapping(s string) (map[forge.DispatchState]StatusTarget, error) {
 	out := map[forge.DispatchState]StatusTarget{}
 	if s == "" {
@@ -115,16 +121,32 @@ func ParseStatusMapping(s string) (map[forge.DispatchState]StatusTarget, error) 
 	if !ok {
 		return nil, fmt.Errorf("JIRA_STATUS_MAPPING: expected a JSON object, got %s", jsonTypeName(top))
 	}
-	for _, key := range slices.Sorted(maps.Keys(raw)) {
+	keys := slices.Sorted(maps.Keys(raw))
+	for _, key := range keys {
 		state, ok := statusMappingKeys[key]
 		if !ok {
-			return nil, fmt.Errorf("JIRA_STATUS_MAPPING: unknown key %q (want one of dispatchable, inProgress, complete, failed)", key)
+			return nil, fmt.Errorf("JIRA_STATUS_MAPPING: unknown key %q (want one of dispatchable, inProgress, complete, failed, ambiguous)", key)
 		}
 		target, err := parseStatusTarget(key, raw[key])
 		if err != nil {
 			return nil, err
 		}
 		out[state] = target
+	}
+	// Keys are sorted so the error names the same pair every run and
+	// ambiguous always precedes failed.
+	for i, k := range keys {
+		status := out[statusMappingKeys[k]].Status
+		if status == "" {
+			continue
+		}
+		for _, p := range keys[:i] {
+			held := out[statusMappingKeys[p]].Status
+			if !strings.EqualFold(held, status) || (p == "ambiguous" && k == "failed") {
+				continue
+			}
+			return nil, fmt.Errorf("JIRA_STATUS_MAPPING: keys %q and %q both map to status %q (only failed and ambiguous may share a status)", p, k, held)
+		}
 	}
 	return out, nil
 }
