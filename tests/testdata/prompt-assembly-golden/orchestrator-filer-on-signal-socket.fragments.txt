@@ -11,6 +11,7 @@ file-issues-relay-socket.md
 file-issues-triage-recap.md
 filer-file-relay-socket.md
 filer-label-relay.md
+filer-relay-reason-readonly.md
 github/filer-dedup.md
 if-blocked-outcome-landing-outbox.md
 if-blocked-pr-outbox-socket.md

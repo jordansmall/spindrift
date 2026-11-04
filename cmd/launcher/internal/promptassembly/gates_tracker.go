@@ -64,8 +64,9 @@ func trackerGates(e Env) map[string]bool {
 	// wording on a client-less tracker riding github's arm, so an override that
 	// still names them matches the shipped slot.
 	g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"] = itRead == "GITHUB" && !unwritable
-	// The Filer's dedup step: a tracker with no in-Box client has no search to
-	// run, so it takes the no-search arm in every access mode (issue #6354).
+	// InBoxUnwritableTracker (not local, which also lacks an in-Box client but
+	// takes the writable arm) picks the Filer's no-search dedup step and the
+	// FILER_RELAY_REASON fragment in every access mode (issue #6354).
 	g["ISSUE_TRACKER_WRITABLE"] = !unwritable
 	g["ISSUE_TRACKER_UNWRITABLE"] = unwritable
 	g["ISSUE_TRACKER_GITHUB_WRITABLE"] = itRead == "GITHUB" && !unwritable

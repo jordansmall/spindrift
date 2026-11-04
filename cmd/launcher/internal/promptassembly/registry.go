@@ -56,6 +56,10 @@ type FragmentRow struct {
 	// holds only if Gates computes the two as complements, so Go carries the
 	// claim over to check it against the real gate computation.
 	InverseOf string `json:"inverseOf,omitempty"`
+	// Inline binds Var without the trailing blank line a step var carries, so
+	// a parent fragment can splice it mid-sentence (issue #6354). Unset for
+	// every step var, which a parent places on a line of its own.
+	Inline bool `json:"inline,omitempty"`
 }
 
 // Registry is the Go-side load of lib/fragments.nix's row list, in the same order.

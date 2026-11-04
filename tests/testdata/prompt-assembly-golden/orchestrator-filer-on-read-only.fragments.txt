@@ -11,6 +11,7 @@ file-issues-relay.md
 file-issues-triage-recap.md
 filer-file-relay.md
 filer-label-relay.md
+filer-relay-reason-readonly.md
 github/filer-dedup.md
 if-blocked-outcome-landing-outbox.md
 if-blocked-pr-outbox.md

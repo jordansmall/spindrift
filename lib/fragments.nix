@@ -26,6 +26,8 @@
 # interpolates; every other fragment is static prose once its gate is on,
 # except for parents splicing in the `var` of a row above them (see the
 # Filer twin rows below).
+# `inline` (issue #6354) binds the var without the trailing blank line a step
+# var carries, for a parent that splices it mid-sentence.
 # `inverseOf` (issue #3219) declares this row's gate the boolean inverse of
 # the named on-gate; fragment-pairs.nix's `validate` asserts those pairs at
 # the end of this file, before an image can bake from a malformed one.
@@ -301,8 +303,28 @@ let
       fragment = "file-issues-direct.md";
       var = "FILE_ISSUES_DIRECT_STEP";
     }
+    # The work relay's stated reason (issue #6354): a read-only Box has no
+    # write token, but an unwritable tracker (Jira) has no in-Box client in any
+    # access mode, so a read-write Box there must not be told its token is
+    # read-only. The readonly arm holds only because the work relay runs on a
+    # writable tracker just when the Box is read-only (gates_tracker.go's
+    # filerFileRelay); revisit it if that gate changes. Both arms share a var
+    # and splice into the relay parents below.
+    {
+      gate = "ISSUE_TRACKER_WRITABLE";
+      fragment = "filer-relay-reason-readonly.md";
+      inline = true;
+      var = "FILER_RELAY_REASON";
+    }
+    {
+      gate = "ISSUE_TRACKER_UNWRITABLE";
+      inverseOf = "ISSUE_TRACKER_WRITABLE";
+      fragment = "filer-relay-reason-unwritable.md";
+      inline = true;
+      var = "FILER_RELAY_REASON";
+    }
     # The carrier (issue #3726) forks the issue-filing relay the same way as
-    # the comment/pr-intent channels above: a read-only Filer emits either a
+    # the comment/pr-intent channels above: a relay Filer emits either a
     # SPINDRIFT_ISSUE_INTENT stdout log line or a `driver-exec signal
     # issue-intent` socket call, so this row and its socket sibling fork on
     # BOX_SIGNAL_CARRIER via the FILER_FILE_RELAY_LOG/_SOCKET gate pair

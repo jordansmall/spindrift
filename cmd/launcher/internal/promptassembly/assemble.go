@@ -521,7 +521,10 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 				}
 				continue
 			}
-			fragBody := append(append(body{}, rendered...), segment{src: fragSource, text: "\n\n"})
+			fragBody := append(body{}, rendered...)
+			if !row.Inline {
+				fragBody = append(fragBody, segment{src: fragSource, text: "\n\n"})
+			}
 			vars[row.Var] = fragBody
 			bound[row.Var] = true
 		} else if !bound[row.Var] {

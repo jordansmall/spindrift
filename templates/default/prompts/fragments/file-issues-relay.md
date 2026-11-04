@@ -2,7 +2,7 @@
 
 ${FILE_ISSUES_TRIAGE_RECAP_STEP}It is pre-provisioned; pass it the surviving findings verbatim,
 the issue number, and the branch for provenance.
-Your token is read-only, so the filer cannot file issues itself — it emits
+${FILER_RELAY_REASON}, so the filer cannot file issues itself — it emits
 `SPINDRIFT_ISSUE_INTENT` lines instead, and the launcher files each one
 host-side once you exit, so no issue URL is known yet.
 

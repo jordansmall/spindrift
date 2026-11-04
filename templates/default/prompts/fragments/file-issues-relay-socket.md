@@ -2,7 +2,7 @@
 
 ${FILE_ISSUES_TRIAGE_RECAP_STEP}It is pre-provisioned; pass it the surviving findings verbatim,
 the issue number, and the branch for provenance.
-Your token is read-only, so the filer cannot file issues itself — it sends
+${FILER_RELAY_REASON}, so the filer cannot file issues itself — it sends
 each one over the Signal socket via `driver-exec signal issue-intent`
 instead, and the launcher files each one host-side once you exit, so no
 issue URL is known yet.

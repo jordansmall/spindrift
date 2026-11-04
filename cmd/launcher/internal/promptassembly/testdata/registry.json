@@ -164,6 +164,19 @@
     "var": "FILE_ISSUES_DIRECT_STEP"
   },
   {
+    "gate": "ISSUE_TRACKER_WRITABLE",
+    "fragment": "filer-relay-reason-readonly.md",
+    "inline": true,
+    "var": "FILER_RELAY_REASON"
+  },
+  {
+    "gate": "ISSUE_TRACKER_UNWRITABLE",
+    "fragment": "filer-relay-reason-unwritable.md",
+    "inline": true,
+    "var": "FILER_RELAY_REASON",
+    "inverseOf": "ISSUE_TRACKER_WRITABLE"
+  },
+  {
     "gate": "FILER_FILE_RELAY_LOG",
     "fragment": "file-issues-relay.md",
     "var": "FILE_ISSUES_RELAY_STEP",
