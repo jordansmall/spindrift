@@ -1,22 +1,20 @@
 {
   "lastSwept": "bc78086b161ec344fba75a432d3c6eb54fd22af4",
   "cursor": "cmd/launcher/internal/driver/claude/testdata/corpus/outcome-fixture/heartbeat.golden.json",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6339",
-    "https://github.com/jordansmall/spindrift/issues/6340"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/6339"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-04T13:59:31.284829392-05:00"
+  },
   "usage": {
-    "input_tokens": 54,
-    "output_tokens": 16601,
-    "cache_read_input_tokens": 1477034,
-    "cache_creation_input_tokens": 82224,
-    "total_cost_usd": 1.3584990850000003,
-    "duration_ms": 154746,
-    "duration_api_ms": 150939,
-    "num_turns": 30
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
