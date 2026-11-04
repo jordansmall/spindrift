@@ -4177,10 +4177,15 @@ such block and are experimental, so you select them by editing
   the Demand count) match the status name from either form, and plain
   string values behave as before.
 
-  `TransitionState` performs the matching workflow transition. When a state
-  has no entry in the mapping, or the mapped transition is not available on
-  the issue's current workflow (its next-status editor screen doesn't offer
-  it), the launcher **falls back to swapping the same lifecycle label**
+  `JIRA_LIFECYCLE` picks how much of the work lifecycle the mapping owns.
+  The default, `hybrid`, is described next; `status` is [described
+  below](#jira-lifecycle-status). The knob governs the work states only.
+
+  Under `hybrid`, `TransitionState` performs the matching workflow
+  transition. When a state has no entry in the mapping, or the mapped
+  transition is not available on the issue's current workflow (its
+  next-status editor screen doesn't offer it), the launcher **falls back to
+  swapping the same lifecycle label**
   (`ready-for-agent` / `agent-in-progress` / `agent-complete` / `agent-failed`,
   same knobs as the `github` tracker) so the lifecycle always makes progress
   even on an unmapped or restrictive workflow. `ListIssues` matches either the
@@ -4189,8 +4194,8 @@ such block and are experimental, so you select them by editing
   for this backend, in place of GitHub's issue-number order).
 
   The `ambiguous` key moves the card on an ambiguous-spec halt
-  (`status=ambiguous`); unmapped, or with the transition unavailable, the
-  halt applies the `agent-ambiguous-spec` label as on `github`. There is no
+  (`status=ambiguous`); under `hybrid`, unmapped, or with the transition
+  unavailable, the halt applies the `agent-ambiguous-spec` label as on `github`. There is no
   `recoverable` key: settle never reaches that state on any forge Jira pairs
   with. Two keys may map to the same status only if they are `failed` and
   `ambiguous`, since both terminals mean a human must act (one Blocked
@@ -4210,8 +4215,8 @@ such block and are experimental, so you select them by editing
   the issue. Map it to a status outside the Done category (say
   `"In Review"`) and the issue moves there and stays open, without
   `agent-complete` — a successful native transition adds no fallback
-  label. Leave it unmapped, or its transition unavailable, and the label
-  fallback above leaves it open wearing `agent-complete`.
+  label. Under `hybrid`, leave it unmapped, or its transition unavailable,
+  and the label fallback above leaves it open wearing `agent-complete`.
 
   Dependencies resolve from **native Jira issue links** (the built-in
   `Blocks` link type's "is blocked by" direction) rather than prose parsing.
@@ -4262,7 +4267,8 @@ such block and are experimental, so you select them by editing
   Center is untested.
 
   Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`,
-  `JIRA_ISSUE_TYPE`, and `JIRA_STATUS_MAPPING` are non-secret, set via
+  `JIRA_ISSUE_TYPE`, `JIRA_STATUS_MAPPING`, and `JIRA_LIFECYCLE` (`hybrid`
+  by default, or `status`) are non-secret, set via
   `issues.jira`
   (baked) or their env vars (runtime) — see the [flake options
   reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside
@@ -4285,9 +4291,35 @@ such block and are experimental, so you select them by editing
   unreadable statuses endpoint reports degraded instead, and an empty mapping
   makes no call.
 
+  <a id="jira-lifecycle-status"></a>With `JIRA_LIFECYCLE=status` the
+  mapped status is the whole work state, for a board that wants no
+  spindrift labels on its cards:
+
+  - Every work state (`dispatchable`, `inProgress`, `complete`, `failed`,
+    `ambiguous`) must be mapped. A mapping that leaves any out fails the
+    eval-time check and launcher startup alike, naming them
+    (`JIRA_LIFECYCLE=status: JIRA_STATUS_MAPPING must map every work state;
+    unmapped: ...`); an unknown mode fails the same way.
+  - `ListIssues`, the daemon's Demand count and the claim's already-claimed
+    check match the mapped status only, never a label.
+  - No lifecycle label is ever applied. A claim and a successful transition
+    still strip stale lifecycle labels, best-effort, so a board migrating
+    off `hybrid` sheds them as its cards move.
+  - A mapped transition the workflow does not offer is a refusal, never a
+    fallback. Settle posts `spindrift could not move this issue: issue X
+    could not move from status "A" to "B": the workflow offers transitions
+    to "C", "D"` as a comment on the issue and settles the Record with
+    reason `transition-refused`, whose note keeps the reason and note it
+    displaced (see [Stats](#stats)). The `doctor` `status-mapping` row
+    catches a mapped status the workflow lacks ahead of time.
+
+  To migrate, map every work state, then set `JIRA_LIFECYCLE=status`
+  (`issues.jira.lifecycle = "status"` in the flake). Research states are
+  unaffected.
+
   A [research dispatch](#research-dispatch)'s states — its queue, its claim,
-  and its verdict terminals (`recommend` / `reject` / `unclear`) — always
-  ride this same label-fallback mechanism: they match and swap the
+  and its verdict terminals (`recommend` / `reject` / `unclear`) — ride the
+  label-fallback mechanism in both `JIRA_LIFECYCLE` modes: they match and swap the
   `agent-research-*` labels, never a Jira workflow status. The research
   tracker is built without `JIRA_STATUS_MAPPING`, so the work mapping never
   moves a researched issue's status or pulls work issues into the research

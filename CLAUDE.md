@@ -18,7 +18,12 @@ launcher nor the Box branches on a kind name to re-derive one. See [ADR
 
 ### Triage label lifecycle
 
-Agent issues move through these labels (see `.github/workflows/agent-dispatch.yml`):
+Agent issues move through these labels (see `.github/workflows/agent-dispatch.yml`).
+On Jira these work labels are the fallback under the default
+`JIRA_LIFECYCLE=hybrid`; `JIRA_LIFECYCLE=status` keeps the work lifecycle on
+mapped native statuses alone, and a refused transition comments on the issue
+instead of applying `agent-failed`. Research labels are unaffected. See the
+[Jira tracker](docs/reference.md#jira-lifecycle-status).
 
 - `ready-for-agent` — fully specified, ready for an AFK agent to pick up. **File new
   agent-ready issues with this label.**
