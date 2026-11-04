@@ -221,11 +221,13 @@ jobs:
   # bwrap/OCI integration tests above are Linux-only and stay on the job
   # above. This job guards the other axis: the developer/consumer surface on
   # Apple Silicon (aarch64-darwin, a flake.nix system). It runs in parallel
-  # with `check` — no `needs:` between them.
+  # with `check` — no `needs:` between them. Main only: macos-latest runners
+  # stall often enough to fail PR CI, so PRs skip it and ci-ok requires it on
+  # main alone.
   check-macos:
     name: flake check (aarch64-darwin)
     needs: changes
-    if: needs.changes.outputs.kind == 'code'
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.kind == 'code'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -324,10 +326,13 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           KIND: ${{ needs.changes.outputs.kind }}
+          ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
         run: |
           if [ "$KIND" = docs ]; then
             required=(changes docs)
-          else
+          elif [ "$ON_MAIN" = true ]; then
             required=(changes check check-macos)
+          else
+            required=(changes check)
           fi
           bash .github/scripts/ci-ok.sh "${required[@]}" <<<"$NEEDS"
