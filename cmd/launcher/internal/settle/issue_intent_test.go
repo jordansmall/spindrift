@@ -307,25 +307,41 @@ func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 	}
 }
 
-// A tracker that doesn't implement forge.HostPostedIssueFiler (every real
-// adapter today) leaves fileIssueIntentsDetailed a no-op rather than
-// panicking. The relay is a best-effort side channel, not part of the run's
-// own landing decision.
-func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerNoOps(t *testing.T) {
+// A tracker that doesn't implement forge.HostPostedIssueFiler degrades each
+// relayed finding to a Failed entry with its body kept, and warns once naming
+// the tracker and the missing capability, rather than dropping the finding
+// silently (issue #6343). Filing still never errors the settle.
+func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerDegrades(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 
 	result := dispatch.Result{
 		IssueIntentsFound: true,
-		IssueIntents:      []string{`{"title":"first","body":"body"}`},
+		IssueIntents: []string{
+			`{"title":"first","body":"first body"}`,
+			`{"title":"second","body":"second body"}`,
+		},
 	}
 
-	urls := filedURLs(fileIssueIntentsDetailed(fc, "1", result, "agent-review-finding", ""))
+	var got []filedIntent
+	stderr := captureStderr(t, func() {
+		got = fileIssueIntentsDetailed(fc, "1", result, "agent-review-finding", "")
+	})
 
 	if len(fc.PostIssueCalls) != 0 {
 		t.Errorf("PostIssueCalls = %+v, want none", fc.PostIssueCalls)
 	}
-	if len(urls) != 0 {
-		t.Errorf("urls = %v, want none", urls)
+	want := []filedIntent{
+		{Title: "first", Failed: true, Body: "first body"},
+		{Title: "second", Failed: true, Body: "second body"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("filed = %+v, want %+v", got, want)
+	}
+	if n := strings.Count(stderr, "HostPostedIssueFiler"); n != 1 {
+		t.Errorf("stderr = %q, want exactly one warning naming HostPostedIssueFiler", stderr)
+	}
+	if !strings.Contains(stderr, "forge.Fake") {
+		t.Errorf("stderr = %q, want the warning to name the tracker type", stderr)
 	}
 }
 
