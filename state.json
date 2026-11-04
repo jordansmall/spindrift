@@ -1,20 +1,15 @@
 {
-  "lastSwept": "bc78086b161ec344fba75a432d3c6eb54fd22af4",
-  "cursor": "cmd/launcher/internal/ecosystem/gradle/testdata/corpus/path-backslash/routes.toml",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-11-03T21:51:39.821009624-05:00"
-  },
+  "lastSwept": "aaea73aa98354e98f792b1b1002dbf1ee241cf0a",
+  "cursor": "cmd/launcher/internal/ecosystem/gradle/testdata/corpus/path-empty-segment/routes.toml",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 16,
+    "output_tokens": 1969,
+    "cache_read_input_tokens": 249744,
+    "cache_creation_input_tokens": 29147,
+    "total_cost_usd": 0.3225688,
+    "duration_ms": 27603,
+    "duration_api_ms": 26759,
+    "num_turns": 9
   }
 }
