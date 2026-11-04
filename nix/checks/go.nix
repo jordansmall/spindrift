@@ -257,6 +257,7 @@ let
       "forge/rest"
       "gitexec"
       "gitremote"
+      "golden"
       "hostop"
       "landdelta"
       "ledger"
