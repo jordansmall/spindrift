@@ -41,6 +41,12 @@ const (
 	// States that name themselves.
 	ReasonAmbiguous   = "ambiguous"
 	ReasonRecoverable = "recoverable"
+
+	// Any terminal state: JIRA_LIFECYCLE=status found no workflow transition
+	// to the mapped status (or no mapped status for the state), so the tracker
+	// was left unchanged. It replaces the path's own reason; the state is
+	// still the host's decision.
+	ReasonTransitionRefused = "transition-refused"
 )
 
 // UnreviewedNote is why a run is not trusted (ReasonUnreviewed): its review

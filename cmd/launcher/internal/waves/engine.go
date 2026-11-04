@@ -25,7 +25,8 @@ import (
 // Unlike settle.Settle's method of the same name it takes d first and settles
 // d's Record directly rather than latching.
 func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, from, to forge.DispatchState, note, reason string) {
-	if err := it.TransitionState(num, from, to); err != nil {
+	reason, note, err := settle.Transition(it, num, from, to, reason, note)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, to, err)
 	}
 	// Same failed-write-still-reports rule as settle.Settle.transitionState

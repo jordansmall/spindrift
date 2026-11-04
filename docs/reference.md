@@ -7375,7 +7375,13 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   from another pass, or a signal-killed `CODE_FORGE=local` run with no
   success self-report and a bundle in the outbox whose loop stopped in
   implement or fix);
-- `ambiguous` and `recoverable` each name their own state.
+- `ambiguous` and `recoverable` each name their own state;
+- `transition-refused` can accompany any terminal state, and replaces the
+  path's own reason: with `JIRA_LIFECYCLE=status`, the tracker's workflow
+  offered no transition to the mapped status, so the card stayed put. The issue
+  carries a comment naming the from and to statuses and the transitions the
+  workflow did offer, and the op's `note` repeats that text and names the
+  reason and note it displaced.
 
 A Record's `outcome` comes only from that op, and `outcome_source` says so:
 `dispatch_settled`, or `none` when no log carried one. `box_status` is the

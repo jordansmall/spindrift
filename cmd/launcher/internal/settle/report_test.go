@@ -589,3 +589,51 @@ func TestSettle_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
 		t.Errorf("log = %q, want untouched without a Record ID", b)
 	}
 }
+
+// JIRA_LIFECYCLE=status (issue #6353): a workflow that offers no transition to
+// the mapped status applies no label, so settle tells the card's readers why
+// and latches the distinct reason; the tracker-side state is unchanged.
+func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "9"})
+	refused := &forge.TransitionRefusedError{Issue: "9", From: "In Review", To: "Done", Offered: []string{"Blocked", "To Do"}}
+	fc.TransitionStateErr = fmt.Errorf("wrapped: %w", refused)
+	s := New(Config{}, fc, fc)
+
+	s.transitionState("9", forge.InProgress, forge.Complete, "merged cleanly", ReasonMerged)
+
+	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "9" {
+		t.Fatalf("comments = %+v, want one on issue 9", fc.CommentCalls)
+	}
+	body := fc.CommentCalls[0].Body
+	for _, want := range []string{`"In Review"`, `"Done"`, `"Blocked"`, `"To Do"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("comment %q lacks %s", body, want)
+		}
+	}
+	got := s.settledLatch["9"]
+	if got.state != forge.Complete.String() || got.reason != ReasonTransitionRefused {
+		t.Errorf("latch = %+v, want state=%s reason=%s", got, forge.Complete, ReasonTransitionRefused)
+	}
+	if !strings.Contains(got.note, "could not move") || !strings.Contains(got.note, ReasonMerged) || !strings.Contains(got.note, "merged cleanly") {
+		t.Errorf("latch note = %q, want the refusal text and the displaced reason and note", got.note)
+	}
+}
+
+func TestSettle_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "9"})
+	fc.TransitionStateErr = fmt.Errorf("boom")
+	s := New(Config{}, fc, fc)
+
+	testutil.CaptureStderr(t, func() {
+		s.transitionState("9", forge.InProgress, forge.Failed, "n", ReasonCIRed)
+	})
+
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("comments = %+v, want none", fc.CommentCalls)
+	}
+	if got := s.settledLatch["9"]; got.reason != ReasonCIRed || got.note != "n" {
+		t.Errorf("latch = %+v, want the caller's reason and note", got)
+	}
+}

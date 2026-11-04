@@ -83,3 +83,46 @@ func TestTransitionState_WarnsWithTrackerError(t *testing.T) {
 		t.Errorf("stderr = %q, want it to contain %q", got, want)
 	}
 }
+
+// JIRA_LIFECYCLE=status (issue #6353): a crashed Box whose Failed transition
+// is refused must leave the card a comment and settle transition-refused, the
+// same as settle's own path.
+func TestTransitionState_Refused_CommentsAndSettlesDistinctReason(t *testing.T) {
+	testutil.InstallPipeReporter(t)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "42"})
+	fc.TransitionStateErr = fmt.Errorf("wrapped: %w", &forge.TransitionRefusedError{Issue: "42", From: "In Progress", To: "Blocked"})
+	path := filepath.Join(t.TempDir(), "issue-42.log")
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:42@x"}})
+	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := dispatch.NewFake()
+	d.LogPathResult = path
+	d.RecordIDResult = "work:42@x"
+
+	testutil.CaptureStderr(t, func() {
+		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box crashed", settle.ReasonBoxFailed)
+	})
+
+	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "42" || !strings.Contains(fc.CommentCalls[0].Body, `"Blocked"`) {
+		t.Fatalf("comments = %+v, want one naming the target status on issue 42", fc.CommentCalls)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settled []hostop.DispatchSettled
+	for _, line := range strings.Split(string(data), "\n") {
+		var ev hostop.Event
+		if json.Unmarshal([]byte(line), &ev) == nil && ev.SpindriftOp != nil && ev.SpindriftOp.Settled != nil {
+			settled = append(settled, *ev.SpindriftOp.Settled)
+		}
+	}
+	if len(settled) != 1 || settled[0].State != "failed" || settled[0].Reason != settle.ReasonTransitionRefused {
+		t.Fatalf("settled ops = %+v, want one failed/transition-refused", settled)
+	}
+	if n := settled[0].Note; !strings.Contains(n, "box crashed") || !strings.Contains(n, settle.ReasonBoxFailed) {
+		t.Errorf("note = %q, want the displaced reason and note kept", n)
+	}
+}

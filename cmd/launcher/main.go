@@ -1612,9 +1612,9 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			if queue {
 				// A stop arrived after the claim above: put the label back so
 				// the issue is not stranded agent-in-progress with no run.
-				restoreErr := it.TransitionState(iss.number, forge.InProgress, forge.Failed)
+				reason, note, restoreErr := settle.Transition(it, iss.number, forge.InProgress, forge.Failed, settle.ReasonStopped, "stopped before the bundle relay")
 				// Reported even if the restore failed, as transitionState does.
-				recoverSettled(iss.number, forge.Failed, settle.ReasonStopped, "stopped before the bundle relay")
+				recoverSettled(iss.number, forge.Failed, reason, note)
 				if restoreErr != nil {
 					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
 				}
@@ -1714,7 +1714,8 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	if !found || prior != forge.Complete {
 		return origErr
 	}
-	if err := it.TransitionState(num, forge.InProgress, forge.Complete); err != nil {
+	// The returned reason and note are dropped: the caller settles the failure.
+	if _, _, err := settle.Transition(it, num, forge.InProgress, forge.Complete, "", ""); err != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not restore agent-complete: %v\n", num, err)
 		return origErr
 	}
