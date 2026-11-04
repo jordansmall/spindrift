@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -41,16 +43,14 @@ func TestParseStatusMapping_AllStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseStatusMapping: %v", err)
 	}
-	want := map[forge.DispatchState]string{
-		forge.Dispatchable: "To Do",
-		forge.InProgress:   "In Progress",
-		forge.Complete:     "Done",
-		forge.Failed:       "Blocked",
+	want := map[forge.DispatchState]jira.StatusTarget{
+		forge.Dispatchable: {Status: "To Do"},
+		forge.InProgress:   {Status: "In Progress"},
+		forge.Complete:     {Status: "Done"},
+		forge.Failed:       {Status: "Blocked"},
 	}
-	for state, status := range want {
-		if m[state] != status {
-			t.Errorf("m[%v] = %q, want %q", state, m[state], status)
-		}
+	if !maps.Equal(m, want) {
+		t.Errorf("mapping = %v, want %v", m, want)
 	}
 }
 
@@ -64,6 +64,56 @@ func TestParseStatusMapping_UnknownKey(t *testing.T) {
 func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 	if _, err := jira.ParseStatusMapping(`{not json`); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
+	}
+}
+
+// The corpus is shared with the Nix mirror of ParseStatusMapping, so both
+// parsers are held to the same accept/reject decisions and error text.
+func TestParseStatusMapping_Corpus(t *testing.T) {
+	raw, err := os.ReadFile("testdata/status-mapping-cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name  string
+		Input string
+		Error string
+		Want  map[string]jira.StatusTarget
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]forge.DispatchState{
+		"dispatchable": forge.Dispatchable, "inProgress": forge.InProgress,
+		"complete": forge.Complete, "failed": forge.Failed,
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			got, err := jira.ParseStatusMapping(tc.Input)
+			if tc.Error != "" {
+				if err == nil || err.Error() != tc.Error {
+					t.Fatalf("error = %v, want %q", err, tc.Error)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			want := map[forge.DispatchState]jira.StatusTarget{}
+			for k, v := range tc.Want {
+				want[keys[k]] = v
+			}
+			if !maps.Equal(got, want) {
+				t.Errorf("mapping = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestParseStatusMapping_InvalidJSONMessage(t *testing.T) {
+	_, err := jira.ParseStatusMapping("{not json")
+	if err == nil || !strings.HasPrefix(err.Error(), "parse JIRA_STATUS_MAPPING: ") {
+		t.Fatalf("error = %v, want a parse JIRA_STATUS_MAPPING: prefix", err)
 	}
 }
 
@@ -474,8 +524,8 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL: srv.URL,
 		Token:   "tok",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.InProgress: "In Progress",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.InProgress: {Status: "In Progress"},
 		},
 		Labels: testLabels,
 	})
@@ -619,7 +669,7 @@ func TestJiraClient_TransitionState_NativeClaimStripsSettledFirst(t *testing.T) 
 			jc := jira.NewJiraClient(jira.JiraConfig{
 				BaseURL:       srv.URL,
 				Token:         "tok",
-				StatusMapping: map[forge.DispatchState]string{forge.InProgress: "In Progress"},
+				StatusMapping: map[forge.DispatchState]jira.StatusTarget{forge.InProgress: {Status: "In Progress"}},
 				Labels:        tc.labels,
 				VerdictLabels: tc.verdicts,
 			})
@@ -670,7 +720,7 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:       srv.URL,
 		Token:         "tok",
-		StatusMapping: map[forge.DispatchState]string{}, // no mapping for InProgress
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{}, // no mapping for InProgress
 		Labels:        testLabels,
 	})
 
@@ -709,8 +759,8 @@ func TestJiraClient_TransitionState_BlockedFallsBackToLabel(t *testing.T) {
 	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL: srv.URL,
 		Token:   "tok",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.InProgress: "In Progress",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.InProgress: {Status: "In Progress"},
 		},
 		Labels: testLabels,
 	})
@@ -747,8 +797,8 @@ func TestJiraClient_TransitionState_InfraErrorPropagates(t *testing.T) {
 	jc := jira.NewJiraClient(jira.JiraConfig{
 		BaseURL: srv.URL,
 		Token:   "tok",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.InProgress: "In Progress",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.InProgress: {Status: "In Progress"},
 		},
 		Labels: testLabels,
 	})
@@ -970,8 +1020,8 @@ func TestJiraClient_ListIssues_JQLAndOrder(t *testing.T) {
 		BaseURL:    srv.URL,
 		Token:      "tok",
 		ProjectKey: "PROJ",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.Dispatchable: "To Do",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.Dispatchable: {Status: "To Do"},
 		},
 		Labels: testLabels,
 	})
@@ -1052,7 +1102,7 @@ func TestJiraClient_ListIssues_UnmappedStateUsesLabelOnly(t *testing.T) {
 		BaseURL:       srv.URL,
 		Token:         "tok",
 		ProjectKey:    "PROJ",
-		StatusMapping: map[forge.DispatchState]string{},
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{},
 		Labels:        testLabels,
 	})
 
@@ -1147,8 +1197,8 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 		BaseURL:    srv.URL,
 		Token:      "tok",
 		ProjectKey: "PROJ",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.Dispatchable: "To Do",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.Dispatchable: {Status: "To Do"},
 		},
 		Labels: testLabels,
 	})
@@ -1201,8 +1251,8 @@ func TestJiraClient_ListIssues_EmptyPageBeforeTotalErrors(t *testing.T) {
 		BaseURL:    srv.URL,
 		Token:      "tok",
 		ProjectKey: "PROJ",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.Dispatchable: "To Do",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.Dispatchable: {Status: "To Do"},
 		},
 		Labels: testLabels,
 	})
@@ -1241,8 +1291,8 @@ func TestJiraClient_ListIssues_RepeatedPageErrors(t *testing.T) {
 		BaseURL:    srv.URL,
 		Token:      "tok",
 		ProjectKey: "PROJ",
-		StatusMapping: map[forge.DispatchState]string{
-			forge.Dispatchable: "To Do",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{
+			forge.Dispatchable: {Status: "To Do"},
 		},
 		Labels: testLabels,
 	})
