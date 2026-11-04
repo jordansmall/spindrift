@@ -106,6 +106,9 @@
 
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
+# issuesWearLabels marks a tracker whose issue labels are reliable
+# provenance, registry or not: jira sets it though it omits labelRegistry
+# (issue #6347). local omits it: a body marker can stand in for its labels.
 [
   (import ./github.nix)
   (import ./git.nix)

@@ -101,6 +101,15 @@ type Descriptor struct {
 	// CreateLabel is a no-op).
 	LabelRegistry bool
 
+	// IssuesWearLabels is true for an ISSUE_TRACKER backend whose issue labels
+	// are reliable provenance, so a label's absence is authoritative too:
+	// github, forgejo, and jira (which has no label registry, so LabelRegistry
+	// is false there). It asks whether a label on an issue is a fact about
+	// that issue, not whether labels can be listed or created ahead of time
+	// (issue #6347). False for local: its frontmatter labels are still read,
+	// but a body marker can stand in for a missing one.
+	IssuesWearLabels bool
+
 	// TrackerAxisRead is this tracker's read-step axis value ("GITHUB",
 	// "LOCAL", or "FORGEJO"); empty means "GITHUB", so github and jira leave it
 	// at the Go zero value. An unregistered name's zero-value Descriptor reads
