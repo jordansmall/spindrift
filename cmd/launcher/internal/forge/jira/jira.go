@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -30,9 +31,9 @@ type JiraConfig struct {
 	Token      string
 
 	// StatusMapping maps canonical DispatchState values to native Jira status
-	// names. TransitionState falls back to Labels when a state is unmapped or
+	// targets. TransitionState falls back to Labels when a state is unmapped or
 	// the mapped transition is unavailable on the issue's workflow.
-	StatusMapping map[forge.DispatchState]string
+	StatusMapping map[forge.DispatchState]StatusTarget
 	// Labels are the fallback labels applied when a transition is unmapped or
 	// blocked by the project's workflow.
 	Labels forge.DispatchLabels
@@ -54,26 +55,111 @@ var statusMappingKeys = map[string]forge.DispatchState{
 	"failed":       forge.Failed,
 }
 
+// StatusTarget is what a canonical state maps to in Jira: the native status
+// name, plus the resolution to set on the transition (empty leaves it to the
+// workflow's default).
+type StatusTarget struct {
+	Status     string `json:"status"`
+	Resolution string `json:"resolution"`
+}
+
+// statusTargetFields are the fields a JIRA_STATUS_MAPPING object value allows.
+var statusTargetFields = []string{"status", "resolution"}
+
+// quotedStatusTargetFields renders statusTargetFields as the "status", "resolution"
+// list the object-shape error message shows.
+func quotedStatusTargetFields() string {
+	quoted := make([]string, len(statusTargetFields))
+	for i, f := range statusTargetFields {
+		quoted[i] = fmt.Sprintf("%q", f)
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// jsonTypeName names v's JSON type as the error messages report it.
+func jsonTypeName(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "bool"
+	case []any:
+		return "array"
+	default:
+		return "object"
+	}
+}
+
 // ParseStatusMapping parses the JIRA_STATUS_MAPPING knob, a JSON object mapping
-// statusMappingKeys to native Jira status names. An unknown key is an error so a
-// typo fails fast at startup instead of silently dropping the mapping.
-func ParseStatusMapping(s string) (map[forge.DispatchState]string, error) {
-	out := map[forge.DispatchState]string{}
+// statusMappingKeys to a native Jira status name or a {"status", "resolution"}
+// object. An unknown key or field is an error so a typo fails fast at startup
+// instead of silently dropping the mapping. Keys are checked in sorted order so
+// the first error is deterministic; the Nix mirror reports the same one.
+func ParseStatusMapping(s string) (map[forge.DispatchState]StatusTarget, error) {
+	out := map[forge.DispatchState]StatusTarget{}
 	if s == "" {
 		return out, nil
 	}
-	var raw map[string]string
-	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+	var top any
+	if err := json.Unmarshal([]byte(s), &top); err != nil {
 		return nil, fmt.Errorf("parse JIRA_STATUS_MAPPING: %w", err)
 	}
-	for key, status := range raw {
+	if top == nil {
+		return out, nil
+	}
+	raw, ok := top.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("JIRA_STATUS_MAPPING: expected a JSON object, got %s", jsonTypeName(top))
+	}
+	for _, key := range slices.Sorted(maps.Keys(raw)) {
 		state, ok := statusMappingKeys[key]
 		if !ok {
 			return nil, fmt.Errorf("JIRA_STATUS_MAPPING: unknown key %q (want one of dispatchable, inProgress, complete, failed)", key)
 		}
-		out[state] = status
+		target, err := parseStatusTarget(key, raw[key])
+		if err != nil {
+			return nil, err
+		}
+		out[state] = target
 	}
 	return out, nil
+}
+
+// parseStatusTarget decodes one JIRA_STATUS_MAPPING value: null or a string is
+// a bare status name (empty means unmapped), an object carries the fields in
+// statusTargetFields.
+func parseStatusTarget(key string, v any) (StatusTarget, error) {
+	switch v := v.(type) {
+	case nil:
+		return StatusTarget{}, nil
+	case string:
+		return StatusTarget{Status: v}, nil
+	case map[string]any:
+		fields := map[string]string{}
+		for _, name := range slices.Sorted(maps.Keys(v)) {
+			if !slices.Contains(statusTargetFields, name) {
+				return StatusTarget{}, fmt.Errorf("JIRA_STATUS_MAPPING: key %q: unknown field %q (want status, resolution)", key, name)
+			}
+			str, ok := v[name].(string)
+			if !ok {
+				return StatusTarget{}, fmt.Errorf("JIRA_STATUS_MAPPING: key %q: field %q must be a string, got %s", key, name, jsonTypeName(v[name]))
+			}
+			fields[name] = str
+		}
+		if fields["status"] == "" {
+			return StatusTarget{}, fmt.Errorf("JIRA_STATUS_MAPPING: key %q: %q must be a non-empty string", key, "status")
+		}
+		if res, present := fields["resolution"]; present && res == "" {
+			return StatusTarget{}, fmt.Errorf("JIRA_STATUS_MAPPING: key %q: %q must be a non-empty string", key, "resolution")
+		}
+		return StatusTarget{Status: fields["status"], Resolution: fields["resolution"]}, nil
+	default:
+		return StatusTarget{}, fmt.Errorf("JIRA_STATUS_MAPPING: key %q: expected a status name or a {%s} object, got %s", key, quotedStatusTargetFields(), jsonTypeName(v))
+	}
 }
 
 // ValidateJiraEnv checks the JIRA_* knobs required when ISSUE_TRACKER=jira,
@@ -370,8 +456,8 @@ func (j *jiraClient) swapLabel(num, add string, removes ...string) error {
 // nativeStatus returns the Jira status StatusMapping maps s to, and whether s
 // is natively mapped at all (an empty mapping counts as unmapped).
 func (j *jiraClient) nativeStatus(s forge.DispatchState) (string, bool) {
-	target := j.cfg.StatusMapping[s]
-	return target, target != ""
+	status := j.cfg.StatusMapping[s].Status
+	return status, status != ""
 }
 
 // alreadyClaimedNative reports whether num's current native status already
@@ -382,7 +468,7 @@ func (j *jiraClient) nativeStatus(s forge.DispatchState) (string, bool) {
 // case (#3887).
 func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.DispatchState) bool {
 	target, ok := j.nativeStatus(forge.InProgress)
-	if !ok || j.cfg.StatusMapping[from] == target {
+	if !ok || j.cfg.StatusMapping[from].Status == target {
 		return false
 	}
 	return strings.EqualFold(payload.Fields.Status.Name, target)
@@ -536,8 +622,8 @@ func (j *jiraClient) CountReady(_ bool) (int, error) {
 func (j *jiraClient) stateJQL(state forge.DispatchState) string {
 	clauses := []string{fmt.Sprintf("project = %q", j.cfg.ProjectKey)}
 	var stateClauses []string
-	if target, ok := j.cfg.StatusMapping[state]; ok && target != "" {
-		stateClauses = append(stateClauses, fmt.Sprintf("status = %q", target))
+	if status := j.cfg.StatusMapping[state].Status; status != "" {
+		stateClauses = append(stateClauses, fmt.Sprintf("status = %q", status))
 	}
 	if label := j.cfg.Labels.Label(state); label != "" {
 		stateClauses = append(stateClauses, fmt.Sprintf("labels = %q", label))

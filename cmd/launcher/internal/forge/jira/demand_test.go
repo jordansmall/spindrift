@@ -38,7 +38,7 @@ func TestJiraClient_CountReady_ServerDC_ZeroRowSearchReadsTotal(t *testing.T) {
 		BaseURL:       srv.URL,
 		Token:         "tok",
 		ProjectKey:    "PROJ",
-		StatusMapping: map[forge.DispatchState]string{forge.Dispatchable: "To Do"},
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{forge.Dispatchable: {Status: "To Do"}},
 		Labels:        testLabels,
 	})
 
@@ -97,7 +97,7 @@ func TestJiraClient_CountReady_Cloud_ApproximateCount(t *testing.T) {
 		Email:         "me@example.com",
 		Token:         "tok",
 		ProjectKey:    "PROJ",
-		StatusMapping: map[forge.DispatchState]string{forge.Dispatchable: "To Do"},
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{forge.Dispatchable: {Status: "To Do"}},
 		Labels:        testLabels,
 	})
 	dc, ok := jc.(forge.DemandCounter)
@@ -148,5 +148,39 @@ func TestJiraClient_CountReady_SearchErrorPropagates(t *testing.T) {
 	}
 	if _, err := dc.CountReady(false); err == nil {
 		t.Fatal("want error on 500, got nil")
+	}
+}
+
+// A {"status", "resolution"} mapping value reads the same as the bare status
+// name: ListIssues and the demand probe both match on the status name.
+func TestJiraClient_ObjectFormMappingMatchesStatusName(t *testing.T) {
+	mapping, err := jira.ParseStatusMapping(`{"dispatchable":{"status":"To Do","resolution":"Fixed"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jqls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jqls = append(jqls, r.URL.Query().Get("jql"))
+		w.Write([]byte(`{"issues":[],"startAt":0,"maxResults":0,"total":0}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ",
+		StatusMapping: mapping, Labels: testLabels,
+	})
+	if _, err := jc.ListIssues(forge.Dispatchable); err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if _, err := jc.(forge.DemandCounter).CountReady(false); err != nil {
+		t.Fatalf("CountReady: %v", err)
+	}
+	if len(jqls) != 2 {
+		t.Fatalf("made %d searches, want 2", len(jqls))
+	}
+	for _, jql := range jqls {
+		if !strings.Contains(jql, `status = "To Do"`) {
+			t.Errorf("jql = %q, want it to match status = \"To Do\"", jql)
+		}
 	}
 }

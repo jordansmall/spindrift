@@ -27,7 +27,7 @@ var Strategy = backendkit.Strategy{
 		if err != nil {
 			// Callers validate the mapping first, so fall back to unmapped
 			// (label-only lifecycle).
-			statusMapping = map[forge.DispatchState]string{}
+			statusMapping = map[forge.DispatchState]StatusTarget{}
 		}
 		return NewJiraClient(JiraConfig{
 			BaseURL:       k.JiraBaseURL,
