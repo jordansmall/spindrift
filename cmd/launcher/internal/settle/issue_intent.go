@@ -158,6 +158,26 @@ type filedIntent struct {
 	DupRef string
 }
 
+// degradeIssueIntents turns each well-formed payload into a Failed filedIntent
+// with its body kept, for a settle that cannot file them, so the finding
+// renders inline rather than vanishing. reason names why filing is refused and
+// is warned once when any finding degrades.
+func degradeIssueIntents(num string, result dispatch.Result, reason string) []filedIntent {
+	var out []filedIntent
+	for _, raw := range result.IssueIntents {
+		in, rej := parseIssueIntent(raw)
+		if rej != nil {
+			fmt.Fprintf(os.Stderr, "    ?? #%s: skipping invalid issue-intent payload: %s\n", num, rej.Reason)
+			continue
+		}
+		out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
+	}
+	if len(out) > 0 {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: refusing to file %d issue intent(s): %s\n", num, len(out), reason)
+	}
+	return out
+}
+
 // fileIssueIntentsDetailed returns one filedIntent per well-formed payload in
 // payload order, success or failure, and appends a non-empty bodyBacklink to
 // each body before filing. Labels are host-derived, the provenanceLabel plus
@@ -186,30 +206,18 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 	if !result.IssueIntentsFound {
 		return nil
 	}
-	// Filing is a best-effort side channel, never part of the run's landing
-	// decision, so a tracker that cannot file is a no-op rather than an error.
+	// Filing stays best-effort: a tracker that cannot file degrades each
+	// finding inline (issue #6343).
 	filer, ok := it.(forge.HostPostedIssueFiler)
 	if !ok {
-		return nil
+		return degradeIssueIntents(num, result, fmt.Sprintf("tracker %T cannot file issues host-side (no HostPostedIssueFiler capability)", it))
 	}
 	// A blank label means the settle was built without its kind's descriptor;
 	// filing under it would leave each finding outside the provenance label
 	// the dedup and triage queues key on. Failed with the body kept degrades
 	// the finding inline, like any other filing failure.
 	if provenanceLabel == "" {
-		var out []filedIntent
-		for _, raw := range result.IssueIntents {
-			in, rej := parseIssueIntent(raw)
-			if rej != nil {
-				fmt.Fprintf(os.Stderr, "    ?? #%s: skipping invalid issue-intent payload: %s\n", num, rej.Reason)
-				continue
-			}
-			out = append(out, filedIntent{Title: in.Title, Failed: true, Body: in.Body})
-		}
-		if len(out) > 0 {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: refusing to file %d issue intent(s): no provenance label (a construction bug: the settle was built without a dispatch kind's finding label)\n", num, len(out))
-		}
-		return out
+		return degradeIssueIntents(num, result, "no provenance label (a construction bug: the settle was built without a dispatch kind's finding label)")
 	}
 	// Hoisted out of the loop: N findings would otherwise cost N ListLabels
 	// round trips. A listErr is non-fatal: ensureLabel falls back to its own

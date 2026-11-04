@@ -636,6 +636,49 @@ func TestResearchSettle_FilingFailureDegradesInlineInComment(t *testing.T) {
 	}
 }
 
+// A tracker without host-side filing must not drop relayed findings: each
+// renders as a "(filing failed)" bullet carrying its body, and the settle
+// warns naming the tracker and the missing capability (issue #6343).
+func TestResearchSettle_TrackerWithoutIssueFiler_DegradesFindingsInComment(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},
+		},
+		Comment:           "**Verdict** — recommend\n\n<!-- spindrift-research -->",
+		CommentFound:      true,
+		IssueIntentsFound: true,
+		IssueIntents: []string{
+			`{"title":"fix(x): first finding","body":"first repro"}`,
+			`{"title":"fix(y): second finding","body":"second repro"}`,
+		},
+	}
+
+	s := NewResearchSettle(fc, researchVerdictLabels, false, testResearchFindingLabel)
+	stderr := captureStderr(t, func() { s.Settle(dispatch.NewFake(), "42", 0, result) })
+
+	if len(fc.CommentCalls) != 1 {
+		t.Fatalf("want 1 comment posted, got %d", len(fc.CommentCalls))
+	}
+	body := fc.CommentCalls[0].Body
+	for _, want := range []string{
+		"## Filed issues",
+		"- **fix(x): first finding** (filing failed) — first repro",
+		"- **fix(y): second finding** (filing failed) — second repro",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("comment body = %q, want it to contain %q", body, want)
+		}
+	}
+	if !strings.Contains(stderr, "HostPostedIssueFiler") || !strings.Contains(stderr, "forge.Fake") {
+		t.Errorf("stderr = %q, want a warning naming the tracker type and HostPostedIssueFiler", stderr)
+	}
+	if len(fc.CompleteVerdictCalls) != 1 {
+		t.Fatalf("want 1 CompleteVerdict call, got %d", len(fc.CompleteVerdictCalls))
+	}
+}
+
 // This pins the comment-blocks-label leg of the file, comment, label order:
 // Settle must never call CompleteVerdict after a failed comment post.
 func TestResearchSettle_Local_CommentPostFailure_NeverAppliesVerdictLabel(t *testing.T) {
