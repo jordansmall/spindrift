@@ -54,6 +54,9 @@ func fragGitForge(e *Env) {
 	e.OutboxRelayCapable = false
 }
 
+// jira rides github's read and write axes but its row has no in-Box client.
+func fragJiraTracker(e *Env) { e.IssueTracker = "jira" }
+
 func fragLocalTracker(e *Env) {
 	e.IssueTracker = "local"
 	e.TrackerAxisRead = "LOCAL"
@@ -419,6 +422,21 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			mutate:       []func(*Env){fragFiler, fragForgejoTracker},
 			filerWant:    []string{"fj issue create"},
 			filerWantNot: []string{"gh issue create", "gh label create"},
+		},
+		{
+			name:   "filer dedup on jira runs no tracker search, host dedup is the whole check",
+			mutate: []func(*Env){fragFiler, fragJiraTracker},
+			filerWant: []string{
+				"run no tracker search at all",
+				"exact site key and overlapping",
+			},
+			filerWantNot: []string{"gh issue list", "fj issue list"},
+		},
+		{
+			name:         "filer dedup on github still searches with gh issue list",
+			mutate:       []func(*Env){fragFiler},
+			filerWant:    []string{"gh issue list --state open --search"},
+			filerWantNot: []string{"run no tracker search at all"},
 		},
 		{
 			name:         "filer write github direct speaks gh issue create, never fj",

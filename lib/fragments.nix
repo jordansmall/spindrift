@@ -376,20 +376,35 @@ let
     }
     # Step 2's tracker search commands fork on the read axis (issue #5127),
     # not FILER_FILE_DIRECT_GH: a relay Filer still reads through the tracker.
-    # jira has no read axis (lib/backends/jira.nix, no trackerAxisRead), so
-    # it takes the GitHub arm like every other ISSUE_TRACKER_GITHUB fragment.
+    # jira declares no read axis (lib/backends/jira.nix, no trackerAxisRead),
+    # so it would ride github's search arm, but it has no in-Box client, so it
+    # takes the unwritable arm (issue #6354): no search, the host's dedup over
+    # relayed intents is the whole check. The two arms share a var, like the
+    # issue-read arms below.
     # One slot (issue #5647, ADR 0068): each backend's search commands differ
     # in more than its name, so each folder carries its own file.
     {
       axis = "tracker";
+      gate = "ISSUE_TRACKER_WRITABLE";
       fragment = "filer-dedup.md";
+      var = "FILER_DEDUP_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_UNWRITABLE";
+      inverseOf = "ISSUE_TRACKER_WRITABLE";
+      fragment = "filer-dedup-unwritable.md";
       var = "FILER_DEDUP_STEP";
     }
     # Deprecation-window fills for override prompts still naming the old vars.
     {
-      gate = "ISSUE_TRACKER_GITHUB";
+      gate = "ISSUE_TRACKER_GITHUB_WRITABLE";
       fragment = "github/filer-dedup.md";
       legacyFragment = "filer-dedup-search.md";
+      var = "FILER_DEDUP_SEARCH_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_UNWRITABLE";
+      fragment = "filer-dedup-unwritable.md";
       var = "FILER_DEDUP_SEARCH_STEP";
     }
     {

@@ -140,11 +140,15 @@ in
             off = "SCOUT_ABSENT";
           }
           {
+            on = "ISSUE_TRACKER_WRITABLE";
+            off = "ISSUE_TRACKER_UNWRITABLE";
+          }
+          {
             on = "ISSUE_TRACKER_LINKS_READABLE";
             off = "ISSUE_TRACKER_LINKS_UNREADABLE";
           }
         ]
       )
-      "lib/fragments.nix must declare exactly the TDD_BAKED/TDD_UNBAKED, COMMIT_BAKED/COMMIT_UNBAKED, CODE_REVIEW_BAKED/CODE_REVIEW_UNBAKED, FILER_ENABLED/FILER_ABSENT, SCOUT_PROVISIONED/SCOUT_ABSENT, and ISSUE_TRACKER_LINKS_READABLE/ISSUE_TRACKER_LINKS_UNREADABLE pairs";
+      "lib/fragments.nix must declare exactly the TDD_BAKED/TDD_UNBAKED, COMMIT_BAKED/COMMIT_UNBAKED, CODE_REVIEW_BAKED/CODE_REVIEW_UNBAKED, FILER_ENABLED/FILER_ABSENT, SCOUT_PROVISIONED/SCOUT_ABSENT, ISSUE_TRACKER_WRITABLE/ISSUE_TRACKER_UNWRITABLE, and ISSUE_TRACKER_LINKS_READABLE/ISSUE_TRACKER_LINKS_UNREADABLE pairs";
     pkgs.runCommand "fragment-pairs-real-registry-declares-declared-pairs" { } "touch $out";
 }
