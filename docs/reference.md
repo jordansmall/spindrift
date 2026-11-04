@@ -4224,8 +4224,29 @@ such block and are experimental, so you select them by editing
   `agent-ambiguous-spec` or `agent-research-unclear` question by editing the
   description (see the [Threat model](#threat-model)).
 
-  Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`, and
-  `JIRA_STATUS_MAPPING` are non-secret, set via
+  The adapter files issues host-side, so a finding relayed to the host (a
+  Filer's or a butler Chore's) lands in the Jira project, not the GitHub
+  repo (it implements `PostIssue`). Each one is created in `JIRA_PROJECT_KEY`
+  with the issue type `JIRA_ISSUE_TYPE` (default `Task`), the finding's title
+  as the summary, its body converted to wiki markup as the description, and
+  exactly the labels the caller asked for. The type must exist on the
+  project: a create Jira rejects, for an unknown type or a required field
+  spindrift does not fill, is an error, and settle records the finding as
+  `(filing failed)` with its body kept. Spindrift fills project, summary,
+  issue type, description and labels; Jira defaults the reporter.
+
+  The dedup marker (the body's last `<!-- spindrift-dedup: ... -->` line)
+  is not left in the description, where a human would see it. The adapter
+  moves it into the issue property `spindrift.dedup`, set in the same
+  create request, and every read of an issue or the backlog (both search
+  APIs) requests that property and puts the marker back as the body's last
+  line. The dedup index and the tuning hold therefore see the body as they
+  do on `github`. Setting the property on create and reading it in search
+  results are confirmed against Jira Cloud's API reference only; Server/Data
+  Center is untested.
+
+  Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`,
+  `JIRA_ISSUE_TYPE`, and `JIRA_STATUS_MAPPING` are non-secret, set via
   `issues.jira`
   (baked) or their env vars (runtime) — see the [flake options
   reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside
@@ -4235,7 +4256,13 @@ such block and are experimental, so you select them by editing
   `GET /rest/api/2/search/jql` by `nextPageToken`, while Server/Data Center
   keeps `/rest/api/2/search` paged by `startAt`.
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
-  independently of the GitHub Code Forge probe.
+  independently of the GitHub Code Forge probe. Two more rows read the
+  project's create metadata: `issue-type` (required) fails when
+  `JIRA_ISSUE_TYPE` is not offered by the project, naming the types that
+  are; if the metadata cannot be read at all (a permission gap, say) it
+  reports degraded instead. `issue-type-required-fields` (advisory) warns
+  and lists any required create-screen field with no default that
+  spindrift does not fill, since filing would fail on it.
 
   A [research dispatch](#research-dispatch)'s states — its queue, its claim,
   and its verdict terminals (`recommend` / `reject` / `unclear`) — always
@@ -5171,9 +5198,8 @@ missing `agent-tuning-finding` label never fails the check unless `--butler`
 promotes the butler tier, and even then only while `tuning` is in
 `BUTLER_CHORES` on a tracker with a label registry (`github`/`forgejo`). It is
 never required on `local`, where the body marker carries the fact, or on
-`jira`, which has no label registry to create it in (a butler on `jira`
-refuses to start until Jira gains host-side issue filing, issue #6343). To
-create it manually:
+`jira`, which has no label registry to create it in. To create it
+manually:
 
 ```sh
 gh label create agent-tuning-finding --repo owner/repo --color 1d76db --description "Filed from a tuning Chore finding; a PR closing it merges by hand (ADR 0062)"

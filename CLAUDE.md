@@ -60,8 +60,7 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
 - `agent-butler-finding` — filed by the host from a butler Chore finding
   (ADR 0056); the host creates the label if missing, and a butler daemon
   refuses to start without it (except on `local`/`jira`, which have no
-  label registry to check; a butler on `jira` refuses to start until Jira
-  gains host-side issue filing, issue #6343). Never carries a dispatch label
+  label registry to check). Never carries a dispatch label
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
   **Opt-in exception** (issue #3880): the host itself adds
@@ -103,12 +102,11 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   and `MERGE_GUARD_PATHS`: the host flips the PR ready, marks the issue
   `agent-complete`, and comments on the PR naming the label. A butler daemon
   with `tuning` in `BUTLER_CHORES` refuses to start without it, except on
-  `local`/`jira`, which have no label registry to check (a butler on `jira`
-  refuses to start until Jira gains host-side issue filing, issue #6343).
-  Jira issues still wear their labels, so Jira is judged by the label like
-  github and forgejo; only on `local` does the `chore=tuning` term in the
-  issue body's dedup marker stand in for it. Removing the label is the
-  deliberate override. See [Merge guard](docs/reference.md#merge-guard).
+  `local`/`jira`, which have no label registry to check. Jira issues still
+  wear their labels, so Jira is judged by the label like github and forgejo;
+  only on `local` does the `chore=tuning` term in the issue body's dedup
+  marker stand in for it. Removing the label is the deliberate override. See
+  [Merge guard](docs/reference.md#merge-guard).
 
 ### Dispatch authentication
 
