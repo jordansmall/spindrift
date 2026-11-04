@@ -367,16 +367,27 @@
   {
     "axis": "tracker",
     "shared": true,
-    "gate": "",
+    "gate": "ISSUE_TRACKER_LINKS_READABLE",
     "fragment": "issue-read.md",
     "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "ISSUE_READ_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB",
+    "gate": "ISSUE_TRACKER_LINKS_UNREADABLE",
+    "fragment": "issue-read-unreadable.md",
+    "var": "ISSUE_READ_STEP",
+    "inverseOf": "ISSUE_TRACKER_LINKS_READABLE"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_LINKS_READABLE",
     "fragment": "issue-read.md",
     "legacyFragment": "issue-read-github.md",
     "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LINKS_UNREADABLE",
+    "fragment": "issue-read-unreadable.md",
     "var": "ISSUE_READ_GITHUB_STEP"
   },
   {
@@ -395,16 +406,27 @@
   {
     "axis": "tracker",
     "shared": true,
-    "gate": "",
+    "gate": "ISSUE_TRACKER_LINKS_READABLE",
     "fragment": "research-issue-read.md",
     "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "RESEARCH_ISSUE_READ_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB",
+    "gate": "ISSUE_TRACKER_LINKS_UNREADABLE",
+    "fragment": "research-issue-read-unreadable.md",
+    "var": "RESEARCH_ISSUE_READ_STEP",
+    "inverseOf": "ISSUE_TRACKER_LINKS_READABLE"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_LINKS_READABLE",
     "fragment": "research-issue-read.md",
     "legacyFragment": "research-issue-read-github.md",
     "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "RESEARCH_ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LINKS_UNREADABLE",
+    "fragment": "research-issue-read-unreadable.md",
     "var": "RESEARCH_ISSUE_READ_GITHUB_STEP"
   },
   {
@@ -423,16 +445,26 @@
   {
     "axis": "tracker",
     "shared": true,
-    "gate": "ISSUE_TRACKER_REACHABLE",
+    "gate": "ISSUE_TRACKER_LINKS_REACHABLE",
     "fragment": "scout-issue-read.md",
     "extraSubstVars": ["FORGE_DISPLAY_NAME"],
     "var": "SCOUT_ISSUE_READ_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB",
+    "gate": "ISSUE_TRACKER_LINKS_UNREADABLE",
+    "fragment": "scout-issue-read-unreadable.md",
+    "var": "SCOUT_ISSUE_READ_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_LINKS_READABLE",
     "fragment": "scout-issue-read.md",
     "legacyFragment": "scout-issue-read-github.md",
     "extraSubstVars": ["FORGE_DISPLAY_NAME"],
+    "var": "SCOUT_ISSUE_READ_GITHUB_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LINKS_UNREADABLE",
+    "fragment": "scout-issue-read-unreadable.md",
     "var": "SCOUT_ISSUE_READ_GITHUB_STEP"
   },
   {

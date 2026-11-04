@@ -1,5 +1,5 @@
 caveman-default-research.md
 check-hygiene-default.md
-research-issue-read.md
+research-issue-read-unreadable.md
 research-outcome-landing-relayed.md
 research-verdict-relay.md

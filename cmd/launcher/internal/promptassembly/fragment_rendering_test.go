@@ -133,10 +133,16 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			},
 		},
 		{
-			name:    "issue-read jira selects github guidance, never forgejo or local mount",
+			name:    "issue-read jira says linked issues cannot be read, never github or forgejo guidance",
 			mutate:  []func(*Env){func(e *Env) { e.IssueTracker = "jira" }},
-			want:    []string{"via GitHub"},
-			wantNot: []string{"via Forgejo", "/issues/2349.md"},
+			want:    []string{"cannot be read from this Box"},
+			wantNot: []string{"via GitHub", "via Forgejo", "/issues/2349.md"},
+		},
+		{
+			name:    "research issue-read jira says linked issues cannot be read, never github guidance",
+			mutate:  []func(*Env){fragResearch, func(e *Env) { e.IssueTracker = "jira" }},
+			want:    []string{"cannot be read from this Box"},
+			wantNot: []string{"via GitHub", "via Forgejo", "/issues/2349.md"},
 		},
 		{
 			name:    "research verdict github read-write keeps gh issue comment",
@@ -834,4 +840,32 @@ func TestAssembleAgentsJSONRosterShape(t *testing.T) {
 			}
 		}
 	})
+}
+
+// The scout's issue-read step is rendered into the agents JSON, not the
+// prompt: on jira, which has no in-Box client, it says linked issues cannot be
+// read instead of pointing at the Code Forge (issue #6344).
+func TestAssembleScoutIssueReadUnreadableOnJira(t *testing.T) {
+	for _, tc := range []struct {
+		tracker, want, wantNot string
+	}{
+		{"github", "via GitHub", ""},
+		{"jira", "cannot be read from this Box", "via GitHub"},
+	} {
+		env := coveredEnv()
+		env.IssueTracker = tc.tracker
+		env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
+		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+		res, err := Assemble(env, loadTestRegistry(t))
+		if err != nil {
+			t.Fatalf("Assemble(%s): %v", tc.tracker, err)
+		}
+		scout := agentPromptFromJSON(t, res.AgentsJSON, "scout")
+		if !strings.Contains(scout, tc.want) {
+			t.Errorf("%s scout prompt lacks %q:\n%s", tc.tracker, tc.want, scout)
+		}
+		if tc.wantNot != "" && strings.Contains(scout, tc.wantNot) {
+			t.Errorf("%s scout prompt contains %q, want none:\n%s", tc.tracker, tc.wantNot, scout)
+		}
+	}
 }

@@ -61,12 +61,13 @@ type Descriptor struct {
 	// compensate.
 	InBoxUnreachableTracker bool
 
-	// InBoxUnwritableTracker is true only for a tracker the Box reads but has
-	// no in-box write path into ("jira"); "local" is covered by
-	// InBoxUnreachableTracker and its empty write axis instead. The jira row
-	// still carries TrackerAxisWrite="GITHUB" for its other arms; this bit
-	// overrides that for the research verdict (#5245) and the work IF BLOCKED
-	// comment (#5263), which both relay through the host.
+	// InBoxUnwritableTracker is true only for a tracker the Box has no client
+	// for ("jira"), so it can neither write to the tracker nor read its linked
+	// issues; "local" is covered by InBoxUnreachableTracker and its empty write
+	// axis instead. The jira row still carries TrackerAxisWrite="GITHUB" for
+	// its other arms; this bit overrides that for the research verdict (#5245)
+	// and the work IF BLOCKED comment (#5263), which both relay through the
+	// host, and for the prompts' linked-issue read steps (#6344).
 	InBoxUnwritableTracker bool
 
 	// SlugIssueRefTracker is true for a tracker whose issues carry no number a

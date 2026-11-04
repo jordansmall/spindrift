@@ -470,6 +470,9 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	// and assign renderedText + "\n\n" to its var. The "\n\n" is appended
 	// here, not baked into the fragment file or the substitution result,
 	// because command substitution strips trailing newlines.
+	// Rows with exclusive gates may share one var (issue #6344), so an off or
+	// empty row must not clobber a binding an on-gate row already made.
+	bound := map[string]bool{}
 	for _, row := range reg.Rows {
 		fragName, err := row.resolvedFragment(e)
 		if err != nil {
@@ -513,12 +516,15 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 				if !errors.Is(err, os.ErrNotExist) {
 					return promptBodies{}, fmt.Errorf("read fragment %s: %w", fragName, err)
 				}
-				vars[row.Var] = body{}
+				if !bound[row.Var] {
+					vars[row.Var] = body{}
+				}
 				continue
 			}
 			fragBody := append(append(body{}, rendered...), segment{src: fragSource, text: "\n\n"})
 			vars[row.Var] = fragBody
-		} else {
+			bound[row.Var] = true
+		} else if !bound[row.Var] {
 			vars[row.Var] = body{}
 		}
 	}

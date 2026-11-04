@@ -11,7 +11,8 @@
   doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
   # The Box has no Jira client and JIRA_TOKEN is host-only, so the research
   # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)
-  # relay through the host.
+  # relay through the host; its linked-issue reads in prompts key off this too
+  # (issue #6344).
   inBoxUnwritableTracker = true;
   # Build-time check of the merged defaults, run by lib/mkHarness.nix when this
   # row is the selected tracker (issue #2539): an unknown-key JIRA_STATUS_MAPPING

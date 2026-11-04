@@ -54,6 +54,16 @@ func trackerGates(e Env) map[string]bool {
 	// The backend-agnostic form of "the Box can read the tracker": gates a
 	// slot whose shared fragment serves every reachable tracker.
 	g["ISSUE_TRACKER_REACHABLE"] = !row.InBoxUnreachableTracker
+	// Without an in-Box client the Box cannot fetch parent/linked issues; the
+	// subject issue's text is injected host-side (issue #6344). The scout's
+	// step has no readable arm for local either, hence LINKS_REACHABLE.
+	g["ISSUE_TRACKER_LINKS_REACHABLE"] = !row.InBoxUnreachableTracker && !unwritable
+	g["ISSUE_TRACKER_LINKS_READABLE"] = !unwritable
+	g["ISSUE_TRACKER_LINKS_UNREADABLE"] = unwritable
+	// The deprecated GITHUB issue-read rows must not render GitHub link-reading
+	// wording on a client-less tracker riding github's arm, so an override that
+	// still names them matches the shipped slot.
+	g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"] = itRead == "GITHUB" && !unwritable
 	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
 	g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] = unwritable && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && (!e.BoxWriteEnabled || researchForceRelay)
