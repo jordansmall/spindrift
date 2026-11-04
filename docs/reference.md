@@ -4269,7 +4269,13 @@ such block and are experimental, so you select them by editing
   notes, settle comments) is converted from Markdown to Jira wiki markup
   first, since the v2 API renders wiki markup. Constructs outside the
   supported subset pass through as text, and `<!-- spindrift-... -->`
-  marker lines pass through verbatim (issue #6348).
+  marker lines pass through verbatim (issue #6348), except the research
+  marker: wiki markup has no comment syntax, so it would render as text.
+  The adapter strips that line and posts it as a `spindrift-research`
+  comment property instead; reading comments requests
+  `expand=properties` and restores the marker as the first line of any
+  comment carrying the property (issue #6351). Comments without it read
+  back unchanged.
 
 - **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
