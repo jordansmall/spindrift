@@ -160,9 +160,35 @@ let
 
   # Pure so the corpus check can compare text; tryEval hides a throw's.
   error = s: valueError (decode s);
+
+  # Mirrors jira.go's CheckLifecycle for an already-valid mapping s: in status
+  # mode every work state must name a status (null and "" are unmapped). attrNames
+  # sorts, as Go's slices.Sorted does, so both sides list the same order.
+  lifecycleError =
+    lifecycle: s:
+    let
+      value = decode s;
+      parsed = if value == null then { } else value;
+      unmapped = builtins.filter (k: statusOf (parsed.${k} or null) == "") (
+        builtins.sort builtins.lessThan validKeys
+      );
+    in
+    if lifecycle == "" || lifecycle == "hybrid" then
+      null
+    else if lifecycle != "status" then
+      ''JIRA_LIFECYCLE: unknown mode "${lifecycle}" (want hybrid or status)''
+    else if unmapped == [ ] then
+      null
+    else
+      "JIRA_LIFECYCLE=status: JIRA_STATUS_MAPPING must map every work state; unmapped: ${builtins.concatStringsSep ", " unmapped}";
 in
 {
-  inherit validKeys validFields error;
+  inherit
+    validKeys
+    validFields
+    error
+    lifecycleError
+    ;
 
   # The empty string is the schema default and yields an empty mapping, as
   # ParseStatusMapping does. A malformed value fails the build loudly, the way

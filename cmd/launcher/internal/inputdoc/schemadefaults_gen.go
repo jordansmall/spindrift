@@ -45,6 +45,7 @@ var schemaDefaults = map[string]string{
 	"IN_PROGRESS_LABEL":             "agent-in-progress",
 	"ISSUE_TRACKER":                 "github",
 	"JIRA_ISSUE_TYPE":               "Task",
+	"JIRA_LIFECYCLE":                "hybrid",
 	"LABEL":                         "ready-for-agent",
 	"LOCAL_ISSUES_DIR":              ".spindrift/issues",
 	"MAX_BUDGET_TOKENS":             "0",

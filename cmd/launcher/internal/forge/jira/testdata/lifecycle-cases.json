@@ -1,0 +1,22 @@
+[
+  {"name": "hybrid, empty mapping", "lifecycle": "hybrid", "mapping": "", "error": ""},
+  {"name": "hybrid, partial mapping", "lifecycle": "hybrid", "mapping": "{\"complete\":\"Done\"}", "error": ""},
+  {"name": "empty lifecycle is hybrid", "lifecycle": "", "mapping": "", "error": ""},
+  {"name": "unknown lifecycle",
+   "lifecycle": "labels", "mapping": "",
+   "error": "JIRA_LIFECYCLE: unknown mode \"labels\" (want hybrid or status)"},
+  {"name": "lifecycle is case-sensitive",
+   "lifecycle": "Status", "mapping": "",
+   "error": "JIRA_LIFECYCLE: unknown mode \"Status\" (want hybrid or status)"},
+  {"name": "status, all five mapped", "lifecycle": "status",
+   "mapping": "{\"dispatchable\":\"To Do\",\"inProgress\":\"In Progress\",\"complete\":{\"status\":\"Done\",\"resolution\":\"Fixed\"},\"failed\":\"Blocked\",\"ambiguous\":\"Needs Spec\"}",
+   "error": ""},
+  {"name": "status, empty mapping", "lifecycle": "status", "mapping": "",
+   "error": "JIRA_LIFECYCLE=status: JIRA_STATUS_MAPPING must map every work state; unmapped: ambiguous, complete, dispatchable, failed, inProgress"},
+  {"name": "status, one key missing", "lifecycle": "status",
+   "mapping": "{\"dispatchable\":\"To Do\",\"inProgress\":\"In Progress\",\"complete\":\"Done\",\"failed\":\"Blocked\"}",
+   "error": "JIRA_LIFECYCLE=status: JIRA_STATUS_MAPPING must map every work state; unmapped: ambiguous"},
+  {"name": "status, null and empty values are unmapped", "lifecycle": "status",
+   "mapping": "{\"dispatchable\":\"To Do\",\"inProgress\":null,\"complete\":\"Done\",\"failed\":\"\",\"ambiguous\":\"Needs Spec\"}",
+   "error": "JIRA_LIFECYCLE=status: JIRA_STATUS_MAPPING must map every work state; unmapped: failed, inProgress"}
+]

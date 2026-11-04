@@ -170,6 +170,10 @@ let
     builtins.readFile ../../cmd/launcher/internal/forge/jira/testdata/status-mapping-cases.json
   );
 
+  lifecycleCorpus = builtins.fromJSON (
+    builtins.readFile ../../cmd/launcher/internal/forge/jira/testdata/lifecycle-cases.json
+  );
+
   mapEntry = "\t\"ambiguous\":    forge.Ambiguous,\n";
   errTail = "inProgress, complete, failed, ambiguous)";
   patchGoSrc = pairs: builtins.replaceStrings (map (p: p.from) pairs) (map (p: p.to) pairs) jiraGoSrc;
@@ -259,6 +263,23 @@ in
         builtins.concatStringsSep ", " (map (r: r.name) mismatched)
       }";
     pkgs.runCommand "jira-status-mapping-corpus-matches-go" { } "touch $out";
+
+  # Shared with the Go test TestCheckLifecycle_Corpus.
+  jira-status-mapping-lifecycle-corpus-matches-go =
+    let
+      expected = row: if row.error == "" then null else row.error;
+      mismatched = builtins.filter (
+        row: jsm.lifecycleError row.lifecycle row.mapping != expected row
+      ) lifecycleCorpus;
+    in
+    assert assertMsg (
+      lifecycleCorpus != [ ]
+    ) "jira-status-mapping-lifecycle-corpus-matches-go: the corpus is empty";
+    assert assertMsg (mismatched == [ ])
+      "jira-status-mapping-lifecycle-corpus-matches-go: lib/jira-status-mapping.nix's lifecycleError diverges from the shared corpus for row(s) ${
+        builtins.concatStringsSep ", " (map (r: r.name) mismatched)
+      }";
+    pkgs.runCommand "jira-status-mapping-lifecycle-corpus-matches-go" { } "touch $out";
 
   jira-status-mapping-keys-reformat-regression =
     let
