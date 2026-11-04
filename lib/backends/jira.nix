@@ -39,6 +39,16 @@
       nixSubPath = "jira.projectKey";
       boxEnv = false;
     };
+    jiraIssueType = {
+      env = "JIRA_ISSUE_TYPE";
+      group = "issues";
+      default = "Task";
+      doc = "Jira issue type host-side issue filing (PostIssue) creates findings as; it must exist on the project";
+      flakeOption = true;
+      legacySettingsExempt = true;
+      nixSubPath = "jira.issueType";
+      boxEnv = false;
+    };
     jiraEmail = {
       env = "JIRA_EMAIL";
       group = "issues";

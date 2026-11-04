@@ -32,6 +32,7 @@ var Strategy = backendkit.Strategy{
 		return NewJiraClient(JiraConfig{
 			BaseURL:       k.JiraBaseURL,
 			ProjectKey:    k.JiraProjectKey,
+			IssueType:     k.JiraIssueType,
 			Email:         k.JiraEmail,
 			Token:         k.JiraToken,
 			StatusMapping: statusMapping,

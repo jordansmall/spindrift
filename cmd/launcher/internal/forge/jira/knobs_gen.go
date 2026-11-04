@@ -9,6 +9,8 @@ const (
 	JiraEmailEnv = "JIRA_EMAIL"
 	// JiraIncludeCommentsEnv names JiraIncludeComments's env var.
 	JiraIncludeCommentsEnv = "JIRA_INCLUDE_COMMENTS"
+	// JiraIssueTypeEnv names JiraIssueType's env var.
+	JiraIssueTypeEnv = "JIRA_ISSUE_TYPE"
 	// JiraProjectKeyEnv names JiraProjectKey's env var.
 	JiraProjectKeyEnv = "JIRA_PROJECT_KEY"
 	// JiraStatusMappingEnv names JiraStatusMapping's env var.
@@ -25,6 +27,8 @@ type Knobs struct {
 	JiraEmail string
 	// JiraIncludeComments is JIRA_INCLUDE_COMMENTS.
 	JiraIncludeComments bool
+	// JiraIssueType is JIRA_ISSUE_TYPE.
+	JiraIssueType string
 	// JiraProjectKey is JIRA_PROJECT_KEY.
 	JiraProjectKey string
 	// JiraStatusMapping is JIRA_STATUS_MAPPING.
@@ -47,6 +51,7 @@ func ReadKnobs(lookup Lookup) (Knobs, error) {
 		JiraBaseURL:         "",
 		JiraEmail:           "",
 		JiraIncludeComments: false,
+		JiraIssueType:       "Task",
 		JiraProjectKey:      "",
 		JiraStatusMapping:   "",
 		JiraToken:           "",
@@ -59,6 +64,9 @@ func ReadKnobs(lookup Lookup) (Knobs, error) {
 	}
 	if v, ok := lookup(JiraIncludeCommentsEnv); ok {
 		k.JiraIncludeComments = v != ""
+	}
+	if v, ok := lookup(JiraIssueTypeEnv); ok && v != "" {
+		k.JiraIssueType = v
 	}
 	if v, ok := lookup(JiraProjectKeyEnv); ok && v != "" {
 		k.JiraProjectKey = v
