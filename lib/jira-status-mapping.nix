@@ -1,11 +1,11 @@
 # Eval-level parse of the JIRA_STATUS_MAPPING knob (the jira row's
 # jiraStatusMapping in lib/backends/jira.nix, issue #2539). cmd/launcher/internal/forge/jira/jira.go's
-# ParseStatusMapping parses the same knob at runtime, so the accepted keys and
-# error wording here must not diverge from it. The one exception is a
-# non-string value: Go's text there comes from encoding/json, so only its
-# `parse JIRA_STATUS_MAPPING:` prefix and JSON type name carry over. Pure
-# builtins only, no pkgs.lib, so a bare `nix eval` tests this file without a
-# locked nixpkgs.
+# ParseStatusMapping parses the same knob at runtime, so the accepted shapes
+# and error wording here must not diverge from it; nix/checks/jira-status-mapping.nix
+# runs the shared corpus (jira/testdata/status-mapping-cases.json) against
+# `error`. The one difference is malformed JSON: builtins.fromJSON aborts
+# uncatchably, so only the Go side words that error. Pure builtins only, no
+# pkgs.lib, so a bare `nix eval` tests this file without a locked nixpkgs.
 let
   # Must match jira.go's statusMappingKeys keys, in lowerCamelCase;
   # nix/checks/jira-status-mapping.nix's jira-status-mapping-keys-match-go-source
@@ -17,64 +17,113 @@ let
     "failed"
   ];
 
-  # builtins.typeOf names as encoding/json's error text names them.
+  # Must match jira.go's statusTargetFields; the same check enforces it.
+  validFields = [
+    "status"
+    "resolution"
+  ];
+
+  # builtins.typeOf names as the JSON type names jira.go's jsonTypeName reports.
   jsonType = {
     int = "number";
     float = "number";
     bool = "bool";
     set = "object";
     list = "array";
+    null = "null";
+    string = "string";
   };
 
-  # This mirrors jira.go's ParseStatusMapping: a value that is neither a string
-  # nor null throws first (Go's map[string]string decode fails before its key
-  # loop), then the first unknown key, with Go's exact unknown-key wording.
-  validate =
-    parsed:
+  firstNonNull =
+    errs:
     let
-      keys = builtins.attrNames parsed;
-      badValue = builtins.filter (
-        k:
-        let
-          v = parsed.${k};
-        in
-        !(builtins.isString v || v == null)
-      ) keys;
-      unknown = builtins.filter (k: !(builtins.elem k validKeys)) keys;
+      found = builtins.filter (e: e != null) errs;
     in
-    if badValue != [ ] then
-      let
-        k = builtins.head badValue;
-      in
-      throw ''parse JIRA_STATUS_MAPPING: key "${k}": expected a JSON string or null, got ${
-        jsonType.${builtins.typeOf parsed.${k}}
-      }''
-    else if unknown == [ ] then
-      parsed
+    if found == [ ] then null else builtins.head found;
+
+  fieldError =
+    key: obj: name:
+    let
+      v = obj.${name};
+    in
+    if !(builtins.elem name validFields) then
+      ''JIRA_STATUS_MAPPING: key "${key}": unknown field "${name}" (want ${builtins.concatStringsSep ", " validFields})''
+    else if !(builtins.isString v) then
+      ''JIRA_STATUS_MAPPING: key "${key}": field "${name}" must be a string, got ${jsonType.${builtins.typeOf v}}''
     else
-      throw ''JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of ${builtins.concatStringsSep ", " validKeys})'';
+      null;
+
+  # Mirrors parseStatusTarget: fields in sorted order (attrNames sorts, as
+  # slices.Sorted does), then status, then resolution.
+  objectError =
+    key: obj:
+    firstNonNull (
+      map (fieldError key obj) (builtins.attrNames obj)
+      ++ [
+        (
+          if (obj.status or "") == "" then
+            ''JIRA_STATUS_MAPPING: key "${key}": "status" must be a non-empty string''
+          else
+            null
+        )
+        (
+          if obj ? resolution && obj.resolution == "" then
+            ''JIRA_STATUS_MAPPING: key "${key}": "resolution" must be a non-empty string''
+          else
+            null
+        )
+      ]
+    );
+
+  keyError =
+    parsed: key:
+    let
+      v = parsed.${key};
+    in
+    if !(builtins.elem key validKeys) then
+      ''JIRA_STATUS_MAPPING: unknown key "${key}" (want one of ${builtins.concatStringsSep ", " validKeys})''
+    else if v == null || builtins.isString v then
+      null
+    else if builtins.isAttrs v then
+      objectError key v
+    else
+      ''JIRA_STATUS_MAPPING: key "${key}": expected a status name or a {"status", "resolution"} object, got ${jsonType.${builtins.typeOf v}}'';
+
+  decode = s: if s == "" then null else builtins.fromJSON s;
+
+  # The message ParseStatusMapping would fail with for a decoded value, or null
+  # when it is valid.
+  valueError =
+    value:
+    # json.Unmarshal of "null" into Go's `any` yields nil with no error, so
+    # ParseStatusMapping("null") is an empty mapping; catch it before
+    # attrNames aborts on it.
+    if value == null then
+      null
+    else if !(builtins.isAttrs value) then
+      "JIRA_STATUS_MAPPING: expected a JSON object, got ${jsonType.${builtins.typeOf value}}"
+    else
+      firstNonNull (map (keyError value) (builtins.attrNames value));
+
+  # Pure so the corpus check can compare text; tryEval hides a throw's.
+  error = s: valueError (decode s);
 in
 {
-  inherit validKeys;
+  inherit validKeys validFields error;
 
   # The empty string is the schema default and yields an empty mapping, as
   # ParseStatusMapping does. A malformed value fails the build loudly, the way
   # the launcher fails at startup.
   parse =
     s:
-    if s == "" then
+    let
+      value = decode s;
+      e = valueError value;
+    in
+    if e != null then
+      throw e
+    else if value == null then
       { }
     else
-      let
-        value = builtins.fromJSON s;
-      in
-      # json.Unmarshal of "null" into Go's map[string]string leaves it nil with
-      # no error, so ParseStatusMapping("null") returns an empty mapping. Catch
-      # null here, before validate's attrNames aborts on it.
-      if value == null then
-        { }
-      else if !(builtins.isAttrs value) then
-        throw "JIRA_STATUS_MAPPING: expected a JSON object, got ${builtins.typeOf value}"
-      else
-        validate value;
+      value;
 }
