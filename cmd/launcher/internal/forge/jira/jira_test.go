@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -1614,5 +1615,155 @@ func TestJiraClient_ReportsClosedNotPlannedAndClosedAt(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// transitionFake stands in for one Jira issue's workflow: it serves the
+// transitions listing (with the field metadata the adapter expands), records
+// every transition POST body verbatim. The issue reads back open ("To Do", no
+// resolution) until a transition POST lands, then closed with the POSTed
+// fields.resolution, so a read-back assertion fails if no transition happened.
+type transitionFake struct {
+	transitionsJSON string
+	status          string
+	category        string
+	resolution      string
+	getQueries      []string
+	posts           []string
+	labelPuts       int
+}
+
+func (f *transitionFake) handler(t *testing.T) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const issuePath = "/rest/api/2/issue/PROJ-1"
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == issuePath:
+			res := "null"
+			if f.resolution != "" {
+				res = fmt.Sprintf(`{"name":%q}`, f.resolution)
+			}
+			status, category := f.status, f.category
+			if status == "" {
+				status, category = "To Do", "new"
+			}
+			fmt.Fprintf(w, `{"key":"PROJ-1","fields":{"status":{"name":%q,"statusCategory":{"key":%q}},"labels":[],"resolution":%s}}`, status, category, res)
+		case r.Method == http.MethodGet && r.URL.Path == issuePath+"/transitions":
+			f.getQueries = append(f.getQueries, r.URL.RawQuery)
+			fmt.Fprint(w, f.transitionsJSON)
+		case r.Method == http.MethodPost && r.URL.Path == issuePath+"/transitions":
+			raw, _ := io.ReadAll(r.Body)
+			f.posts = append(f.posts, string(raw))
+			var body struct {
+				Fields struct {
+					Resolution struct {
+						Name string `json:"name"`
+					} `json:"resolution"`
+				} `json:"fields"`
+			}
+			json.Unmarshal(raw, &body)
+			f.status, f.category = "Done", "done"
+			f.resolution = body.Fields.Resolution.Name
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == issuePath:
+			f.labelPuts++
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}
+}
+
+const doneTransition = `{"transitions":[{"id":"21","name":"Done","to":{"name":"Done"},"fields":%s}]}`
+
+func completeTo(t *testing.T, f *transitionFake, target jira.StatusTarget) (forge.IssueTracker, error) {
+	t.Helper()
+	srv := httptest.NewServer(f.handler(t))
+	t.Cleanup(srv.Close)
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:       srv.URL,
+		Token:         "tok",
+		StatusMapping: map[forge.DispatchState]jira.StatusTarget{forge.Complete: target},
+		Labels:        testLabels,
+	})
+	return jc, jc.TransitionState("PROJ-1", forge.InProgress, forge.Complete)
+}
+
+func TestJiraClient_TransitionState_StringMappingPostsBareTransition(t *testing.T) {
+	f := &transitionFake{transitionsJSON: fmt.Sprintf(doneTransition, `{}`)}
+	if _, err := completeTo(t, f, jira.StatusTarget{Status: "Done"}); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	if want := []string{"expand=transitions.fields"}; !slices.Equal(f.getQueries, want) {
+		t.Errorf("transitions GET queries = %v, want %v", f.getQueries, want)
+	}
+	if want := []string{`{"transition":{"id":"21"}}`}; !slices.Equal(f.posts, want) {
+		t.Errorf("POST bodies = %v, want %v (no fields key)", f.posts, want)
+	}
+}
+
+func TestJiraClient_TransitionState_ObjectMappingSendsResolution(t *testing.T) {
+	f := &transitionFake{transitionsJSON: fmt.Sprintf(doneTransition, `{"resolution":{"required":true,"hasDefaultValue":false,"name":"Resolution"}}`)}
+	jc, err := completeTo(t, f, jira.StatusTarget{Status: "Done", Resolution: "Won't Do"})
+	if err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	if want := []string{`{"fields":{"resolution":{"name":"Won't Do"}},"transition":{"id":"21"}}`}; !slices.Equal(f.posts, want) {
+		t.Errorf("POST bodies = %v, want %v", f.posts, want)
+	}
+	// Read back through the adapter's own path: closed, with the mapped resolution.
+	iss, err := jc.Issue("PROJ-1")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed || !iss.ClosedNotPlanned {
+		t.Errorf("issue reads back state=%v notPlanned=%v, want closed with the Won't Do resolution", iss.State, iss.ClosedNotPlanned)
+	}
+}
+
+func TestJiraClient_TransitionState_ResolutionWithoutScreenFieldErrorsWithoutPost(t *testing.T) {
+	f := &transitionFake{transitionsJSON: fmt.Sprintf(doneTransition, `{}`)}
+	_, err := completeTo(t, f, jira.StatusTarget{Status: "Done", Resolution: "Won't Do"})
+	if err == nil {
+		t.Fatal("TransitionState: want error when the transition has no resolution field")
+	}
+	for _, want := range []string{"Done", "PROJ-1", "Won't Do", "no resolution field"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+	if len(f.posts) != 0 {
+		t.Errorf("POSTed %v, want no transition POST", f.posts)
+	}
+	if f.labelPuts != 0 {
+		t.Errorf("label fallback ran %d times, want 0: a screen error must not fall back", f.labelPuts)
+	}
+}
+
+func TestJiraClient_TransitionState_RequiredFieldUnsetErrorsWithoutPost(t *testing.T) {
+	const fields = `{"resolution":{"required":true,"hasDefaultValue":false,"name":"Resolution"},"customfield_10001":{"required":true,"hasDefaultValue":false,"name":""}}`
+	f := &transitionFake{transitionsJSON: fmt.Sprintf(doneTransition, fields)}
+	_, err := completeTo(t, f, jira.StatusTarget{Status: "Done"})
+	if err == nil {
+		t.Fatal("TransitionState: want error for unset required field")
+	}
+	for _, want := range []string{"Resolution (resolution)", "customfield_10001", "Done", "PROJ-1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+	if len(f.posts) != 0 {
+		t.Errorf("POSTed %v, want no transition POST", f.posts)
+	}
+	if f.labelPuts != 0 {
+		t.Errorf("label fallback ran %d times, want 0: a required-field error must not fall back", f.labelPuts)
+	}
+}
+
+func TestJiraClient_TransitionState_RequiredFieldWithDefaultDoesNotBlock(t *testing.T) {
+	f := &transitionFake{transitionsJSON: fmt.Sprintf(doneTransition, `{"resolution":{"required":true,"hasDefaultValue":true,"name":"Resolution"},"labels":{"required":false,"name":"Labels"}}`)}
+	if _, err := completeTo(t, f, jira.StatusTarget{Status: "Done"}); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	if len(f.posts) != 1 {
+		t.Errorf("POSTs = %v, want exactly one", f.posts)
 	}
 }
