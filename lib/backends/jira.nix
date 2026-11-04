@@ -14,6 +14,9 @@
   # relay through the host; its linked-issue reads in prompts key off this too
   # (issue #6344).
   inBoxUnwritableTracker = true;
+  # Comments and issue filing (#6352) both post host-side, so the Box needs no
+  # Jira client under read-only.
+  hostPostingCapable = true;
   # Issues carry applied labels though there is no registry (see default.nix).
   issuesWearLabels = true;
   # Build-time check of the merged defaults, run by lib/mkHarness.nix when this

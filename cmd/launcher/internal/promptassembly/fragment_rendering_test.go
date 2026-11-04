@@ -254,8 +254,8 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			wantNot: []string{"gh issue comment", "GitHub token"},
 		},
 		{
-			// Unreachable in production (main.go checkReadOnlyCapabilityGate
-			// refuses jira read-only); pinned only so the gate cell stays sane.
+			// Pinned for the gate cell: jira read-only is legal, but the launcher
+			// posts the blocked comment, so the Box never runs gh issue comment.
 			name:    "blocked-comment jira read-only never runs gh issue comment",
 			mutate:  []func(*Env){func(e *Env) { e.IssueTracker = "jira" }, fragReadOnly},
 			want:    []string{"the launcher posts it as the issue comment"},
