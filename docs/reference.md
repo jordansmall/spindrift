@@ -4455,11 +4455,12 @@ downgrades to manual regardless of `MERGE_MODE`, `MERGE_GUARD_PATHS`, and the
 paths touched, immediate and auto alike. The outcome matches a guard hit: the
 PR is flipped ready, the issue lands at `agent-complete`, and a comment on the
 PR names the label and says that removing it is the override. The Record
-settles with reason `tuning-provenance`. On a tracker with no label registry
-(`local`, `jira`) the same fact is the Chore's `chore=<name>` term
+settles with reason `tuning-provenance`. On a tracker where a missing label
+is not authoritative (`local`) the Chore's `chore=<name>` term
 (`chore=tuning`) in the issue body's last `<!-- spindrift-dedup: ... -->`
-marker line. Where a registry exists,
-removing the label is the deliberate override: the PR then merges normally
+marker line holds as well. Everywhere else (`github`, `forgejo`, and `jira`, whose issues
+wear labels though it has no label registry) the label alone decides, and
+removing it is the deliberate override: the PR then merges normally
 even if the body still carries the marker. If the closing issue cannot be
 read, the merge is held as a precaution (with a comment on the PR) and
 settles `merge-guard-check-error`. Either check alone holds the merge. See
@@ -5155,16 +5156,17 @@ gh label create agent-butler-patch --repo owner/repo --color 5319e7 --descriptio
 
 The `agent-tuning-finding` label (ADR 0062) is a single fixed,
 non-configurable provenance label on a finding a tuning Chore files. A PR
-closing an issue wearing it merges by hand. Trackers with no label registry
-(`local`, `jira`) carry the same fact as a `chore=tuning` term in the issue
-body's dedup marker. `spindrift doctor` checks and, in interactive mode,
+closing an issue wearing it merges by hand. On `local`, where a missing label
+is not authoritative, a `chore=tuning` term in the issue body's dedup marker
+holds it too; `jira` has no label registry but its issues wear labels, so
+it is judged by the label. `spindrift doctor` checks and, in interactive mode,
 offers to create it, but treats it as advisory: like the labels above, a
 missing `agent-tuning-finding` label never fails the check unless `--butler`
 promotes the butler tier, and even then only while `tuning` is in
 `BUTLER_CHORES` on a tracker with a label registry (`github`/`forgejo`). It is
-never required on `local`/`jira`, where the body marker carries the fact (a
-butler on `jira` refuses to start until Jira gains host-side issue filing,
-issue #6343). To
+never required on `local`, where the body marker carries the fact, or on
+`jira`, which has no label registry to create it in (a butler on `jira`
+refuses to start until Jira gains host-side issue filing, issue #6343). To
 create it manually:
 
 ```sh
