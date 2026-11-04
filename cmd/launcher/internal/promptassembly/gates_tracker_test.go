@@ -653,6 +653,32 @@ func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
 	}
 }
 
+// TestGatesJiraWorkFilerAlwaysRelays pins that a jira work dispatch with the
+// Filer on files through the relay in every access mode (issue #6354): the Box
+// has no in-box jira write path, so the direct gh fork must never fire.
+func TestGatesJiraWorkFilerAlwaysRelays(t *testing.T) {
+	for _, boxWrite := range []bool{true, false} {
+		g := Gates(Env{
+			DispatchKind:    "work",
+			IssueTracker:    "jira",
+			FilerEnabled:    true,
+			BoxWriteEnabled: boxWrite,
+		})
+		want := map[string]bool{
+			"FILER_FILE_RELAY":          true,
+			"FILER_FILE_RELAY_WORK":     true,
+			"FILER_FILE_DIRECT_GH":      false,
+			"FILER_FILE_DIRECT_FORGEJO": false,
+			"FILER_FILE_DIRECT_ANY":     false,
+		}
+		for gate, w := range want {
+			if g[gate] != w {
+				t.Errorf("boxWrite=%v: %s = %v, want %v", boxWrite, gate, g[gate], w)
+			}
+		}
+	}
+}
+
 // TestAssembleJiraResearchRendersRelayedVerdict pins the rendered prompt: a jira
 // research run has no `gh issue comment` guidance, Filer off or on (issue
 // #5245).
