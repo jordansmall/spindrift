@@ -246,6 +246,7 @@ let
       "agentpaths"
       "backend"
       "backendkit"
+      "dedupmarker"
       "dispatchkey"
       "dispatchkind"
       "doctor"

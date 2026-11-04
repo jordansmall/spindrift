@@ -9,6 +9,7 @@ import (
 
 	"github.com/rivo/uniseg"
 
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -303,9 +304,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		}
 		marker := buildDedupMarker(markerTerms)
 		if marker == "" {
-			marker = dedupMarkerPrefix + dedupMarkerSuffix
+			marker = dedupmarker.Bare
 		}
-		body = body + "\n\n" + marker
+		body = dedupmarker.Append(body, marker)
 		ensureFilingLabel(it, provenanceLabel, &existingLabels)
 		labels := []string{provenanceLabel}
 		if l := ensureTypeLabel(it, in.Type, &existingLabels); l != "" {

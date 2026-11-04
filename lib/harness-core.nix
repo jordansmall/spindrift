@@ -56,6 +56,7 @@ let
   # backend, so a backend edit leaves their drvPaths unchanged (issue #5738).
   backendBundleDirs = [
     "backendkit"
+    "dedupmarker"
     "flock"
     "forge/bundlerelay"
     "forge/forgejo"

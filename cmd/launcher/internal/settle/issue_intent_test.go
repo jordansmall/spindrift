@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
@@ -23,7 +24,7 @@ import (
 // launcher appends its own marker line unconditionally, empty when the
 // intent carried no usable dedup term (issue #3609 review).
 func withEmptyMarker(body string) string {
-	return body + "\n\n" + dedupMarkerPrefix + dedupMarkerSuffix
+	return body + "\n\n" + dedupmarker.Bare
 }
 
 // filedURLs returns filed's successful entries' URLs in payload order,

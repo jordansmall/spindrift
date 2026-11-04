@@ -328,24 +328,24 @@ let
     else
       builtins.elemAt tailBytesMatch 0;
 
-  # dedupMarkerPrefix/dedupMarkerSuffix, parsed out of the Go source that
-  # defines them (issue #3609) rather than retyped, the same builtins.match
-  # idiom as bakedCap and nonceHexWidth above: the two direct-mode filer
-  # fragments below build this marker line themselves (their own token never
-  # round-trips through the launcher, so dedup.go can't build it for them),
-  # and a rename here that isn't echoed in the fragments would leave them
-  # emitting a marker parseDedupMarker can never recognize.
-  dedupMarkerGoSrc = builtins.readFile ../../cmd/launcher/internal/settle/dedup.go;
-  dedupMarkerPrefixMatch = builtins.match ".*dedupMarkerPrefix = \"([^\"]*)\".*" dedupMarkerGoSrc;
+  # dedupmarker.Prefix/Suffix, parsed out of the Go source that defines them
+  # (issue #3609) rather than retyped, the same builtins.match idiom as
+  # bakedCap and nonceHexWidth above: the two direct-mode filer fragments
+  # below build this marker line themselves (their own token never
+  # round-trips through the launcher, so dedupmarker.Build can't build it for
+  # them), and a rename here that isn't echoed in the fragments would leave
+  # them emitting a marker dedupmarker.Parse can never recognize.
+  dedupMarkerGoSrc = builtins.readFile ../../cmd/launcher/internal/dedupmarker/dedupmarker.go;
+  dedupMarkerPrefixMatch = builtins.match ".*[[:space:]]Prefix = \"([^\"]*)\".*" dedupMarkerGoSrc;
   dedupMarkerPrefixInGo =
     if dedupMarkerPrefixMatch == null then
-      throw "dedup marker check: no dedupMarkerPrefix const found in cmd/launcher/internal/settle/dedup.go -- update the match in nix/checks/prompts.nix alongside the const"
+      throw "dedup marker check: no Prefix const found in cmd/launcher/internal/dedupmarker/dedupmarker.go -- update the match in nix/checks/prompts.nix alongside the const"
     else
       builtins.elemAt dedupMarkerPrefixMatch 0;
-  dedupMarkerSuffixMatch = builtins.match ".*dedupMarkerSuffix = \"([^\"]*)\".*" dedupMarkerGoSrc;
+  dedupMarkerSuffixMatch = builtins.match ".*[[:space:]]Suffix = \"([^\"]*)\".*" dedupMarkerGoSrc;
   dedupMarkerSuffixInGo =
     if dedupMarkerSuffixMatch == null then
-      throw "dedup marker check: no dedupMarkerSuffix const found in cmd/launcher/internal/settle/dedup.go -- update the match in nix/checks/prompts.nix alongside the const"
+      throw "dedup marker check: no Suffix const found in cmd/launcher/internal/dedupmarker/dedupmarker.go -- update the match in nix/checks/prompts.nix alongside the const"
     else
       builtins.elemAt dedupMarkerSuffixMatch 0;
 
@@ -1840,11 +1840,11 @@ in
         ${normalizedGrep}
         for f in ${../../templates/default/prompts/fragments/github/filer-direct-file.md} ${../../templates/default/prompts/fragments/forgejo/filer-direct-file.md}; do
           normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerPrefixInGo} || {
-            echo "$f: expected the dedup marker prefix '${dedupMarkerPrefixInGo}' (dedup.go's dedupMarkerPrefix const) verbatim" >&2
+            echo "$f: expected the dedup marker prefix '${dedupMarkerPrefixInGo}' (dedupmarker.Prefix) verbatim" >&2
             exit 1
           }
           normalized_grep "$f" ${pkgs.lib.escapeShellArg dedupMarkerSuffixInGo} || {
-            echo "$f: expected the dedup marker suffix '${dedupMarkerSuffixInGo}' (dedup.go's dedupMarkerSuffix const) verbatim" >&2
+            echo "$f: expected the dedup marker suffix '${dedupMarkerSuffixInGo}' (dedupmarker.Suffix) verbatim" >&2
             exit 1
           }
         done
