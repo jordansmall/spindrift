@@ -170,11 +170,11 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
-		// The #579 guard resets sr when the genuine turn is scanned, but that
-		// reset is immaterial: the terminator carries its own top-level
-		// "error":"server_error", which matchTransient re-matches on the next
-		// line. Pins that against a future classifyTurn or decoder
-		// change that widens the reset window (issue #815).
+		// The #579 guard clears the classifier's candidate when the genuine
+		// turn is decoded, but that is immaterial: the terminator carries its
+		// own top-level "error":"server_error", which driverkit.MatchTransient
+		// matches on the next line. Pins that against a future classifyTurn or
+		// decoder change that widens the exemption (issue #815).
 		name: "Transient_GenuineAssistantContent_ThenSyntheticServerErrorTerminator",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the server_error transient pattern before writing the fix"}]}}`,
@@ -201,10 +201,10 @@ var classifyTests = []struct {
 	},
 	{
 		// Unlike the same-marker case above, this outcome is not invariant to
-		// the #579 guard: if isAgentContentEvent stopped exempting the genuine
-		// turn, its "rate_limit_error" would set sr.found and the terminator's
-		// "server_error" would never be scanned. Disabling that branch makes
-		// this test fail (issue #1199).
+		// the #579 guard: if classifyTurn stopped exempting the genuine turn,
+		// its "rate_limit_error" would latch first under FirstMatch and the
+		// terminator's "server_error" would never count. Disabling
+		// classifyTurn's content verdict makes this test fail (issue #1199).
 		name: "Transient_GenuineAssistantContent_RateLimitMarker_ThenSyntheticServerErrorTerminator",
 		lines: []string{
 			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"Investigating the rate_limit_error transient pattern before writing the fix"}]}}`,
