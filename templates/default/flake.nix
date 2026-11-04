@@ -288,6 +288,8 @@
             #     email = "";
             #     # DEPRECATED no-op: Jira comments always reach the prompt (the last 10, attributed, through the adapter's comment lister) whether or not this is set. Kept so existing configs still evaluate; will be removed
             #     includeComments = false;
+            #     # Jira issue type host-side issue filing (PostIssue) creates findings as; it must exist on the project
+            #     issueType = "Task";
             #     # Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira
             #     projectKey = "";
             #     # JSON object mapping dispatch states (dispatchable, inProgress, complete, failed, ambiguous) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow; only failed and ambiguous may share a status

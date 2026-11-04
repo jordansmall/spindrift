@@ -30,7 +30,7 @@ type JiraConfig struct {
 	ProjectKey string
 	Email      string // Jira Cloud: Basic auth and Cloud search APIs; empty selects Bearer-token auth and v2 /search (Server/Data Center PAT)
 	Token      string
-	IssueType  string // issue type PostIssue files; empty means defaultIssueType
+	IssueType  string // issue type PostIssue files; empty takes the JIRA_ISSUE_TYPE row default
 
 	// StatusMapping maps canonical DispatchState values to native Jira status
 	// targets. TransitionState falls back to Labels when a state is unmapped or
@@ -215,7 +215,10 @@ type jiraClient struct {
 // NewJiraClient returns an IssueTracker backed by the Jira REST API.
 func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 	if cfg.IssueType == "" {
-		cfg.IssueType = defaultIssueType
+		// An all-unset lookup yields the row defaults.
+		if k, err := ReadKnobs(func(string) (string, bool) { return "", false }); err == nil {
+			cfg.IssueType = k.JiraIssueType
+		}
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
@@ -478,10 +481,6 @@ func restoreResearchMarker(body string, props []jiraProperty) string {
 	}
 	return body
 }
-
-// defaultIssueType is the type PostIssue files when JiraConfig.IssueType is
-// unset; Task exists in every standard Jira project template.
-const defaultIssueType = "Task"
 
 // dedupPropertyKey is the issue entity property holding a filed finding's
 // dedup marker (ADR 0072). The marker rides outside the description because
