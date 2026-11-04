@@ -146,7 +146,7 @@ func doctorConfigErr(rc readContext, v readValidation, opts doctorOptions) error
 		// "" means no --chore: validate every BUTLER_CHORES entry, and an
 		// empty BUTLER_CHORES fails (ErrNoChores) -- same as gateKinds
 		// refusing an explicit butler selector with no chores.
-		if _, err := resolveButlerSettings(rc.config, ""); err != nil {
+		if _, err := resolveButlerSettings(rc.config, rc.capabilities, ""); err != nil {
 			configErr = errors.Join(configErr, err)
 		}
 	}

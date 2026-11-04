@@ -349,8 +349,9 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 			daemonAwakeWindow:  schemaDefault("DAEMON_AWAKE_WINDOW"),
 			baseBranch:         schemaDefault("BASE_BRANCH"),
 		}},
-		factory: testFactory(t, t.TempDir(), runner.NewFake()),
-		cleanup: func() {},
+		factory:      testFactory(t, t.TempDir(), runner.NewFake()),
+		capabilities: forge.Capabilities{HostPostedIssueFiler: testHostFiler(t)},
+		cleanup:      func() {},
 	}
 }
 
@@ -515,10 +516,38 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 	}
 }
 
+// testHostFiler resolves a filing-capable tracker's HostPostedIssueFiler the
+// way production does, through forge.ResolveCapabilities.
+func testHostFiler(t *testing.T) forge.HostPostedIssueFiler {
+	t.Helper()
+	caps := fakeCapabilities(forge.NewFake())
+	if caps.HostPostedIssueFiler == nil {
+		t.Fatal("AsIssueFiler() fake lacks HostPostedIssueFiler")
+	}
+	return caps.HostPostedIssueFiler
+}
+
+// Issue #6343: the gate keys on the tracker's HostPostedIssueFiler
+// capability, never a backend name, so a fake gaining PostIssue passes and a
+// bare one is refused.
+func TestButlerPreflight_TrackerCapability(t *testing.T) {
+	cfg := config{schemaConfig: schemaConfig{codeForge: "local", issueTracker: "jira", butlerChores: "bugs"}}
+	bare := forge.NewFake()
+	caps := forge.ResolveCapabilities(bare, bare, backend.Descriptor{}, backend.Descriptor{})
+	_, err := butlerPreflight(cfg, "bugs", true, caps.HostPostedIssueFiler, choreCatalog{})
+	if err == nil || !strings.Contains(err.Error(), "ISSUE_TRACKER") || !strings.Contains(err.Error(), "host-side issue filing") {
+		t.Fatalf("bare tracker: err = %v, want it to name ISSUE_TRACKER and host-side issue filing", err)
+	}
+	if _, err := butlerPreflight(cfg, "bugs", true, testHostFiler(t), choreCatalog{}); err != nil {
+		t.Fatalf("filing-capable tracker: %v", err)
+	}
+}
+
 // (m) butlerPreflight guards codeForge, BUTLER_CHORES membership (or, with
 // no --chore, BUTLER_CHORES being non-empty at all), BUTLER_CHORE_CLASSES
 // syntax, the BUTLER_PATCH_CLASSES cross-checks (ADR 0057, only when
-// butlerMaxPatchesPerDay > 0), and the Filer gate in that order, before
+// butlerMaxPatchesPerDay > 0), the ISSUE_TRACKER host-side filing gate (issue
+// #6343), and the Filer gate in that order, before
 // cmdButler ever claims a Ledger -- in particular a chore run with no
 // provisioned Filer (FILER_MODEL="") must be refused up
 // front rather than sweep and silently drop findings.
@@ -581,7 +610,7 @@ func TestButlerPreflight(t *testing.T) {
 				butlerMaxPatchesPerDay:    tc.butlerMaxPatchesPerDay,
 			}}
 			catalog := choreCatalog{names: tc.catalogNames, known: tc.catalogKnown}
-			_, err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, catalog)
+			_, err := butlerPreflight(cfg, tc.chore, tc.filerEnabled, testHostFiler(t), catalog)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("butlerPreflight(%+v): %v", tc, err)
@@ -622,14 +651,14 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "chores", "bugs.md"), []byte("prompt"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog); err != nil {
+		if _, err := butlerPreflight(cfgWith(dir), "bugs", true, testHostFiler(t), rejectingCatalog); err != nil {
 			t.Errorf("butlerPreflight: %v, want nil", err)
 		}
 	})
 
 	t.Run("override dir missing prompt names the path", func(t *testing.T) {
 		dir := t.TempDir()
-		_, err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
+		_, err := butlerPreflight(cfgWith(dir), "bugs", true, testHostFiler(t), rejectingCatalog)
 		wantPath := filepath.Join(dir, "chores", "bugs.md")
 		if err == nil || !strings.Contains(err.Error(), "prompt file missing") || !strings.Contains(err.Error(), wantPath) {
 			t.Errorf("butlerPreflight err = %v, want it to name %q", err, wantPath)
@@ -645,7 +674,7 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, "chores", "bugs.md"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		_, err := butlerPreflight(cfgWith(dir), "bugs", true, rejectingCatalog)
+		_, err := butlerPreflight(cfgWith(dir), "bugs", true, testHostFiler(t), rejectingCatalog)
 		if err == nil || !strings.Contains(err.Error(), "prompt file missing") {
 			t.Errorf("butlerPreflight err = %v, want prompt file missing", err)
 		}
@@ -656,7 +685,7 @@ func TestButlerPreflight_PromptDirOverride(t *testing.T) {
 		if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		_, err := butlerPreflight(cfgWith(file), "bugs", true, rejectingCatalog)
+		_, err := butlerPreflight(cfgWith(file), "bugs", true, testHostFiler(t), rejectingCatalog)
 		if err == nil || !strings.Contains(err.Error(), "prompt file missing") || !strings.Contains(err.Error(), "CHORE_CATALOG") {
 			t.Errorf("butlerPreflight err = %v, want the catalog-based error", err)
 		}
@@ -949,6 +978,7 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		}, func(sc *schemaConfig) { sc.butlerChoreClasses = "bugs=error-handling" }), workLabel: "agent-go", dispatchKind: dispatchkind.Butler},
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
+		capabilities: forge.Capabilities{HostPostedIssueFiler: testHostFiler(t)},
 		// This test never runs the patch rung (no PatchForge is wired), so
 		// the Fake's SettlePatch is never called; it only needs to satisfy
 		// butler.PatchGate for lc.patchGate() (issue #4076).
@@ -1002,7 +1032,7 @@ func TestButlerPreflight_RecordsDigest(t *testing.T) {
 	}
 
 	cfg := config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "tuning"}}
-	if _, err := butlerPreflight(cfg, "tuning", true, choreCatalog{}); err != nil {
+	if _, err := butlerPreflight(cfg, "tuning", true, testHostFiler(t), choreCatalog{}); err != nil {
 		t.Fatalf("butlerPreflight with the stock tuning Chore: %v", err)
 	}
 }
@@ -1049,7 +1079,8 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 
 	forgejoDesc, _ := backend.ByName("forgejo")
 	caps := forge.Capabilities{
-		BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+		HostPostedIssueFiler: testHostFiler(t),
+		BranchPusher:         fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
 		PRForge: fc.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
 		ForgeDescriptor: forgejoDesc, TrackerDescriptor: forgejoDesc,
 	}

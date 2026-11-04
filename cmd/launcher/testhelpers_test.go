@@ -171,8 +171,15 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 	return f
 }
 
-// doctorReport never reads rc.capabilities, so this leaves it at its zero
-// value.
+// The tracker is filing-capable so doctor --butler's resolveButlerSettings
+// clears its host-side issue filing gate (issue #6343); tests probing the gate
+// override capabilities.
 func doctorReadContext(c config, f *forge.Fake) readContext {
-	return readContext{config: c, issueTracker: f, codeForge: f}
+	return readContext{config: c, issueTracker: f, codeForge: f, capabilities: fakeCapabilities(f)}
+}
+
+// fakeCapabilities resolves a filing-capable Fake's capabilities the way
+// production does, through forge.ResolveCapabilities.
+func fakeCapabilities(f *forge.Fake) forge.Capabilities {
+	return forge.ResolveCapabilities(f, f.AsIssueFiler(), backend.Descriptor{}, backend.Descriptor{})
 }
