@@ -402,6 +402,11 @@ type jiraTransitionsPayload struct {
 		To struct {
 			Name string `json:"name"`
 		} `json:"to"`
+		Fields map[string]struct {
+			Required        bool   `json:"required"`
+			HasDefaultValue bool   `json:"hasDefaultValue"`
+			Name            string `json:"name"`
+		} `json:"fields"`
 	} `json:"transitions"`
 }
 
@@ -412,25 +417,49 @@ type jiraTransitionsPayload struct {
 var errTransitionUnavailable = fmt.Errorf("jira: no available transition")
 
 // transitionByStatus performs the workflow transition on issue num leading to
-// targetStatus, returning errTransitionUnavailable when the issue's current
-// workflow offers no such transition (ADR 0013).
-func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
+// target.Status, returning errTransitionUnavailable when the issue's current
+// workflow offers no such transition (ADR 0013). target.Resolution, when set,
+// rides the POST as fields.resolution. A transition that requires some other
+// field, or a resolution the transition's screen cannot take (Jira would answer
+// 400), fails before any POST with an error that is deliberately not
+// errTransitionUnavailable: a label fallback would hide a mapping the operator
+// must fix (ADR 0072).
+func (j *jiraClient) transitionByStatus(num string, target StatusTarget) error {
 	var payload jiraTransitionsPayload
-	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/transitions", nil, &payload); err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/transitions?expand=transitions.fields", nil, &payload); err != nil {
 		return err
 	}
-	var transitionID string
 	for _, t := range payload.Transitions {
-		if strings.EqualFold(t.To.Name, targetStatus) {
-			transitionID = t.ID
-			break
+		if !strings.EqualFold(t.To.Name, target.Status) {
+			continue
 		}
+		if _, ok := t.Fields["resolution"]; target.Resolution != "" && !ok {
+			return fmt.Errorf("jira: transition to %q on issue %s has no resolution field on its screen, so the resolution %q that JIRA_STATUS_MAPPING sets cannot be applied",
+				target.Status, num, target.Resolution)
+		}
+		var missing []string
+		for _, key := range slices.Sorted(maps.Keys(t.Fields)) {
+			f := t.Fields[key]
+			if !f.Required || f.HasDefaultValue || (key == "resolution" && target.Resolution != "") {
+				continue
+			}
+			name := key
+			if f.Name != "" {
+				name = fmt.Sprintf("%s (%s)", f.Name, key)
+			}
+			missing = append(missing, name)
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("jira: transition to %q on issue %s requires field(s) %s that JIRA_STATUS_MAPPING does not supply (only resolution can be set, via the {\"status\",\"resolution\"} object form)",
+				target.Status, num, strings.Join(missing, ", "))
+		}
+		body := map[string]any{"transition": map[string]string{"id": t.ID}}
+		if target.Resolution != "" {
+			body["fields"] = map[string]any{"resolution": map[string]string{"name": target.Resolution}}
+		}
+		return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/transitions", body, nil)
 	}
-	if transitionID == "" {
-		return fmt.Errorf("%w to %q on issue %s", errTransitionUnavailable, targetStatus, num)
-	}
-	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/transitions",
-		map[string]any{"transition": map[string]string{"id": transitionID}}, nil)
+	return fmt.Errorf("%w to %q on issue %s", errTransitionUnavailable, target.Status, num)
 }
 
 // swapLabel adds the add label and removes every removes label on issue num
@@ -453,11 +482,12 @@ func (j *jiraClient) swapLabel(num, add string, removes ...string) error {
 		map[string]any{"update": map[string]any{"labels": ops}}, nil)
 }
 
-// nativeStatus returns the Jira status StatusMapping maps s to, and whether s
-// is natively mapped at all (an empty mapping counts as unmapped).
-func (j *jiraClient) nativeStatus(s forge.DispatchState) (string, bool) {
-	status := j.cfg.StatusMapping[s].Status
-	return status, status != ""
+// nativeStatus returns the StatusTarget StatusMapping maps s to, and whether s
+// is natively mapped at all (an empty status counts as unmapped). Every read of
+// the mapping goes through it so "mapped" has one definition.
+func (j *jiraClient) nativeStatus(s forge.DispatchState) (StatusTarget, bool) {
+	target := j.cfg.StatusMapping[s]
+	return target, target.Status != ""
 }
 
 // alreadyClaimedNative reports whether num's current native status already
@@ -468,10 +498,10 @@ func (j *jiraClient) nativeStatus(s forge.DispatchState) (string, bool) {
 // case (#3887).
 func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.DispatchState) bool {
 	target, ok := j.nativeStatus(forge.InProgress)
-	if !ok || j.cfg.StatusMapping[from].Status == target {
+	if fromTarget, _ := j.nativeStatus(from); !ok || fromTarget.Status == target.Status {
 		return false
 	}
-	return strings.EqualFold(payload.Fields.Status.Name, target)
+	return strings.EqualFold(payload.Fields.Status.Name, target.Status)
 }
 
 // TransitionState moves issue num from state from to state to via the Jira
@@ -622,8 +652,8 @@ func (j *jiraClient) CountReady(_ bool) (int, error) {
 func (j *jiraClient) stateJQL(state forge.DispatchState) string {
 	clauses := []string{fmt.Sprintf("project = %q", j.cfg.ProjectKey)}
 	var stateClauses []string
-	if status := j.cfg.StatusMapping[state].Status; status != "" {
-		stateClauses = append(stateClauses, fmt.Sprintf("status = %q", status))
+	if target, ok := j.nativeStatus(state); ok {
+		stateClauses = append(stateClauses, fmt.Sprintf("status = %q", target.Status))
 	}
 	if label := j.cfg.Labels.Label(state); label != "" {
 		stateClauses = append(stateClauses, fmt.Sprintf("labels = %q", label))
