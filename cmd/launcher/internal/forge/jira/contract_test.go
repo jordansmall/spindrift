@@ -58,6 +58,11 @@ type jiraHarness struct {
 	// maxResults, as a real Jira server may.
 	pageCap int
 
+	// metaFields are the create-screen fields the fake project reports for every
+	// issue type; metaPageSize, when > 0, caps rows per createmeta page.
+	metaFields   []metaField
+	metaPageSize int
+
 	cloud bool // serves Cloud's search/jql + approximate-count; rejects v2 /search (410)
 	srv   *httptest.Server
 	tr    forge.IssueTracker
@@ -284,6 +289,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue":
 		h.createIssue(w, r)
+		return
+
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/createmeta/"):
+		h.createMeta(w, r)
 		return
 
 	case r.Method == http.MethodGet && issueCommentPathRe.MatchString(r.URL.Path):
