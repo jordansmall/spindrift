@@ -11,12 +11,11 @@ import (
 // comment, host-posted issue filing) against an adapter's own scripted or real
 // backend, without knowing which adapter it is (ADR 0034).
 type HostMediationHarness interface {
+	HostPostedCommentHarness
+
 	// CodeForge returns the read-only CodeForge under test. It must implement
 	// forge.BundleRelay and forge.DraftPRCreator.
 	CodeForge() forge.CodeForge
-	// Tracker returns the IssueTracker under test. It must implement
-	// forge.HostPostedCommenter.
-	Tracker() forge.IssueTracker
 
 	// SeedBundle stages ref as a relayable code-out bundle and returns the
 	// outbox directory RelayBundle should read it from.
@@ -39,7 +38,15 @@ type HostMediationHarness interface {
 	// its URL with no error, rather than surfacing the refusal as a failure
 	// (issue #2407 slices 1-3). Returns that head and the URL it must return.
 	SeedExistingOpenPR() (head, wantURL string)
+}
 
+// HostPostedCommentHarness is the tracker-only slice of HostMediationHarness,
+// which RunHostPostedCommentContract runs standalone for an adapter (Jira)
+// with no bundle relay or draft-PR seam.
+type HostPostedCommentHarness interface {
+	// Tracker returns the IssueTracker under test. It must implement
+	// forge.HostPostedCommenter.
+	Tracker() forge.IssueTracker
 	// SeedCommentTarget returns an issue number to call Comment against:
 	// failing selects a target the backend will refuse to post to, !failing an
 	// ordinary seeded issue.
@@ -78,12 +85,19 @@ func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("DraftPRCreation", func(t *testing.T) { testDraftPRCreation(t, h) })
 	t.Run("DraftPRCreationFails", func(t *testing.T) { testDraftPRCreationFails(t, h) })
 	t.Run("DraftPRCreationAdoptsExisting", func(t *testing.T) { testDraftPRCreationAdoptsExisting(t, h) })
-	t.Run("HostPostedComment", func(t *testing.T) { testHostPostedComment(t, h) })
-	t.Run("HostPostedCommentFails", func(t *testing.T) { testHostPostedCommentFails(t, h) })
+	RunHostPostedCommentContract(t, h)
 
 	if ih, ok := h.(IssueFilerHarness); ok {
 		RunIssueFilerContract(t, ih)
 	}
+}
+
+// RunHostPostedCommentContract runs only the host-posted comment scenarios, for
+// a tracker-only adapter (Jira) that has no bundle relay or draft-PR seam to
+// drive RunHostMediationContract with.
+func RunHostPostedCommentContract(t *testing.T, ch HostPostedCommentHarness) {
+	t.Run("HostPostedComment", func(t *testing.T) { testHostPostedComment(t, ch) })
+	t.Run("HostPostedCommentFails", func(t *testing.T) { testHostPostedCommentFails(t, ch) })
 }
 
 // RunIssueFilerContract runs only the host-posted issue-filing scenarios, for
@@ -112,7 +126,7 @@ func mustDraftPRCreator(t *testing.T, h HostMediationHarness) forge.DraftPRCreat
 	return dpc
 }
 
-func mustHostPostedCommenter(t *testing.T, h HostMediationHarness) forge.HostPostedCommenter {
+func mustHostPostedCommenter(t *testing.T, h HostPostedCommentHarness) forge.HostPostedCommenter {
 	t.Helper()
 	hc, ok := h.Tracker().(forge.HostPostedCommenter)
 	if !ok {
@@ -241,7 +255,7 @@ func testDraftPRCreationAdoptsExisting(t *testing.T, h HostMediationHarness) {
 // testHostPostedComment covers the channel a read-only Box's blocked or
 // verdict comment travels: a SPINDRIFT_COMMENT line the Launcher posts
 // host-side through this call (issue #1914).
-func testHostPostedComment(t *testing.T, h HostMediationHarness) {
+func testHostPostedComment(t *testing.T, h HostPostedCommentHarness) {
 	hc := mustHostPostedCommenter(t, h)
 	num := h.SeedCommentTarget(false)
 	const body = "host-mediation contract comment"
@@ -254,7 +268,7 @@ func testHostPostedComment(t *testing.T, h HostMediationHarness) {
 	}
 }
 
-func testHostPostedCommentFails(t *testing.T, h HostMediationHarness) {
+func testHostPostedCommentFails(t *testing.T, h HostPostedCommentHarness) {
 	hc := mustHostPostedCommenter(t, h)
 	num := h.SeedCommentTarget(true)
 

@@ -12,7 +12,32 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 )
 
-var _ forgetest.IssueFilerHarness = (*jiraHarness)(nil)
+var (
+	_ forgetest.IssueFilerHarness        = (*jiraHarness)(nil)
+	_ forgetest.HostPostedCommentHarness = (*jiraHarness)(nil)
+)
+
+func (h *jiraHarness) SeedCommentTarget(failing bool) (num string) {
+	if failing {
+		return "PROJ-999" // never seeded: the fake 404s the comment POST
+	}
+	h.SeedIssue(forge.Issue{Number: "PROJ-1", Title: "comment target"})
+	return "PROJ-1"
+}
+
+// CommentPosted reads the thread back through the client, so it proves the
+// wire markup round-trips to the body the caller posted.
+func (h *jiraHarness) CommentPosted(num, body string) bool {
+	cl, ok := h.Tracker().(forge.CommentLister)
+	if !ok {
+		return false
+	}
+	got, err := cl.Comments(num)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(got, func(c forge.Comment) bool { return c.Body == body })
+}
 
 func (h *jiraHarness) IssueFilerTracker() forge.IssueTracker { return h.tr }
 
@@ -54,6 +79,14 @@ func TestJiraClient_IssueFilerContract(t *testing.T) {
 
 func TestJiraClient_IssueFilerContract_Cloud(t *testing.T) {
 	forgetest.RunIssueFilerContract(t, newJiraCloudHarness(t))
+}
+
+func TestJiraClient_HostPostedCommentContract(t *testing.T) {
+	forgetest.RunHostPostedCommentContract(t, newJiraHarness(t))
+}
+
+func TestJiraClient_HostPostedCommentContract_Cloud(t *testing.T) {
+	forgetest.RunHostPostedCommentContract(t, newJiraCloudHarness(t))
 }
 
 func filerOf(t *testing.T, h *jiraHarness) forge.HostPostedIssueFiler {
