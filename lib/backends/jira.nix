@@ -62,7 +62,7 @@
       env = "JIRA_LIFECYCLE";
       group = "issues";
       default = "hybrid";
-      doc = "how the work lifecycle is kept on Jira: hybrid (the default) moves issues through the JIRA_STATUS_MAPPING statuses and falls back to swapping lifecycle labels for a state that is unmapped or whose transition is unavailable, and reads and the claim check also match the labels; status makes the mapped status the whole work state, so every work state (dispatchable, inProgress, complete, failed, ambiguous) must be mapped, labels are never touched, and an unavailable transition fails with a comment on the issue. Research states stay on labels in both modes";
+      doc = "how the work lifecycle is kept on Jira: hybrid (the default) moves issues through the JIRA_STATUS_MAPPING statuses and falls back to swapping lifecycle labels for a state that is unmapped or whose transition is unavailable, and reads and the claim check also match the labels; status makes the mapped status the whole work state, so every work state (dispatchable, inProgress, complete, failed, ambiguous) must be mapped, no lifecycle label is ever applied (stale ones are still stripped), and an unavailable transition is commented on the issue and settles as transition-refused. Research states stay on labels in both modes";
       flakeOption = true;
       legacySettingsExempt = true;
       nixSubPath = "jira.lifecycle";
