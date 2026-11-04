@@ -4150,7 +4150,7 @@ such block and are experimental, so you select them by editing
   canonical dispatch state to Jira status name, e.g.:
 
   ```json
-  { "dispatchable": "To Do", "inProgress": "In Progress", "complete": "Done", "failed": "Blocked" }
+  { "dispatchable": "To Do", "inProgress": "In Progress", "complete": "Done", "failed": "Blocked", "ambiguous": "Blocked" }
   ```
 
   A value may instead be an object naming the status and a resolution to
@@ -4187,6 +4187,22 @@ such block and are experimental, so you select them by editing
   mapped status or the fallback label, so issues stuck on the label are never
   lost, and orders results by Jira's `created` timestamp (the canonical order
   for this backend, in place of GitHub's issue-number order).
+
+  The `ambiguous` key moves the card on an ambiguous-spec halt
+  (`status=ambiguous`); unmapped, or with the transition unavailable, the
+  halt applies the `agent-ambiguous-spec` label as on `github`. There is no
+  `recoverable` key: settle never reaches that state on any forge Jira pairs
+  with. Two keys may map to the same status only if they are `failed` and
+  `ambiguous`, since both terminals mean a human must act (one Blocked
+  column). Any other duplicate (status names compared case-insensitively;
+  startup folds Unicode like the claim check, the eval-time check ASCII only)
+  fails at eval and at launcher startup, naming both keys: `dispatchable`
+  sharing with `inProgress` would make every ready card look claimed. Listing
+  either of the two on a shared status returns both, as `ListIssues` matches
+  by status; nothing in the dispatch loop needs to tell them apart.
+  Recover's `Failed` listing also returns ambiguous cards on a shared status;
+  they drop out only because an ambiguous halt has no landable bundle and no
+  ready self-report, so recover relies on its eligibility check.
 
   The adapter implements no close, so for a merged PR and an
   already-resolved outcome alike the `complete` entry decides whether the
