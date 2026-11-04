@@ -86,12 +86,14 @@ func trackerGates(e Env) map[string]bool {
 	// On a work dispatch the relay activates on a read-only Box; a writable
 	// Box keeps the direct gh/fj path, forked further on itFiler.
 	// researchForceRelay (ADR 0041, #2593) activates the relay
-	// unconditionally, so it has to be checked first.
+	// unconditionally, so it has to be checked first. So does a tracker the
+	// Box cannot write (InBoxUnwritableTracker), which has no direct path
+	// (issue #6354).
 	filerFileRelay := false
 	filerFileDirectGH := false
 	filerFileDirectForgejo := false
 	if e.FilerEnabled {
-		if researchForceRelay {
+		if researchForceRelay || unwritable {
 			filerFileRelay = true
 		} else if !e.BoxWriteEnabled {
 			filerFileRelay = true
