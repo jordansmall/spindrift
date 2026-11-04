@@ -334,6 +334,12 @@ func goldenCells() []goldenCell {
 			// jira rides the same prompt-selection arms as github.
 			c.export("ISSUE_TRACKER", "jira")
 		}},
+		{name: "jira-tracker-filer", mode: modeInitial, review: true, setup: func(c *cellInputs) {
+			// A tracker with no in-Box client: the Filer's dedup runs no
+			// tracker search (issue #6354).
+			c.export("ISSUE_TRACKER", "jira")
+			c.filerOn()
+		}},
 		{name: "orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.filerOn()
 		}},

@@ -52,8 +52,6 @@ let
     "auto-lint.md" =
       "assemble_test.go TestAssembleAutoLintGate; fragment_rendering_test.go TestAssembleStepRendering/AUTO-LINT_on_points_at_the_skill,_no_inline_linter_procedure";
     "ci-failure.md" = "assemble_test.go TestAssembleCIFailureSummaryGate";
-    "scout-issue-read-unreadable.md" =
-      "fragment_rendering_test.go TestAssembleScoutIssueReadUnreadableOnJira";
     "local/research-verdict-relay.md" =
       "assemble_test.go TestAssembleResearchPromptCavemanLocalTracker; orchestrator TestMarkerFragmentParity";
   };

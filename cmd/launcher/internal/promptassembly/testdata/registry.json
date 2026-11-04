@@ -215,14 +215,25 @@
   },
   {
     "axis": "tracker",
-    "gate": "",
+    "gate": "ISSUE_TRACKER_WRITABLE",
     "fragment": "filer-dedup.md",
     "var": "FILER_DEDUP_STEP"
   },
   {
-    "gate": "ISSUE_TRACKER_GITHUB",
+    "gate": "ISSUE_TRACKER_UNWRITABLE",
+    "fragment": "filer-dedup-unwritable.md",
+    "var": "FILER_DEDUP_STEP",
+    "inverseOf": "ISSUE_TRACKER_WRITABLE"
+  },
+  {
+    "gate": "ISSUE_TRACKER_GITHUB_WRITABLE",
     "fragment": "github/filer-dedup.md",
     "legacyFragment": "filer-dedup-search.md",
+    "var": "FILER_DEDUP_SEARCH_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_UNWRITABLE",
+    "fragment": "filer-dedup-unwritable.md",
     "var": "FILER_DEDUP_SEARCH_STEP"
   },
   {
