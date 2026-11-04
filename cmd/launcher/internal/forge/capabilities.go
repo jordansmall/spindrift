@@ -44,6 +44,7 @@ type Capabilities struct {
 	IssueLabeler          IssueLabeler
 	DemandCounter         DemandCounter
 	IssueTypeChecker      IssueTypeChecker
+	StatusMappingChecker  StatusMappingChecker
 
 	// CODE_FORGE and ISSUE_TRACKER select independently, so each knob keeps
 	// its own descriptor row.
@@ -88,6 +89,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.IssueLabeler, _ = it.(IssueLabeler)
 	c.DemandCounter, _ = it.(DemandCounter)
 	c.IssueTypeChecker, _ = it.(IssueTypeChecker)
+	c.StatusMappingChecker, _ = it.(StatusMappingChecker)
 
 	c.ForgeDescriptor = forgeDesc
 	c.TrackerDescriptor = trackerDesc

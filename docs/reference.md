@@ -4278,7 +4278,12 @@ such block and are experimental, so you select them by editing
   are; if the metadata cannot be read at all (a permission gap, say) it
   reports degraded instead. `issue-type-required-fields` (advisory) warns
   and lists any required create-screen field with no default that
-  spindrift does not fill, since filing would fail on it.
+  spindrift does not fill, since filing would fail on it. A third row,
+  `status-mapping` (required), reads the project's workflow statuses and
+  fails when `JIRA_STATUS_MAPPING` names a status the workflow lacks
+  (compared case-insensitively), in either `JIRA_LIFECYCLE` mode; an
+  unreadable statuses endpoint reports degraded instead, and an empty mapping
+  makes no call.
 
   A [research dispatch](#research-dispatch)'s states — its queue, its claim,
   and its verdict terminals (`recommend` / `reject` / `unclear`) — always

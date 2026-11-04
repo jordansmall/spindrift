@@ -243,6 +243,17 @@ type IssueTypeChecker interface {
 	CheckIssueType() (unfilled []string, err error)
 }
 
+// StatusMappingChecker is the optional IssueTracker capability for adapters
+// that map dispatch states to workflow statuses (Jira's JIRA_STATUS_MAPPING,
+// issue #6353), so doctor can catch a mapped status the project's workflow
+// lacks before a transition to it silently never happens.
+type StatusMappingChecker interface {
+	// CheckMappedStatuses returns the mapped status names absent from the
+	// project's workflow, deduplicated and sorted; empty when none is missing
+	// or nothing is mapped. An error means the check could not run.
+	CheckMappedStatuses() (missing []string, err error)
+}
+
 // LandingRecorder is the optional IssueTracker capability for adapters that
 // can persist where a Dispatch's work landed (ADR 0029). Only the local
 // adapter implements it; github and jira issues close through the forge's own

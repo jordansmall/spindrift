@@ -63,6 +63,13 @@ type jiraHarness struct {
 	metaFields   []metaField
 	metaPageSize int
 
+	// workflowStatuses are the status names the fake project's workflow has,
+	// served per issue type by the project statuses endpoint; statusCalls counts
+	// the reads and statusesFail makes the endpoint answer 403.
+	workflowStatuses []string
+	statusCalls      int
+	statusesFail     bool
+
 	cloud bool // serves Cloud's search/jql + approximate-count; rejects v2 /search (410)
 	srv   *httptest.Server
 	tr    forge.IssueTracker
@@ -289,6 +296,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue":
 		h.createIssue(w, r)
+		return
+
+	case r.Method == http.MethodGet && projectStatusesPathRe.MatchString(r.URL.Path):
+		h.projectStatuses(w, r)
 		return
 
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/createmeta/"):
