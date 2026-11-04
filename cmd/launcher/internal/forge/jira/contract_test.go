@@ -20,9 +20,12 @@ import (
 type jiraIssueRecord struct {
 	title, body string
 	labels      []string
-	nativeDeps  []string
-	failGET     bool // simulates the native-API error the issue's GET returns
-	comments    []jiraWireComment
+	// props are the issue entity properties, as raw JSON values keyed by
+	// property key; served back only where a request names the key.
+	props      map[string]json.RawMessage
+	nativeDeps []string
+	failGET    bool // simulates the native-API error the issue's GET returns
+	comments   []jiraWireComment
 }
 
 // jiraWireComment mirrors Jira's native comment JSON independently of the
@@ -131,7 +134,7 @@ type jiraPayloadLink struct {
 	} `json:"inwardIssue"`
 }
 
-func (h *jiraHarness) payload(key string, rec *jiraIssueRecord) map[string]any {
+func (h *jiraHarness) payload(key string, rec *jiraIssueRecord, wantProps string) map[string]any {
 	links := make([]jiraPayloadLink, len(rec.nativeDeps))
 	for i, id := range rec.nativeDeps {
 		l := jiraPayloadLink{}
@@ -141,7 +144,7 @@ func (h *jiraHarness) payload(key string, rec *jiraIssueRecord) map[string]any {
 		}{Key: id}
 		links[i] = l
 	}
-	return map[string]any{
+	out := map[string]any{
 		"key": key,
 		"fields": map[string]any{
 			"summary":     rec.title,
@@ -156,6 +159,17 @@ func (h *jiraHarness) payload(key string, rec *jiraIssueRecord) map[string]any {
 			"issuelinks": links,
 		},
 	}
+	// Like real Jira, properties come back only when the request names them.
+	requested := map[string]json.RawMessage{}
+	for _, k := range strings.Split(wantProps, ",") {
+		if v, ok := rec.props[k]; ok && k != "" {
+			requested[k] = v
+		}
+	}
+	if wantProps != "" {
+		out["properties"] = requested
+	}
+	return out
 }
 
 func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +182,7 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusGone)
 			return
 		}
-		out := h.matching(r.URL.Query().Get("jql"), fullPayload)
+		out := h.matching(r.URL.Query().Get("jql"), fullPayload, r.URL.Query().Get("properties"))
 
 		// Genuinely paginate on startAt/maxResults (issue #2265), matching the
 		// real Jira search response shape jiraSearchPayload decodes. total is
@@ -212,7 +226,7 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		if q.Get("fields") != "" {
 			shape = fullPayload
 		}
-		out := h.matching(q.Get("jql"), shape)
+		out := h.matching(q.Get("jql"), shape, q.Get("properties"))
 
 		// The token is opaque to the client; here it encodes the next offset.
 		// maxResults is honoured, and no total is returned.
@@ -250,7 +264,7 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 			JQL string `json:"jql"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
-		json.NewEncoder(w).Encode(map[string]any{"count": len(h.matching(body.JQL, fullPayload))})
+		json.NewEncoder(w).Encode(map[string]any{"count": len(h.matching(body.JQL, fullPayload, ""))})
 		return
 
 	case r.Method == http.MethodGet && matchIssuePath(r.URL.Path) != "":
@@ -265,7 +279,11 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, `{"errorMessages":["simulated native lookup failure"]}`)
 			return
 		}
-		json.NewEncoder(w).Encode(h.payload(num, rec))
+		json.NewEncoder(w).Encode(h.payload(num, rec, r.URL.Query().Get("properties")))
+		return
+
+	case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue":
+		h.createIssue(w, r)
 		return
 
 	case r.Method == http.MethodGet && issueCommentPathRe.MatchString(r.URL.Path):
@@ -324,6 +342,69 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}
 }
+
+// failingIssueTitle is the title the fake's create rejects as Jira rejects a
+// missing required field, the contract's failing-filing seed.
+const failingIssueTitle = "fail-issue"
+
+// createIssue serves POST /rest/api/2/issue the way Jira's create-issue API
+// does: fields.project/issuetype are validated, entity properties ride as a
+// top-level [{"key","value"}] array, and a rejection is a 400 with an
+// "errors" map.
+func (h *jiraHarness) createIssue(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Fields struct {
+			Project struct {
+				Key string `json:"key"`
+			} `json:"project"`
+			Summary     string   `json:"summary"`
+			Description string   `json:"description"`
+			Labels      []string `json:"labels"`
+			IssueType   struct {
+				Name string `json:"name"`
+			} `json:"issuetype"`
+		} `json:"fields"`
+		Properties []struct {
+			Key   string          `json:"key"`
+			Value json.RawMessage `json:"value"`
+		} `json:"properties"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	reject := func(field, msg string) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{"errorMessages": []string{}, "errors": map[string]string{field: msg}})
+	}
+	f := req.Fields
+	switch {
+	case f.Project.Key != "PROJ":
+		reject("project", "project is required")
+	case !contains(h.issueTypes(), f.IssueType.Name):
+		reject("issuetype", "issue type is invalid")
+	case f.Summary == "" || f.Summary == failingIssueTitle:
+		reject("summary", "You must specify a summary of the issue.")
+	default:
+		n := len(h.order) + 1
+		key := fmt.Sprintf("PROJ-%d", n)
+		for h.issues[key] != nil {
+			n++
+			key = fmt.Sprintf("PROJ-%d", n)
+		}
+		rec := &jiraIssueRecord{title: f.Summary, body: f.Description, labels: f.Labels, props: map[string]json.RawMessage{}}
+		for _, p := range req.Properties {
+			rec.props[p.Key] = p.Value
+		}
+		h.order = append(h.order, key)
+		h.issues[key] = rec
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"id": strconv.Itoa(10000 + n), "key": key, "self": h.srv.URL + "/rest/api/2/issue/" + key})
+	}
+}
+
+// issueTypes are the types the fake project defines.
+func (h *jiraHarness) issueTypes() []string { return []string{"Task", "Bug"} }
 
 var (
 	issuePathRe        = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)$`)
@@ -419,7 +500,7 @@ const (
 // matching returns the payloads of the issues whose labels satisfy the JQL's
 // labels clause, in creation order. With idOnly it returns only the id, as
 // real Cloud search/jql does when no fields are requested.
-func (h *jiraHarness) matching(jql string, shape payloadShape) []map[string]any {
+func (h *jiraHarness) matching(jql string, shape payloadShape, wantProps string) []map[string]any {
 	var wantLabel string
 	if sub := jqlLabelClause.FindStringSubmatch(jql); sub != nil {
 		wantLabel = sub[1]
@@ -431,7 +512,7 @@ func (h *jiraHarness) matching(jql string, shape payloadShape) []map[string]any 
 			continue
 		}
 		if shape == fullPayload {
-			out = append(out, h.payload(num, rec))
+			out = append(out, h.payload(num, rec, wantProps))
 		} else {
 			out = append(out, map[string]any{"id": num})
 		}

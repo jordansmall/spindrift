@@ -51,7 +51,8 @@ type HostMediationHarness interface {
 
 // IssueFilerHarness is implemented by harnesses whose Tracker() also satisfies
 // forge.HostPostedIssueFiler. RunHostMediationContract type-asserts for it and
-// no-ops the issue-filing scenario when it is absent.
+// no-ops the issue-filing scenario when it is absent; RunIssueFilerContract
+// runs it standalone.
 type IssueFilerHarness interface {
 	// IssueFilerTracker returns an IssueTracker that also implements
 	// forge.HostPostedIssueFiler.
@@ -81,9 +82,16 @@ func RunHostMediationContract(t *testing.T, h HostMediationHarness) {
 	t.Run("HostPostedCommentFails", func(t *testing.T) { testHostPostedCommentFails(t, h) })
 
 	if ih, ok := h.(IssueFilerHarness); ok {
-		t.Run("HostPostedIssueFiling", func(t *testing.T) { testHostPostedIssueFiling(t, ih) })
-		t.Run("HostPostedIssueFilingFails", func(t *testing.T) { testHostPostedIssueFilingFails(t, ih) })
+		RunIssueFilerContract(t, ih)
 	}
+}
+
+// RunIssueFilerContract runs only the host-posted issue-filing scenarios, for
+// a tracker-only adapter (Jira) that has no bundle relay or draft-PR seam to
+// drive RunHostMediationContract with.
+func RunIssueFilerContract(t *testing.T, ih IssueFilerHarness) {
+	t.Run("HostPostedIssueFiling", func(t *testing.T) { testHostPostedIssueFiling(t, ih) })
+	t.Run("HostPostedIssueFilingFails", func(t *testing.T) { testHostPostedIssueFilingFails(t, ih) })
 }
 
 func mustBundleRelay(t *testing.T, h HostMediationHarness) forge.BundleRelay {

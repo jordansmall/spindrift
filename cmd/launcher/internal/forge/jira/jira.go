@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
 )
@@ -29,6 +30,7 @@ type JiraConfig struct {
 	ProjectKey string
 	Email      string // Jira Cloud: Basic auth and Cloud search APIs; empty selects Bearer-token auth and v2 /search (Server/Data Center PAT)
 	Token      string
+	IssueType  string // issue type PostIssue files; empty means defaultIssueType
 
 	// StatusMapping maps canonical DispatchState values to native Jira status
 	// targets. TransitionState falls back to Labels when a state is unmapped or
@@ -212,6 +214,9 @@ type jiraClient struct {
 
 // NewJiraClient returns an IssueTracker backed by the Jira REST API.
 func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
+	if cfg.IssueType == "" {
+		cfg.IssueType = defaultIssueType
+	}
 	hc := cfg.HTTPClient
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultJiraHTTPTimeout}
@@ -250,8 +255,11 @@ func jiraStatusMap() rest.StatusMap {
 
 // jiraIssuePayload is the subset of Jira's issue representation this adapter reads.
 type jiraIssuePayload struct {
-	Key    string `json:"key"`
-	Fields struct {
+	Key string `json:"key"`
+	// Properties holds the entity properties a request named via its
+	// properties query parameter; Jira omits the others.
+	Properties map[string]json.RawMessage `json:"properties"`
+	Fields     struct {
 		Summary     string `json:"summary"`
 		Description string `json:"description"`
 		Status      struct {
@@ -353,6 +361,15 @@ func (p jiraIssuePayload) issue() forge.Issue {
 		State:  issueState(p),
 		Labels: p.Fields.Labels,
 	}
+	// The dedup marker lives in an entity property, not the description (see
+	// PostIssue); putting it back as the last line is what lets the dedup
+	// index and the tuning hold read the body unchanged.
+	if raw, ok := p.Properties[dedupPropertyKey]; ok {
+		var prop dedupProperty
+		if json.Unmarshal(raw, &prop) == nil {
+			iss.Body = dedupmarker.Append(iss.Body, prop.Marker)
+		}
+	}
 	if iss.State == forge.IssueClosed {
 		iss.ClosedAt, _ = time.Parse(jiraDateLayout, p.Fields.ResolutionDate)
 		iss.ClosedNotPlanned = slices.ContainsFunc(jiraNotPlannedResolutions, func(r string) bool {
@@ -377,7 +394,7 @@ type jiraCommentsPayload struct {
 // comment thread is not inlined into Body: Comments delivers it via forge.IssueText.
 func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
-	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"?properties="+dedupPropertyKey, nil, &payload); err != nil {
 		return forge.Issue{}, err
 	}
 	return payload.issue(), nil
@@ -461,6 +478,56 @@ func restoreResearchMarker(body string, props []jiraProperty) string {
 	}
 	return body
 }
+
+// defaultIssueType is the type PostIssue files when JiraConfig.IssueType is
+// unset; Task exists in every standard Jira project template.
+const defaultIssueType = "Task"
+
+// dedupPropertyKey is the issue entity property holding a filed finding's
+// dedup marker (ADR 0072). The marker rides outside the description because
+// the wiki-markup conversion and Jira's rendering both treat it as prose.
+const dedupPropertyKey = "spindrift.dedup"
+
+// dedupProperty is the property's JSON value. The marker line is stored
+// verbatim so Append restores the body exactly; Jira requires a JSON value,
+// and an object is the form every Jira version accepts.
+type dedupProperty struct {
+	Marker string `json:"marker"`
+}
+
+// PostIssue implements forge.HostPostedIssueFiler, creating an issue in the
+// configured project. The body's dedup marker is split off before the wiki
+// conversion (which would pass it through as description text) and stored as
+// an entity property in the same create request, so the visible description
+// never carries it. A create Jira rejects (an unknown issue type, a
+// missing required field) is an error, like any other non-2xx.
+func (j *jiraClient) PostIssue(title, body string, labels []string) (string, error) {
+	desc, marker := dedupmarker.Split(body)
+	req := map[string]any{
+		"fields": map[string]any{
+			"project":     map[string]string{"key": j.cfg.ProjectKey},
+			"summary":     title,
+			"issuetype":   map[string]string{"name": j.cfg.IssueType},
+			"description": toWikiMarkup(desc),
+			"labels":      append([]string{}, labels...),
+		},
+	}
+	if marker != "" {
+		req["properties"] = []map[string]any{{"key": dedupPropertyKey, "value": dedupProperty{Marker: marker}}}
+	}
+	var created struct {
+		Key string `json:"key"`
+	}
+	if err := j.rest.Do(http.MethodPost, "/rest/api/2/issue", req, &created); err != nil {
+		return "", err
+	}
+	if created.Key == "" {
+		return "", errors.New("jira: create issue response carried no key")
+	}
+	return strings.TrimRight(j.cfg.BaseURL, "/") + "/browse/" + created.Key, nil
+}
+
+var _ forge.HostPostedIssueFiler = (*jiraClient)(nil)
 
 type jiraTransitionsPayload struct {
 	Transitions []struct {
@@ -805,6 +872,7 @@ func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 			q := url.Values{
 				"jql":        {jql},
 				"fields":     {"summary,description,status,labels,resolution,resolutiondate"},
+				"properties": {dedupPropertyKey},
 				"maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)},
 			}
 			if token != "" {
@@ -833,6 +901,7 @@ func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 		startAt := len(all)
 		q := url.Values{
 			"jql":        {jql},
+			"properties": {dedupPropertyKey},
 			"startAt":    {fmt.Sprintf("%d", startAt)},
 			"maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)},
 		}
