@@ -4516,6 +4516,31 @@ settles `merge-guard-check-error`. Either check alone holds the merge. See
 [Create the tuning-finding
 label](#create-the-tuning-finding-label-on-the-target-repo).
 
+**Handed off conflict-free under `immediate`.** Under `MERGE_MODE=immediate`,
+once a green PR is flipped ready for a human (a path hit, the tuning hold, or
+the check error of either), the launcher asks the Code Forge whether it still
+merges into its base. An unknown answer gets a short bounded wait, a few
+polls `MERGE_POLL_INTERVAL` apart; still unknown, or unreadable, hands the PR
+off without the check, and the log says so. A conflicting answer must repeat
+on a re-read one `MERGE_POLL_INTERVAL` later, since Forgejo also reports a PR
+unmergeable while its asynchronous conflict check runs; the re-read gets the
+same bounded wait. Otherwise the PR is handed off unchanged, and the log says
+so. A confirmed conflict gets the response an immediate
+merge gives one: the PR is demoted to draft, rebased onto the base, the
+conflict-resolve Box dispatched if the rebase conflicts, and the new head
+awaited until green (a red head draws the post-force-push fix budget), then
+restored to ready. The hold's comment follows and the issue is marked
+`agent-complete` with the hold's settle reason. A failed response settles as
+it would on the merge path: a failed conflict-resolve Box or a resolved head
+out of fix budget fails the landing (`agent-failed`, never `agent-complete`),
+while a rebase that cannot run (`MAX_REBASE_ATTEMPTS=0`, or a non-conflict
+rebase failure) leaves the PR in draft, posts the merge-blocked comment and
+the hold's own guard or tuning comment together, and settles `merge-blocked`.
+A PR that is merely behind its base is not rebased here (though on Forgejo a
+draft whose `MarkReady` failed, or a conflict check outlasting the re-read
+wait, also reads as a conflict), and drift after the hand-off is not handled.
+`manual` and `auto` hand off without the check.
+
 The changed-path list is read **host-side**, the same way the merge gate
 reads CI state — never from anything the Box produced — so an injected
 Agent following its normal flow cannot make the guard see a clean diff. It
