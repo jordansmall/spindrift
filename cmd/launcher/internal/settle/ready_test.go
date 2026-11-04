@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -974,8 +975,8 @@ func assertLatchedLeftOpen(t *testing.T, s *Settle, num string) {
 }
 
 // tuningTestSettle builds a green-PR Settle whose settled issue carries
-// labels and body, on a tracker with or without a label registry.
-func tuningTestSettle(mode string, labelRegistry bool, labels []string, body string) (*Settle, *forge.Fake) {
+// labels and body, on the tracker the real backend row describes.
+func tuningTestSettle(mode string, tracker backend.Descriptor, labels []string, body string) (*Settle, *forge.Fake) {
 	c := baseConfig()
 	c.MergeMode = mode
 	fc := forge.NewFake(testDispatchLabels)
@@ -983,7 +984,7 @@ func tuningTestSettle(mode string, labelRegistry bool, labels []string, body str
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := newTestSettle(c, fc, fc)
-	s.cfg.Capabilities.TrackerDescriptor.LabelRegistry = labelRegistry
+	s.cfg.Capabilities.TrackerDescriptor = tracker
 	return s, fc
 }
 
@@ -1037,7 +1038,7 @@ func assertTuningPRComment(t *testing.T, fc *forge.Fake, what string) {
 // A PR closing an issue wearing agent-tuning-finding is never merged by the
 // host, whatever MERGE_MODE says and whichever paths it touches.
 func TestSelfHeal_TuningLabel_HoldsImmediateMerge(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 	iss, _ := fc.Issue("1")
@@ -1047,45 +1048,58 @@ func TestSelfHeal_TuningLabel_HoldsImmediateMerge(t *testing.T) {
 }
 
 func TestSelfHeal_TuningLabel_HoldsAutoMerge(t *testing.T) {
-	s, fc := tuningTestSettle("auto", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	s, fc := tuningTestSettle("auto", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
-// A tracker with no label registry cannot carry the label, so the body's
-// chore=tuning marker is the provenance.
-func TestSelfHeal_TuningMarker_HoldsOnLabelessTracker(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress"}, tuningBody)
+// On a tracker whose label absence is not authoritative, the body's
+// chore=tuning marker holds on its own.
+func TestSelfHeal_TuningMarker_HoldsOnLocal(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, tuningBody)
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
-// A label-less tracker that still reports the label (jira applies labels
-// without registering them) holds on the label alone, marker or not.
-func TestSelfHeal_TuningLabel_HoldsOnLabelessTracker(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+// The label check still runs where issues do not wear labels, so a label
+// local does report holds with no marker behind it.
+func TestSelfHeal_TuningLabel_AlsoHoldsOnLocal(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
-// Removing the label is the override: with a label registry the body marker
-// alone must not hold, so the PR merges normally.
+// Jira has no label registry but its issues wear labels, so the label alone
+// holds and removing it is the override.
+func TestSelfHeal_TuningLabel_HoldsOnJira(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", backend.Jira, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	assertTuningHeld(t, s, fc, landing)
+}
+
+// Removing the label is the override: where issues wear labels the body
+// marker alone must not hold, so the PR merges normally. Jira counts here
+// though it has no label registry.
 func TestSelfHeal_TuningLabelRemoved_MarkerAloneDoesNotHold(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress"}, tuningBody)
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
-	if landing != landingMerged {
-		t.Errorf("selfHeal = %v, want landingMerged after the label was removed", landing)
-	}
-	if fc.Merged != testPR {
-		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.CommentPRCalls) != 0 {
-		t.Errorf("no hold comment expected; got %+v", fc.CommentPRCalls)
+	for _, tracker := range []backend.Descriptor{backend.GitHub, backend.Forgejo, backend.Jira} {
+		t.Run(tracker.Name, func(t *testing.T) {
+			s, fc := tuningTestSettle("immediate", tracker, []string{"agent-in-progress"}, tuningBody)
+			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+			if landing != landingMerged {
+				t.Errorf("selfHeal = %v, want landingMerged after the label was removed", landing)
+			}
+			if fc.Merged != testPR {
+				t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
+			}
+			if len(fc.CommentPRCalls) != 0 {
+				t.Errorf("no hold comment expected; got %+v", fc.CommentPRCalls)
+			}
+		})
 	}
 }
 
-func TestSelfHeal_NoTuningProvenance_LabelessTrackerMergesNormally(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress"}, "plain body\n<!-- spindrift-dedup: foo, chore=docs -->")
+func TestSelfHeal_NoTuningProvenance_LocalMergesNormally(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, "plain body\n<!-- spindrift-dedup: foo, chore=docs -->")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged", landing)
@@ -1098,7 +1112,7 @@ func TestSelfHeal_NoTuningProvenance_LabelessTrackerMergesNormally(t *testing.T)
 // An unreadable issue fails safe like an unreadable file list: held, with a
 // precautionary comment, still agent-complete.
 func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress"}, "")
+	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress"}, "")
 	fc.IssueErr = errors.New("gh issue view: 502")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
@@ -1125,7 +1139,7 @@ func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
 // MERGE_MODE=manual would already leave the PR to a human, but the latched
 // reason must still name tuning provenance, not plain manual.
 func TestSelfHeal_TuningLabel_HoldsManualMerge(t *testing.T) {
-	s, fc := tuningTestSettle("manual", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	s, fc := tuningTestSettle("manual", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
@@ -1133,7 +1147,7 @@ func TestSelfHeal_TuningLabel_HoldsManualMerge(t *testing.T) {
 // A configured merge guard the PR's files miss must not pre-empt the tuning
 // hold: the guard check passes and the provenance check still runs after it.
 func TestSelfHeal_TuningLabel_HoldsWithMergeGuardMiss(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	s.cfg.MergeGuardPaths = ".github/**"
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
@@ -1141,7 +1155,7 @@ func TestSelfHeal_TuningLabel_HoldsWithMergeGuardMiss(t *testing.T) {
 
 // A failed PR comment must not lift the hold.
 func TestSelfHeal_TuningHold_CommentPRErrorStillHolds(t *testing.T) {
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	fc.CommentPRErr = errors.New("gh pr comment: 502")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
@@ -1157,18 +1171,19 @@ func TestSelfHeal_TuningHold_CommentPRErrorStillHolds(t *testing.T) {
 // agent-complete and the PR is flipped ready, never merged.
 func TestSelfHeal_TuningHeldUnderEveryMergeMode(t *testing.T) {
 	cases := []struct {
-		name     string
-		registry bool
-		labels   []string
-		body     string
+		name    string
+		tracker backend.Descriptor
+		labels  []string
+		body    string
 	}{
-		{"label on registry tracker", true, []string{"agent-in-progress", "agent-tuning-finding"}, ""},
-		{"marker on registry-less tracker", false, []string{"agent-in-progress"}, tuningBody},
+		{"label on github", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, ""},
+		{"label on jira", backend.Jira, []string{"agent-in-progress", "agent-tuning-finding"}, ""},
+		{"marker on local", backend.Local, []string{"agent-in-progress"}, tuningBody},
 	}
 	for _, mode := range []string{"immediate", "auto", "manual"} {
 		for _, tc := range cases {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
-				s, fc := tuningTestSettle(mode, tc.registry, tc.labels, tc.body)
+				s, fc := tuningTestSettle(mode, tc.tracker, tc.labels, tc.body)
 				landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 				assertTuningHeld(t, s, fc, landing)
 				iss, _ := fc.Issue("1")
@@ -1211,7 +1226,7 @@ var (
 // MergeByHand holds the PR closing its finding, naming that row's label.
 func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 	withCatalogRows(t, syntheticHold, syntheticFree)
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-synthetic-finding"}, "")
+	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-synthetic-finding"}, "")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual", landing)
@@ -1231,16 +1246,16 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 	}
 }
 
-func TestSelfHeal_SyntheticMergeByHandRow_HoldsByMarkerOnLabelessTracker(t *testing.T) {
+func TestSelfHeal_SyntheticMergeByHandRow_HoldsByMarkerOnLocal(t *testing.T) {
 	withCatalogRows(t, syntheticHold)
 	body := "finding\n<!-- spindrift-dedup: foo, chore=synthetic -->"
-	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress"}, body)
+	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, body)
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual || fc.Merged != "" {
 		t.Errorf("selfHeal = %v, Merged=%q; want landingManual and no merge", landing, fc.Merged)
 	}
 	// The tuning marker is no longer special once tuning is off the catalog.
-	s, fc = tuningTestSettle("immediate", false, []string{"agent-in-progress"}, tuningBody)
+	s, fc = tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, tuningBody)
 	if landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil); landing != landingMerged || fc.Merged != testPR {
 		t.Errorf("selfHeal = %v, Merged=%q; want landingMerged for a marker no MergeByHand row owns", landing, fc.Merged)
 	}
@@ -1250,7 +1265,7 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByMarkerOnLabelessTracker(t *test
 // with no MergeByHand row at all the closing issue is never even read.
 func TestSelfHeal_NonMergeByHandRow_DoesNotHold(t *testing.T) {
 	withCatalogRows(t, syntheticFree)
-	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-freebie-finding"}, "")
+	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-freebie-finding"}, "")
 	fc.IssueErr = errors.New("gh issue view: 502")
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingMerged || fc.Merged != testPR {

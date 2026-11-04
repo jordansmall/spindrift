@@ -292,9 +292,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		// tracked" answers, and the next run sees full coverage and skips.
 		//
 		// A finding wearing a Chore's finding label also carries that Chore's
-		// choreTerm, so a tracker with no label registry (local, jira) can
-		// still recognise it; deriving the term from the label keeps the two
-		// from diverging.
+		// choreTerm, so PriorFindings can list it on any tracker and local's
+		// merge hold can recognise it without the label; deriving the term
+		// from the label keeps the two from diverging.
 		markerTerms := terms
 		for _, row := range catalogRows() {
 			if wearsFindingLabel(row, extraLabels) {

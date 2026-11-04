@@ -67,9 +67,10 @@ const (
 )
 
 // choreTermPrefix opens the dedup-marker term a Chore finding carries, naming
-// the Chore that filed it (ADR 0062). Trackers without a label registry
-// (local, jira) cannot wear the Chore's finding label, so the merge hold of a
-// PR closing such a finding recognises it by this term instead. "=" is not a
+// the Chore that filed it (ADR 0062). PriorFindings lists a Chore's findings
+// by it on every tracker, and on local, whose label absence is not
+// authoritative (backend.Descriptor.IssuesWearLabels), the merge hold of a PR
+// closing such a finding recognises it by this term too. "=" is not a
 // dedupPunctRun separator, so the term survives normalizeDedupKey unchanged.
 // It is excluded from dedup matching because every finding of a Chore carries
 // it.
