@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -33,11 +34,21 @@ type JiraConfig struct {
 	IssueType  string // issue type PostIssue files; empty takes the JIRA_ISSUE_TYPE row default
 
 	// StatusMapping maps canonical DispatchState values to native Jira status
-	// targets. TransitionState falls back to Labels when a state is unmapped or
-	// the mapped transition is unavailable on the issue's workflow.
+	// targets. Unless StatusOnly, TransitionState falls back to Labels when a
+	// state is unmapped or the mapped transition is unavailable on the issue's
+	// workflow.
 	StatusMapping map[forge.DispatchState]StatusTarget
+	// StatusOnly is JIRA_LIFECYCLE=status for the work tracker: the mapped
+	// status alone carries the lifecycle, so reads and the already-claimed
+	// check ignore Labels and an unavailable transition is a
+	// forge.TransitionRefusedError instead of a label swap. The research
+	// tracker never sets it (ADR 0022).
+	StatusOnly bool
 	// Labels are the fallback labels applied when a transition is unmapped or
-	// blocked by the project's workflow.
+	// blocked by the project's workflow (hybrid mode), and the stale labels a
+	// successful native transition or claim still strips. A status-mode
+	// refusal swaps none in; a refused claim has already stripped the stale
+	// settled labels before it transitions.
 	Labels forge.DispatchLabels
 	// VerdictLabels configures CompleteVerdict, applied via the same
 	// label-fallback path as Labels; native status mapping for research
@@ -574,19 +585,27 @@ type jiraTransitionsPayload struct {
 	} `json:"transitions"`
 }
 
-// errTransitionUnavailable marks the one case TransitionState falls back to a
-// label for: the mapped status has no matching transition on the issue's
-// current workflow. Any other error is an infra failure and must propagate
+// transitionUnavailableError marks the one case TransitionState falls back to
+// a label for (or, in status mode, refuses): the mapped status has no matching
+// transition on the issue's current workflow. offered names the statuses the
+// workflow does offer. Any other error is an infra failure and must propagate
 // rather than be swallowed into a silent fallback.
-var errTransitionUnavailable = fmt.Errorf("jira: no available transition")
+type transitionUnavailableError struct {
+	num, status string
+	offered     []string
+}
+
+func (e *transitionUnavailableError) Error() string {
+	return fmt.Sprintf("jira: no available transition to %q on issue %s", e.status, e.num)
+}
 
 // transitionByStatus performs the workflow transition on issue num leading to
-// target.Status, returning errTransitionUnavailable when the issue's current
-// workflow offers no such transition (ADR 0013). target.Resolution, when set,
-// rides the POST as fields.resolution. A transition that requires some other
-// field, or a resolution the transition's screen cannot take (Jira would answer
-// 400), fails before any POST with an error that is deliberately not
-// errTransitionUnavailable: a label fallback would hide a mapping the operator
+// target.Status, returning a *transitionUnavailableError when the issue's
+// current workflow offers no such transition (ADR 0013). target.Resolution,
+// when set, rides the POST as fields.resolution. A transition that requires
+// some other field, or a resolution the transition's screen cannot take (Jira
+// would answer 400), fails before any POST with an error that is deliberately
+// not that type: a label fallback would hide a mapping the operator
 // must fix (ADR 0072).
 func (j *jiraClient) transitionByStatus(num string, target StatusTarget) error {
 	var payload jiraTransitionsPayload
@@ -623,7 +642,11 @@ func (j *jiraClient) transitionByStatus(num string, target StatusTarget) error {
 		}
 		return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/transitions", body, nil)
 	}
-	return fmt.Errorf("%w to %q on issue %s", errTransitionUnavailable, target.Status, num)
+	offered := make([]string, len(payload.Transitions))
+	for i, t := range payload.Transitions {
+		offered[i] = t.To.Name
+	}
+	return &transitionUnavailableError{num: num, status: target.Status, offered: offered}
 }
 
 // swapLabel adds the add label and removes every removes label on issue num
@@ -671,14 +694,19 @@ func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.D
 // TransitionState moves issue num from state from to state to via the Jira
 // workflow transition matching StatusMapping[to]. When to is unmapped or that
 // transition is unavailable, it swaps the DispatchLabels for from/to instead
-// (ADR 0013) so the lifecycle always makes progress. Either way it removes the
-// labels forge.TransitionRemoveLabels names, so a claim or landing also strips
-// a stale terminal or research verdict label like the other trackers.
+// (ADR 0013) so the lifecycle always makes progress; with StatusOnly an
+// unavailable transition, or a target with no mapped status, returns a
+// *forge.TransitionRefusedError instead and swaps in no label (a claim's
+// stale-label strip below still runs first). A successful
+// transition, native or label swap, removes the labels
+// forge.TransitionRemoveLabels names, so a claim or landing also strips a stale
+// terminal or research verdict label like the other trackers.
 //
 // A claim (to == InProgress) first GETs num and errors on
 // forge.ErrAlreadyClaimed without transitioning when either the native status
 // or the fallback label already reads InProgress (#3887), since either mode
-// may be the one that actually landed a prior claim. The check is
+// may be the one that actually landed a prior claim (StatusOnly checks the
+// native status alone). The check is
 // read-then-write, not atomic: another claimer can still land between the
 // two. On a native claim it then strips any settled labels that GET showed
 // before transitioning, and fails the claim if that strip fails: nothing has
@@ -692,7 +720,7 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 			return err
 		}
-		if j.cfg.Labels.AlreadyClaimed(from, to, payload.Fields.Labels) || j.alreadyClaimedNative(payload, from) {
+		if (!j.cfg.StatusOnly && j.cfg.Labels.AlreadyClaimed(from, to, payload.Fields.Labels)) || j.alreadyClaimedNative(payload, from) {
 			return fmt.Errorf("jira: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, payload.Fields.Status.Name)
 		}
 		if native {
@@ -718,15 +746,36 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 			_ = j.swapLabel(num, "", forge.TransitionRemoveLabels(j.cfg.Labels, j.cfg.VerdictLabels, from, to)...)
 			return nil
 		}
-		if !errors.Is(err, errTransitionUnavailable) {
+		var unavailable *transitionUnavailableError
+		if !errors.As(err, &unavailable) {
 			return err
 		}
+		if j.cfg.StatusOnly {
+			return j.refuseTransition(num, &forge.TransitionRefusedError{Issue: num, To: unavailable.status, Offered: unavailable.offered})
+		}
+	}
+	if j.cfg.StatusOnly {
+		return j.refuseTransition(num, &forge.TransitionRefusedError{Issue: num, State: to.String()})
 	}
 	toLabel := j.cfg.Labels.Label(to)
 	if toLabel == "" {
 		return fmt.Errorf("jira: no status mapping or fallback label configured for state %v", to)
 	}
 	return j.swapLabel(num, toLabel, forge.TransitionRemoveLabels(j.cfg.Labels, j.cfg.VerdictLabels, from, to)...)
+}
+
+// refuseTransition fills refusal's From with the status the issue could not
+// leave (the transitions payload carries only targets) and returns it. A
+// failed GET leaves From empty rather than replacing the refusal with a
+// transport error, which callers could not tell from a transient fault.
+func (j *jiraClient) refuseTransition(num string, refusal *forge.TransitionRefusedError) error {
+	var payload jiraIssuePayload
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not read the status a refused transition left it in: %v\n", num, err)
+	} else {
+		refusal.From = payload.Fields.Status.Name
+	}
+	return refusal
 }
 
 // CompleteVerdict swaps num's InProgress fallback label for verdict's terminal
@@ -767,10 +816,14 @@ type jiraSearchPayload struct {
 
 // ListIssues returns open issues in dispatch state state, created-time
 // ascending. The query matches the mapped Jira status when one is configured
-// and always ORs in the fallback label, so issues that fell back to a label
-// are still found.
+// and, unless StatusOnly, ORs in the fallback label so issues that fell back
+// to a label are still found. A state with neither lists nothing.
 func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
-	issues, err := j.doSearch(j.stateJQL(state) + " order by created asc")
+	jql, ok := j.stateJQL(state)
+	if !ok {
+		return nil, nil
+	}
+	issues, err := j.doSearch(jql + " order by created asc")
 	if err != nil {
 		return nil, err
 	}
@@ -790,18 +843,22 @@ func (j *jiraClient) ProbeInterval() time.Duration { return demandProbeInterval 
 // lag recent updates, which a demand probe tolerates since the child lists
 // issues itself), or the total of a zero-row v2 search on Server/DC.
 func (j *jiraClient) CountReady(_ bool) (int, error) {
+	jql, ok := j.stateJQL(forge.Dispatchable)
+	if !ok {
+		return 0, nil
+	}
 	if j.cloud {
 		var out struct {
 			Count int `json:"count"`
 		}
-		body := map[string]string{"jql": j.stateJQL(forge.Dispatchable)}
+		body := map[string]string{"jql": jql}
 		if err := j.rest.Do(http.MethodPost, "/rest/api/3/search/approximate-count", body, &out); err != nil {
 			return 0, err
 		}
 		return out.Count, nil
 	}
 	q := url.Values{
-		"jql":        {j.stateJQL(forge.Dispatchable)},
+		"jql":        {jql},
 		"maxResults": {"0"},
 	}
 	var payload jiraSearchPayload
@@ -812,23 +869,27 @@ func (j *jiraClient) CountReady(_ bool) (int, error) {
 }
 
 // stateJQL is the unordered JQL ListIssues and CountReady share, so the demand
-// probe counts exactly the set a dispatch would list.
-func (j *jiraClient) stateJQL(state forge.DispatchState) string {
+// probe counts exactly the set a dispatch would list. ok is false when state
+// has no status or label clause, in either mode (status mode always leaves
+// Recoverable so): the bare project query would match every open issue, so
+// callers must treat that state as empty instead of searching.
+func (j *jiraClient) stateJQL(state forge.DispatchState) (jql string, ok bool) {
 	clauses := []string{fmt.Sprintf("project = %q", j.cfg.ProjectKey)}
 	var stateClauses []string
 	if target, ok := j.nativeStatus(state); ok {
 		stateClauses = append(stateClauses, fmt.Sprintf("status = %q", target.Status))
 	}
-	if label := j.cfg.Labels.Label(state); label != "" {
+	if label := j.cfg.Labels.Label(state); label != "" && !j.cfg.StatusOnly {
 		stateClauses = append(stateClauses, fmt.Sprintf("labels = %q", label))
 	}
-	if len(stateClauses) > 0 {
-		clauses = append(clauses, "("+strings.Join(stateClauses, " OR ")+")")
+	if len(stateClauses) == 0 {
+		return "", false
 	}
+	clauses = append(clauses, "("+strings.Join(stateClauses, " OR ")+")")
 	// A resolved issue must never come back as dispatchable, even when it still
 	// carries a stale dispatch label from an earlier fallback transition.
 	clauses = append(clauses, "statusCategory != Done")
-	return strings.Join(clauses, " AND ")
+	return strings.Join(clauses, " AND "), true
 }
 
 // ListOpenIssues returns every open issue in the project, created-time

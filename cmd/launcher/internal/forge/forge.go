@@ -102,6 +102,44 @@ func (e *RateLimitError) Unwrap() error { return e.Err }
 // run (#3887).
 var ErrAlreadyClaimed = errors.New("forge: issue already claimed")
 
+// TransitionRefusedError is returned by TransitionState when a tracker that
+// owns its lifecycle natively (Jira with JIRA_LIFECYCLE=status) cannot move
+// the issue: its workflow offers no transition to the target status (To
+// names it; Offered lists the statuses the workflow does offer), or the
+// tracker maps no status to the target dispatch state (State names it; To is
+// empty). From is the issue's current status, empty when it could not be
+// read. Error reads as a plain sentence because settle posts it verbatim as
+// an issue comment; detect it with errors.As.
+type TransitionRefusedError struct {
+	Issue, From, To string
+	State           string
+	Offered         []string
+}
+
+func (e *TransitionRefusedError) Error() string {
+	from := ""
+	if e.From != "" {
+		from = fmt.Sprintf(" from status %q", e.From)
+	}
+	if e.To == "" {
+		return fmt.Sprintf("issue %s could not move%s: the tracker maps no status to state %s", e.Issue, from, e.State)
+	}
+	offers := "offers no transitions"
+	if len(e.Offered) > 0 {
+		offers = "offers transitions to " + QuoteList(e.Offered)
+	}
+	return fmt.Sprintf("issue %s could not move%s to %q: the workflow %s", e.Issue, from, e.To, offers)
+}
+
+// QuoteList renders each of items %q-quoted, joined by ", ".
+func QuoteList(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = fmt.Sprintf("%q", s)
+	}
+	return strings.Join(quoted, ", ")
+}
+
 // Issue is a GitHub issue as seen by the launcher.
 type Issue struct {
 	Number string // launcher keeps issue numbers as strings
