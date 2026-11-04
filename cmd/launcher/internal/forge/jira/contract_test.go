@@ -3,6 +3,7 @@ package jira_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -31,8 +32,14 @@ type jiraWireComment struct {
 	Author struct {
 		DisplayName string `json:"displayName"`
 	} `json:"author"`
-	Created string `json:"created"`
-	Body    string `json:"body"`
+	Created    string             `json:"created"`
+	Body       string             `json:"body"`
+	Properties []jiraWireProperty `json:"properties,omitempty"`
+}
+
+type jiraWireProperty struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
 }
 
 // jiraHarness stands in for the Jira REST API. Jira's DepsOf and Issue share
@@ -267,7 +274,26 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		if rec, ok := h.issues[num]; ok {
 			out = append(out, rec.comments...)
 		}
+		// Jira omits comment properties unless the caller expands them.
+		if r.URL.Query().Get("expand") != "properties" {
+			for i := range out {
+				out[i].Properties = nil
+			}
+		}
 		json.NewEncoder(w).Encode(map[string]any{"comments": out})
+		return
+
+	case r.Method == http.MethodPost && issueCommentPathRe.MatchString(r.URL.Path):
+		num := issueCommentPathRe.FindStringSubmatch(r.URL.Path)[1]
+		rec, ok := h.issues[num]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var c jiraWireComment
+		json.NewDecoder(r.Body).Decode(&c)
+		rec.comments = append(rec.comments, c)
+		w.WriteHeader(http.StatusCreated)
 		return
 
 	case r.Method == http.MethodPut && matchIssuePath(r.URL.Path) != "":
@@ -454,5 +480,34 @@ func TestJiraClient_CountReady_FullTotalUnderPageCap(t *testing.T) {
 	}
 	if got != seeded {
 		t.Errorf("CountReady = %d, want %d (the full total, not the page cap)", got, seeded)
+	}
+}
+
+func TestJiraClient_ResearchMarker_RoundTripsThroughProperty(t *testing.T) {
+	h := newJiraHarness(t)
+	h.SeedIssue(forge.Issue{Number: "PROJ-9", Title: "t"})
+	body := forge.ResearchMarker + "\n## Verdict\n\nstatus=recommend"
+	if err := h.tr.Comment("PROJ-9", body); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+
+	stored := h.issues["PROJ-9"].comments
+	if len(stored) != 1 || strings.Contains(stored[0].Body, forge.ResearchMarker) {
+		t.Fatalf("stored visible text must not carry the marker: %+v", stored)
+	}
+	got, err := h.tr.(forge.CommentLister).Comments("PROJ-9")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0].Body, forge.ResearchMarker+"\n") {
+		t.Fatalf("Comments = %+v, want marker restored on top", got)
+	}
+
+	text, err := forge.IssueText(h.tr, "PROJ-9", io.Discard)
+	if err != nil {
+		t.Fatalf("IssueText: %v", err)
+	}
+	if !strings.Contains(text, forge.ResearchMarker) {
+		t.Errorf("issue text lacks the research marker:\n%s", text)
 	}
 }

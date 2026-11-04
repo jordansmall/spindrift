@@ -233,3 +233,8 @@ func ParseResearchVerdicts(s string) (VerdictLabels, error) {
 	}
 	return NewVerdictLabels(entries...), nil
 }
+
+// ResearchMarker is the line a research verdict comment carries so the Box can
+// grep for it in the ISSUE TEXT snapshot; the research prompt writes the same
+// literal.
+const ResearchMarker = "<!-- spindrift-research -->"
