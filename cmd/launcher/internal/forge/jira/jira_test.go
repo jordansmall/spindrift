@@ -190,6 +190,42 @@ func TestParseStatusMapping_Corpus(t *testing.T) {
 	}
 }
 
+// The lifecycle corpus is shared with lib/jira-status-mapping.nix's
+// lifecycleError, so eval and launcher startup word the same errors.
+func TestCheckLifecycle_Corpus(t *testing.T) {
+	raw, err := os.ReadFile("testdata/lifecycle-cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		Name      string
+		Lifecycle string
+		Mapping   string
+		Error     string
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			mapping, err := jira.ParseStatusMapping(tc.Mapping)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = jira.CheckLifecycle(tc.Lifecycle, mapping)
+			if tc.Error == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.Error {
+				t.Fatalf("error = %v, want %q", err, tc.Error)
+			}
+		})
+	}
+}
+
 func TestParseStatusMapping_InvalidJSONMessage(t *testing.T) {
 	_, err := jira.ParseStatusMapping("{not json")
 	if err == nil || !strings.HasPrefix(err.Error(), "parse JIRA_STATUS_MAPPING: ") {

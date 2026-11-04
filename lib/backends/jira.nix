@@ -21,10 +21,16 @@
   issuesWearLabels = true;
   # Build-time check of the merged defaults, run by lib/mkHarness.nix when this
   # row is the selected tracker (issue #2539): an unknown-key JIRA_STATUS_MAPPING
-  # fails the build here, and stays dead config on every other tracker.
+  # or an unmet JIRA_LIFECYCLE fails the build here, and stays dead config on
+  # every other tracker.
   validateKnobs =
     defaults:
-    builtins.seq ((import ../jira-status-mapping.nix).parse (defaults.jiraStatusMapping or "")) true;
+    let
+      jsm = import ../jira-status-mapping.nix;
+      mapping = defaults.jiraStatusMapping or "";
+      lifecycleErr = jsm.lifecycleError (defaults.jiraLifecycle or "hybrid") mapping;
+    in
+    builtins.seq (jsm.parse mapping) (if lifecycleErr != null then throw lifecycleErr else true);
   knobs = {
     jiraBaseURL = {
       env = "JIRA_BASE_URL";
@@ -52,6 +58,16 @@
       nixSubPath = "jira.issueType";
       boxEnv = false;
     };
+    jiraLifecycle = {
+      env = "JIRA_LIFECYCLE";
+      group = "issues";
+      default = "hybrid";
+      doc = "how the work lifecycle is kept on Jira: hybrid (the default) moves issues through the JIRA_STATUS_MAPPING statuses and falls back to swapping lifecycle labels for a state that is unmapped or whose transition is unavailable, and reads and the claim check also match the labels; status makes the mapped status the whole work state, so every work state (dispatchable, inProgress, complete, failed, ambiguous) must be mapped, labels are never touched, and an unavailable transition fails with a comment on the issue. Research states stay on labels in both modes";
+      flakeOption = true;
+      legacySettingsExempt = true;
+      nixSubPath = "jira.lifecycle";
+      boxEnv = false;
+    };
     jiraEmail = {
       env = "JIRA_EMAIL";
       group = "issues";
@@ -64,7 +80,7 @@
       env = "JIRA_STATUS_MAPPING";
       group = "issues";
       default = "";
-      doc = "JSON object mapping dispatch states (dispatchable, inProgress, complete, failed, ambiguous) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow; only failed and ambiguous may share a status";
+      doc = "JSON object mapping dispatch states (dispatchable, inProgress, complete, failed, ambiguous) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow (JIRA_LIFECYCLE=hybrid only; JIRA_LIFECYCLE=status requires every work state mapped and never falls back); only failed and ambiguous may share a status";
       flakeOption = true;
       nixSubPath = "jira.statusMapping";
       boxEnv = false;

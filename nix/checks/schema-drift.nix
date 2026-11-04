@@ -1653,6 +1653,63 @@ checkedMerge {
       "mkharness-direct-choices-guard-null: expected mkHarness to reject a direct-caller `defaults.mergeMethod = null` (not a member of lib/env-schema.nix's mergeMethod.choices), but it evaluated successfully";
     pkgs.runCommand "mkharness-direct-choices-guard-null" { } "touch $out";
 
+  # JIRA_LIFECYCLE rides the same jira-row validateKnobs seam: status mode
+  # without every work state mapped, and an unknown mode, fail the build under
+  # ISSUE_TRACKER=jira; a fully mapped status mode builds, and a stale value is
+  # dead config under another tracker.
+  mkharness-jira-lifecycle-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      evals =
+        defaults:
+        (builtins.tryEval (
+          import ../../lib/mkHarness.nix {
+            inherit nixpkgs system defaults;
+            packages = p: [ p.hello ];
+          }
+        )).success;
+      full = builtins.toJSON {
+        dispatchable = "To Do";
+        inProgress = "In Progress";
+        complete = "Done";
+        failed = "Blocked";
+        ambiguous = "Needs Spec";
+      };
+      jira = {
+        issueTracker = "jira";
+      };
+    in
+    assert assertMsg (
+      !evals (jira // { jiraLifecycle = "status"; })
+    ) "mkharness-jira-lifecycle-guard: status mode with an empty mapping must not evaluate";
+    assert assertMsg (
+      !evals (
+        jira
+        // {
+          jiraLifecycle = "status";
+          jiraStatusMapping = builtins.toJSON { complete = "Done"; };
+        }
+      )
+    ) "mkharness-jira-lifecycle-guard: status mode with a partial mapping must not evaluate";
+    assert assertMsg (
+      !evals (jira // { jiraLifecycle = "bogus"; })
+    ) "mkharness-jira-lifecycle-guard: an unknown mode must not evaluate";
+    assert assertMsg (evals (
+      jira
+      // {
+        jiraLifecycle = "status";
+        jiraStatusMapping = full;
+      }
+    )) "mkharness-jira-lifecycle-guard: status mode with every work state mapped must evaluate";
+    assert assertMsg (evals (
+      jira // { jiraLifecycle = "hybrid"; }
+    )) "mkharness-jira-lifecycle-guard: hybrid with an empty mapping must evaluate";
+    assert assertMsg (evals {
+      issueTracker = "github";
+      jiraLifecycle = "status";
+    }) "mkharness-jira-lifecycle-guard: a stale status lifecycle under another tracker is dead config";
+    pkgs.runCommand "mkharness-jira-lifecycle-guard" { } "touch $out";
+
   # Regression guard (issue #2539): proves lib/jira-status-mapping.nix's
   # `parse` is wired into mkHarness's eval-time assert chain, not only
   # exercised in isolation by nix/checks/jira-status-mapping.nix.

@@ -186,9 +186,40 @@ func parseStatusTarget(key string, v any) (StatusTarget, error) {
 	}
 }
 
+// The JIRA_LIFECYCLE modes.
+const (
+	LifecycleHybrid = "hybrid"
+	LifecycleStatus = "status"
+)
+
+// CheckLifecycle validates a JIRA_LIFECYCLE value against the parsed status
+// mapping: status mode lets the mapped status stand alone as the work state, so
+// every work state must name one. lib/jira-status-mapping.nix's lifecycleError
+// mirrors it; testdata/lifecycle-cases.json pins both. Unmapped states are
+// listed sorted so the error is stable.
+func CheckLifecycle(lifecycle string, mapping map[forge.DispatchState]StatusTarget) error {
+	switch lifecycle {
+	case "", LifecycleHybrid:
+		return nil
+	case LifecycleStatus:
+	default:
+		return fmt.Errorf("JIRA_LIFECYCLE: unknown mode %q (want hybrid or status)", lifecycle)
+	}
+	var unmapped []string
+	for _, key := range slices.Sorted(maps.Keys(statusMappingKeys)) {
+		if mapping[statusMappingKeys[key]].Status == "" {
+			unmapped = append(unmapped, key)
+		}
+	}
+	if len(unmapped) > 0 {
+		return fmt.Errorf("JIRA_LIFECYCLE=status: JIRA_STATUS_MAPPING must map every work state; unmapped: %s", strings.Join(unmapped, ", "))
+	}
+	return nil
+}
+
 // ValidateJiraEnv checks the JIRA_* knobs required when ISSUE_TRACKER=jira,
 // returning an error for the first unmet requirement.
-func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
+func ValidateJiraEnv(baseURL, projectKey, token, statusMapping, lifecycle string) error {
 	if baseURL == "" {
 		return fmt.Errorf("set JIRA_BASE_URL (Jira site base URL) when ISSUE_TRACKER=jira")
 	}
@@ -198,10 +229,11 @@ func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
 	if token == "" {
 		return fmt.Errorf("set JIRA_TOKEN when ISSUE_TRACKER=jira")
 	}
-	if _, err := ParseStatusMapping(statusMapping); err != nil {
+	mapping, err := ParseStatusMapping(statusMapping)
+	if err != nil {
 		return err
 	}
-	return nil
+	return CheckLifecycle(lifecycle, mapping)
 }
 
 type jiraClient struct {

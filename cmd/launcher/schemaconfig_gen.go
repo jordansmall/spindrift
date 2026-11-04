@@ -204,6 +204,7 @@ func loadSchemaConfig() schemaConfig {
 			"JIRA_EMAIL":                       getenvSchema("JIRA_EMAIL"),
 			"JIRA_INCLUDE_COMMENTS":            getenvSchema("JIRA_INCLUDE_COMMENTS"),
 			"JIRA_ISSUE_TYPE":                  getenvSchema("JIRA_ISSUE_TYPE"),
+			"JIRA_LIFECYCLE":                   getenvSchema("JIRA_LIFECYCLE"),
 			"JIRA_PROJECT_KEY":                 getenvSchema("JIRA_PROJECT_KEY"),
 			"JIRA_STATUS_MAPPING":              getenvSchema("JIRA_STATUS_MAPPING"),
 			"JIRA_TOKEN":                       os.Getenv("JIRA_TOKEN"),

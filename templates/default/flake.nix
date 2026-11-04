@@ -290,9 +290,11 @@
             #     includeComments = false;
             #     # Jira issue type host-side issue filing (PostIssue) creates findings as; it must exist on the project
             #     issueType = "Task";
+            #     # how the work lifecycle is kept on Jira: hybrid (the default) moves issues through the JIRA_STATUS_MAPPING statuses and falls back to swapping lifecycle labels for a state that is unmapped or whose transition is unavailable, and reads and the claim check also match the labels; status makes the mapped status the whole work state, so every work state (dispatchable, inProgress, complete, failed, ambiguous) must be mapped, labels are never touched, and an unavailable transition fails with a comment on the issue. Research states stay on labels in both modes
+            #     lifecycle = "hybrid";
             #     # Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira
             #     projectKey = "";
-            #     # JSON object mapping dispatch states (dispatchable, inProgress, complete, failed, ambiguous) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow; only failed and ambiguous may share a status
+            #     # JSON object mapping dispatch states (dispatchable, inProgress, complete, failed, ambiguous) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow (JIRA_LIFECYCLE=hybrid only; JIRA_LIFECYCLE=status requires every work state mapped and never falls back); only failed and ambiguous may share a status
             #     statusMapping = "";
             #   };
             #   labels = {

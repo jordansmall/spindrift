@@ -183,6 +183,7 @@ let
       jiraBaseURL = "JIRA_BASE_URL";
       jiraProjectKey = "JIRA_PROJECT_KEY";
       jiraIssueType = "JIRA_ISSUE_TYPE";
+      jiraLifecycle = "JIRA_LIFECYCLE";
       jiraEmail = "JIRA_EMAIL";
       jiraStatusMapping = "JIRA_STATUS_MAPPING";
       jiraIncludeComments = "JIRA_INCLUDE_COMMENTS";
