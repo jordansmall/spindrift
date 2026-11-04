@@ -290,7 +290,7 @@
             #     includeComments = false;
             #     # Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira
             #     projectKey = "";
-            #     # JSON object mapping dispatch states (dispatchable, inProgress, complete, failed) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow
+            #     # JSON object mapping dispatch states (dispatchable, inProgress, complete, failed, ambiguous) to native Jira status names, e.g. {'inProgress':'In Progress'}, where a value may instead be a {'status':'Done','resolution':'Done'} object whose resolution is sent with the transition; TransitionState performs the matching workflow transition, falling back to swapping the matching lifecycle label when a state is unmapped or its transition is blocked by the project's workflow; only failed and ambiguous may share a status
             #     statusMapping = "";
             #   };
             #   labels = {

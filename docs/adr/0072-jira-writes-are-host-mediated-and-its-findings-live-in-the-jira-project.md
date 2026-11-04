@@ -185,3 +185,11 @@ Out of scope:
   is, with a comment, for a human to move.
 - Jira stays documented as experimental until it has run against a real
   project.
+
+## Amendment (issue #6350): `ambiguous` is mappable
+
+The Context above says `Ambiguous` cannot be mapped at all; that held when it
+was written. `JIRA_STATUS_MAPPING` now takes an `ambiguous` key, and
+`failed` and `ambiguous` (both mean a human must act) may map to one status.
+Any other two keys sharing a status are rejected at eval and at launcher
+startup.
