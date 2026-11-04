@@ -169,13 +169,112 @@ func TestJiraClient_Comment_ConvertsMarkdownToWikiMarkup(t *testing.T) {
 	defer srv.Close()
 
 	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
-	md := "## Verdict\n\n- [t](https://x.io)\n<!-- spindrift-research -->"
+	md := "## Verdict\n\n- [t](https://x.io)\n<!-- spindrift-dedup: x -->"
 	if err := jc.Comment("PROJ-42", md); err != nil {
 		t.Fatalf("Comment: %v", err)
 	}
-	want := "h2. Verdict\n\n* [t|https://x.io]\n<!-- spindrift-research -->"
+	want := "h2. Verdict\n\n* [t|https://x.io]\n<!-- spindrift-dedup: x -->"
 	if gotBody["body"] != want {
 		t.Errorf("body = %q, want %q", gotBody["body"], want)
+	}
+}
+
+func TestJiraClient_Comment_MovesResearchMarkerToProperty(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	const dedup = "<!-- spindrift-dedup: x -->"
+	md := "## Verdict\n\n- [t](https://x.io)\n" + dedup + "\n" + forge.ResearchMarker
+	if err := jc.Comment("PROJ-42", md); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	if want := "h2. Verdict\n\n* [t|https://x.io]\n" + dedup; gotBody["body"] != want {
+		t.Errorf("body = %q, want %q", gotBody["body"], want)
+	}
+	props, _ := gotBody["properties"].([]any)
+	if len(props) != 1 {
+		t.Fatalf("properties = %v, want one", gotBody["properties"])
+	}
+	p, _ := props[0].(map[string]any)
+	if p["key"] != "spindrift-research" || p["value"] != true {
+		t.Errorf("property = %v", p)
+	}
+}
+
+func TestJiraClient_Comment_StripsOnlyTheFirstResearchMarker(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	md := forge.ResearchMarker + "\n## Verdict\n\n```\n" + forge.ResearchMarker + "\n```"
+	if err := jc.Comment("PROJ-42", md); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	want := "h2. Verdict\n\n{code}\n" + forge.ResearchMarker + "\n{code}"
+	if gotBody["body"] != want {
+		t.Errorf("body = %q, want %q", gotBody["body"], want)
+	}
+	if props, _ := gotBody["properties"].([]any); len(props) != 1 {
+		t.Errorf("properties = %v, want one", gotBody["properties"])
+	}
+}
+
+func TestJiraClient_Comment_NoMarkerSendsNoProperties(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	if err := jc.Comment("PROJ-42", "plain"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	if _, ok := gotBody["properties"]; ok {
+		t.Errorf("properties present: %v", gotBody)
+	}
+}
+
+func TestJiraClient_Comments_RestoresMarkerFromProperty(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Write([]byte(`{"comments":[
+			{"author":{"displayName":"bot"},"created":"c1","body":"h2. V",
+			 "properties":[{"key":"spindrift-research","value":true}]},
+			{"author":{"displayName":"human"},"created":"c2","body":"hi",
+			 "properties":[{"key":"other","value":1}]},
+			{"author":{"displayName":"old"},"created":"c3","body":"h2. V\n<!-- spindrift-research -->"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	got, err := jc.(forge.CommentLister).Comments("PROJ-42")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	if gotQuery != "expand=properties" {
+		t.Errorf("query = %q, want expand=properties", gotQuery)
+	}
+	want := []string{forge.ResearchMarker + "\nh2. V", "hi", "h2. V\n<!-- spindrift-research -->"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d comments", len(got))
+	}
+	for i, w := range want {
+		if got[i].Body != w {
+			t.Errorf("comment %d body = %q, want %q", i, got[i].Body, w)
+		}
 	}
 }
 

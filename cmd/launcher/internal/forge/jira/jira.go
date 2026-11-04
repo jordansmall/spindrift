@@ -259,8 +259,9 @@ type jiraCommentsPayload struct {
 		Author struct {
 			DisplayName string `json:"displayName"`
 		} `json:"author"`
-		Created string `json:"created"`
-		Body    string `json:"body"`
+		Created    string         `json:"created"`
+		Body       string         `json:"body"`
+		Properties []jiraProperty `json:"properties"`
 	} `json:"comments"`
 }
 
@@ -279,7 +280,7 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 // what forge.IssueText assumes when it windows to the last 10.
 func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 	var payload jiraCommentsPayload
-	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &payload); err != nil {
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment?expand=properties", nil, &payload); err != nil {
 		return nil, err
 	}
 	comments := make([]forge.Comment, len(payload.Comments))
@@ -287,7 +288,7 @@ func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 		comments[i] = forge.Comment{
 			Author:    c.Author.DisplayName,
 			CreatedAt: c.Created,
-			Body:      c.Body,
+			Body:      restoreResearchMarker(c.Body, c.Properties),
 		}
 	}
 	return comments, nil
@@ -306,8 +307,51 @@ func (j *jiraClient) TouchesOf(num string) ([]string, error) {
 }
 
 func (j *jiraClient) Comment(num, body string) error {
-	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment",
-		map[string]string{"body": toWikiMarkup(body)}, nil)
+	body, isResearch := stripResearchMarker(body)
+	req := jiraCommentRequest{Body: toWikiMarkup(body)}
+	if isResearch {
+		req.Properties = []jiraProperty{{Key: researchProperty, Value: true}}
+	}
+	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment", req, nil)
+}
+
+// researchProperty is the comment entity property that carries the research
+// marker: wiki markup has no comment syntax, so the literal would render.
+const researchProperty = "spindrift-research"
+
+type jiraProperty struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
+}
+
+type jiraCommentRequest struct {
+	Body       string         `json:"body"`
+	Properties []jiraProperty `json:"properties,omitempty"`
+}
+
+// stripResearchMarker drops the first line that is exactly the research marker,
+// the only one restoreResearchMarker puts back; later copies (a verdict quoting
+// it) stay verbatim. The dedup marker stays inline.
+func stripResearchMarker(body string) (string, bool) {
+	lines := strings.Split(body, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == forge.ResearchMarker {
+			return strings.Join(append(lines[:i], lines[i+1:]...), "\n"), true
+		}
+	}
+	return body, false
+}
+
+// restoreResearchMarker puts the marker back as the first line when the comment
+// carries the property. Comments without it (human, or verdicts posted with an
+// inline marker) read back untouched.
+func restoreResearchMarker(body string, props []jiraProperty) string {
+	for _, p := range props {
+		if p.Key == researchProperty {
+			return forge.ResearchMarker + "\n" + body
+		}
+	}
+	return body
 }
 
 type jiraTransitionsPayload struct {
