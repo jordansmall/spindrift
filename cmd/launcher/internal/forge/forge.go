@@ -56,6 +56,10 @@ var ErrAuthFailure = errors.New("forge auth failure")
 // reached or does not exist under the authenticated account.
 var ErrRepoNotFound = errors.New("forge repo not found")
 
+// ErrUnknownIssueType is returned by IssueTypeChecker.CheckIssueType when the
+// configured issue type is not one the tracker's project offers.
+var ErrUnknownIssueType = errors.New("issue type not offered by the project")
+
 // ErrBundleNotFound is returned by RelayBundle when the outbox bundle is absent
 // because the Box's branch range was empty (issue #2096), a benign "nothing to
 // relay" outcome. A present but corrupt bundle is a genuine error, not this.

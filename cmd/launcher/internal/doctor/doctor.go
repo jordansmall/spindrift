@@ -312,6 +312,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		},
 	}
 
+	repoStateChecks = append(repoStateChecks, IssueTypeChecks(caps)...)
+
 	results := RunChecksFailFast(connectivityChecks)
 	if cerr := FirstRequiredError(results); cerr != nil {
 		// RunChecksFailFast stops at the first Required failure, so that result is

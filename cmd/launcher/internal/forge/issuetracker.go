@@ -231,6 +231,18 @@ type IssueLabeler interface {
 	AddLabels(num string, labels []string) error
 }
 
+// IssueTypeChecker is the optional IssueTracker capability for adapters whose
+// issue creation needs a configured issue type the project may not offer
+// (Jira's JIRA_ISSUE_TYPE, issue #6352), so doctor can catch the mismatch
+// before the first host-side filing fails.
+type IssueTypeChecker interface {
+	// CheckIssueType returns an error wrapping ErrUnknownIssueType when the
+	// configured type is absent from the project, and otherwise the required
+	// create-screen fields the host's own create request does not fill, each
+	// named for an operator. Any other error means the check could not run.
+	CheckIssueType() (unfilled []string, err error)
+}
+
 // LandingRecorder is the optional IssueTracker capability for adapters that
 // can persist where a Dispatch's work landed (ADR 0029). Only the local
 // adapter implements it; github and jira issues close through the forge's own
