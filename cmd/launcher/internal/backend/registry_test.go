@@ -76,25 +76,36 @@ func TestRelayCapableAndHostPostingCapable(t *testing.T) {
 	}
 }
 
-// TestLabelRegistry pins which trackers manage labels as registered objects:
-// doctor's extra Required labels would deadlock a preflight on one that does
-// not (issue #4400).
+// TestLabelRegistry pins which trackers manage labels as registered objects
+// (doctor's extra Required labels would deadlock a preflight on one that does
+// not, issue #4400) and which carry labels on their issues, registry or not:
+// jira does, though it has no label registry (issue #6347).
 func TestLabelRegistry(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		desc Descriptor
-		want bool
+		name              string
+		desc              Descriptor
+		registry, wearing bool
 	}{
-		{"github", GitHub, true},
-		{"forgejo", Forgejo, true},
-		{"local", Local, false},
-		{"jira", Jira, false},
+		{"github", GitHub, true, true},
+		{"forgejo", Forgejo, true, true},
+		{"local", Local, false, false},
+		{"jira", Jira, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.desc.LabelRegistry; got != tc.want {
-				t.Fatalf("%s.LabelRegistry = %v, want %v", tc.name, got, tc.want)
+			if got := tc.desc.LabelRegistry; got != tc.registry {
+				t.Errorf("%s.LabelRegistry = %v, want %v", tc.name, got, tc.registry)
+			}
+			if got := tc.desc.IssuesWearLabels; got != tc.wearing {
+				t.Errorf("%s.IssuesWearLabels = %v, want %v", tc.name, got, tc.wearing)
 			}
 		})
+	}
+	// A registered label the tracker's issues cannot wear means nothing, so no
+	// row may set LabelRegistry without IssuesWearLabels.
+	for _, d := range Registry {
+		if d.LabelRegistry && !d.IssuesWearLabels {
+			t.Errorf("%s sets LabelRegistry without IssuesWearLabels", d.Name)
+		}
 	}
 }
 

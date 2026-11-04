@@ -1274,6 +1274,7 @@ rec {
         (optional "relayCapable" "RelayCapable" false)
         (optional "hostPostingCapable" "HostPostingCapable" false)
         (optional "labelRegistry" "LabelRegistry" false)
+        (optional "issuesWearLabels" "IssuesWearLabels" false)
         (optional "trackerAxisRead" "TrackerAxisRead" "")
         (optional "trackerAxisWrite" "TrackerAxisWrite" "")
         (optional "trackerAxisFiler" "TrackerAxisFiler" "")

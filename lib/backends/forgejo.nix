@@ -15,6 +15,7 @@ rec {
   relayCapable = true;
   hostPostingCapable = true;
   labelRegistry = true;
+  issuesWearLabels = true;
   goTestBuildsOn = "git";
   trackerAxisRead = "FORGEJO";
   trackerAxisWrite = "FORGEJO";

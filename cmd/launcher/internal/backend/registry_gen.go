@@ -14,6 +14,7 @@ var GitHub = Descriptor{
 	RelayCapable:            true,
 	HostPostingCapable:      true,
 	LabelRegistry:           true,
+	IssuesWearLabels:        true,
 	Quickstart:              &QuickstartBlock{Hosts: []string{"github.com"}, Axes: []string{"tracker", "forge"}},
 }
 
@@ -48,6 +49,7 @@ var Jira = Descriptor{
 	DoctorTokenHint:        "JIRA_TOKEN",
 	DoctorSlugHint:         "JIRA_BASE_URL / JIRA_PROJECT_KEY",
 	InBoxUnwritableTracker: true,
+	IssuesWearLabels:       true,
 }
 
 // Forgejo is the descriptor for the "forgejo" backend.
@@ -64,6 +66,7 @@ var Forgejo = Descriptor{
 	RelayCapable:       true,
 	HostPostingCapable: true,
 	LabelRegistry:      true,
+	IssuesWearLabels:   true,
 	TrackerAxisRead:    "FORGEJO",
 	TrackerAxisWrite:   "FORGEJO",
 	TrackerAxisFiler:   "FORGEJO",
@@ -75,4 +78,4 @@ var Registry = []Descriptor{GitHub, Git, Local, Jira, Forgejo}
 
 // descriptorRowFields lists the Descriptor fields the nix table renders, for
 // the struct-sync test; it is not read at runtime.
-var descriptorRowFields = []string{"Name", "DisplayName", "ValidAsTracker", "ValidAsCodeForge", "TokenEnvVar", "BoxTokenEnvVar", "DoctorTokenHint", "DoctorSlugHint", "HostMediatedRemote", "InBoxUnreachableTracker", "InBoxUnwritableTracker", "SlugIssueRefTracker", "OutboxRelayCapable", "InBoxGHCredentialHelper", "RelayCapable", "HostPostingCapable", "LabelRegistry", "TrackerAxisRead", "TrackerAxisWrite", "TrackerAxisFiler", "ForgeBackend", "Quickstart"}
+var descriptorRowFields = []string{"Name", "DisplayName", "ValidAsTracker", "ValidAsCodeForge", "TokenEnvVar", "BoxTokenEnvVar", "DoctorTokenHint", "DoctorSlugHint", "HostMediatedRemote", "InBoxUnreachableTracker", "InBoxUnwritableTracker", "SlugIssueRefTracker", "OutboxRelayCapable", "InBoxGHCredentialHelper", "RelayCapable", "HostPostingCapable", "LabelRegistry", "IssuesWearLabels", "TrackerAxisRead", "TrackerAxisWrite", "TrackerAxisFiler", "ForgeBackend", "Quickstart"}
