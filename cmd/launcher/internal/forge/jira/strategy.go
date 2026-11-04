@@ -36,19 +36,35 @@ var Strategy = backendkit.Strategy{
 			Email:         k.JiraEmail,
 			Token:         k.JiraToken,
 			StatusMapping: statusMapping,
+			StatusOnly:    statusOnlyFor(s.Tracker, k.JiraLifecycle),
 			Labels:        s.Labels,
 			VerdictLabels: s.VerdictLabels,
 		}), nil
 	},
 }
 
+// labelOnly reports whether tracker instance t rides labels alone: the work
+// lifecycle's native statuses never apply to research (ADR 0022, 0072).
+func labelOnly(t dispatchkind.Tracker) bool {
+	// TestKindAxesGuard requires a switch on a descriptor tag, not ==.
+	switch t {
+	case dispatchkind.TrackerResearch:
+		return true
+	}
+	return false
+}
+
+// statusOnlyFor reports whether tracker instance t runs the status-only work
+// lifecycle. Research verdicts stay on labels in either mode (ADR 0072).
+func statusOnlyFor(t dispatchkind.Tracker, lifecycle string) bool {
+	return !labelOnly(t) && lifecycle == LifecycleStatus
+}
+
 // statusMappingFor is the JIRA_STATUS_MAPPING the tracker instance t is built
 // with. The mapping covers the work lifecycle only; research states always ride
 // the label fallback (ADR 0022, issue #4919), so the research tracker gets none.
 func statusMappingFor(t dispatchkind.Tracker, mapping string) string {
-	// TestKindAxesGuard requires a switch on a descriptor tag, not ==.
-	switch t {
-	case dispatchkind.TrackerResearch:
+	if labelOnly(t) {
 		return ""
 	}
 	return mapping
