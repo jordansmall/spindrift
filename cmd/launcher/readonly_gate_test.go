@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// The git/jira pair fails under read-only, so this fixture pins that read-write
-// is a complete no-op rather than a gate that happens to pass.
+// The git/jira pair fails under read-only on the forge axis (git is not
+// relay-capable), so this fixture pins that read-write is a complete no-op
+// rather than a gate that happens to pass.
 func TestReadOnlyCapabilityGate_ReadWriteIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-write"
@@ -70,23 +71,38 @@ func TestReadOnlyCapabilityGate_Table(t *testing.T) {
 			},
 		},
 		{
-			// jira cannot post from the host, so the pair fails even though
-			// the github forge is capable.
-			name:         "read-only github/jira fails naming ISSUE_TRACKER and issue-filing",
+			// Every valid tracker can post from the host, so this reaches the
+			// tracker axis only through the forge-only git row, which Validate()
+			// rejects as a tracker earlier: the gate is the backstop here.
+			name:         "read-only github/git tracker fails naming ISSUE_TRACKER and issue-filing",
 			access:       "read-only",
 			codeForge:    "github",
-			issueTracker: "jira",
+			issueTracker: "git",
 			wantErr:      true,
 			wantSubstrs: []string{
 				"BOX_FORGE_AND_ISSUE_ACCESS",
 				"does not implement",
 				"issue-filing",
-				`the selected ISSUE_TRACKER="jira"`,
+				`the selected ISSUE_TRACKER="git"`,
 			},
 		},
 		{
-			// Both axes are incapable, and the gate checks the forge axis
-			// first, so the forge message must win.
+			name:         "read-only github/jira passes",
+			access:       "read-only",
+			codeForge:    "github",
+			issueTracker: "jira",
+			wantErr:      false,
+		},
+		{
+			name:         "read-only forgejo/jira passes",
+			access:       "read-only",
+			codeForge:    "forgejo",
+			issueTracker: "jira",
+			wantErr:      false,
+		},
+		{
+			// jira can post from the host, so a git/jira pair fails on the
+			// forge axis alone, with the forge message.
 			name:         "read-only git/jira fails on the forge axis first",
 			access:       "read-only",
 			codeForge:    "git",

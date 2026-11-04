@@ -44,22 +44,52 @@ in
       "mkHarness.nix must throw when BOX_FORGE_AND_ISSUE_ACCESS=read-only and CODE_FORGE=git (relay-incapable)";
     pkgs.runCommand "read-only-capability-rejects-relay-incapable-code-forge" { } "touch $out";
 
-  # jira has no hostPostingCapable bit (the host cannot post comments or file
-  # issues for it), so the assert must throw. Message wording is pinned
-  # Go-side, as for the CODE_FORGE=git check above.
-  read-only-capability-rejects-host-posting-incapable-issue-tracker =
+  # jira is host-posting capable but git is not relay-capable, so the forge axis
+  # still refuses the pair (wording pinned Go-side by the `read-only git/jira
+  # fails on the forge axis first` case in cmd/launcher/readonly_gate_test.go).
+  read-only-capability-rejects-jira-tracker-on-git-forge =
     let
       broken = builtins.tryEval (
         builtins.seq (mkHarnessWith {
           boxForgeAndIssueAccess = "read-only";
+          codeForge = "git";
           issueTracker = "jira";
         }) "unreached"
       );
     in
     assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when BOX_FORGE_AND_ISSUE_ACCESS=read-only and ISSUE_TRACKER=jira (host-posting-incapable)";
-    pkgs.runCommand "read-only-capability-rejects-host-posting-incapable-issue-tracker" { }
-      "touch $out";
+      "mkHarness.nix must throw when BOX_FORGE_AND_ISSUE_ACCESS=read-only and CODE_FORGE=git with ISSUE_TRACKER=jira (relay-incapable forge)";
+    pkgs.runCommand "read-only-capability-rejects-jira-tracker-on-git-forge" { } "touch $out";
+
+  # jira holds hostPostingCapable: comments and issue filing post host-side, so
+  # it pairs with any relay-capable forge under read-only.
+  read-only-capability-accepts-jira-tracker-on-github =
+    let
+      ok = builtins.tryEval (
+        builtins.seq (mkHarnessWith {
+          boxForgeAndIssueAccess = "read-only";
+          codeForge = "github";
+          issueTracker = "jira";
+        }) "reached"
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when BOX_FORGE_AND_ISSUE_ACCESS=read-only and ISSUE_TRACKER=jira on CODE_FORGE=github";
+    pkgs.runCommand "read-only-capability-accepts-jira-tracker-on-github" { } "touch $out";
+
+  read-only-capability-accepts-jira-tracker-on-forgejo =
+    let
+      ok = builtins.tryEval (
+        builtins.seq (mkHarnessWith {
+          boxForgeAndIssueAccess = "read-only";
+          codeForge = "forgejo";
+          issueTracker = "jira";
+        }) "reached"
+      );
+    in
+    assert assertMsg ok.success
+      "mkHarness.nix must not throw when BOX_FORGE_AND_ISSUE_ACCESS=read-only and ISSUE_TRACKER=jira on CODE_FORGE=forgejo";
+    pkgs.runCommand "read-only-capability-accepts-jira-tracker-on-forgejo" { } "touch $out";
 
   read-only-capability-accepts-capable-github-pair =
     let

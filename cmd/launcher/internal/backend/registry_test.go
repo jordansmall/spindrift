@@ -65,7 +65,7 @@ func TestRelayCapableAndHostPostingCapable(t *testing.T) {
 		{"github", GitHub, true},
 		{"forgejo", Forgejo, true},
 		{"local", Local, true},
-		{"jira", Jira, false},
+		{"jira", Jira, true},
 	}
 	for _, tc := range hostPostingCases {
 		t.Run("HostPostingCapable/"+tc.name, func(t *testing.T) {

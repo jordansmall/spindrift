@@ -88,8 +88,8 @@ type Descriptor struct {
 
 	// HostPostingCapable is true for an ISSUE_TRACKER backend whose comments
 	// and issue filing can be host-mediated under
-	// BOX_FORGE_AND_ISSUE_ACCESS=read-only. True for github, forgejo, local;
-	// false for jira.
+	// BOX_FORGE_AND_ISSUE_ACCESS=read-only. True for github, forgejo, local,
+	// jira.
 	HostPostingCapable bool
 
 	// LabelRegistry is true for an ISSUE_TRACKER backend whose labels are
