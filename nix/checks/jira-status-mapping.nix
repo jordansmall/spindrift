@@ -2,7 +2,8 @@
 # cmd/launcher/internal/forge/jira/jira.go's ParseStatusMapping. No
 # malformed-JSON check: builtins.fromJSON raises a builtin type error that
 # builtins.tryEval cannot catch, so forcing it here would abort the whole
-# checks-inbox aggregate instead of failing one assert.
+# checks-inbox aggregate instead of failing one assert. The error text is
+# pinned by the shared corpus check, which compares jsm.error, not tryEval.
 { pkgs, ... }:
 let
   jsm = import ../../lib/jira-status-mapping.nix;
@@ -68,6 +69,107 @@ let
     );
     true;
 
+  # Same hand-mirroring for the object-value field list (jsm.validFields).
+  fieldsMarker = "statusTargetFields = []string{";
+  fieldErrMarker = "unknown field %q (want ";
+
+  extractFields =
+    src:
+    let
+      parts = splitString fieldsMarker src;
+      firstQuoted =
+        entry:
+        let
+          toks = splitString "\"" entry;
+        in
+        if builtins.length toks >= 3 then [ (builtins.elemAt toks 1) ] else [ ];
+    in
+    if builtins.length parts < 2 then
+      [ ]
+    else
+      builtins.concatMap firstQuoted (
+        splitString "," (builtins.head (splitString "}" (builtins.elemAt parts 1)))
+      );
+
+  extractErrorFields =
+    src:
+    let
+      parts = splitString fieldErrMarker src;
+    in
+    if builtins.length parts < 2 then
+      [ ]
+    else
+      splitString ", " (builtins.head (splitString ")" (builtins.elemAt parts 1)));
+
+  checkFields =
+    validFields: src:
+    let
+      goFields = extractFields src;
+      errFields = extractErrorFields src;
+      show = builtins.concatStringsSep ", ";
+    in
+    assert assertMsg (goFields != [ ]) (
+      "jira.go statusTargetFields extraction yielded no fields: extractFields no longer matches "
+      + "jira.go's shape — fix the extractor"
+    );
+    assert assertMsg (errFields != [ ]) (
+      "jira.go unknown-field error extraction yielded no fields: extractErrorFields no longer matches "
+      + "jira.go's shape — fix the extractor"
+    );
+    assert assertMsg (sortKeys goFields == sortKeys validFields) (
+      "lib/jira-status-mapping.nix validFields [${show validFields}] drifted from "
+      + "jira.go statusTargetFields [${show goFields}]"
+    );
+    assert assertMsg (sortKeys errFields == sortKeys goFields) (
+      "jira.go's unknown-field error lists [${show errFields}] but statusTargetFields has [${show goFields}]"
+    );
+    true;
+
+  fieldsLiteral = "statusTargetFields = []string{\"status\", \"resolution\"}";
+  fieldsErrTail = "(want status, resolution)";
+  fieldDriftCases = {
+    field-added = [
+      {
+        from = fieldsLiteral;
+        to = "statusTargetFields = []string{\"status\", \"resolution\", \"note\"}";
+      }
+      {
+        from = fieldsErrTail;
+        to = "(want status, resolution, note)";
+      }
+    ];
+    field-renamed = [
+      {
+        from = fieldsLiteral;
+        to = "statusTargetFields = []string{\"status\", \"resolutions\"}";
+      }
+      {
+        from = fieldsErrTail;
+        to = "(want status, resolutions)";
+      }
+    ];
+    field-dropped = [
+      {
+        from = fieldsLiteral;
+        to = "statusTargetFields = []string{\"status\"}";
+      }
+      {
+        from = fieldsErrTail;
+        to = "(want status)";
+      }
+    ];
+    error-string-only = [
+      {
+        from = fieldsErrTail;
+        to = "(want status, resolutions)";
+      }
+    ];
+  };
+
+  corpus = builtins.fromJSON (
+    builtins.readFile ../../cmd/launcher/internal/forge/jira/testdata/status-mapping-cases.json
+  );
+
   mapEntry = "\t\"failed\":       forge.Failed,\n";
   errTail = "inProgress, complete, failed)";
   patchGoSrc = pairs: builtins.replaceStrings (map (p: p.from) pairs) (map (p: p.to) pairs) jiraGoSrc;
@@ -118,6 +220,45 @@ in
   jira-status-mapping-keys-match-go-source =
     assert checkKeys jsm.validKeys jiraGoSrc;
     pkgs.runCommand "jira-status-mapping-keys-match-go-source" { } "touch $out";
+
+  jira-status-mapping-fields-match-go-source =
+    assert checkFields jsm.validFields jiraGoSrc;
+    pkgs.runCommand "jira-status-mapping-fields-match-go-source" { } "touch $out";
+
+  jira-status-mapping-fields-drift-regression =
+    let
+      names = builtins.attrNames fieldDriftCases;
+      stale = builtins.filter (
+        n: builtins.any (p: !pkgs.lib.hasInfix p.from jiraGoSrc) fieldDriftCases.${n}
+      ) names;
+      acceptedGo = builtins.filter (
+        n: (builtins.tryEval (checkFields jsm.validFields (patchGoSrc fieldDriftCases.${n}))).success
+      ) names;
+      acceptedNix =
+        pkgs.lib.optional (builtins.tryEval (checkFields (jsm.validFields ++ [ "note" ]) jiraGoSrc)).success
+          "validFields-added";
+      accepted = acceptedGo ++ acceptedNix;
+    in
+    assert assertMsg (stale == [ ])
+      "jira-status-mapping-fields-drift-regression: a doctoring needle no longer matches jira.go for case(s) ${builtins.concatStringsSep ", " stale}";
+    assert assertMsg (accepted == [ ])
+      "jira-status-mapping-fields-drift-regression: checkFields accepted divergent source for case(s) ${builtins.concatStringsSep ", " accepted}";
+    pkgs.runCommand "jira-status-mapping-fields-drift-regression" { } "touch $out";
+
+  # The corpus is shared with the Go test TestParseStatusMapping_Corpus, so the
+  # eval-time parse and the launcher's startup parse agree on text, not just on
+  # accept/reject.
+  jira-status-mapping-corpus-matches-go =
+    let
+      expected = row: if row.error == "" then null else row.error;
+      mismatched = builtins.filter (row: jsm.error row.input != expected row) corpus;
+    in
+    assert assertMsg (corpus != [ ]) "jira-status-mapping-corpus-matches-go: the corpus is empty";
+    assert assertMsg (mismatched == [ ])
+      "jira-status-mapping-corpus-matches-go: lib/jira-status-mapping.nix's error diverges from the shared corpus for row(s) ${
+        builtins.concatStringsSep ", " (map (r: r.name) mismatched)
+      }";
+    pkgs.runCommand "jira-status-mapping-corpus-matches-go" { } "touch $out";
 
   jira-status-mapping-keys-reformat-regression =
     let
@@ -235,21 +376,39 @@ in
     assert assertMsg (!stringResult.success) "parse must throw on a bare JSON string";
     pkgs.runCommand "jira-status-mapping-parse-rejects-non-object" { } "touch $out";
 
-  # Go decodes into map[string]string, so any value that is not a JSON string
-  # or null fails at launcher startup, before the key loop runs.
-  jira-status-mapping-parse-rejects-non-string-value =
+  # A value is a status name, null, or a {status, resolution} object; any
+  # other JSON type fails at launcher startup.
+  jira-status-mapping-parse-rejects-bad-value-type =
     let
       rejects = v: !(builtins.tryEval (jsm.parse (builtins.toJSON v))).success;
     in
     assert assertMsg (rejects { complete = 5; }) "parse must throw on a number value";
     assert assertMsg (rejects { complete = true; }) "parse must throw on a boolean value";
-    assert assertMsg (rejects {
-      failed = {
-        a = 1;
-      };
-    }) "parse must throw on an object value";
     assert assertMsg (rejects { complete = [ "x" ]; }) "parse must throw on an array value";
-    pkgs.runCommand "jira-status-mapping-parse-rejects-non-string-value" { } "touch $out";
+    pkgs.runCommand "jira-status-mapping-parse-rejects-bad-value-type" { } "touch $out";
+
+  jira-status-mapping-parse-object-value =
+    let
+      rejects = v: !(builtins.tryEval (jsm.parse (builtins.toJSON { complete = v; }))).success;
+      full = {
+        status = "Done";
+        resolution = "Fixed";
+      };
+    in
+    assert assertMsg (
+      jsm.parse (builtins.toJSON { complete = full; }) == { complete = full; }
+    ) "parse must accept a {status, resolution} object";
+    assert assertMsg (!rejects { status = "Done"; }) "parse must accept an object with only a status";
+    assert assertMsg (rejects (full // { note = "x"; })) "parse must throw on an unknown field";
+    assert assertMsg (rejects { resolution = "Fixed"; }) "parse must throw on a missing status";
+    assert assertMsg (rejects (full // { status = ""; })) "parse must throw on an empty status";
+    assert assertMsg (rejects (full // { resolution = ""; })) "parse must throw on an empty resolution";
+    assert assertMsg (rejects (full // { status = 5; })) "parse must throw on a non-string status";
+    assert assertMsg (rejects (
+      full // { resolution = true; }
+    )) "parse must throw on a non-string resolution";
+    assert assertMsg (rejects (full // { resolution = null; })) "parse must throw on a null resolution";
+    pkgs.runCommand "jira-status-mapping-parse-object-value" { } "touch $out";
 
   # Go leaves a null value as an empty status without error.
   jira-status-mapping-parse-allows-null-value =
