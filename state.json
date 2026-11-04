@@ -1,18 +1,20 @@
 {
   "lastSwept": "3650a747b7ad3a354e5b6aa0ca56f3868e6f6fa8",
   "cursor": "cmd/launcher/internal/ecosystem/gradle/testdata/corpus/path-whitespace-trailing/routes.toml",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6365"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-04T16:31:18.412812179-05:00"
+  },
   "usage": {
-    "input_tokens": 32,
-    "output_tokens": 16287,
-    "cache_read_input_tokens": 753882,
-    "cache_creation_input_tokens": 57137,
-    "total_cost_usd": 0.912060995,
-    "duration_ms": 175268,
-    "duration_api_ms": 171155,
-    "num_turns": 18
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
