@@ -4153,6 +4153,30 @@ such block and are experimental, so you select them by editing
   { "dispatchable": "To Do", "inProgress": "In Progress", "complete": "Done", "failed": "Blocked" }
   ```
 
+  A value may instead be an object naming the status and a resolution to
+  send with the transition:
+
+  ```json
+  { "complete": { "status": "Done", "resolution": "Done" } }
+  ```
+
+  `status` is required and `resolution` is optional; the object takes no
+  other fields, and a malformed one fails the eval-time parse and launcher
+  startup alike. Use the object form when the transition into that status
+  has a screen that requires Resolution, as Done transitions in
+  company-managed workflows often do: a bare transition POST gets a 400
+  there, which the label fallback cannot absorb. Before posting any
+  transition the adapter reads its field metadata, and if a required field
+  without a default is still unset it fails naming the field(s), posting
+  nothing and **not** falling back to a label: only an unavailable
+  transition falls back. A mapped `resolution` on a transition whose screen
+  has no Resolution field fails the same way, since Jira would reject it. The resolution also matters
+  for what the adapter later reads back: its closed-not-planned reading
+  (the tuning cooldown, closed-finding dedup) comes from the issue's
+  resolution (`Won't Do`, `Won't Fix`, `Declined`). Reads (`ListIssues`,
+  the Demand count) match the status name from either form, and plain
+  string values behave as before.
+
   `TransitionState` performs the matching workflow transition. When a state
   has no entry in the mapping, or the mapped transition is not available on
   the issue's current workflow (its next-status editor screen doesn't offer
