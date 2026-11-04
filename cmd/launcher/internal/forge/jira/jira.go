@@ -307,7 +307,7 @@ func (j *jiraClient) TouchesOf(num string) ([]string, error) {
 
 func (j *jiraClient) Comment(num, body string) error {
 	return j.rest.Do(http.MethodPost, "/rest/api/2/issue/"+num+"/comment",
-		map[string]string{"body": body}, nil)
+		map[string]string{"body": toWikiMarkup(body)}, nil)
 }
 
 type jiraTransitionsPayload struct {

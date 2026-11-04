@@ -160,6 +160,25 @@ func TestJiraClient_Comment_PostsBody(t *testing.T) {
 	}
 }
 
+func TestJiraClient_Comment_ConvertsMarkdownToWikiMarkup(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	md := "## Verdict\n\n- [t](https://x.io)\n<!-- spindrift-research -->"
+	if err := jc.Comment("PROJ-42", md); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	want := "h2. Verdict\n\n* [t|https://x.io]\n<!-- spindrift-research -->"
+	if gotBody["body"] != want {
+		t.Errorf("body = %q, want %q", gotBody["body"], want)
+	}
+}
+
 func TestJiraClient_Issue_FetchesFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rest/api/2/issue/PROJ-7" {
