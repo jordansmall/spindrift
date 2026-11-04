@@ -4240,6 +4240,12 @@ such block and are experimental, so you select them by editing
   field instead of running `gh issue comment`, and settle posts that note
   to the Jira issue (issue #5263). The same bit drives both halves.
 
+  Every comment body the adapter posts (research verdicts, blocked-run
+  notes, settle comments) is converted from Markdown to Jira wiki markup
+  first, since the v2 API renders wiki markup. Constructs outside the
+  supported subset pass through as text, and `<!-- spindrift-... -->`
+  marker lines pass through verbatim (issue #6348).
+
 - **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
   self-hosted Forgejo/Gitea instance just re-points it). `FORGEJO_TOKEN` is a
