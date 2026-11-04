@@ -1,0 +1,1 @@
+bounded delta review blocked the landing: VERDICT: BLOCK ## Blocking - `run.go:42` -- missing **nil check** on `opts` - see [the spec](https://example.com/spec_v2) for *why*
