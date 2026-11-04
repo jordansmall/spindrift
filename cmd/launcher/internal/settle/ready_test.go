@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // A merge failure after CI reaches green leaves the issue at agent-complete,
@@ -1362,5 +1363,418 @@ func TestHoldCheckErrorComment_JoinsEveryRow(t *testing.T) {
 	want := "synthetic/other provenance: could not read the closing issue (boom) — downgrading to manual as a precaution; review and merge by hand"
 	if got := holdCheckErrorComment([]chore.Row{syntheticHold, other}, errors.New("boom")); got != want {
 		t.Errorf("holdCheckErrorComment = %q, want %q", got, want)
+	}
+}
+
+// handOffExit names the four exits that take a green PR away from the merge
+// mode and hand it to a human, with the reason each settles.
+type handOffExit struct {
+	name   string
+	reason string
+	arm    func(s *Settle, fc *forge.Fake)
+}
+
+var guardHitExit = handOffExit{"guard-hit", ReasonMergeGuardHit, func(s *Settle, fc *forge.Fake) {
+	s.cfg.MergeGuardPaths = ".github/**"
+	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
+}}
+
+var handOffExits = []handOffExit{
+	guardHitExit,
+	{"guard-check-error", ReasonMergeGuardCheckError, func(s *Settle, fc *forge.Fake) {
+		s.cfg.MergeGuardPaths = ".github/**"
+		fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
+	}},
+	{"merge-by-hand", ReasonMergeByHand, func(s *Settle, fc *forge.Fake) {
+		iss, _ := fc.Issue("1")
+		fc.SetIssue(forge.Issue{Number: "1", Labels: append(iss.Labels, "agent-tuning-finding")})
+	}},
+	{"merge-by-hand-check-error", ReasonMergeGuardCheckError, func(s *Settle, fc *forge.Fake) {
+		fc.IssueErr = errors.New("gh issue view: 502")
+	}},
+}
+
+// handOffSettle builds a green PR held at exit under mode, with the forge
+// reporting mergeable.
+func handOffSettle(exit handOffExit, mode string, mergeable forge.MergeableState) (*Settle, *forge.Fake) {
+	s, fc := tuningTestSettle(mode, backend.GitHub, []string{"agent-in-progress"}, "")
+	s.cfg.MaxRebaseAttempts = 3
+	s.cfg.MaxFixAttempts = 1
+	exit.arm(s, fc)
+	fc.SetMergeableState(testPR, mergeable)
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess})
+	return s, fc
+}
+
+func assertHandedOff(t *testing.T, s *Settle, fc *forge.Fake, landing landingResult, reason string) {
+	t.Helper()
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual", landing)
+	}
+	assertLatchedReason(t, s, "1", reason)
+	if fc.Merged != "" {
+		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
+	}
+	if labels := clearErrAndReadLabels(fc); !containsLabel(labels, "agent-complete") || containsLabel(labels, "agent-failed") {
+		t.Errorf("issue must be agent-complete, not agent-failed; labels=%v", labels)
+	}
+}
+
+// clearErrAndReadLabels reads issue 1's labels with any scripted read error cleared.
+func clearErrAndReadLabels(fc *forge.Fake) []string {
+	fc.IssueErr = nil
+	iss, _ := fc.Issue("1")
+	return iss.Labels
+}
+
+// assertHoldCommented checks the hold's own explanation reached the issue or
+// the PR; every guard and hold comment ends by asking for a merge by hand.
+func assertHoldCommented(t *testing.T, fc *forge.Fake) {
+	t.Helper()
+	var bodies []string
+	for _, c := range fc.CommentCalls {
+		bodies = append(bodies, c.Body)
+	}
+	for _, c := range fc.CommentPRCalls {
+		bodies = append(bodies, c.Body)
+	}
+	for _, b := range bodies {
+		if strings.Contains(b, "review and merge by hand") {
+			return
+		}
+	}
+	t.Errorf("no hold comment posted; issue=%+v pr=%+v", fc.CommentCalls, fc.CommentPRCalls)
+}
+
+// assertReadyOnly checks the hand-off flipped the PR ready once and never
+// demoted or rebased it.
+func assertReadyOnly(t *testing.T, fc *forge.Fake) {
+	t.Helper()
+	if len(fc.RebasedURLs) != 0 || len(fc.MarkDraftCalls) != 0 {
+		t.Errorf("no conflict response expected; rebased=%v markDraft=%v", fc.RebasedURLs, fc.MarkDraftCalls)
+	}
+	if want := []string{"MarkReady:" + testPR}; !slices.Equal(fc.LandingCallLog, want) {
+		t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+	}
+}
+
+// A hold under immediate first makes sure the PR still merges into its base: a
+// CONFLICTING verdict at green draws the conflict response before the hand-off
+// (issue #6368).
+func TestSelfHeal_HandOffConflict_RespondsBeforeHandOff(t *testing.T) {
+	for _, exit := range handOffExits {
+		for _, rebaseErr := range []error{nil, forge.ErrMergeConflict} {
+			name := exit.name + "/clean-rebase"
+			if rebaseErr != nil {
+				name = exit.name + "/rebase-conflict"
+			}
+			t.Run(name, func(t *testing.T) {
+				s, fc := handOffSettle(exit, "immediate", forge.MergeableConflicting)
+				fc.RebaseErr = rebaseErr
+				d := dispatch.NewFake()
+
+				landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+
+				assertHandedOff(t, s, fc, landing, exit.reason)
+				assertHoldCommented(t, fc)
+				if len(fc.RebasedURLs) != 1 {
+					t.Errorf("Rebase called %d times, want 1", len(fc.RebasedURLs))
+				}
+				wantResolves := 0
+				if rebaseErr != nil {
+					wantResolves = 1
+				}
+				if len(d.ResolveConflictCalls) != wantResolves {
+					t.Errorf("ResolveConflict called %d times, want %d", len(d.ResolveConflictCalls), wantResolves)
+				}
+				if fc.MergeableCalls != 2 {
+					t.Errorf("Mergeable read %d times, want 2 (verdict and its confirmation)", fc.MergeableCalls)
+				}
+				// Flipped ready so its mergeability reads true, demoted for the
+				// rebase, and restored once the new head is green.
+				want := []string{"MarkReady:" + testPR, "MarkDraft:" + testPR, "MarkReady:" + testPR}
+				if !slices.Equal(fc.LandingCallLog, want) {
+					t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+				}
+			})
+		}
+	}
+}
+
+// A MERGEABLE verdict hands off unchanged, and an UNKNOWN one does too
+// after a bounded wait, as does an unreadable one; each says so in the log.
+func TestSelfHeal_HandOffNotConflicting_HandsOffUnchanged(t *testing.T) {
+	cases := []struct {
+		name      string
+		mergeable forge.MergeableState
+		err       error
+		wantLog   string
+		wantReads int
+	}{
+		{"mergeable", forge.MergeableMergeable, nil, "", 1},
+		{"unknown", forge.MergeableUnknown, nil, "status=mergeable-unknown", mergeableUnknownPolls},
+		{"error", forge.MergeableUnknown, errors.New("gh api pulls: 502"), "status=mergeable-check-error", 1},
+	}
+	for _, exit := range handOffExits {
+		for _, tc := range cases {
+			t.Run(exit.name+"/"+tc.name, func(t *testing.T) {
+				s, fc := handOffSettle(exit, "immediate", tc.mergeable)
+				fc.MergeableErr = tc.err
+				var landing landingResult
+				out := testutil.CaptureStdout(t, func() {
+					landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+				})
+
+				assertHandedOff(t, s, fc, landing, exit.reason)
+				assertHoldCommented(t, fc)
+				assertReadyOnly(t, fc)
+				if tc.wantLog != "" && !strings.Contains(out, tc.wantLog) {
+					t.Errorf("log must say the hand-off skipped the conflict check; got %q", out)
+				}
+				if tc.wantLog == "" && strings.Contains(out, "status=mergeable-") {
+					t.Errorf("unexpected mergeable status log: %q", out)
+				}
+				if fc.MergeableCalls != tc.wantReads {
+					t.Errorf("Mergeable read %d times, want %d", fc.MergeableCalls, tc.wantReads)
+				}
+			})
+		}
+	}
+}
+
+// A conflict response that cannot produce a green head fails the landing the
+// way the immediate path does; the issue never wears agent-complete.
+func TestSelfHeal_HandOffConflict_FailedResponseFailsLanding(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(s *Settle, fc *forge.Fake, d *dispatch.Fake)
+	}{
+		{"resolve Box fails", func(s *Settle, fc *forge.Fake, d *dispatch.Fake) {
+			fc.RebaseErr = forge.ErrMergeConflict
+			d.ResolveConflictErr = errors.New("box exited 1")
+		}},
+		{"resolved head red with no fix budget", func(s *Settle, fc *forge.Fake, d *dispatch.Fake) {
+			s.cfg.MaxFixAttempts = 0
+			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateFailure})
+		}},
+		{"resolved head red after its fix pass", func(s *Settle, fc *forge.Fake, d *dispatch.Fake) {
+			fc.RebaseErr = forge.ErrMergeConflict
+			fc.SetCheckStates(testPR, []forge.RollupState{
+				forge.StateSuccess, forge.StateSuccess, // first green
+				forge.StateFailure, // rewait after the conflict resolve: red
+				forge.StateFailure, forge.StateFailure, forge.StateFailure,
+			})
+		}},
+	}
+	for _, exit := range handOffExits {
+		for _, tc := range cases {
+			t.Run(exit.name+"/"+tc.name, func(t *testing.T) {
+				s, fc := handOffSettle(exit, "immediate", forge.MergeableConflicting)
+				d := dispatch.NewFake()
+				tc.setup(s, fc, d)
+
+				landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+
+				if landing != landingFailed {
+					t.Fatalf("selfHeal = %v (%q), want landingFailed", landing, reason)
+				}
+				assertLatchedReason(t, s, "1", ReasonLandingFailed)
+				if labels := clearErrAndReadLabels(fc); !containsLabel(labels, "agent-failed") || containsLabel(labels, "agent-complete") {
+					t.Errorf("issue must carry agent-failed only; labels=%v", labels)
+				}
+				if fc.Merged != "" {
+					t.Errorf("fc.Merged=%q, want no merge", fc.Merged)
+				}
+			})
+		}
+	}
+}
+
+// A resolved head that goes red with fix budget left draws a fix pass, then the
+// loop re-gates, and the still-conflicting verdict draws a second response
+// before the hand-off.
+func TestSelfHeal_HandOffConflict_RedResolvedHeadDrawsFixPass(t *testing.T) {
+	s, fc := handOffSettle(guardHitExit, "immediate", forge.MergeableConflicting)
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateSuccess, forge.StateSuccess, // first green
+		forge.StateFailure,                     // rewait after the rebase: red
+		forge.StateSuccess, forge.StateSuccess, // after the fix pass
+		forge.StateSuccess, forge.StateSuccess, // rewait of the second response
+	})
+	d := dispatch.NewFake()
+
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+
+	if len(d.FixCalls) != 1 {
+		t.Errorf("FixCalls = %+v, want one fix pass", d.FixCalls)
+	}
+	assertHandedOff(t, s, fc, landing, ReasonMergeGuardHit)
+	if len(fc.RebasedURLs) != 2 {
+		t.Errorf("Rebase called %d times, want 2 (one per response)", len(fc.RebasedURLs))
+	}
+}
+
+// A response that cannot even try to resolve (rebases disabled, or a rebase
+// failing without a conflict) blocks the merge the way the immediate path does:
+// the PR is left demoted, the landing settles manual with ReasonMergeBlocked and
+// says so in a comment, and the hold's own notice still reaches the human.
+func TestSelfHeal_HandOffConflict_UnresolvableBlocksMerge(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(s *Settle, fc *forge.Fake)
+		wantRebase int
+	}{
+		{"no rebase attempts", func(s *Settle, fc *forge.Fake) {
+			s.cfg.MaxRebaseAttempts = 0
+		}, 0},
+		{"rebase fails without a conflict", func(s *Settle, fc *forge.Fake) {
+			fc.RebaseErr = errors.New("non-fast-forward")
+		}, 1},
+	}
+	for _, exit := range handOffExits {
+		for _, tc := range cases {
+			t.Run(exit.name+"/"+tc.name, func(t *testing.T) {
+				s, fc := handOffSettle(exit, "immediate", forge.MergeableConflicting)
+				tc.setup(s, fc)
+
+				landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+
+				assertHandedOff(t, s, fc, landing, ReasonMergeBlocked)
+				if len(fc.RebasedURLs) != tc.wantRebase {
+					t.Errorf("Rebase called %d times, want %d", len(fc.RebasedURLs), tc.wantRebase)
+				}
+				want := []string{"MarkReady:" + testPR, "MarkDraft:" + testPR}
+				if !slices.Equal(fc.LandingCallLog, want) {
+					t.Errorf("LandingCallLog = %v, want %v", fc.LandingCallLog, want)
+				}
+				if len(fc.CommentCalls) == 0 || !strings.Contains(fc.CommentCalls[0].Body, "merge blocked after green CI") {
+					t.Errorf("want the merge-blocked comment first; got %+v", fc.CommentCalls)
+				}
+				assertHoldCommented(t, fc)
+			})
+		}
+	}
+}
+
+// A live run owning the issue abandons the hand-off conflict response exactly
+// like the immediate path: nothing committed, claim untouched.
+func TestSelfHeal_HandOffConflict_ResolveAlreadyRunning_Abandons(t *testing.T) {
+	for _, exit := range handOffExits {
+		t.Run(exit.name, func(t *testing.T) {
+			s, fc := handOffSettle(exit, "immediate", forge.MergeableConflicting)
+			fc.RebaseErr = forge.ErrMergeConflict
+			d := dispatch.NewFake()
+			d.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
+
+			landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+
+			if landing != landingAbandoned || reason != "" {
+				t.Errorf("selfHeal = %v, %q, want landingAbandoned and empty reason", landing, reason)
+			}
+			fc.IssueErr = nil
+			assertNoTransitionOrComment(t, fc)
+			assertClaimUntouched(t, fc)
+		})
+	}
+}
+
+// Manual and auto keep their exits: a guard hit hands off without a
+// mergeability read or any conflict response.
+func TestSelfHeal_HandOffConflict_NonImmediateModesUnchanged(t *testing.T) {
+	for _, mode := range []string{"manual", "auto"} {
+		for _, exit := range handOffExits {
+			t.Run(mode+"/"+exit.name, func(t *testing.T) {
+				s, fc := handOffSettle(exit, mode, forge.MergeableConflicting)
+				d := dispatch.NewFake()
+
+				landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+
+				assertHandedOff(t, s, fc, landing, exit.reason)
+				assertHoldCommented(t, fc)
+				assertReadyOnly(t, fc)
+				if len(d.ResolveConflictCalls) != 0 {
+					t.Errorf("no conflict response expected; resolves=%v", d.ResolveConflictCalls)
+				}
+				if fc.MergeableCalls != 0 {
+					t.Errorf("Mergeable read %d times, want 0", fc.MergeableCalls)
+				}
+			})
+		}
+	}
+}
+
+// Forgejo reports a draft pull unmergeable, so a held PR that is still the draft
+// the Driver opened must be flipped ready before its mergeability is read: a
+// MERGEABLE PR hands off with no demotion, rebase, or force-push (issue #6368).
+func TestSelfHeal_HandOff_DraftUnmergeableForge_HandsOffUnchanged(t *testing.T) {
+	for _, exit := range handOffExits {
+		t.Run(exit.name, func(t *testing.T) {
+			s, fc := handOffSettle(exit, "immediate", forge.MergeableMergeable)
+			fc.DraftUnmergeable = true
+			fc.SetDraft(testPR, true)
+
+			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+
+			assertHandedOff(t, s, fc, landing, exit.reason)
+			assertHoldCommented(t, fc)
+			assertReadyOnly(t, fc)
+		})
+	}
+}
+
+// A CONFLICTING verdict is confirmed by one re-read before it draws a response,
+// since Forgejo's boolean is also false while its async conflict check runs. A
+// re-read that comes back MERGEABLE, stays UNKNOWN, or errors hands off
+// unchanged and says why.
+func TestSelfHeal_HandOffConflict_UnrepeatedConflictHandsOffUnchanged(t *testing.T) {
+	cases := []struct {
+		name      string
+		steady    forge.MergeableState
+		errAfter  int
+		err       error
+		wantLog   string
+		wantReads int
+	}{
+		{"mergeable", forge.MergeableMergeable, 0, nil, "status=conflict-unconfirmed", 2},
+		{"unknown", forge.MergeableUnknown, 0, nil, "status=mergeable-unknown  ~~ handing off without a conflict response", 1 + mergeableUnknownPolls},
+		{"error", forge.MergeableMergeable, 1, errors.New("gh api pulls: 502"), "status=mergeable-check-error", 2},
+	}
+	for _, exit := range handOffExits {
+		for _, tc := range cases {
+			t.Run(exit.name+"/"+tc.name, func(t *testing.T) {
+				s, fc := handOffSettle(exit, "immediate", tc.steady)
+				fc.SetMergeableStates(testPR, []forge.MergeableState{forge.MergeableConflicting})
+				fc.MergeableErr, fc.MergeableErrAfter = tc.err, tc.errAfter
+				var landing landingResult
+				out := testutil.CaptureStdout(t, func() {
+					landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+				})
+
+				assertHandedOff(t, s, fc, landing, exit.reason)
+				assertHoldCommented(t, fc)
+				assertReadyOnly(t, fc)
+				if !strings.Contains(out, tc.wantLog) {
+					t.Errorf("log must say why the hand-off skipped the response; want %q in %q", tc.wantLog, out)
+				}
+				if fc.MergeableCalls != tc.wantReads {
+					t.Errorf("Mergeable read %d times, want %d", fc.MergeableCalls, tc.wantReads)
+				}
+			})
+		}
+	}
+}
+
+// A re-read that is UNKNOWN before it repeats CONFLICTING still confirms it.
+func TestSelfHeal_HandOffConflict_ConfirmedAfterUnknownRespondsBeforeHandOff(t *testing.T) {
+	s, fc := handOffSettle(guardHitExit, "immediate", forge.MergeableMergeable)
+	fc.SetMergeableStates(testPR, []forge.MergeableState{
+		forge.MergeableConflicting, forge.MergeableUnknown, forge.MergeableConflicting,
+	})
+
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+
+	assertHandedOff(t, s, fc, landing, guardHitExit.reason)
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1", len(fc.RebasedURLs))
 	}
 }
