@@ -1,5 +1,17 @@
 # Migration Guide
 
+## A Jira tracker's issue-read steps no longer point at GitHub (issue #6344)
+
+On `ISSUE_TRACKER=jira`, `ISSUE_READ_STEP`, `RESEARCH_ISSUE_READ_STEP` and
+`SCOUT_ISSUE_READ_STEP` (and the deprecated `*_ISSUE_READ_GITHUB_STEP`
+variables) now render the new root fragments `issue-read-unreadable.md`,
+`research-issue-read-unreadable.md` and `scout-issue-read-unreadable.md`,
+which say a Jira Box cannot read linked Jira issues, instead of telling it to
+pull them via GitHub. `github`, `forgejo` and `local` render unchanged. No
+variable is renamed or removed, but a Jira deployment with an override prompt
+directory must add those three files to its `fragments/`, or these steps,
+including the work prompt's `git log` bullet, render empty.
+
 ## A read-only Box on `CODE_FORGE=local` renders the host-mediated commit step (issue #6259)
 
 A read-only Box on a host-mediated forge (`CODE_FORGE=local`) now renders
@@ -63,9 +75,11 @@ How a slot finds its file:
 What breaks in an override prompt directory:
 
 - The per-backend variables below are deprecated. Each still renders what it
-  did before, but warns. Replace every variable in the left column's row with
-  the one on the right; where one slot replaces several variables, an
-  override that named several of them now names the slot once.
+  did before (a Jira tracker's `*_ISSUE_READ_GITHUB_STEP` renders the new
+  unreadable wording, per the first section above), but warns. Replace every
+  variable in the left column's row with the one on the right; where one slot
+  replaces several variables, an override that named several of them now
+  names the slot once.
 
   | Deprecated variables | Replacement |
   | --- | --- |
