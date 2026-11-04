@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"spindrift.dev/launcher/internal/chore"
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -47,24 +48,6 @@ var findingLabels = func() []string {
 	}
 	return labels
 }()
-
-// dedupMarkerPrefix and dedupMarkerSuffix delimit the hidden marker line
-// buildDedupMarker appends to a filed finding's body (issue #3609): carrying
-// the intent's own DedupTerms lets a later run recover this issue's dedup key
-// set from the backlog (backlogDedupIndex) without re-parsing prose.
-//
-// Findings filed before #3609 carry no marker, so they add no keys, open or
-// closed. Since #3873 indexes closed findings too, that gap is permanent but
-// bounded: a fixed set that never grows. It is deliberately not backfilled
-// (issue #3813): a backfilled key would be guessed from body prose, and
-// wrong ones covering an intent's every key can make matchDedup skip a
-// genuinely new finding -- indefinitely on a closed issue, without filing
-// anything a human would triage -- worse than a visible duplicate. The
-// Filer's own pre-filing prose search covers those legacy issues instead.
-const (
-	dedupMarkerPrefix = "<!-- spindrift-dedup: "
-	dedupMarkerSuffix = " -->"
-)
 
 // choreTermPrefix opens the dedup-marker term a Chore finding carries, naming
 // the Chore that filed it (ADR 0062). PriorFindings lists a Chore's findings
@@ -187,8 +170,21 @@ func splitDedupTerms(terms []string) (keys map[string]bool, dropped []string) {
 // filed finding's body, or "" when terms carries no usable term (every entry
 // invalid or blank after normalizeDedupTerm). "" does not mean "append
 // nothing": fileIssueIntentsDetailed substitutes a bare
-// dedupMarkerPrefix+dedupMarkerSuffix, which parseDedupMarker reads back as
+// dedupmarker.Bare, which parseDedupMarker reads back as
 // zero keys, so the launcher's own marker is always the body's last one.
+//
+// The hidden marker line carries the intent's own DedupTerms (issue #3609), so
+// a later run recovers this issue's dedup key set from the backlog
+// (backlogDedupIndex) without re-parsing prose.
+//
+// Findings filed before #3609 carry no marker, so they add no keys, open or
+// closed. Since #3873 indexes closed findings too, that gap is permanent but
+// bounded: a fixed set that never grows. It is deliberately not backfilled
+// (issue #3813): a backfilled key would be guessed from body prose, and
+// wrong ones covering an intent's every key can make matchDedup skip a
+// genuinely new finding -- indefinitely on a closed issue, without filing
+// anything a human would triage -- worse than a visible duplicate. The
+// Filer's own pre-filing prose search covers those legacy issues instead.
 func buildDedupMarker(terms []string) string {
 	var kept []string
 	for _, t := range terms {
@@ -199,7 +195,7 @@ func buildDedupMarker(terms []string) string {
 	if len(kept) == 0 {
 		return ""
 	}
-	return dedupMarkerPrefix + strings.Join(kept, ", ") + dedupMarkerSuffix
+	return dedupmarker.Build(kept)
 }
 
 // parseDedupMarker recovers the normalized dedup terms from the LAST marker
@@ -211,22 +207,13 @@ func buildDedupMarker(terms []string) string {
 // through a single raw term; normalizeDedupTerm drops any such split piece
 // rather than trusting it.
 func parseDedupMarker(body string) []string {
-	lines := strings.Split(body, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
-		if !strings.HasPrefix(line, dedupMarkerPrefix) || !strings.HasSuffix(line, dedupMarkerSuffix) {
-			continue
+	var terms []string
+	for _, t := range dedupmarker.Parse(body) {
+		if k, ok := normalizeDedupTerm(t); ok {
+			terms = append(terms, k)
 		}
-		inner := strings.TrimSuffix(strings.TrimPrefix(line, dedupMarkerPrefix), dedupMarkerSuffix)
-		var terms []string
-		for _, t := range strings.Split(inner, ",") {
-			if k, ok := normalizeDedupTerm(t); ok {
-				terms = append(terms, k)
-			}
-		}
-		return terms
 	}
-	return nil
+	return terms
 }
 
 // carriesChoreMarker reports whether body's last dedup marker line carries

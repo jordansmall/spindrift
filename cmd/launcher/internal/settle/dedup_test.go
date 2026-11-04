@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dedupmarker"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -285,7 +286,7 @@ func TestParseDedupMarker_NoMarkerLine(t *testing.T) {
 // usable term parses back to zero keys, so an always-appended marker costs a
 // term-less issue nothing in the backlog index (issue #3609 review).
 func TestParseDedupMarker_EmptyMarkerYieldsNoKeys(t *testing.T) {
-	body := "a finding body\n\n" + dedupMarkerPrefix + dedupMarkerSuffix
+	body := "a finding body\n\n" + dedupmarker.Bare
 	if got := parseDedupMarker(body); len(got) != 0 {
 		t.Errorf("parseDedupMarker = %v, want no keys", got)
 	}
@@ -810,7 +811,7 @@ func TestNormalizeDedupKey_TuningChoreTermIsStable(t *testing.T) {
 }
 
 func TestCarriesChoreMarker(t *testing.T) {
-	quoted := dedupMarkerPrefix + "chore=tuning, quoted" + dedupMarkerSuffix
+	quoted := dedupmarker.Prefix + "chore=tuning, quoted" + dedupmarker.Suffix
 	for _, tc := range []struct {
 		name string
 		body string
