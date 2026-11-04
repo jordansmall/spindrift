@@ -29,6 +29,10 @@
 # `inverseOf` (issue #3219) declares this row's gate the boolean inverse of
 # the named on-gate; fragment-pairs.nix's `validate` asserts those pairs at
 # the end of this file, before an image can bake from a malformed one.
+# Two rows may share one `var` only when their gates are never on together
+# (issue #6344's issue-read arms): the on row's fragment binds the var and an
+# off row leaves it alone. Nothing checks that exclusivity outside an
+# `inverseOf` pair; overlapping gates mean the last on row silently wins.
 
 # `signalChannel` (issue #3726) names which of lib/prompt-contract.nix's
 # markerChannels ("comment" | "pr-intent" | "issue-intent") a _LOG/_SOCKET
@@ -564,8 +568,20 @@ let
     {
       axis = "tracker";
       shared = true;
+      gate = "ISSUE_TRACKER_LINKS_READABLE";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "issue-read.md";
+      var = "ISSUE_READ_STEP";
+    }
+    # A tracker with no in-Box client (jira) cannot have its linked issues read
+    # from the Box (issue #6344), so each issue-read slot has an unreadable arm
+    # sharing its var (exclusive gates, so one binds), which keeps an override
+    # naming only the slot var rendering the step on jira. The deprecated GITHUB
+    # rows below get the same sibling arm, since jira rides github's arm.
+    {
+      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      inverseOf = "ISSUE_TRACKER_LINKS_READABLE";
+      fragment = "issue-read-unreadable.md";
       var = "ISSUE_READ_STEP";
     }
     # Deprecation-window fill for override prompts that still name the
@@ -574,10 +590,15 @@ let
     # `fragment` is missing, so an override dir still on the old layout
     # renders as before.
     {
-      gate = "ISSUE_TRACKER_GITHUB";
+      gate = "ISSUE_TRACKER_GITHUB_LINKS_READABLE";
       fragment = "issue-read.md";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "issue-read-github.md";
+      var = "ISSUE_READ_GITHUB_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      fragment = "issue-read-unreadable.md";
       var = "ISSUE_READ_GITHUB_STEP";
     }
     {
@@ -598,15 +619,27 @@ let
     {
       axis = "tracker";
       shared = true;
+      gate = "ISSUE_TRACKER_LINKS_READABLE";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "research-issue-read.md";
       var = "RESEARCH_ISSUE_READ_STEP";
     }
     {
-      gate = "ISSUE_TRACKER_GITHUB";
+      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      inverseOf = "ISSUE_TRACKER_LINKS_READABLE";
+      fragment = "research-issue-read-unreadable.md";
+      var = "RESEARCH_ISSUE_READ_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_GITHUB_LINKS_READABLE";
       fragment = "research-issue-read.md";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "research-issue-read-github.md";
+      var = "RESEARCH_ISSUE_READ_GITHUB_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      fragment = "research-issue-read-unreadable.md";
       var = "RESEARCH_ISSUE_READ_GITHUB_STEP";
     }
     {
@@ -627,16 +660,28 @@ let
     {
       axis = "tracker";
       shared = true;
-      gate = "ISSUE_TRACKER_REACHABLE";
+      gate = "ISSUE_TRACKER_LINKS_REACHABLE";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       fragment = "scout-issue-read.md";
       var = "SCOUT_ISSUE_READ_STEP";
     }
+    # No inverseOf: LINKS_REACHABLE is also off for local, which has no in-Box
+    # tracker and so no step at all.
     {
-      gate = "ISSUE_TRACKER_GITHUB";
+      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      fragment = "scout-issue-read-unreadable.md";
+      var = "SCOUT_ISSUE_READ_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_GITHUB_LINKS_READABLE";
       fragment = "scout-issue-read.md";
       extraSubstVars = [ "FORGE_DISPLAY_NAME" ];
       legacyFragment = "scout-issue-read-github.md";
+      var = "SCOUT_ISSUE_READ_GITHUB_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_LINKS_UNREADABLE";
+      fragment = "scout-issue-read-unreadable.md";
       var = "SCOUT_ISSUE_READ_GITHUB_STEP";
     }
     {

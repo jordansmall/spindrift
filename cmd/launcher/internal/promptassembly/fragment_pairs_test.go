@@ -23,6 +23,8 @@ func pairEnvMatrix() []Env {
 		allTrue.Field(i).SetBool(true)
 	}
 	envs = append(envs, allTrue.Interface().(Env))
+	// A tracker with no in-Box client moves the issue-read pair (issue #6344).
+	envs = append(envs, Env{IssueTracker: "jira"})
 
 	kinds := []string{"", defaultDispatchKind, "research"}
 	out := make([]Env, 0, len(envs)*len(kinds))

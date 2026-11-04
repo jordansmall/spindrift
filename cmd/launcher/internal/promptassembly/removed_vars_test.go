@@ -328,7 +328,6 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 		{"github", "github", "GITHUB", "ISSUE_READ_GITHUB_STEP", "issue-read-github.md"},
 		{"local", "local", "LOCAL", "ISSUE_READ_LOCAL_STEP", "issue-read-local.md"},
 		{"forgejo", "forgejo", "FORGEJO", "ISSUE_READ_FORGEJO_STEP", "issue-read-forgejo.md"},
-		{"jira reads via the github gate", "jira", "GITHUB", "ISSUE_READ_GITHUB_STEP", "issue-read-github.md"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -362,6 +361,53 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 				t.Errorf("warnings = %q, want one naming ${%s}", warnings, tc.v)
 			}
 		})
+	}
+}
+
+// A client-less tracker (jira) rides github's arm, so an override still naming
+// the deprecated GITHUB issue-read var must render the unreadable arm, not
+// nothing and not github's link-reading wording (issue #6344).
+func TestAssembleDeprecatedIssueReadVarOnJiraRendersUnreadable(t *testing.T) {
+	slots := []struct {
+		name, kind, file, slot, old, fragment string
+		agent                                 string // subagent whose prompt carries the slot; "" means the main prompt
+	}{
+		{name: "work", kind: "work", file: "issue-prompt.md", slot: "${ISSUE_READ_STEP}",
+			old: "${ISSUE_READ_GITHUB_STEP}", fragment: "issue-read-unreadable.md"},
+		{name: "research", kind: "research", file: "research-prompt.md", slot: "${RESEARCH_ISSUE_READ_STEP}",
+			old: "${RESEARCH_ISSUE_READ_GITHUB_STEP}", fragment: "research-issue-read-unreadable.md"},
+		{name: "scout", kind: "work", file: "scout-prompt.md", slot: "${SCOUT_ISSUE_READ_STEP}",
+			old: "${SCOUT_ISSUE_READ_GITHUB_STEP}", fragment: "scout-issue-read-unreadable.md", agent: "scout"},
+	}
+	for _, s := range slots {
+		for _, v := range []string{s.slot, s.old} {
+			t.Run(s.name+"/"+v, func(t *testing.T) {
+				env := coveredEnv()
+				env.IssueTracker = "jira"
+				env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = "GITHUB", "GITHUB", "GITHUB"
+				env.DispatchKind = s.kind
+				if s.agent != "" {
+					env.AgentsJSONTemplate = `{"` + s.agent + `":{"model":"x"}}`
+					env.AgentsPromptFiles = `{"` + s.agent + `":"` + s.file + `"}`
+				}
+				env.PromptsDir = stagePromptsCopy(t)
+				replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, v)
+				res, err := Assemble(env, loadTestRegistry(t))
+				if err != nil {
+					t.Fatalf("Assemble: %v", err)
+				}
+				prompt := res.Prompt
+				if s.agent != "" {
+					prompt = agentPromptFromJSON(t, res.AgentsJSON, s.agent)
+				}
+				if want := fragmentText(t, s.fragment); !strings.Contains(prompt, want) {
+					t.Errorf("prompt lacks the unreadable arm %q:\n%s", want, prompt)
+				}
+				if strings.Contains(prompt, "via GitHub") {
+					t.Errorf("jira prompt points at GitHub:\n%s", prompt)
+				}
+			})
+		}
 	}
 }
 

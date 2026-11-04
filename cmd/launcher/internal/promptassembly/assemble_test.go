@@ -2597,7 +2597,8 @@ func TestAssembleJiraTracker(t *testing.T) {
 
 // Pins issue #2352's acceptance criterion at the Assemble level, not just
 // the gate-map level gates_tracker_test.go already covers: two Envs
-// differing only in IssueTracker must produce byte-identical prompts. Run
+// differing only in IssueTracker must produce byte-identical prompts, apart
+// from the issue-read step a client-less jira cannot follow (issue #6344). Run
 // read-only, because on a write-capable Box jira's IF BLOCKED comment
 // deliberately diverges from github's gh issue comment (issue #5263).
 func TestAssembleJiraRidesGithubArms(t *testing.T) {
@@ -2619,14 +2620,15 @@ func TestAssembleJiraRidesGithubArms(t *testing.T) {
 		t.Fatalf("Assemble(github): %v", err)
 	}
 
+	githubResult.Prompt = swapIssueRead(t, githubResult.Prompt)
 	if jiraResult.Prompt != githubResult.Prompt {
-		t.Errorf("jira Prompt != github Prompt, want byte-identical (jira rides github's arm end-to-end):\njira:\n%s\n\ngithub:\n%s", jiraResult.Prompt, githubResult.Prompt)
+		t.Errorf("jira Prompt != github Prompt, want byte-identical once the issue-read step is swapped (issue #6344):\njira:\n%s\n\ngithub:\n%s", jiraResult.Prompt, githubResult.Prompt)
 	}
 }
 
 // The read-write half of the #2352 pin: on a write-capable Box the jira and
-// github prompts may differ only in the IF BLOCKED step 4 comment fragment
-// (issue #5263).
+// github prompts may differ only in the IF BLOCKED step 4 comment fragment and
+// the issue-read step (issues #5263, #6344).
 func TestAssembleJiraRidesGithubArmsReadWrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -2651,7 +2653,7 @@ func TestAssembleJiraRidesGithubArmsReadWrite(t *testing.T) {
 	if !strings.Contains(jiraResult.Prompt, jiraStep) {
 		t.Fatalf("jira read-write prompt lacks its blocked-comment fragment %q", jiraStep)
 	}
-	swapped := strings.Replace(githubResult.Prompt, githubStep, jiraStep, 1)
+	swapped := swapIssueRead(t, strings.Replace(githubResult.Prompt, githubStep, jiraStep, 1))
 	if jiraResult.Prompt != swapped {
 		t.Errorf("jira read-write Prompt differs from github beyond the blocked-comment step:\njira:\n%s\n\ngithub (step swapped):\n%s", jiraResult.Prompt, swapped)
 	}
@@ -4408,6 +4410,47 @@ func TestAssembleUngatedRowRendersUnconditionally(t *testing.T) {
 	}
 }
 
+// Two rows may share one var when their gates are exclusive (issue #6344): the
+// row whose gate is on binds it, and the off row must not clobber it, whichever
+// comes first in the registry.
+func TestAssembleRowsSharingVarWithExclusiveGates(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"issue-prompt.md":  "[${STEP}]\n",
+		"review-prompt.md": "review\n",
+		"fragments/on.md":  "on-text\n",
+		"fragments/off.md": "off-text\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+	onRow := FragmentRow{Gate: "TDD_BAKED", Fragment: "on.md", Var: "STEP"}
+	offRow := FragmentRow{Gate: "TDD_UNBAKED", Fragment: "off.md", Var: "STEP"}
+	orders := map[string][]FragmentRow{
+		"on row first":  {onRow, offRow},
+		"off row first": {offRow, onRow},
+	}
+	for name, rows := range orders {
+		t.Run(name, func(t *testing.T) {
+			env := coveredEnv()
+			env.PromptsDir = dir
+			env.TDDSkillBaked = true
+			result, err := Assemble(env, Registry{Rows: rows})
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if !strings.Contains(result.Prompt, "[on-text") || strings.Contains(result.Prompt, "off-text") {
+				t.Errorf("Prompt = %q, want the on row's text bound to the shared var", result.Prompt)
+			}
+		})
+	}
+}
+
 // An axis row reads fragments/<backend>/<fragment> for the active tracker or
 // forge, picked by the axis signal rather than the backend name; a folder without the file renders empty rather than failing, a gate
 // still applies, and an unset backend takes the default.
@@ -4672,4 +4715,16 @@ func TestAssembleWorkPromptFileIssuesTriageRecapPerFilerCell(t *testing.T) {
 			}
 		})
 	}
+}
+
+// swapIssueRead rewrites github's rendered issue-read step into jira's: the
+// Box has no Jira client, so linked issues are unreadable (issue #6344). It
+// fails the test if github's step is absent or the swap is not one-for-one.
+func swapIssueRead(t *testing.T, prompt string) string {
+	t.Helper()
+	githubStep := strings.ReplaceAll(fragmentText(t, "issue-read.md"), "${FORGE_DISPLAY_NAME}", "GitHub")
+	if !strings.Contains(prompt, githubStep) {
+		t.Fatalf("github prompt lacks its issue-read fragment %q", githubStep)
+	}
+	return strings.Replace(prompt, githubStep, fragmentText(t, "issue-read-unreadable.md"), 1)
 }

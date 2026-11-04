@@ -838,6 +838,37 @@ func TestGatesIssueTrackerReachable(t *testing.T) {
 	}
 }
 
+// TestGatesIssueTrackerLinksReadable pins the inverse pair that selects the
+// issue-read wording: only a tracker with no in-Box client (jira) cannot have
+// its parent/linked issues read from the Box (issue #6344).
+func TestGatesIssueTrackerLinksReadable(t *testing.T) {
+	for _, tc := range []struct {
+		tracker, read string
+		readable      bool
+		githubArm     bool
+	}{
+		{"", "GITHUB", true, true},
+		{"github", "GITHUB", true, true},
+		{"forgejo", "FORGEJO", true, false},
+		{"local", "LOCAL", true, false},
+		{"jira", "GITHUB", false, false},
+	} {
+		g := Gates(Env{IssueTracker: tc.tracker, TrackerAxisRead: tc.read})
+		if got := g["ISSUE_TRACKER_LINKS_READABLE"]; got != tc.readable {
+			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_LINKS_READABLE] = %v, want %v", tc.tracker, got, tc.readable)
+		}
+		if got := g["ISSUE_TRACKER_GITHUB_LINKS_READABLE"]; got != tc.githubArm {
+			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_GITHUB_LINKS_READABLE] = %v, want %v", tc.tracker, got, tc.githubArm)
+		}
+		if got := g["ISSUE_TRACKER_LINKS_REACHABLE"]; got != (tc.readable && tc.tracker != "local") {
+			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_LINKS_REACHABLE] = %v, want %v", tc.tracker, got, tc.readable && tc.tracker != "local")
+		}
+		if got := g["ISSUE_TRACKER_LINKS_UNREADABLE"]; got != !tc.readable {
+			t.Errorf("Gates(IssueTracker=%q)[ISSUE_TRACKER_LINKS_UNREADABLE] = %v, want %v", tc.tracker, got, !tc.readable)
+		}
+	}
+}
+
 // TestGatesBackendAgnosticReadWriteAndRelayed pins ISSUE_TRACKER_READWRITE and
 // ISSUE_TRACKER_RELAYED as the exact unions of the backend-named gates they
 // replace on the slot rows, across every tracker, access mode, dispatch kind

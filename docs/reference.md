@@ -4232,7 +4232,8 @@ such block and are experimental, so you select them by editing
   `gh issue comment`, and a run whose relayed verdict is missing fails to
   `agent-research-failed` instead of applying a bare verdict label (issue
   #5245). The backend row's `inBoxUnwritableTracker` bit drives both
-  halves.
+  halves, and also swaps the work, research and scout issue-read steps
+  to say linked Jira issues cannot be read from the Box (issue #6344).
 
   A blocked work run's progress comment is host-posted on Jira for the
   same reason: under `read-write` the IF BLOCKED step tells the agent to
