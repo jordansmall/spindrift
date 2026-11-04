@@ -87,34 +87,27 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			// The launcher, never the Driver, owns the draft to ready flip at
 			// green, inverting the old draft-until-ready invariant (issues
 			// #1651, #1653, #1654, #1614, #1625). MarkReady is idempotent, so
-			// it runs before the guard and merge-mode checks below: a PR
-			// downgraded to manual must not stay stranded as a draft.
-			if err := s.pr.MarkReady(pr); err != nil {
-				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, err)
+			// it runs before the hold and merge-mode checks below: a PR
+			// downgraded to manual must not stay stranded as a draft. It also
+			// precedes any mergeability read, since Forgejo reports a draft pull
+			// unmergeable; a PR that does conflict is demoted again by the
+			// conflict response, as an immediate merge's conflict is.
+			if mrErr := s.pr.MarkReady(pr); mrErr != nil {
+				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, mrErr)
 			}
-			matched, guardErr := s.mergeGuardHit(pr)
-			if guardErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
-				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
-				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardCheckError), ""
-			}
-			if len(matched) > 0 {
-				fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
-				s.it.Comment(num, mergeGuardComment(matched))
-				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardHit), ""
-			}
-			heldRow, held, holdErr := s.mergeByHandHold(num)
-			if holdErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  check=tuning  !! %v\n", num, pr, holdErr)
-				s.commentHoldPR(num, pr, holdCheckErrorComment(mergeByHandRows(), holdErr))
-				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardCheckError), ""
-			}
+			// A hold takes the PR away from the merge below, so a human gets it
+			// instead; under immediate that PR must still merge into its base
+			// first, which the merge path's own conflict handling would have
+			// checked (issue #6368).
+			holdReason, postHoldComment := s.handOffHold(num, pr)
+			held := holdReason != ""
+			var mergeReason string
+			var err error
 			if held {
-				fmt.Printf("    #%s  landing=%s  status=%s\n", num, pr, ReasonMergeByHand)
-				s.commentHoldPR(num, pr, holdComment(heldRow))
-				return s.completeLanding(num, gen, landingManual, ReasonMergeByHand), ""
+				err = s.resolveBeforeHandOff(num, gen, pr, d)
+			} else {
+				mergeReason, err = s.applyMergeMode(num, gen, pr, d)
 			}
-			mergeReason, err := s.applyMergeMode(num, gen, pr, d)
 			if err != nil {
 				if errors.Is(err, errAbandoned) {
 					return landingAbandoned, ""
@@ -142,7 +135,12 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				}
 				fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
+				postHoldComment()
 				return s.completeLanding(num, gen, landingManual, ReasonMergeBlocked), ""
+			}
+			if held {
+				postHoldComment()
+				return s.completeLanding(num, gen, landingManual, holdReason), ""
 			}
 			return s.completeLanding(num, gen, mergedLanding(mergeReason), mergeReason), ""
 		case gateTerminal:
@@ -582,6 +580,159 @@ func (s *Settle) mergeByHandHold(num string) (chore.Row, bool, error) {
 	return chore.Row{}, false, nil
 }
 
+// handOffHold decides whether the green PR is held from the merge mode and
+// handed to a human instead: a merge-guard hit or check error, or a
+// merge-by-hand hold. It logs the hold as soon as it is decided, so a
+// conflict response that then fails leaves that line ahead of its own. A
+// non-empty reason is the landing's settled reason, and comment posts the
+// explanation once the hand-off is certain; it is a no-op when nothing holds.
+func (s *Settle) handOffHold(num, pr string) (reason string, comment func()) {
+	matched, guardErr := s.mergeGuardHit(pr)
+	if guardErr != nil {
+		fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
+		return ReasonMergeGuardCheckError, func() {
+			s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
+		}
+	}
+	if len(matched) > 0 {
+		fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
+		return ReasonMergeGuardHit, func() { s.it.Comment(num, mergeGuardComment(matched)) }
+	}
+	heldRow, isHeld, holdErr := s.mergeByHandHold(num)
+	if holdErr != nil {
+		fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  check=tuning  !! %v\n", num, pr, holdErr)
+		return ReasonMergeGuardCheckError, func() {
+			s.commentHoldPR(num, pr, holdCheckErrorComment(mergeByHandRows(), holdErr))
+		}
+	}
+	if isHeld {
+		fmt.Printf("    #%s  landing=%s  status=%s\n", num, pr, ReasonMergeByHand)
+		return ReasonMergeByHand, func() { s.commentHoldPR(num, pr, holdComment(heldRow)) }
+	}
+	return "", func() {}
+}
+
+// mergeableUnknownPolls bounds how long resolveBeforeHandOff waits for the
+// forge to compute a PR's mergeability before giving up on a verdict.
+const mergeableUnknownPolls = 3
+
+// awaitMergeable reads pr's mergeability, polling up to mergeableUnknownPolls
+// times while the forge answers UNKNOWN. ok is false when no verdict came, an
+// unreadable forge or one still UNKNOWN; the reason is already logged, with
+// noVerdict naming what the caller does without one.
+func (s *Settle) awaitMergeable(num, pr string, interval time.Duration, noVerdict string) (forge.MergeableState, bool) {
+	for poll := 0; poll < mergeableUnknownPolls; poll++ {
+		if poll > 0 {
+			s.clock.Sleep(interval)
+		}
+		state, err := s.pr.Mergeable(pr)
+		if err != nil {
+			fmt.Printf("    #%s  landing=%s  status=mergeable-check-error  !! %v\n", num, pr, err)
+			return forge.MergeableUnknown, false
+		}
+		if state != forge.MergeableUnknown {
+			return state, true
+		}
+	}
+	fmt.Printf("    #%s  landing=%s  status=mergeable-unknown  ~~ %s\n", num, pr, noVerdict)
+	return forge.MergeableUnknown, false
+}
+
+// resolveBeforeHandOff runs the immediate path's conflict response ahead of a
+// hold's hand-off, so a human is never handed a PR that no longer merges into
+// its base (issue #6368). Other merge modes keep their exits. Only a
+// CONFLICTING verdict that a re-read one poll interval later repeats acts:
+// Forgejo's boolean is also false while its async conflict check runs, so one
+// read is not proof. Both reads wait out UNKNOWN through awaitMergeable; a
+// forge that gives no verdict, or a re-read that does not repeat CONFLICTING,
+// hands off without a conflict response. The response is respondToConflict, the
+// same one mergeImmediate runs, so a failure returns the errors that path does
+// and selfHealGate settles them identically.
+func (s *Settle) resolveBeforeHandOff(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
+	if s.cfg.MergeMode != "immediate" {
+		return nil
+	}
+	interval := time.Duration(s.cfg.MergePollInterval) * time.Second
+	if state, ok := s.awaitMergeable(num, pr, interval, "handing off without a conflict check"); !ok || state != forge.MergeableConflicting {
+		return nil
+	}
+	s.clock.Sleep(interval)
+	again, ok := s.awaitMergeable(num, pr, interval, "handing off without a conflict response")
+	if !ok {
+		return nil
+	}
+	if again != forge.MergeableConflicting {
+		fmt.Printf("    #%s  landing=%s  status=conflict-unconfirmed  ~~ handing off without a conflict response\n", num, pr)
+		return nil
+	}
+	if s.terminated(num, gen) {
+		return errAbandoned
+	}
+	fmt.Printf("    #%s  landing=%s  status=handoff-conflict\n", num, pr)
+	conflictErr := fmt.Errorf("%w: PR conflicts with its base", forge.ErrMergeConflict)
+	_, err := s.respondToConflict(num, gen, pr, d, s.cfForNum(num), conflictErr, &rebaseBudget{})
+	return err
+}
+
+// rebaseBudget counts a caller's rebase attempts and transient-push retries
+// across its respondToConflict calls.
+type rebaseBudget struct{ attempts, pushRetries int }
+
+// respondToConflict answers a genuine merge conflict on a green PR: demote it
+// to draft (issue #1863) as a visible signal it is not currently mergeable,
+// rebase it (retrying a transient push failure), fall back to a conflict-resolve
+// dispatch when the rebase itself conflicts, and wait for the force-pushed head
+// to go green. budget is the caller's, shared across that caller's own calls
+// (mergeImmediate's loop), so the caller decides how far it reaches; an
+// exhausted budget returns conflictErr unchanged.
+// resolved reports that a conflict-resolve dispatch ran, so the caller's next
+// conflict is the same one read from a stale snapshot and must not be rebased
+// again.
+func (s *Settle) respondToConflict(num string, gen uint64, pr string, d dispatch.Dispatcher, cf forge.CodeForge, conflictErr error, budget *rebaseBudget) (resolved bool, err error) {
+	// Best-effort; nil-guarded because landPushOnly reaches mergeImmediate with
+	// s.pr unset.
+	if s.pr != nil {
+		if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
+			fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
+		}
+	}
+	if budget.attempts >= s.cfg.MaxRebaseAttempts {
+		return false, conflictErr
+	}
+	budget.attempts++
+	fmt.Printf("    #%s  landing=%s  status=rebase-retry  attempt=%d/%d\n",
+		num, pr, budget.attempts, s.cfg.MaxRebaseAttempts)
+	rbErr := cf.Rebase(pr)
+	for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && budget.pushRetries < s.cfg.MaxRebaseAttempts {
+		budget.pushRetries++
+		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
+			num, pr, budget.pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
+		s.transientBackoff().Do(budget.pushRetries)
+		rbErr = cf.Rebase(pr)
+	}
+	if rbErr != nil {
+		if errors.Is(rbErr, forge.ErrTransientPushFailure) {
+			fmt.Printf("    #%s  landing=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
+				num, pr, budget.pushRetries, rbErr)
+			return false, rbErr
+		}
+		if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
+			if crErr := s.resolveConflict(num, gen, pr, d); crErr != nil {
+				return false, crErr
+			}
+			if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
+				return false, rwErr
+			}
+			return true, nil
+		}
+		fmt.Printf("    #%s  landing=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
+		return false, rbErr
+	}
+	// The rebase force-push reset the PR's required checks, so the next merge
+	// attempt must wait for the new head to go green.
+	return false, s.rewaitAfterForcePush(num, gen, pr)
+}
+
 // applyMergeMode performs the mode-specific action once a landing is ready to
 // merge: CI green on a PR, or straight away on a push-only forge. It runs
 // before the Complete commit, which both callers make through completeLanding
@@ -633,15 +784,14 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 // termination check ahead of preflightStaleBase duplicates the loop's own first
 // iteration deliberately, because preflightStaleBase force-pushes (issue #943).
 func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
-	rebaseAttempts := 0
-	pushRetries := 0
+	var budget rebaseBudget
 	checksBlockedAttempts := 0
 	mergeTransientAttempts := 0
 	skipRebase := false
 	if s.terminated(num, gen) {
 		return errAbandoned
 	}
-	// preflightStaleBase keeps its own retry budget: sharing rebaseAttempts with
+	// preflightStaleBase keeps its own retry budget: sharing the rebase budget with
 	// the conflict loop below would let one path exhaust the other's allowance.
 	if err := s.preflightStaleBase(num, gen, pr, d); err != nil {
 		return err
@@ -690,53 +840,11 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
-		// A genuine conflict: demote to draft (issue #1863) as a visible signal
-		// the PR is not currently mergeable. Best-effort; nil-guarded because
-		// landPushOnly reaches mergeImmediate with s.pr unset.
-		if s.pr != nil {
-			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
-			}
+		resolved, rErr := s.respondToConflict(num, gen, pr, d, cf, err, &budget)
+		if rErr != nil {
+			return rErr
 		}
-		if rebaseAttempts >= s.cfg.MaxRebaseAttempts {
-			return err
-		}
-		rebaseAttempts++
-		fmt.Printf("    #%s  landing=%s  status=rebase-retry  attempt=%d/%d\n",
-			num, pr, rebaseAttempts, s.cfg.MaxRebaseAttempts)
-		rbErr := cf.Rebase(pr)
-		for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts {
-			pushRetries++
-			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
-				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
-			s.transientBackoff().Do(pushRetries)
-			rbErr = cf.Rebase(pr)
-		}
-		if rbErr != nil {
-			if errors.Is(rbErr, forge.ErrTransientPushFailure) {
-				fmt.Printf("    #%s  landing=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
-					num, pr, pushRetries, rbErr)
-				return rbErr
-			}
-			if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
-				if crErr := s.resolveConflict(num, gen, pr, d); crErr != nil {
-					return crErr
-				}
-				if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
-					return rwErr
-				}
-				skipRebase = true
-			} else {
-				fmt.Printf("    #%s  landing=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
-				return rbErr
-			}
-			continue
-		}
-		// The rebase force-push reset the PR's required checks, so the next merge
-		// attempt must wait for the new head to go green.
-		if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
-			return rwErr
-		}
+		skipRebase = resolved
 	}
 }
 

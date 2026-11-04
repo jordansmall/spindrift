@@ -48,6 +48,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 			prs:             map[string]PR{},
 			branchPRs:       map[string]string{},
 			mergeableStates: map[string]MergeableState{},
+			mergeableQ:      map[string][]MergeableState{},
 			needsUpdate:     map[string]bool{},
 			drafts:          map[string]bool{},
 			checkQ:          map[string][]RollupState{},

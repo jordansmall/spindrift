@@ -13,6 +13,7 @@ type PRForgeFake struct {
 	prs             map[string]PR
 	branchPRs       map[string]string // keyed by branch name, valued by PR URL
 	mergeableStates map[string]MergeableState
+	mergeableQ      map[string][]MergeableState
 	needsUpdate     map[string]bool
 	drafts          map[string]bool // keyed by PR URL; internal-only, forge.PR carries no draft field (#2503)
 	checkQ          map[string][]RollupState
@@ -75,6 +76,19 @@ type PRForgeFake struct {
 	// CommentPRCalls records every CommentPR call, in order.
 	CommentPRCalls []CommentPRCall
 
+	// MergeableErr, if non-nil, is returned by every Mergeable call once
+	// MergeableCalls exceeds MergeableErrAfter.
+	MergeableErr error
+	// MergeableErrAfter is how many Mergeable calls succeed before
+	// MergeableErr applies.
+	MergeableErrAfter int
+	// MergeableCalls counts Mergeable calls.
+	MergeableCalls int
+	// DraftUnmergeable models Forgejo, whose boolean mergeable is false for a
+	// draft pull: Mergeable then reports MergeableConflicting while the PR is
+	// draft (see SetDraft), whatever state was scripted.
+	DraftUnmergeable bool
+
 	// MarkDraftErr, if non-nil, is returned by MarkDraft.
 	MarkDraftErr error
 	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
@@ -124,11 +138,30 @@ func (pf *PRForgeFake) SetMergeableState(url string, state MergeableState) {
 	pf.mergeableStates[url] = state
 }
 
-// Mergeable returns the scripted state for url, or MergeableUnknown when
-// nothing was scripted.
+// SetMergeableStates scripts successive Mergeable results for url, consumed
+// before the state SetMergeableState scripts.
+func (pf *PRForgeFake) SetMergeableStates(url string, states []MergeableState) {
+	pf.mu.Lock()
+	defer pf.mu.Unlock()
+	pf.mergeableQ[url] = append([]MergeableState(nil), states...)
+}
+
+// Mergeable returns the next queued state for url, else the scripted state, or
+// MergeableUnknown when nothing was scripted.
 func (pf *PRForgeFake) Mergeable(url string) (MergeableState, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
+	pf.MergeableCalls++
+	if pf.MergeableErr != nil && pf.MergeableCalls > pf.MergeableErrAfter {
+		return MergeableUnknown, pf.MergeableErr
+	}
+	if pf.DraftUnmergeable && pf.drafts[url] {
+		return MergeableConflicting, nil
+	}
+	if q := pf.mergeableQ[url]; len(q) > 0 {
+		pf.mergeableQ[url] = q[1:]
+		return q[0], nil
+	}
 	if s, ok := pf.mergeableStates[url]; ok {
 		return s, nil
 	}
