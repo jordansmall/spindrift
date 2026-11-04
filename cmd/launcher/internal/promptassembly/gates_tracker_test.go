@@ -1006,3 +1006,52 @@ func TestGatesPRBodyIssueRefKeysOnKnob(t *testing.T) {
 		}
 	}
 }
+
+// TestAssembleFilerRelayReason pins the relay's stated reason (issue #6354):
+// a read-write Box on a tracker with no in-Box client never claims a
+// read-only token (its prompt later tells it to push with that token), while
+// a read-only Box still does, on both signal carriers.
+func TestAssembleFilerRelayReason(t *testing.T) {
+	reg := loadTestRegistry(t)
+	const readOnlyClaim = "Your token is read-only"
+	const noClient = "This issue tracker has no in-Box client"
+	const template = `{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read"]}}`
+	cases := []struct {
+		name         string
+		tracker      string
+		carrier      string
+		boxWrite     bool
+		wantReadOnly bool
+	}{
+		{"jira read-write log", "jira", "log", true, false},
+		{"jira read-write socket", "jira", "socket", true, false},
+		{"github read-only log", "github", "log", false, true},
+		{"github read-only socket", "github", "socket", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.IssueTracker = tc.tracker
+			env.SignalCarrier = tc.carrier
+			env.BoxWriteEnabled = tc.boxWrite
+			env.FilerEnabled = true
+			env.AgentsJSONTemplate = template
+			env.AgentsPromptFiles = agentsPromptFilesAll
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			for name, text := range map[string]string{"prompt": result.Prompt, "agents": result.AgentsJSON} {
+				if got := strings.Contains(text, readOnlyClaim); got != tc.wantReadOnly {
+					t.Errorf("%s contains %q = %v, want %v", name, readOnlyClaim, got, tc.wantReadOnly)
+				}
+				if got := strings.Contains(text, noClient); got == tc.wantReadOnly {
+					t.Errorf("%s contains %q = %v, want %v", name, noClient, got, !tc.wantReadOnly)
+				}
+				if strings.Contains(text, "${FILER_RELAY_REASON}") {
+					t.Errorf("%s leaks the literal ${FILER_RELAY_REASON}", name)
+				}
+			}
+		})
+	}
+}
