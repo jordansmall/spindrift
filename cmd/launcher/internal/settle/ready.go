@@ -556,11 +556,11 @@ func mergeByHandRows() []chore.Row {
 
 // mergeByHandHold reports whether num's issue is a finding of a MergeByHand
 // Chore, whose PR the host never merges, and which row held it. With no such
-// row the issue is not read at all. A tracker with a label registry is judged
-// by the row's finding label alone, so removing it is the override; one
-// without may never have applied the label, so the body's chore=<name> marker
-// counts there too. An unreadable issue is an error: the caller holds as a
-// precaution.
+// row the issue is not read at all. A tracker whose issues wear labels is
+// judged by the row's finding label alone, so removing it is the override; one
+// whose issues do not (local) may never have applied the label, so the body's
+// chore=<name> marker counts there too. An unreadable issue is an error: the
+// caller holds as a precaution.
 func (s *Settle) mergeByHandHold(num string) (chore.Row, bool, error) {
 	rows := mergeByHandRows()
 	if len(rows) == 0 {
@@ -570,12 +570,12 @@ func (s *Settle) mergeByHandHold(num string) (chore.Row, bool, error) {
 	if err != nil {
 		return chore.Row{}, false, err
 	}
-	registry := s.cfg.Capabilities.TrackerDescriptor.LabelRegistry
+	wearsLabels := s.cfg.Capabilities.TrackerDescriptor.IssuesWearLabels
 	for _, r := range rows {
 		if wearsFindingLabel(r, iss.Labels) {
 			return r, true, nil
 		}
-		if !registry && carriesChoreMarker(iss.Body, r.Name) {
+		if !wearsLabels && carriesChoreMarker(iss.Body, r.Name) {
 			return r, true, nil
 		}
 	}
