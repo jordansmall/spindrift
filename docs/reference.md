@@ -4962,8 +4962,10 @@ own search matches them — a permanent, bounded gap, not a transition period,
 and deliberately not backfilled (a guessed key could skip a new finding
 without filing anything a human would triage). The marker records the folded form (e.g.
 `pkg:file:go:type:field`), so a literal body search for the raw site key
-— the Filer prompt's own body search (`gh issue list --search` on GitHub and jira, the REST
-`q=` issue search on Forgejo, none on `local`) — may not
+— the Filer prompt's own body search (`gh issue list --search` on GitHub, the REST
+`q=` issue search on Forgejo, none on `local` or on a tracker the Box cannot
+write such as Jira, where the host's dedup over relayed intents is the whole
+check) — may not
 match the marker text; the Launcher's host-side dedup is the backstop.
 The Launcher appends that marker line to every issue it files,
 empty (`<!-- spindrift-dedup:  -->`, which reads back as no keys) when
