@@ -170,8 +170,8 @@ let
     builtins.readFile ../../cmd/launcher/internal/forge/jira/testdata/status-mapping-cases.json
   );
 
-  mapEntry = "\t\"failed\":       forge.Failed,\n";
-  errTail = "inProgress, complete, failed)";
+  mapEntry = "\t\"ambiguous\":    forge.Ambiguous,\n";
+  errTail = "inProgress, complete, failed, ambiguous)";
   patchGoSrc = pairs: builtins.replaceStrings (map (p: p.from) pairs) (map (p: p.to) pairs) jiraGoSrc;
 
   # By construction the map and error string are rewritten together (except
@@ -185,7 +185,7 @@ let
       }
       {
         from = errTail;
-        to = "inProgress, complete, failed, blocked)";
+        to = "inProgress, complete, failed, ambiguous, blocked)";
       }
     ];
     key-renamed = [
@@ -195,7 +195,7 @@ let
       }
       {
         from = errTail;
-        to = "inProgress, completed, failed)";
+        to = "inProgress, completed, failed, ambiguous)";
       }
     ];
     key-dropped = [
@@ -205,7 +205,7 @@ let
       }
       {
         from = errTail;
-        to = "inProgress, complete)";
+        to = "inProgress, complete, failed)";
       }
     ];
     error-string-only = [
@@ -265,18 +265,19 @@ in
       oldLiteral =
         mapMarker
         + "\n\t\"dispatchable\": forge.Dispatchable,\n\t\"inProgress\":   forge.InProgress,\n"
-        + "\t\"complete\":     forge.Complete,\n\t\"failed\":       forge.Failed,\n}";
+        + "\t\"complete\":     forge.Complete,\n\t\"failed\":       forge.Failed,\n"
+        + "\t\"ambiguous\":    forge.Ambiguous,\n}";
       newLiteral =
         mapMarker
         + "\"dispatchable\": forge.Dispatchable, \"inProgress\": forge.InProgress, "
-        + "\"complete\": forge.Complete, \"failed\": forge.Failed}";
+        + "\"complete\": forge.Complete, \"failed\": forge.Failed, \"ambiguous\": forge.Ambiguous}";
       doctored = builtins.replaceStrings [ oldLiteral ] [ newLiteral ] jiraGoSrc;
     in
     assert assertMsg (doctored != jiraGoSrc)
       "jira-status-mapping-keys-reformat-regression: the map literal no longer matches the doctoring pattern; update oldLiteral";
     assert assertMsg (
       sortKeys (extractMapKeys doctored) == sortKeys jsm.validKeys
-    ) "extractMapKeys must still find all four keys in a one-line map literal";
+    ) "extractMapKeys must still find all five keys in a one-line map literal";
     assert assertMsg (builtins.tryEval (checkKeys jsm.validKeys doctored)).success
       "checkKeys must accept a gofmt-legal reflow of the map literal";
     pkgs.runCommand "jira-status-mapping-keys-reformat-regression" { } "touch $out";
@@ -325,7 +326,7 @@ in
     pkgs.runCommand "jira-status-mapping-parse-valid" { } "touch $out";
 
   # tryEval exposes only success or failure, never the thrown message text, so
-  # this cannot also pin that the message names the four valid states (see
+  # this cannot also pin that the message names the five valid states (see
   # nix/checks/drivers.nix's drivers-assert-shape-missing-attribute-throws).
   jira-status-mapping-parse-rejects-unknown-key =
     let
@@ -342,10 +343,11 @@ in
         inProgress = "In Progress";
         complete = "Done";
         failed = "Failed";
+        ambiguous = "Needs Spec";
       };
       out = jsm.parse (builtins.toJSON mapping);
     in
-    assert assertMsg (out == mapping) "parse must return all four keys unchanged";
+    assert assertMsg (out == mapping) "parse must return all five keys unchanged";
     pkgs.runCommand "jira-status-mapping-parse-valid-all-keys" { } "touch $out";
 
   # Go's json.Unmarshal of "null" into map[string]string leaves the map nil
@@ -417,4 +419,39 @@ in
     in
     assert assertMsg (out == { complete = null; }) "parse must pass a null value through unchanged";
     pkgs.runCommand "jira-status-mapping-parse-allows-null-value" { } "touch $out";
+
+  # Mirrors ParseStatusMapping's sharing rule: only failed and ambiguous may map
+  # to one status (compared ASCII-case-insensitively); an empty or null value
+  # maps to no status, so it never collides.
+  jira-status-mapping-parse-status-sharing =
+    let
+      accepts = v: (builtins.tryEval (builtins.deepSeq (jsm.parse (builtins.toJSON v)) true)).success;
+    in
+    assert assertMsg (accepts { ambiguous = "Needs Spec"; }) "parse must accept the ambiguous key";
+    assert assertMsg (accepts {
+      failed = "Blocked";
+      ambiguous = "bLOCKED";
+    }) "parse must accept failed and ambiguous sharing a status, case-folded";
+    assert assertMsg (
+      !accepts {
+        dispatchable = "To Do";
+        inProgress = "to do";
+      }
+    ) "parse must reject dispatchable and inProgress sharing a status";
+    assert assertMsg (
+      !accepts {
+        ambiguous = "X";
+        failed = "X";
+        complete = "x";
+      }
+    ) "parse must reject complete sharing a status with failed and ambiguous";
+    assert assertMsg (accepts {
+      complete = null;
+      failed = null;
+    }) "parse must not collide two null values";
+    assert assertMsg (accepts {
+      complete = "";
+      failed = "";
+    }) "parse must not collide two empty values";
+    pkgs.runCommand "jira-status-mapping-parse-status-sharing" { } "touch $out";
 }

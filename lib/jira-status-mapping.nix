@@ -15,6 +15,7 @@ let
     "inProgress"
     "complete"
     "failed"
+    "ambiguous"
   ];
 
   # Must match jira.go's statusTargetFields; the same check enforces it.
@@ -22,6 +23,13 @@ let
     "status"
     "resolution"
   ];
+
+  # ASCII-only: Go's strings.EqualFold also folds Unicode, so a non-ASCII
+  # case-only share is rejected at launcher startup but not here.
+  chars = s: builtins.genList (i: builtins.substring i 1 s) (builtins.stringLength s);
+  foldCase = builtins.replaceStrings (chars "ABCDEFGHIJKLMNOPQRSTUVWXYZ") (
+    chars "abcdefghijklmnopqrstuvwxyz"
+  );
 
   # builtins.typeOf names as the JSON type names jira.go's jsonTypeName reports.
   jsonType = {
@@ -89,6 +97,46 @@ let
     else
       ''JIRA_STATUS_MAPPING: key "${key}": expected a status name or a {"status", "resolution"} object, got ${jsonType.${builtins.typeOf v}}'';
 
+  statusOf =
+    v:
+    if builtins.isString v then
+      v
+    else if builtins.isAttrs v then
+      v.status
+    else
+      "";
+
+  # Mirrors ParseStatusMapping's share check: unmapped keys never collide, keys
+  # are visited in sorted order, and the first holder of a status is the one
+  # reported.
+  shareError =
+    parsed:
+    let
+      withStatus = builtins.filter (k: statusOf parsed.${k} != "") (builtins.attrNames parsed);
+      firstHolder =
+        k:
+        builtins.head (
+          builtins.filter (p: foldCase (statusOf parsed.${p}) == foldCase (statusOf parsed.${k})) withStatus
+        );
+      shared = builtins.filter (
+        k:
+        let
+          p = firstHolder k;
+        in
+        p != k && !(p == "ambiguous" && k == "failed")
+      ) withStatus;
+    in
+    if shared == [ ] then
+      null
+    else
+      let
+        k = builtins.head shared;
+        p = firstHolder k;
+      in
+      ''JIRA_STATUS_MAPPING: keys "${p}" and "${k}" both map to status ${
+        builtins.toJSON (statusOf parsed.${p})
+      } (only failed and ambiguous may share a status)'';
+
   decode = s: if s == "" then null else builtins.fromJSON s;
 
   # The message ParseStatusMapping would fail with for a decoded value, or null
@@ -103,7 +151,12 @@ let
     else if !(builtins.isAttrs value) then
       "JIRA_STATUS_MAPPING: expected a JSON object, got ${jsonType.${builtins.typeOf value}}"
     else
-      firstNonNull (map (keyError value) (builtins.attrNames value));
+      let
+        keyErr = firstNonNull (map (keyError value) (builtins.attrNames value));
+      in
+      # Only reached once every value parsed, as Go's share check runs after
+      # its key loop, so statusOf never meets a non-string status.
+      if keyErr != null then keyErr else shareError value;
 
   # Pure so the corpus check can compare text; tryEval hides a throw's.
   error = s: valueError (decode s);

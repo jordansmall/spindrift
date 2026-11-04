@@ -62,6 +62,85 @@ func TestParseStatusMapping_UnknownKey(t *testing.T) {
 	}
 }
 
+func TestParseStatusMapping_AmbiguousKey(t *testing.T) {
+	m, err := jira.ParseStatusMapping(`{"ambiguous":"Needs Spec"}`)
+	if err != nil {
+		t.Fatalf("ParseStatusMapping: %v", err)
+	}
+	if m[forge.Ambiguous].Status != "Needs Spec" {
+		t.Errorf("m[Ambiguous] = %q, want %q", m[forge.Ambiguous].Status, "Needs Spec")
+	}
+}
+
+func TestParseStatusMapping_UnknownKeyListsAmbiguous(t *testing.T) {
+	_, err := jira.ParseStatusMapping(`{"disptchable":"To Do"}`)
+	if err == nil || !strings.Contains(err.Error(), "(want one of dispatchable, inProgress, complete, failed, ambiguous)") {
+		t.Fatalf("err = %v, want the key list ending in ambiguous", err)
+	}
+}
+
+// failed and ambiguous both mean a human must act, so they may share one
+// column, case-insensitively.
+func TestParseStatusMapping_FailedAndAmbiguousMayShare(t *testing.T) {
+	for _, s := range []string{
+		`{"failed":"Blocked","ambiguous":"Blocked"}`,
+		`{"failed":"Blocked","ambiguous":"blocked"}`,
+	} {
+		m, err := jira.ParseStatusMapping(s)
+		if err != nil {
+			t.Fatalf("ParseStatusMapping(%s): %v", s, err)
+		}
+		if m[forge.Failed].Status == "" || m[forge.Ambiguous].Status == "" {
+			t.Errorf("ParseStatusMapping(%s) = %v, want both mapped", s, m)
+		}
+	}
+}
+
+func TestParseStatusMapping_OtherSharesRejected(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{
+			"case-differing dispatchable and inProgress",
+			`{"dispatchable":"To Do","inProgress":"to do"}`,
+			`JIRA_STATUS_MAPPING: keys "dispatchable" and "inProgress" both map to status "To Do" (only failed and ambiguous may share a status)`,
+		},
+		{
+			"non-ASCII case-only share",
+			`{"dispatchable":"Ärger","inProgress":"ärger"}`,
+			`JIRA_STATUS_MAPPING: keys "dispatchable" and "inProgress" both map to status "Ärger" (only failed and ambiguous may share a status)`,
+		},
+		{
+			"complete and failed",
+			`{"failed":"Done","complete":"Done"}`,
+			`JIRA_STATUS_MAPPING: keys "complete" and "failed" both map to status "Done" (only failed and ambiguous may share a status)`,
+		},
+		{
+			"three-way ambiguous failed complete",
+			`{"ambiguous":"Blocked","failed":"Blocked","complete":"Blocked"}`,
+			`JIRA_STATUS_MAPPING: keys "ambiguous" and "complete" both map to status "Blocked" (only failed and ambiguous may share a status)`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := jira.ParseStatusMapping(tc.in)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// An empty (or null) status is unmapped, so two of them never collide.
+func TestParseStatusMapping_EmptyStatusesDoNotCollide(t *testing.T) {
+	for _, s := range []string{
+		`{"dispatchable":"","inProgress":""}`,
+		`{"dispatchable":null,"complete":null}`,
+	} {
+		if _, err := jira.ParseStatusMapping(s); err != nil {
+			t.Errorf("ParseStatusMapping(%s): %v", s, err)
+		}
+	}
+}
+
 func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 	if _, err := jira.ParseStatusMapping(`{not json`); err == nil {
 		t.Fatal("want error for invalid JSON, got nil")
@@ -86,7 +165,7 @@ func TestParseStatusMapping_Corpus(t *testing.T) {
 	}
 	keys := map[string]forge.DispatchState{
 		"dispatchable": forge.Dispatchable, "inProgress": forge.InProgress,
-		"complete": forge.Complete, "failed": forge.Failed,
+		"complete": forge.Complete, "failed": forge.Failed, "ambiguous": forge.Ambiguous,
 	}
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
@@ -831,6 +910,114 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	if !reflect.DeepEqual(gotLabelOps, want) {
 		t.Errorf("label ops = %v, want %v", gotLabelOps, want)
 	}
+}
+
+// newAmbiguousClient builds a client against url whose ambiguous halt label is
+// set, so a fallback has a label to apply.
+func newAmbiguousClient(url string, mapping map[forge.DispatchState]jira.StatusTarget) forge.IssueTracker {
+	labels := testLabels
+	labels.Ambiguous = "agent-ambiguous-spec"
+	return jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:       url,
+		Token:         "tok",
+		StatusMapping: mapping,
+		Labels:        labels,
+	})
+}
+
+// decodeLabelOps returns the label operations of a Jira issue-update PUT body.
+func decodeLabelOps(r *http.Request) []map[string]string {
+	var body struct {
+		Update struct {
+			Labels []map[string]string `json:"labels"`
+		} `json:"update"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	return body.Update.Labels
+}
+
+var needsSpec = map[forge.DispatchState]jira.StatusTarget{forge.Ambiguous: {Status: "Needs Spec"}}
+
+func assertAmbiguousLabelAdded(t *testing.T, ops []map[string]string) {
+	t.Helper()
+	if !slices.ContainsFunc(ops, func(op map[string]string) bool { return op["add"] == "agent-ambiguous-spec" }) {
+		t.Errorf("label ops = %v, want an add of agent-ambiguous-spec", ops)
+	}
+}
+
+// Ambiguous mapped natively performs the workflow transition, not a label swap.
+func TestJiraClient_TransitionState_AmbiguousMappedTransitions(t *testing.T) {
+	var posted string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-5/transitions":
+			fmt.Fprint(w, `{"transitions":[{"id":"31","name":"Block","to":{"name":"Needs Spec"}}]}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue/PROJ-5/transitions":
+			var body map[string]map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			posted = body["transition"]["id"]
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-5":
+			// Best-effort stale-label strip after the native transition.
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := newAmbiguousClient(srv.URL, needsSpec)
+	if err := jc.TransitionState("PROJ-5", forge.InProgress, forge.Ambiguous); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	if posted != "31" {
+		t.Errorf("posted transition id = %q, want 31", posted)
+	}
+}
+
+// Unmapped ambiguous keeps the agent-ambiguous-spec label, with no workflow
+// transition queried.
+func TestJiraClient_TransitionState_AmbiguousUnmappedFallsBackToLabel(t *testing.T) {
+	var gotLabelOps []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/rest/api/2/issue/PROJ-6" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			return
+		}
+		gotLabelOps = decodeLabelOps(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	jc := newAmbiguousClient(srv.URL, map[forge.DispatchState]jira.StatusTarget{})
+	if err := jc.TransitionState("PROJ-6", forge.InProgress, forge.Ambiguous); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	assertAmbiguousLabelAdded(t, gotLabelOps)
+}
+
+// A mapped ambiguous whose transition the workflow does not offer falls back to
+// the agent-ambiguous-spec label.
+func TestJiraClient_TransitionState_AmbiguousTransitionUnavailableFallsBackToLabel(t *testing.T) {
+	var gotLabelOps []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-7/transitions":
+			fmt.Fprint(w, `{"transitions":[{"id":"99","name":"Reopen","to":{"name":"Backlog"}}]}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-7":
+			gotLabelOps = decodeLabelOps(r)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := newAmbiguousClient(srv.URL, needsSpec)
+	if err := jc.TransitionState("PROJ-7", forge.InProgress, forge.Ambiguous); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	assertAmbiguousLabelAdded(t, gotLabelOps)
 }
 
 // A mapped transition the issue's current workflow does not offer also falls
