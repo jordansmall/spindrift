@@ -5131,7 +5131,9 @@ offers to create it, but treats it as advisory: like the labels above, a
 missing `agent-tuning-finding` label never fails the check unless `--butler`
 promotes the butler tier, and even then only while `tuning` is in
 `BUTLER_CHORES` on a tracker with a label registry (`github`/`forgejo`). It is
-never required on `local`/`jira`, where the body marker carries the fact. To
+never required on `local`/`jira`, where the body marker carries the fact (a
+butler on `jira` refuses to start until Jira gains host-side issue filing,
+issue #6343). To
 create it manually:
 
 ```sh
@@ -6629,7 +6631,9 @@ change), so such a run keeps the old stale-claim behavior until the
 wrapper is regenerated.
 
 Every butler config failure exits 6 (config-invalid): a missing Filer, a
-`CODE_FORGE` with no Ledger, a
+`CODE_FORGE` with no Ledger, an `ISSUE_TRACKER` that cannot file issues
+host-side (the Filer relays findings only through host-side issue filing, so
+they would be lost; issue #6343), a
 malformed `BUTLER_CHORE_CLASSES`, a sweep cap above the day cap, a malformed
 `BUTLER_EVERY`/`BUTLER_CLAIM_TIMEOUT`/`DAEMON_AWAKE_WINDOW`, and the
 prompt-file check above. `spindrift doctor --butler` runs the same checks

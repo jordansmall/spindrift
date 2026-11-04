@@ -60,7 +60,8 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
 - `agent-butler-finding` — filed by the host from a butler Chore finding
   (ADR 0056); the host creates the label if missing, and a butler daemon
   refuses to start without it (except on `local`/`jira`, which have no
-  label registry to check). Never carries a dispatch label
+  label registry to check; a butler on `jira` refuses to start until Jira
+  gains host-side issue filing, issue #6343). Never carries a dispatch label
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
   **Opt-in exception** (issue #3880): the host itself adds
@@ -104,7 +105,8 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   with `tuning` in `BUTLER_CHORES` refuses to start without it. On
   `local`/`jira`, which have no label registry, the `chore=tuning` term in
   the issue body's dedup marker stands in for it (and nothing is required
-  at startup). Removing the label is the deliberate override. See [Merge
+  at startup; a butler on `jira` refuses to start until Jira gains host-side
+  issue filing, issue #6343). Removing the label is the deliberate override. See [Merge
   guard](docs/reference.md#merge-guard).
 
 ### Dispatch authentication

@@ -309,6 +309,30 @@ func TestDoctorReport_Butler_OptInValidatesButlerConfig(t *testing.T) {
 	}
 }
 
+// Issue #6343: doctor --butler refuses a tracker that cannot file issues
+// host-side, through the same resolveButlerSettings chain.
+func TestDoctorReport_Butler_TrackerCannotFileExitsConfigInvalid(t *testing.T) {
+	t.Setenv("FILER_MODEL", "claude-haiku-4-5-20251001")
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, doctor.ButlerLabelNames()...)
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	c.codeForge = "github"
+	c.butlerChores = "bugs"
+	c.butlerClaimTimeout = "15m"
+	c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
+
+	rc := doctorReadContext(c, f)
+	rc.capabilities = forge.ResolveCapabilities(f, f, backend.Descriptor{}, backend.Descriptor{})
+	var stdout, stderr bytes.Buffer
+	got := doctorReport(rc, &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true, butler: true})
+	if got != 2 || !strings.Contains(stderr.String(), "host-side issue filing") {
+		t.Errorf("want exit 2 naming host-side issue filing, got %d; stderr: %q", got, stderr.String())
+	}
+}
+
 // Issue #3920: doctor --butler folds resolveButlerSettings's whole chain
 // (butlerPreflight, BUTLER_EVERY, BUTLER_CLAIM_TIMEOUT, DAEMON_AWAKE_WINDOW)
 // into configErr, so each of butlerPreflight's guards must actually reach

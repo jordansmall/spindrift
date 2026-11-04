@@ -107,7 +107,9 @@ type choreCatalog struct {
 // entry is fine, its allow-list is just empty. The Filer gate
 // matters because a butler Box relays findings only through the Filer:
 // without one it would still report ready, and settling would advance
-// lastSwept and the cursor past findings nobody filed. An empty chore (no
+// lastSwept and the cursor past findings nobody filed. The same holds when
+// the Issue Tracker cannot file host-side (hostFiler nil, issue #6343): the
+// Filer's relayed findings would have nowhere to land. An empty chore (no
 // --chore) needs BUTLER_CHORES to name at least one candidate instead. A
 // per-sweep cap above the day cap is also rejected here: left alone, every
 // run would trip internal/chore.Check's SweepFindingsExceedHeadroom at
@@ -118,7 +120,7 @@ type choreCatalog struct {
 // claim -- otherwise they'd only surface once the Runner's Box fails
 // in promptassembly.choreSection, leaving the claim standing for the full
 // claim timeout (issue #3905).
-func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog choreCatalog) ([]chore.Chore, error) {
+func butlerPreflight(cfg config, choreName string, filerEnabled bool, hostFiler forge.HostPostedIssueFiler, catalog choreCatalog) ([]chore.Chore, error) {
 	row, ok := backendkit.ByName(cfg.codeForge)
 	if !ok || row.NewLedger == nil {
 		return nil, fmt.Errorf("butler: CODE_FORGE=%q cannot host a butler Ledger (supported: %s)", cfg.codeForge, strings.Join(ledgerCapableNames(), ", "))
@@ -175,6 +177,9 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog ch
 			}
 		}
 	}
+	if hostFiler == nil {
+		return nil, fmt.Errorf("butler: ISSUE_TRACKER=%q has no host-side issue filing, so the Filer's relayed findings would be lost", cfg.issueTracker)
+	}
 	if !filerEnabled {
 		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL)")
 	}
@@ -225,9 +230,9 @@ type butlerSettings struct {
 // guards (which also resolve BUTLER_CHORES, BUTLER_EVERY, BUTLER_CHORE_CLASSES
 // and, when the patch rung is on, BUTLER_PATCH_CLASSES, via chore.Load), then
 // BUTLER_CLAIM_TIMEOUT and DAEMON_AWAKE_WINDOW -- before any Ledger claim.
-func resolveButlerSettings(cfg config, choreName string) (butlerSettings, error) {
+func resolveButlerSettings(cfg config, caps forge.Capabilities, choreName string) (butlerSettings, error) {
 	filerEnabled := resolveAgentPresenceSignals(cfg.driver).filerEnabled
-	chores, err := butlerPreflight(cfg, choreName, filerEnabled, resolveChoreCatalog())
+	chores, err := butlerPreflight(cfg, choreName, filerEnabled, caps.HostPostedIssueFiler, resolveChoreCatalog())
 	if err != nil {
 		return butlerSettings{}, err
 	}
@@ -308,7 +313,7 @@ func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchF
 func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 	defer lc.cleanup()
 
-	settings, err := resolveButlerSettings(lc.config, choreName)
+	settings, err := resolveButlerSettings(lc.config, lc.capabilities, choreName)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return exitConfigInvalid
