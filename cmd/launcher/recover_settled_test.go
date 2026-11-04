@@ -150,3 +150,77 @@ func TestRecoverFailed_DeclinedAppendsSettled(t *testing.T) {
 
 	requireRecoverSettled(t, path, "complete", "recover-declined", read())
 }
+
+// JIRA_LIFECYCLE=status (issue #6353): a refused park comments on the card and
+// settles transition-refused rather than relay-failed.
+func TestParkQueueFailure_RefusedParkCommentsAndSettlesDistinctReason(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	path := stampPrimaryLog(t, x.dir, "42")
+	id, err := recoverrecord.BundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := testutil.InstallPipeReporter(t)
+	x.fc.TransitionStateErr = &forge.TransitionRefusedError{Issue: "42", From: "In Progress", To: "Blocked"}
+	x.fc.CommentCalls = nil
+
+	testutil.CaptureStderr(t, func() {
+		_ = parkQueueFailure(x.c, x.fc, "42", recoverrecord.Load(x.dir, "42", id), errors.New("boom"), time.Now(), io.Discard, io.Discard)
+	})
+
+	requireRecoverSettled(t, path, "failed", "transition-refused", read())
+	if len(x.fc.CommentCalls) != 1 || !strings.Contains(x.fc.CommentCalls[0].Body, "could not move") {
+		t.Errorf("comments = %+v, want one naming the refusal", x.fc.CommentCalls)
+	}
+}
+
+func TestRecoverFailed_RefusedRestoreCommentsRefusal(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
+	fc.TransitionStateErr = &forge.TransitionRefusedError{Issue: "42", From: "In Progress", To: "Done"}
+	orig := errors.New("no change")
+
+	var got error
+	testutil.CaptureStderr(t, func() {
+		got = recoverFailed(fc, capsFor(fc, fc), "42", orig, io.Discard, io.Discard)
+	})
+
+	if got != orig {
+		t.Errorf("err = %v, want the original failure", got)
+	}
+	if len(fc.CommentCalls) != 1 || !strings.Contains(fc.CommentCalls[0].Body, `"Done"`) {
+		t.Errorf("comments = %+v, want one naming the refusal", fc.CommentCalls)
+	}
+}
+
+// refuseRestore refuses the InProgress->Failed move (the stop-after-claim
+// restore) the way a status-lifecycle workflow without that edge would.
+type refuseRestore struct{ forge.IssueTracker }
+
+func (w refuseRestore) TransitionState(num string, from, to forge.DispatchState) error {
+	if from == forge.InProgress && to == forge.Failed {
+		return &forge.TransitionRefusedError{Issue: num, From: "In Progress", To: "Blocked"}
+	}
+	return w.IssueTracker.TransitionState(num, from, to)
+}
+
+func TestRecoverQueueOne_RefusedRestoreCommentsAndSettlesDistinctReason(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	path := stampPrimaryLog(t, x.dir, "42")
+	stop := withControlledStop(t)
+	read := testutil.InstallPipeReporter(t)
+	x.fc.CommentCalls = nil
+
+	testutil.CaptureStderr(t, func() {
+		x.runOn(t, stopAfterClaim{IssueTracker: refuseRestore{x.fc}, stop: stop}, x.cf, capsFor(x.tracker, x.cf))
+	})
+
+	requireRecoverSettled(t, path, "failed", "transition-refused", read())
+	if len(x.fc.CommentCalls) != 1 || !strings.Contains(x.fc.CommentCalls[0].Body, "could not move") {
+		t.Errorf("comments = %+v, want one naming the refusal", x.fc.CommentCalls)
+	}
+}

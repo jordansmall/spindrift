@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -308,6 +309,32 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 	fmt.Printf("    #%s  landing=%s  status=blocked  note=no outcome line; PR on %s left for manual adopt\n", num, res.URL, branch)
 }
 
+// Transition moves num from one dispatch state to another and is the one place
+// a refused TransitionState (a status-lifecycle tracker that could not move
+// the card, issue #6353) is recognised. A refusal is posted as a comment,
+// since no label was applied and the card would otherwise carry no trace of
+// why it did not move, and the returned reason and note are the ones the
+// Record should settle with. For any other outcome reason and note come back
+// unchanged. The TransitionState error is returned as is (nil on success);
+// logging it is the caller's, since each site words it differently.
+func Transition(it forge.IssueTracker, num string, from, to forge.DispatchState, reason, note string) (string, string, error) {
+	err := it.TransitionState(num, from, to)
+	var refused *forge.TransitionRefusedError
+	if !errors.As(err, &refused) {
+		return reason, note, err
+	}
+	if cerr := it.Comment(num, "spindrift could not move this issue: "+refused.Error()); cerr != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not comment the refused transition: %v\n", num, cerr)
+	}
+	// The displaced reason and note ride in the new note: a merged PR whose
+	// card could not reach Done still landed.
+	displaced := reason
+	if note != "" {
+		displaced += ": " + note
+	}
+	return ReasonTransitionRefused, fmt.Sprintf("%s (settle reason was %s)", refused.Error(), displaced), err
+}
+
 // settledLatch is one issue's most recently latched terminal decision,
 // awaiting flushSettled (issue #3627).
 type settledLatch struct {
@@ -329,7 +356,8 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState, note,
 	if s.cfg.Unclaimed && to != forge.Complete {
 		return
 	}
-	if err := s.it.TransitionState(num, from, to); err != nil {
+	reason, note, err := Transition(s.it, num, from, to, reason, note)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, to, err)
 	}
 	if !to.Terminal() {

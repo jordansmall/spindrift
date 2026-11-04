@@ -107,12 +107,13 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	// Without the record the next pass would retry with no backoff and no bound.
 	saveErr := rec.Save()
 	var parkErr error
-	if err := it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
+	reason, note, err := settle.Transition(it, num, forge.InProgress, forge.Failed, settle.ReasonRelayFailed, note)
+	if err != nil {
 		parkErr = fmt.Errorf("recover: park #%s on %s: %w", num, c.failedLabel, err)
 	}
 	// Emitted here, not through the settler's latch: a landing that returns
 	// false never reaches a terminal transition there, so nothing else reports
 	// this attempt's end.
-	recoverSettled(num, forge.Failed, settle.ReasonRelayFailed, note)
+	recoverSettled(num, forge.Failed, reason, note)
 	return errors.Join(saveErr, parkErr)
 }
