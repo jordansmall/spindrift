@@ -13,7 +13,10 @@ import (
 // TestInitScript_ExactContent pins the full rendered script for a
 // route declaring a gradle path.
 func TestInitScript_ExactContent(t *testing.T) {
-	got := initScript(27182, "r0", gradleDeclaredRoutes())
+	got, bound := initScript(27182, "r0", gradleDeclaredRoutes())
+	if !bound {
+		t.Error("initScript with a declared path reported bound=false")
+	}
 	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/maven/"
 def spindriftSettingsManaged = false
 def spindriftPluginManagementManaged = false
@@ -108,9 +111,9 @@ gradle.projectsEvaluated {
 // TestInitScript_PrefixInterpolated proves the route prefix (issue
 // #3142), not just the port, reaches the rendered spindriftMavenUrl.
 func TestInitScript_PrefixInterpolated(t *testing.T) {
-	base := initScript(27182, "r0", gradleDeclaredRoutes())
+	base, _ := initScript(27182, "r0", gradleDeclaredRoutes())
 	for _, prefix := range []string{"artifactory-gradle", "r1"} {
-		got := initScript(27182, prefix, gradleDeclaredRoutes())
+		got, _ := initScript(27182, prefix, gradleDeclaredRoutes())
 		want := strings.Replace(base, "127.0.0.1:27182/r0/", "127.0.0.1:27182/"+prefix+"/", 1)
 		if got != want {
 			t.Errorf("initScript(27182, %q) = %q, want %q", prefix, got, want)
@@ -127,7 +130,10 @@ func TestInitScript_PrefixInterpolated(t *testing.T) {
 // No test feeds an unknown ecosystem's block: Parse refuses one before it
 // reaches the renderer, and a real neighbour's block is a corpus case.
 func TestInitScript_NoDeclaredPathIsInert(t *testing.T) {
-	got := initScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
+	got, bound := initScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
+	if bound {
+		t.Error("path-less initScript reported bound=true")
+	}
 	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "spindriftMavenUrl", "repos.clear", "repos.maven"} {
 		if strings.Contains(got, marker) {
 			t.Errorf("path-less initScript = %q, must not contain %q", got, marker)
@@ -168,10 +174,10 @@ func TestStrategy_HomeConfig(t *testing.T) {
 	if hc.Render == nil {
 		t.Fatal("gradle Strategy HomeConfig has nil Render")
 	}
-	got := hc.Render(27182, "r0", nil)
-	want := initScript(27182, "r0", nil)
-	if got != want {
-		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)
+	got, gotBound := hc.Render(27182, "r0", nil)
+	want, wantBound := initScript(27182, "r0", nil)
+	if got != want || gotBound != wantBound {
+		t.Errorf("Render(27182, %q) = (%q, %v), want (%q, %v)", "r0", got, gotBound, want, wantBound)
 	}
 }
 

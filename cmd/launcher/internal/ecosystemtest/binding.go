@@ -94,7 +94,7 @@ func (c *replay) binding() ([]byte, error) {
 			out.EnvExports = append(out.EnvExports, exports...)
 			out.Warnings = append(out.Warnings, warnings...)
 		} else {
-			home.Content = hc.Render(port, prefix, routes)
+			home.Content, _ = hc.Render(port, prefix, routes)
 		}
 		out.HomeConfig = home
 	}

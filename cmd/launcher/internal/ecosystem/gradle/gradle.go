@@ -41,15 +41,15 @@ var Strategy = ecosystem.Strategy{
 // The path comes from the path key of routes[0]'s [routes.ecosystems.gradle]
 // block (ADR 0045, ADR 0048, #3259, #3404); with none declared, this renders
 // an inert script.
-func initScript(port int, prefix string, routes []registrymanifest.Route) string {
+func initScript(port int, prefix string, routes []registrymanifest.Route) (string, bool) {
 	if path := ecosystemkit.DeclaredPath(routes, name); path != "" {
-		return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, path))
+		return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, path)), true
 	}
 	return "// spindrift: gradle has no discoverable per-registry path to redirect\n" +
 		"// onto (no in-tree config file to derive one from, and no path key in a\n" +
 		"// [routes.ecosystems.gradle] block of the routes file) -- this init\n" +
 		"// script intentionally installs no repository redirection, so the\n" +
-		"// build falls through to whatever repositories it declares itself.\n"
+		"// build falls through to whatever repositories it declares itself.\n", false
 }
 
 // gradleRedirectScript points every intercepted repository at mavenURL,

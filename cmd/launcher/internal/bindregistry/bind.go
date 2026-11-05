@@ -240,19 +240,23 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 	}
 
 	// homeConfigPaths lets bindingSummaryProse name a HomeConfig Strategy's binding
-	// path Strategy-generically. Only Strategies with a non-nil HomeConfig land here, which
-	// is exactly the set that summary looks up, so its lookup never misses.
+	// path Strategy-generically. Only Strategies with a non-nil HomeConfig whose render
+	// bound something land here: an inert render still writes its file (overwriting a
+	// stale redirect) but is left out so the summary does not advertise it.
 	homeConfigPaths := make(map[string]string)
 	for _, row := range ecosystem.HomeConfigRows(rows) {
 		path, ok := resolveHomeConfigPath(stdout, row, getenv)
 		if !ok {
 			return false
 		}
-		if err := os.WriteFile(path, []byte(row.HomeConfig.Render(port, prefix, gate.manifest.Routes)), 0o644); err != nil {
+		content, bound := row.HomeConfig.Render(port, prefix, gate.manifest.Routes)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			fmt.Fprintf(stdout, "driver-exec bind-registry: write %s home config: %v\n", row.Name, err)
 			return false
 		}
-		homeConfigPaths[row.Name] = path
+		if bound {
+			homeConfigPaths[row.Name] = path
+		}
 	}
 
 	// These lines print only after every fallible write above has succeeded:
@@ -505,7 +509,9 @@ func ecosystemFallbackNames(rows []ecosystem.Strategy) string {
 // clauses in Strategies order. A BindingEnvVar Strategy is named only when exports
 // actually carries its var, because a host-rooted route can render no export for
 // that ecosystem (issues #3259, #3260) and naming it would advertise a binding the
-// child process will not have. An empty result leaves the caller's bare line.
+// child process will not have. A HomeConfig Strategy is likewise named only when
+// homeConfigPaths carries it, which an inert render (issue #6338) leaves it out of.
+// An empty result leaves the caller's bare line.
 func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExport, homeConfigPaths map[string]string) string {
 	var fragments []string
 	for _, row := range rows {
@@ -516,7 +522,11 @@ func bindingSummaryProse(rows []ecosystem.Strategy, exports []ecosystem.EnvExpor
 			}
 			fragments = append(fragments, row.Name+" bound to it via "+row.BindingEnvVar)
 		case row.HomeConfig != nil:
-			fragments = append(fragments, row.Name+" bound to it via "+homeConfigPaths[row.Name])
+			path, ok := homeConfigPaths[row.Name]
+			if !ok {
+				continue
+			}
+			fragments = append(fragments, row.Name+" bound to it via "+path)
 		}
 	}
 	return joinProse(fragments)

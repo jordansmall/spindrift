@@ -40,7 +40,9 @@ var Strategy = ecosystem.Strategy{
 		HomeEnvVar:          "CARGO_HOME",
 		HomeRelativeDefault: ".cargo",
 		ConfigPath:          "config.toml",
-		Render:              cargoConfigTOML,
+		Render: func(port int, prefix string, routes []registrymanifest.Route) (string, bool) {
+			return cargoConfigTOML(port, prefix, routes), true
+		},
 	},
 	RepoAwareHomeConfig: cargoRepoAwareConfig,
 	RewriteRows: []registryvocab.RewriteRow{{
