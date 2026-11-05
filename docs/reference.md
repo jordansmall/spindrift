@@ -1317,8 +1317,19 @@ What the Driver carries:
   message that finishes, since its `message_end` repeats the whole message. The
   Pass log omits them, so the Transcript's raw JSONL view no longer shows them.
   A message cut off before `message_end` (stream end or SIGTERM) keeps its text
-  as one coalesced delta event per content block. `tool_execution_update` and
-  the `*_start`/`*_end` markers pass through unchanged.
+  as one coalesced delta event per content block. The `*_start`/`*_end`
+  markers, and the `tool_execution_update` events of every tool but `subagent`
+  (see issue #6383 below), pass through unchanged.
+- **Subagent progress updates are collapsed (issue #6383).** A `subagent`
+  call's `tool_execution_update` events are cumulative, so driver-exec holds
+  only the latest one per call instead of writing each. Once the call's
+  `tool_execution_end` carries its children (`result.details.results`), the
+  held update is dropped. When the end carries no results (the subagent
+  threw), the held update is written ahead of it, as the only record of the
+  children. `Flush` writes the update of each call still running, in the order
+  the calls were first seen. The Pass log, and so the Transcript's raw JSONL
+  view, no longer shows a subagent's intermediate progress, and a process
+  killed without `Flush` loses the held update.
 
 Fix passes and nudges resume the first pass's pi session with `--session-id`,
 and a missing session starts fresh instead of failing, as the fix box's session
