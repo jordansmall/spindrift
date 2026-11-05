@@ -115,6 +115,46 @@ func TestNormalizeDedupTerm_PunctuationFoldNeverManufacturesDoubleDash(t *testin
 	}
 }
 
+// A heading with a spaced dash slugs to a "--" on GitHub, and the host drops
+// any term containing "--" (it could close the marker's HTML comment), which
+// would lose the doc file from DedupFiles (issue #6395). The prompts therefore
+// fold each run of spaces and hyphens to one hyphen; this pins both halves.
+func TestDedupFiles_SpacedDashHeadingAnchorMustBeFolded(t *testing.T) {
+	const doc = "docs/adr/0055-structural-scoping-is-the-outcome-freshness-boundary-nonce-is-only-for-mid-run-signals.md"
+	folded := doc + ":what-the-nonce-proves-and-what-it-does-not"
+	githubSlug := doc + ":what-the-nonce-proves--and-what-it-does-not"
+
+	if _, ok := normalizeDedupTerm(folded); !ok {
+		t.Errorf("normalizeDedupTerm(%q) ok = false, want true", folded)
+	}
+	if got := DedupFiles([]string{folded}); len(got) != 1 || got[0] != doc {
+		t.Errorf("DedupFiles(folded) = %v, want [%s]", got, doc)
+	}
+	if _, ok := normalizeDedupTerm(githubSlug); ok {
+		t.Errorf("normalizeDedupTerm(%q) ok = true, want false", githubSlug)
+	}
+	if got := DedupFiles([]string{githubSlug}); len(got) != 0 {
+		t.Errorf("DedupFiles(githubSlug) = %v, want none", got)
+	}
+}
+
+// Markdown text above a file's first heading keys on the bare path, with no
+// ":" and so no anchor; the term must stay usable and DedupFiles must return
+// it whole as the file.
+func TestDedupFiles_BarePathKeyForTextAboveFirstHeading(t *testing.T) {
+	const bare = "docs/reference.md"
+
+	if _, ok := normalizeDedupTerm(bare); !ok {
+		t.Errorf("normalizeDedupTerm(%q) ok = false, want true", bare)
+	}
+	if !UsableDedupTerm(bare) {
+		t.Errorf("UsableDedupTerm(%q) = false, want true", bare)
+	}
+	if got := DedupFiles([]string{bare}); len(got) != 1 || got[0] != bare {
+		t.Errorf("DedupFiles(%q) = %v, want [%s]", bare, got, bare)
+	}
+}
+
 // A site named with "." in one filing and ":" in another (issue
 // #3957/#3958's exact pair) normalizes to the same dedup key, so
 // splitDedupTerms' new-intent key set matches an old-style marker already

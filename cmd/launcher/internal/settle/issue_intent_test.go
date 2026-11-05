@@ -1726,6 +1726,64 @@ func TestFileIssueIntentsDetailed_Dedup_PartialOverlapStillFiles(t *testing.T) {
 	}
 }
 
+// A docs-drift finding keys both a code site and a doc site. Reusing the
+// canonical heading-anchor doc term beside the same code term is fully
+// covered by the open issue and skipped; a differently named doc term is
+// only a partial overlap and still files.
+func TestFileIssueIntentsDetailed_Dedup_DocSiteNamedDifferentlyAcrossSweeps(t *testing.T) {
+	const codeSite = "cmd/launcher/internal/driver/pi/streamfilter.go:newStreamFilter"
+	const docSite = "docs/reference.md:the-pi-driver"
+	tests := []struct {
+		name        string
+		docTerm     string
+		wantSkipped bool
+	}{
+		{"canonical heading anchor reused is fully covered", docSite, true},
+		{"non-canonical doc term still files", "docs/reference.md:1320", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := forge.NewFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{
+				Number: "501",
+				Title:  "docs drift: pi stream filter",
+				Body: "first sweep's finding\n\n<!-- spindrift-dedup: chore=docs-drift, " +
+					codeSite + ", " + docSite + " -->",
+				Labels: []string{"agent-butler-finding"},
+			})
+			fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
+
+			result := dispatch.Result{
+				IssueIntentsFound: true,
+				IssueIntents: []string{`{"title":"docs drift: pi stream filter","body":"new body","dedupTerms":["chore=docs-drift","` +
+					codeSite + `","` + tt.docTerm + `"]}`},
+			}
+
+			var filed []filedIntent
+			stdout := captureStdout(t, func() {
+				filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-butler-finding", "")
+			})
+
+			wantPosts := 0
+			if !tt.wantSkipped {
+				wantPosts = 1
+			}
+			if len(fc.PostIssueCalls) != wantPosts {
+				t.Fatalf("PostIssueCalls = %+v, want %d", fc.PostIssueCalls, wantPosts)
+			}
+			if len(filed) != 1 || filed[0].Skipped != tt.wantSkipped {
+				t.Fatalf("filed = %+v, want one entry with Skipped=%v", filed, tt.wantSkipped)
+			}
+			if !tt.wantSkipped {
+				line := lineContaining(t, stdout, "partial dedup overlap")
+				if !strings.Contains(line, "#501") {
+					t.Errorf("partial-overlap line = %q, want it naming #501", line)
+				}
+			}
+		})
+	}
+}
+
 // The covered sites of a partial overlap can be tracked by two different
 // backlog issues, and the line then names every one of them -- with the
 // covered keys bracketed, so the two lists it joins stay apart (issue #3808).
