@@ -34,7 +34,12 @@ func subagentResult(agent string, messages ...string) string {
 // subagentUpdate is a subagent tool_execution_update: partialResult carries the
 // children's messages so far, cumulatively.
 func subagentUpdate(results ...string) string {
-	return `{"type":"tool_execution_update","toolCallId":"s1","toolName":"subagent","args":{},"partialResult":{"content":[{"type":"text","text":"(running...)"}],"details":{"mode":"parallel","results":[` + strings.Join(results, ",") + `]}}}`
+	return subagentUpdateOf("s1", results...)
+}
+
+// subagentUpdateOf is subagentUpdate for the call id.
+func subagentUpdateOf(id string, results ...string) string {
+	return `{"type":"tool_execution_update","toolCallId":"` + id + `","toolName":"subagent","args":{},"partialResult":{"content":[{"type":"text","text":"(running...)"}],"details":{"mode":"parallel","results":[` + strings.Join(results, ",") + `]}}}`
 }
 
 // Both children share timestamp 1500: only the agent and index tell their
