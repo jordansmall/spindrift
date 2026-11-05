@@ -1,15 +1,20 @@
 {
   "lastSwept": "c03d1b346274660cfbcd18f4a88c7d2b3c0ef4b6",
   "cursor": "cmd/launcher/internal/ecosystem/npmfamily/testdata/corpus/npm/port-only-host/lockfile-scan.golden.txt",
-  "phase": "done",
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-04T22:37:44.550671805-05:00"
+  },
   "usage": {
-    "input_tokens": 14,
-    "output_tokens": 2783,
-    "cache_read_input_tokens": 226484,
-    "cache_creation_input_tokens": 44407,
-    "total_cost_usd": 0.45626880000000003,
-    "duration_ms": 34816,
-    "duration_api_ms": 34149,
-    "num_turns": 8
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
