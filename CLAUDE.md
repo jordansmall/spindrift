@@ -16,187 +16,51 @@ launcher nor the Box branches on a kind name to re-derive one. See [ADR
 0056](docs/adr/0056-the-butler-is-an-issueless-dispatch-kind-with-its-state-in-git.md)
 (amendments, issues #3996 and #5668).
 
-### Triage label lifecycle
+### Labels
 
-Agent issues move through these labels (see `.github/workflows/agent-dispatch.yml`).
-On Jira these work labels are the fallback under the default
-`JIRA_LIFECYCLE=hybrid`; `JIRA_LIFECYCLE=status` keeps the work lifecycle on
-mapped native statuses alone, and a refused transition comments on the issue
-instead of applying `agent-failed`. Research labels are unaffected. See the
-[Jira tracker](docs/reference.md#jira-lifecycle-status).
+**File new agent-ready issues with `ready-for-agent`.** Work issues move
+through the triage labels below (`.github/workflows/agent-dispatch.yml`);
+[Label lifecycle](docs/reference.md#label-lifecycle) is the full record,
+including every path that ends in `agent-failed`. On Jira these labels are
+the fallback under the default `JIRA_LIFECYCLE=hybrid`; `status` mode keeps
+the work lifecycle on native statuses alone (see [Jira
+lifecycle](docs/reference.md#jira-lifecycle-status)).
 
-- `ready-for-agent` — fully specified, ready for an AFK agent to pick up. **File new
-  agent-ready issues with this label.**
-- `agent-trigger` — adding it to an issue fires one dispatch run; the workflow claims
-  the issue by swapping `agent-trigger`/`ready-for-agent` → `agent-in-progress` up front.
-- `agent-in-progress` — an AFK agent is actively working the issue.
-- `agent-complete` — agent work merged and green, or the issue's change was
-  found already on the default branch (`status=already-resolved`, closed as
-  completed).
-- `agent-failed` — the Box failed or stopped `status=blocked`, or its PR
-  could not land (e.g. red CI after the fix passes, a merge-gate failure, no
-  PR found), or a read-only Box's host-side bundle relay exhausted its
-  retries on any code forge, or its relay succeeded but the host-side draft
-  PR create exhausted the same retries (the bundle stays in the outbox;
-  `spindrift recover <n>` relays and lands it, clearing this label; on a
-  `github`/`forgejo` read-only deployment the daemon's recover kind lands it
-  itself when the bundle is relayable, the run self-reported ready from its
-  land pass, and the host claim is free, with bounded attempts and one give-up
-  comment naming `spindrift recover <n>`), or a read-only fix pass's bundle
-  relay failed (its PR is already open, so the daemon's recover kind skips it
-  and a hand-run `spindrift recover <n>` re-gates that PR instead of relaying
-  the bundle), or a run's review loop stopped before its land pass finished,
-  whether it reported `status=ready` from another pass or, killed by a
-  signal on `CODE_FORGE=local` with a bundle in the outbox, stopped in
-  implement or fix (settled reason `unreviewed`: nothing is landed, and
-  recover skips it); needs human triage, re-label to retry.
-- `agent-ambiguous-spec` — the pre-implement gate found the issue internally
-  contradictory and the Box halted on purpose (`status=ambiguous`), posting
-  its questions as a comment. Not a crash and never `agent-failed`; a human
-  resolves the spec, then re-applies `agent-trigger` (or `ready-for-agent`)
-  to retry. See [Create the ambiguous-spec
-  label](docs/reference.md#create-the-ambiguous-spec-label-on-the-target-repo).
-- `agent-review-finding` — filed by the Filer from a non-blocking review
-  finding (#393); the host also ensure-creates the label when it files a
-  relayed finding; doctor requires it on a read-only deployment with a Filer.
-  Never carries a dispatch label
-  (`agent-trigger`/`ready-for-agent`) — a human promotes it to
-  `ready-for-agent` like any other issue before an agent picks it up.
-- `agent-butler-finding` — filed by the host from a butler Chore finding
-  (ADR 0056); the host creates the label if missing, and a butler daemon
-  refuses to start without it (except on `local`/`jira`, which have no
-  label registry to check). Never carries a dispatch label
-  (`agent-trigger`/`ready-for-agent`) — a human promotes it to
-  `ready-for-agent` like any other issue before an agent picks it up.
-  **Opt-in exception** (issue #3880): the host itself adds
-  `ready-for-agent` (or your configured `LABEL`) at settle when the
-  finding's class clears the Chore's host-side allow-list, a bounded
-  number of files, an in-Box reviewer's concurrence, and the day's
-  promotion budget — off by default. See
-  [Butler](docs/reference.md#butler).
-- `agent-butler-patch` — provenance label for a butler finding the host lands
-  as a patch PR (ADR 0057), alongside `agent-butler-finding`. Never carries a
-  dispatch label, except when the host's push or PR create fails and the
-  finding falls back to promotion — the issue then keeps this label with no
-  patch PR behind it (a failed create first adopts any PR the forge made
-  anyway, else deletes the pushed branch; issue #4112). The host ensure-creates
-  the label, and a butler daemon refuses to start without it while the patch
-  rung is on. The patch rung is off until
-  `BUTLER_MAX_PATCHES_PER_DAY` is greater than 0, and also needs an issue
-  tracker that can add a label after filing (`github`/`forgejo`; never
-  `ISSUE_TRACKER=local`), since a failed landing's fallback has nowhere
-  else to put the work label, and that tracker must name the same backend
-  as `CODE_FORGE` (`github`+`github` or `forgejo`+`forgejo`), since `Closes
-  #N` and the agent branch both name an issue in the forge's own
-  namespace (issue #4074). The patch PR lands through the work merge
-  gate with zero fix passes — even when the run's Ledger Done commit is
-  lost after the PR opened (issue #4118): a clean merge closes the
-  finding and marks it `agent-complete` like any landed work PR (a
-  green PR left unmerged — `MERGE_MODE=manual`, a `MERGE_GUARD_PATHS`
-  hit, or a merge blocked after green — stays open, marked ready, for
-  a human to merge, while `MERGE_MODE=auto` queues it at the forge;
-  neither adds `agent-complete`); a red run or a CI-poll timeout leaves the
-  PR in draft and the issue wearing only its two labels, for a human to
-  relabel `ready-for-agent` or close — `agent-failed` never applies to
-  this path. [Butler](docs/reference.md#butler) is the full record;
-  change it and this summary together.
-- `agent-tuning-finding` — provenance label on a finding a tuning Chore files
-  (ADR 0062). Never carries a dispatch label — a human promotes it to
-  `ready-for-agent` like any other issue before an agent picks it up. Any PR
-  closing an issue wearing it merges only by hand, regardless of `MERGE_MODE`
-  and `MERGE_GUARD_PATHS`: the host hands the PR off ready (under
-  `MERGE_MODE=immediate`, only once any conflict with the base is resolved),
-  marks the issue `agent-complete`, and comments on the PR naming the label.
-  A butler daemon with `tuning` in `BUTLER_CHORES` refuses to start without
-  it, except on `local`/`jira`, which have no label registry to check. Jira
-  issues still wear their labels, so Jira is judged by the label like github
-  and forgejo; only on `local` does the `chore=tuning` term in the issue
-  body's dedup marker stand in for it. Removing the label is the deliberate
-  override. See [Merge guard](docs/reference.md#merge-guard).
+| Label | Meaning |
+|---|---|
+| `ready-for-agent` | fully specified; an AFK agent may pick it up |
+| `agent-trigger` | fires one CI dispatch run; the claim swaps it and `ready-for-agent` for `agent-in-progress` |
+| `agent-in-progress` | a Box is working the issue |
+| `agent-complete` | landed green, or the change was already on the default branch |
+| `agent-failed` | the Box failed or the PR could not land; human triage, re-label to retry (`spindrift recover <n>` for a stranded read-only bundle) |
+| `agent-ambiguous-spec` | the pre-implement gate halted on a contradictory spec and posted questions; resolve them, then re-apply `agent-trigger` |
+
+The provenance labels `agent-review-finding`, `agent-research-finding`,
+`agent-butler-finding`, `agent-butler-patch`, and `agent-tuning-finding` mark
+issues the host filed from a finding. They never carry a dispatch label: a
+human promotes them to `ready-for-agent`, except for the butler's opt-in
+promotion and patch PRs ([Butler](docs/reference.md#butler)). A PR closing an
+`agent-tuning-finding` issue always merges by hand ([Merge
+guard](docs/reference.md#merge-guard)).
+
+Research (ADR 0022, `.github/workflows/agent-research.yml`) uses a disjoint
+family, so an issue may wear one label from each: `agent-research-trigger`
+(one CI run) or `agent-research` (the `spindrift research` / daemon queue) →
+`agent-research-in-progress` → one verdict comment and
+`agent-research-recommend`, `agent-research-reject` (auto-closes as not
+planned), or `agent-research-unclear` (answer, then re-apply the trigger);
+`agent-research-failed` means no verdict. Research never opens a PR. See
+[Research dispatch](docs/reference.md#research-dispatch).
 
 ### Dispatch authentication
 
-`agent-dispatch.yml` and `agent-recover.yml` authenticate to GitHub by minting a
-short-lived **GitHub App installation token** per run (`actions/create-github-app-token`
-from the worker App's repository variable `SPINDRIFT_AGENT_WORKER_APP_ID` and repository
-secret `SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY`), not the long-lived `SPINDRIFT_GH_TOKEN`
-fine-grained PAT. The App installation has its own rate-limit bucket, isolated
-from any personal PAT — the fix for the 403 / secondary rate limiting hit during
-dispatch, CI polling, and merge. The composite `agent-setup` action is unchanged;
-it consumes whatever `gh-token` it is handed. An installation token expires ~1h
-after minting, so both workflows pair the mint step with the `gh-token-refresher`
-composite action, which re-mints a fresh token every 45 minutes for the rest of
-the job and hands the launcher `--gh-token-refresh-file` (issue #1027) — the App
-private key stays in that backgrounded loop, never reaching the launcher or the
-Box. See [GitHub App installation
-token](docs/reference.md#github-app-installation-token-recommended) for the full
-setup, required App permissions, and how the refresh mechanism works.
-
-### Research label lifecycle
-
-A second, disjoint label family (ADR 0022; see `.github/workflows/agent-research.yml`)
-drives the advise-only research Dispatch kind — never the work path above.
-Claiming a research issue strips the trigger, the standing `agent-research`,
-and the verdict/failed labels below (`agent-research-finding` is a
-provenance label the claim step never touches), so a work lifecycle label
-(`ready-for-agent`, `agent-in-progress`, ...) survives a research claim
-untouched, and an issue may legitimately wear one label from each family at
-once:
-
-- `agent-research-trigger` — applying it fires one research run in CI;
-  re-apply it to retry (crash) or re-research (after answering an
-  `unclear` verdict's questions) — the same gesture as `agent-trigger`. The
-  claim strips it before any build work, so it self-clears and never
-  re-fires on its own.
-- `agent-research` — the standing research queue: `spindrift research` and
-  the daemon (`nix run .#daemon -- research`) draw from it. Every claim
-  (CI's or the launcher's) strips it too, so a claimed issue drops out of
-  the queue while a Box works it.
-- `agent-research-in-progress` — a Box is reviewing the issue against the
-  Target repo and will post a single structured verdict comment.
-- `agent-research-recommend` — relevant and enriched with context for a
-  worker — promote it to `ready-for-agent`.
-- `agent-research-reject` — false positive, not worth doing, or a duplicate
-  (named in the comment). Applying it **closes the issue as not planned**,
-  automatically: `agent-research-close.yml` fires on the label and does the
-  close, so the verdict and the issue state never drift, and the Filer's
-  closed-`agent-research-reject` suppression actually holds. This is a
-  *successful* conclusion (`Complete`), never `agent-research-failed`.
-- `agent-research-unclear` — relevance needs an answer only a human has —
-  answer the researcher's questions in the comment, then re-apply
-  `agent-research-trigger` (CI) or `agent-research` (daemon /
-  `spindrift research` queue).
-- `agent-research-failed` — the Box crashed or produced no verdict; a human
-  triage queue distinct from `agent-research-reject`, so crash-retry and
-  verdict-review never mix.
-- `agent-research-finding` — filed by the Filer from a research finding
-  (ADR 0041). Never carries a dispatch label
-  (`agent-trigger`/`ready-for-agent`) — a human promotes it to
-  `ready-for-agent` like any other issue before an agent picks it up.
-
-Research never opens a PR, watches CI, or merges — it posts one comment and
-stops. `spindrift doctor` checks and, in interactive mode, offers to create
-these labels too, but treats them as advisory: unlike the triage labels, a
-missing research label never fails the check unless `--research` promotes the
-tier, as the daemon's startup preflight does when the research kind is
-explicitly selected. Doctor does not check or create
-`agent-research-trigger` — like `agent-trigger`, it is repo-local Actions
-trigger vocabulary, not a doctor-managed label — so create it
-manually for the CI path; see [Create the research
-labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
-The workflow authenticates with an optional least-privilege research GitHub App
-(Issues RW, Contents R, Metadata R) — set the
-`SPINDRIFT_AGENT_RESEARCH_APP_ID` repository variable and the
-`SPINDRIFT_AGENT_RESEARCH_APP_PRIVATE_KEY` repository secret, and
-`agent-research.yml` mints a short-lived installation token per run, falling
-back to the main `SPINDRIFT_GH_TOKEN` when the App is unset — see [Research
-token](docs/reference.md#research-token-least-privilege-optional). To drive
-research continuously instead of a one-off `spindrift research`, run the
-daemon (`nix run .#daemon`) with the `research` kind selector — `nix run
-.#daemon -- research` — or omit the selector to draw from every configured
-kind (dispatch, research, the butler once `BUTLER_CHORES` enables one, and,
-on a read-only outbox-relay-capable Code Forge, recover) off one pool
-(issue #3541, #3878, #4656).
+`agent-dispatch.yml` and `agent-recover.yml` mint a short-lived GitHub App
+installation token per run, re-minted every 45 minutes by the
+`gh-token-refresher` action, instead of using the `SPINDRIFT_GH_TOKEN` PAT. See
+[GitHub App installation
+token](docs/reference.md#github-app-installation-token-recommended) and, for
+research's optional least-privilege App, [Research
+token](docs/reference.md#research-token-least-privilege-optional).
 
 ### Comment injection trust boundary
 
@@ -214,10 +78,7 @@ untrusted — see SECURITY.md.
 ## Worktrees
 
 **Always do task work in a dedicated git worktree, one per task/branch.** Do not
-edit files directly on whatever branch happens to be checked out. Parallel work
-gets increasingly tangled without worktrees — uncommitted edits stranded on the
-wrong branch, stash/pop juggling, and cross-task churn in a single tree. A
-worktree per task keeps each change isolated on its own branch from the start.
+edit files directly on whatever branch happens to be checked out:
 
 ```sh
 git worktree add ../spindrift-<task> -b <branch> origin/main
@@ -225,182 +86,89 @@ git worktree add ../spindrift-<task> -b <branch> origin/main
 
 ## Build and check output
 
-Whatever the tool — `nix build`, `nix flake check`, `go test`, `shellcheck`
-sweeps — redirect its output to a file on disk and grep/tail that file for
-what you need. Never stream the full output into the conversation context:
-build logs, store paths, and eval traces are huge and mostly noise, and they
-crowd out room for the actual task.
-
-```sh
-<check-command> >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
-grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
-```
-
-See "## Nix edits" below for this repo's actual in-box gate (the concrete
-`nix run .#gate` invocation).
-
-Write the log and grep it in the **same shell invocation and sandbox mode** —
-`$TMPDIR` differs across the sandbox boundary, so a file written sandboxed is
-not visible to an unsandboxed follow-up (and vice versa).
+Whatever the tool, redirect its output to a file and grep/tail that file;
+never stream build logs, store paths, or eval traces into the context. Write
+the log and grep it in the **same shell invocation and sandbox mode** —
+`$TMPDIR` differs across the sandbox boundary. The gate below shows the
+pattern.
 
 ## Nix edits
 
-spindrift dogfoods the `nixStoreWritable` + `extraClosures` knobs (ADR 0018,
-issue #469) on its own Consumer config (issue #470), so the Box working a
-spindrift issue has a writable `/nix/store` and the check/dev closure
-pre-baked. That makes real checks the primary in-box gate — prefer them over
-guessing. But run the **scoped** gate, not the full flake check (issue
-#581): the gate covers the inbox set of source-level checks (go
-test/vet/fmt, shellcheck, nil-clean, marker/parity checks) except the bats
-suite, which CI runs and which would push a cold gate past Claude Code's
-stock 10-minute Bash cap (dogfood raises it to 30 minutes, issue #4409) —
-build `.#checks.<system>.bats-shard-N` directly when you change
-bash under test. The set also skips the checks that build/inspect the OCI
-image (`dockerTools.buildLayeredImage`) or assert facts about the box's own
-baked toolchain — the box is already built from that image, so
-re-baking it in-box tests nothing the pre-dispatch build didn't, and
-nested image builds are heavy/unreliable in a Box (issue #565 saw one
-kicked with `EXIT:137`). It also skips `docs-edit-isolation`, which proves a
-docs-only edit leaves the non-docs checks alone by re-evaluating the whole
-checkset twice — a large share of a cold inbox evaluation — and which
-guards CI's docs-lane membership, something a Box rarely changes; CI's full
-`nix flake check` still runs it (issue #5849):
+spindrift dogfoods `nixStoreWritable` + `extraClosures` (ADR 0018, issues
+#469 and #470), so a Box working this repo has a writable `/nix/store` and the
+check closure pre-baked: run real checks rather than guessing. The
+`/nix-checks` skill (`skills/nix-checks/SKILL.md`) mirrors this section —
+change one and change the other; `nix/checks/nix-checks-lore-parity.nix`
+pins the shared clauses.
+
+Run the **scoped** gate, not the full flake check (issue #581):
 
 ```sh
 nix run .#gate >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"
 grep -nE '^gate:|error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 ```
 
-The gate evaluates that same set in parallel `nix-eval-jobs` workers (their
-count is clamped to the Box's memory limit) and builds each check as it
-evaluates, so builds overlap evaluation instead of waiting behind a
-single-threaded one. The `gate:` lines name each failing attr (or
-`nix-eval-jobs` / `nix build (batch)` when a failure cannot be pinned to one)
-and end in a one-line summary, and the exit code is non-zero on any failure.
-`nix build .#checks-inbox` builds the same set as one aggregate and stays for
-CI and humans, but evaluates single-threaded, so a Box should use the gate.
+It builds the inbox set (go test/vet/fmt, shellcheck, nil-clean,
+marker/parity checks) in parallel `nix-eval-jobs` workers, prints a `gate:`
+line per failure plus a summary, and exits non-zero on any failure. It skips
+the bats suite — build `.#checks.<system>.bats-shard-N` when you change bash
+under test — the OCI image checks (the Box already is that image; issue #565),
+and `docs-edit-isolation`, which costs a large share of a cold eval by
+re-evaluating the whole checkset twice (issue #5849). `nix build
+.#checks-inbox` is the same set evaluated single-threaded, for CI and humans.
 A `gate:` line saying paths "exist in this Box's store but not in its
-database" means the host realised them after the Box started (ADR 0042, issue
-#6095), not that the branch regressed: do not chase it. Start a fresh Box or
-leave the check to CI; the gate already registers the content-addressed
-`-source` ones itself when the Box's store database is writable.
+database" means the host realised them after the Box started (issue #6095),
+not a regression: start a fresh Box or leave it to CI.
 
-The gate builds with `-L` (`--print-build-logs`) already, so it is complete
-as written. Keep `-L` on every single-attr `nix build`: without it a failure
-prints only the failing derivation's store path and a `[build failed]`
-line, so the compile or test error costs a second turn running `nix log`.
-Pass the gate no `-j`, `--max-jobs`, or `--cores` flags: the Box's baked
-`nix.conf` pins `cores = 4` and `max-jobs = 2` (lib/image.nix's
-`nixConfigFile`) for its builds and the gate sizes its own eval workers, so
-hand-tuning either on top is guesswork. The one exception, an
-`EXIT:137` kill, is below.
+Checks run in two tiers. While iterating, run the narrowest check: `go test`
+on one package, one bats shard, or `nix build .#checks.<system>.<name> -L`
+(list attrs with `nix eval .#checks.<system> --apply builtins.attrNames`).
+Run the full gate once per pass, just before the pass's final commit. After a
+rebase, re-run it only if the rebase hit conflicts or brought in changes to
+files the branch touches. A Box's worker subagents run targeted checks only —
+its coordinator agent owns the full gate.
 
-Checks run in two tiers. While iterating, run the narrowest check that
-covers the change — `go test` on one package, one bats shard, or a single
-check attr with `nix build .#checks.<system>.<name> -L` (`<system>` is
-e.g. `x86_64-linux`). List the attrs with `nix eval .#checks.<system>
---apply builtins.attrNames`. Run the full gate (`nix run .#gate`) once per
-pass, just before the pass's final commit. After a rebase, re-run it only
-if the rebase hit conflicts or brought in changes to files the branch
-touches; otherwise CI's full `nix flake check` is the final gate. A Box's
-worker subagents run targeted checks only — its coordinator agent owns the
-full gate.
+Keep `-L` (`--print-build-logs`) on every single-attr `nix build`: without it
+a failure prints only a store path and a `[build failed]` line, costing a turn
+on `nix log`. Pass no `-j`, `--max-jobs`, or `--cores`: the Box's `nix.conf`
+pins `cores = 4` and `max-jobs = 2` (lib/image.nix's `nixConfigFile`) and the
+gate sizes its own workers.
+
+A check failure is deterministic: never re-run a failed check unchanged, not
+under reduced parallelism and not after a sleep — fix the code or read the
+log, then re-run. The one exception is an `EXIT:137` (out-of-memory) kill,
+which is not a check result: re-run a smaller target (the gate instead of
+`nix flake check`), and if the gate itself was killed, run `nix build
+.#checks-inbox -L --max-jobs 1 --cores 1` once.
+
+Nix flakes only evaluate git-tracked files: `git add` any new file before the
+first build that touches it, or it aborts with "is not tracked by Git".
+
+The full `nix flake check` is what CI runs (a docs-only PR builds just
+`checks-docs`; issue #5155). Run it in-box only if you touched
+`nix/checks/image.nix`, `lib/image.nix`, or anything else baked into the
+image. Preferring the scoped gate is a firm rule, and it **overrides** any
+acceptance criteria in an issue that ask for `nix flake check` more loosely.
+
+Run `nil diagnostics path/to/file.nix` on each changed `*.nix` file while
+iterating; it catches structural mistakes without a store build but does not
+replace the gate. Prefer the devShell toolchain (`nix develop -c <cmd>`). In a
+Box without `nixInBox` plus `nixStoreWritable`, fall back to `nil diagnostics`
+and the baked `gofmt -l .`, `go vet ./...`, `go test ./...`, and say so; a
+bwrap Box with both knobs runs real checks too (ADR 0042).
 
 A Driver's Nix checks live in `nix/checks/drivers/<name>.nix`, named after its
-row in `lib/drivers/default.nix`; `nix/checks/drivers.nix` unions the files
-and runs the parity checks over every row. Its Go tests are the exception:
-`nix/checks/go.nix` generates `drivers-<name>-go-test` from the same row.
-Build one check with `nix build .#checks.<system>.<attr> -L`.
+row in `lib/drivers/default.nix`; `nix/checks/go.nix` generates its
+`drivers-<name>-go-test` from the same row.
 
-A check failure is deterministic: the same derivation hash fails the same
-way however it is scheduled. Never re-run a failed check unchanged — not
-under reduced parallelism (the `EXIT:137` carve-out below is outside
-this rule), not after a sleep. Each retry is a multi-minute build with a
-foregone conclusion; the only remedies are to fix the code or read the
-log `-L` already surfaced, and re-run only after a real edit. A build the
-kernel killed (`EXIT:137`, out of memory) is the exception: that is not a
-check result at all, so a re-run is legitimate there, unlike a real
-failure. Under the full `nix flake check`, re-run the scoped gate
-instead — a smaller target, not a smaller `--cores`. Under the gate itself
-there is no smaller target left, so fall back to the single-threaded
-aggregate, `nix build .#checks-inbox -L --max-jobs 1 --cores 1`, the one
-sanctioned exception to the no-resource-flags rule above: it drops
-evaluation to one thread, the concurrent derivations to one, and the
-concurrent compiles or test binaries inside it to one as well. Reach for
-it once, only after an `EXIT:137`, and never for a check that genuinely
-failed.
-
-Nix flakes only evaluate git-tracked files: `git add` any new file (e.g.
-`git add -A`) before the first `nix build`/`nix flake check` that touches it,
-or the build aborts with "is not tracked by Git" and burns a checks cycle.
-
-If the repo has a `flake.nix` devShell, prefer its pinned toolchain over an
-ambient one:
-
-```sh
-nix develop -c <check-command>
-```
-
-If `nix develop` is unavailable or fails, fall back to the baked toolchain —
-`gofmt -l .`, `go vet ./...`, `go test ./...` for the Go tree here — and say
-so.
-
-The full `nix flake check` — including the image-building checks
-the gate skips — is what CI runs pre-dispatch/pre-merge (a docs-only
-PR builds just `checks-docs` instead; issue #5155); it isn't the
-in-box gate. Run it in-box only if you touched `nix/checks/image.nix`,
-`lib/image.nix`, or anything else that changes what gets baked into the
-image, since that's the one case the scoped target can't cover:
-
-```sh
-nix flake check
-```
-
-Preferring the scoped target is a firm rule, and it **overrides** any
-acceptance criteria in an issue that ask for `nix flake check` more loosely.
-The same rules in agent-facing form live in `skills/nix-checks/SKILL.md`, the
-dogfood-only `/nix-checks` skill this section's wording is mirrored from —
-change one and change the other.
-
-Run `nil diagnostics` on each changed `*.nix` file as a fast, per-file
-pre-check while iterating — it catches syntax errors, duplicate attribute
-keys, undefined variables, and unused bindings without a store round-trip:
-
-```sh
-nil diagnostics path/to/file.nix
-```
-
-`nil diagnostics` exits non-zero on errors (warnings still exit 0). It
-complements, but does not replace, the gate before finishing the task —
-`nil` catches structural mistakes early; only a real check build catches
-evaluation and build errors. If neither the gate nor `nix flake check`
-is available — a Box built without the self-test knobs (`nixInBox` plus
-`nixStoreWritable`) — fall back to `nil diagnostics` and say so. The runner
-is not itself a reason: under bwrap a writable store is an ephemeral tmpfs
-overlay over the read-only host store (ADR 0042), so a bwrap Box carrying
-both knobs runs the same real checks the podman one does.
-
-The repo's Go version floor is whatever `cmd/launcher/go.mod`'s `go`
-directive says. There is no separate Nix-level Go version pin to keep in
-sync — every Nix expression that needs Go pulls `pkgs.go`/`p.go` from
-the single `nixpkgs` flake input, so the floor is sourced transitively
-through `flake.lock`. Bumping the `go.mod` directive only requires
-re-verifying that the locked `nixpkgs` input's `go.version` still meets
-the new floor. The Dashboard module carries its own `go` directive in
-`dashboard/go.mod`; bump it alongside `cmd/launcher/go.mod`.
+The Go version floor is `cmd/launcher/go.mod`'s `go` directive; Go comes from
+the locked `nixpkgs` input, so a bump only needs that input's `go.version` to
+meet it. Bump `dashboard/go.mod` alongside.
 
 ## Shell edits
 
-Before finishing any task that touches `*.sh` or `*.bash` files, run
-`shellcheck` on each changed file and resolve all findings:
-
-```sh
-shellcheck path/to/file.sh
-```
-
-`shellcheck` is baked into the dogfood Box alongside `nil`, so it's on PATH as
-the `agent` user (uid 1000) without a store build. It complements, but does not
-replace, the `shellcheck` check `nix flake check` runs in CI.
+Run `shellcheck` on each changed `*.sh`/`*.bash` file and resolve all findings
+before finishing. It is on PATH in the dogfood Box.
 
 ## Running `gh`
 
