@@ -393,6 +393,7 @@ let
       "glob"
       "golden"
       "hostprofile"
+      "npmrcvalue"
       "panicguard"
       "profileprobe"
       "registrydiscover"
