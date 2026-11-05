@@ -19,6 +19,11 @@ const SPAWNS_FILE = "/home/agent/.pi/agent/spindrift-spawns.json";
 // Bounds a hung guard like lib/image.nix's guardBound and opencode-guards.js:
 // Claude's own hook timeout is non-blocking, so unbounded it would let the call run.
 const GUARD_TIMEOUT_MS = 10_000;
+// A model can repeat one tool call forever. The REPEAT_BLOCK_AT-th consecutive
+// identical call is refused, and the REPEAT_EXIT_AT_BLOCK-th refusal in a row
+// ends the pi process instead, since the refusals before it did not break the loop.
+const REPEAT_BLOCK_AT = 3;
+const REPEAT_EXIT_AT_BLOCK = 3;
 // The summary hook is a PostToolUse hook, which lib/image.nix leaves at
 // Claude's default timeout.
 const SUMMARY_TIMEOUT_MS = 60_000;
@@ -129,7 +134,33 @@ function spawnsRefusal(input) {
 }
 
 export default function (pi) {
+  let lastCall;
+  let repeats = 0;
   pi.on("tool_call", async (event) => {
+    // Keyed before the guards below rewrite event.input in place.
+    const key = `${event.toolName}\0${JSON.stringify(event.input)}`;
+    repeats = key === lastCall ? repeats + 1 : 1;
+    lastCall = key;
+    if (repeats >= REPEAT_BLOCK_AT) {
+      const blocks = repeats - REPEAT_BLOCK_AT + 1;
+      const loop = `spindrift-pi-hooks: ${event.toolName} called identically ${repeats} times in a row`;
+      if (blocks >= REPEAT_EXIT_AT_BLOCK) {
+        console.error(`${loop}, shutting down`);
+        // Not ctx.shutdown(): that is a no-op in print mode, and pi exits 0
+        // after an aborted json-mode turn, which no subagent result or run reads
+        // as failed. stderr is written synchronously, so the line is not lost.
+        // A coordinator's running subagent children are not signalled; the
+        // Box's teardown reaps them.
+        process.exit(1);
+      }
+      console.error(`${loop}, blocked`);
+      return {
+        block: true,
+        reason:
+          `You have already made this exact call to ${event.toolName} ${repeats - 1} times in a row with ` +
+          "unchanged output. Take a different action instead of repeating it.",
+      };
+    }
     // agentScope is model-supplied and the extension confirms project agents
     // only when a UI exists, which a Box lacks: "project" or "both" would let
     // the Target repo's .pi/agents override the baked roster.

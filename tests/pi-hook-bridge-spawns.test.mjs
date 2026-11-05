@@ -50,8 +50,9 @@ await blocked(handler, { agent: "worker", task: "x" }, "scout", "none");
 asChild("worker");
 await allowed(handler, { agent: "worker", task: "x" });
 
+// A different task: the bridge blocks the third identical call in a row (issue #6384).
 asTopLevel();
-await allowed(handler, { agent: "worker", task: "x" });
+await allowed(handler, { agent: "worker", task: "y" });
 await blocked(handler, { agent: "worker", agentScope: "both", task: "x" }, "agentScope");
 
 const missing = await handlerFor(BRIDGE_MISSING);

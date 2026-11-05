@@ -494,6 +494,38 @@ in
         touch $out
       '';
 
+  # Issue #6384: the bridge blocks, then ends the process on, a tool call the
+  # model repeats identically. Its HOOKS_DIR holds one stub per generated hook
+  # that rewrites every bash call to a unique command, as a per-call wrapper
+  # could, so the bash case proves the repeat is keyed before the rewrite.
+  drivers-pi-hook-bridge-loop-test =
+    let
+      uniqueRewrite = pkgs.writeShellScript "unique-rewrite" ''
+        cat >/dev/null
+        printf '{"hookSpecificOutput":{"updatedInput":{"command":"find # %s"}}}\n' "$$"
+      '';
+    in
+    pkgs.runCommand "drivers-pi-hook-bridge-loop-test"
+      {
+        nativeBuildInputs = [
+          pkgs.gnugrep
+          pkgs.gnused
+          pkgs.jq
+        ];
+      }
+      ''
+        bridge=${../../../agent/pi-hook-bridge.js}
+        mkdir $TMPDIR/hooks
+        for h in $(sed -n '/BEGIN GENERATED PI HOOKS/,/END GENERATED PI HOOKS/p' $bridge |
+          grep -o '[a-z-]*\.sh'); do
+          cp ${uniqueRewrite} $TMPDIR/hooks/$h
+        done
+        sed "s|^const HOOKS_DIR = .*|const HOOKS_DIR = \"$TMPDIR/hooks\";|" $bridge > $TMPDIR/bridge.mjs
+        grep -qF "const HOOKS_DIR = \"$TMPDIR/hooks\";" $TMPDIR/bridge.mjs
+        BRIDGE=$TMPDIR/bridge.mjs ${pkgs.nodejs}/bin/node ${../../../tests/pi-hook-bridge-loop.test.mjs}
+        touch $out
+      '';
+
   # A spawns target absent from the roster must fail eval, as under opencode;
   # an entry that cannot call subagent has no spawn to check. pi hands a
   # subagent its identity only through a non-empty body, so spawns on an entry
