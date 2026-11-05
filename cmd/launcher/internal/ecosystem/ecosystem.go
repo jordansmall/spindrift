@@ -27,7 +27,10 @@ type EnvExportRenderer func(port int, prefix string, getenv func(string) string,
 // resolution wholesale, so it never preserves a prior environment value.
 // routes is the manifest's full route list (issue #3259), which a pre-clone
 // renderer (gradle's) keys off through the first route's tagged EnforcedPaths.
-type HomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route) string
+// bound is false when the rendered file installs no redirection (gradle with no
+// declared path): the file is still written, but the bind summary must not
+// advertise a binding it lacks.
+type HomeConfigRenderer func(port int, prefix string, routes []registrymanifest.Route) (content string, bound bool)
 
 // HomeConfig is one ecosystem's home-level (not in-tree) registry config.
 // HomeRelativeDefault and ConfigPath stay separate fields because the verb

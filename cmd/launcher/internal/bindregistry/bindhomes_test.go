@@ -1,6 +1,8 @@
 package bindregistry
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -55,5 +57,58 @@ func TestBindHomes_NoAnnounceLineWithoutOptIn(t *testing.T) {
 
 	if got := out.String(); strings.Count(got, "\n") != 1 || strings.Contains(got, "STUB_A_REGISTRY=") {
 		t.Errorf("BindHomes output = %q, want only the Forwarder line", got)
+	}
+}
+
+// An inert HomeConfig render (bound=false) still overwrites its file, so a stale redirect
+// cannot survive, but the summary must not advertise a binding it lacks.
+func TestBindHomes_InertHomeConfigIsWrittenButNotSummarized(t *testing.T) {
+	home := t.TempDir()
+	homeConfig := func(configPath, content string, bound bool) *ecosystem.HomeConfig {
+		return &ecosystem.HomeConfig{
+			HomeEnvVar: "STUB_HOME",
+			ConfigPath: configPath,
+			Render: func(int, string, []registrymanifest.Route) (string, bool) {
+				return content, bound
+			},
+		}
+	}
+	rows := []ecosystem.Strategy{
+		{Name: "stub-bound", HomeConfig: homeConfig("bound/config", "bound content\n", true)},
+		{Name: "stub-inert", HomeConfig: homeConfig("inert/config", "inert content\n", false)},
+	}
+	getenv := func(k string) string {
+		if k == "STUB_HOME" {
+			return home
+		}
+		return ""
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, "inert"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "inert/config"), []byte("stale redirect\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if !BindHomes(&out, rows, ReadyGate(bindHomesManifest()), nil, getenv) {
+		t.Fatalf("BindHomes returned false; output:\n%s", out.String())
+	}
+
+	for configPath, want := range map[string]string{"bound/config": "bound content\n", "inert/config": "inert content\n"} {
+		got, err := os.ReadFile(filepath.Join(home, configPath))
+		if err != nil {
+			t.Fatalf("read %s: %v", configPath, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s = %q, want %q", configPath, got, want)
+		}
+	}
+
+	want := "==> registry proxy Forwarder up on 127.0.0.1:" + strconv.Itoa(ForwarderPort) +
+		" — stub-bound bound to it via " + filepath.Join(home, "bound/config") + "\n"
+	if got := out.String(); got != want {
+		t.Errorf("BindHomes output =\n%s\nwant\n%s", got, want)
 	}
 }

@@ -36,8 +36,8 @@ var Strategy = ecosystem.Strategy{
 		HomeEnvVar:          "SYNTHETIC_HOME",
 		HomeRelativeDefault: ".synthetic",
 		ConfigPath:          "config",
-		Render: func(port int, prefix string, _ []registrymanifest.Route) string {
-			return "registry = " + ecosystem.RouteLocalURL(prefix, port) + "\n"
+		Render: func(port int, prefix string, _ []registrymanifest.Route) (string, bool) {
+			return "registry = " + ecosystem.RouteLocalURL(prefix, port) + "\n", true
 		},
 	},
 	RewriteRows: []registryvocab.RewriteRow{{

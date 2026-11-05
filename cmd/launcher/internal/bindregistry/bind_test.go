@@ -94,13 +94,15 @@ func TestRewriteHostNames_DedupesPreservingFirstOccurrenceOrder(t *testing.T) {
 }
 
 // Both halves of the summary's skip rule: a BindingEnvVar Strategy is named only when
-// the rendered exports carry its var, while a HomeConfig Strategy is named
-// unconditionally because its file is always written.
-func TestBindingSummaryProse_SkipsUnrenderedBindingEnvVars(t *testing.T) {
+// the rendered exports carry its var, and a HomeConfig Strategy only when it has a
+// path in homeConfigPaths, which BindHomes records only for a render that bound
+// something (an inert render still writes its file but advertises no redirection).
+func TestBindingSummaryProse_SkipsUnboundStrategies(t *testing.T) {
 	rows := []ecosystem.Strategy{
 		{Name: "stub-bound", BindingEnvVar: "STUB_BOUND_REGISTRY"},
 		{Name: "stub-unbound", BindingEnvVar: "STUB_UNBOUND_REGISTRY"},
 		{Name: "stub-file", HomeConfig: &ecosystem.HomeConfig{}},
+		{Name: "stub-inert-file", HomeConfig: &ecosystem.HomeConfig{}},
 	}
 
 	got := bindingSummaryProse(

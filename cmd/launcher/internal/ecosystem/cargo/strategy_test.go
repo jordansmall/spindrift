@@ -113,7 +113,10 @@ func TestStrategy_HomeConfig(t *testing.T) {
 	if hc.Render == nil {
 		t.Fatal("cargo HomeConfig has nil Render")
 	}
-	got := hc.Render(27182, "r0", nil)
+	got, bound := hc.Render(27182, "r0", nil)
+	if !bound {
+		t.Error("cargo Render reported bound=false")
+	}
 	want := cargoConfigTOML(27182, "r0", nil)
 	if got != want {
 		t.Errorf("Render(27182, %q) = %q, want %q", "r0", got, want)

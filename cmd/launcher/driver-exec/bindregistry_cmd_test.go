@@ -149,7 +149,8 @@ func syntheticHomeConfigPath(home string) string {
 // syntheticHomeConfig is the synthetic Strategy's home config for a route prefix at
 // the Forwarder's port, from the Strategy's own renderer.
 func syntheticHomeConfig(prefix string) string {
-	return synthetic.Strategy.HomeConfig.Render(bindregistry.ForwarderPort, prefix, nil)
+	content, _ := synthetic.Strategy.HomeConfig.Render(bindregistry.ForwarderPort, prefix, nil)
+	return content
 }
 
 // syntheticExport is the line the synthetic Strategy's env export renders to.
@@ -424,8 +425,8 @@ func TestBindRegistry_HomeConfigsComeFromRowsWalk(t *testing.T) {
 			HomeEnvVar:          "STUB_ECOSYSTEM_HOME",
 			HomeRelativeDefault: ".stub-ecosystem",
 			ConfigPath:          "stub.conf",
-			Render: func(port int, prefix string, _ []registrymanifest.Route) string {
-				return "stub=" + strconv.Itoa(port) + "/" + prefix
+			Render: func(port int, prefix string, _ []registrymanifest.Route) (string, bool) {
+				return "stub=" + strconv.Itoa(port) + "/" + prefix, true
 			},
 		},
 	})
@@ -464,8 +465,8 @@ func TestBindRegistry_SuccessSummaryFragmentsComeFromRowsWalk(t *testing.T) {
 				HomeEnvVar:          "STUB_HOME_ECOSYSTEM_HOME",
 				HomeRelativeDefault: ".stub-home-ecosystem",
 				ConfigPath:          "stub.conf",
-				Render: func(port int, prefix string, _ []registrymanifest.Route) string {
-					return "stub=" + strconv.Itoa(port) + "/" + prefix
+				Render: func(port int, prefix string, _ []registrymanifest.Route) (string, bool) {
+					return "stub=" + strconv.Itoa(port) + "/" + prefix, true
 				},
 			},
 		},
@@ -1163,7 +1164,7 @@ var intreeRepoAwareRow = ecosystem.Strategy{
 		HomeEnvVar:          "STUB_REPO_AWARE_HOME",
 		HomeRelativeDefault: ".stub-repo-aware",
 		ConfigPath:          "config",
-		Render:              func(int, string, []registrymanifest.Route) string { return "" },
+		Render:              func(int, string, []registrymanifest.Route) (string, bool) { return "", false },
 	},
 	RepoAwareHomeConfig: renderRepoAware,
 }
@@ -2044,8 +2045,8 @@ var pathHomeRow = ecosystem.Strategy{
 		HomeEnvVar:          "STUB_HOME_HOME",
 		HomeRelativeDefault: ".stub-home",
 		ConfigPath:          "stub.conf",
-		Render: func(port int, prefix string, routes []registrymanifest.Route) string {
-			return "url = " + ecosystem.RouteLocalURL(prefix, port) + routes[0].Ecosystems.Path("stub-home") + "/\n"
+		Render: func(port int, prefix string, routes []registrymanifest.Route) (string, bool) {
+			return "url = " + ecosystem.RouteLocalURL(prefix, port) + routes[0].Ecosystems.Path("stub-home") + "/\n", true
 		},
 	},
 }
