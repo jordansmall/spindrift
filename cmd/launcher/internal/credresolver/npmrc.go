@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"spindrift.dev/launcher/internal/npmrcvalue"
 )
 
 // npmrcHostname strips any trailing ":port", mirroring netrc.go's host-only
@@ -21,15 +23,6 @@ func npmrcHostname(s string) string {
 		return s[1 : len(s)-1]
 	}
 	return s
-}
-
-// npmrcUnquoteValue strips a matching pair of surrounding double quotes, which
-// npm accepts and `npm config set` sometimes writes.
-func npmrcUnquoteValue(v string) string {
-	if len(v) >= 2 && strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`) {
-		return v[1 : len(v)-1]
-	}
-	return v
 }
 
 // npmrcAuthToken returns the value of the first "//<registry>/:_authToken="
@@ -60,7 +53,7 @@ func npmrcAuthToken(content []byte, sourceName, host string) (string, error) {
 			continue
 		}
 
-		value := npmrcUnquoteValue(strings.TrimSpace(pathAndKey[keyIdx+len(marker):]))
+		value := npmrcvalue.Decode(pathAndKey[keyIdx+len(marker):])
 		if value == "" {
 			return "", fmt.Errorf("registry proxy credential file %s has npmrc _authToken entry for host %s but the value is empty", sourceName, host)
 		}
