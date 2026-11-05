@@ -619,3 +619,21 @@ credential rule and no preflight check. Like its siblings it is a secret knob
 but unlike theirs its written file is deliberately left off the
 credential-deny list (`lib/credential-paths.nix`): pi's `settings.json`
 carries no credential, so the agent's own `read` and `bash` calls may open it.
+
+## Amendment (issue #6384): the pi hook bridge breaks identical tool-call loops
+
+A model can repeat one tool call forever: a real pi scout looped 1,550 turns
+on the same `find` call, and pi's subagent extension has no turn cap to stop
+it. The bridge (#5482) already sees every `tool_call` in the coordinator and
+in each subagent child, so it counts consecutive identical calls (same tool
+name and arguments, nothing between). The third is refused with a reason
+telling the model to act differently; any different call resets the count, so
+re-running a command after an edit is never caught. This is pi-only; claude and
+opencode are untouched.
+
+A refusal alone does not end a loop that ignores it, so the third refusal in
+a row (the fifth identical call) calls `process.exit(1)`. It is not
+`ctx.shutdown()`, a no-op in print mode, and pi exits 0 after an aborted
+json-mode turn; a nonzero exit is what makes a subagent result fail for its
+coordinator, with the bridge's stderr line in that result, and settles a
+looping coordinator as a failed run.

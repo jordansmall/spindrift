@@ -1302,6 +1302,16 @@ What the Driver carries:
   output blocks the call (fail closed); the post-tool summary hook fails open,
   because pi only logs a throwing `tool_result` handler, and the full output
   stays in the log.
+- **Identical tool-call loops are broken (issue #6384).** The bridge counts
+  consecutive identical tool calls (same tool and arguments, nothing between)
+  across every tool, in the coordinator and in each subagent child. The third
+  in a row is refused with a reason telling the model to take a different
+  action; the fifth, after two refusals, writes one stderr line and exits
+  the pi process nonzero, which fails a subagent's result for its coordinator
+  and settles a looping coordinator as a failed run. Each refusal and the
+  shutdown write a `spindrift-pi-hooks:` stderr line naming the tool and
+  count. Any different call resets the count, so only exact repeats are
+  caught: re-running a command after an edit never is.
 - **Streaming deltas of finished messages are dropped (issue #6066).**
   driver-exec drops the `message_update` `*_delta` events of every assistant
   message that finishes, since its `message_end` repeats the whole message. The
