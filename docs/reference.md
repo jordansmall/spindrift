@@ -5098,8 +5098,12 @@ paths (`gh`, Forgejo), the Filer's open-issue search is likewise keyed
 on the literal line. This is an accepted limitation: there is no fuzzy
 or context-hash backlog matching, following #4108's decision that line
 aliasing never reaches into the backlog. The mitigation is in the Filer
-prompt, which keys on the nearest enclosing symbol and uses a bare line
-only when none exists.
+prompt, which keys on the nearest enclosing symbol (a Markdown site on its
+nearest heading's anchor, `file.md:<anchor>`, with each run of spaces and
+hyphens folded to one hyphen and a repeated heading taking a `-1`, `-2`
+suffix; text above a file's first heading keys on the bare path
+`file.md`) and uses a bare line only when none exists. A docs-drift
+finding keys its doc site alongside its code site, never instead of it.
 
 The two direct filing paths (`gh`, Forgejo) never reach the Launcher,
 so their dedup stays entirely the Filer's own: it runs the open-issue

@@ -184,6 +184,10 @@ func TestButlerFileIssuesRelayFragmentKeysOnEnclosingSymbol(t *testing.T) {
 			name:   "keys on the nearest enclosing symbol",
 			clause: "(`path/to/file.go:Symbol`, where Symbol is the symbol it names or else the nearest enclosing one, or `path/to/file.go:<line>` only when no symbol encloses the site)",
 		},
+		{
+			name:   "a Markdown site keys on the heading anchor",
+			clause: "A Markdown site has no symbol: key it `path/to/file.md:<anchor>`, the anchor of the nearest heading above it (lowercased, punctuation dropped but hyphens and underscores kept, then each run of spaces and hyphens folded to one hyphen, a repeated heading taking a `-1`, `-2` suffix: `#### The pi Driver` is `the-pi-driver`), never a line number or a free word. Text above a file's first heading keys on the bare path `path/to/file.md`.",
+		},
 	})
 }
 

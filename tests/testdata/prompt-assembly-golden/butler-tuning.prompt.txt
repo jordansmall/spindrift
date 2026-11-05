@@ -98,7 +98,11 @@ the finding; over the Signal socket the filer passes them as `-cite`
 (repeatable) and `-metric`, on top of the flags listed under File findings.
 If the filer reports a rejection for a missing cite or metric, re-delegate the finding with its cited anchors and metric slug; never drop
 it for that. Give the finding's target file in its dedup term,
-`-dedup <path>:<symbol>`.
+`-dedup <path>:<symbol>` (`<path>:<anchor>`, the nearest heading's anchor,
+for a Markdown target: lowercased, punctuation dropped but hyphens and
+underscores kept, then each run of spaces and hyphens folded to one hyphen,
+a repeated heading taking a `-1`, `-2` suffix; text above the first heading
+keys on the bare path).
 
 The host drops a finding that cites an anchor not in the digest, targets a
 file absent at the scanned HEAD, or, unless its class is evidence-gap, has no
