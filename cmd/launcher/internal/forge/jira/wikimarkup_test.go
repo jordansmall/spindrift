@@ -84,6 +84,12 @@ func TestToWikiMarkup(t *testing.T) {
 		{"escaped stars stay literal", `\*not italic\*`, `\*not italic\*`},
 		{"escaped bracket opens no link", `\[t](https://x.io/a)`, `\[t](https://x.io/a)`},
 		{"code span keeps backslashes", "`a\\\\b`", `{{a\\b}}`},
+		{"code span escapes braces", "`struct{}`", `{{struct\{\}}}`},
+		{"code span escapes brackets and braces", "`map[string]struct{}`", `{{map\[string\]struct\{\}}}`},
+		{"code span escapes template braces", "`{{ .Field }}`", `{{\{\{ .Field \}\}}}`},
+		{"code span escapes macro", "`{code}`", `{{\{code\}}}`},
+		{"code span escaped brace not doubled", "`\\{`", `{{\{}}`},
+		{"table code span braces", "| a | `struct{}` |\n|---|---|", `||a||{{struct\{\}}}||`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := toWikiMarkup(tc.in); got != tc.want {
