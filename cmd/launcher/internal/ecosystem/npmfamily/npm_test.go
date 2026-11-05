@@ -464,29 +464,3 @@ func TestParseNpmRegistryConfig_DecodesIniValue(t *testing.T) {
 		})
 	}
 }
-
-func TestNpmrcDecodeValue(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"https://x.example.com/", "https://x.example.com/"},
-		{"  https://x.example.com/  ", "https://x.example.com/"},
-		{"https://x.example.com/ ; c", "https://x.example.com/"},
-		{"https://x.example.com/#frag", "https://x.example.com/"},
-		{`https://x.example.com/\#frag`, "https://x.example.com/#frag"},
-		{`https://x.example.com/\;a`, "https://x.example.com/;a"},
-		{`a\nb`, `a\nb`},
-		{`trailing\`, `trailing\`},
-		{`"https://x.example.com/#a;b"`, "https://x.example.com/#a;b"},
-		{`'https://x.example.com/#a;b'`, "https://x.example.com/#a;b"},
-		{`"abc"`, "abc"},
-		{`"bad\q"`, `"bad\q"`},
-		{`'a "b"'`, `a "b"`},
-		{`"`, `"`},
-		{`'`, ""},
-		{`"half`, "\"half"},
-	}
-	for _, tc := range cases {
-		if got := npmrcDecodeValue(tc.in); got != tc.want {
-			t.Errorf("npmrcDecodeValue(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}

@@ -1,13 +1,13 @@
 package npmfamily
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/ecosystem/ecosystemkit"
+	"spindrift.dev/launcher/internal/npmrcvalue"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -59,7 +59,7 @@ func parseNpmRegistryConfig(content string) ([]ecosystem.Declaration, bool, erro
 			continue
 		}
 		key = strings.TrimSpace(key)
-		value = npmrcDecodeValue(value)
+		value = npmrcvalue.Decode(value)
 		if key != "registry" && !strings.HasSuffix(key, ":registry") {
 			continue
 		}
@@ -78,51 +78,6 @@ func parseNpmRegistryConfig(content string) ([]ecosystem.Declaration, bool, erro
 	// sawDeclaration tells the caller the file named a registry key but no
 	// usable value, which differs from a file that names no registry key.
 	return out, sawDeclaration, nil
-}
-
-// npmrcDecodeValue decodes an .npmrc value the way npm's ini package does
-// (unsafe()): a value wrapped in matching quotes is JSON-decoded (single quotes
-// stripped first, the text kept as-is when that fails), and an unquoted one is
-// cut at the first unescaped ";" or "#" with "\;" and "\#" kept as literals.
-// It decodes into a Go string only, so quoted non-string JSON (e.g. '123')
-// comes back as its raw text, unlike ini; acceptable since registry values are
-// URLs.
-func npmrcDecodeValue(val string) string {
-	val = strings.TrimSpace(val)
-	if len(val) > 0 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
-		if val[0] == '\'' {
-			// ini slices (1, -1) even for a lone quote, which leaves "".
-			val = strings.TrimPrefix(strings.TrimSuffix(val, "'"), "'")
-		}
-		var s string
-		if json.Unmarshal([]byte(val), &s) == nil {
-			return s
-		}
-		return val
-	}
-	var out strings.Builder
-	esc := false
-	for i := 0; i < len(val); i++ {
-		c := val[i]
-		switch {
-		case esc:
-			if c != '\\' && c != ';' && c != '#' {
-				out.WriteByte('\\')
-			}
-			out.WriteByte(c)
-			esc = false
-		case c == ';' || c == '#':
-			return strings.TrimSpace(out.String())
-		case c == '\\':
-			esc = true
-		default:
-			out.WriteByte(c)
-		}
-	}
-	if esc {
-		out.WriteByte('\\')
-	}
-	return strings.TrimSpace(out.String())
 }
 
 // isScopedNpmFamilyKey reports whether a key the Strategy's own predicate already
