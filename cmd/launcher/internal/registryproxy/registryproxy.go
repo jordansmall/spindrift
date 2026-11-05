@@ -191,7 +191,11 @@ func authHeader(scheme, credential string) (headerName, headerValue string, err 
 	case scheme == "" || strings.EqualFold(scheme, "bearer"):
 		return "Authorization", authorizationHeaderValue(credential), nil
 	case strings.EqualFold(scheme, "basic"):
-		return "Authorization", basicHeaderValue(credential), nil
+		v, err := basicHeaderValue(credential)
+		if err != nil {
+			return "", "", err
+		}
+		return "Authorization", v, nil
 	case strings.HasPrefix(scheme, "header:"):
 		name := strings.TrimPrefix(scheme, "header:")
 		if name == "" {
@@ -205,13 +209,18 @@ func authHeader(scheme, credential string) (headerName, headerValue string, err 
 
 // basicHeaderValue renders credential as an HTTP Basic Authorization value:
 // verbatim when it already names "Basic ", otherwise base64-encoded per RFC
-// 7617, where credential is expected to be "user:password".
-func basicHeaderValue(credential string) string {
+// 7617, which needs the "user:password" separator. A credential without one
+// would encode to a header upstream rejects with a 401, so it errors instead;
+// the message never carries the credential itself.
+func basicHeaderValue(credential string) (string, error) {
 	const prefix = "Basic "
 	if len(credential) > len(prefix) && strings.EqualFold(credential[:len(prefix)], prefix) {
-		return credential
+		return credential, nil
 	}
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(credential))
+	if !strings.Contains(credential, ":") {
+		return "", errors.New(`registryproxy: basic credential has no "user:" part; give it as user:secret, or use the bearer scheme for a bare token`)
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(credential)), nil
 }
 
 // AssignPrefixes sets Prefix on each element of routes in place, mutating the
