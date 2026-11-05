@@ -36,6 +36,12 @@ func Render(routes []Route) []byte {
 		if r.SchemeFromProfile {
 			fmt.Fprintf(&b, "# auth-scheme from host profile %s: the probe saw no usable challenge\n", quoteTOMLString(r.Profile.Name))
 		}
+		switch r.BareToken {
+		case BareTokenProfileScheme:
+			fmt.Fprintf(&b, "# basic needs a user:secret credential, but the matched store yields a bare token, so host profile %s's bare-token scheme replaces it\n", quoteTOMLString(r.Profile.Name))
+		case BareTokenNeedsUserSecret:
+			b.WriteString("# basic needs a user:secret credential (for example an env source); the matched store yields a bare token, which the proxy refuses for basic\n")
+		}
 		fmt.Fprintf(&b, "auth-scheme = %s\n", quoteTOMLString(r.AuthScheme))
 		if len(r.Allow) > 0 {
 			fmt.Fprintf(&b, "# allow from host profile %s: sibling paths outside the declared registry path\n", quoteTOMLString(r.Profile.Name))

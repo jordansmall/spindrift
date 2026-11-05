@@ -27,6 +27,11 @@ type Row struct {
 	// AuthScheme uses the routes-file grammar (bearer, basic, header:<Name>);
 	// empty for a host that needs no credential.
 	AuthScheme string
+	// BareTokenScheme is the scheme a bare store token authenticates with when
+	// the probe answers basic; empty when the host has no such fact. Discovery
+	// keeps it over the basic answer, since no credential store yields the
+	// user:secret a basic route needs.
+	BareTokenScheme string
 	// BasicUsername is display text describing the username convention.
 	BasicUsername string
 	// Siblings maps an ecosystem Strategy name to path patterns, relative to the
@@ -42,11 +47,12 @@ const publicNote = "known public host, needs no credential, nothing to configure
 // unexported so no importer can reorder or edit it under Match.
 var table = []Row{
 	{
-		Name:         "artifactory",
-		Hosts:        []string{"*.jfrog.io"},
-		PathPrefixes: []string{"/artifactory/api/"},
-		ProbeHeaders: []string{"X-Artifactory-Id"},
-		AuthScheme:   "bearer",
+		Name:            "artifactory",
+		Hosts:           []string{"*.jfrog.io"},
+		PathPrefixes:    []string{"/artifactory/api/"},
+		ProbeHeaders:    []string{"X-Artifactory-Id"},
+		AuthScheme:      "bearer",
+		BareTokenScheme: "bearer",
 		// Cargo's config.json dl is <repo>/v1/crates, a sibling of the declared
 		// <repo>/index path. The other ecosystems' downloads sit under the
 		// declared path.

@@ -577,6 +577,60 @@ func TestDiscover_ProbeBasicHonored(t *testing.T) {
 	}
 }
 
+func TestDiscover_StoreMatchedBasicKeepsProfileBareTokenScheme(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
+
+	advice := ProfileAdvice{Name: "artifactory", BareTokenScheme: "bearer"}
+	probe := func(string) ProbeResult { return ProbeResult{Scheme: "basic", Profile: advice} }
+	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
+	routes, _ := discoverSynthetic(t, dir, stores, alwaysMatch, probe)
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly 1", routes)
+	}
+	if got := routes[0]; got.AuthScheme != "bearer" || got.BareToken != BareTokenProfileScheme || got.SchemeFromProfile {
+		t.Errorf("route = %+v, want bearer with BareTokenProfileScheme and no SchemeFromProfile", got)
+	}
+}
+
+func TestDiscover_StoreMatchedBasicWithoutProfileFactStaysBasicAndFlagged(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
+
+	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
+	for name, probe := range map[string]Probe{
+		"no profile":      probeAs("basic"),
+		"profile no fact": func(string) ProbeResult { return ProbeResult{Scheme: "basic", Profile: ProfileAdvice{Name: "other"}} },
+	} {
+		routes, _ := discoverSynthetic(t, dir, stores, alwaysMatch, probe)
+		if len(routes) != 1 {
+			t.Fatalf("%s: routes = %+v, want exactly 1", name, routes)
+		}
+		if got := routes[0]; got.AuthScheme != "basic" || got.BareToken != BareTokenNeedsUserSecret {
+			t.Errorf("%s: route = %+v, want basic with BareTokenNeedsUserSecret", name, got)
+		}
+	}
+}
+
+func TestDiscover_UnmatchedBasicAndStoreMatchedBearerCarryNoBareTokenNote(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFixture(t, dir, cfgPath, hostDecl)
+
+	stores := []Store{{Name: "netrc", Path: "/home/agent/.netrc"}}
+	for name, tc := range map[string]struct {
+		lookup Lookup
+		scheme string
+	}{
+		"unmatched basic":      {noMatch, "basic"},
+		"store-matched bearer": {alwaysMatch, "bearer"},
+	} {
+		routes, _ := discoverSynthetic(t, dir, stores, tc.lookup, probeAs(tc.scheme))
+		if len(routes) != 1 || routes[0].BareToken != BareTokenNone || routes[0].AuthScheme != tc.scheme {
+			t.Errorf("%s: routes = %+v, want %s and no bare-token note", name, routes, tc.scheme)
+		}
+	}
+}
+
 func TestDiscover_ProbeHeaderSchemeHonored(t *testing.T) {
 	dir := t.TempDir()
 	testutil.WriteFixture(t, dir, cfgPath, hostDecl)

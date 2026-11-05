@@ -58,6 +58,9 @@ func TestMatchPublicDefaultsAreUnauthenticated(t *testing.T) {
 func TestTableAuthSchemesUseRoutesGrammar(t *testing.T) {
 	grammar := regexp.MustCompile("^(bearer|basic|header:[!#$%&'*+.^_`|~0-9A-Za-z-]+)$")
 	for _, row := range table {
+		if row.BareTokenScheme != "" && (row.BareTokenScheme == "basic" || !grammar.MatchString(row.BareTokenScheme)) {
+			t.Errorf("%s: BareTokenScheme %q must be a non-basic routes-file scheme", row.Name, row.BareTokenScheme)
+		}
 		if row.AuthScheme != "" && !grammar.MatchString(row.AuthScheme) {
 			t.Errorf("%s: AuthScheme %q is not bearer, basic or header:<Name>", row.Name, row.AuthScheme)
 		}
