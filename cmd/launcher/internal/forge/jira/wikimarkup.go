@@ -196,7 +196,7 @@ func tableCells(row string) []string {
 		if c == "" {
 			c = " "
 		}
-		cells[i] = convertInline(escapePipes(c))
+		cells[i] = convertInline(escapeChars(c, "|"))
 	}
 	return cells
 }
@@ -248,7 +248,9 @@ func convertInline(s string) string {
 		case c == '`':
 			n := runLen(s, i)
 			if end := codeSpanEnd(s, i); end > 0 {
-				b.WriteString("{{" + s[i+n:end-n] + "}}")
+				// Jira reads braces inside {{...}} as macros or the span
+				// end, and brackets as links.
+				b.WriteString("{{" + escapeChars(s[i+n:end-n], "{}[]") + "}}")
 				i = end
 				continue
 			}
@@ -256,7 +258,7 @@ func convertInline(s string) string {
 			i += n
 		case c == '[' && (i == 0 || s[i-1] != '!'):
 			if m := linkRe.FindStringSubmatch(s[i:]); m != nil {
-				b.WriteString("[" + convertInline(escapePipes(m[1])) + "|" + m[2] + "]")
+				b.WriteString("[" + convertInline(escapeChars(m[1], "|")) + "|" + m[2] + "]")
 				i += len(m[0])
 				continue
 			}
@@ -347,17 +349,19 @@ func isEscape(s string, i int) bool {
 	return s[i] == '\\' && i+1 < len(s) && isPunct(s[i+1])
 }
 
-// escapePipes backslash-escapes each "|" in link or cell text, which Jira
-// would read as a separator; an already-escaped "\|" is left as is.
-func escapePipes(s string) string {
+// escapeChars backslash-escapes each byte of s that appears in set, such as
+// the "|" Jira would read as a link or cell separator; an already-escaped
+// pair such as "\|" is left as is, never doubled.
+func escapeChars(s, set string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		switch {
 		case isEscape(s, i):
 			b.WriteString(s[i : i+2])
 			i++
-		case s[i] == '|':
-			b.WriteString(`\|`)
+		case strings.IndexByte(set, s[i]) >= 0:
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
 		default:
 			b.WriteByte(s[i])
 		}
