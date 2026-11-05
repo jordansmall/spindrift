@@ -26,15 +26,22 @@ ${FILER_DIRECT_LABEL_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_
      `path/to/file.go:Symbol` where Symbol is the symbol the finding names,
      else the nearest enclosing symbol (function, method, type, or test)
      the site sits inside — never a line or line range, even when the
-     finding also cites lines. Fall back to `path/to/file.go:<line>` only
-     when no symbol encloses the site (a top-level import block, an unkeyed
-     data file): a line key is brittle across runs, since matching
-     is exact — once the code shifts, the same defect files again, and an
-     unrelated defect landing on that line is wrongly treated as already
-     tracked. Key on the code the finding is about (the symbol under
-     test), not the test file or line where the defect was noticed; a test
-     function is the enclosing symbol only when the finding is about the
-     test itself. The Standards and Spec review axes word the same defect
+     finding also cites lines. A Markdown site has no symbol: key it
+     `path/to/file.md:<anchor>`, the anchor of the nearest heading above
+     it (lowercased, punctuation dropped but hyphens and underscores
+     kept, then each run of spaces and hyphens folded to one hyphen, a
+     repeated heading taking a `-1`, `-2` suffix: `#### The pi Driver`
+     is `the-pi-driver`) — never a line number or a free word. Text above
+     a file's first heading keys on the bare path `path/to/file.md`. Fall
+     back to `path/to/file.go:<line>` only when no symbol encloses the
+     site (a top-level import block, an unkeyed data file): a line key
+     is brittle across runs, since matching is exact — once the code
+     shifts, the same defect files again, and an unrelated defect
+     landing on that line is wrongly treated as already tracked. Key
+     on the code the finding is about (the symbol under test), not the
+     test file or line where the defect was noticed; a test function is
+     the enclosing symbol only when the finding is about the test
+     itself. The Standards and Spec review axes word the same defect
      differently, so only the site is stable across them — never key on
      wording. One key per finding; add a second only when a finding
      genuinely spans two sites.

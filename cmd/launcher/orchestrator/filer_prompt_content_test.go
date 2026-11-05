@@ -47,6 +47,10 @@ func TestFilerPromptSiteKeyRuleContract(t *testing.T) {
 			clause: "else the nearest enclosing symbol (function, method, type, or test) the site sits inside",
 		},
 		{
+			name:   "a Markdown site keys on the heading anchor, never a line or free word",
+			clause: "A Markdown site has no symbol: key it `path/to/file.md:<anchor>`, the anchor of the nearest heading above it (lowercased, punctuation dropped but hyphens and underscores kept, then each run of spaces and hyphens folded to one hyphen, a repeated heading taking a `-1`, `-2` suffix: `#### The pi Driver` is `the-pi-driver`) — never a line number or a free word. Text above a file's first heading keys on the bare path `path/to/file.md`.",
+		},
+		{
 			name:   "a line key is the fallback only when no symbol encloses the site",
 			clause: "Fall back to `path/to/file.go:<line>` only when no symbol encloses the site",
 		},

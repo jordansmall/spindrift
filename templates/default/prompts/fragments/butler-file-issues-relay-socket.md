@@ -5,11 +5,16 @@ carries no tracker issue number for provenance — instead, give the filer the
 finding's dedup/site key (`path/to/file.go:Symbol`, where Symbol is the
 symbol it names or else the nearest enclosing one, or `path/to/file.go:<line>`
 only when no symbol encloses the site) naming the file(s) the finding
-concerns, so the launcher can derive that from the filed issue-intent. Also
-give the filer the finding's class, and, only when the `reviewer` agreed on
-it (see PROMOTION CANDIDATES above), the reviewer's one-line concurrence,
-and, when the finding is a patch candidate the reviewer approved, its diff
-as the finding's patch.
+concerns, so the launcher can derive that from the filed issue-intent. A
+Markdown site has no symbol: key it `path/to/file.md:<anchor>`, the anchor
+of the nearest heading above it (lowercased, punctuation dropped but hyphens
+and underscores kept, then each run of spaces and hyphens folded to one
+hyphen, a repeated heading taking a `-1`, `-2` suffix: `#### The pi Driver` is
+`the-pi-driver`), never a line number or a free word. Text above a file's
+first heading keys on the bare path `path/to/file.md`. Also give the filer the
+finding's class, and, only when the `reviewer` agreed on it (see PROMOTION
+CANDIDATES above), the reviewer's one-line concurrence, and, when the finding
+is a patch candidate the reviewer approved, its diff as the finding's patch.
 
 The butler never writes to the Issue Tracker itself — the filer is
 relay-only here. It sends each one over the Signal socket via
