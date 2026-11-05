@@ -744,9 +744,11 @@ func TestNew_BasicAuthScheme(t *testing.T) {
 		name       string
 		credential string
 		want       string
+		wantErr    bool
 	}{
-		{"plain user:password is base64-encoded", "alice:hunter2", "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2"))},
-		{"already-Basic credential passes through verbatim", "Basic dXNlcjpwdw==", "Basic dXNlcjpwdw=="},
+		{"plain user:password is base64-encoded", "alice:hunter2", "Basic " + base64.StdEncoding.EncodeToString([]byte("alice:hunter2")), false},
+		{"already-Basic credential passes through verbatim", "Basic dXNlcjpwdw==", "Basic dXNlcjpwdw==", false},
+		{"colon-less credential is refused", "bare-token-s3kr1t", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotAuth string
@@ -754,6 +756,22 @@ func TestNew_BasicAuthScheme(t *testing.T) {
 				gotAuth = r.Header.Get("Authorization")
 				w.WriteHeader(http.StatusOK)
 			})
+
+			if tc.wantErr {
+				// A colon-less credential would encode to a malformed RFC 7617
+				// header, so New refuses it up front without echoing the secret.
+				_, err := New(AssignPrefixes([]Route{{MatchHost: "registry.example.com", EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential}}), nil)
+				if err == nil {
+					t.Fatal("New = nil error, want error")
+				}
+				if !strings.Contains(err.Error(), "registry.example.com") {
+					t.Errorf("error %q does not name the route", err)
+				}
+				if strings.Contains(err.Error(), tc.credential) {
+					t.Errorf("error %q echoes the credential", err)
+				}
+				return
+			}
 
 			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/"}, Upstream: upstream.URL, AuthScheme: "basic", Credential: tc.credential})
 
