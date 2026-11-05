@@ -1,20 +1,15 @@
 {
   "lastSwept": "2502e4639c4ce2eb3b80a6270494539c76446def",
-  "cursor": "cmd/launcher/internal/ecosystem/npmfamily/testdata/corpus/npm/profile-public-default/discovery.golden.toml",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-11-05T02:41:05.590954439-05:00"
-  },
+  "cursor": "cmd/launcher/internal/ecosystem/npmfamily/testdata/corpus/npm/scoped-before-unscoped/summary.golden.txt",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 16,
+    "output_tokens": 2526,
+    "cache_read_input_tokens": 259272,
+    "cache_creation_input_tokens": 45570,
+    "total_cost_usd": 0.46699840000000004,
+    "duration_ms": 33678,
+    "duration_api_ms": 32889,
+    "num_turns": 9
   }
 }
