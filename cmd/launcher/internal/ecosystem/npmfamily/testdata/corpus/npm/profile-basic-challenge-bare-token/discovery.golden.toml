@@ -5,5 +5,6 @@
 # basic username: the Artifactory username (or email) that owns the token
 # credential helper: an access token from the JFrog Platform UI or `jf rt access-token-create`
 match-host = "artifacts.corp.test"
-auth-scheme = "basic"
+# basic needs a user:secret credential, but the matched store yields a bare token, so host profile "artifactory"'s bare-token scheme replaces it
+auth-scheme = "bearer"
 credential = { npmrc = "stores/npmrc" }

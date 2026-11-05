@@ -682,6 +682,34 @@ func TestRender_ReceivedSchemeKeepsAdviceWithoutSchemeComment(t *testing.T) {
 	}
 }
 
+func TestRender_BareTokenNotesPrecedeAuthScheme(t *testing.T) {
+	for name, tc := range map[string]struct {
+		note   BareTokenNote
+		scheme string
+		want   string
+	}{
+		"profile scheme":    {BareTokenProfileScheme, "bearer", "# basic needs a user:secret credential, but the matched store yields a bare token, so host profile \"artifactory\"'s bare-token scheme replaces it\nauth-scheme = \"bearer\"\n"},
+		"needs user:secret": {BareTokenNeedsUserSecret, "basic", "# basic needs a user:secret credential (for example an env source); the matched store yields a bare token, which the proxy refuses for basic\nauth-scheme = \"basic\"\n"},
+	} {
+		route := Route{
+			MatchHost:        "repo.corp.example",
+			UpstreamBaseURL:  "https://repo.corp.example/npm/",
+			AuthScheme:       tc.scheme,
+			Profile:          ProfileAdvice{Name: "artifactory"},
+			BareToken:        tc.note,
+			CredentialSource: "npmrc",
+			CredentialValue:  "stores/npmrc",
+		}
+		got := string(Render([]Route{route}))
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%s: Render output missing %q:\n%s", name, tc.want, got)
+		}
+		if _, err := registryroutes.Parse([]byte(got), nil); err != nil {
+			t.Errorf("%s: Parse(Render): %v", name, err)
+		}
+	}
+}
+
 func TestRender_PublicProfileWritesOnlyTheNoteComment(t *testing.T) {
 	const note = "known public host, needs no credential, nothing to configure"
 	route := Route{

@@ -46,6 +46,8 @@ type ProbeResult struct {
 // so this package never imports hostprofile (ADR 0071).
 type ProfileAdvice struct {
 	Name, Note, BasicUsername, CredentialHelper string
+	// BareTokenScheme is hostprofile.Row.BareTokenScheme.
+	BareTokenScheme string
 	// Siblings maps an ecosystem name to path patterns relative to the registry
 	// path a Target repo declares.
 	Siblings map[string][]string
@@ -55,6 +57,19 @@ type ProfileAdvice struct {
 // reads the registry's WWW-Authenticate answer and response headers; it does
 // not default to "bearer", so an empty Scheme means no usable challenge.
 type Probe func(upstreamBaseURL string) ProbeResult
+
+// BareTokenNote says which comment Render writes above auth-scheme when the
+// probe answered basic on a route whose matched store yields a bare token.
+type BareTokenNote int
+
+const (
+	BareTokenNone BareTokenNote = iota
+	// BareTokenProfileScheme: the host profile's BareTokenScheme replaced basic.
+	BareTokenProfileScheme
+	// BareTokenNeedsUserSecret: basic stays, but no store yields the user:secret
+	// the proxy requires for it.
+	BareTokenNeedsUserSecret
+)
 
 // Route is one proposed route, shaped to write directly into a registry routes
 // file (registryroutes.Route) minus the optional keys this engine has no basis
@@ -73,6 +88,9 @@ type Route struct {
 	// SchemeFromProfile is ProbeResult.SchemeFromProfile, kept only while
 	// AuthScheme is the profile's own value.
 	SchemeFromProfile bool
+	// BareToken records the note owed when the probe answered basic but the
+	// matched store yields a bare token.
+	BareToken BareTokenNote
 	// Allow is the Host profile's sibling paths for the ecosystems this host
 	// serves, joined onto each declared registry path.
 	Allow            []string
@@ -149,6 +167,16 @@ func Discover(repoDir string, rows []ecosystem.Strategy, stores []Store, lookup 
 		if found {
 			route.CredentialSource = matchedStore.Name
 			route.CredentialValue = matchedStore.Path
+			// Every store Discover can match resolves to a bare secret, which
+			// the proxy refuses for basic (it needs user:secret).
+			if route.AuthScheme == "basic" {
+				if scheme := res.Profile.BareTokenScheme; scheme != "" {
+					route.AuthScheme, route.SchemeFromProfile = scheme, false
+					route.BareToken = BareTokenProfileScheme
+				} else {
+					route.BareToken = BareTokenNeedsUserSecret
+				}
+			}
 			// Each kind's own StoreConfig already names every companion it
 			// contributes, so Discover assigns both unconditionally rather
 			// than branching per store name.

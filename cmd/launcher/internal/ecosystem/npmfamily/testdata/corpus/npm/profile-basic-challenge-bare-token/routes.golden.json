@@ -1,7 +1,7 @@
 [
   {
     "Allow": null,
-    "AuthScheme": "basic",
+    "AuthScheme": "bearer",
     "Credential": {
       "ExecArgv": null,
       "FileFormat": "npmrc",

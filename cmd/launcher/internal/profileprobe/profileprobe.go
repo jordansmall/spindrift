@@ -24,6 +24,7 @@ func Fill(probe registrydiscover.Probe) registrydiscover.Probe {
 			Name:             row.Name,
 			Note:             row.Note,
 			BasicUsername:    row.BasicUsername,
+			BareTokenScheme:  row.BareTokenScheme,
 			CredentialHelper: row.CredentialHelper,
 			Siblings:         row.Siblings,
 		}
