@@ -7917,8 +7917,15 @@ answers with neither, a matched Host profile (ADR 0071) fills the scheme
 and the route gets a comment naming the profile: Artifactory is recognised
 from an `/artifactory/api/` path in the declared registry URL, a
 `*.jfrog.io` hostname, or the `X-Artifactory-Id` header the probe received.
-A scheme the registry did announce always wins, and an unprofiled host
-still defaults to `bearer`. The profile's advice does not depend on the
+A scheme the registry did announce always wins, except a `basic` answer
+on a store-matched route: every credential store yields a bare token, never
+the `user:secret` that `basic` needs, and the proxy refuses a colon-less
+`basic` credential at startup. There a profile's bare-token scheme wins
+instead (Artifactory's is `bearer`; its access tokens work as Bearer despite
+the Basic challenge), and without one `discover` keeps `basic` under a
+comment that the credential must be `user:secret`, for example from an
+`env` source. An unprofiled host still defaults to `bearer`.
+The profile's advice does not depend on the
 probe: for a route on a profiled host, discovery also merges the
 profile's sibling paths for the ecosystems declaring that host into the
 route's `allow`, each joined onto the declared registry path (a join
