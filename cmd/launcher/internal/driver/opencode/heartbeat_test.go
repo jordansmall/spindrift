@@ -12,9 +12,9 @@ import (
 )
 
 // TestWriter_ForwardsRawBytesUnchanged verifies that every byte written to
-// the Writer is forwarded to raw unchanged, regardless of what heartbeat
-// parsing does with it — mirroring driver/claude/heartbeat.go's Writer
-// contract.
+// the opencode Driver's heartbeat writer is forwarded to raw unchanged,
+// regardless of what heartbeat parsing does with it — the contract of the
+// shared driverkit.HeartbeatWriter the opencode Driver returns.
 func TestWriter_ForwardsRawBytesUnchanged(t *testing.T) {
 	var raw, out bytes.Buffer
 	w := newDriver().NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
