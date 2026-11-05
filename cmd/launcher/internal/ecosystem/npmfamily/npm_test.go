@@ -421,3 +421,72 @@ func TestParseNpmRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) {
 		t.Errorf("decls[0] = %+v, want Ecosystem and ConfigPath both unset", decls[0])
 	}
 }
+
+// npm decodes each .npmrc value with ini's unsafe(), so a quoted or
+// comment-bearing value must reach the declaration the way npm reads it.
+func TestParseNpmRegistryConfig_DecodesIniValue(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    []ecosystem.Declaration
+	}{
+		{"inline semicolon comment", "registry=https://a.example.com/ ; mirror\n",
+			[]ecosystem.Declaration{{Host: "a.example.com", UpstreamBaseURL: "https://a.example.com"}}},
+		{"inline hash comment", "registry=https://a.example.com/#mirror\n",
+			[]ecosystem.Declaration{{Host: "a.example.com", UpstreamBaseURL: "https://a.example.com"}}},
+		{"double quoted", "registry=\"https://a.example.com/\"\n",
+			[]ecosystem.Declaration{{Host: "a.example.com", UpstreamBaseURL: "https://a.example.com"}}},
+		{"single quoted", "registry='https://a.example.com/'\n",
+			[]ecosystem.Declaration{{Host: "a.example.com", UpstreamBaseURL: "https://a.example.com"}}},
+		{"quoted default and scoped", "registry=\"https://a.example.com/\"\n@acme:registry='https://b.example.com/npm/'\n",
+			[]ecosystem.Declaration{
+				{Host: "a.example.com", UpstreamBaseURL: "https://a.example.com"},
+				{Host: "b.example.com", UpstreamBaseURL: "https://b.example.com/npm", Scoped: true},
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decls, namedAny, err := Npm.ConfigParser(tc.content)
+			if err != nil {
+				t.Fatalf("ConfigParser: unexpected error: %v", err)
+			}
+			if !namedAny {
+				t.Error("namedAny = false, want true")
+			}
+			if len(decls) != len(tc.want) {
+				t.Fatalf("decls = %+v, want %+v", decls, tc.want)
+			}
+			for i, w := range tc.want {
+				if decls[i] != w {
+					t.Errorf("decls[%d] = %+v, want %+v", i, decls[i], w)
+				}
+			}
+		})
+	}
+}
+
+func TestNpmrcDecodeValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://x.example.com/", "https://x.example.com/"},
+		{"  https://x.example.com/  ", "https://x.example.com/"},
+		{"https://x.example.com/ ; c", "https://x.example.com/"},
+		{"https://x.example.com/#frag", "https://x.example.com/"},
+		{`https://x.example.com/\#frag`, "https://x.example.com/#frag"},
+		{`https://x.example.com/\;a`, "https://x.example.com/;a"},
+		{`a\nb`, `a\nb`},
+		{`trailing\`, `trailing\`},
+		{`"https://x.example.com/#a;b"`, "https://x.example.com/#a;b"},
+		{`'https://x.example.com/#a;b'`, "https://x.example.com/#a;b"},
+		{`"abc"`, "abc"},
+		{`"bad\q"`, `"bad\q"`},
+		{`'a "b"'`, `a "b"`},
+		{`"`, `"`},
+		{`'`, ""},
+		{`"half`, "\"half"},
+	}
+	for _, tc := range cases {
+		if got := npmrcDecodeValue(tc.in); got != tc.want {
+			t.Errorf("npmrcDecodeValue(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
