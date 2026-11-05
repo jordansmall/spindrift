@@ -89,16 +89,67 @@ func TestNpmrcAuthToken_HostMatchIsCaseInsensitivePortAndPathTolerant(t *testing
 	}
 }
 
-// npm accepts, and sometimes writes, double-quoted values.
-func TestNpmrcAuthToken_QuotedValueIsUnquoted(t *testing.T) {
-	content := []byte(`//registry.example.com/:_authToken="s3kr3t"` + "\n")
-
-	got, err := npmrcAuthToken(content, "/some/npmrc", "registry.example.com")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// npm decodes .npmrc values through ini's unsafe(): quotes, comments and
+// backslash escapes all apply to the token.
+func TestNpmrcAuthToken_ValueIsDecodedLikeNpm(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"plain", "s3kr3t", "s3kr3t"},
+		{"double quoted", `"abc123"`, "abc123"},
+		{"single quoted", `'abc123'`, "abc123"},
+		{"double quoted keeps semicolon", `"a;b"`, "a;b"},
+		{"trailing semicolon comment", "abc123 ; CI token", "abc123"},
+		{"trailing hash comment", "abc123#x", "abc123"},
+		{"escaped semicolon", `a\;b`, "a;b"},
+		{"escaped hash", `a\#b`, "a#b"},
+		{"escaped backslash", `a\\b`, `a\b`},
 	}
-	if got != "s3kr3t" {
-		t.Errorf("got %q, want %q", got, "s3kr3t")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("//registry.example.com/:_authToken=" + tc.value + "\n")
+
+			got, err := npmrcAuthToken(content, "/some/npmrc", "registry.example.com")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Each value decodes to something the guards reject, and the error must never
+// echo the value: every row with content carries the marker TOK.
+func TestNpmrcAuthToken_DecodedValueIsGuarded(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr string
+	}{
+		{"comment only", " ; TOK", "is empty"},
+		{"empty single quotes", `''`, "is empty"},
+		{"json newline", `"TOK\nTOK"`, "embedded newline"},
+		{"single quoted expansion", `'${TOK}'`, "variable expansion"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			content := []byte("//registry.example.com/:_authToken=" + tc.value + "\n")
+
+			_, err := npmrcAuthToken(content, "/some/npmrc", "registry.example.com")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("expected error to contain %q, got: %v", tc.wantErr, err)
+			}
+			if strings.Contains(err.Error(), "TOK") {
+				t.Errorf("error must not print the value, got: %v", err)
+			}
+		})
 	}
 }
 
