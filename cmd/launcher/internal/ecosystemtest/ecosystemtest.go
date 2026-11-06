@@ -487,10 +487,10 @@ func (c *replay) pathSet() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// proxyRoutes is the proxy route table stages 4 to 6 run against: the
-// production projection (registrypathset.ApplyToRoute, then
-// registryproxy.AssignPrefixes) over the path sets derived from every Strategy the
-// case names.
+// proxyRoutes is the proxy route table the afterRoutes stages run against:
+// the production projection (registrypathset.ApplyToRoute, then
+// registryproxy.AssignPrefixes) over the path sets derived from every
+// Strategy the case names.
 // Credentials stay empty: no secret is resolved.
 func (c *replay) proxyRoutes() ([]registryproxy.Route, error) {
 	return c.proxied.get(func() ([]registryproxy.Route, error) {
