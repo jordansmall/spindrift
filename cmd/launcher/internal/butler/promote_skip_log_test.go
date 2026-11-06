@@ -11,21 +11,13 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
-	"spindrift.dev/launcher/internal/outcome"
 )
 
 // intentsDispatcher returns a ready Box whose run files the given raw
 // issue-intent JSON lines.
 func intentsDispatcher(intents ...string) *dispatch.Fake {
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents:      intents,
-	})
+	d.RunResult = dispatch.Succeeded(readyResult(intents...))
 	return d
 }
 

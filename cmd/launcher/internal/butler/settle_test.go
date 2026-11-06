@@ -41,6 +41,9 @@ func claimButlerChore(t *testing.T, backend ledger.Backend, choreName string, st
 	return claim
 }
 
+// readyResult builds a Found ready Result for issue "butler-bugs" with note
+// "swept". IssueIntentsFound/IssueIntents are set only when at least one
+// intent is passed.
 func readyResult(intents ...string) dispatch.Result {
 	r := dispatch.Result{
 		Resolved: outcome.Resolved{

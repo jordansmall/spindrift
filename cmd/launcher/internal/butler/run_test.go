@@ -100,19 +100,9 @@ func runRepoGitOutput(t *testing.T, repo string, args ...string) []byte {
 }
 
 // readyDispatcher builds a dispatch.Fake whose Run() reports a ready outcome
-// carrying one filed-issue intent, the "clean run" shape settle expects
-// (settle_test.go's readyResult mirrors this).
+// carrying one filed-issue intent, the "clean run" shape settle expects.
 func readyDispatcher() *dispatch.Fake {
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents:      []string{`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"]}`},
-	})
-	return d
+	return intentsDispatcher(`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"]}`)
 }
 
 // crashedDispatcher builds a dispatch.Fake whose Run() reports no outcome
@@ -142,20 +132,12 @@ func gitLogSubjects(t *testing.T, repo, ref string) []string {
 // promotableDispatcher builds a dispatch.Fake whose one relayed finding
 // carries class, one file, and a reviewer concurrence -- the shape that
 // clears every settle-side promotion gate whenever the host policy allows
-// class (issue #3880). Mirrors readyDispatcher's outcome shape.
+// class (issue #3880). The outcome shape comes from readyResult via
+// intentsDispatcher.
 func promotableDispatcher(class string) *dispatch.Fake {
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			fmt.Sprintf(`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed"}`, class),
-		},
-	})
-	return d
+	return intentsDispatcher(
+		fmt.Sprintf(`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed"}`, class),
+	)
 }
 
 // (a) A clean run claims, dispatches, files its one finding, and writes a
@@ -894,18 +876,10 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/9100"
 
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
-			`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
-		},
-	})
+	d := intentsDispatcher(
+		`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
+		`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
+	)
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -973,23 +947,15 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 		t.Fatalf("seed Outcome = %+v, want Kind=Swept Filed=4", seedOut)
 	}
 
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
-			`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
-			`{"title":"bug three","body":"repro","dedupTerms":["a.go:Three"]}`,
-			`{"title":"bug four","body":"repro","dedupTerms":["a.go:Four"]}`,
-			`{"title":"bug five","body":"repro","dedupTerms":["a.go:Five"]}`,
-			`{"title":"bug six","body":"repro","dedupTerms":["a.go:Six"]}`,
-			`{"title":"bug seven","body":"repro","dedupTerms":["a.go:Seven"]}`,
-		},
-	})
+	d := intentsDispatcher(
+		`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
+		`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
+		`{"title":"bug three","body":"repro","dedupTerms":["a.go:Three"]}`,
+		`{"title":"bug four","body":"repro","dedupTerms":["a.go:Four"]}`,
+		`{"title":"bug five","body":"repro","dedupTerms":["a.go:Five"]}`,
+		`{"title":"bug six","body":"repro","dedupTerms":["a.go:Six"]}`,
+		`{"title":"bug seven","body":"repro","dedupTerms":["a.go:Seven"]}`,
+	)
 	policy := testRunPolicy(noRunEvery, "seed", "bugs")
 	policy.Budgets = chore.Budgets{MaxFindingsPerDay: 10, MaxFindingsPerSweep: 0}
 	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), func(c dispatch.Chore) dispatch.Dispatcher { return d }, policy, func() time.Time { return now })
@@ -1518,18 +1484,9 @@ func patchDiffFor(path string) string {
 // (class on the patch allow-list, concurrence, patch room) whenever the host
 // policy allows it.
 func patchableDispatcher(class string) *dispatch.Fake {
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["docs/a.md:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, class, testPatchDiff),
-		},
-	})
-	return d
+	return intentsDispatcher(
+		fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["docs/a.md:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, class, testPatchDiff),
+	)
 }
 
 // patchableDispatcherN is patchableDispatcher's multi-finding sibling: n
@@ -1537,21 +1494,12 @@ func patchableDispatcher(class string) *dispatch.Fake {
 // docs/aN.md path, so decide's site-key gate holds for every one of them) so
 // a test can pit them against one sweep's shared patch room (issue #4074).
 func patchableDispatcherN(class string, n int) *dispatch.Fake {
-	d := dispatch.NewFake()
 	intents := make([]string, n)
 	for i := range intents {
 		path := fmt.Sprintf("docs/a%d.md", i)
 		intents[i] = fmt.Sprintf(`{"title":"fix typo %d","body":"repro","dedupTerms":[%q],"class":%q,"concurrence":"agreed","patch":%q}`, i, path+":Foo", class, patchDiffFor(path))
 	}
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents:      intents,
-	})
-	return d
+	return intentsDispatcher(intents...)
 }
 
 // fakePushCall/fakeDraftCall record one fakePatchForge.PushBranch/CreateDraftPR
@@ -2647,17 +2595,9 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9600"
 
 	claudeDiff := "--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-old\n+new\n"
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["CLAUDE.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, claudeDiff),
-		},
-	})
+	d := intentsDispatcher(
+		fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["CLAUDE.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, claudeDiff),
+	)
 	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
@@ -2698,18 +2638,9 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 // fixture builder (see makeDiff's doc) -- only builds flat, single-segment
 // trees, so their tracked file can't live under docs/.
 func patchableTopLevelDispatcher(path, diff string) *dispatch.Fake {
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":[%q],"class":"docs-drift","concurrence":"agreed","patch":%q}`, path+":Foo", diff),
-		},
-	})
-	return d
+	return intentsDispatcher(
+		fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":[%q],"class":"docs-drift","concurrence":"agreed","patch":%q}`, path+":Foo", diff),
+	)
 }
 
 // TestSweep_PatchAppliesToBaseHeadButNotScannedFallsThrough is the Sweep-

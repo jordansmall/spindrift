@@ -13,7 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
-	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -190,17 +189,7 @@ func TestSweep_Swept(t *testing.T) {
 	fc := forge.NewFake()
 	fc.PostIssueURL = "https://example.com/issues/900"
 
-	d := dispatch.NewFake()
-	d.RunResult = dispatch.Succeeded(dispatch.Result{
-		IssueIntentsFound: true,
-		IssueIntents: []string{
-			`{"title":"finding one","body":"repro","dedupTerms":["a.go:Foo"]}`,
-		},
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
-		},
-	})
+	d := intentsDispatcher(`{"title":"finding one","body":"repro","dedupTerms":["a.go:Foo"]}`)
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r := New(backend, tree, fc.AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return d }, testPolicy(), func() time.Time { return now })
