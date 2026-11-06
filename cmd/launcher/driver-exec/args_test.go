@@ -5,31 +5,33 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"spindrift.dev/launcher/internal/promptassembly"
 )
 
 // claudeShape is the claude Driver's argv shape from issue #262 slice 4.
 // --model is always present, even empty; --agents and --effort drop out
 // when empty.
-var claudeShape = argvShape{
-	promptStyle:    "flag",
-	promptFlag:     "-p",
-	modelFlag:      "--model",
-	modelOmitEmpty: false,
-	agentsFlag:     "--agents",
-	effortFlag:     "--effort",
-	order:          []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
+var claudeShape = promptassembly.ArgvShape{
+	PromptStyle:    "flag",
+	PromptFlag:     "-p",
+	ModelFlag:      "--model",
+	ModelOmitEmpty: false,
+	AgentsFlag:     "--agents",
+	EffortFlag:     "--effort",
+	Order:          []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
 }
 
 // opencodeShape is the opencode Driver's argv shape from issue #262 slice 4.
 // driverFlags leads because opencode's own `run` subcommand arrives that way,
 // and the prompt is one trailing positional argument.
-var opencodeShape = argvShape{
-	promptStyle:    "positional",
-	modelFlag:      "-m",
-	modelOmitEmpty: true,
-	agentsFlag:     "",
-	effortFlag:     "--variant",
-	order:          []string{"driverFlags", "model", "effort", "session", "prompt"},
+var opencodeShape = promptassembly.ArgvShape{
+	PromptStyle:    "positional",
+	ModelFlag:      "-m",
+	ModelOmitEmpty: true,
+	AgentsFlag:     "",
+	EffortFlag:     "--variant",
+	Order:          []string{"driverFlags", "model", "effort", "session", "prompt"},
 }
 
 func TestBuildDriverArgsMinimal(t *testing.T) {
@@ -334,7 +336,7 @@ func TestBuildDriverArgsUnknownSlotErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	shape := claudeShape
-	shape.order = []string{"prompt", "bogusSlot"}
+	shape.Order = []string{"prompt", "bogusSlot"}
 	in := driverInput{
 		shape:      shape,
 		promptFile: promptFile,
@@ -354,7 +356,7 @@ func TestBuildDriverArgsInvalidPromptStyleErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	shape := claudeShape
-	shape.promptStyle = "flagg"
+	shape.PromptStyle = "flagg"
 	in := driverInput{
 		shape:      shape,
 		promptFile: promptFile,
@@ -382,14 +384,14 @@ func TestBuildDriverArgsSyntheticShapeIsDataDriven(t *testing.T) {
 	if err := os.WriteFile(sessionFile, []byte("--resume xyz"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	synthShape := argvShape{
-		promptStyle:    "flag",
-		promptFlag:     "--input",
-		modelFlag:      "--llm",
-		modelOmitEmpty: true,
-		agentsFlag:     "--personas",
-		effortFlag:     "--thinking",
-		order:          []string{"agents", "model", "driverFlags", "session", "effort", "prompt"},
+	synthShape := promptassembly.ArgvShape{
+		PromptStyle:    "flag",
+		PromptFlag:     "--input",
+		ModelFlag:      "--llm",
+		ModelOmitEmpty: true,
+		AgentsFlag:     "--personas",
+		EffortFlag:     "--thinking",
+		Order:          []string{"agents", "model", "driverFlags", "session", "effort", "prompt"},
 	}
 	in := driverInput{
 		shape:       synthShape,

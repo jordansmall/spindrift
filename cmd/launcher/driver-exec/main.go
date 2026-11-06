@@ -109,15 +109,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	args, err := buildDriverArgs(driverInput{
-		shape: argvShape{
-			promptStyle:    handoff.ArgvShape.PromptStyle,
-			promptFlag:     handoff.ArgvShape.PromptFlag,
-			modelFlag:      handoff.ArgvShape.ModelFlag,
-			modelOmitEmpty: handoff.ArgvShape.ModelOmitEmpty,
-			agentsFlag:     handoff.ArgvShape.AgentsFlag,
-			effortFlag:     handoff.ArgvShape.EffortFlag,
-			order:          handoff.ArgvShape.Order,
-		},
+		shape:       handoff.ArgvShape,
 		promptFile:  *promptFile,
 		model:       model,
 		effort:      effort,
