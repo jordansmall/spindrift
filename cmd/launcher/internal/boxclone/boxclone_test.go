@@ -11,16 +11,8 @@ import (
 
 	"spindrift.dev/launcher/internal/backendkit"
 	"spindrift.dev/launcher/internal/boxclone"
+	"spindrift.dev/launcher/internal/testutil"
 )
-
-func git(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v (dir=%s): %v: %s", args, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
 
 type fixture struct {
 	origin, work, globalCfg, ghLog string
@@ -48,16 +40,16 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 
 	seed := filepath.Join(root, "seed")
-	git(t, root, "init", "-q", "--bare", "-b", "main", f.origin)
-	git(t, root, "init", "-q", "-b", "main", seed)
-	git(t, seed, "config", "user.name", "Test")
-	git(t, seed, "config", "user.email", "t@example.com")
+	testutil.GitRun(t, root, "init", "-q", "--bare", "-b", "main", f.origin)
+	testutil.GitRun(t, root, "init", "-q", "-b", "main", seed)
+	testutil.GitRun(t, seed, "config", "user.name", "Test")
+	testutil.GitRun(t, seed, "config", "user.email", "t@example.com")
 	if err := os.WriteFile(filepath.Join(seed, "base.txt"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, seed, "add", "base.txt")
-	git(t, seed, "commit", "-q", "-m", "base")
-	git(t, seed, "push", "-q", f.origin, "main")
+	testutil.GitRun(t, seed, "add", "base.txt")
+	testutil.GitRun(t, seed, "commit", "-q", "-m", "base")
+	testutil.GitRun(t, seed, "push", "-q", f.origin, "main")
 
 	bin := filepath.Join(root, "bin")
 	if err := os.Mkdir(bin, 0o755); err != nil {
@@ -89,7 +81,7 @@ func mapLookup(m map[string]string) backendkit.Lookup {
 // succeeds when the Box built exactly that URL.
 func (f *fixture) redirect(t *testing.T, urlPrefix string) {
 	t.Helper()
-	git(t, filepath.Dir(f.work), "config", "--file", f.globalCfg, "url."+f.origin+".insteadOf", urlPrefix)
+	testutil.GitRun(t, filepath.Dir(f.work), "config", "--file", f.globalCfg, "url."+f.origin+".insteadOf", urlPrefix)
 }
 
 func (f *fixture) ghCalls(t *testing.T) string {
@@ -106,7 +98,7 @@ func (f *fixture) ghCalls(t *testing.T) string {
 
 func (f *fixture) originURL(t *testing.T) string {
 	t.Helper()
-	return git(t, f.work, "config", "--get", "remote.origin.url")
+	return testutil.GitOutput(t, f.work, "config", "--get", "remote.origin.url")
 }
 
 func TestCloneGithubDefaultClonesGithubURLAndSetsUpGhCredentials(t *testing.T) {
@@ -122,7 +114,7 @@ func TestCloneGithubDefaultClonesGithubURLAndSetsUpGhCredentials(t *testing.T) {
 	if got := f.ghCalls(t); got != "auth setup-git" {
 		t.Errorf("gh argv = %q, want %q", got, "auth setup-git")
 	}
-	git(t, f.work, "rev-parse", "--verify", "refs/remotes/origin/main")
+	testutil.GitRun(t, f.work, "rev-parse", "--verify", "refs/remotes/origin/main")
 }
 
 func TestCloneGitForgeClonesFromRemoteURL(t *testing.T) {
@@ -203,7 +195,7 @@ func TestCloneLocalClonesMountSkipsGhAndTrustsBothPaths(t *testing.T) {
 	if got := f.ghCalls(t); got != "" {
 		t.Errorf("gh was invoked: %q", got)
 	}
-	safe := git(t, filepath.Dir(f.work), "config", "--file", f.globalCfg, "--get-all", "safe.directory")
+	safe := testutil.GitOutput(t, filepath.Dir(f.work), "config", "--file", f.globalCfg, "--get-all", "safe.directory")
 	for _, want := range []string{f.origin, f.work} {
 		if !strings.Contains(safe, want) {
 			t.Errorf("safe.directory %q missing %q", safe, want)
@@ -235,10 +227,10 @@ func TestCloneSetsIdentityRepoLocallyAndLeavesGlobalConfigAlone(t *testing.T) {
 			if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 				t.Fatal(err)
 			}
-			if got := git(t, f.work, "config", "--local", "user.name"); got != "Box Agent" {
+			if got := testutil.GitOutput(t, f.work, "config", "--local", "user.name"); got != "Box Agent" {
 				t.Errorf("local user.name = %q", got)
 			}
-			if got := git(t, f.work, "config", "--local", "user.email"); got != "box@example.com" {
+			if got := testutil.GitOutput(t, f.work, "config", "--local", "user.email"); got != "box@example.com" {
 				t.Errorf("local user.email = %q", got)
 			}
 			after, err := os.ReadFile(f.globalCfg)
