@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -235,7 +236,7 @@ func TestPreviewIssues_Bwrap_PrintsRealFreshnessLine(t *testing.T) {
 	c.imageTag = "/nix/store/" + staleHash + "-agent-closure"
 	fc := forge.NewFake()
 
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &freshness.Fake{OutPath: "/nix/store/" + freshHash + "-agent-closure"}
 
 	var buf bytes.Buffer
