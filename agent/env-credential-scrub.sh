@@ -10,7 +10,7 @@
 # a denylist that every new reader command would have to be added to.
 
 # The rewrite path sets no `permissionDecision`, omitting it rather than
-# saying "allow": three PreToolUse hooks share the Bash matcher, and an
+# saying "allow": other PreToolUse hooks share the Bash matcher, and an
 # explicit allow here could read as overriding a sibling hook's deny on the
 # same call.
 
