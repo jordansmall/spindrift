@@ -499,33 +499,11 @@ func (r *boxRun) capture(fn func(io.Writer) error) (string, error) {
 
 func trimNewlines(s string) string { return strings.TrimRight(s, "\n") }
 
-// handoffFacts are the shared handoff's fields box itself reads; every other
-// field is the orchestrator's and driver-exec's.
-type handoffFacts struct {
-	Driver      string
-	SessionMode string
-	PromptFile  string
-}
-
-// readHandoff reads the handoff file once, returning its raw bytes alongside
-// the facts decoded from them.
-func (r *boxRun) readHandoff() ([]byte, handoffFacts, error) {
-	raw, err := os.ReadFile(r.handoffFile)
-	if err != nil {
-		return nil, handoffFacts{}, err
-	}
-	var h handoffFacts
-	if err := json.Unmarshal(raw, &h); err != nil {
-		return nil, handoffFacts{}, fmt.Errorf("parse handoff file %s: %w", r.handoffFile, err)
-	}
-	return raw, h, nil
-}
-
 // firstRun is the Box's first Driver run: the shared handoff as-is, the prompt
 // assembly wrote, and the session mode the handoff names. Its exit code
 // seeds the run's, so unlike a resume it replaces the zero value unconditionally.
 func (r *boxRun) firstRun() error {
-	_, h, err := r.readHandoff()
+	h, err := promptassembly.LoadHandoffFile(r.handoffFile)
 	if err != nil {
 		return phaseErr("first-run handoff", err)
 	}
@@ -550,16 +528,16 @@ func (r *boxRun) firstRun() error {
 
 // resume runs one corrective orchestrator pass against the pinned session.
 func (r *boxRun) resume(prompt string) error {
-	raw, h, err := r.readHandoff()
+	h, err := promptassembly.LoadHandoffFile(r.handoffFile)
 	if err != nil {
 		return phaseErr("resume handoff", err)
 	}
-	handoff, err := r.strippedHandoff(raw)
+	stripped, err := strippedHandoff(h)
 	if err != nil {
 		return phaseErr("resume handoff", err)
 	}
 	// `cmd || claude_rc=$?`: a zero exit leaves the earlier code in place.
-	rc, err := r.pass(handoff, h.Driver, prompt, "resume")
+	rc, err := r.pass(stripped, h.Driver, prompt, "resume")
 	if rc != 0 {
 		r.st.rc = rc
 	}
@@ -639,12 +617,8 @@ func writeTemp(pattern, content string) (string, error) {
 // ReviewPromptFile cleared, so the resume stays a narrow single pass instead of
 // re-entering the full review loop (issues #2065, #2975). Left on disk: this
 // Box exits after one run.
-func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return "", fmt.Errorf("parse handoff file %s: %w", r.handoffFile, err)
-	}
-	fields["ReviewPromptFile"] = json.RawMessage(`""`)
+func strippedHandoff(h promptassembly.Handoff) (string, error) {
+	h.ReviewPromptFile = ""
 
 	f, err := os.CreateTemp("", "box-handoff-")
 	if err != nil {
@@ -652,7 +626,7 @@ func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
 	}
 	enc := json.NewEncoder(f)
 	enc.SetEscapeHTML(false)
-	if err := enc.Encode(fields); err != nil {
+	if err := enc.Encode(h); err != nil {
 		f.Close()
 		return "", err
 	}
