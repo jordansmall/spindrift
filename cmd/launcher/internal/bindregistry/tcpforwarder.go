@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
 )
@@ -55,12 +54,6 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 // is a parameter because not every caller implements that subcommand itself:
 // only driver-exec does.
 func SpawnHTTPForwarder(binary, upstreamHost string, upstreamPort int, secret string, port int) (int, error) {
-	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer devNull.Close()
-
 	cmd := exec.Command(binary,
 		"forward-registry-tcp",
 		"-listen-port", fmt.Sprintf("%d", port),
@@ -72,22 +65,7 @@ func SpawnHTTPForwarder(binary, upstreamHost string, upstreamPort int, secret st
 	// os.Environ() may already carry this key, so drop any prior value and
 	// leave the child exactly one entry.
 	cmd.Env = append(filterEnv(os.Environ(), "REGISTRY_PROXY_TCP_SECRET"), "REGISTRY_PROXY_TCP_SECRET="+secret)
-	cmd.Stdin = devNull
-	cmd.Stdout = devNull
-	cmd.Stderr = devNull
-	// Setsid detaches the Forwarder from the caller's session so it outlives
-	// the caller. cmd.Wait() is never called; this stays a detached,
-	// long-running process.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-
-	if err := closeOnExecInheritedFDs(); err != nil {
-		return 0, err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
-	return cmd.Process.Pid, nil
+	return startDetached(cmd)
 }
 
 // filterEnv returns env with every entry for key removed, so a caller can
