@@ -13,17 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/seambundle"
+	"spindrift.dev/launcher/internal/testutil"
 )
-
-func runGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v (dir=%s): %v: %s", args, dir, err, out)
-	}
-	return string(out)
-}
 
 func writeFile(t *testing.T, path, contents string) {
 	t.Helper()
@@ -37,16 +28,16 @@ func writeFile(t *testing.T, path, contents string) {
 func newRepoWithFeatureBranch(t *testing.T) (dir, base, branch string) {
 	t.Helper()
 	dir = t.TempDir()
-	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.name", "Test Bot")
-	runGit(t, dir, "config", "user.email", "bot@example.com")
+	testutil.GitRun(t, dir, "init", "-b", "main")
+	testutil.GitRun(t, dir, "config", "user.name", "Test Bot")
+	testutil.GitRun(t, dir, "config", "user.email", "bot@example.com")
 	writeFile(t, filepath.Join(dir, "base.txt"), "base\n")
-	runGit(t, dir, "add", "base.txt")
-	runGit(t, dir, "commit", "-m", "base")
-	runGit(t, dir, "checkout", "-b", "feature")
+	testutil.GitRun(t, dir, "add", "base.txt")
+	testutil.GitRun(t, dir, "commit", "-m", "base")
+	testutil.GitRun(t, dir, "checkout", "-b", "feature")
 	writeFile(t, filepath.Join(dir, "feature.txt"), "feature\n")
-	runGit(t, dir, "add", "feature.txt")
-	runGit(t, dir, "commit", "-m", "feature")
+	testutil.GitRun(t, dir, "add", "feature.txt")
+	testutil.GitRun(t, dir, "commit", "-m", "feature")
 	return dir, "main", "feature"
 }
 
@@ -56,13 +47,13 @@ func newRepoWithFeatureBranch(t *testing.T) (dir, base, branch string) {
 func newRepoNoFeatureCommits(t *testing.T) (dir, base, branch string) {
 	t.Helper()
 	dir = t.TempDir()
-	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "user.name", "Test Bot")
-	runGit(t, dir, "config", "user.email", "bot@example.com")
+	testutil.GitRun(t, dir, "init", "-b", "main")
+	testutil.GitRun(t, dir, "config", "user.name", "Test Bot")
+	testutil.GitRun(t, dir, "config", "user.email", "bot@example.com")
 	writeFile(t, filepath.Join(dir, "base.txt"), "base\n")
-	runGit(t, dir, "add", "base.txt")
-	runGit(t, dir, "commit", "-m", "base")
-	runGit(t, dir, "checkout", "-b", "feature")
+	testutil.GitRun(t, dir, "add", "base.txt")
+	testutil.GitRun(t, dir, "commit", "-m", "base")
+	testutil.GitRun(t, dir, "checkout", "-b", "feature")
 	return dir, "main", "feature"
 }
 
