@@ -4,24 +4,15 @@ import (
 	"fmt"
 	"os"
 	"strings"
-)
 
-// argvShape describes a Driver's argv layout as data (ADR 0009).
-type argvShape struct {
-	promptStyle    string // "flag" or "positional"
-	promptFlag     string // meaningful only when promptStyle == "flag"
-	modelFlag      string
-	modelOmitEmpty bool     // when true, omit the model slot entirely if model == ""
-	agentsFlag     string   // "" means this Driver has no --agents equivalent
-	effortFlag     string   // the effort slot is always omitted when effort == ""
-	order          []string // permutation of {"prompt","model","agents","session","driverFlags","effort"}
-}
+	"spindrift.dev/launcher/internal/promptassembly"
+)
 
 // driverInput holds the pieces of a Driver's argv (ADR 0009). The prompt,
 // --agents JSON, and session pin/resume flags reach this process as files
 // (issue #626); shape carries the argv layout as data (issue #2534).
 type driverInput struct {
-	shape       argvShape
+	shape       promptassembly.ArgvShape
 	promptFile  string
 	model       string
 	effort      string
@@ -31,12 +22,13 @@ type driverInput struct {
 }
 
 // buildDriverArgs reads promptFile (and, when set, agentsFile/sessionFile) and
-// assembles the Driver's argv by walking in.shape.order. No driver-name
-// conditional appears here: a new Driver's argv shape is a new argvShape data
-// row, not a change to this function (issue #2534).
+// assembles the Driver's argv by walking in.shape.Order. No driver-name
+// conditional appears here: a new Driver's argv shape is a new
+// promptassembly.ArgvShape data row, not a change to this function (issue
+// #2534).
 func buildDriverArgs(in driverInput) ([]string, error) {
-	if in.shape.promptStyle != "flag" && in.shape.promptStyle != "positional" {
-		return nil, fmt.Errorf("buildDriverArgs: invalid promptStyle %q, want \"flag\" or \"positional\"", in.shape.promptStyle)
+	if in.shape.PromptStyle != "flag" && in.shape.PromptStyle != "positional" {
+		return nil, fmt.Errorf("buildDriverArgs: invalid promptStyle %q, want \"flag\" or \"positional\"", in.shape.PromptStyle)
 	}
 
 	prompt, err := os.ReadFile(in.promptFile)
@@ -45,20 +37,20 @@ func buildDriverArgs(in driverInput) ([]string, error) {
 	}
 
 	var args []string
-	for _, slot := range in.shape.order {
+	for _, slot := range in.shape.Order {
 		switch slot {
 		case "prompt":
-			if in.shape.promptStyle == "flag" {
-				args = append(args, in.shape.promptFlag, string(prompt))
+			if in.shape.PromptStyle == "flag" {
+				args = append(args, in.shape.PromptFlag, string(prompt))
 			} else {
 				args = append(args, string(prompt))
 			}
 		case "model":
-			if in.model != "" || !in.shape.modelOmitEmpty {
-				args = append(args, in.shape.modelFlag, in.model)
+			if in.model != "" || !in.shape.ModelOmitEmpty {
+				args = append(args, in.shape.ModelFlag, in.model)
 			}
 		case "agents":
-			if in.shape.agentsFlag == "" || in.agentsFile == "" {
+			if in.shape.AgentsFlag == "" || in.agentsFile == "" {
 				continue
 			}
 			agents, err := os.ReadFile(in.agentsFile)
@@ -66,7 +58,7 @@ func buildDriverArgs(in driverInput) ([]string, error) {
 				return nil, err
 			}
 			if len(agents) > 0 {
-				args = append(args, in.shape.agentsFlag, string(agents))
+				args = append(args, in.shape.AgentsFlag, string(agents))
 			}
 		case "session":
 			if in.sessionFile == "" {
@@ -83,7 +75,7 @@ func buildDriverArgs(in driverInput) ([]string, error) {
 			if in.effort == "" {
 				continue
 			}
-			args = append(args, in.shape.effortFlag, in.effort)
+			args = append(args, in.shape.EffortFlag, in.effort)
 		default:
 			return nil, fmt.Errorf("buildDriverArgs: unrecognised argv slot %q", slot)
 		}
