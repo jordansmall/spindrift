@@ -1117,6 +1117,8 @@ driverGoTests
         ];
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
         SPINDRIFT_PI_BIN = "${pkgs.pi-coding-agent}/bin/pi";
+        # A yarn berry for the npmfamily test that drives a real install at a loopback stub.
+        SPINDRIFT_YARN_BIN = "${pkgs.yarn-berry}/bin/yarn";
         # Handed in because only cmd/launcher is copied below; the hooks carry
         # store-pinned shebangs, as the sandbox has no /usr/bin/env.
         SPINDRIFT_PI_BRIDGE = ../../agent/pi-hook-bridge.js;
