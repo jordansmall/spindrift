@@ -21,24 +21,23 @@ import (
 // flag package, which panics on re-registering flags across repeated calls in
 // one test binary.
 func mainRun(argv []string, stdout, stderr io.Writer) int {
-	if isAssemblePromptInvocation(argv) {
-		return runAssemblePrompt(argv[1:], stdout, stderr)
-	}
-	if isBindRegistryInvocation(argv) {
-		return runBindRegistry(argv[1:], stdout)
-	}
-	if isProbeRegistrySocketInvocation(argv) {
-		return runProbeRegistrySocket(argv[1:], stdout)
-	}
-	if isProbeRegistryTCPInvocation(argv) {
-		return runProbeRegistryTCP(argv[1:], stdout)
-	}
-	if isForwardRegistryTCPInvocation(argv) {
-		return runForwardRegistryTCP(argv[1:], stdout)
-	}
-	if isSignalInvocation(argv) {
-		// The only verb handed stdin: a signal's body never travels on argv.
-		return runSignal(argv[1:], os.Stdin, stdout)
+	// A verb is argv's first word, never a top-level flag (issue #2349).
+	if len(argv) > 0 {
+		switch argv[0] {
+		case "assemble-prompt":
+			return runAssemblePrompt(argv[1:], stdout, stderr)
+		case "bind-registry":
+			return runBindRegistry(argv[1:], stdout)
+		case "probe-registry-socket":
+			return runProbeRegistrySocket(argv[1:], stdout)
+		case "probe-registry-tcp":
+			return runProbeRegistryTCP(argv[1:], stdout)
+		case "forward-registry-tcp":
+			return runForwardRegistryTCP(argv[1:], stdout)
+		case "signal":
+			// The only verb handed stdin: a signal's body never travels on argv.
+			return runSignal(argv[1:], os.Stdin, stdout)
+		}
 	}
 
 	fs := flag.NewFlagSet("driver-exec", flag.ContinueOnError)

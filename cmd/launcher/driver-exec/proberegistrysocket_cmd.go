@@ -10,10 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/registryprobe"
 )
 
-func isProbeRegistrySocketInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == "probe-registry-socket"
-}
-
 // probeRegistrySocketVisible reports whether path is a unix domain socket
 // file. The host can mount a socket that the guest kernel puts no endpoint
 // behind, so a visible file is necessary but not sufficient (issue #3111).

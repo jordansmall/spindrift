@@ -10,12 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/bindregistry"
 )
 
-// isForwardRegistryTCPInvocation reports whether args selects the
-// forward-registry-tcp subcommand, which is a verb rather than a top-level flag.
-func isForwardRegistryTCPInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == "forward-registry-tcp"
-}
-
 // runForwardRegistryTCP runs the forward-registry-tcp subcommand (ADR 0007,
 // issue #3111). It is the detached child bindregistry.SpawnHTTPForwarder execs,
 // so on success it never returns: http.ListenAndServe blocks forever and no

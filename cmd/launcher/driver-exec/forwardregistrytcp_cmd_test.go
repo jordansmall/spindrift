@@ -5,18 +5,6 @@ import (
 	"testing"
 )
 
-func TestIsForwardRegistryTCPInvocation(t *testing.T) {
-	if isForwardRegistryTCPInvocation(nil) {
-		t.Fatalf("isForwardRegistryTCPInvocation(nil) = true, want false")
-	}
-	if !isForwardRegistryTCPInvocation([]string{"forward-registry-tcp", "-listen-port", "1"}) {
-		t.Fatalf("isForwardRegistryTCPInvocation([forward-registry-tcp ...]) = false, want true")
-	}
-	if isForwardRegistryTCPInvocation([]string{"bind-registry"}) {
-		t.Fatalf("isForwardRegistryTCPInvocation([bind-registry]) = true, want false")
-	}
-}
-
 func TestRunForwardRegistryTCP_MissingListenPortFlag(t *testing.T) {
 	var stdout bytes.Buffer
 	rc := runForwardRegistryTCP([]string{"-upstream-host", "127.0.0.1", "-upstream-port", "1"}, &stdout)

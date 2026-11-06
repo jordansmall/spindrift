@@ -14,10 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-func isBindRegistryInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == "bind-registry"
-}
-
 // runBindRegistry is the bind-registry subcommand's entry point (ADR 0007, ADR
 // 0036 amendment #6, issues #2930/#2931): it wires the registered Strategies, the
 // real DialProbe and SpawnSocat into runBindRegistryWithDeps and returns the

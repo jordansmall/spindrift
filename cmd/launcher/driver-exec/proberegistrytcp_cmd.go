@@ -15,10 +15,6 @@ import (
 // does not eat into the outer probe's own ~30s budget.
 const probeRegistryTCPDialTimeout = 5 * time.Second
 
-func isProbeRegistryTCPInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == "probe-registry-tcp"
-}
-
 // probeRegistryTCPConnect reports whether host:port can be dialed over TCP
 // (issue #3111). Only a real dial from inside the guest proves the route is
 // live: `--add-host host-gateway` resolves to the bridge IP on a plain Linux

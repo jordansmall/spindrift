@@ -112,18 +112,6 @@ func forEachTransport(t *testing.T, f func(t *testing.T, transport string)) {
 	}
 }
 
-func TestIsSignalInvocation(t *testing.T) {
-	if isSignalInvocation(nil) {
-		t.Fatal("isSignalInvocation(nil) = true, want false")
-	}
-	if !isSignalInvocation([]string{"signal", "comment"}) {
-		t.Fatal("isSignalInvocation([signal comment]) = false, want true")
-	}
-	if isSignalInvocation([]string{"bind-registry"}) {
-		t.Fatal("isSignalInvocation([bind-registry]) = true, want false")
-	}
-}
-
 // The whole accept path over both transports: every kind is accepted, the
 // printed receipt carries kind, bytes, hash and a rising sequence, and status
 // reflects every prior accept.

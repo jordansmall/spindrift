@@ -506,25 +506,6 @@ func presenceEnvValue(b bool) string {
 	return ""
 }
 
-// Only a bare "assemble-prompt" first arg selects the subcommand; every other
-// shape must fall through to the Driver path or to another subcommand.
-func TestIsAssemblePromptInvocation(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{"assemble-prompt first arg", []string{"assemble-prompt", "--registry", "x"}, true},
-		{"no args", nil, false},
-		{"ordinary flag invocation", []string{"--driver", "claude"}, false},
-	}
-	for _, c := range cases {
-		if got := isAssemblePromptInvocation(c.args); got != c.want {
-			t.Errorf("%s: isAssemblePromptInvocation(%v) = %v, want %v", c.name, c.args, got, c.want)
-		}
-	}
-}
-
 // The passthrough flags must reach result.Handoff untouched by Assemble, and
 // PromptFile, AgentsFile and Issue must come from the output and issue flags
 // this command already parsed (issue #2975).
