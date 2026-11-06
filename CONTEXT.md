@@ -39,10 +39,11 @@ The swappable agent CLI baked into the Box. `claude` (the default),
 build-time seam (one Driver per image, picked beside `runtime`), analogous to
 the Forge and runner seams. Each Driver normalizes its tool's quirks at its own
 boundary and has two coordinated halves keyed by one name — a nix-generated
-in-box half (invocation, agent-config, outcome extraction) and a host-side
-Strategy in the launcher (how its Pass log decodes into canonical events,
-and the few facts the shared readers need). _Provisional
-name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine, backend, tool.
+in-box half (invocation, agent-config) and a host-side Strategy in the
+launcher (how its Pass log decodes into canonical events, which shared reader
+takes its final message, and the few facts the shared readers need).
+_Provisional name_ — may be renamed (e.g. "agent harness"). _Avoid_: engine,
+backend, tool.
 
 **Strategy**:
 A Driver's host-side half, as a declarative literal (ADR 0066): its decoder,
@@ -103,9 +104,9 @@ from the handoff file `assemble-prompt` writes. It spawns the Driver (via `nix
 develop --command` when asked), tees the stream to the Box log, filters
 heartbeats in-process (absorbing the former standalone heartbeat-filter
 binary), and returns the Driver's exit code. Owns process mechanics —
-invocation data and outcome extraction stay with the Driver's nix half (ADR
-0009). Replaced the old entrypoint's temp-file/eval marshalling across the
-devShell process boundary (issue #626). The settle phases (outcome backstop,
+invocation data stays with the Driver's nix half (ADR 0009). Replaced the old
+entrypoint's temp-file/eval marshalling across the devShell process boundary
+(issue #626). The settle phases (outcome backstop,
 marker gate, read-only guards, dispatch-kind posture, bundle-out) run
 in-process in the box binary, so driver-exec carries no verb for them.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
@@ -1317,16 +1318,18 @@ synthetic line in-box or by settle host-side). An optional
 Box never printed a real outcome line — the synthetic `blocked` mentioned
 below is one such line. Unlike the mid-run signal channels below, this line carries no
 per-run control nonce (`RUN_NONCE`, issues #1937/#1939): `SPINDRIFT_OUTCOME`
-is defended by **structure** instead. In-box, the per-driver extractor
-jq-scopes to the agent's own final message (claude
-`select(.type=="result")`, opencode `select(.type=="text")`) and re-emits one
-**bare, leading** line; host-side, `lastInLog` treats only a leading-token
-line as a candidate. Untrusted corpus reaches the log only as a
-`tool_result` (wrong event type) or buried mid-JSON in the raw transcript
-(non-leading), so it cannot win regardless of any nonce. ADR 0055 records the
-decision to retire the nonce here — structural scoping is the freshness
-boundary — while keeping it as the _sole_ replay defense for the mid-run
-signal channels (`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` /
+is defended by **structure** instead. In-box, the Driver's shared Go result
+reader (`Driver.ResultText`, called from `box/box.go` and picked by its
+Strategy's `Result` axis) scopes to the agent's own final message — claude's
+`result` events, the last assistant message for opencode and pi — then
+`outcome.StripResultText` strips markdown wrapping and
+`outcome.ExtractOutcomeLine` re-emits one **bare, leading** line; host-side,
+`lastInLog` treats only a leading-token line as a candidate. Untrusted corpus
+reaches the log only as a `tool_result` (wrong event type) or buried mid-JSON
+in the raw transcript (non-leading), so it cannot win regardless of any nonce.
+ADR 0055 records the decision to retire the nonce here — structural scoping is
+the freshness boundary — while keeping it as the _sole_ replay defense for the
+mid-run signal channels (`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` /
 `SPINDRIFT_ISSUE_INTENT`), which cannot be structurally scoped because they
 survive only as a token embedded in one JSON-escaped line. The line carries only what the Launcher cannot know without the
 Box — never backend identity or other run config, which the Launcher already
