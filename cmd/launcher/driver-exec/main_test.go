@@ -412,3 +412,72 @@ func TestMainRunHeartbeatLogDefaultsToTmp(t *testing.T) {
 		t.Errorf("heartbeat missing issue prefix: %q", got)
 	}
 }
+
+// TestMainRunRoutesVerbs pins issue #6439: every verb reaches its own handler
+// through mainRun's switch, and a verb word given only as a flag value does not.
+func TestMainRunRoutesVerbs(t *testing.T) {
+	cases := []struct {
+		name       string
+		argv       []string
+		wantRC     int
+		wantStdout string
+		wantStderr string
+		wantAbsent string
+	}{
+		{
+			name:       "assemble-prompt",
+			argv:       []string{"assemble-prompt"},
+			wantRC:     1,
+			wantStdout: "driver-exec assemble-prompt: -registry, -validate-markers-registry, -prompt-output, -agents-json-output, and -handoff-output are all required",
+		},
+		{
+			name:       "bind-registry",
+			argv:       []string{"bind-registry", "-intree-action", "bogus"},
+			wantRC:     1,
+			wantStdout: "driver-exec bind-registry: -intree-work-dir and -intree-action must be given together",
+		},
+		{
+			name:       "probe-registry-socket",
+			argv:       []string{"probe-registry-socket"},
+			wantRC:     1,
+			wantStdout: "driver-exec probe-registry-socket: -path is required",
+		},
+		{
+			name:       "probe-registry-tcp",
+			argv:       []string{"probe-registry-tcp"},
+			wantRC:     1,
+			wantStdout: "driver-exec probe-registry-tcp: -host is required",
+		},
+		{
+			name:       "forward-registry-tcp",
+			argv:       []string{"forward-registry-tcp"},
+			wantRC:     1,
+			wantStdout: "driver-exec forward-registry-tcp: -listen-port is required",
+		},
+		{
+			name:       "verb name as a flag value falls through to the Driver path",
+			argv:       []string{"--work-dir", "bind-registry"},
+			wantRC:     2,
+			wantStderr: "-work-dir",
+			wantAbsent: "bind-registry:",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			rc := mainRun(tc.argv, &stdout, &stderr)
+			if rc != tc.wantRC {
+				t.Errorf("mainRun(%q) rc = %d, want %d", tc.argv, rc, tc.wantRC)
+			}
+			if tc.wantStdout != "" && !strings.Contains(stdout.String(), tc.wantStdout) {
+				t.Errorf("stdout = %q, want it to contain %q", stdout.String(), tc.wantStdout)
+			}
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tc.wantStderr)
+			}
+			if tc.wantAbsent != "" && strings.Contains(stdout.String()+stderr.String(), tc.wantAbsent) {
+				t.Errorf("output %q%q must not contain %q", stdout.String(), stderr.String(), tc.wantAbsent)
+			}
+		})
+	}
+}
