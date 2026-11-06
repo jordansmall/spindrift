@@ -37,10 +37,12 @@ func IsMergeConflict(stderr string) bool {
 	return MatchesAnyMarker(stderr, mergeConflictMarkers)
 }
 
+// mergeTransientMarkers' "http 5xx" entries anchor on gh's status-line
+// prefix; bare digits would match PR numbers, branch names and URLs in stderr.
 var mergeTransientMarkers = []string{
-	"502",
-	"503",
-	"504",
+	"http 502",
+	"http 503",
+	"http 504",
 	"bad gateway",
 	"service unavailable",
 	"gateway timeout",
