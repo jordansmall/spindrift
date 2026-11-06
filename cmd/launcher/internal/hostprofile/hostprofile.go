@@ -59,7 +59,7 @@ var table = []Row{
 		Siblings:         map[string][]string{"cargo": {"../v1/crates"}},
 		BasicUsername:    "the Artifactory username (or email) that owns the token",
 		CredentialHelper: "an access token from the JFrog Platform UI or `jf rt access-token-create`",
-		Note:             "JFrog Artifactory; a challenge the probe receives wins over the bearer default, and basic pairs the username below with the token as password",
+		Note:             "JFrog Artifactory; a challenge the probe receives wins over the bearer default, except that a basic challenge on a store-matched route keeps bearer (access tokens work as Bearer), and a basic route needs a user:secret credential whose user is the username below",
 	},
 	{Name: "crates.io", Hosts: []string{"crates.io", "*.crates.io"}, Note: publicNote},
 	{Name: "registry.npmjs.org", Hosts: []string{"registry.npmjs.org"}, Note: publicNote},
