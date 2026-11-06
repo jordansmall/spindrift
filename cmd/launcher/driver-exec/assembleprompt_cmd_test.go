@@ -615,13 +615,7 @@ func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
 		EffortFlag:     "--effort",
 		Order:          []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
 	}
-	if handoff.ArgvShape.PromptStyle != wantArgvShape.PromptStyle ||
-		handoff.ArgvShape.PromptFlag != wantArgvShape.PromptFlag ||
-		handoff.ArgvShape.ModelFlag != wantArgvShape.ModelFlag ||
-		handoff.ArgvShape.ModelOmitEmpty != wantArgvShape.ModelOmitEmpty ||
-		handoff.ArgvShape.AgentsFlag != wantArgvShape.AgentsFlag ||
-		handoff.ArgvShape.EffortFlag != wantArgvShape.EffortFlag ||
-		!reflectStringSlicesEqual(handoff.ArgvShape.Order, wantArgvShape.Order) {
+	if !reflect.DeepEqual(handoff.ArgvShape, wantArgvShape) {
 		t.Errorf("Handoff.ArgvShape = %+v, want %+v", handoff.ArgvShape, wantArgvShape)
 	}
 
@@ -634,20 +628,6 @@ func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
 	if handoff.Caps != wantCaps {
 		t.Errorf("Handoff.Caps = %+v, want %+v", handoff.Caps, wantCaps)
 	}
-}
-
-// This is hand-rolled so the package needs neither reflect nor slices for a
-// single comparison.
-func reflectStringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // Pins the graceful-degrade contract for the budget caps (issue #2975 review
