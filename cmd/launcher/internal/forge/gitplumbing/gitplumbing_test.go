@@ -110,6 +110,21 @@ func TestIsMergeTransient(t *testing.T) {
 			want:   true,
 		},
 		{
+			name:   "PR number containing 502 is not a status code",
+			stderr: "GraphQL: Resource not accessible by integration (pulls/5021/merge, agent/issue-5034)",
+			want:   false,
+		},
+		{
+			name:   "503 status line without reason phrase",
+			stderr: "HTTP 503 (https://api.github.com/repos/org/repo/pulls/1/merge)",
+			want:   true,
+		},
+		{
+			name:   "504 status line without reason phrase",
+			stderr: "HTTP 504 (https://api.github.com/repos/org/repo/pulls/1/merge)",
+			want:   true,
+		},
+		{
 			name:   "timeout",
 			stderr: "error: context deadline exceeded: request timeout",
 			want:   true,
