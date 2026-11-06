@@ -186,6 +186,16 @@ the artifact base path is registry-specific, not a fixed shape.
 > default registry and the rewritten per-scope registry hosts (verified
 > against real yarn-berry 4.14.1).
 
+> **Update.** Yarn berry refuses any `http:` request whose host is not in
+> `unsafeHttpWhitelist`, which defaults to empty with no loopback exemption,
+> so both Bindings above failed `yarn install` with `YN0081` (issue #6408).
+> The yarn Strategy now also exports `YARN_UNSAFE_HTTP_WHITELIST` with
+> `127.0.0.1`, appended to any value already set, whenever a yarn-tagged
+> route binds, scoped-only included. `launcher-go-seam-test` runs a real
+> yarn berry install through both shapes to keep it that way. The bind
+> summary deliberately does not name the whitelist: it lists Bindings, and
+> the whitelist is a supporting setting, not a Binding.
+
 > **Update.** `pnpm` (issue #2855) needed no new path-allowlist table entry —
 > `allowlist.go`'s existing `npm` entry already matches pnpm's requests,
 > since pnpm's client fetches from the same registry protocol with the same
