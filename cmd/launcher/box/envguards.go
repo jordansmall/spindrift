@@ -1,11 +1,10 @@
 package main
 
-import "spindrift.dev/launcher/internal/dispatchkind"
+import (
+	"errors"
 
-// missingEnvError names the first required Box env var that was unset or empty.
-type missingEnvError struct{ Name, Msg string }
-
-func (e *missingEnvError) Error() string { return e.Msg }
+	"spindrift.dev/launcher/internal/dispatchkind"
+)
 
 // checkEnvGuards is the env preamble entrypoint.sh ran under `set -e`, in its
 // order. An empty value counts as missing, like bash's `${X:?}`.
@@ -21,7 +20,7 @@ func checkEnvGuards(getenv func(string) string) error {
 		if set(name) {
 			return nil
 		}
-		return &missingEnvError{Name: name, Msg: msg}
+		return errors.New(msg)
 	}
 	// BOX_GH_TOKEN_OPTIONAL is a positive opt-out from dispatch.buildBoxEnv
 	// for a pairing that never reaches GitHub (forgejo or local forge with a
