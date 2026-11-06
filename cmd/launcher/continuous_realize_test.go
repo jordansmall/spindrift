@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // shaPattern matches the full 40-char SHA-1 hex string that fetchBaseTip's
@@ -29,24 +30,24 @@ func newStaleProbeRepo(t *testing.T) (dir, origin string) {
 	dir = tempLogDir(t)
 
 	origin = t.TempDir()
-	mustRunGit(t, origin, "init", "-b", "main")
-	mustRunGit(t, origin, "config", "user.email", "origin@example.com")
-	mustRunGit(t, origin, "config", "user.name", "Origin")
+	testutil.GitRun(t, origin, "init", "-b", "main")
+	testutil.GitRun(t, origin, "config", "user.email", "origin@example.com")
+	testutil.GitRun(t, origin, "config", "user.name", "Origin")
 	if err := os.WriteFile(filepath.Join(origin, "base.txt"), []byte("base"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, origin, "add", "base.txt")
-	mustRunGit(t, origin, "commit", "-m", "base")
+	testutil.GitRun(t, origin, "add", "base.txt")
+	testutil.GitRun(t, origin, "commit", "-m", "base")
 
-	mustRunGit(t, dir, "init", "-b", "main")
-	mustRunGit(t, dir, "config", "user.email", "pwd@example.com")
-	mustRunGit(t, dir, "config", "user.name", "Pwd")
+	testutil.GitRun(t, dir, "init", "-b", "main")
+	testutil.GitRun(t, dir, "config", "user.email", "pwd@example.com")
+	testutil.GitRun(t, dir, "config", "user.name", "Pwd")
 	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, dir, "add", "base.txt")
-	mustRunGit(t, dir, "commit", "-m", "base")
-	mustRunGit(t, dir, "remote", "add", "origin", origin)
+	testutil.GitRun(t, dir, "add", "base.txt")
+	testutil.GitRun(t, dir, "commit", "-m", "base")
+	testutil.GitRun(t, dir, "remote", "add", "origin", origin)
 
 	return dir, origin
 }

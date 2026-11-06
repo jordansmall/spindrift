@@ -1227,8 +1227,8 @@ func mustLocalAccumulationRepo(t *testing.T, relPath, registryConfig string) str
 	checkout := mustSeedableCheckout(t)
 	if registryConfig != "" {
 		testutil.WriteFixture(t, checkout, relPath, registryConfig)
-		mustRunGit(t, checkout, "add", relPath)
-		mustRunGit(t, checkout, "commit", "-m", "add registry config")
+		testutil.GitRun(t, checkout, "add", relPath)
+		testutil.GitRun(t, checkout, "commit", "-m", "add registry config")
 	}
 	accumRepo := filepath.Join(t.TempDir(), "accum.git")
 	if err := local.SeedAccumulationRepo(accumRepo, checkout, "main"); err != nil {
@@ -1299,8 +1299,8 @@ func TestBuildRegistryProxyRoutes_HostRooted_Local_CheckoutOnlyConfigIgnored(t *
 	}
 
 	testutil.WriteFixture(t, checkout, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")
-	mustRunGit(t, checkout, "add", synthetic.Strategy.InTreeConfigPath)
-	mustRunGit(t, checkout, "commit", "-m", "add registry config, never pushed to accum")
+	testutil.GitRun(t, checkout, "add", synthetic.Strategy.InTreeConfigPath)
+	testutil.GitRun(t, checkout, "commit", "-m", "add registry config, never pushed to accum")
 
 	path := writeRoutesFile(t, `
 [[routes]]

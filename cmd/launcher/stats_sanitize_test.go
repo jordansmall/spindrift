@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 const (
@@ -222,7 +223,7 @@ func TestCheckoutEvents_SanitizesWarning(t *testing.T) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitRun(t, root, "init")
+	testutil.GitRun(t, root, "init")
 	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		t.Fatal(err)

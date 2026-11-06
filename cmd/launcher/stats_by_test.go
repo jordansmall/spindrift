@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/recordstats"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // statsStampedLog is a stamped work Dispatch log: dispatch_start, optional
@@ -307,7 +308,7 @@ func TestStats_ByRejectsBadDimension(t *testing.T) {
 func statsEventsRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	gitRun(t, root, "init")
+	testutil.GitRun(t, root, "init")
 	inferred := func(ts string) string {
 		return statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
 			`{"type":"system","timestamp":"` + ts + `"}` + "\n" +
@@ -511,7 +512,7 @@ func TestStats_EventsRevisionAppearsOnlyUnderByRevision(t *testing.T) {
 
 func TestStats_ByRevisionUsesEventsForButlerChoreKey(t *testing.T) {
 	root := t.TempDir()
-	gitRun(t, root, "init")
+	testutil.GitRun(t, root, "init")
 	statsWriteLogs(t, root, map[string]string{
 		"issue-butler-deps.log": statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "butler"}) +
 			`{"type":"system","timestamp":"2026-10-07T09:00:30Z"}` + "\n" +
