@@ -736,6 +736,14 @@ func TestParseBlockerRefs_HeaderSectionEndsOnNextHeading(t *testing.T) {
 	}
 }
 
+func TestParseBlockerRefs_IssueRefLineDoesNotEndSection(t *testing.T) {
+	body := "## Blocked by\n- #5\n#6 is related\n- #7\n"
+	refs := forge.ParseBlockerRefs(body)
+	if !slices.Equal(refs, []string{"5", "7"}) {
+		t.Errorf("expected [5 7], got %v", refs)
+	}
+}
+
 func TestParseBlockerRefs_NoDuplicates(t *testing.T) {
 	refs := forge.ParseBlockerRefs("depends on #5 and blocked by #5")
 	if len(refs) != 1 || refs[0] != "5" {

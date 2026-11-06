@@ -9,7 +9,7 @@ var (
 	blockKeyword    = regexp.MustCompile(`(?i)(?:depends on|blocked by)\s*:?\s*`)
 	issueRef        = regexp.MustCompile(`#([0-9]+)`)
 	blockedByHeader = regexp.MustCompile(`(?i)^#+\s*blocked by\s*:?\s*$`)
-	anyHeading      = regexp.MustCompile(`^#+`)
+	anyHeading      = regexp.MustCompile(`^#{1,6}(?:[ \t]|$)`)
 	bulletItem      = regexp.MustCompile(`^[ \t]*[-*][ \t]*`)
 	refListPrefix   = regexp.MustCompile(`^(?:#[0-9]+|[,/]|\s+|\band\b)+`)
 	fenceDelimiter  = regexp.MustCompile("^(```+|~~~+)")
@@ -47,8 +47,9 @@ func IsBlockedByHeader(line string) bool {
 	return blockedByHeader.MatchString(strings.TrimSpace(line))
 }
 
-// IsAnyHeading reports whether line is a markdown heading of any level. It
-// does not trim line; see IsBlockedByHeader for what that implies.
+// IsAnyHeading reports whether line is an unindented CommonMark ATX heading
+// (one to six "#" then a space, tab or end of line), so "#6 is related" is
+// not one. It does not trim line; see IsBlockedByHeader for what that implies.
 func IsAnyHeading(line string) bool {
 	return anyHeading.MatchString(line)
 }

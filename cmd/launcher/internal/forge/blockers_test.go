@@ -30,6 +30,15 @@ func TestIsAnyHeading(t *testing.T) {
 	}{
 		{"## Touches", true},
 		{"# Title", true},
+		{"#", true},
+		{"###", true},
+		{"######", true},
+		{"#\tTab", true},
+		{"#6 is related", false},
+		{"#hashtag", false},
+		{"##Context", false},
+		{"####### seven", false},
+		{"  ## Indented", false},
 		{"- item", false},
 		{"plain text", false},
 	}
