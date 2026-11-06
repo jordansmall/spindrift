@@ -1,21 +1,23 @@
 {
   "lastSwept": "a3508d916102406e056708075c35c023b8f5db2a",
-  "cursor": "cmd/launcher/internal/runner/oci/oci.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-11-06T14:38:09.623050667-05:00"
-  },
+  "cursor": "cmd/launcher/internal/seamtest/driver.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6479",
+    "https://github.com/jordansmall/spindrift/issues/6480"
+  ],
+  "promoted": [
+    "https://github.com/jordansmall/spindrift/issues/6479",
+    "https://github.com/jordansmall/spindrift/issues/6480"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
-  },
-  "reserved": 2
+    "input_tokens": 66,
+    "output_tokens": 15487,
+    "cache_read_input_tokens": 2394147,
+    "cache_creation_input_tokens": 91711,
+    "total_cost_usd": 1.5840839899999994,
+    "duration_ms": 163398,
+    "duration_api_ms": 158300,
+    "num_turns": 36
+  }
 }
