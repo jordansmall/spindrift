@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // bootstrap surfaces a validation error without constructing a runner, forge
@@ -402,26 +403,19 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
 	}
 }
 
-func mustRunGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	if err := runGit(dir, args...); err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-}
-
 // A throwaway checkout with one commit on "main", for use as the pwd argument
 // to seedAccumulationRepoIfHostMediated.
 func mustSeedableCheckout(t *testing.T) string {
 	t.Helper()
 	checkout := t.TempDir()
-	mustRunGit(t, checkout, "init", "-b", "main")
-	mustRunGit(t, checkout, "config", "user.email", "test@example.com")
-	mustRunGit(t, checkout, "config", "user.name", "Test")
+	testutil.GitRun(t, checkout, "init", "-b", "main")
+	testutil.GitRun(t, checkout, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, checkout, "config", "user.name", "Test")
 	if err := os.WriteFile(filepath.Join(checkout, "base.txt"), []byte("base"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustRunGit(t, checkout, "add", "base.txt")
-	mustRunGit(t, checkout, "commit", "-m", "base")
+	testutil.GitRun(t, checkout, "add", "base.txt")
+	testutil.GitRun(t, checkout, "commit", "-m", "base")
 	return checkout
 }
 
@@ -585,7 +579,7 @@ func TestSeedAccumulationRepoIfHostMediated_ConcurrentCallSameRepo_FailsUntilRel
 // reacquires the flock directly against the same repoPath.
 func TestSeedAccumulationRepoIfHostMediated_SeedFailure_ReleasesLock(t *testing.T) {
 	checkout := t.TempDir()
-	mustRunGit(t, checkout, "init", "-b", "main")
+	testutil.GitRun(t, checkout, "init", "-b", "main")
 	// No commit: baseBranch has no ref yet, so SeedAccumulationRepo's push
 	// fails after the lock is already acquired.
 

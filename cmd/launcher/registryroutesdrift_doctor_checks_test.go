@@ -394,8 +394,8 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_UNCOVERED_PATH_SILENT"
 // whenever the two roles differ.
 func TestRegistryRouteDriftCheckForRoutes_NonTargetCheckoutReturnsNil(t *testing.T) {
 	repoDir := t.TempDir()
-	mustRunGit(t, repoDir, "init")
-	mustRunGit(t, repoDir, "remote", "add", "origin", "git@github.com:other/elsewhere.git")
+	testutil.GitRun(t, repoDir, "init")
+	testutil.GitRun(t, repoDir, "remote", "add", "origin", "git@github.com:other/elsewhere.git")
 	writeSyntheticRegistries(t, repoDir, "reg = https://uncovered.example.com/\n")
 	withDriftRepoDir(t, repoDir)
 
@@ -527,9 +527,9 @@ credential = { env = "SPINDRIFT_TEST_REGISTRY_ROUTE_DRIFT_WIRING" }
 func newGitCheckoutWithRemote(t *testing.T, remoteURL string) string {
 	t.Helper()
 	dir := t.TempDir()
-	mustRunGit(t, dir, "init")
+	testutil.GitRun(t, dir, "init")
 	if remoteURL != "" {
-		mustRunGit(t, dir, "remote", "add", "origin", remoteURL)
+		testutil.GitRun(t, dir, "remote", "add", "origin", remoteURL)
 	}
 	return dir
 }

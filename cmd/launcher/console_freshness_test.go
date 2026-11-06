@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 var errBoomFreshness = errors.New("pull failed")
@@ -228,7 +229,7 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 // carries a non-conflicting dirty change across silently.
 func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
-	gitRun(t, pwd, "checkout", "-b", "feature")
+	testutil.GitRun(t, pwd, "checkout", "-b", "feature")
 	gitWriteFile(t, filepath.Join(pwd, "flake.nix"), "{ dirty = true; }\n")
 
 	if _, _, err := consoleGitSync(pwd, "main"); err == nil {
@@ -291,7 +292,7 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 // nothing told the operator their pwd had moved off the branch.
 func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
 	pwd := newConsoleGitRepo(t, "main")
-	gitRun(t, pwd, "checkout", "-b", "feature")
+	testutil.GitRun(t, pwd, "checkout", "-b", "feature")
 
 	_, notice, err := consoleGitSync(pwd, "main")
 	if err != nil {
@@ -362,14 +363,6 @@ func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
 	}
 }
 
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-}
-
 func gitWriteFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
@@ -386,15 +379,15 @@ func newConsoleGitRepo(t *testing.T, baseBranch string) string {
 	bare := filepath.Join(dir, "origin.git")
 	clone := filepath.Join(dir, "clone")
 
-	gitRun(t, "", "init", "--bare", bare)
-	gitRun(t, "", "clone", bare, clone)
-	gitRun(t, clone, "checkout", "-B", baseBranch)
-	gitRun(t, clone, "config", "user.email", "test@example.com")
-	gitRun(t, clone, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "init", "--bare", bare)
+	testutil.GitRun(t, "", "clone", bare, clone)
+	testutil.GitRun(t, clone, "checkout", "-B", baseBranch)
+	testutil.GitRun(t, clone, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, clone, "config", "user.name", "Test")
 	gitWriteFile(t, filepath.Join(clone, "flake.nix"), "{ }\n")
-	gitRun(t, clone, "add", "flake.nix")
-	gitRun(t, clone, "commit", "-m", "base")
-	gitRun(t, clone, "push", "-u", "origin", baseBranch)
+	testutil.GitRun(t, clone, "add", "flake.nix")
+	testutil.GitRun(t, clone, "commit", "-m", "base")
+	testutil.GitRun(t, clone, "push", "-u", "origin", baseBranch)
 
 	return clone
 }
