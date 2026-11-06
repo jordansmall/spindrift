@@ -105,7 +105,7 @@ func TestQuickstartLauncherRows_NoRuntimeRow(t *testing.T) {
 	}
 }
 
-// This test mirrors cmd/launcher's own TestRunDoctor_WiresLauncherChecksIntoOutput
+// This test mirrors cmd/launcher's own TestRunDoctor_WiresDoctorReportChecksIntoOutput
 // (issue #2725). The answer set leaves the git user name blank so the
 // transcript must report the launcherchecks "git-user-name" row, the one
 // assertion that proves the doctor.Run call site is no longer handed nil.
