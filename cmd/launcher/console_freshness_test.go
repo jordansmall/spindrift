@@ -2,9 +2,7 @@ package main
 
 import (
 	"errors"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -170,7 +168,7 @@ func TestNewConsoleFreshness_UsesBoxArtifactNotRuntime(t *testing.T) {
 	c.imageTag = outPath // bare store path with no colon, bwrap's own tag shape
 	eval := &freshness.Fake{OutPath: outPath}
 
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	fresh, _, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
 
 	applicable, isFresh, msg := fresh()
@@ -206,7 +204,7 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 		},
 	}
 
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	fresh, _, _ := newConsoleFreshness(c, pwd, eval, nil, nil)
 
 	applicable, isFresh, msg := fresh()
@@ -228,9 +226,9 @@ func TestNewConsoleFreshness_NeverWiresLauncherDimension(t *testing.T) {
 // itself only blocks a checkout that would overwrite a conflicting file, so it
 // carries a non-conflicting dirty change across silently.
 func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	testutil.GitRun(t, pwd, "checkout", "-b", "feature")
-	gitWriteFile(t, filepath.Join(pwd, "flake.nix"), "{ dirty = true; }\n")
+	testutil.WriteFixture(t, pwd, "flake.nix", "{ dirty = true; }\n")
 
 	if _, _, err := consoleGitSync(pwd, "main"); err == nil {
 		t.Fatal("consoleGitSync() = nil, want an error refusing the checkout")
@@ -249,8 +247,8 @@ func TestConsoleGitSync_DirtyOffBranch_RefusesCheckout(t *testing.T) {
 // "off baseBranch AND dirty", not "dirty" alone, or every routine rebuild
 // with scratch files present would wrongly refuse.
 func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
-	gitWriteFile(t, filepath.Join(pwd, "scratch.txt"), "untracked\n")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
+	testutil.WriteFixture(t, pwd, "scratch.txt", "untracked\n")
 
 	if _, _, err := consoleGitSync(pwd, "main"); err != nil {
 		t.Fatalf("consoleGitSync() = %v, want nil for a dirty tree already on baseBranch", err)
@@ -262,7 +260,7 @@ func TestConsoleGitSync_DirtyOnBaseBranch_StillSyncs(t *testing.T) {
 // builtRev comparison relies on that format, so a --short added to either call
 // site would silently break the match.
 func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 
 	head, err := headRev(pwd)
 	if err != nil {
@@ -291,7 +289,7 @@ func TestHeadRevAndProbeRev_SameCommit_IdenticalFormat(t *testing.T) {
 // proceed because there is nothing dirty to carry across, but before the notice
 // nothing told the operator their pwd had moved off the branch.
 func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 	testutil.GitRun(t, pwd, "checkout", "-b", "feature")
 
 	_, notice, err := consoleGitSync(pwd, "main")
@@ -306,7 +304,7 @@ func TestConsoleGitSync_CleanOffBranch_ReturnsSwitchNotice(t *testing.T) {
 // Syncing while already on baseBranch returns no notice, since no switch
 // happened.
 func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 
 	_, notice, err := consoleGitSync(pwd, "main")
 	if err != nil {
@@ -321,7 +319,7 @@ func TestConsoleGitSync_AlreadyOnBaseBranch_NoSwitchNotice(t *testing.T) {
 // pins the seam headRev shares with gitOutput once headRev delegates to it
 // (issue #1133).
 func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 
 	want, err := exec.Command("git", "-C", pwd, "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -341,7 +339,7 @@ func TestHeadRev_ReturnsReposCurrentCommit(t *testing.T) {
 // error on failure. This pins the seam runGit shares with gitOutput once runGit
 // delegates to it (issue #1133).
 func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
-	pwd := newConsoleGitRepo(t, "main")
+	pwd := testutil.NewCloneWithOrigin(t, "main")
 
 	if err := runGit(pwd, "checkout", "-b", "feature"); err != nil {
 		t.Fatalf("runGit(checkout -b feature) = %v", err)
@@ -361,35 +359,6 @@ func TestRunGit_ExecutesCommandAndSurfacesError(t *testing.T) {
 	if !strings.Contains(err.Error(), "does-not-exist") {
 		t.Errorf("runGit() error = %q, want it to surface git's stderr mentioning %q", err, "does-not-exist")
 	}
-}
-
-func gitWriteFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// newConsoleGitRepo builds a bare "origin" plus a local clone of it, matching
-// the shape the launcher's own pwd has in production: a checkout with an
-// "origin" remote.
-func newConsoleGitRepo(t *testing.T, baseBranch string) string {
-	t.Helper()
-	dir := t.TempDir()
-	bare := filepath.Join(dir, "origin.git")
-	clone := filepath.Join(dir, "clone")
-
-	testutil.GitRun(t, "", "init", "--bare", bare)
-	testutil.GitRun(t, "", "clone", bare, clone)
-	testutil.GitRun(t, clone, "checkout", "-B", baseBranch)
-	testutil.GitRun(t, clone, "config", "user.email", "test@example.com")
-	testutil.GitRun(t, clone, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(clone, "flake.nix"), "{ }\n")
-	testutil.GitRun(t, clone, "add", "flake.nix")
-	testutil.GitRun(t, clone, "commit", "-m", "base")
-	testutil.GitRun(t, clone, "push", "-u", "origin", baseBranch)
-
-	return clone
 }
 
 // An unknown BOX_ARTIFACT must fail the Console's freshness wiring rather than
