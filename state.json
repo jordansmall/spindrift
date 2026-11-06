@@ -1,18 +1,20 @@
 {
   "lastSwept": "2502e4639c4ce2eb3b80a6270494539c76446def",
   "cursor": "cmd/launcher/internal/ecosystem/cargo/testdata/corpus/private-matched/routes.golden.json",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6393"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-05T19:03:41.799847568-05:00"
+  },
   "usage": {
-    "input_tokens": 48,
-    "output_tokens": 9972,
-    "cache_read_input_tokens": 1330820,
-    "cache_creation_input_tokens": 70164,
-    "total_cost_usd": 1.0013260000000002,
-    "duration_ms": 104112,
-    "duration_api_ms": 101113,
-    "num_turns": 26
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
