@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 func TestGitClient_ImplementsCodeForge(t *testing.T) {
@@ -30,21 +31,6 @@ func TestGitClient_NoPRForgeConcept(t *testing.T) {
 	}
 }
 
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-}
-
-func gitWriteFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // newBareRemoteWithBranches builds the shape a Box leaves behind: a base
 // branch plus a pushed per-issue branch one commit ahead of it. It returns the
 // bare repo path.
@@ -54,21 +40,21 @@ func newBareRemoteWithBranches(t *testing.T) string {
 	bare := filepath.Join(dir, "origin.git")
 	work := filepath.Join(dir, "work")
 
-	gitRun(t, "", "init", "--bare", bare)
-	gitRun(t, "", "clone", bare, work)
-	gitRun(t, work, "checkout", "-B", "main")
-	gitRun(t, work, "config", "user.email", "test@example.com")
-	gitRun(t, work, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(work, "base.txt"), "base\n")
-	gitRun(t, work, "add", "base.txt")
-	gitRun(t, work, "commit", "-m", "base")
-	gitRun(t, work, "push", "-u", "origin", "main")
+	testutil.GitRun(t, "", "init", "--bare", bare)
+	testutil.GitRun(t, "", "clone", bare, work)
+	testutil.GitRun(t, work, "checkout", "-B", "main")
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
+	testutil.WriteFixture(t, work, "base.txt", "base\n")
+	testutil.GitRun(t, work, "add", "base.txt")
+	testutil.GitRun(t, work, "commit", "-m", "base")
+	testutil.GitRun(t, work, "push", "-u", "origin", "main")
 
-	gitRun(t, work, "checkout", "-b", "agent/issue-1")
-	gitWriteFile(t, filepath.Join(work, "feature.txt"), "feature\n")
-	gitRun(t, work, "add", "feature.txt")
-	gitRun(t, work, "commit", "-m", "feature")
-	gitRun(t, work, "push", "-u", "origin", "agent/issue-1")
+	testutil.GitRun(t, work, "checkout", "-b", "agent/issue-1")
+	testutil.WriteFixture(t, work, "feature.txt", "feature\n")
+	testutil.GitRun(t, work, "add", "feature.txt")
+	testutil.GitRun(t, work, "commit", "-m", "feature")
+	testutil.GitRun(t, work, "push", "-u", "origin", "agent/issue-1")
 
 	return bare
 }
@@ -83,8 +69,8 @@ func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 	}
 
 	verify := t.TempDir()
-	gitRun(t, "", "clone", bare, verify)
-	gitRun(t, verify, "checkout", "main")
+	testutil.GitRun(t, "", "clone", bare, verify)
+	testutil.GitRun(t, verify, "checkout", "main")
 	if _, err := os.Stat(filepath.Join(verify, "feature.txt")); err != nil {
 		t.Errorf("main does not contain feature.txt after Merge: %v", err)
 	}
@@ -99,39 +85,39 @@ func conflictRemote(t *testing.T, files map[string]string, branchSteps, mainStep
 	bare := filepath.Join(dir, "origin.git")
 	work := filepath.Join(dir, "work")
 
-	gitRun(t, "", "init", "--bare", bare)
-	gitRun(t, "", "clone", bare, work)
-	gitRun(t, work, "checkout", "-B", "main")
-	gitRun(t, work, "config", "user.email", "test@example.com")
-	gitRun(t, work, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "init", "--bare", bare)
+	testutil.GitRun(t, "", "clone", bare, work)
+	testutil.GitRun(t, work, "checkout", "-B", "main")
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
 	for name, body := range files {
-		gitWriteFile(t, filepath.Join(work, name), body)
-		gitRun(t, work, "add", name)
+		testutil.WriteFixture(t, work, name, body)
+		testutil.GitRun(t, work, "add", name)
 	}
-	gitRun(t, work, "commit", "-m", "base")
-	gitRun(t, work, "push", "-u", "origin", "main")
+	testutil.GitRun(t, work, "commit", "-m", "base")
+	testutil.GitRun(t, work, "push", "-u", "origin", "main")
 
-	gitRun(t, work, "checkout", "-b", "agent/issue-1")
+	testutil.GitRun(t, work, "checkout", "-b", "agent/issue-1")
 	branchSteps(work)
-	gitRun(t, work, "commit", "-m", "feature")
-	gitRun(t, work, "push", "-u", "origin", "agent/issue-1")
+	testutil.GitRun(t, work, "commit", "-m", "feature")
+	testutil.GitRun(t, work, "push", "-u", "origin", "agent/issue-1")
 
-	gitRun(t, work, "checkout", "main")
+	testutil.GitRun(t, work, "checkout", "main")
 	mainSteps(work)
-	gitRun(t, work, "commit", "-m", "main")
-	gitRun(t, work, "push", "origin", "main")
+	testutil.GitRun(t, work, "commit", "-m", "main")
+	testutil.GitRun(t, work, "push", "origin", "main")
 	return bare
 }
 
 func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
 		func(work string) {
-			gitWriteFile(t, filepath.Join(work, "shared.txt"), "feature change\n")
-			gitRun(t, work, "add", "shared.txt")
+			testutil.WriteFixture(t, work, "shared.txt", "feature change\n")
+			testutil.GitRun(t, work, "add", "shared.txt")
 		},
 		func(work string) {
-			gitWriteFile(t, filepath.Join(work, "shared.txt"), "conflicting main change\n")
-			gitRun(t, work, "add", "shared.txt")
+			testutil.WriteFixture(t, work, "shared.txt", "conflicting main change\n")
+			testutil.GitRun(t, work, "add", "shared.txt")
 		})
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -145,10 +131,10 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 // classification must come from the unmerged index entries.
 func TestGitClient_Merge_ModifyDeleteConflictReturnsErrMergeConflict(t *testing.T) {
 	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
-		func(work string) { gitRun(t, work, "rm", "shared.txt") },
+		func(work string) { testutil.GitRun(t, work, "rm", "shared.txt") },
 		func(work string) {
-			gitWriteFile(t, filepath.Join(work, "shared.txt"), "main change\n")
-			gitRun(t, work, "add", "shared.txt")
+			testutil.WriteFixture(t, work, "shared.txt", "main change\n")
+			testutil.GitRun(t, work, "add", "shared.txt")
 		})
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -162,8 +148,8 @@ func TestGitClient_Merge_ModifyDeleteConflictReturnsErrMergeConflict(t *testing.
 func TestGitClient_Merge_RenameRenameConflictReturnsErrMergeConflict(t *testing.T) {
 	body := "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n"
 	bare := conflictRemote(t, map[string]string{"x.txt": body},
-		func(work string) { gitRun(t, work, "mv", "x.txt", "z.txt") },
-		func(work string) { gitRun(t, work, "mv", "x.txt", "y.txt") })
+		func(work string) { testutil.GitRun(t, work, "mv", "x.txt", "z.txt") },
+		func(work string) { testutil.GitRun(t, work, "mv", "x.txt", "y.txt") })
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
@@ -176,28 +162,28 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	bare := filepath.Join(dir, "origin.git")
 	work := filepath.Join(dir, "work")
 
-	gitRun(t, "", "init", "--bare", bare)
-	gitRun(t, "", "clone", bare, work)
-	gitRun(t, work, "checkout", "-B", "main")
-	gitRun(t, work, "config", "user.email", "test@example.com")
-	gitRun(t, work, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(work, "base.txt"), "base\n")
-	gitRun(t, work, "add", "base.txt")
-	gitRun(t, work, "commit", "-m", "base")
-	gitRun(t, work, "push", "-u", "origin", "main")
+	testutil.GitRun(t, "", "init", "--bare", bare)
+	testutil.GitRun(t, "", "clone", bare, work)
+	testutil.GitRun(t, work, "checkout", "-B", "main")
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
+	testutil.WriteFixture(t, work, "base.txt", "base\n")
+	testutil.GitRun(t, work, "add", "base.txt")
+	testutil.GitRun(t, work, "commit", "-m", "base")
+	testutil.GitRun(t, work, "push", "-u", "origin", "main")
 
-	gitRun(t, work, "checkout", "-b", "agent/issue-1")
-	gitWriteFile(t, filepath.Join(work, "feature.txt"), "feature\n")
-	gitRun(t, work, "add", "feature.txt")
-	gitRun(t, work, "commit", "-m", "feature")
-	gitRun(t, work, "push", "-u", "origin", "agent/issue-1")
+	testutil.GitRun(t, work, "checkout", "-b", "agent/issue-1")
+	testutil.WriteFixture(t, work, "feature.txt", "feature\n")
+	testutil.GitRun(t, work, "add", "feature.txt")
+	testutil.GitRun(t, work, "commit", "-m", "feature")
+	testutil.GitRun(t, work, "push", "-u", "origin", "agent/issue-1")
 
 	// Advance main so the feature branch is now behind.
-	gitRun(t, work, "checkout", "main")
-	gitWriteFile(t, filepath.Join(work, "later.txt"), "later\n")
-	gitRun(t, work, "add", "later.txt")
-	gitRun(t, work, "commit", "-m", "later main commit")
-	gitRun(t, work, "push", "origin", "main")
+	testutil.GitRun(t, work, "checkout", "main")
+	testutil.WriteFixture(t, work, "later.txt", "later\n")
+	testutil.GitRun(t, work, "add", "later.txt")
+	testutil.GitRun(t, work, "commit", "-m", "later main commit")
+	testutil.GitRun(t, work, "push", "origin", "main")
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if err := g.Rebase("agent/issue-1"); err != nil {
@@ -205,8 +191,8 @@ func TestGitClient_Rebase_ForcePushesRebasedBranch(t *testing.T) {
 	}
 
 	verify := t.TempDir()
-	gitRun(t, "", "clone", bare, verify)
-	gitRun(t, verify, "checkout", "agent/issue-1")
+	testutil.GitRun(t, "", "clone", bare, verify)
+	testutil.GitRun(t, verify, "checkout", "agent/issue-1")
 	if _, err := os.Stat(filepath.Join(verify, "later.txt")); err != nil {
 		t.Errorf("rebased branch does not contain later.txt from base: %v", err)
 	}
@@ -256,15 +242,11 @@ func TestGitClient_Merge_SetsCommitIdentityOnTempClone(t *testing.T) {
 	}
 
 	verify := t.TempDir()
-	gitRun(t, "", "clone", bare, verify)
-	gitRun(t, verify, "checkout", "main")
-	out := exec.Command("git", "-C", verify, "log", "-1", "--format=%an <%ae>", "main")
-	got, err := out.Output()
-	if err != nil {
-		t.Fatalf("git log: %v", err)
-	}
-	if strings.TrimSpace(string(got)) != "Spindrift Bot <bot@example.com>" {
-		t.Errorf("merge commit identity = %q, want \"Spindrift Bot <bot@example.com>\"", strings.TrimSpace(string(got)))
+	testutil.GitRun(t, "", "clone", bare, verify)
+	testutil.GitRun(t, verify, "checkout", "main")
+	got := testutil.GitOutput(t, verify, "log", "-1", "--format=%an <%ae>", "main")
+	if got != "Spindrift Bot <bot@example.com>" {
+		t.Errorf("merge commit identity = %q, want \"Spindrift Bot <bot@example.com>\"", got)
 	}
 }
 
@@ -332,12 +314,12 @@ func installLeakingHook(t *testing.T, hookName, secret string) {
 		t.Fatal(err)
 	}
 	hookPath := filepath.Join(hooksDir, hookName)
-	gitWriteFile(t, hookPath, "#!/bin/sh\necho 'fatal: unable to access "+
+	testutil.WriteFixture(t, hooksDir, hookName, "#!/bin/sh\necho 'fatal: unable to access "+
 		"https://oauth2:"+secret+"@git.example.com/org/repo.git/' >&2\nexit 1\n")
 	if err := os.Chmod(hookPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitWriteFile(t, filepath.Join(home, ".gitconfig"), "[init]\n\ttemplateDir = "+templateDir+"\n")
+	testutil.WriteFixture(t, home, ".gitconfig", "[init]\n\ttemplateDir = "+templateDir+"\n")
 	t.Setenv("HOME", home)
 }
 
@@ -385,10 +367,10 @@ func TestGitClient_BranchExists(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
 	// ls-remote patterns tail-match and glob, so this decoy (and the glob
 	// names below) must not read as the branch existing.
-	gitRun(t, bare, "update-ref", "refs/heads/backup/agent/issue-2", "refs/heads/agent/issue-1")
+	testutil.GitRun(t, bare, "update-ref", "refs/heads/backup/agent/issue-2", "refs/heads/agent/issue-1")
 	// Matches the qualified pattern under `*/`, so ls-remote exits 0 and only
 	// the exact-line filter rejects it.
-	gitRun(t, bare, "update-ref", "refs/heads/x/refs/heads/agent/issue-2", "refs/heads/agent/issue-1")
+	testutil.GitRun(t, bare, "update-ref", "refs/heads/x/refs/heads/agent/issue-2", "refs/heads/agent/issue-1")
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	exists, err := g.BranchExists("agent/issue-1")
@@ -573,9 +555,9 @@ func TestGitClient_Probe_TimesOutOnHangingRemote(t *testing.T) {
 func newBareRemoteWithHangingPush(t *testing.T) string {
 	t.Helper()
 	bare := newBareRemoteWithBranches(t)
-	hook := filepath.Join(bare, "hooks", "pre-receive")
-	gitWriteFile(t, hook, "#!/bin/sh\nsleep 999\n")
-	if err := os.Chmod(hook, 0o755); err != nil {
+	rel := filepath.Join("hooks", "pre-receive")
+	testutil.WriteFixture(t, bare, rel, "#!/bin/sh\nsleep 999\n")
+	if err := os.Chmod(filepath.Join(bare, rel), 0o755); err != nil {
 		t.Fatalf("chmod pre-receive hook: %v", err)
 	}
 	return bare
@@ -631,7 +613,7 @@ func installGitShim(t *testing.T, subcommand, action string) {
 		"fi\n" +
 		"exec " + realGit + " \"$@\"\n"
 	shim := filepath.Join(shimDir, "git")
-	gitWriteFile(t, shim, script)
+	testutil.WriteFixture(t, shimDir, "git", script)
 	if err := os.Chmod(shim, 0o755); err != nil {
 		t.Fatalf("chmod git shim: %v", err)
 	}
@@ -691,8 +673,8 @@ func TestGitClient_Merge_SucceedsWhenGrandchildHoldsOutputPipe(t *testing.T) {
 	}
 
 	verify := t.TempDir()
-	gitRun(t, "", "clone", bare, verify)
-	gitRun(t, verify, "checkout", "main")
+	testutil.GitRun(t, "", "clone", bare, verify)
+	testutil.GitRun(t, verify, "checkout", "main")
 	if _, err := os.Stat(filepath.Join(verify, "feature.txt")); err != nil {
 		t.Errorf("main does not contain feature.txt after Merge: %v", err)
 	}
@@ -734,18 +716,18 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 	// this setup push forever too.
 	bare := newBareRemoteWithBranches(t)
 	advance := t.TempDir()
-	gitRun(t, "", "clone", bare, advance)
-	gitRun(t, advance, "checkout", "main")
-	gitRun(t, advance, "config", "user.email", "test@example.com")
-	gitRun(t, advance, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(advance, "later.txt"), "later\n")
-	gitRun(t, advance, "add", "later.txt")
-	gitRun(t, advance, "commit", "-m", "later main commit")
-	gitRun(t, advance, "push", "origin", "main")
+	testutil.GitRun(t, "", "clone", bare, advance)
+	testutil.GitRun(t, advance, "checkout", "main")
+	testutil.GitRun(t, advance, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, advance, "config", "user.name", "Test")
+	testutil.WriteFixture(t, advance, "later.txt", "later\n")
+	testutil.GitRun(t, advance, "add", "later.txt")
+	testutil.GitRun(t, advance, "commit", "-m", "later main commit")
+	testutil.GitRun(t, advance, "push", "origin", "main")
 
-	hook := filepath.Join(bare, "hooks", "pre-receive")
-	gitWriteFile(t, hook, "#!/bin/sh\nsleep 999\n")
-	if err := os.Chmod(hook, 0o755); err != nil {
+	rel := filepath.Join("hooks", "pre-receive")
+	testutil.WriteFixture(t, bare, rel, "#!/bin/sh\nsleep 999\n")
+	if err := os.Chmod(filepath.Join(bare, rel), 0o755); err != nil {
 		t.Fatalf("chmod pre-receive hook: %v", err)
 	}
 
@@ -779,12 +761,12 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 func TestGitClient_Rebase_ContentConflictReturnsErrMergeConflict(t *testing.T) {
 	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
 		func(w string) {
-			gitWriteFile(t, filepath.Join(w, "shared.txt"), "feature change\n")
-			gitRun(t, w, "add", "shared.txt")
+			testutil.WriteFixture(t, w, "shared.txt", "feature change\n")
+			testutil.GitRun(t, w, "add", "shared.txt")
 		},
 		func(w string) {
-			gitWriteFile(t, filepath.Join(w, "shared.txt"), "conflicting main change\n")
-			gitRun(t, w, "add", "shared.txt")
+			testutil.WriteFixture(t, w, "shared.txt", "conflicting main change\n")
+			testutil.GitRun(t, w, "add", "shared.txt")
 		})
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
@@ -796,10 +778,10 @@ func TestGitClient_Rebase_ContentConflictReturnsErrMergeConflict(t *testing.T) {
 func TestGitClient_Rebase_ModifyDeleteConflictReturnsErrMergeConflict(t *testing.T) {
 	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
 		func(w string) {
-			gitWriteFile(t, filepath.Join(w, "shared.txt"), "feature change\n")
-			gitRun(t, w, "add", "shared.txt")
+			testutil.WriteFixture(t, w, "shared.txt", "feature change\n")
+			testutil.GitRun(t, w, "add", "shared.txt")
 		},
-		func(w string) { gitRun(t, w, "rm", "shared.txt") })
+		func(w string) { testutil.GitRun(t, w, "rm", "shared.txt") })
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
@@ -811,8 +793,8 @@ func TestGitClient_Rebase_ModifyDeleteConflictReturnsErrMergeConflict(t *testing
 // conflict, so this covers the "CONFLICT (" classification beyond content.
 func TestGitClient_Rebase_RenameConflictReturnsErrMergeConflict(t *testing.T) {
 	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
-		func(w string) { gitRun(t, w, "mv", "shared.txt", "feature-name.txt") },
-		func(w string) { gitRun(t, w, "mv", "shared.txt", "main-name.txt") })
+		func(w string) { testutil.GitRun(t, w, "mv", "shared.txt", "feature-name.txt") },
+		func(w string) { testutil.GitRun(t, w, "mv", "shared.txt", "main-name.txt") })
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
@@ -851,12 +833,12 @@ func TestGitClient_Rebase_HookOutputDoesNotLeakCredentials(t *testing.T) {
 	// branch is already up to date.
 	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
 		func(w string) {
-			gitWriteFile(t, filepath.Join(w, "feature.txt"), "feature\n")
-			gitRun(t, w, "add", "feature.txt")
+			testutil.WriteFixture(t, w, "feature.txt", "feature\n")
+			testutil.GitRun(t, w, "add", "feature.txt")
 		},
 		func(w string) {
-			gitWriteFile(t, filepath.Join(w, "later.txt"), "later\n")
-			gitRun(t, w, "add", "later.txt")
+			testutil.WriteFixture(t, w, "later.txt", "later\n")
+			testutil.GitRun(t, w, "add", "later.txt")
 		})
 	installLeakingHook(t, "pre-rebase", secret)
 
@@ -880,8 +862,8 @@ func TestCloneToTemp_GitInDisablesAutoMaintenance(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	src := t.TempDir()
-	gitRun(t, src, "init", "-q")
-	gitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+	testutil.GitRun(t, src, "init", "-q")
+	testutil.GitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
 	_, gitIn, cleanup, err := cloneToTemp(src, "spindrift-git-forge-test-*", time.Minute)
 	if err != nil {
 		t.Fatalf("cloneToTemp: %v", err)
@@ -902,19 +884,15 @@ func TestCloneToTemp_PersistsAutoMaintenanceGuard(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	src := t.TempDir()
-	gitRun(t, src, "init", "-q")
-	gitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+	testutil.GitRun(t, src, "init", "-q")
+	testutil.GitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
 	dir, _, cleanup, err := cloneToTemp(src, "spindrift-git-forge-test-*", time.Minute)
 	if err != nil {
 		t.Fatalf("cloneToTemp: %v", err)
 	}
 	defer cleanup()
 	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
-		out, err := exec.Command("git", "-C", dir, "config", "--get", key).Output()
-		if err != nil {
-			t.Fatalf("bare git config --get %s: %v", key, err)
-		}
-		if got := strings.TrimSpace(string(out)); got != want {
+		if got := testutil.GitOutput(t, dir, "config", "--get", key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
 	}
