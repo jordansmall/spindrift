@@ -122,6 +122,60 @@ func TestNpmrcAuthToken_ValueIsDecodedLikeNpm(t *testing.T) {
 	}
 }
 
+// npm's ini parser splits at the first "=" and trims the key, so whitespace
+// around "=" must not hide the entry.
+func TestNpmrcAuthToken_WhitespaceAroundEqualsLikeNpm(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"spaces both sides", "//registry.example.com/:_authToken = tok", "tok"},
+		{"space before only", "//registry.example.com/:_authToken =tok", "tok"},
+		{"space after only", "//registry.example.com/:_authToken= tok", "tok"},
+		{"tabs", "//registry.example.com/:_authToken\t=\ttok", "tok"},
+		{"base64 padding kept", "//registry.example.com/:_authToken = dG9r==", "dG9r=="},
+		{"path before key", "//registry.example.com/path:_authToken=tok", "tok"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := npmrcAuthToken([]byte(tc.line+"\n"), "/some/npmrc", "registry.example.com")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Lines whose key is not exactly _authToken for the host fall through to the
+// no-entry error rather than matching.
+func TestNpmrcAuthToken_NonMatchingKeyFallsThrough(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+	}{
+		{"key with trailing text", "//registry.example.com/:_authTokenX=tok"},
+		{"key with trailing text and spaces", "//registry.example.com/:_authTokenX = tok"},
+		{"token inside another option's value", "//registry.example.com/:_password=x:_authToken=tok"},
+		{"equals sign in path", "//registry.example.com/a=b/:_authToken=tok"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := npmrcAuthToken([]byte(tc.line+"\n"), "/some/npmrc", "registry.example.com")
+			if err == nil {
+				t.Fatal("expected no-entry error, got nil")
+			}
+			want := "registry proxy credential file /some/npmrc has no npmrc _authToken entry for host registry.example.com"
+			if err.Error() != want {
+				t.Errorf("got %q, want %q", err.Error(), want)
+			}
+		})
+	}
+}
+
 // Each value decodes to something the guards reject, and the error must never
 // echo the value: every row with content carries the marker TOK.
 func TestNpmrcAuthToken_DecodedValueIsGuarded(t *testing.T) {
