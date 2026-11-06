@@ -25,15 +25,16 @@ func npmrcHostname(s string) string {
 	return s
 }
 
-// npmrcAuthToken returns the value of the first "//<registry>/:_authToken="
+// npmrcAuthToken returns the value of the first "//<registry>/:_authToken"
 // line whose registry hostname equals host, ignoring case, any path after the
-// host, and any port on either side. sourceName names the file in errors,
-// never alongside a credential value. A miss or an empty value is an error
-// rather than a silent skip, so the proxy never runs unauthenticated.
+// host, any port on either side, and whitespace around "=". sourceName names
+// the file in errors, never alongside a credential value. A miss or an empty
+// value is an error rather than a silent skip, so the proxy never runs
+// unauthenticated.
 func npmrcAuthToken(content []byte, sourceName, host string) (string, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	normalizedHost := npmrcHostname(host)
-	const marker = ":_authToken="
+	const keySuffix = ":_authToken"
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -41,19 +42,25 @@ func npmrcAuthToken(content []byte, sourceName, host string) (string, error) {
 			continue
 		}
 
-		rest := line[len("//"):]
+		// Split at the first "=" and trim the key, as npm's ini parser does.
+		// line is already trimmed and "//"-prefixed, so only the key's right
+		// side can carry whitespace and the "//" slice below is in bounds.
+		key, rawValue, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		rest := strings.TrimSpace(key)[len("//"):]
 		slash := strings.Index(rest, "/")
 		if slash < 0 {
 			continue
 		}
 		registrySpec, pathAndKey := rest[:slash], rest[slash+1:]
 
-		keyIdx := strings.Index(pathAndKey, marker)
-		if keyIdx < 0 || !strings.EqualFold(npmrcHostname(registrySpec), normalizedHost) {
+		if !strings.HasSuffix(pathAndKey, keySuffix) || !strings.EqualFold(npmrcHostname(registrySpec), normalizedHost) {
 			continue
 		}
 
-		value := npmrcvalue.Decode(pathAndKey[keyIdx+len(marker):])
+		value := npmrcvalue.Decode(rawValue)
 		if value == "" {
 			return "", fmt.Errorf("registry proxy credential file %s has npmrc _authToken entry for host %s but the value is empty", sourceName, host)
 		}
