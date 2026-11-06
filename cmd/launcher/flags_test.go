@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -2211,71 +2212,28 @@ func TestParseFlags_NoBuildWithIssue(t *testing.T) {
 	}
 }
 
-func TestDispatchNoBuildArgs(t *testing.T) {
-	noBuild, rest := dispatchNoBuildArgs([]string{"--no-build", "123"})
-	if !noBuild {
-		t.Error("want noBuild=true, got false")
+// Each flag is recognised alone (issue #2202 added --self-contained), --force
+// aliases --yes, and a repeated flag is accepted silently. All-flag input
+// leaves remaining nil, not empty.
+func TestParseIssuePositionals_EachFlag(t *testing.T) {
+	cases := []struct {
+		args []string
+		want issueArgs
+	}{
+		{[]string{"--no-build"}, issueArgs{noBuild: true}},
+		{[]string{"--yes"}, issueArgs{yes: true}},
+		{[]string{"--force"}, issueArgs{yes: true}},
+		{[]string{"--self-contained"}, issueArgs{selfContained: true}},
+		{[]string{"--no-build", "123"}, issueArgs{noBuild: true, remaining: []string{"123"}}},
+		{[]string{"--self-contained", "42"}, issueArgs{selfContained: true, remaining: []string{"42"}}},
+		{[]string{"--yes", "--yes", "42"}, issueArgs{yes: true, remaining: []string{"42"}}},
 	}
-	if len(rest) != 1 || rest[0] != "123" {
-		t.Errorf("rest = %v, want [123]", rest)
-	}
-}
-
-func TestDispatchNoBuildArgs_AbsentFlag(t *testing.T) {
-	noBuild, rest := dispatchNoBuildArgs([]string{"42"})
-	if noBuild {
-		t.Error("want noBuild=false, got true")
-	}
-	if len(rest) != 1 || rest[0] != "42" {
-		t.Errorf("rest = %v, want [42]", rest)
-	}
-}
-
-func TestDispatchYesArgs_YesFlag(t *testing.T) {
-	yes, rest := dispatchYesArgs([]string{"--yes", "42"})
-	if !yes {
-		t.Error("want yes=true, got false")
-	}
-	if len(rest) != 1 || rest[0] != "42" {
-		t.Errorf("rest = %v, want [42]", rest)
-	}
-}
-
-func TestDispatchYesArgs_ForceAlias(t *testing.T) {
-	yes, _ := dispatchYesArgs([]string{"--force"})
-	if !yes {
-		t.Error("--force must set yes=true")
-	}
-}
-
-func TestDispatchYesArgs_Absent(t *testing.T) {
-	yes, rest := dispatchYesArgs([]string{"42"})
-	if yes {
-		t.Error("want yes=false, got true")
-	}
-	if len(rest) != 1 || rest[0] != "42" {
-		t.Errorf("rest = %v, want [42]", rest)
-	}
-}
-
-// Issue #2202 added --self-contained.
-func TestDispatchSelfContainedArgs(t *testing.T) {
-	selfContained, rest := dispatchSelfContainedArgs([]string{"--self-contained", "42"})
-	if !selfContained {
-		t.Error("want selfContained=true, got false")
-	}
-	if len(rest) != 1 || rest[0] != "42" {
-		t.Errorf("rest = %v, want [42]", rest)
-	}
-}
-
-func TestDispatchSelfContainedArgs_Absent(t *testing.T) {
-	selfContained, rest := dispatchSelfContainedArgs([]string{"42"})
-	if selfContained {
-		t.Error("want selfContained=false, got true")
-	}
-	if len(rest) != 1 || rest[0] != "42" {
-		t.Errorf("rest = %v, want [42]", rest)
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			if got := parseIssuePositionals(tc.args); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

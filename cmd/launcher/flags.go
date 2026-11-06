@@ -26,50 +26,11 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "spindrift %s (rev %s)\n", version, revision)
 }
 
-// dispatchNoBuildArgs reports whether --no-build is present and returns the
-// args with it removed.
-func dispatchNoBuildArgs(args []string) (noBuild bool, remaining []string) {
-	for _, a := range args {
-		if a == "--no-build" {
-			noBuild = true
-		} else {
-			remaining = append(remaining, a)
-		}
-	}
-	return
-}
-
-// dispatchYesArgs reports whether --yes or --force is present and returns the
-// args with it removed.
-func dispatchYesArgs(args []string) (yes bool, remaining []string) {
-	for _, a := range args {
-		if a == "--yes" || a == "--force" {
-			yes = true
-		} else {
-			remaining = append(remaining, a)
-		}
-	}
-	return
-}
-
-// dispatchSelfContainedArgs reports whether --self-contained is present and
-// returns the args with it removed (issue #2202).
-func dispatchSelfContainedArgs(args []string) (selfContained bool, remaining []string) {
-	for _, a := range args {
-		if a == "--self-contained" {
-			selfContained = true
-		} else {
-			remaining = append(remaining, a)
-		}
-	}
-	return
-}
-
 // doctorFlagArgs parses doctor's own args: --verbose or -v requests the full
 // report (issue #3777); --butler additionally validates the butler config,
 // folding a failure into doctor's config-invalid exit (issue #3920). Unlike
-// the dispatch-only parsers above, doctor takes no positionals of its own, so
-// any other token — flag or bare word — is a usage error; ok is false
+// parseIssuePositionals, doctor takes no positionals of its own, so any
+// other token — flag or bare word — is a usage error; ok is false
 // exactly when badArg holds that token.
 func doctorFlagArgs(args []string) (opts doctorOptions, badArg string, ok bool) {
 	for _, a := range args {
@@ -98,20 +59,26 @@ type issueArgs struct {
 }
 
 // parseIssuePositionals strips the dispatch-only booleans shared by every
-// issue-taking verb (issue #3054). Stripping them is the only filtering it
+// issue-taking verb (issue #3054): --no-build, --yes (aliased by --force), and
+// --self-contained (issue #2202). Stripping them is the only filtering it
 // does, and callers use remaining directly as the issue-ID list (issue
 // #3055): recover accepts opaque, non-numeric identifiers such as Jira keys
 // and local-forge slugs, so any filter here would silently narrow it.
 func parseIssuePositionals(args []string) issueArgs {
-	noBuild, remaining := dispatchNoBuildArgs(args)
-	yes, remaining := dispatchYesArgs(remaining)
-	selfContained, remaining := dispatchSelfContainedArgs(remaining)
-	return issueArgs{
-		noBuild:       noBuild,
-		yes:           yes,
-		selfContained: selfContained,
-		remaining:     remaining,
+	var parsed issueArgs
+	for _, a := range args {
+		switch a {
+		case "--no-build":
+			parsed.noBuild = true
+		case "--yes", "--force":
+			parsed.yes = true
+		case "--self-contained":
+			parsed.selfContained = true
+		default:
+			parsed.remaining = append(parsed.remaining, a)
+		}
 	}
+	return parsed
 }
 
 // extractInputFlag pulls "--input <path>", the Launcher input document's
