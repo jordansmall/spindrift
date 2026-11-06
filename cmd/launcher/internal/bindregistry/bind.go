@@ -215,15 +215,14 @@ func BindHomes(stdout io.Writer, rows []ecosystem.Strategy, gate Gate, publish P
 
 	// A GOPROXY value, a cargo config.toml and a gradle init script can each
 	// name only ONE upstream, so all bind to the first route's prefix (issue
-	// #3142), preserving the pre-prefix routes[0] fallback. A missing route or empty prefix is defensive only, but warn
-	// and skip rather than bind everything to a URL that 404s every request.
-	if len(gate.manifest.Routes) == 0 || gate.manifest.Routes[0].Prefix == "" {
-		// Leaves any already-spawned Forwarder running idle and never calls
-		// publish. Both are harmless: the verb's env file simply stays empty.
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — "+ecosystemFallbackNames(rows)+" will fall back to the public registry")
+	// #3142), preserving the pre-prefix routes[0] fallback.
+	//
+	// A no-prefix manifest leaves any already-spawned Forwarder running idle and
+	// never calls publish. Both are harmless: the verb's env file simply stays empty.
+	prefix, ok := firstRoutePrefix(stdout, gate.manifest, rows)
+	if !ok {
 		return true
 	}
-	prefix := gate.manifest.Routes[0].Prefix
 
 	// Strategy-generic, so a future Strategy with an EnvExports renderer needs no change
 	// here.
@@ -499,10 +498,23 @@ func rowNames(rows []ecosystem.Strategy) []string {
 	return names
 }
 
-// ecosystemFallbackNames renders every Strategy's Name in Strategies order:
-// when the gate is closed, every known ecosystem falls back to the public registry.
+// ecosystemFallbackNames renders the Name of each Strategy in rows, in Strategies
+// order, for a warning that those ecosystems fall back to the public registry.
 func ecosystemFallbackNames(rows []ecosystem.Strategy) string {
 	return joinProse(rowNames(rows))
+}
+
+// firstRoutePrefix returns the manifest's first route prefix. A missing route or
+// empty prefix is defensive only, but it warns that rows fall back to the public
+// registry and returns false rather than bind them to a URL that 404s every
+// request. The warning is already printed on false, so the caller must not warn
+// again.
+func firstRoutePrefix(stdout io.Writer, m registrymanifest.Manifest, rows []ecosystem.Strategy) (string, bool) {
+	if len(m.Routes) == 0 || m.Routes[0].Prefix == "" {
+		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — "+ecosystemFallbackNames(rows)+" will fall back to the public registry")
+		return "", false
+	}
+	return m.Routes[0].Prefix, true
 }
 
 // bindingSummaryProse renders the success summary's "<name> bound to it via <where>"
@@ -560,20 +572,18 @@ func applyRepoAwareHomeConfigs(stdout io.Writer, workDir string, rows []ecosyste
 	}
 	port := gate.port
 
-	// The warning names the repo-aware Strategies from the supplied Strategies rather than a
-	// hardcoded list, so a second such Strategy landing cannot leave it
-	// overstating the fallback.
 	repoAwareRows := repoAwareHomeConfigRows(rows)
 	if len(repoAwareRows) == 0 {
 		return true
 	}
 
-	if len(gate.manifest.Routes) == 0 || gate.manifest.Routes[0].Prefix == "" {
-		names := joinProse(rowNames(repoAwareRows))
-		fmt.Fprintln(stdout, "==> WARNING: registry proxy manifest carries no route prefix — "+names+" will fall back to the public registry")
+	// The warning names the repo-aware Strategies from the supplied Strategies rather than a
+	// hardcoded list, so a second such Strategy landing cannot leave it
+	// overstating the fallback.
+	prefix, ok := firstRoutePrefix(stdout, gate.manifest, repoAwareRows)
+	if !ok {
 		return true
 	}
-	prefix := gate.manifest.Routes[0].Prefix
 
 	_, routes, _ := InTreeRoutes(gate.manifest.Routes, port)
 
