@@ -3715,6 +3715,25 @@ func TestStartChild_StateAfterAbandonNamesChild(t *testing.T) {
 	}
 }
 
+// TestStartChild_StateWithClosedReportPipeKeepsFDSentinel pins that a report
+// pipe whose descriptor cannot be read leaves ReportFD at -1: the handoff
+// rejects a negative fd, while a 0 would pass as stdin.
+func TestStartChild_StateWithClosedReportPipeKeepsFDSentinel(t *testing.T) {
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	h := startAbandonedChild(t, r)
+	if err := h.reportRead.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	readStderr := captureStderr(t)
+	if st := h.State(); st.ReportFD != -1 {
+		t.Errorf("State().ReportFD = %d, want -1", st.ReportFD)
+	}
+	if got := string(readStderr()); !strings.Contains(got, "daemon: read report pipe fd:") {
+		t.Errorf("stderr = %q, want the report pipe fd diagnostic", got)
+	}
+}
+
 // TestInheritChild_ContinuesASplitLineOnASecondRunner hands a child with half
 // a record read off to a second runner instance: the carried fragment is
 // completed by the rest of the line, later records and the exit reach the
