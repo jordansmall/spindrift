@@ -124,7 +124,11 @@ func (s PickState) String() string {
 // Section is a named slice of the session's issues the Console body shows one
 // at a time (ADR 0030). Backlog is the pick source; the four work Sections
 // slice Picks by PickState via pickSection. Values stay contiguous from zero
-// so H/L and the 1-5 direct jump index into them without a lookup table.
+// so the H/L wrap in model.go and the section-tab loop in view.go can step
+// through them, and the tabs number themselves [1]-[5] in that order. The 1-5
+// direct jump maps keys through its own table in keymap_list.go, which (with
+// its help text) must be updated to match whenever a Section is added,
+// removed, or reordered.
 type Section int
 
 const (
@@ -133,8 +137,8 @@ const (
 	SectionHeld
 	SectionSettled
 	SectionFailed
-	// sectionCount is the modulus H/L wrap by and the upper bound the 1-5
-	// direct jump validates against.
+	// sectionCount is the modulus H/L wrap by and the bound of the tab loop
+	// in view.go.
 	sectionCount
 )
 
