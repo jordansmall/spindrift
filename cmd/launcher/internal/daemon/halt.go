@@ -18,11 +18,15 @@ const (
 	HaltChildHostTainted
 	HaltChildConfigInvalid
 	// HaltSelfChanged: the daemon attribute's store path at the fetched tip
-	// no longer matches the daemon's own running build (Config.SelfProgram).
-	// The pool finishes what is already running and halts at the iteration
-	// boundary rather than orchestrating fresh Boxes from stale code; it
-	// never re-execs itself — composing this halt with a service restart
-	// policy is how an operator opts into self-update.
+	// no longer matches the daemon's own running build (Config.SelfProgram,
+	// whose doc holds the full self-update model). Recorded in drain mode
+	// (the default) only, once the successor's prebuild and smoke test pass
+	// (issue #5012). A failing build records a blocked self-update instead.
+	// The pool then starts no fresh Box from stale code and finishes what is
+	// already running, and exit 10 plus a service restart policy loads the
+	// new build. Under Config.RestartInPlace (--restart-in-place, ADR 0063)
+	// a self-change records no halt: the daemon execs the new build in place
+	// once the pool reaches a clean moment.
 	HaltSelfChanged
 	HaltSelfBuild
 	HaltBreaker
@@ -163,9 +167,9 @@ func (h Halt) Event() Event {
 // operator may want to act on automatically: its build changed at the
 // fetched tip. It is deliberately distinct from every other code this
 // binary returns (see Halt.ExitCode) so a service unit can restart on it
-// alone — see HaltSelfChanged's doc for why that restart, not an
-// automatic re-exec, is how an operator opts into self-update. It
-// sits outside the 0-7 band the *child* launcher's exit codes occupy
+// alone: in drain mode, exit 10 plus a restart policy is how the new
+// build loads (see HaltSelfChanged for the in-place alternative). It sits
+// outside the 0-7 band the *child* launcher's exit codes occupy
 // (Interpret, cmd/launcher/internal/daemon/outcome.go) so the two
 // taxonomies cannot be confused when both appear in one log.
 const ExitSelfChanged = 10
