@@ -26,10 +26,12 @@ const defaultCloneTimeout = 5 * time.Minute
 // diverge them deliberately.
 const defaultOpTimeout = defaultCloneTimeout
 
-// gitOutputWaitDelay bounds Cmd.WaitDelay for Merge and Rebase. A hook's
-// grandchild can hold the output pipe open after git exits, and a killed git's
-// child can hold it past the context deadline; without WaitDelay, Run blocks
-// until that grandchild exits. ErrWaitDelay means git itself exited 0.
+// gitOutputWaitDelay bounds Cmd.WaitDelay for every git call that captures
+// output (Merge, Rebase, BranchExists). A hook's grandchild or a transport
+// child such as an ssh ControlMaster can hold the output pipe open after git
+// exits, and a killed git's child can hold it past the context deadline;
+// without WaitDelay, Run blocks until that child exits. ErrWaitDelay means git
+// itself exited 0.
 const gitOutputWaitDelay = time.Second
 
 // gitClient is the push-only Code Forge adapter for a plain git remote
@@ -246,16 +248,30 @@ func (g *gitClient) Rebase(branch string) error {
 
 // BranchExists reports whether branch exists on the remote. Under
 // `git ls-remote --exit-code`, exit code 2 means no matching ref rather than a
-// failure; any other non-zero exit is a real error.
+// failure; any other non-zero exit is a real error. ls-remote patterns
+// tail-match and glob, so exit 0 only means some ref matched: the output must
+// carry the exact refs/heads/<branch> line.
 func (g *gitClient) BranchExists(branch string) (bool, error) {
 	if err := validateGitRef(branch); err != nil {
 		return false, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
-	err := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, branch).Run()
-	if err == nil {
-		return true, nil
+	want := "refs/heads/" + branch
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--exit-code", "--heads", g.remoteURL, want)
+	cmd.Stdout = &out
+	cmd.WaitDelay = gitOutputWaitDelay
+	err := cmd.Run()
+	// Reading out after ErrWaitDelay can lose pipe-buffered bytes; that fails
+	// closed to "absent", and ls-remote's output here is a single line.
+	if err == nil || errors.Is(err, exec.ErrWaitDelay) {
+		for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+			if _, ref, ok := strings.Cut(line, "\t"); ok && ref == want {
+				return true, nil
+			}
+		}
+		return false, nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 2 {

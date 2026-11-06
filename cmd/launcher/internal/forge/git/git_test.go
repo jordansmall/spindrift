@@ -383,6 +383,12 @@ func TestGitClient_Probe(t *testing.T) {
 
 func TestGitClient_BranchExists(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
+	// ls-remote patterns tail-match and glob, so this decoy (and the glob
+	// names below) must not read as the branch existing.
+	gitRun(t, bare, "update-ref", "refs/heads/backup/agent/issue-2", "refs/heads/agent/issue-1")
+	// Matches the qualified pattern under `*/`, so ls-remote exits 0 and only
+	// the exact-line filter rejects it.
+	gitRun(t, bare, "update-ref", "refs/heads/x/refs/heads/agent/issue-2", "refs/heads/agent/issue-1")
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 
 	exists, err := g.BranchExists("agent/issue-1")
@@ -393,12 +399,22 @@ func TestGitClient_BranchExists(t *testing.T) {
 		t.Error("BranchExists(agent/issue-1) = false, want true — the branch was pushed")
 	}
 
-	exists, err = g.BranchExists("agent/issue-999")
-	if err != nil {
-		t.Fatalf("BranchExists(agent/issue-999): %v", err)
-	}
-	if exists {
-		t.Error("BranchExists(agent/issue-999) = true, want false — the branch was never pushed")
+	for _, tc := range []struct{ branch, why string }{
+		{"agent/issue-999", "never pushed"},
+		{"agent/issue-2", "only tail-matched by backup/ and x/refs/heads/ decoys"},
+		{"issue-1", "tail-matches agent/issue-1"},
+		{"issue-2", "tail-matches decoy refs"},
+		{"agent/*", "glob"},
+		{"agent/issue-?", "glob"},
+		{"refs/heads/agent/issue-1", "double prefix"},
+	} {
+		exists, err := g.BranchExists(tc.branch)
+		if err != nil {
+			t.Fatalf("BranchExists(%s): %v", tc.branch, err)
+		}
+		if exists {
+			t.Errorf("BranchExists(%s) = true, want false — %s (no refs/heads/%s)", tc.branch, tc.why, tc.branch)
+		}
 	}
 }
 
