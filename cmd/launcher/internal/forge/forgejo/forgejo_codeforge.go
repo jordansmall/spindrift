@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
-	"path"
 	"strings"
 	"time"
 
@@ -262,28 +261,20 @@ func (f *forgejoCodeForge) Probe() (string, error) {
 	return payload.FullName, nil
 }
 
-// forgejoBranchProtection is the part of Forgejo's branch-protection payload
-// BranchProtected needs: rule_name is a glob, not a literal branch name.
-type forgejoBranchProtection struct {
-	RuleName string `json:"rule_name"`
-}
-
-// BranchProtected reports whether branch matches any branch-protection rule. It
-// lists the rules instead of looking one up by name because each rule_name is
-// matched as a glob (path.Match): "release/*" protects "release/1.0" without
-// appearing verbatim. A repo with no rules answers 200 with an empty array, so a
-// 404 or any other error means the probe failed and must be returned as one.
+// BranchProtected reports whether Forgejo considers branch protected. Forgejo
+// applies its own rule matching (case-insensitive names, gobwas globs), so this
+// reads the branch's server-computed `protected` flag instead of re-matching
+// branch_protections rule names; the flag needs only repo read, where listing
+// the rules needs admin. A 404 (branch or repo unresolvable) or any other error
+// means the probe failed and is returned as one.
 func (f *forgejoCodeForge) BranchProtected(branch string) (bool, error) {
-	var rules []forgejoBranchProtection
-	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/branch_protections", nil, &rules); err != nil {
+	var payload struct {
+		Protected bool `json:"protected"`
+	}
+	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/branches/"+url.PathEscape(branch), nil, &payload); err != nil {
 		return false, err
 	}
-	for _, r := range rules {
-		if ok, err := path.Match(r.RuleName, branch); err == nil && ok {
-			return true, nil
-		}
-	}
-	return false, nil
+	return payload.Protected, nil
 }
 
 // relayClone builds the `git clone` closure bundlerelay's Relay,
