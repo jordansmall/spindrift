@@ -1689,8 +1689,8 @@ func (p *pool) publishInitial() {
 	p.mutate(func(*state) []Event { return nil })
 }
 
-// emit is mutate's trivial case, for the events that ride no state change
-// of their own: box, child_finish and baton_hold.
+// emit is mutate's trivial case, for an event that rides no state change of
+// its own; today only child_finish.
 func (p *pool) emit(ev Event) {
 	p.mutate(func(*state) []Event { return []Event{ev} })
 }
