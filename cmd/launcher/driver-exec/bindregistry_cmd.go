@@ -37,7 +37,10 @@ var spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret stri
 // source the verb's env file. Each value is single-quoted with embedded quotes escaped,
 // because nothing inside single quotes is special to the shell; %q alone left a
 // command-injection path for repo-controlled values (issue #3259). Names are
-// interpolated raw, safe only because every Name is a constant from this package.
+// interpolated raw, so each Strategy must emit only shell-identifier names. Cargo
+// builds its names from a host route prefix and a Target repo registry name, which
+// validPrefixCharset and cargoBareKeyPattern limit to [A-Za-z0-9_-];
+// cargoRegistryEnvVarName then maps "-" to "_" behind a letter-led fixed prefix.
 func renderEnvExports(exports []ecosystem.EnvExport) string {
 	var rendered string
 	for _, e := range exports {
