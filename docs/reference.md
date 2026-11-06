@@ -1948,10 +1948,10 @@ and the guard plugin described after this list (issue #5346):
   every credential rule and `envFiles` row, `agent/credential-vars`; see
   below) ahead of the Driver's original command, and asserts no
   `permissionDecision` of its own on that path (the same silent,
-  no-explicit-opinion posture `reject-background-bash.sh` and
-  `credential-deny.sh` use for a call they don't deny — three hooks share the
-  `Bash` matcher, and an explicit `allow` here could read as this hook's
-  opinion overriding a sibling's `deny` on the same call). The
+  no-explicit-opinion posture `reject-background-bash.sh`,
+  `credential-deny.sh`, and `bash-output-tee.sh` use for a call they don't
+  deny — other hooks share the `Bash` matcher, and an explicit `allow` here
+  could read as this hook's opinion overriding a sibling's `deny` on the same call). The
   rewrite is an actual removal from the subprocess's environment, not a
   denylist of dump commands: `env`/`printenv`/`set`/`export -p`/a direct
   `$VAR` expansion all come up empty as a structural consequence, with no
