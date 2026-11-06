@@ -2260,10 +2260,11 @@ func TestSweep_PatchLocalTrackerIssueURLLeavesFindingFiled(t *testing.T) {
 	}
 }
 
-// patchGateDispatchLabels mirrors settle_test.go's own testDispatchLabels:
-// the DispatchLabels a real *settle.Settle needs to know what "agent-
-// complete"/"agent-failed" actually spell, even though an unclaimed patch
-// finding's issue never carries agent-in-progress in the first place.
+// patchGateDispatchLabels mirrors testDispatchLabels in internal/settle's
+// gate_test.go: the DispatchLabels a real *settle.Settle needs to know
+// what "agent-complete"/"agent-failed" actually spell, even though an
+// unclaimed patch finding's issue never carries agent-in-progress in the
+// first place.
 var patchGateDispatchLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
