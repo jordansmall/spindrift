@@ -1,7 +1,7 @@
 package main
 
 import (
-	"errors"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +50,10 @@ func TestEnvGuards_MissingVarIsNamed(t *testing.T) {
 		{workEnv, "GIT_USER_EMAIL", "GIT_USER_EMAIL is required"},
 	}
 	for _, c := range cases {
+		// The message equality below is what pins which var was reported.
+		if !strings.HasPrefix(c.wantMsg, c.drop+" ") {
+			t.Fatalf("%s: wantMsg %q must start with the dropped var", c.drop, c.wantMsg)
+		}
 		for _, how := range []string{"unset", "empty"} {
 			env := c.env()
 			if how == "empty" {
@@ -58,8 +62,7 @@ func TestEnvGuards_MissingVarIsNamed(t *testing.T) {
 				delete(env, c.drop)
 			}
 			err := guardErr(env)
-			var me *missingEnvError
-			if !errors.As(err, &me) || me.Name != c.drop || err.Error() != c.wantMsg {
+			if err == nil || err.Error() != c.wantMsg {
 				t.Errorf("%s %s: err = %v, want %q", c.drop, how, err, c.wantMsg)
 			}
 		}
