@@ -145,15 +145,3 @@ func TestRunProbeRegistryTCP_MissingPortFlag(t *testing.T) {
 		t.Fatalf("runProbeRegistryTCP exit = %d, must not equal ExitIncapable (%d): a usage error is not a verdict", rc, registryprobe.ExitIncapable)
 	}
 }
-
-func TestIsProbeRegistryTCPInvocation(t *testing.T) {
-	if isProbeRegistryTCPInvocation(nil) {
-		t.Fatalf("isProbeRegistryTCPInvocation(nil) = true, want false")
-	}
-	if !isProbeRegistryTCPInvocation([]string{"probe-registry-tcp", "-host", "127.0.0.1", "-port", "1234"}) {
-		t.Fatalf("isProbeRegistryTCPInvocation([probe-registry-tcp ...]) = false, want true")
-	}
-	if isProbeRegistryTCPInvocation([]string{"probe-registry-socket"}) {
-		t.Fatalf("isProbeRegistryTCPInvocation([probe-registry-socket]) = true, want false")
-	}
-}

@@ -69,13 +69,6 @@ func malformedCarriedText(v string) error {
 	return fmt.Errorf("malformed --composition-carried value %q, want [<pass>:]<name>=<path>", v)
 }
 
-// isAssemblePromptInvocation reports whether args (os.Args[1:]) selects the
-// assemble-prompt subcommand, which is a verb and not a top-level flag (issue
-// #2349).
-func isAssemblePromptInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == "assemble-prompt"
-}
-
 // runAssemblePrompt is the `assemble-prompt` subcommand's CLI wrapper and
 // returns the process exit code. Keep it thin: the real work belongs in
 // promptassembly (ADR 0007's thin-exec-glue tier, issue #2349).

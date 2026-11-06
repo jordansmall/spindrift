@@ -134,15 +134,3 @@ func TestRunProbeRegistrySocket_MissingPathFlag(t *testing.T) {
 		t.Fatalf("runProbeRegistrySocket exit = %d, must not equal ExitIncapable (%d): a usage error is not a verdict", rc, registryprobe.ExitIncapable)
 	}
 }
-
-func TestIsProbeRegistrySocketInvocation(t *testing.T) {
-	if isProbeRegistrySocketInvocation(nil) {
-		t.Fatalf("isProbeRegistrySocketInvocation(nil) = true, want false")
-	}
-	if !isProbeRegistrySocketInvocation([]string{"probe-registry-socket", "-path", "/foo.sock"}) {
-		t.Fatalf("isProbeRegistrySocketInvocation([probe-registry-socket ...]) = false, want true")
-	}
-	if isProbeRegistrySocketInvocation([]string{"bind-registry"}) {
-		t.Fatalf("isProbeRegistrySocketInvocation([bind-registry]) = true, want false")
-	}
-}

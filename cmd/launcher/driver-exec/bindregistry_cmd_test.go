@@ -196,25 +196,6 @@ func forwarderLineOf(stdout string) string {
 	return ""
 }
 
-func TestIsBindRegistryInvocation(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{"bind-registry first arg", []string{"bind-registry"}, true},
-		{"bind-registry with flags", []string{"bind-registry", "--work-dir", "x"}, true},
-		{"no args", nil, false},
-		{"other", []string{"other"}, false},
-		{"flag names bind-registry as a value, not args[0]", []string{"--work-dir", "bind-registry"}, false},
-	}
-	for _, c := range cases {
-		if got := isBindRegistryInvocation(c.args); got != c.want {
-			t.Errorf("%s: isBindRegistryInvocation(%v) = %v, want %v", c.name, c.args, got, c.want)
-		}
-	}
-}
-
 // At least one complete mode must be requested. -bindings-env-output alone is
 // sufficient on its own since issue #3141, so it no longer appears among the
 // error cases here.

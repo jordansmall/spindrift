@@ -22,12 +22,6 @@ import (
 // signalclient.Timeout before the caller sees its rejected line.
 const signalUsageReportTimeout = 5 * time.Second
 
-// isSignalInvocation reports whether args selects the signal subcommand, which
-// is a verb rather than a top-level flag.
-func isSignalInvocation(args []string) bool {
-	return len(args) > 0 && args[0] == "signal"
-}
-
 // runSignal posts one signal to the Box's Signal socket (ADR 0052, issue
 // #3724): `signal comment|pr-intent|issue-intent|status`. The kind is the
 // route, so it is a word rather than a flag, and no flag names a destination
