@@ -61,6 +61,10 @@ amendment, targets Artifactory.
    - a credential-helper hint;
    - a short note for the operator.
 
+   > **Update.** Issue #6390 added a bare-token scheme,
+   > `BareTokenScheme`, which discovery applies as Decision item 2's
+   > Update records.
+
    A row matches on any of three signals:
    - a host pattern, for SaaS hosts (`*.jfrog.io`, `pkgs.dev.azure.com`);
    - a path prefix in the registry URL the repo declares
@@ -87,6 +91,19 @@ amendment, targets Artifactory.
    file stays the only declaration surface (ADR 0045), and `allow` stays
    operator-owned (ADR 0047). A spindrift release that edits a profile
    changes no Consumer's enforced path-set.
+
+   > **Update.** Issue #6390 (commit 104ffdd9a) added one exception to
+   > "a probed challenge wins", on the discovery side only. Every
+   > credential store yields a bare token, and the proxy refuses a
+   > `basic` credential with no `:`, so a `basic` scheme on a
+   > store-matched route, whether probed or filled in from the profile,
+   > yields to the profile's new row field, `BareTokenScheme`, when the
+   > row has one (Artifactory: `bearer`). Without one, discover keeps
+   > `basic` and writes a comment that the credential must be
+   > `user:secret`. An unmatched route keeps a probed `basic`, and any
+   > other scheme is never touched. The boundary above is unchanged:
+   > the result is still a proposal the operator reviews, and the proxy,
+   > route resolution and the launch gate still never read a profile.
 3. **A profile is only as good as its corpus.** Host cases are
    `ecosystemtest` cases in each ecosystem's corpus. They use the host's
    real URL shapes. The probe is stubbed with the host's real challenge
@@ -138,6 +155,10 @@ amendment, targets Artifactory.
   `bearer`, so a profile can fill in a scheme the probe couldn't
   determine without overriding one it did determine. `normalizeAuthScheme`'s
   fallback to `bearer` moves after the profile is consulted.
+
+  > **Update.** "Without overriding one it did determine" now has the
+  > exception recorded under Decision item 2: a probed `basic` on a
+  > store-matched route yields to the profile's `BareTokenScheme`.
 - The routes file discovery writes gains comments naming the matched
   profile. Operators who already have a routes file see no change until
   they rerun discovery. `doctor`'s drift warning applies to them
