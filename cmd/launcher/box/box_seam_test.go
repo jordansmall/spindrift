@@ -474,9 +474,9 @@ func outcomeLines(stdout string) []string {
 	return out
 }
 
-// assertResumeHandoffStripsReview reads the handoff the first resume's
-// orchestrator was given and checks the shared original, the handoff box wrote,
-// still names a review prompt.
+// assertResumeHandoffStripsReview pins that the first resume's handoff decodes
+// to the shared handoff's typed fields with only ReviewPromptFile cleared, and
+// that the shared original still names a review prompt.
 func (r seamRun) assertResumeHandoffStripsReview(t *testing.T) {
 	t.Helper()
 	if len(r.orchRec) != 2 {
@@ -486,18 +486,19 @@ func (r seamRun) assertResumeHandoffStripsReview(t *testing.T) {
 	if path == "" || path == r.handoff {
 		t.Fatalf("resume handoff = %q; want a copy distinct from %q", path, r.handoff)
 	}
-	var got, orig map[string]any
-	if err := json.Unmarshal(readSeamFile(t, path), &got); err != nil {
+	var gotH, origH promptassembly.Handoff
+	if err := json.Unmarshal(readSeamFile(t, path), &gotH); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(readSeamFile(t, r.handoff), &orig); err != nil {
+	if err := json.Unmarshal(readSeamFile(t, r.handoff), &origH); err != nil {
 		t.Fatal(err)
 	}
-	if orig["ReviewPromptFile"] == "" || orig["ReviewPromptFile"] == nil {
-		t.Errorf("shared handoff names no review prompt: %v", orig)
+	if origH.ReviewPromptFile == "" {
+		t.Errorf("shared handoff names no review prompt: %+v", origH)
 	}
-	if got["ReviewPromptFile"] != "" || got["Driver"] != "claude" || got["Issue"] != seamIssue {
-		t.Errorf("resume handoff = %v; want ReviewPromptFile cleared and the rest kept", got)
+	origH.ReviewPromptFile = ""
+	if !reflect.DeepEqual(gotH, origH) {
+		t.Errorf("resume handoff = %+v; want the shared handoff with only ReviewPromptFile cleared: %+v", gotH, origH)
 	}
 }
 
