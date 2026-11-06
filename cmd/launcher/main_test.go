@@ -4566,12 +4566,14 @@ func minimalValidConfig() config {
 	}
 }
 
-// runDoctor passes launcherChecks(c), not nil, as doctor.Run's extraChecks
-// argument (AC2), so a launcherChecks row failure shows in doctor's output.
+// runDoctor passes the report half of doctorCheckSets(c), not nil, as
+// doctor.Run's extraChecks argument (AC2). That half starts with
+// doctorExtraChecks(c), so a doctorExtraChecks row failure shows in doctor's
+// output.
 // The config adds the four work-tier labels, which minimalValidConfig leaves
 // unset and doctor.Run's own label check would otherwise fail on, and clears
 // gitUserName to fail exactly the "git-user-name" row and no other.
-func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
+func TestRunDoctor_WiresDoctorReportChecksIntoOutput(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
@@ -4579,7 +4581,7 @@ func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
 	c := minimalValidConfig()
 	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
 		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
-	c.gitUserName = "" // fails exactly the launcherChecks "git-user-name" row
+	c.gitUserName = "" // fails exactly doctorExtraChecks' "git-user-name" row
 
 	var buf bytes.Buffer
 	_, report := doctorCheckSets(c)
@@ -4588,7 +4590,7 @@ func TestRunDoctor_WiresLauncherChecksIntoOutput(t *testing.T) {
 	}
 	out := buf.String()
 	if !strings.Contains(out, "MISSING: git-user-name") {
-		t.Errorf("want runDoctor's output to report launcherChecks(c)'s failing git-user-name row (proves it wired launcherChecks(c), not nil), got:\n%s", out)
+		t.Errorf("want runDoctor's output to report doctorExtraChecks(c)'s failing git-user-name row (proves it wired doctorCheckSets(c)'s report half, not nil), got:\n%s", out)
 	}
 }
 

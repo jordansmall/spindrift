@@ -11,6 +11,13 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
+// launcherChecks is the union of the two Required-tier groups validate() runs,
+// without the validateChoice step between them; it exists only so these tests
+// can cover both groups together.
+func launcherChecks(c config) []doctor.Check {
+	return append(launcherRequiredKnobChecks(c), launcherCrossKnobChecks(c)...)
+}
+
 // checkByName looks a row up by name rather than by position, so reordering
 // the underlying slice literal does not break the tests below.
 func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check {

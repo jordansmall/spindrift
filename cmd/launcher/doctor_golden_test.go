@@ -41,8 +41,9 @@ import (
 //     its ListIssues call entirely and reports the fixed "0 recoverable
 //     issue(s)" line rather than depending on f.Issues content.
 //   - extraChecks is nil: going through doctorReport/doctorCheckSets would
-//     pull in launcherChecks and rc.reportChecks, whose probes read the real
-//     environment (PATH, filesystem) and make the report machine-dependent.
+//     pull in the report half of doctorCheckSets
+//     (rc.validation().reportChecks), whose probes read the real environment
+//     (PATH, filesystem) and make the report machine-dependent.
 func TestRunDoctor_HealthyReport_Golden(t *testing.T) {
 	f, c := healthyGoldenFixture()
 

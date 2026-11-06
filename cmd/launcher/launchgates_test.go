@@ -234,9 +234,9 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	if err := runDoctor(f, f, c, doctor.NewReporter(&reportBuf, true), &reportBuf, strings.NewReader(""), false, report); err != nil {
 		t.Fatalf("runDoctor() unexpected error: %v", err)
 	}
-	// doctor.Run's own launcherChecks, label and runtime probes print "ok: <text>"
-	// lines ahead of the gateRegistry section, which gateNamesFromOkLines cannot
-	// tell apart from a gate's own line.
+	// doctor.Run's extra rows (doctorCheckSets' report half), label and runtime
+	// probes print "ok: <text>" lines ahead of the gateRegistry section, which
+	// gateNamesFromOkLines cannot tell apart from a gate's own line.
 	reportOrder := gateNamesInRegistry(gateNamesFromOkLines(reportBuf.String()), gateRegistry)
 
 	// newGatedContext hands walkGateRegistry a Reporter discarding to io.Discard

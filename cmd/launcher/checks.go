@@ -10,13 +10,10 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// launcherChecks and the helpers below adapt internal/launcherchecks, which
-// owns the Required-tier rows shared with Quickstart (issue #2725): both are
-// package main binaries and Go forbids a main-to-main import, so the shared
-// rows cannot live in either.
-func launcherChecks(c config) []doctor.Check {
-	return append(launcherRequiredKnobChecks(c), launcherCrossKnobChecks(c)...)
-}
+// The launcher*Checks adapters in this file wrap internal/launcherchecks,
+// which owns the Required-tier rows shared with Quickstart (issue #2725): both
+// are package main binaries and Go forbids a main-to-main import, so the
+// shared rows cannot live in either.
 
 // launcherRequiredKnobChecks builds the Required-tier rows that run before
 // validate()'s validateChoice calls: the knob rows, then the active runner
@@ -42,9 +39,10 @@ func launcherCrossKnobChecks(c config) []doctor.Check {
 	return launcherchecks.CrossKnobChecks(launcherCheckConfig(c), launcherCrossKnobDeps(c))
 }
 
-// doctorExtraChecks returns launcherChecks(c) without the runner family's
-// LaunchWithConfig prerequisites (the "runtime" row), which doctor.Run already
-// reports through Config.RuntimeProbe's advisory line.
+// doctorExtraChecks returns the config-knob rows plus the cross-knob rows,
+// leaving out the runner family's LaunchWithConfig prerequisites (the
+// "runtime" row), which doctor.Run already reports through
+// Config.RuntimeProbe's advisory line.
 // validateConfig (main.go) also uses this set to classify exit 2, so
 // runner launch-gate prerequisites must stay out: a bwrap host missing pasta
 // is an installation fault, not a configuration one (issue #2671).
