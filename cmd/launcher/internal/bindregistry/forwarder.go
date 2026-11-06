@@ -56,21 +56,28 @@ func SpawnSocat(socketPath string, port int) (int, error) {
 		return 0, err
 	}
 
+	cmd := exec.Command(path,
+		fmt.Sprintf("TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr", port),
+		fmt.Sprintf("UNIX-CONNECT:%s", socketPath),
+	)
+	return startDetached(cmd)
+}
+
+// startDetached runs cmd with stdio on /dev/null in a new session, so it
+// outlives the caller. It overwrites any Stdin, Stdout, Stderr or SysProcAttr
+// already set on cmd, and marks every inherited fd close-on-exec
+// process-wide. Never call cmd.Wait() on it: it stays a long-running
+// detached process.
+func startDetached(cmd *exec.Cmd) (int, error) {
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return 0, err
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command(path,
-		fmt.Sprintf("TCP-LISTEN:%d,bind=127.0.0.1,fork,reuseaddr", port),
-		fmt.Sprintf("UNIX-CONNECT:%s", socketPath),
-	)
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
 	cmd.Stderr = devNull
-	// Setsid detaches the Forwarder from the caller's session and process
-	// group so it outlives the caller. Never call cmd.Wait() on it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := closeOnExecInheritedFDs(); err != nil {
