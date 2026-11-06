@@ -262,10 +262,12 @@ type Config struct {
 	SelfUpdate SelfUpdate
 
 	// IdleFloor and IdleCap bound each kind's own idle backoff: the first
-	// no-work check (exit 2 always, exit 3 when the pool is otherwise
-	// idle) waits IdleFloor, and each further consecutive no-work check
-	// doubles the wait, capped at IdleCap. Any check that actually
-	// dispatches or refreshes an image resets the wait back to IdleFloor.
+	// no-work check (exit 2 or exit 3) waits IdleFloor, and each further
+	// consecutive no-work check doubles the wait, capped at IdleCap. Sibling
+	// occupancy plays no part (kindBackoff.markNoWork), and a reported kind's
+	// exit 2 carrying a next-due report waits for that instead (kindSched).
+	// Any check that actually dispatches or refreshes an image resets the
+	// wait back to IdleFloor.
 	// IdleFloor must be positive; IdleCap must be >= IdleFloor.
 	IdleFloor time.Duration
 	IdleCap   time.Duration
