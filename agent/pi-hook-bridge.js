@@ -61,6 +61,17 @@ for (const { script, tools } of HOOKS) {
   }
 }
 
+// Twin: agent/opencode-guards.js repeats GUARD_TIMEOUT_MS and
+// SUMMARY_TIMEOUT_MS, requireJq, runHook, the HOOKS-loop decision handling
+// (deny, in-place rewrite, the "returned no rewrite" refusal) and the fail-open
+// summary call; a fix to one belongs in the other. Within these pieces they
+// differ on purpose only in CLAUDE_TOOLS (per-host argument names), when an
+// unmapped tool throws, and the host API a decision goes through: here a
+// returned { block, reason }, and Object.assign of every updatedInput key;
+// there a throw, and a rewrite that copies only `command` into output.args. A
+// hook that rewrites any key but `command` would take effect here and be
+// dropped there.
+
 // A guard without a working jq exits 0 and allows the call (see guardHook in
 // lib/image.nix), so a silent exit 0 is only trustworthy once jq has run.
 let jqWorks = false;

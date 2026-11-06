@@ -46,7 +46,8 @@ const CLAUDE_TOOLS = {
 // Every tool a generated hook names must be mapped: the handler skips unmapped
 // tools, which would leave one silently unguarded. Throwing here would not help:
 // opencode logs a plugin whose load throws and carries on without it, failing
-// every guard open. So the message is held and thrown on every call instead.
+// every guard open. So the message is held and thrown on every call instead;
+// pi-hook-bridge.js throws at load, as pi exits 1 on an extension load error.
 const unmappedMessage = (() => {
   for (const { script, tools } of HOOKS) {
     for (const tool of tools) {
@@ -57,6 +58,16 @@ const unmappedMessage = (() => {
   }
   return null;
 })();
+
+// Twin: agent/pi-hook-bridge.js repeats GUARD_TIMEOUT_MS and
+// SUMMARY_TIMEOUT_MS, requireJq, runHook, the HOOKS-loop decision handling
+// (deny, in-place rewrite, the "returned no rewrite" refusal) and the fail-open
+// summary call; a fix to one belongs in the other. Within these pieces they
+// differ on purpose only in CLAUDE_TOOLS (per-host argument names), when an
+// unmapped tool throws, and the host API a decision goes through: here a throw,
+// and a rewrite that copies only `command` into output.args; there a returned
+// { block, reason }, and Object.assign of every updatedInput key. A hook that
+// rewrites any key but `command` would take effect there and be dropped here.
 
 // A guard without a working jq exits 0 and allows the call (see guardHook in
 // lib/image.nix), so a silent exit 0 is only trustworthy once jq has run.
