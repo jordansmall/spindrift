@@ -58,13 +58,13 @@ type Result struct {
 // the flag order the Driver's parser requires. Assemble never populates this;
 // the wrapper fills it from per-Driver static configuration (issue #2975).
 type ArgvShape struct {
-	PromptStyle    string
-	PromptFlag     string
-	ModelFlag      string
-	ModelOmitEmpty bool
-	AgentsFlag     string
-	EffortFlag     string
-	Order          []string
+	PromptStyle    string   // "flag" or "positional"
+	PromptFlag     string   // meaningful only when PromptStyle == "flag"
+	ModelFlag      string   // spells the model slot
+	ModelOmitEmpty bool     // when true, omit the model slot entirely if Handoff.Model == ""
+	AgentsFlag     string   // "" means this Driver has no --agents equivalent
+	EffortFlag     string   // the effort slot is always omitted when Handoff.Effort == ""
+	Order          []string // permutation of {"prompt","model","agents","session","driverFlags","effort"}
 }
 
 // Caps carries the per-run resource ceilings an orchestrator invocation
