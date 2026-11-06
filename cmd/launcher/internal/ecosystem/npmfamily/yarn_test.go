@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/registryvocab"
 )
 
 func TestParseYarnRegistryConfig_NpmRegistryServerQuoted(t *testing.T) {
@@ -160,5 +162,75 @@ func TestParseYarnRegistryConfig_NeverStampsEcosystemOrConfigPath(t *testing.T) 
 	}
 	if decls[0].Ecosystem != "" || decls[0].ConfigPath != "" {
 		t.Errorf("decls[0] = %+v, want Ecosystem and ConfigPath both unset", decls[0])
+	}
+}
+
+func yarnExports(getenv map[string]string, routes []registrymanifest.Route) []ecosystem.EnvExport {
+	got, _ := Yarn.EnvExports(27182, "", stubGetenv(getenv), routes)
+	return got
+}
+
+func TestYarnEnvExports_UnscopedBindingAlsoWhitelistsLoopback(t *testing.T) {
+	got := yarnExports(nil, taggedRoute("r0", registryvocab.Subtree{Ecosystem: "yarn", Path: "/yarn"}))
+	want := []ecosystem.EnvExport{
+		{Name: yarnBindingEnvVar, Value: "http://127.0.0.1:27182/r0/yarn/"},
+		{Name: yarnUnsafeHTTPWhitelistVar, Value: "127.0.0.1"},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("exports = %v, want %v", got, want)
+	}
+}
+
+func TestYarnEnvExports_ScopedOnlyExportsOnlyWhitelist(t *testing.T) {
+	got := yarnExports(nil, taggedRoute("r0", registryvocab.Subtree{Ecosystem: "yarn", Path: "/acme", Scoped: true}))
+	want := ecosystem.EnvExport{Name: yarnUnsafeHTTPWhitelistVar, Value: "127.0.0.1"}
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("exports = %v, want [%v]", got, want)
+	}
+}
+
+func TestYarnEnvExports_AmbiguousStillWhitelists(t *testing.T) {
+	routes := taggedRoute("r0",
+		registryvocab.Subtree{Ecosystem: "yarn", Path: "/a"},
+		registryvocab.Subtree{Ecosystem: "yarn", Path: "/b"},
+	)
+	got := yarnExports(nil, routes)
+	if v, ok := ecosystem.ExportValue(got, yarnUnsafeHTTPWhitelistVar); !ok || v != "127.0.0.1" {
+		t.Errorf("whitelist = (%q, %v), want (127.0.0.1, true)", v, ok)
+	}
+}
+
+func TestYarnEnvExports_PreservesExistingWhitelist(t *testing.T) {
+	routes := taggedRoute("r0", registryvocab.Subtree{Ecosystem: "yarn", Path: "/yarn"})
+	tests := []struct{ name, existing, want string }{
+		{"appended", "registry.corp.example", "registry.corp.example,127.0.0.1"},
+		{"already listed", "a.example,127.0.0.1", "a.example,127.0.0.1"},
+		{"substring is not a match", "127.0.0.10", "127.0.0.10,127.0.0.1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := yarnExports(map[string]string{yarnUnsafeHTTPWhitelistVar: tc.existing}, routes)
+			if v, ok := ecosystem.ExportValue(got, yarnUnsafeHTTPWhitelistVar); !ok || v != tc.want {
+				t.Errorf("whitelist = (%q, %v), want (%q, true)", v, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestYarnEnvExports_NoYarnPathNoWhitelist(t *testing.T) {
+	tests := []struct {
+		name   string
+		routes []registrymanifest.Route
+	}{
+		{"other ecosystems only", taggedRoute("r0", registryvocab.Subtree{Ecosystem: "npm", Path: "/npm"})},
+		{"no paths", []registrymanifest.Route{{Prefix: "r0"}}},
+		{"empty prefix", taggedRoute("", registryvocab.Subtree{Ecosystem: "yarn", Path: "/yarn"})},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := yarnExports(nil, tc.routes); len(got) != 0 {
+				t.Errorf("exports = %v, want none", got)
+			}
+		})
 	}
 }
