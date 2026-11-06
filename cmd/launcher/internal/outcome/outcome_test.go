@@ -488,7 +488,7 @@ func TestLastPRIntentInLog_TakesLast(t *testing.T) {
 // A verified PR-intent line must not be suppressed by a later line that carries
 // the token without verifying: an untrusted author's echoed mention, or a
 // stale-nonce line from another run. LastCommentLineInLog gives the same
-// guarantee. LastInLog does not, because SPINDRIFT_OUTCOME is not nonce-gated.
+// guarantee. lastInLog does not, because SPINDRIFT_OUTCOME is not nonce-gated.
 func TestLastPRIntentInLog_ValidLineNotShadowedByLaterRejectedMention(t *testing.T) {
 	genuine := encodePRIntent(t, "real title", "real body")
 	path := writeLog(t,
@@ -1025,7 +1025,7 @@ func TestLastCommentLineInLog_TakesLast(t *testing.T) {
 }
 
 // The nonce-gated COMMENT signal prefers the last line that actually verifies,
-// unlike LastInLog's unconditional last-line-wins, so an attacker cannot
+// unlike lastInLog's unconditional last-line-wins, so an attacker cannot
 // suppress a real verdict or blocked-note by posting COMMENT-shaped noise after
 // it.
 func TestLastCommentLineInLog_ValidLineNotShadowedByLaterRejectedMention(t *testing.T) {
