@@ -96,17 +96,17 @@ type activityCacheEntry struct {
 // already held, so narration split across two reads still collapses to one
 // entry (#1501 AC1). On failure entry.offset and entry.lines stay unmodified,
 // so a transient read hiccup doesn't clobber the feed accumulated so far.
-func appendActivity(drv driver.Driver, number string, entry *activityCacheEntry) (lines []ActivityLine, ok bool) {
+func appendActivity(drv driver.Driver, number string, entry *activityCacheEntry) bool {
 	data, ok := entry.readAppended(drv, number)
 	if !ok {
-		return nil, false
+		return false
 	}
 	tail := collapseActivityLines(data)
 	if len(tail) > 0 && len(entry.lines) > 0 && entry.lines[len(entry.lines)-1].Text == tail[0].Text {
 		tail = tail[1:]
 	}
 	entry.lines = append(entry.lines, tail...)
-	return entry.lines, true
+	return true
 }
 
 // SidebarActivityCache remembers the open sidebar's Activity feed and parses
@@ -145,7 +145,7 @@ func (c *SidebarActivityCache) Refresh(drv driver.Driver, pwd, number string) ([
 	}
 
 	if info.Size() > entry.offset {
-		if _, ok := appendActivity(drv, number, &entry); !ok {
+		if !appendActivity(drv, number, &entry) {
 			return nil, false
 		}
 	}
