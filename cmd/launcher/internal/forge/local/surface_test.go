@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 func currentBranch(t *testing.T, dir string) string {
@@ -37,8 +38,8 @@ func TestSurfaceIntegrationBranch_CreatesLocalBranchAtIntegrationTip(t *testing.
 		t.Fatalf("surfaced = false, want true")
 	}
 
-	want := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
-	if got := revParse(t, pwd.dir, "refs/heads/"+parent.String()); got != want {
+	want := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+IntegrationBranch(parent))
+	if got := testutil.GitOutput(t, pwd.dir, "rev-parse", "refs/heads/"+parent.String()); got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
 	if got := currentBranch(t, pwd.dir); got != "main" {
@@ -68,8 +69,8 @@ func TestSurfaceIntegrationBranch_BranchNameDecoupledFromIntegrationKey(t *testi
 		t.Fatalf("surfaced = false, want true")
 	}
 
-	want := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
-	if got := revParse(t, pwd.dir, "refs/heads/"+branchName); got != want {
+	want := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+IntegrationBranch(parent))
+	if got := testutil.GitOutput(t, pwd.dir, "rev-parse", "refs/heads/"+branchName); got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", branchName, got, want)
 	}
 	if err := exec.Command("git", "-C", pwd.dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+parent.String()).Run(); err == nil {
@@ -158,7 +159,7 @@ func TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch(t *testing.T) {
 	pwd.run("checkout", "-b", parent.String())
 	pwd.commit("operator-work.txt", "operator work")
 	pwd.run("checkout", "main")
-	diverged := revParse(t, pwd.dir, parent.String())
+	diverged := testutil.GitOutput(t, pwd.dir, "rev-parse", parent.String())
 
 	surfaced, skipped, err := SurfaceIntegrationBranch(repo.Bare, pwd.dir, parent, parent.String())
 	if err != nil {
@@ -170,7 +171,7 @@ func TestSurfaceIntegrationBranch_RefusesDivergedLocalBranch(t *testing.T) {
 	if skipped == "" {
 		t.Errorf("skipped = %q, want a diverged-branch reason", skipped)
 	}
-	if got := revParse(t, pwd.dir, parent.String()); got != diverged {
+	if got := testutil.GitOutput(t, pwd.dir, "rev-parse", parent.String()); got != diverged {
 		t.Errorf("refs/heads/%s = %s, want %s (untouched operator commit)", parent, got, diverged)
 	}
 }

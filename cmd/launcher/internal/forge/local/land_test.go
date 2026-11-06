@@ -1,28 +1,19 @@
 package local
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/testutil"
 )
-
-func gitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
 
 // parentCount returns ref's parent count: 1 for a linear history, 2 or more
 // for a merge commit.
 func parentCount(t *testing.T, repoPath, ref string) int {
 	t.Helper()
-	fields := strings.Fields(gitOutput(t, repoPath, "rev-list", "--parents", "-n", "1", ref))
+	fields := strings.Fields(testutil.GitOutput(t, repoPath, "rev-list", "--parents", "-n", "1", ref))
 	if len(fields) == 0 {
 		t.Fatalf("rev-list --parents -n 1 %s: empty output", ref)
 	}
@@ -92,7 +83,7 @@ func TestLocalCodeForge_TwoSeamChain_LandsLinearWithNoMergeCommits(t *testing.T)
 		t.Fatalf("Merge (seam 2): %v", err)
 	}
 
-	if out := gitOutput(t, repo.Bare, "rev-list", "--min-parents=2", "refs/heads/"+IntegrationBranch(parent)); out != "" {
+	if out := testutil.GitOutput(t, repo.Bare, "rev-list", "--min-parents=2", "refs/heads/"+IntegrationBranch(parent)); out != "" {
 		t.Errorf("integration branch has merge commit(s): %s", out)
 	}
 }

@@ -2,9 +2,6 @@ package freshness
 
 import (
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -186,13 +183,6 @@ func TestProbe_OCIImage_KeysOffArtifactNotRuntimeName(t *testing.T) {
 	}
 }
 
-func gitWriteFile(t *testing.T, path, contents string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
@@ -224,7 +214,7 @@ func TestProbe_FreshWhenImageHashMatches(t *testing.T) {
 // against whatever pwd happens to have checked out.
 func TestProbe_EvalReceivesFetchedRev(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
-	localHead := gitOutput(t, pwd, "rev-parse", "HEAD")
+	localHead := testutil.GitOutput(t, pwd, "rev-parse", "HEAD")
 	advancedSha, err := gitAdvanceOrigin(t, pwd, "main")
 	if err != nil {
 		t.Fatalf("gitAdvanceOrigin: %v", err)
@@ -854,7 +844,7 @@ func TestProbe_FetchFailure_MessageIncludesGitStderr(t *testing.T) {
 // Probe fetches the base tip without checking it out.
 func TestProbe_NeverMutatesWorkingCopy(t *testing.T) {
 	pwd := testutil.NewCloneWithOrigin(t, "main")
-	before := gitOutput(t, pwd, "rev-parse", "HEAD")
+	before := testutil.GitOutput(t, pwd, "rev-parse", "HEAD")
 	eval := &Fake{OutPath: "/nix/store/" + testutil.SameHash + "-agent-image"}
 
 	if _, err := gitAdvanceOrigin(t, pwd, "main"); err != nil {
@@ -872,23 +862,14 @@ func TestProbe_NeverMutatesWorkingCopy(t *testing.T) {
 		t.Fatalf("Applicable = false, want true")
 	}
 
-	after := gitOutput(t, pwd, "rev-parse", "HEAD")
+	after := testutil.GitOutput(t, pwd, "rev-parse", "HEAD")
 	if before != after {
 		t.Errorf("checked-out HEAD changed: %q -> %q; Probe must never check out", before, after)
 	}
-	status := gitOutput(t, pwd, "status", "--porcelain")
+	status := testutil.GitOutput(t, pwd, "status", "--porcelain")
 	if status != "" {
 		t.Errorf("working copy dirtied by Probe: %q", status)
 	}
-}
-
-func gitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // gitAdvanceOrigin pushes a commit on baseBranch from a second clone of the
@@ -896,15 +877,15 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 // without touching pwd itself.
 func gitAdvanceOrigin(t *testing.T, pwd, baseBranch string) (string, error) {
 	t.Helper()
-	origin := gitOutput(t, pwd, "remote", "get-url", "origin")
+	origin := testutil.GitOutput(t, pwd, "remote", "get-url", "origin")
 	second := t.TempDir()
 	testutil.GitRun(t, "", "clone", origin, second)
 	testutil.GitRun(t, second, "checkout", baseBranch)
 	testutil.GitRun(t, second, "config", "user.email", "test@example.com")
 	testutil.GitRun(t, second, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(second, "new.txt"), "new\n")
+	testutil.WriteFixture(t, second, "new.txt", "new\n")
 	testutil.GitRun(t, second, "add", "new.txt")
 	testutil.GitRun(t, second, "commit", "-m", "advance")
 	testutil.GitRun(t, second, "push", "origin", baseBranch)
-	return gitOutput(t, second, "rev-parse", "HEAD"), nil
+	return testutil.GitOutput(t, second, "rev-parse", "HEAD"), nil
 }

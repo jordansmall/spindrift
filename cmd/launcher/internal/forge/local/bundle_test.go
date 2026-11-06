@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/seambundle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // setGitIdentityEnv gives ambient git commands a commit identity. The tests
@@ -30,18 +31,18 @@ func setGitIdentityEnv(t *testing.T) {
 func seedBundleBranch(t *testing.T, bare, base, outboxDir, branch, num string) string {
 	t.Helper()
 	work := t.TempDir()
-	run(t, "", "clone", bare, work)
-	run(t, work, "checkout", base)
-	run(t, work, "checkout", "-b", branch)
+	testutil.GitRun(t, "", "clone", bare, work)
+	testutil.GitRun(t, work, "checkout", base)
+	testutil.GitRun(t, work, "checkout", "-b", branch)
 	if err := os.WriteFile(filepath.Join(work, "feature-"+num+".txt"), []byte("feature\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, work, "add", "feature-"+num+".txt")
-	run(t, work, "config", "user.email", "test@example.com")
-	run(t, work, "config", "user.name", "Test")
-	run(t, work, "commit", "-m", "feature "+num)
-	run(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
-	return revParse(t, work, branch)
+	testutil.GitRun(t, work, "add", "feature-"+num+".txt")
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
+	testutil.GitRun(t, work, "commit", "-m", "feature "+num)
+	testutil.GitRun(t, work, "bundle", "create", filepath.Join(outboxDir, seambundle.FileName), base+".."+branch)
+	return testutil.GitOutput(t, work, "rev-parse", branch)
 }
 
 // RelayBundle imports a Box's code-out bundle into the Accumulation repo as
@@ -66,7 +67,7 @@ func TestLocalCodeForge_RelayBundle_ImportsBranchIntoRepo(t *testing.T) {
 		t.Fatalf("RelayBundle: %v", err)
 	}
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s", branch, got, wantSHA)
 	}
 }
@@ -169,24 +170,24 @@ func TestLocalCodeForge_RelayBundle_ReRelayOverwritesDivergedRef(t *testing.T) {
 	// of the already-relayed ref, so the new commit shares no ancestry with the
 	// one already relayed in.
 	work := t.TempDir()
-	run(t, "", "clone", repo.Bare, work)
-	run(t, work, "checkout", IntegrationBranch(parent))
-	run(t, work, "checkout", "-b", branch)
+	testutil.GitRun(t, "", "clone", repo.Bare, work)
+	testutil.GitRun(t, work, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, work, "checkout", "-b", branch)
 	if err := os.WriteFile(filepath.Join(work, "feature-1698.txt"), []byte("retried\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, work, "add", "feature-1698.txt")
-	run(t, work, "config", "user.email", "test@example.com")
-	run(t, work, "config", "user.name", "Test")
-	run(t, work, "commit", "-m", "retried feature 1698")
-	wantSHA := revParse(t, work, branch)
-	run(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), IntegrationBranch(parent)+".."+branch)
+	testutil.GitRun(t, work, "add", "feature-1698.txt")
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
+	testutil.GitRun(t, work, "commit", "-m", "retried feature 1698")
+	wantSHA := testutil.GitOutput(t, work, "rev-parse", branch)
+	testutil.GitRun(t, work, "bundle", "create", filepath.Join(outbox, seambundle.FileName), IntegrationBranch(parent)+".."+branch)
 
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle (retry, diverged history): %v", err)
 	}
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+	if got := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+branch); got != wantSHA {
 		t.Errorf("refs/heads/%s = %s, want %s (the retried bundle's tip)", branch, got, wantSHA)
 	}
 }
@@ -222,7 +223,7 @@ func TestLocalCodeForge_FirstSeam_CreatesIntegrationBranchFromBase(t *testing.T)
 		t.Fatalf("Merge: %v", err)
 	}
 
-	if got := revParse(t, repoPath, "refs/heads/"+IntegrationBranch(parent)); got == "" {
+	if got := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/"+IntegrationBranch(parent)); got == "" {
 		t.Error("integration branch: want a resolved sha, got empty")
 	}
 }
@@ -256,7 +257,7 @@ func TestLocalCodeForge_LandBundle_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LandingRef: %v", err)
 	}
-	wantSHA := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
+	wantSHA := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+IntegrationBranch(parent))
 	if want := IntegrationBranch(parent) + "@" + wantSHA; landing != want {
 		t.Errorf("LandingRef = %q, want %q", landing, want)
 	}
@@ -287,7 +288,7 @@ func twoBranchFixture(t *testing.T) twoBranchRepo {
 	return twoBranchRepo{
 		bare:        repo.Bare,
 		integration: integration,
-		baseTip:     revParse(t, repo.Bare, "refs/heads/"+integration),
+		baseTip:     testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+integration),
 		b1:          b1,
 		b2:          b2,
 	}
@@ -301,13 +302,13 @@ func TestFastForward_LostRaceIsTransient(t *testing.T) {
 	if err := fastForward(bare, integrationRef, "refs/heads/"+f.b1, staleTip); err != nil {
 		t.Fatalf("first fastForward: %v", err)
 	}
-	movedTip := revParse(t, bare, integrationRef)
+	movedTip := testutil.GitOutput(t, bare, "rev-parse", integrationRef)
 
 	err := fastForward(bare, integrationRef, "refs/heads/"+f.b2, staleTip)
 	if !errors.Is(err, forge.ErrMergeTransient) {
 		t.Fatalf("fastForward with stale oldTip: err = %v, want errors.Is ErrMergeTransient", err)
 	}
-	if got := revParse(t, bare, integrationRef); got != movedTip {
+	if got := testutil.GitOutput(t, bare, "rev-parse", integrationRef); got != movedTip {
 		t.Errorf("integration = %s, want it left at %s", got, movedTip)
 	}
 }
@@ -329,12 +330,12 @@ func TestFastForward_UnmovedFailureIsNotTransient(t *testing.T) {
 // untouched and treat the create as done, not reset it to the new sha.
 func TestCreateBranch_ExistingBranchIsLeftUntouched(t *testing.T) {
 	f := twoBranchFixture(t)
-	other := revParse(t, f.bare, "refs/heads/"+f.b1)
+	other := testutil.GitOutput(t, f.bare, "rev-parse", "refs/heads/"+f.b1)
 
 	if err := createBranch(f.bare, f.integration, other); err != nil {
 		t.Fatalf("createBranch on an existing branch: %v", err)
 	}
-	if got := revParse(t, f.bare, "refs/heads/"+f.integration); got != f.baseTip {
+	if got := testutil.GitOutput(t, f.bare, "rev-parse", "refs/heads/"+f.integration); got != f.baseTip {
 		t.Errorf("integration = %s, want it left at %s", got, f.baseTip)
 	}
 }
@@ -343,12 +344,12 @@ func TestCreateBranch_ExistingBranchIsLeftUntouched(t *testing.T) {
 // the given sha.
 func TestCreateBranch_AbsentBranchIsCreatedAtSHA(t *testing.T) {
 	f := twoBranchFixture(t)
-	want := revParse(t, f.bare, "refs/heads/"+f.b1)
+	want := testutil.GitOutput(t, f.bare, "rev-parse", "refs/heads/"+f.b1)
 
 	if err := createBranch(f.bare, "integration/fresh", want); err != nil {
 		t.Fatalf("createBranch: %v", err)
 	}
-	if got := revParse(t, f.bare, "refs/heads/integration/fresh"); got != want {
+	if got := testutil.GitOutput(t, f.bare, "rev-parse", "refs/heads/integration/fresh"); got != want {
 		t.Errorf("integration/fresh = %s, want %s", got, want)
 	}
 }

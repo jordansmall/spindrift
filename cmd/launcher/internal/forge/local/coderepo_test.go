@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // checkoutFixture is a plain (non-bare) git checkout standing in for the
@@ -29,7 +31,7 @@ func newCheckoutFixture(t *testing.T, branch string) *checkoutFixture {
 
 func (c *checkoutFixture) run(args ...string) {
 	c.t.Helper()
-	run(c.t, c.dir, args...)
+	testutil.GitRun(c.t, c.dir, args...)
 }
 
 func (c *checkoutFixture) commit(name, contents string) {
@@ -43,20 +45,7 @@ func (c *checkoutFixture) commit(name, contents string) {
 
 func (c *checkoutFixture) headRev() string {
 	c.t.Helper()
-	out, err := exec.Command("git", "-C", c.dir, "rev-parse", "HEAD").CombinedOutput()
-	if err != nil {
-		c.t.Fatalf("rev-parse HEAD: %v: %s", err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func revParse(t *testing.T, dir, ref string) string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()
-	if err != nil {
-		t.Fatalf("rev-parse %s in %s: %v: %s", ref, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
+	return testutil.GitOutput(c.t, c.dir, "rev-parse", "HEAD")
 }
 
 // This test also covers the "no remote at all" acceptance criterion
@@ -77,7 +66,7 @@ func TestSeedAccumulationRepo_CreatesBareRepoWhenAbsent(t *testing.T) {
 	if _, err := os.Stat(repoPath); err != nil {
 		t.Fatalf("repoPath not created: %v", err)
 	}
-	if got, want := revParse(t, repoPath, "refs/heads/main"), checkout.headRev(); got != want {
+	if got, want := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/main"), checkout.headRev(); got != want {
 		t.Errorf("refs/heads/main = %s, want %s", got, want)
 	}
 }
@@ -117,23 +106,23 @@ func TestSeedAccumulationRepo_PreservesOtherRefs(t *testing.T) {
 	// Stand in for a landed agent branch left in the Accumulation repo by
 	// prior seam work.
 	work := t.TempDir()
-	run(t, work, "clone", repoPath, ".")
-	run(t, work, "checkout", "-b", "agent/1696")
+	testutil.GitRun(t, work, "clone", repoPath, ".")
+	testutil.GitRun(t, work, "checkout", "-b", "agent/1696")
 	if err := os.WriteFile(filepath.Join(work, "seam.txt"), []byte("seam"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, work, "add", "seam.txt")
-	run(t, work, "config", "user.email", "test@example.com")
-	run(t, work, "config", "user.name", "Test")
-	run(t, work, "commit", "-m", "seam work")
-	run(t, work, "push", "origin", "agent/1696")
-	agentRev := revParse(t, work, "agent/1696")
+	testutil.GitRun(t, work, "add", "seam.txt")
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
+	testutil.GitRun(t, work, "commit", "-m", "seam work")
+	testutil.GitRun(t, work, "push", "origin", "agent/1696")
+	agentRev := testutil.GitOutput(t, work, "rev-parse", "agent/1696")
 
 	if err := SeedAccumulationRepo(repoPath, checkout.dir, "main"); err != nil {
 		t.Fatalf("SeedAccumulationRepo (second run): %v", err)
 	}
 
-	if got := revParse(t, repoPath, "refs/heads/agent/1696"); got != agentRev {
+	if got := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/agent/1696"); got != agentRev {
 		t.Errorf("refs/heads/agent/1696 = %s, want %s (untouched by re-seed)", got, agentRev)
 	}
 }
@@ -155,7 +144,7 @@ func TestSeedAccumulationRepo_UpdatesBaseWhenCheckoutAdvances(t *testing.T) {
 		t.Fatalf("SeedAccumulationRepo (second run): %v", err)
 	}
 
-	if got, want := revParse(t, repoPath, "refs/heads/main"), checkout.headRev(); got != want {
+	if got, want := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/main"), checkout.headRev(); got != want {
 		t.Errorf("refs/heads/main = %s, want %s (checkout's new tip)", got, want)
 	}
 }
@@ -178,17 +167,7 @@ func TestSeedAccumulationRepo_MirrorsCheckoutRewind(t *testing.T) {
 		t.Fatalf("SeedAccumulationRepo (second run): %v", err)
 	}
 
-	if got, want := revParse(t, repoPath, "refs/heads/main"), checkout.headRev(); got != want {
+	if got, want := testutil.GitOutput(t, repoPath, "rev-parse", "refs/heads/main"), checkout.headRev(); got != want {
 		t.Errorf("refs/heads/main = %s, want %s (checkout's rewound tip)", got, want)
-	}
-}
-
-// run is package-level rather than a checkoutFixture method because some
-// tests drive a plain clone of the Accumulation repo, not the fixture.
-func run(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
