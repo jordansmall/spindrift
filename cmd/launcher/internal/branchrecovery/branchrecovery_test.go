@@ -12,18 +12,10 @@ import (
 
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/seambundle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 const branch = "agent/issue-7"
-
-func git(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v (dir=%s): %v: %s", args, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
-}
 
 func write(t *testing.T, dir, name, body string) {
 	t.Helper()
@@ -35,8 +27,8 @@ func write(t *testing.T, dir, name, body string) {
 func commit(t *testing.T, dir, name, body string) {
 	t.Helper()
 	write(t, dir, name, body)
-	git(t, dir, "add", name)
-	git(t, dir, "commit", "-m", name)
+	testutil.GitRun(t, dir, "add", name)
+	testutil.GitRun(t, dir, "commit", "-m", name)
 }
 
 type fixture struct {
@@ -56,15 +48,15 @@ func newFixture(t *testing.T) *fixture {
 		outbox: filepath.Join(root, "outbox"),
 	}
 	seed := filepath.Join(root, "seed")
-	git(t, root, "init", "-q", "--bare", "-b", "main", f.origin)
-	git(t, root, "init", "-q", "-b", "main", seed)
-	git(t, seed, "config", "user.name", "Test")
-	git(t, seed, "config", "user.email", "t@example.com")
+	testutil.GitRun(t, root, "init", "-q", "--bare", "-b", "main", f.origin)
+	testutil.GitRun(t, root, "init", "-q", "-b", "main", seed)
+	testutil.GitRun(t, seed, "config", "user.name", "Test")
+	testutil.GitRun(t, seed, "config", "user.email", "t@example.com")
 	commit(t, seed, "base.txt", "base\n")
-	git(t, seed, "push", "-q", f.origin, "main")
-	git(t, root, "clone", "-q", f.origin, f.work)
-	git(t, f.work, "config", "user.name", "Test")
-	git(t, f.work, "config", "user.email", "t@example.com")
+	testutil.GitRun(t, seed, "push", "-q", f.origin, "main")
+	testutil.GitRun(t, root, "clone", "-q", f.origin, f.work)
+	testutil.GitRun(t, f.work, "config", "user.name", "Test")
+	testutil.GitRun(t, f.work, "config", "user.email", "t@example.com")
 	f.cfg = branchrecovery.Config{
 		WorkDir: f.work, Branch: branch, BaseBranch: "main",
 		CodeForge: "github", Push: true, OutboxDir: f.outbox,
@@ -75,28 +67,28 @@ func newFixture(t *testing.T) *fixture {
 // withPriorBranch pushes branch to origin with one commit on file name.
 func (f *fixture) withPriorBranch(t *testing.T, name, body string) {
 	t.Helper()
-	git(t, f.work, "checkout", "-q", "-b", branch)
+	testutil.GitRun(t, f.work, "checkout", "-q", "-b", branch)
 	commit(t, f.work, name, body)
-	git(t, f.work, "push", "-q", "origin", branch)
-	git(t, f.work, "checkout", "-q", "main")
-	git(t, f.work, "branch", "-q", "-D", branch)
+	testutil.GitRun(t, f.work, "push", "-q", "origin", branch)
+	testutil.GitRun(t, f.work, "checkout", "-q", "main")
+	testutil.GitRun(t, f.work, "branch", "-q", "-D", branch)
 }
 
 // advanceMain lands a commit on origin/main and fetches it into the work clone.
 func (f *fixture) advanceMain(t *testing.T, name, body string) {
 	t.Helper()
 	other := filepath.Join(t.TempDir(), "other")
-	git(t, filepath.Dir(other), "clone", "-q", f.origin, other)
-	git(t, other, "config", "user.name", "Test")
-	git(t, other, "config", "user.email", "t@example.com")
+	testutil.GitRun(t, filepath.Dir(other), "clone", "-q", f.origin, other)
+	testutil.GitRun(t, other, "config", "user.name", "Test")
+	testutil.GitRun(t, other, "config", "user.email", "t@example.com")
 	commit(t, other, name, body)
-	git(t, other, "push", "-q", "origin", "main")
-	git(t, f.work, "fetch", "-q", "origin")
+	testutil.GitRun(t, other, "push", "-q", "origin", "main")
+	testutil.GitRun(t, f.work, "fetch", "-q", "origin")
 }
 
 func (f *fixture) originRef(t *testing.T, ref string) string {
 	t.Helper()
-	return git(t, f.origin, "rev-parse", ref)
+	return testutil.GitOutput(t, f.origin, "rev-parse", ref)
 }
 
 func (f *fixture) rebaseInProgress() bool {
@@ -126,10 +118,10 @@ func TestRecoverNoPriorBranchStartsFresh(t *testing.T) {
 	if out != (branchrecovery.Outcome{}) {
 		t.Errorf("outcome = %+v", out)
 	}
-	if got, want := git(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
+	if got, want := testutil.GitOutput(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
 		t.Errorf("HEAD = %s, want origin/main %s", got, want)
 	}
-	if got := git(t, f.origin, "branch", "--list", branch); got != "" {
+	if got := testutil.GitOutput(t, f.origin, "branch", "--list", branch); got != "" {
 		t.Errorf("branch pushed: %q", got)
 	}
 	if !strings.Contains(w.String(), "==> rebasing "+branch+" onto latest origin/main") {
@@ -151,11 +143,11 @@ func TestRecoverAdoptsOpenPR(t *testing.T) {
 	if out != (branchrecovery.Outcome{Adopted: true}) {
 		t.Errorf("outcome = %+v", out)
 	}
-	head := git(t, f.work, "rev-parse", "HEAD")
+	head := testutil.GitOutput(t, f.work, "rev-parse", "HEAD")
 	if got := f.originRef(t, "refs/heads/"+branch); got != head || got == before {
 		t.Errorf("origin branch = %s, want rebased HEAD %s (was %s)", got, head, before)
 	}
-	git(t, f.work, "merge-base", "--is-ancestor", "origin/main", "HEAD")
+	testutil.GitRun(t, f.work, "merge-base", "--is-ancestor", "origin/main", "HEAD")
 	if _, err := os.Stat(filepath.Join(f.work, "prior.txt")); err != nil {
 		t.Errorf("prior work lost: %v", err)
 	}
@@ -183,7 +175,7 @@ func TestRecoverAdoptReadOnlyRelaysBundle(t *testing.T) {
 	if got := f.originRef(t, "refs/heads/"+branch); got != before {
 		t.Errorf("origin branch moved: %s -> %s", before, got)
 	}
-	git(t, f.work, "bundle", "verify", f.bundlePath())
+	testutil.GitRun(t, f.work, "bundle", "verify", f.bundlePath())
 }
 
 func TestRecoverAdoptConflictDefersPublish(t *testing.T) {
@@ -234,7 +226,7 @@ func TestRecoverStaleBranchForceReset(t *testing.T) {
 			if got := f.originRef(t, "refs/heads/"+branch); got != want {
 				t.Errorf("origin branch = %s, want %s", got, want)
 			}
-			if got, want := git(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
+			if got, want := testutil.GitOutput(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
 				t.Errorf("HEAD = %s, want origin/main %s", got, want)
 			}
 			if _, err := os.Stat(f.bundlePath()); !os.IsNotExist(err) {
@@ -262,11 +254,11 @@ func TestRecoverPublishRejectedByLease(t *testing.T) {
 			f := newFixture(t)
 			f.withPriorBranch(t, "prior.txt", "prior\n")
 			other := filepath.Join(t.TempDir(), "other")
-			git(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
-			git(t, other, "config", "user.name", "Test")
-			git(t, other, "config", "user.email", "t@example.com")
+			testutil.GitRun(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
+			testutil.GitRun(t, other, "config", "user.name", "Test")
+			testutil.GitRun(t, other, "config", "user.email", "t@example.com")
 			commit(t, other, "concurrent.txt", "c\n")
-			git(t, other, "push", "-q", "origin", branch)
+			testutil.GitRun(t, other, "push", "-q", "origin", branch)
 			ahead := f.originRef(t, "refs/heads/"+branch)
 
 			_, err := branchrecovery.Recover(f.cfg, answer(tc.open), &bytes.Buffer{})
@@ -293,7 +285,7 @@ func TestRecoverOpenPRErrorAborts(t *testing.T) {
 	if got := f.originRef(t, "refs/heads/"+branch); got != before {
 		t.Errorf("origin branch moved: %s -> %s", before, got)
 	}
-	if got := git(t, f.work, "branch", "--list", branch); got != "" {
+	if got := testutil.GitOutput(t, f.work, "branch", "--list", branch); got != "" {
 		t.Errorf("local branch created: %q", got)
 	}
 }
@@ -312,7 +304,7 @@ func TestRecoverWithoutOpenPRQueryStartsFresh(t *testing.T) {
 	if out != (branchrecovery.Outcome{}) {
 		t.Errorf("outcome = %+v", out)
 	}
-	if got, want := git(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
+	if got, want := testutil.GitOutput(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
 		t.Errorf("HEAD = %s, want origin/main %s", got, want)
 	}
 	if got := f.originRef(t, "refs/heads/"+branch); got != before {
@@ -332,7 +324,7 @@ func TestRecoverWithoutOpenPRQueryStartsFresh(t *testing.T) {
 func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
 	push := func(t *testing.T, f *fixture) error {
 		t.Helper()
-		git(t, f.work, "fetch", "-q", "origin")
+		testutil.GitRun(t, f.work, "fetch", "-q", "origin")
 		out, err := exec.Command("git", "-C", f.work, "push", "--force-with-lease", "--force-if-includes", "-u", "origin", branch).CombinedOutput()
 		if err != nil {
 			t.Logf("push: %s", out)
@@ -355,7 +347,7 @@ func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
 		if err := push(t, f); err != nil {
 			t.Fatalf("push rejected: %v", err)
 		}
-		if got, want := f.originRef(t, "refs/heads/"+branch), git(t, f.work, "rev-parse", "HEAD"); got != want {
+		if got, want := f.originRef(t, "refs/heads/"+branch), testutil.GitOutput(t, f.work, "rev-parse", "HEAD"); got != want {
 			t.Errorf("origin branch = %s, want local tip %s", got, want)
 		}
 	})
@@ -363,11 +355,11 @@ func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
 	t.Run("still rejects a foreign commit pushed afterwards", func(t *testing.T) {
 		f := recoverFresh(t)
 		other := filepath.Join(t.TempDir(), "other")
-		git(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
-		git(t, other, "config", "user.name", "Test")
-		git(t, other, "config", "user.email", "t@example.com")
+		testutil.GitRun(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
+		testutil.GitRun(t, other, "config", "user.name", "Test")
+		testutil.GitRun(t, other, "config", "user.email", "t@example.com")
 		commit(t, other, "foreign.txt", "f\n")
-		git(t, other, "push", "-q", "origin", branch)
+		testutil.GitRun(t, other, "push", "-q", "origin", branch)
 		foreign := f.originRef(t, "refs/heads/"+branch)
 
 		commit(t, f.work, "work.txt", "work\n")
@@ -388,7 +380,7 @@ func TestRecoverSeedsTheRemoteTrackingReflog(t *testing.T) {
 			f := newFixture(t)
 			f.withPriorBranch(t, "prior.txt", "prior\n")
 			ref := "refs/remotes/origin/" + branch
-			git(t, f.work, "reflog", "drop", ref)
+			testutil.GitRun(t, f.work, "reflog", "drop", ref)
 			var openPR func() (bool, error)
 			if queryable {
 				openPR = answer(true)
@@ -412,14 +404,14 @@ func TestPublish(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
 			f.cfg.Push = push
-			git(t, f.work, "checkout", "-q", "-b", branch)
+			testutil.GitRun(t, f.work, "checkout", "-q", "-b", branch)
 			commit(t, f.work, "work.txt", "work\n")
 
 			if err := branchrecovery.Publish(f.cfg, &bytes.Buffer{}); err != nil {
 				t.Fatal(err)
 			}
 			_, bundleErr := os.Stat(f.bundlePath())
-			pushed := git(t, f.origin, "branch", "--list", branch) != ""
+			pushed := testutil.GitOutput(t, f.origin, "branch", "--list", branch) != ""
 			if push && (!pushed || bundleErr == nil) {
 				t.Errorf("push mechanism: pushed=%v bundleErr=%v", pushed, bundleErr)
 			}
@@ -427,7 +419,7 @@ func TestPublish(t *testing.T) {
 				if pushed || bundleErr != nil {
 					t.Errorf("bundle mechanism: pushed=%v bundleErr=%v", pushed, bundleErr)
 				}
-				git(t, f.work, "bundle", "verify", f.bundlePath())
+				testutil.GitRun(t, f.work, "bundle", "verify", f.bundlePath())
 			}
 		})
 	}
