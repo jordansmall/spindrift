@@ -438,8 +438,8 @@ func TestPromptBytes_OutcomeNeverShowsColonForm(t *testing.T) {
 	pbNoMatchFold(t, section, `trailing colon`)
 }
 
-// issue #1901: LastInLog only recognizes a line that *starts* with the prefix,
-// so text before the token hides the whole line. issue #3224
+// issue #1901: outcome's lastInLog only recognizes a line that *starts* with
+// the prefix, so text before the token hides the whole line. issue #3224
 // reshaped the example to a truncated prefix fragment, so this pins the rule's
 // own wording plus the column-one consequence.
 func TestPromptBytes_OutcomeMarksTokenPrecededByTextInvalid(t *testing.T) {
