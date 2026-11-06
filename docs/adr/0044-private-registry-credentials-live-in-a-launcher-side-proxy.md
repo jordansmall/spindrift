@@ -294,12 +294,16 @@ the artifact base path is registry-specific, not a fixed shape.
   dependency is added here, so a Go golden test
   (`cmd/launcher/internal/ecosystem/gradle/gradle_test.go`,
   `TestInitScript_ExactContent`) covers the generated init script's
-  shape, and `tests/bind-registry-parity.bats` covers the entrypoint's
-  control flow: the call site is one ecosystem-agnostic verb invocation
-  covering every table row, so pinning it end-to-end for the cargo row
-  (that `driver-exec bind-registry` reached from the entrypoint really
-  rewrites config and reaches the Driver's child, not a bash
-  reimplementation) proves the same seam gradle's row goes through, not an
+  shape, and box's tests cover its control flow:
+  `TestRegistry_ExportsReachTheEnvironmentBindingsFirst` and
+  `TestRegistry_RevertsAfterTheDriverOnEveryExit`
+  (`cmd/launcher/box/registry_test.go`) pin export ordering and the revert
+  on every exit, and `TestBoxSeamDriverInvocationGolden/work-registry`
+  (`cmd/launcher/box/box_seam_test.go`) pins the binding end-to-end for
+  the cargo row. The call site is box's `bindRegistry` step over the
+  ecosystem-agnostic `bindregistry` package, covering every table row, so
+  that cargo case (the binding really rewrites config and reaches the
+  Driver's child) proves the same seam gradle's row goes through, not an
   actual Gradle invocation; that the init script itself gets written to
   `$GRADLE_USER_HOME/init.d/` is covered separately, at the Go level, in
   two halves: `TestCorpus` (`cmd/launcher/internal/ecosystem/gradle/corpus_test.go`)
