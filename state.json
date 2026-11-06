@@ -1,21 +1,29 @@
 {
-  "lastSwept": "f5d4f6add6b465f16ddd7d76a4e68f83e36fbf0c",
-  "cursor": "cmd/launcher/internal/registryroutes/retiredkeys_internal_test.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-11-06T14:25:58.023589528-05:00"
-  },
+  "lastSwept": "a3508d916102406e056708075c35c023b8f5db2a",
+  "cursor": "cmd/launcher/internal/runner/bwrap/prerequisites.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/6472",
+    "https://github.com/jordansmall/spindrift/issues/6473",
+    "https://github.com/jordansmall/spindrift/issues/6474",
+    "https://github.com/jordansmall/spindrift/issues/6475",
+    "https://github.com/jordansmall/spindrift/issues/6476"
+  ],
+  "promoted": [
+    "https://github.com/jordansmall/spindrift/issues/6472",
+    "https://github.com/jordansmall/spindrift/issues/6473",
+    "https://github.com/jordansmall/spindrift/issues/6474",
+    "https://github.com/jordansmall/spindrift/issues/6475",
+    "https://github.com/jordansmall/spindrift/issues/6476"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
-  },
-  "reserved": 6
+    "input_tokens": 54,
+    "output_tokens": 63692,
+    "cache_read_input_tokens": 1158046,
+    "cache_creation_input_tokens": 68729,
+    "total_cost_usd": 4.83037772,
+    "duration_ms": 421200,
+    "duration_api_ms": 624542,
+    "num_turns": 41
+  }
 }
