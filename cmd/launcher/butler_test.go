@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,16 +27,6 @@ import (
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/tuning"
 )
-
-func runButlerGitOutput(t *testing.T, repo string, args ...string) []byte {
-	t.Helper()
-	full := append([]string{"-C", repo}, args...)
-	out, err := exec.Command("git", full...).Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", full, err)
-	}
-	return out
-}
 
 // TestButlerOutcomeErr pins the stderr text and exit code `spindrift butler`
 // reports for each Sweep Outcome; the Daemon backs off on exit 2.
@@ -321,8 +310,7 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 // Ledger claim (issue #3905).
 func assertNoButlerLedgerClaims(t *testing.T, repo string) {
 	t.Helper()
-	out := runButlerGitOutput(t, repo, "for-each-ref", ledger.RefPrefix)
-	if len(strings.TrimSpace(string(out))) != 0 {
+	if out := mustGitOutput(t, repo, "for-each-ref", ledger.RefPrefix); out != "" {
 		t.Errorf("for-each-ref %s = %q, want no claim refs", ledger.RefPrefix, out)
 	}
 }

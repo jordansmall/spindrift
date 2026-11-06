@@ -52,7 +52,7 @@ func TestBackendRows_NewLedgerCoverage(t *testing.T) {
 // anything once it's gone).
 func TestRemoteLedger_FetchesBaseBranchAndCleansUp(t *testing.T) {
 	remoteRepo := ledgertest.NewRepo(t)
-	head := strings.TrimSpace(string(runButlerGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")))
+	head := mustGitOutput(t, remoteRepo, "rev-parse", "refs/heads/main")
 
 	backend, tree, cleanup, err := remoteLedger(config{schemaConfig: schemaConfig{baseBranch: "main"}}, remoteRepo)
 	if err != nil {
