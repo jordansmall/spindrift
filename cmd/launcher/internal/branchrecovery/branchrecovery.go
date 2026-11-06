@@ -53,14 +53,17 @@ type Outcome struct {
 func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, error) {
 	var out Outcome
 	base := "origin/" + cfg.BaseBranch
-	if err := cfg.seedRemoteReflog(w); err != nil {
-		return out, err
+	remoteOID, remoteExists := cfg.remoteTip()
+	if remoteExists {
+		if err := cfg.seedRemoteReflog(w, remoteOID); err != nil {
+			return out, err
+		}
 	}
 	// A leftover origin/<branch> is recorded in the new branch's reflog before
 	// the reset: the push's --force-if-includes refuses a remote tip the local
 	// reflog never held.
 	fresh := func() error {
-		if cfg.git(io.Discard, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+cfg.Branch) != nil {
+		if !remoteExists {
 			return cfg.git(w, "checkout", "-b", cfg.Branch, base)
 		}
 		if err := cfg.git(w, "branch", "--no-track", cfg.Branch, "origin/"+cfg.Branch); err != nil {
@@ -70,13 +73,11 @@ func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, err
 	}
 
 	switch {
-	case openPR == nil:
-		// A stale refs/remotes/origin/<branch> is superseded by a fresh checkout.
-		fmt.Fprintf(w, "==> CODE_FORGE=%s: starting %s fresh from %s\n", cfg.CodeForge, cfg.Branch, base)
-		if err := fresh(); err != nil {
-			return out, err
+	case openPR == nil || !remoteExists:
+		if openPR == nil {
+			fmt.Fprintf(w, "==> CODE_FORGE=%s: starting %s fresh from %s\n", cfg.CodeForge, cfg.Branch, base)
 		}
-	case cfg.git(io.Discard, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+cfg.Branch) != nil:
+		// A stale refs/remotes/origin/<branch> is superseded by a fresh checkout.
 		if err := fresh(); err != nil {
 			return out, err
 		}
@@ -138,19 +139,24 @@ func Publish(cfg Config, w io.Writer) error {
 // uninitialized stack value (git remote.c is_reachable_in_reflog), so the push
 // is refused at random — reliably on aarch64. The seed predates every local
 // branch entry, so the walk always reaches them.
-func (cfg Config) seedRemoteReflog(w io.Writer) error {
+func (cfg Config) seedRemoteReflog(w io.Writer, oid string) error {
 	ref := "refs/remotes/origin/" + cfg.Branch
 	if cfg.git(io.Discard, "reflog", "exists", ref) == nil {
 		return nil
 	}
-	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
+	return cfg.git(w, "reflog", "write", ref, oid, oid, "branchrecovery: observed at clone")
+}
+
+// remoteTip returns origin/<branch>'s tip OID; a failed probe means no remote
+// branch.
+func (cfg Config) remoteTip() (oid string, ok bool) {
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+cfg.Branch)
 	cmd.Dir = cfg.WorkDir
 	tip, err := cmd.Output()
 	if err != nil {
-		return nil // no remote branch, so no lease to check
+		return "", false
 	}
-	oid := strings.TrimSpace(string(tip))
-	return cfg.git(w, "reflog", "write", ref, oid, oid, "branchrecovery: observed at clone")
+	return strings.TrimSpace(string(tip)), true
 }
 
 func (cfg Config) git(w io.Writer, args ...string) error {
