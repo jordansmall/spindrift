@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // Pins contained=true for the LandingIntegrationRef that LandingRef resolves
@@ -219,7 +220,7 @@ func TestLocalCodeForge_LandingContained_IntegrationRef_ErrorsOnGenuineGitFailur
 	repo := forgetest.NewGitRepoFixture(t, IntegrationBranch(parent))
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	query := cf.(forge.LandingContainmentQuery)
-	sha := revParse(t, repo.Bare, "refs/heads/"+IntegrationBranch(parent))
+	sha := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+IntegrationBranch(parent))
 
 	scope := forge.NewSeedScope(parent.String(), IntegrationBranch(parent))
 	landing := forge.Landing{Kind: forge.LandingIntegrationRef, Branch: IntegrationBranch(parent), SHA: sha}
@@ -336,34 +337,34 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForRebasedLanding(t *test
 	if err := br.RelayBundle(outbox, branch); err != nil {
 		t.Fatalf("RelayBundle: %v", err)
 	}
-	preLandSHA := revParse(t, repo.Bare, "refs/heads/"+branch)
+	preLandSHA := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+branch)
 
 	// Advance the integration branch with an unrelated commit so replaying
 	// branch's own commit onto it is a genuine rebase (a new sha), not a no-op
 	// fast-forward, mirroring land_test.go's two-seam setup.
 	other := t.TempDir()
-	run(t, "", "clone", repo.Bare, other)
-	run(t, other, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, "", "clone", repo.Bare, other)
+	testutil.GitRun(t, other, "checkout", IntegrationBranch(parent))
 	if err := os.WriteFile(filepath.Join(other, "other.txt"), []byte("other\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, other, "add", "other.txt")
-	run(t, other, "config", "user.email", "test@example.com")
-	run(t, other, "config", "user.name", "Test")
-	run(t, other, "commit", "-m", "other seam")
-	run(t, other, "push", "origin", IntegrationBranch(parent))
+	testutil.GitRun(t, other, "add", "other.txt")
+	testutil.GitRun(t, other, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, other, "config", "user.name", "Test")
+	testutil.GitRun(t, other, "commit", "-m", "other seam")
+	testutil.GitRun(t, other, "push", "origin", IntegrationBranch(parent))
 
 	// Land branch by rebasing it onto the advanced integration tip and
 	// fast-forwarding integration to the result, bypassing cf.Merge, which
 	// would resync refs/heads/branch to the rebased result. This test needs a
 	// landing whose branch ref never got resynced in the Accumulation repo.
 	rebaseWork := t.TempDir()
-	run(t, "", "clone", repo.Bare, rebaseWork)
-	run(t, rebaseWork, "checkout", branch)
-	run(t, rebaseWork, "rebase", "origin/"+IntegrationBranch(parent))
-	run(t, rebaseWork, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
+	testutil.GitRun(t, "", "clone", repo.Bare, rebaseWork)
+	testutil.GitRun(t, rebaseWork, "checkout", branch)
+	testutil.GitRun(t, rebaseWork, "rebase", "origin/"+IntegrationBranch(parent))
+	testutil.GitRun(t, rebaseWork, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != preLandSHA {
+	if got := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+branch); got != preLandSHA {
 		t.Fatalf("refs/heads/%s = %s, want unchanged %s", branch, got, preLandSHA)
 	}
 	if err := exec.Command("git", "-C", repo.Bare, "merge-base", "--is-ancestor", preLandSHA, "refs/heads/"+IntegrationBranch(parent)).Run(); err == nil {
@@ -393,31 +394,31 @@ func TestLocalCodeForge_LandingContained_BranchRef_TrueForMultiCommitRebasedLand
 	branch := "agent/issue-1698"
 
 	work := t.TempDir()
-	run(t, "", "clone", repo.Bare, work)
-	run(t, work, "checkout", IntegrationBranch(parent))
-	run(t, work, "checkout", "-b", branch)
-	run(t, work, "config", "user.email", "test@example.com")
-	run(t, work, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "clone", repo.Bare, work)
+	testutil.GitRun(t, work, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, work, "checkout", "-b", branch)
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
 	writeAndCommit(t, work, "feature-1698-a.txt", "a")
 	writeAndCommit(t, work, "feature-1698-b.txt", "b")
-	run(t, work, "push", "origin", branch)
-	preLandSHA := revParse(t, repo.Bare, "refs/heads/"+branch)
+	testutil.GitRun(t, work, "push", "origin", branch)
+	preLandSHA := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+branch)
 
 	other := t.TempDir()
-	run(t, "", "clone", repo.Bare, other)
-	run(t, other, "checkout", IntegrationBranch(parent))
-	run(t, other, "config", "user.email", "test@example.com")
-	run(t, other, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "clone", repo.Bare, other)
+	testutil.GitRun(t, other, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, other, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, other, "config", "user.name", "Test")
 	writeAndCommit(t, other, "other.txt", "other")
-	run(t, other, "push", "origin", IntegrationBranch(parent))
+	testutil.GitRun(t, other, "push", "origin", IntegrationBranch(parent))
 
 	rebaseWork := t.TempDir()
-	run(t, "", "clone", repo.Bare, rebaseWork)
-	run(t, rebaseWork, "checkout", branch)
-	run(t, rebaseWork, "rebase", "origin/"+IntegrationBranch(parent))
-	run(t, rebaseWork, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
+	testutil.GitRun(t, "", "clone", repo.Bare, rebaseWork)
+	testutil.GitRun(t, rebaseWork, "checkout", branch)
+	testutil.GitRun(t, rebaseWork, "rebase", "origin/"+IntegrationBranch(parent))
+	testutil.GitRun(t, rebaseWork, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
 
-	if got := revParse(t, repo.Bare, "refs/heads/"+branch); got != preLandSHA {
+	if got := testutil.GitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+branch); got != preLandSHA {
 		t.Fatalf("refs/heads/%s = %s, want unchanged %s", branch, got, preLandSHA)
 	}
 
@@ -446,33 +447,33 @@ func TestLocalCodeForge_LandingContained_BranchRef_FalseWhenLaterCommitNeverLand
 	branch := "agent/issue-1698"
 
 	work := t.TempDir()
-	run(t, "", "clone", repo.Bare, work)
-	run(t, work, "checkout", IntegrationBranch(parent))
-	run(t, work, "checkout", "-b", branch)
-	run(t, work, "config", "user.email", "test@example.com")
-	run(t, work, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "clone", repo.Bare, work)
+	testutil.GitRun(t, work, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, work, "checkout", "-b", branch)
+	testutil.GitRun(t, work, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, work, "config", "user.name", "Test")
 	writeAndCommit(t, work, "feature-1698-a.txt", "a")
-	oldestSHA := revParse(t, work, "HEAD")
+	oldestSHA := testutil.GitOutput(t, work, "rev-parse", "HEAD")
 	writeAndCommit(t, work, "feature-1698-b.txt", "b")
-	run(t, work, "push", "origin", branch)
+	testutil.GitRun(t, work, "push", "origin", branch)
 
 	other := t.TempDir()
-	run(t, "", "clone", repo.Bare, other)
-	run(t, other, "checkout", IntegrationBranch(parent))
-	run(t, other, "config", "user.email", "test@example.com")
-	run(t, other, "config", "user.name", "Test")
+	testutil.GitRun(t, "", "clone", repo.Bare, other)
+	testutil.GitRun(t, other, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, other, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, other, "config", "user.name", "Test")
 	writeAndCommit(t, other, "other.txt", "other")
-	run(t, other, "push", "origin", IntegrationBranch(parent))
+	testutil.GitRun(t, other, "push", "origin", IntegrationBranch(parent))
 
 	// Land only the oldest commit's patch onto integration; the newest commit
 	// genuinely never lands.
 	partial := t.TempDir()
-	run(t, "", "clone", repo.Bare, partial)
-	run(t, partial, "checkout", IntegrationBranch(parent))
-	run(t, partial, "config", "user.email", "test@example.com")
-	run(t, partial, "config", "user.name", "Test")
-	run(t, partial, "cherry-pick", oldestSHA)
-	run(t, partial, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
+	testutil.GitRun(t, "", "clone", repo.Bare, partial)
+	testutil.GitRun(t, partial, "checkout", IntegrationBranch(parent))
+	testutil.GitRun(t, partial, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, partial, "config", "user.name", "Test")
+	testutil.GitRun(t, partial, "cherry-pick", oldestSHA)
+	testutil.GitRun(t, partial, "push", "origin", "HEAD:refs/heads/"+IntegrationBranch(parent))
 
 	cf := NewLocalCodeForge(repo.Bare, IntegrationBranch(parent), parent, "Test Bot", "bot@example.com", "agent/issue-")
 	query := cf.(forge.LandingContainmentQuery)

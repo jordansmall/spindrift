@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // The multi-commit rebase fixtures below (and containment_test.go's own) need
@@ -18,8 +19,8 @@ func writeAndCommit(t *testing.T, dir, name, contents string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(contents+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run(t, dir, "add", name)
-	run(t, dir, "commit", "-m", name)
+	testutil.GitRun(t, dir, "add", name)
+	testutil.GitRun(t, dir, "commit", "-m", name)
 }
 
 // An unknown sha gives merged=false and no error: `git cherry` exits nonzero
