@@ -663,6 +663,28 @@ func TestLocalTracker_DepsOf_ParsesBlockedBySlugSection(t *testing.T) {
 	}
 }
 
+func TestLocalTracker_DepsOf_IssueRefLineDoesNotEndSection(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "depends-on-others", localIssue{
+		frontmatter: localFrontmatter{Title: "Depends on others", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body:        "## Blocked by\n\n- b\n#6 is related\n- c\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	deps, err := lt.DepsOf("depends-on-others")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	want := []forge.Dependency{
+		{ID: "b", Source: forge.DepSourceBody},
+		{ID: "c", Source: forge.DepSourceBody},
+	}
+	if !reflect.DeepEqual(deps, want) {
+		t.Errorf("DepsOf = %v, want %v", deps, want)
+	}
+}
+
 func TestLocalTracker_DepsOf_StripsBackticksFromSlug(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels

@@ -43,6 +43,14 @@ func TestParseTouchPaths_SectionEndsOnNextHeading(t *testing.T) {
 	}
 }
 
+func TestParseTouchPaths_IssueRefLineDoesNotEndSection(t *testing.T) {
+	body := "## Touches\n- a.go\n#6 is related\n- b.go\n"
+	paths := forge.ParseTouchPaths(body)
+	if len(paths) != 2 || paths[0] != "a.go" || paths[1] != "b.go" {
+		t.Errorf("expected [a.go b.go], got %v", paths)
+	}
+}
+
 func TestParseTouchPaths_NoDuplicates(t *testing.T) {
 	body := "## Touches\n- cmd/launcher/*.go\n- cmd/launcher/*.go"
 	paths := forge.ParseTouchPaths(body)
