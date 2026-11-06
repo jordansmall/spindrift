@@ -43,6 +43,31 @@ func TestKeymapUniqueness(t *testing.T) {
 	}
 }
 
+// The 1-5 jump maps keys through a hand-kept table in keymap_list.go; this
+// pins each key to its Section so a swapped entry cannot pass unnoticed.
+func TestDispatchKey_NumberKeysJumpToSection(t *testing.T) {
+	cases := []struct {
+		key  string
+		want Section
+	}{
+		{"1", SectionBacklog},
+		{"2", SectionRunning},
+		{"3", SectionHeld},
+		{"4", SectionSettled},
+		{"5", SectionFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			tm := teaModel{m: NewModel()}
+			tm.m.ActiveSection = (tc.want + 1) % sectionCount
+			tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.key)})
+			if tm.m.ActiveSection != tc.want {
+				t.Errorf("ActiveSection after %q = %v, want %v", tc.key, tm.m.ActiveSection, tc.want)
+			}
+		})
+	}
+}
+
 // Backspace in ModeFilterEdit trims the last rune, not the last byte: a byte
 // trim leaves invalid UTF-8 behind on any multi-byte rune (issue #5321).
 func TestDispatchKey_FilterEditBackspace_TrimsLastRune(t *testing.T) {
