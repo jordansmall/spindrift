@@ -47,3 +47,21 @@ func TestCaptureStdout_LargeOutput(t *testing.T) {
 		t.Fatal("CaptureStdout: timed out after 5s (deadlock regression)")
 	}
 }
+
+func TestGitOutput_ReturnsTrimmedStdout(t *testing.T) {
+	dir := t.TempDir()
+	GitRun(t, dir, "init")
+	GitRun(t, dir, "config", "user.name", "Test Name")
+	if got := GitOutput(t, dir, "config", "--get", "user.name"); got != "Test Name" {
+		t.Fatalf("GitOutput = %q, want %q", got, "Test Name")
+	}
+}
+
+func TestGitOutput_ExcludesStderr(t *testing.T) {
+	dir := t.TempDir()
+	GitRun(t, dir, "init")
+	// "Switched to a new branch" goes to stderr only.
+	if got := GitOutput(t, dir, "checkout", "-b", "x"); got != "" {
+		t.Fatalf("GitOutput = %q, want empty (stderr must not leak into the result)", got)
+	}
+}
