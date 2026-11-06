@@ -39,21 +39,9 @@ func resolveEdgeRefs(tracker forge.IssueTracker, all []forge.Issue, fetch func(s
 	if err != nil {
 		return nil
 	}
-	ids := make([]string, len(deps))
-	sourceOf := make(map[string]forge.DepSource, len(deps))
-	for i, d := range deps {
-		ids[i] = d.ID
-		sourceOf[d.ID] = d.Source
-	}
-	return resolveBlockerRefs(tracker, all, ids, sourceOf)
-}
-
-// resolveBlockerRefs resolves ids into BlockerRefs tagged with their DepSource
-// (issue #1632).
-func resolveBlockerRefs(tracker forge.IssueTracker, all []forge.Issue, ids []string, sourceOf map[string]forge.DepSource) []BlockerRef {
-	refs := make([]BlockerRef, 0, len(ids))
-	for _, id := range ids {
-		refs = append(refs, resolveBlockerRef(tracker, all, id, sourceOf[id]))
+	refs := make([]BlockerRef, 0, len(deps))
+	for _, d := range deps {
+		refs = append(refs, resolveBlockerRef(tracker, all, d.ID, d.Source))
 	}
 	return refs
 }
