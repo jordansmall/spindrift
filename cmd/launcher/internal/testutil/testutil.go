@@ -4,6 +4,7 @@ package testutil
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,8 +27,22 @@ func GitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, out)
+		t.Fatalf("git -C %s %v: %v: %s", dir, args, err, out)
 	}
+}
+
+// GitOutput runs git in dir and returns its trimmed stdout, failing the test on error.
+func GitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		var stderr []byte
+		if ee := (*exec.ExitError)(nil); errors.As(err, &ee) {
+			stderr = ee.Stderr
+		}
+		t.Fatalf("git -C %s %v: %v: %s", dir, args, err, stderr)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // NewCloneWithOrigin returns a clone directory whose bare "origin" holds one
