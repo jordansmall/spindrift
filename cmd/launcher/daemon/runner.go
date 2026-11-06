@@ -930,9 +930,7 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 }
 
 // State reads the child's pid, its report pipe's fd and the read state a
-// successor continues from. The fd comes from SyscallConn rather than Fd():
-// Fd switches the file to blocking mode, which would defeat the read-deadline
-// abandon on a handle that is waited on again.
+// successor continues from. ReportFD stays -1 if the fd cannot be read.
 func (h *hostChildHandle) State() daemon.ChildState {
 	st := daemon.ChildState{
 		PID:        h.proc.Pid,
@@ -940,12 +938,10 @@ func (h *hostChildHandle) State() daemon.ChildState {
 		Partial:    slices.Clone(h.reports.partial),
 		Discarding: h.reports.discarding,
 	}
-	rc, err := h.reportRead.SyscallConn()
-	if err == nil {
-		err = rc.Control(func(fd uintptr) { st.ReportFD = int(fd) })
-	}
-	if err != nil {
+	if fd, err := fileDescriptor(h.reportRead); err != nil {
 		fmt.Fprintf(os.Stderr, "daemon: read report pipe fd: %v\n", err)
+	} else {
+		st.ReportFD = fd
 	}
 	return st
 }
@@ -988,8 +984,7 @@ func setCloseOnExec(fd int, on bool) error {
 
 // fileDescriptor returns f's descriptor number. It reads it through
 // SyscallConn, not f.Fd(): Fd switches the file to blocking mode, which would
-// break the SetReadDeadline-based abandon if an exec fails and this image
-// carries on.
+// break any SetReadDeadline-based read on f that follows.
 func fileDescriptor(f *os.File) (int, error) {
 	rc, err := f.SyscallConn()
 	if err != nil {
