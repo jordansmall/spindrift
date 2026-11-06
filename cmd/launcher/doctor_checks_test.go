@@ -8,8 +8,9 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 )
 
-// replaceCheckByName must copy rather than mutate in place: doctorExtraChecks
-// callers (validate(), validateConfig) still need the un-substituted row.
+// replaceCheckByName must copy rather than mutate in place: doctorCheckSets
+// substitutes into doctorExtraChecks's slice, but doctorExtraChecks's other
+// caller (validateConfig) still needs the un-substituted row.
 func TestReplaceCheckByName_MatchReplacesOnlyThatRowAndDoesNotMutateInput(t *testing.T) {
 	origErr := errors.New("original")
 	replacementErr := errors.New("replacement")
