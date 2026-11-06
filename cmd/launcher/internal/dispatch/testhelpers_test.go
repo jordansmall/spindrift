@@ -35,8 +35,9 @@ func writeFile(path, content string) error {
 }
 
 // nonceLine appends d's per-run nonce (issue #1939) to line and a trailing
-// newline, the way a genuine Box echoes RUN_NONCE on its outcome line. line
-// must have no trailing newline.
+// newline. The trailing " nonce=" is a legacy field the outcome parser
+// tolerates but no longer requires (ADR 0055); fixtures keep it so the
+// parser still sees it. line must have no trailing newline.
 func nonceLine(d *Dispatch, line string) []byte {
 	return []byte(line + " nonce=" + d.nonce + "\n")
 }

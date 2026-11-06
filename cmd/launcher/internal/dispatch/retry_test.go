@@ -216,8 +216,9 @@ func TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult(t *testing.T) 
 
 // A synthetic backstop line (ADR 0036) wins the authoritative outcome by
 // last-line-wins, but the driver's own near-miss self-report must still
-// survive on Result.SelfReport (issues #2223 and #2224). The backstop line
-// carries this run's own nonce so LastInLog accepts it as authoritative.
+// survive on Result.Resolved.SelfReport (issues #2223 and #2224).
+// outcome.Resolve takes the backstop line as authoritative with no nonce
+// check (ADR 0055).
 func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 	fr := runner.NewFake()
 	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
@@ -227,7 +228,7 @@ func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
 	fr.WriteToOutput = append([]byte("SPINDRIFT_OUTCOME: success\n"),
-		nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=blocked synthetic=true note=backstop")...)
+		[]byte("SPINDRIFT_OUTCOME issue=1 landing=agent/issue-1 status=blocked synthetic=true note=backstop\n")...)
 
 	result := d.Run()
 
@@ -465,7 +466,7 @@ func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T)
 	}}
 	var sleeps []time.Duration
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
-	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1") // missing landing= and status=, but carries the nonce
+	fr.WriteToOutput = nonceLine(d, "SPINDRIFT_OUTCOME issue=1") // missing landing= and status=
 
 	result := d.Run()
 
@@ -717,8 +718,8 @@ func TestDispatchWithRetry_TransientBackoffReDispatchSetsResumeAfterHold(t *test
 	}
 }
 
-// A box that prints a valid, nonce-bearing SPINDRIFT_OUTCOME but then exits
-// non-zero settles on that printed outcome (issue #2075) instead of being
+// A box that prints a valid SPINDRIFT_OUTCOME but then exits non-zero
+// settles on that printed outcome (issue #2075) instead of being
 // reclassified into a hold or an agent-failed.
 func TestDispatchWithRetry_NonZeroExitWithOutcomeSettles(t *testing.T) {
 	fr := runner.NewFake()
