@@ -12,8 +12,10 @@ import (
 // read Yarn.Name or Yarn.BindingEnvVar without a package initialization
 // cycle. Sharing the const keeps BindingEnvVar and the exported var one name.
 const (
-	nameYarn          = "yarn"
-	yarnBindingEnvVar = "YARN_NPM_REGISTRY_SERVER"
+	nameYarn                   = "yarn"
+	yarnBindingEnvVar          = "YARN_NPM_REGISTRY_SERVER"
+	yarnUnsafeHTTPWhitelistVar = "YARN_UNSAFE_HTTP_WHITELIST"
+	yarnLoopbackHost           = "127.0.0.1"
 )
 
 // Yarn is the yarn Strategy, which the Bundle registers.
@@ -23,11 +25,38 @@ var Yarn = ecosystem.Strategy{
 	LockfileNames:    []string{"yarn.lock"},
 	Classification:   "npm/pnpm/yarn",
 	InTreeConfigPath: ".yarnrc.yml",
-	EnvExports: func(port int, _ string, _ func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
-		return npmFamilyBinding(port, routes, yarnBindingEnvVar, nameYarn)
-	},
-	BindingEnvVar: yarnBindingEnvVar,
-	ConfigParser:  parseYarnRegistryConfig,
+	EnvExports:       yarnEnvExports,
+	BindingEnvVar:    yarnBindingEnvVar,
+	ConfigParser:     parseYarnRegistryConfig,
+}
+
+// yarnEnvExports adds the loopback whitelist to the shared binding. Yarn berry
+// refuses every http: request whose hostname is not in unsafeHttpWhitelist
+// (default empty, no loopback exemption), and the in-tree rewrite points even
+// scoped-only registries at the Forwarder, so any yarn-tagged path needs it.
+func yarnEnvExports(port int, _ string, getenv func(string) string, routes []registrymanifest.Route) ([]ecosystem.EnvExport, []string) {
+	exports, warnings := npmFamilyBinding(port, routes, yarnBindingEnvVar, nameYarn)
+	if len(boundTaggedPaths(routes, nameYarn)) == 0 {
+		return exports, warnings
+	}
+	return append(exports, ecosystem.EnvExport{
+		Name:  yarnUnsafeHTTPWhitelistVar,
+		Value: withLoopbackHost(getenv(yarnUnsafeHTTPWhitelistVar)),
+	}), warnings
+}
+
+// withLoopbackHost appends 127.0.0.1 to any existing comma-separated
+// whitelist, returning it unchanged when 127.0.0.1 is already an exact entry.
+func withLoopbackHost(existing string) string {
+	if existing == "" {
+		return yarnLoopbackHost
+	}
+	for _, entry := range strings.Split(existing, ",") {
+		if strings.TrimSpace(entry) == yarnLoopbackHost {
+			return existing
+		}
+	}
+	return existing + "," + yarnLoopbackHost
 }
 
 // parseYarnRegistryConfig takes every "npmRegistryServer: <url>" line,

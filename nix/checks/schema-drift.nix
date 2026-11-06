@@ -1227,6 +1227,8 @@ checkedMerge {
         "GONOSUMDB"
         "GOSUMDB"
         "GOTOOLCHAIN"
+        # An operator's yarn berry whitelist, extended by the yarn Strategy (issue #6408).
+        "YARN_UNSAFE_HTTP_WHITELIST"
         # Launcher-internal plumbing, never set by an operator.
         "SPINDRIFT_REPORT_FD" # report FD handed to a child
         "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path

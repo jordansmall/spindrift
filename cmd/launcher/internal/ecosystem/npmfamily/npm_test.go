@@ -43,7 +43,20 @@ func rowExports(t *testing.T, name string, port int, prefix string, routes []reg
 	if row.EnvExports == nil {
 		t.Fatalf("%s row has nil EnvExports", name)
 	}
-	return row.EnvExports(port, prefix, stubGetenv(nil), routes)
+	exports, warnings := row.EnvExports(port, prefix, stubGetenv(nil), routes)
+	// The yarn http whitelist is a supporting setting with its own tests in
+	// yarn_test.go; these tests pin the binding var alone.
+	return withoutYarnWhitelist(exports), warnings
+}
+
+func withoutYarnWhitelist(exports []ecosystem.EnvExport) []ecosystem.EnvExport {
+	var out []ecosystem.EnvExport
+	for _, e := range exports {
+		if e.Name != yarnUnsafeHTTPWhitelistVar {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // Each Strategy binds its BindingEnvVar and nothing else, from its own tagged path

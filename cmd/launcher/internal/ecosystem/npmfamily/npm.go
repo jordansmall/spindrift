@@ -110,17 +110,9 @@ func addNpmFamilyDeclaration(out []ecosystem.Declaration, indexByURL map[string]
 // streamNpmPackument (#3401) re-points embedded tarball URLs.
 func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, tag string) ([]ecosystem.EnvExport, []string) {
 	var matches []npmFamilyMatch
-	for _, route := range routes {
-		// An empty prefix has no Forwarder address to bind. BindHomes'
-		// empty-prefix guard covers only routes[0], so later routes need their
-		// own check.
-		if route.Prefix == "" {
-			continue
-		}
-		for _, p := range route.EnforcedPaths {
-			if p.Ecosystem == tag && !p.Scoped {
-				matches = append(matches, npmFamilyMatch{prefix: route.Prefix, path: p.Path})
-			}
+	for _, m := range boundTaggedPaths(routes, tag) {
+		if !m.scoped {
+			matches = append(matches, m)
 		}
 	}
 
@@ -156,6 +148,29 @@ func npmFamilyBinding(port int, routes []registrymanifest.Route, envVar, tag str
 	}
 }
 
-// npmFamilyMatch is one unscoped ecosystem-tagged path and the prefix of the
-// route that carries it.
-type npmFamilyMatch struct{ prefix, path string }
+// npmFamilyMatch is one ecosystem-tagged path and the prefix of the route that
+// carries it.
+type npmFamilyMatch struct {
+	prefix, path string
+	scoped       bool
+}
+
+// boundTaggedPaths lists every path tagged tag on a route with a Forwarder
+// address, scoped or not.
+func boundTaggedPaths(routes []registrymanifest.Route, tag string) []npmFamilyMatch {
+	var matches []npmFamilyMatch
+	for _, route := range routes {
+		// An empty prefix has no Forwarder address to bind. BindHomes'
+		// empty-prefix guard covers only routes[0], so later routes need their
+		// own check.
+		if route.Prefix == "" {
+			continue
+		}
+		for _, p := range route.EnforcedPaths {
+			if p.Ecosystem == tag {
+				matches = append(matches, npmFamilyMatch{prefix: route.Prefix, path: p.Path, scoped: p.Scoped})
+			}
+		}
+	}
+	return matches
+}
