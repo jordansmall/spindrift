@@ -12,6 +12,16 @@ import (
 
 var errBoomFreshness = errors.New("pull failed")
 
+// mustGitOutput runs gitOutput in dir and fails the test on error.
+func mustGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitOutput(dir, args...)
+	if err != nil {
+		t.Fatalf("git -C %s: %v", dir, err)
+	}
+	return out
+}
+
 // The checker must recognize a tip it just rebuilt against as fresh: the
 // imageTag comparand baked at process start never updated in-process (issue
 // #652), so a successful rebuild left the next check reporting stale forever.

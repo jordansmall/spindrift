@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -313,8 +312,8 @@ func TestSurfaceAfterDispatch_AllSeamsClosed_SurfacesBranch(t *testing.T) {
 		t.Errorf("want output to mention %s, got %q", parent, buf.String())
 	}
 
-	got := revParseTest(t, fx.pwd, "refs/heads/"+parent)
-	want := revParseTest(t, fx.repo.Bare, "refs/heads/"+fx.integrationBranch)
+	got := mustGitOutput(t, fx.pwd, "rev-parse", "refs/heads/"+parent)
+	want := mustGitOutput(t, fx.repo.Bare, "rev-parse", "refs/heads/"+fx.integrationBranch)
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
@@ -351,12 +350,12 @@ func TestSurfaceAfterDispatch_UsesPassedWiredInstance(t *testing.T) {
 		t.Fatalf("surfaceAfterDispatch: %v", err)
 	}
 
-	got := revParseTest(t, pwd, "refs/heads/"+parent)
-	want := revParseTest(t, real.Bare, "refs/heads/"+integrationBranch)
+	got := mustGitOutput(t, pwd, "rev-parse", "refs/heads/"+parent)
+	want := mustGitOutput(t, real.Bare, "rev-parse", "refs/heads/"+integrationBranch)
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (the passed *Wired's own Integration branch tip)", parent, got, want)
 	}
-	decoyTip := revParseTest(t, decoy.Bare, "refs/heads/"+integrationBranch)
+	decoyTip := mustGitOutput(t, decoy.Bare, "rev-parse", "refs/heads/"+integrationBranch)
 	if got == decoyTip {
 		t.Errorf("refs/heads/%s = decoy repo's tip %s, want surfaceAfterDispatch to ignore c's AccumulationRepoDir and use the passed *Wired's", parent, decoyTip)
 	}
@@ -442,8 +441,8 @@ func TestSurfaceAfterDispatch_ReadsForgeDescriptorFromCaps(t *testing.T) {
 	if !strings.Contains(buf.String(), parent) {
 		t.Errorf("want the sweep to run and report %s (caps.ForgeDescriptor says host-mediated), got %q", parent, buf.String())
 	}
-	got := revParseTest(t, fx.pwd, "refs/heads/"+parent)
-	want := revParseTest(t, fx.repo.Bare, "refs/heads/"+fx.integrationBranch)
+	got := mustGitOutput(t, fx.pwd, "rev-parse", "refs/heads/"+parent)
+	want := mustGitOutput(t, fx.repo.Bare, "rev-parse", "refs/heads/"+fx.integrationBranch)
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
@@ -571,8 +570,8 @@ func TestRunReconcile_ClosingLastSeamSurfacesIntegrationBranch(t *testing.T) {
 		t.Errorf("want output to report surfaced ticket %s, got %q", parent, buf.String())
 	}
 
-	got := revParseTest(t, pwd, "refs/heads/"+parent)
-	want := revParseTest(t, repo.Bare, "refs/heads/"+local.IntegrationBranch(sanitizedParent))
+	got := mustGitOutput(t, pwd, "rev-parse", "refs/heads/"+parent)
+	want := mustGitOutput(t, repo.Bare, "rev-parse", "refs/heads/"+local.IntegrationBranch(sanitizedParent))
 	if got != want {
 		t.Errorf("refs/heads/%s = %s, want %s (Integration branch tip)", parent, got, want)
 	}
@@ -647,15 +646,6 @@ func TestSurfaceAfterDispatch_NeverLandedAndCheckedOut_OnlyNeverLandedCollapses(
 	if got := strings.Count(buf.String(), "\n"); got != 2 {
 		t.Errorf("want exactly two lines total (one checked-out, one summary), got %d in %q", got, buf.String())
 	}
-}
-
-func revParseTest(t *testing.T, dir, ref string) string {
-	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", ref).CombinedOutput()
-	if err != nil {
-		t.Fatalf("rev-parse %s in %s: %v: %s", ref, dir, err, out)
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // lateMergeFixture writes two stamped work logs settled complete with their PR
