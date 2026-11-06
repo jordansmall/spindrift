@@ -2,6 +2,8 @@ package bindregistry
 
 import (
 	"errors"
+	"os"
+	"os/exec"
 	"syscall"
 	"testing"
 	"time"
@@ -164,5 +166,34 @@ func TestCloseOnExecInheritedFDs_MarksLeakedFD(t *testing.T) {
 	}
 	if !fdCloExec(t, writeFD) {
 		t.Errorf("writeFD %d not close-on-exec after closeOnExecInheritedFDs, a detached child would inherit it", writeFD)
+	}
+}
+
+func TestStartDetached_DetachesWithSetsid(t *testing.T) {
+	cmd := exec.Command("sleep", "5")
+	pid, err := startDetached(cmd)
+	if err != nil {
+		t.Fatalf("startDetached: %v", err)
+	}
+	t.Cleanup(func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	})
+
+	if pid <= 0 || pid != cmd.Process.Pid {
+		t.Errorf("pid = %d, want cmd.Process.Pid %d (> 0)", pid, cmd.Process.Pid)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
+		t.Errorf("SysProcAttr.Setsid not set, the child would share the caller's session")
+	}
+	// A new session makes the child its own process-group leader. Getpgid,
+	// unlike Getsid, is in syscall on both linux and darwin.
+	if pgid, err := syscall.Getpgid(pid); err != nil || pgid != pid {
+		t.Errorf("Getpgid(%d) = %d, %v; want %d, the child did not get its own session", pid, pgid, err, pid)
+	}
+	for name, stream := range map[string]any{"stdin": cmd.Stdin, "stdout": cmd.Stdout, "stderr": cmd.Stderr} {
+		if f, ok := stream.(*os.File); !ok || f.Name() != os.DevNull {
+			t.Errorf("%s = %v, want the %s *os.File", name, stream, os.DevNull)
+		}
 	}
 }
