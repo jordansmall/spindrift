@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"iter"
 	"regexp"
 	"strings"
 )
@@ -24,6 +25,25 @@ var (
 // It does not recognise indented 4-space code blocks.
 func IsFenceDelimiter(line string) bool {
 	return fenceDelimiter.MatchString(line)
+}
+
+// UnfencedLines yields body's lines with trailing CRs stripped, skipping fenced
+// code blocks, delimiter lines included. The toggle ignores fence char and
+// length, so ~~~ closes a ``` block and an unclosed fence swallows the rest.
+func UnfencedLines(body string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		inFence := false
+		for _, rawLine := range strings.Split(body, "\n") {
+			line := strings.TrimRight(rawLine, "\r")
+			if IsFenceDelimiter(line) {
+				inFence = !inFence
+				continue
+			}
+			if !inFence && !yield(line) {
+				return
+			}
+		}
+	}
 }
 
 // StripInlineCode blanks out inline code spans in line, so the parsers do not
