@@ -975,6 +975,16 @@ checkedMerge {
     source = "lib/runners/*.nix";
   };
 
+  # Regenerate with `nix run .#regen` when lib/runners/*.nix or the artifacts
+  # lib/preambles.nix renders change (issue #6612).
+  launcher-artifacts-gen = mkGofmtDriftCheck {
+    name = "launcher-artifacts-gen";
+    rendered = renderers.renderLauncherArtifactsGo (import ../../lib/preambles.nix)
+      .launcherArtifactsInput;
+    committedPath = "cmd/launcher/internal/inputdoc/artifacts_gen.go";
+    source = "lib/runners/*.nix and lib/preambles.nix";
+  };
+
   # renderRunnerFamiliesGo throws on a row with an unknown or missing field, so
   # a new row attr cannot be silently dropped from the Go Descriptor. The
   # control proves the real rows render, so the negatives are not vacuous.
