@@ -5035,15 +5035,18 @@ without dedup. Before filing, the Launcher builds a dedup index once per run
 — and only once some intent actually carries a usable key, since a payload
 with none can match nothing — from the backlog: a tracker that implements
 the optional `LabeledBacklogLister` capability (every real adapter — github,
-forgejo, jira, local — does) is asked for issues labeled
-`agent-review-finding` or `agent-research-finding` directly, closed then
-open, each with bodies and newest-first; the github adapter caps each
-label at a larger scan limit than plain `ListOpenIssues()` allows, while
-forgejo, jira and local read every matching issue; a tracker without the
-capability (a test fake) falls back to `ListOpenIssues()` itself, open
-only, unchanged from before issue #3873. Either of the two lookups can fail
-independently without blocking the other — a failed lookup warns and
-contributes nothing, the other's issues still index. Each backlog issue's
+forgejo, jira, local — does) is asked directly, closed then open, for
+issues wearing any dispatch kind's finding label (`agent-review-finding`,
+`agent-research-finding`, `agent-butler-finding`) or one of the further
+labels `doctor.ButlerLabelNames()` adds (`agent-butler-patch`,
+`agent-tuning-finding`), each with bodies and newest-first; the github
+adapter caps each label at a larger scan limit than plain
+`ListOpenIssues()` allows, while forgejo, jira and local read every
+matching issue; a tracker without the capability (a test fake) falls back
+to `ListOpenIssues()` itself, open only, unchanged from before
+issue #3873. The closed and the open lookup can each fail independently
+without blocking the other — a failed lookup warns and contributes
+nothing, the other's issues still index. Each backlog issue's
 keys are only the terms recorded in its hidden
 `<!-- spindrift-dedup: ... -->` marker line — written by the Launcher itself
 at filing time — never its title: two distinct findings can share a
