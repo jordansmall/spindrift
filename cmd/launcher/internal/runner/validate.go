@@ -6,8 +6,10 @@ import (
 )
 
 // ValidateRuntime checks that runtime ("podman", "docker", "rancher", or
-// "bwrap") names a binary on PATH, guarding the same Config.Runtime field
-// the adapter constructors and the adapter-selection switch consume.
+// "bwrap") names a binary on PATH. Each family's prerequisites run it on
+// Config.Runtime through RuntimePrerequisite, the same field the OCI
+// constructor resolves through BinaryFor. RUNNER_KIND, not this value, selects
+// the runner family.
 func ValidateRuntime(runtime string) error {
 	return ValidateRuntimeWithLookup(runtime, exec.LookPath)
 }
