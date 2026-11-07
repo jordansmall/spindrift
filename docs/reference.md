@@ -1558,14 +1558,13 @@ message names it, rather than silently impersonating the claude Driver.
 *host*-side half, though the two now diverge (issue #2489). The session
 cache half is unchanged: the image bake pre-creates
 `sessionCacheDirRelative` agent-owned (so podman/bwrap never fabricate a
-root-owned parent when the launcher mounts over it), exported as an
-absolute path (`DRIVER_SESSION_CACHE_DIR`, rendered by
-`lib/preambles.nix`'s `renderDriverMountPreamble` — a separate renderer from
-the registry's own `renderPreamble` above, consumed by the launcher wrapper
-process rather than the in-box shim) that the Go launcher's OCI and
+root-owned parent when the launcher mounts over it), carried as an
+absolute path (`DRIVER_SESSION_CACHE_DIR`, a Launcher input document key
+that `runArtifacts` in `lib/preambles.nix` writes and the Go launcher
+reads, not the in-box shim) that the Go launcher's OCI and
 bwrap adapters mount over directly — no Driver-specific path literal lives
 in those runner adapters for session cache. Skills no longer follow this
-pattern: `DRIVER_SKILLS_DIR` is rendered the same way but is read only by
+pattern: `DRIVER_SKILLS_DIR` is carried the same way but is read only by
 `box` itself (see the `skillsDirRelative` and `skills`
 entries above), not by the Go launcher. The runner adapters instead mount
 `SPINDRIFT_SKILLS_DIR` onto a fixed, Driver-independent literal,
