@@ -47,7 +47,7 @@ func ApplyToRoute(route registryproxy.Route, sets map[string]HostPathSet, rows [
 	}
 	// EnforcedPaths dedupes, EnforcedSubtrees does not: a declared path keeps
 	// its own tagged entry even when it duplicates a derived or allow path,
-	// because the Forwarder keys a rewrite row's bases off that tag (see
+	// because the Registry proxy keys a rewrite row's bases off that tag (see
 	// routeState.basesByEcosystem in registryproxy), not off EnforcedPaths.
 	for _, d := range declaredPaths(route, rows) {
 		subtrees = append(subtrees, registryvocab.Subtree{Ecosystem: d.ecosystem, Path: d.path})
