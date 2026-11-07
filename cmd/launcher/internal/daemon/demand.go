@@ -44,7 +44,7 @@ const (
 //
 // A leader's error counts toward the breaker like a ResolveTip failure
 // (backoffOrHalt): a tracker that cannot even be counted is the systemic
-// fault the breaker exists for. It still Observes DemandFailed first, so the
+// fault the breaker exists for. It still Observes demandFailed first, so the
 // kind rests one interval instead of every slot re-probing it at once.
 //
 // A rate limit is the exception (ADR 0059): it is the tracker refusing us for
@@ -133,13 +133,13 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 			before := s.sched.View(kind, now)
 			prev := before.fault
 			if !limited {
-				s.observe(now, DemandFailed{Kind: kind})
+				s.observe(now, demandFailed{Kind: kind})
 				if prev == probeFailed {
 					return nil
 				}
 				return []Event{{Event: "probe_failed", Kind: kind, Slot: intPtr(slot), Reason: fmt.Sprintf("demand: %v", err)}}
 			}
-			s.observe(now, DemandRateLimited{Kind: kind, Reset: reset})
+			s.observe(now, demandRateLimited{Kind: kind, Reset: reset})
 			// A pause that lapsed with no successful probe since is over, so a
 			// fresh one announces itself; only a repeat inside a live pause is quiet.
 			if prev == probeRateLimited && !before.RateLimitedUntil.IsZero() {
@@ -155,7 +155,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		// before.Counted is zero when never probed, so a first probe finding
 		// work reads as appearing and one finding none as nothing at all.
 		before := s.sched.View(kind, now)
-		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh, IDs: d.IDs})
+		s.observe(now, demandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh, IDs: d.IDs})
 		var evs []Event
 		if before.fault != probeClean {
 			evs = append(evs, Event{Event: "probe_resumed", Kind: kind, Slot: intPtr(slot), Tracker: before.Tracker})

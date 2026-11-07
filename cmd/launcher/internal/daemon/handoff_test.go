@@ -202,15 +202,15 @@ func TestHandoffDecodeAcceptsPreviousVersion(t *testing.T) {
 // exit from a child the successor inherited can land before that probe, and
 // must not take a zero baseline in its place.
 func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
-	recoverProbe := DemandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"7"}}
+	recoverProbe := demandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"7"}}
 	cases := []struct {
 		name        string
 		fresh       func() Schedule
 		kind        Kind
 		predecessor func(*testing.T, Schedule) (Schedule, time.Time)
-		exit        ChildDone // an inherited child's exit
-		flat        DemandProbed
-		rise        DemandProbed
+		exit        childDone // an inherited child's exit
+		flat        demandProbed
+		rise        demandProbed
 	}{
 		{
 			name:  "jammed work",
@@ -218,14 +218,14 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 			kind:  schedWork,
 			predecessor: func(t *testing.T, s Schedule) (Schedule, time.Time) {
 				s = schedObserve(t, s, schedT0,
-					DemandProbed{Kind: schedWork, Ready: 3},
-					ChildDone{Kind: schedWork, Result: ChildJammed},
-					ChildDone{Kind: schedWork, Result: ChildJammed})
+					demandProbed{Kind: schedWork, Ready: 3},
+					childDone{Kind: schedWork, Result: childJammed},
+					childDone{Kind: schedWork, Result: childJammed})
 				return s, schedT0
 			},
-			exit: ChildDone{Kind: schedWork, Result: ChildJammed},
-			flat: DemandProbed{Kind: schedWork, Ready: 3},
-			rise: DemandProbed{Kind: schedWork, Ready: 4},
+			exit: childDone{Kind: schedWork, Result: childJammed},
+			flat: demandProbed{Kind: schedWork, Ready: 3},
+			rise: demandProbed{Kind: schedWork, Ready: 4},
 		},
 		{
 			name:  "upper-bound recover",
@@ -233,14 +233,14 @@ func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
 			kind:  schedRecover,
 			predecessor: func(t *testing.T, s Schedule) (Schedule, time.Time) {
 				now := schedT0
-				s = schedObserve(t, s, now, recoverProbe, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+				s = schedObserve(t, s, now, recoverProbe, childDone{Kind: schedRecover, Result: childEmpty})
 				now = s.View(schedRecover, now).Until
-				s = schedObserve(t, s, now, recoverProbe, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+				s = schedObserve(t, s, now, recoverProbe, childDone{Kind: schedRecover, Result: childEmpty})
 				return s, now
 			},
-			exit: ChildDone{Kind: schedRecover, Result: ChildEmpty},
+			exit: childDone{Kind: schedRecover, Result: childEmpty},
 			flat: recoverProbe,
-			rise: DemandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"8"}},
+			rise: demandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"8"}},
 		},
 	}
 	for _, c := range cases {
@@ -329,7 +329,7 @@ func TestScheduleRestoreLeavesUncarriedReadyUnconfirmed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			succ := probedSchedule([]Kind{schedWork, schedResearch}, 0).restore(c.handoff)
-			succ = schedObserve(t, succ, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
+			succ = schedObserve(t, succ, schedT0, childDone{Kind: schedWork, Result: childJammed})
 			if v := succ.View(schedWork, schedT0); !v.Gated || !v.JamBaselinePending {
 				t.Fatalf("after the inherited jam view = %+v, want gated with the baseline pending", v)
 			}
@@ -338,7 +338,7 @@ func TestScheduleRestoreLeavesUncarriedReadyUnconfirmed(t *testing.T) {
 				t.Fatalf("inherited jam step = %v, want it escalated past %v", want, schedFloor)
 			}
 
-			succ = schedObserve(t, succ, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
+			succ = schedObserve(t, succ, schedT0, demandProbed{Kind: schedWork, Ready: 3})
 			v := succ.View(schedWork, schedT0)
 			if !v.Gated || v.JamBaselinePending {
 				t.Fatalf("after a flat probe view = %+v, want gated with the baseline settled", v)
@@ -347,7 +347,7 @@ func TestScheduleRestoreLeavesUncarriedReadyUnconfirmed(t *testing.T) {
 				t.Fatalf("flat probe moved the step to %v, want %v", got, want)
 			}
 
-			succ = schedObserve(t, succ, schedT0, DemandProbed{Kind: schedWork, Ready: 4})
+			succ = schedObserve(t, succ, schedT0, demandProbed{Kind: schedWork, Ready: 4})
 			if v := succ.View(schedWork, schedT0); v.Gated {
 				t.Fatalf("after a rise view = %+v, want the gate lifted", v)
 			}

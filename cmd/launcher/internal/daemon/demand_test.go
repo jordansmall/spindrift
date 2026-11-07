@@ -556,7 +556,7 @@ func TestPoolReservationFloorsResearchAlongsideDemand(t *testing.T) {
 	now := clk.Now()
 	p.mutate(func(s *state) []Event {
 		for _, k := range cfg.Kinds {
-			s.sched, _ = s.sched.Observe(now, DemandProbed{Kind: k, Ready: 1})
+			s.sched, _ = s.sched.Observe(now, demandProbed{Kind: k, Ready: 1})
 		}
 		return nil
 	})
@@ -646,8 +646,8 @@ func TestPoolEmptyDemandKindYieldsToTheOther(t *testing.T) {
 			defer p.cancel()
 			now := clk.Now()
 			p.mutate(func(s *state) []Event {
-				s.sched, _ = s.sched.Observe(now, DemandProbed{Kind: workKind, Ready: tt.work})
-				s.sched, _ = s.sched.Observe(now, DemandProbed{Kind: researchKind, Ready: tt.resrch})
+				s.sched, _ = s.sched.Observe(now, demandProbed{Kind: workKind, Ready: tt.work})
+				s.sched, _ = s.sched.Observe(now, demandProbed{Kind: researchKind, Ready: tt.resrch})
 				return nil
 			})
 			if kind, ok := p.pickKind(); !ok || kind != tt.want {

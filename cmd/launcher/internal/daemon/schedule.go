@@ -70,7 +70,7 @@ type kindSched struct {
 	idsAtJam []string
 
 	// readyUnconfirmed is set while ready carries an adjustment no accepted
-	// probe has confirmed: a Claimed's decrement, a child's exit 2 zeroing it,
+	// probe has confirmed: a claimed's decrement, a child's exit 2 zeroing it,
 	// or a restore, which carries no count.
 	readyUnconfirmed bool
 	// jamBaselinePending is set when a jam was recorded while readyUnconfirmed,
@@ -79,7 +79,7 @@ type kindSched struct {
 	// only restore holds that baseline pending: a carried gate has none.
 	jamBaselinePending bool
 
-	// counted is the tracker's last probed count, set only by DemandProbed.
+	// counted is the tracker's last probed count, set only by demandProbed.
 	// ready is also zeroed by a child's exit 2, which is no tracker
 	// observation, so zero crossings compare against this instead.
 	counted int
@@ -87,7 +87,7 @@ type kindSched struct {
 	// Schedule is a value and Observe copies its map shallowly.
 	countedIDs []string
 
-	// claims counts the Claimed events folded into this kind, so a probe can
+	// claims counts the claimed events folded into this kind, so a probe can
 	// tell whether one landed while it was in flight.
 	claims int
 
@@ -165,25 +165,25 @@ func (start) isDecision() {}
 func (probe) isDecision() {}
 func (park) isDecision()  {}
 
-// ChildOutcome is how a child's check ended, as far as scheduling cares.
-type ChildOutcome int
+// childOutcome is how a child's check ended, as far as scheduling cares.
+type childOutcome int
 
 const (
-	ChildContinue ChildOutcome = iota // exit 0 or 4: it did or found something
-	ChildEmpty                        // exit 2: queue empty
-	ChildJammed                       // exit 3: none dispatchable
+	childContinue childOutcome = iota // exit 0 or 4: it did or found something
+	childEmpty                        // exit 2: queue empty
+	childJammed                       // exit 3: none dispatchable
 )
 
-// SchedEvent is a fact the pool feeds to Observe.
-type SchedEvent interface {
+// schedEvent is a fact the pool feeds to Observe.
+type schedEvent interface {
 	// kind is the Kind the event concerns; "" for one that names none.
 	kind() Kind
 }
 
-// ChildDone: a child of Kind finished with Result.
-type ChildDone struct {
+// childDone: a child of Kind finished with Result.
+type childDone struct {
 	Kind   Kind
-	Result ChildOutcome
+	Result childOutcome
 	// NextDue is the child's report of when its kind next has work; read only
 	// for a child-reported kind.
 	NextDue NextDue
@@ -193,8 +193,8 @@ type ChildDone struct {
 	GateGen int
 }
 
-// DemandProbed: a probe of Kind counted Ready startable items.
-type DemandProbed struct {
+// demandProbed: a probe of Kind counted Ready startable items.
+type demandProbed struct {
 	Kind  Kind
 	Ready int
 	// Claims is the kind's claim count when the probe began.
@@ -204,27 +204,27 @@ type DemandProbed struct {
 	Fresh bool // the probe skipped any adapter cache
 }
 
-// DemandFailed: a probe of Kind errored.
-type DemandFailed struct{ Kind Kind }
+// demandFailed: a probe of Kind errored.
+type demandFailed struct{ Kind Kind }
 
-// Claimed: a child of Kind reported its claim, taking an item out of the count
+// claimed: a child of Kind reported its claim, taking an item out of the count
 // it was started against.
-type Claimed struct{ Kind Kind }
+type claimed struct{ Kind Kind }
 
-// DemandRateLimited: a probe of Kind was refused by its tracker's rate limit.
+// demandRateLimited: a probe of Kind was refused by its tracker's rate limit.
 // Reset is when the tracker says the limit lifts; zero when it reported none.
 // The pause covers every kind on the same tracker, not just Kind.
-type DemandRateLimited struct {
+type demandRateLimited struct {
 	Kind  Kind
 	Reset time.Time
 }
 
-func (e ChildDone) kind() Kind    { return e.Kind }
-func (e DemandProbed) kind() Kind { return e.Kind }
-func (e DemandFailed) kind() Kind { return e.Kind }
-func (e Claimed) kind() Kind      { return e.Kind }
+func (e childDone) kind() Kind    { return e.Kind }
+func (e demandProbed) kind() Kind { return e.Kind }
+func (e demandFailed) kind() Kind { return e.Kind }
+func (e claimed) kind() Kind      { return e.Kind }
 
-func (e DemandRateLimited) kind() Kind { return e.Kind }
+func (e demandRateLimited) kind() Kind { return e.Kind }
 
 // newSchedule builds a Schedule over kinds. probe holds the Demand interval
 // for each probed kind; a kind absent or at 0 stays exit-driven. floor and
@@ -378,11 +378,11 @@ func (s Schedule) Decide(now time.Time, occ occupancy) decision {
 
 // Observe folds ev into the schedule at now and returns the updated copy.
 // woke reports that the event made its kind startable when it was not before,
-// or, for a Claimed, made a probed kind probe-due when it was not before: a
+// or, for a claimed, made a probed kind probe-due when it was not before: a
 // sibling parked until the old probe's deadline must re-decide.
-// Only the observed kind changes — except DemandRateLimited, which pauses
+// Only the observed kind changes — except demandRateLimited, which pauses
 // every kind on its tracker and only ever closes kinds, so woke is false.
-func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
+func (s Schedule) Observe(now time.Time, ev schedEvent) (Schedule, bool) {
 	kind := ev.kind()
 	ks, ok := s.state[kind]
 	if !ok {
@@ -391,14 +391,14 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	before := ks
 	var claimWoke bool
 	switch e := ev.(type) {
-	case DemandRateLimited:
+	case demandRateLimited:
 		return s.rateLimited(now, kind, e.Reset), false
-	case ChildDone:
+	case childDone:
 		ks = ks.childDone(now, e.Result, e.NextDue, e.GateGen)
-	case DemandProbed:
+	case demandProbed:
 		ks.ready, ks.counted, ks.countedIDs, ks.fault = e.Ready, e.Ready, e.IDs, probeClean
 		// A claim that landed mid-probe moved the count after it was read, so
-		// stay stale (the Claimed zeroed probedAt) and re-probe, and never
+		// stay stale (the claimed zeroed probedAt) and re-probe, and never
 		// lift a jam on that pre-claim count.
 		if e.Claims == ks.claims {
 			ks.probedAt = now
@@ -434,11 +434,11 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 		if e.Fresh {
 			ks.fresh = false
 		}
-	case DemandFailed:
+	case demandFailed:
 		// Keep the old count: only a rest from probing, so siblings don't
 		// hammer a failing tracker.
 		ks.probedAt, ks.fault = now, probeFailed
-	case Claimed:
+	case claimed:
 		if ks.probed() {
 			ks.claims++
 			// Keep a failed re-probe from resting on the pre-claim count; counted
@@ -497,35 +497,35 @@ func opened(before, after kindSched, now time.Time) bool {
 	return after.startable(now, 0) && !before.startable(now, 0)
 }
 
-func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen int) kindSched {
+func (k kindSched) childDone(now time.Time, r childOutcome, nd NextDue, gateGen int) kindSched {
 	if k.reported {
 		k.due = NextDue{}
 		switch {
-		case r == ChildEmpty && !nd.IsZero():
+		case r == childEmpty && !nd.IsZero():
 			k.due = nd
 			k.gate = k.gate.reset()
-		case r == ChildContinue:
+		case r == childContinue:
 			// A swept Chore may leave another due; the next child re-reports.
 			k.gate = k.gate.reset()
 		default:
-			k.gate = k.gate.markNoWorkUnder(now, r == ChildJammed, gateGen)
+			k.gate = k.gate.markNoWorkUnder(now, r == childJammed, gateGen)
 		}
 		return k
 	}
 	if !k.probed() {
-		if r == ChildContinue {
+		if r == childContinue {
 			k.gate = k.gate.reset()
 		} else {
-			k.gate = k.gate.markNoWorkUnder(now, r == ChildJammed, gateGen)
+			k.gate = k.gate.markNoWorkUnder(now, r == childJammed, gateGen)
 		}
 		return k
 	}
 	switch r {
-	case ChildContinue:
+	case childContinue:
 		k.gate = k.gate.reset()
 		// The child just consumed from the count; re-probe rather than trust it.
 		k.probedAt = time.Time{}
-	case ChildEmpty:
+	case childEmpty:
 		k.ready, k.probedAt, k.readyUnconfirmed = 0, now, true
 		if k.counted > 0 {
 			k.fresh = true
@@ -547,9 +547,9 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen 
 		// The child's answer is a fresh observation: one interval of rest,
 		// not a growing backoff, so an empty queue never becomes a spawn loop.
 		k.gate = k.gate.reset()
-	case ChildJammed:
+	case childJammed:
 		k.gate, _ = k.gate.markNoWork(now, true)
-		// The child swaps the label before the daemon folds its Claimed, so an
+		// The child swaps the label before the daemon folds its claimed, so an
 		// unconfirmed ready may count that claim twice. The signal is
 		// readyUnconfirmed, not a zero probedAt: a failed probe sets probedAt
 		// but keeps the decremented count, and a Continue zeroes probedAt
@@ -586,7 +586,7 @@ func (s Schedule) TipMoved(now time.Time) (_ Schedule, lifted []Kind, woke bool)
 func (s Schedule) claimsOf(kind Kind) int { return s.state[kind].claims }
 
 // gateGenOf is kind's gate generation, 0 for an unknown kind: what a child
-// started now carries back in ChildDone.GateGen (issue #4618).
+// started now carries back in childDone.GateGen (issue #4618).
 func (s Schedule) gateGenOf(kind Kind) int { return s.state[kind].gate.gen }
 
 // with returns a copy of s holding ks for kind, leaving s's own map alone.

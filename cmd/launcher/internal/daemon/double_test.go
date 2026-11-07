@@ -1477,13 +1477,13 @@ func (p *pool) pickKind() (Kind, bool) {
 // markNoWork folds one no-work child result into the schedule and returns the
 // wait it gates for.
 func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
-	result := ChildEmpty
+	result := childEmpty
 	if jammed {
-		result = ChildJammed
+		result = childJammed
 	}
 	var wait time.Duration
 	p.mutate(func(s *state) []Event {
-		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: result, GateGen: s.sched.gateGenOf(kind)})
+		s.sched, _ = s.sched.Observe(now, childDone{Kind: kind, Result: result, GateGen: s.sched.gateGenOf(kind)})
 		if v := s.sched.View(kind, now); v.Gated {
 			wait = v.Until.Sub(now)
 		}
