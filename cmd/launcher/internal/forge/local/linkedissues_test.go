@@ -154,6 +154,29 @@ func TestLinkedIssues_MissingBlockerSlugIsUnresolved(t *testing.T) {
 	}
 }
 
+func TestLinkedIssues_FencedBlockerSlugIsNotLinked(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "a", localIssue{
+		frontmatter: localFrontmatter{Title: "A", Created: "2026-01-01T00:00:00Z"},
+		body:        "```\n## Blocked by\n\n- fenced\n```\n\n## Blocked by\n\n- real-dep\n",
+	})
+	writeLocalIssue(t, dir, "real-dep", localIssue{
+		frontmatter: localFrontmatter{Title: "real-dep", Created: "2026-01-01T00:00:00Z"},
+		body:        "no blockers",
+	})
+
+	links, err := NewLocalTracker(dir, testLabels).LinkedIssues("a")
+	if err != nil {
+		t.Fatalf("LinkedIssues: %v", err)
+	}
+	mustFind(t, links, "real-dep")
+	for _, l := range links {
+		if l.Ref == "fenced" {
+			t.Errorf("fenced slug linked: %+v", l)
+		}
+	}
+}
+
 func TestLinkedIssues_MalformedLinkedFileIsUnresolved(t *testing.T) {
 	dir := t.TempDir()
 	writeLocalIssue(t, dir, "a", localIssue{
