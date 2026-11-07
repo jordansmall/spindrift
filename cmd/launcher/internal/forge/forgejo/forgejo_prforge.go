@@ -334,7 +334,7 @@ func (f *forgejoCodeForge) latestStatuses(sha string) ([]forgejoStatus, error) {
 }
 
 // FailureDetail renders the failing entries of latestStatuses into a bounded
-// excerpt, returning "" when nothing is failing. forge.RenderFailureDetail owns
+// report, returning "" when nothing is failing. forge.RenderFailureDetail owns
 // the formatting and the forge.MaxFailureDetailBytes truncation. Callers should
 // treat a non-nil error as "detail unavailable".
 func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {

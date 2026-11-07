@@ -37,7 +37,7 @@ var failingStatusContextStates = map[string]bool{
 	"ERROR":   true,
 }
 
-// FailureDetail renders the PR's failing checks into a bounded excerpt, or ""
+// FailureDetail renders the PR's failing checks into a bounded report, or ""
 // when none are failing. It reads the head commit's statusCheckRollup over
 // GraphQL because `gh pr checks` uses the REST check-runs endpoint, which 403s
 // under a fine-grained PAT. The fetch is best-effort: a non-nil error means
