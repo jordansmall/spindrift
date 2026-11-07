@@ -52,7 +52,8 @@ const tmpOverlay = "<tmp-overlay>"
 // writable store with a nix.conf swaps the store's ro-bind for a tmpfs
 // overlay, and the launcher probes overlayfs before the Box run.
 func bwrapStoreOverlay(doc *inputdoc.Document) bool {
-	return doc.Artifacts["NIX_STORE_WRITABLE"] == "true" && doc.Artifacts["NIX_CONFIG_FILE"] != ""
+	b := doc.Artifacts.Bwrap
+	return b != nil && b.NixStoreWritable.Bool() && b.NixConfigFile.String() != ""
 }
 
 // argvEnv scans a runner argv for the env it hands the Box. flag is "-e"
@@ -96,8 +97,8 @@ func argvEnv(argv []string, flag string) (env map[string]*string, mounts map[str
 // can pin a value the document leaves open.
 func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []string {
 	var bad []string
-	bwrap := doc.Artifacts["RUNTIME"] == "bwrap"
-	image := doc.Artifacts["IMAGE_TAG"]
+	bwrap := doc.Artifacts.Shared.Runtime.String() == "bwrap"
+	image := docImageTag(doc)
 	flag := "-e"
 	if bwrap {
 		flag = "--setenv"
@@ -108,7 +109,7 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		bad = append(bad, fmt.Sprintf("run argv names image %q; document specifies %q", argv[max(0, n-2)], image))
 	}
 	env, mounts := argvEnv(argv, flag)
-	if cache := doc.Artifacts["DRIVER_SESSION_CACHE_DIR"]; mounts[cache] == "" {
+	if cache := doc.Artifacts.Shared.DriverSessionCacheDir.String(); mounts[cache] == "" {
 		bad = append(bad, fmt.Sprintf("no mount targets the driver session cache %q", cache))
 	}
 	if bwrap {
@@ -121,7 +122,7 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 		}
 	}
 	secretNames := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"}
-	for _, name := range strings.Fields(doc.Artifacts["BOX_ENV_VARS"]) {
+	for _, name := range strings.Fields(doc.Artifacts.Shared.BoxEnvVars.String()) {
 		got, ok := env[name]
 		want, inDoc := doc.Settings[name]
 		if rt, ok := smokeRuntimeSettings[name]; ok {
@@ -289,7 +290,7 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 		// one. The generation mirrors bwrap.ClosureGeneration's
 		// SafePathComponent (an unusable tag yields a path with no generation
 		// segment).
-		tag := doc.Artifacts["IMAGE_TAG"]
+		tag := docImageTag(doc)
 		gen := filepath.Base(tag)
 		if tag == "" || gen == "." || gen == ".." || gen == string(filepath.Separator) {
 			gen = ""
@@ -424,7 +425,7 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := doc.Artifacts["RUNTIME"]; got != c.runtime {
+			if got := doc.Artifacts.Shared.Runtime.String(); got != c.runtime {
 				t.Fatalf("fixture %s renders RUNTIME=%q; case expects %q", c.fixture, got, c.runtime)
 			}
 			boxRun, gh, ledgerRefs := runSmoke(t, c, docPath)
@@ -462,7 +463,7 @@ func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(strings.Fields(doc.Artifacts["BOX_ENV_VARS"]), dropped) {
+	if !slices.Contains(strings.Fields(doc.Artifacts.Shared.BoxEnvVars.String()), dropped) {
 		t.Fatalf("fixture %s does not forward %s; pick another knob", c.fixture, dropped)
 	}
 
@@ -527,7 +528,7 @@ func TestSeamSmokeBwrapOverlayProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bwrapStoreOverlay(doc) {
-		t.Fatalf("scratch document does not enable the store overlay: %q", doc.Artifacts)
+		t.Fatalf("scratch document does not enable the store overlay: %+v", doc.Artifacts)
 	}
 
 	boxRun, gh, _ := runSmoke(t, c, scratch)
@@ -540,4 +541,16 @@ func TestSeamSmokeBwrapOverlayProbe(t *testing.T) {
 	for _, p := range checkForgeCalls(doc, c.kind, gh) {
 		t.Errorf("forge: %s", p)
 	}
+}
+
+// docImageTag reads IMAGE_TAG from whichever runner family part the document
+// sets; both rows render it.
+func docImageTag(doc *inputdoc.Document) string {
+	switch a := doc.Artifacts; {
+	case a.Bwrap != nil:
+		return a.Bwrap.ImageTag.String()
+	case a.OCI != nil:
+		return a.OCI.ImageTag.String()
+	}
+	return ""
 }

@@ -274,7 +274,7 @@ func warnStrippedChildEnv(keys []string, stderr io.Writer) {
 func resolveDriverEnv(doc *inputdoc.Document, stderr io.Writer) []string {
 	var baked string
 	if doc != nil {
-		baked = doc.Artifacts["DRIVER"]
+		baked = doc.Artifacts.Shared.Driver.String()
 	}
 	ambient := os.Getenv("DRIVER")
 	_, warning := inputdoc.ResolveDriver(baked, ambient, inputdoc.DriverWarned())

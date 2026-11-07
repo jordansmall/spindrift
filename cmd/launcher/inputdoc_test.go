@@ -2,7 +2,8 @@ package main
 
 import (
 	"bytes"
-	"maps"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,8 +19,57 @@ func setRunner(t *testing.T, runtime, kind string) {
 	setArtifact(t, "RUNNER_KIND", kind)
 }
 
+// artifactsFromFlat builds typed artifacts from the flat key/value object the
+// document carries. It rejects a key no row renders; decoding rejects a family
+// key the RUNNER_KIND in m does not select.
+func artifactsFromFlat(m map[string]string) (inputdoc.Artifacts, error) {
+	known := map[string]bool{}
+	for _, k := range inputdoc.SharedArtifactKeys {
+		known[k] = true
+	}
+	for _, keys := range inputdoc.FamilyArtifactKeys {
+		for _, k := range keys {
+			known[k] = true
+		}
+	}
+	for k := range m {
+		if !known[k] {
+			return inputdoc.Artifacts{}, fmt.Errorf("unknown artifact key %q", k)
+		}
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return inputdoc.Artifacts{}, err
+	}
+	var a inputdoc.Artifacts
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return inputdoc.Artifacts{}, err
+	}
+	return a, nil
+}
+
+func flatArtifacts(a inputdoc.Artifacts) (map[string]string, error) {
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	return m, json.Unmarshal(raw, &m)
+}
+
+// mustArtifacts is artifactsFromFlat for table fixtures: a typo or a family
+// key without its RUNNER_KIND panics instead of reading as an absent key.
+func mustArtifacts(m map[string]string) inputdoc.Artifacts {
+	a, err := artifactsFromFlat(m)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
 // setArtifact adds key to the loaded document's artifacts for the calling test
-// only. It copies the document, so a shared fixture is never mutated.
+// only. It copies the document, so a shared fixture is never mutated. A family
+// key needs the runner family already selected (setRunner first).
 func setArtifact(t *testing.T, key, value string) {
 	t.Helper()
 	prev := loadedDoc
@@ -27,11 +77,14 @@ func setArtifact(t *testing.T, key, value string) {
 	if prev != nil {
 		*doc = *prev
 	}
-	doc.Artifacts = maps.Clone(doc.Artifacts)
-	if doc.Artifacts == nil {
-		doc.Artifacts = map[string]string{}
+	flat, err := flatArtifacts(doc.Artifacts)
+	if err != nil {
+		t.Fatalf("setArtifact(%s): %v", key, err)
 	}
-	doc.Artifacts[key] = value
+	flat[key] = value
+	if doc.Artifacts, err = artifactsFromFlat(flat); err != nil {
+		t.Fatalf("setArtifact(%s): %v (call setRunner first)", key, err)
+	}
 	loadedDoc = doc
 	t.Cleanup(func() { loadedDoc = prev })
 }
@@ -187,21 +240,16 @@ func TestWarnAmbientKnobEnv_SetButEmptyNonBoolKnob_NoWarning(t *testing.T) {
 
 // The wrapper no longer pre-populates env (ADR 0020), so a boxEnv knob like
 // MODEL reaches the Box with its baked value only through these fallbacks: the
-// document's settings or artifacts first, then the schema default table.
+// document's settings first, then the schema default table.
 func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil; os.Unsetenv("MODEL"); os.Unsetenv("DRIVER") })
+	t.Cleanup(func() { loadedDoc = nil; os.Unsetenv("MODEL") })
 	os.Unsetenv("MODEL")
-	os.Unsetenv("DRIVER")
 
 	loadedDoc = &inputdoc.Document{
-		Settings:  map[string]string{"MODEL": "from-settings"},
-		Artifacts: map[string]string{"DRIVER": "from-artifacts"},
+		Settings: map[string]string{"MODEL": "from-settings"},
 	}
 	if got := resolveBoxEnvVar("MODEL"); got != "from-settings" {
 		t.Errorf("MODEL = %q, want from-settings", got)
-	}
-	if got := resolveBoxEnvVar("DRIVER"); got != "from-artifacts" {
-		t.Errorf("DRIVER = %q, want from-artifacts", got)
 	}
 
 	os.Setenv("MODEL", "from-env")
@@ -219,6 +267,7 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 // An ambient env var named like an artifact must never swap a nix-built
 // reference (issue #6611): loadConfig reads artifacts from the document only.
 func TestLoadConfig_ArtifactsIgnoreAmbientEnv(t *testing.T) {
+	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "IMAGE_TAG", "spindrift:from-doc")
 	setArtifact(t, "AGENT_FILES", "/nix/store/from-doc")
 	t.Setenv("IMAGE", "ambient")
@@ -259,9 +308,9 @@ func TestResolveChoreCatalog_AbsentVersusEmpty(t *testing.T) {
 		want choreCatalog
 	}{
 		{"no document", nil, choreCatalog{}},
-		{"key absent", &inputdoc.Document{Artifacts: map[string]string{}}, choreCatalog{}},
-		{"key empty", &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": ""}}, choreCatalog{known: true}},
-		{"names", &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "bugs  docs-drift"}}, choreCatalog{names: []string{"bugs", "docs-drift"}, known: true}},
+		{"key absent", &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{})}, choreCatalog{}},
+		{"key empty", &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{"CHORE_CATALOG": ""})}, choreCatalog{known: true}},
+		{"names", &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{"CHORE_CATALOG": "bugs  docs-drift"})}, choreCatalog{names: []string{"bugs", "docs-drift"}, known: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

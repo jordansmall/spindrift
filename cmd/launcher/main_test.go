@@ -811,6 +811,7 @@ func TestRunnerConfig_LimitsSkillsOverrides(t *testing.T) {
 // files, issue #2663) reach runner.Config, so the bwrap adapter binds them
 // instead of runner-written copies.
 func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
+	setRunner(t, "bwrap", "bwrap")
 	// Bare store-path files (pkgs.writeText output), not directories holding a
 	// nested passwd/group file: the shape nix/checks/preambles.nix asserts.
 	setArtifact(t, "PASSWD_FILE", "/nix/store/abc-passwd")
@@ -839,6 +840,7 @@ func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
 // snapshot, issue #2664) reach runner.Config, so the bwrap adapter can mount
 // the config and realize its snapshot closure.
 func TestRunnerConfig_NixConfigFile(t *testing.T) {
+	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
 	setArtifact(t, "NIX_CONFIG_FILE_DRV", "/nix/store/abc-nix-conf.drv")
 
@@ -857,6 +859,7 @@ func TestRunnerConfig_NixConfigFile(t *testing.T) {
 // config.nixStoreWritable, the bwrap adapter's read-write /nix/store overlay
 // gate (issue #2665).
 func TestLoadConfig_NixStoreWritable_ReadsArtifact(t *testing.T) {
+	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 
 	c := loadConfig()
@@ -879,6 +882,7 @@ func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 // NIX_VOLUME names the container-build fallback's /nix volume. It comes from
 // the document only: absent, it is empty (the oci row renders the default).
 func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
+	setRunner(t, "podman", "oci")
 	t.Setenv("NIX_VOLUME", "ambient")
 	c := loadConfig()
 	if c.nixVolume != "" {
@@ -902,6 +906,7 @@ func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
 // whether to overlay /nix/store as a writable tmpfs layer (issue #2665,
 // ADR 0042).
 func TestRunnerConfig_NixStoreWritable(t *testing.T) {
+	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 
 	c := loadConfig()
@@ -1725,12 +1730,13 @@ func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 		os.Unsetenv(k)
 	}
 
-	loadedDoc = &inputdoc.Document{Artifacts: map[string]string{
+	loadedDoc = &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{
+		"RUNNER_KIND":   "oci",
 		"IMAGE_ARCHIVE": "/nix/store/doc-image",
 		"RUNTIME":       "podman",
 		"DRIVER":        "claude",
 		"BOX_ENV_VARS":  "MODEL BASE_BRANCH",
-	}}
+	})}
 
 	c := loadConfig()
 	if c.imageArchive != "/nix/store/doc-image" {
@@ -1764,7 +1770,7 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 
 // With no loaded document (a direct binary invocation), resolveCapabilitySignals
 // derives the signals fresh from the backend registry rather than trusting a
-// forwarded artifact that was never populated: docArtifact("FULLY_LOCAL")
+// forwarded artifact that was never populated: Shared.FullyLocal
 // is always "" with no document (issue #2527 review).
 func TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
@@ -1789,12 +1795,12 @@ func TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact(t *tes
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "false",
 			"OUTBOX_RELAY_CAPABLE":       "true",
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
-		},
+		}),
 	}
 
 	sig := resolveCapabilitySignals("github", "github")
@@ -1820,7 +1826,7 @@ func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *test
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{"FULLY_LOCAL": "false"},
+		Artifacts: mustArtifacts(map[string]string{"FULLY_LOCAL": "false"}),
 	}
 
 	sig := resolveCapabilitySignals("local", "local")
@@ -1837,12 +1843,12 @@ func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *t
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "false",
 			"OUTBOX_RELAY_CAPABLE":       "false",
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
-		},
+		}),
 	}
 	t.Setenv("HOST_MEDIATED_REMOTE", "true")
 	t.Setenv("OUTBOX_RELAY_CAPABLE", "true")
@@ -1872,7 +1878,7 @@ func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
-		Artifacts: map[string]string{"RUNTIME": "podman"},
+		Artifacts: mustArtifacts(map[string]string{"RUNTIME": "podman"}),
 	}
 
 	sig := resolveCapabilitySignals("local", "local")
@@ -1890,17 +1896,17 @@ func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t
 // A matching document carrying only some of the four keys falls back to the
 // registry derivation for all four. Presence must be checked with AND, not
 // OR: an OR lets a document missing one key into the trust branch, where
-// docArtifact(missingKey) reads the absent key as false (issue #2527 review).
+// the missing key's typed field reads as false (issue #2527 review).
 func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "false",
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
 			// OUTBOX_RELAY_CAPABLE deliberately absent: 3 of 4 keys present.
-		},
+		}),
 	}
 
 	sig := resolveCapabilitySignals("local", "local")
@@ -1927,7 +1933,7 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 // With no loaded document, resolveTrackerAndForgeSignals derives the
 // tracker-axis and forge-backend strings fresh from the pure mirror of
 // lib/mkHarness.nix's computation rather than reading an unpopulated
-// docArtifact as "" (issue #2533 review).
+// typed artifact as "" (issue #2533 review).
 func TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
@@ -1956,12 +1962,12 @@ func TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact(t
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"TRACKER_AXIS_READ":  "WEIRD_READ",
 			"TRACKER_AXIS_WRITE": "WEIRD_WRITE",
 			"TRACKER_AXIS_FILER": "WEIRD_FILER",
 			"FORGE_BACKEND":      "WEIRD_FORGE",
-		},
+		}),
 	}
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("github", "github")
@@ -1978,12 +1984,12 @@ func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t 
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"TRACKER_AXIS_READ":  "GITHUB",
 			"TRACKER_AXIS_WRITE": "GITHUB",
 			"TRACKER_AXIS_FILER": "GH",
 			"FORGE_BACKEND":      "GH",
-		},
+		}),
 	}
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
@@ -1999,12 +2005,12 @@ func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "forgejo"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"TRACKER_AXIS_READ":  "GITHUB",
 			"TRACKER_AXIS_WRITE": "GITHUB",
 			"TRACKER_AXIS_FILER": "GH",
 			// FORGE_BACKEND deliberately absent: 3 of 4 keys present.
-		},
+		}),
 	}
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
@@ -2046,10 +2052,10 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
 		},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"FILER_ENABLED":      "true",
 			"WORKER_PROVISIONED": "false",
-		},
+		}),
 	}
 	// Live values must equal what the document baked in for the trust branch
 	// to activate, so pin them rather than inherit the ambient environment.
@@ -2077,10 +2083,10 @@ func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTru
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
 		},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"FILER_ENABLED":      "false",
 			"WORKER_PROVISIONED": "true",
-		},
+		}),
 	}
 	// FILER_MODEL is overridden away from the document's baked "", the
 	// scenario that tripped the old all-three-must-match trust gate. The
@@ -2108,10 +2114,10 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
 		},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"FILER_ENABLED":      "false",
 			"WORKER_PROVISIONED": "true",
-		},
+		}),
 	}
 	// WORKER_MODEL is overridden away from the document's baked value; the
 	// other two stay matched, isolating the divergence to WORKER_MODEL.
@@ -2203,11 +2209,11 @@ func TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiv
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
 		},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"FILER_ENABLED":      "false",
 			"WORKER_PROVISIONED": "true",
 			"SCOUT_PROVISIONED":  "false",
-		},
+		}),
 	}
 	// Live SCOUT_MODEL deliberately non-empty, away from what a scoutModel=""
 	// bake produced: the baked SCOUT_PROVISIONED=false must still win.
@@ -2232,11 +2238,11 @@ func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependent
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
 		},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"FILER_ENABLED":      "true",
 			"WORKER_PROVISIONED": "false",
 			// SCOUT_PROVISIONED deliberately absent: a pre-#3157 document.
-		},
+		}),
 	}
 	t.Setenv("FILER_MODEL", "")
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
@@ -2297,11 +2303,11 @@ func TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken(t
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "true",
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
-		},
+		}),
 	}
 
 	c := minimalValidLocalConfig()
@@ -2320,11 +2326,11 @@ func TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndG
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "true",
 			"IN_BOX_UNREACHABLE_TRACKER": "true",
 			"FULLY_LOCAL":                "true",
-		},
+		}),
 	}
 
 	c := minimalValidConfig()
@@ -3385,7 +3391,7 @@ func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T)
 }
 
 // dispatchConfig wires resolveTrackerAndForgeSignals and
-// resolveAgentPresenceSignals rather than the old unguarded docArtifact reads:
+// resolveAgentPresenceSignals rather than the old unguarded artifact reads:
 // with no document, WorkerProvisioned comes back true and the tracker-axis and
 // forge-backend strings come back the fresh github computation, not the old
 // bug's unconditional false and empty (issue #2533 review).
@@ -3626,12 +3632,12 @@ func TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities(t *test
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
-		Artifacts: map[string]string{
+		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "true",
 			"OUTBOX_RELAY_CAPABLE":       "false",
 			"IN_BOX_UNREACHABLE_TRACKER": "true",
 			"FULLY_LOCAL":                "true",
-		},
+		}),
 	}
 
 	sig := resolveCapabilitySignals("github", "github")
@@ -6657,7 +6663,7 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 // Pins issue #2538 AC1, "the artifact rides the document; the launcher
 // performs no runtime-name comparison to determine kind": RUNTIME=bwrap with
 // RUNNER_KIND genuinely absent must not derive runnerKind from the runtime
-// name, and resolves to "", the empty default every absent docArtifact call
+// name, and resolves to "", the empty default every absent artifact field
 // gets.
 func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 	setArtifact(t, "RUNTIME", "bwrap")

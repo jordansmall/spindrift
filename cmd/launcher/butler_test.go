@@ -368,7 +368,7 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 // before writing a Ledger claim, same guarantee as above (issue #3905).
 func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
-	withLoadedDoc(t, &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "docs-drift"}})
+	withLoadedDoc(t, &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{"CHORE_CATALOG": "docs-drift"})})
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var stderr bytes.Buffer
@@ -387,7 +387,7 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 // (issue #5929), and does so before writing a Ledger claim.
 func TestCmdButler_RejectsUnsetDispatchKind(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
-	withLoadedDoc(t, &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "bugs"}})
+	withLoadedDoc(t, &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{"CHORE_CATALOG": "bugs"})})
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var stderr bytes.Buffer
