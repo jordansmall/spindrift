@@ -882,3 +882,193 @@ func TestSlotStatus_ImageBuildSinceMarshalsAndOmitsWhenEmpty(t *testing.T) {
 		t.Errorf("marshalled = %s, want no image_build key when empty", data)
 	}
 }
+
+// TestProjectStatus feeds hand-built state and a fixed time to projectStatus:
+// no pool, no clock, no lock.
+func TestProjectStatus(t *testing.T) {
+	now := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+	rfc := func(tm time.Time) string { return tm.UTC().Format(time.RFC3339) }
+	win, err := ParseWindow("09:00-17:00 UTC")
+	if err != nil {
+		t.Fatalf("ParseWindow: %v", err)
+	}
+	work := KindOf(dispatchkind.Work)
+	idle := func(n int) []slotState {
+		ss := make([]slotState, n)
+		for i := range ss {
+			ss[i] = slotState{phase: PhaseIdle, since: now}
+		}
+		return ss
+	}
+
+	t.Run("idle with no Awake window is checking", func(t *testing.T) {
+		got := projectStatus(&state{slots: idle(2)}, Config{Kinds: []Kind{work}, RepoURL: "https://example.test/r"}, now)
+		if got.State != StateChecking || got.Reason != "" {
+			t.Fatalf("state/reason = %q/%q, want checking and none", got.State, got.Reason)
+		}
+		if got.RepoURL != "https://example.test/r" || len(got.Kinds) != 1 || got.Kinds[0] != work {
+			t.Errorf("repo/kinds = %q/%v, want the config's", got.RepoURL, got.Kinds)
+		}
+		if len(got.Slots) != 2 {
+			t.Fatalf("slots = %+v, want two", got.Slots)
+		}
+		if g := got.Slots[1]; g.Slot != 1 || g.Phase != PhaseIdle || g.Busy || g.Since != rfc(now) {
+			t.Errorf("slots = %+v, want two bare idle slots", got.Slots)
+		}
+		if len(got.Checks) != 1 || got.Checks[0].NextCheck != "" {
+			t.Errorf("checks = %+v, want one kind with no nextCheck", got.Checks)
+		}
+		if got.SelfUpdate != nil || got.Trackers != nil {
+			t.Errorf("self_update/trackers = %v/%v, want none", got.SelfUpdate, got.Trackers)
+		}
+	})
+
+	t.Run("shut Awake window is asleep and floors nextCheck", func(t *testing.T) {
+		got := projectStatus(&state{slots: idle(1)}, Config{Kinds: []Kind{work}, Awake: win}, now)
+		if got.State != StateAsleep || got.Reason != "" {
+			t.Fatalf("state/reason = %q/%q, want asleep and none", got.State, got.Reason)
+		}
+		if len(got.Checks) != 1 {
+			t.Fatalf("checks = %+v, want one kind", got.Checks)
+		}
+		if want := rfc(now.Add(time.Hour)); got.Checks[0].NextCheck != want {
+			t.Errorf("nextCheck = %q, want %q (the window opening)", got.Checks[0].NextCheck, want)
+		}
+	})
+
+	t.Run("open Awake window is not asleep", func(t *testing.T) {
+		got := projectStatus(&state{slots: idle(1)}, Config{Kinds: []Kind{work}, Awake: win}, now.Add(2*time.Hour))
+		if got.State != StateChecking {
+			t.Fatalf("state = %q, want checking", got.State)
+		}
+	})
+
+	t.Run("a running slot outranks asleep and copies its issues", func(t *testing.T) {
+		st := &state{slots: idle(2)}
+		st.slots[1] = slotState{phase: PhaseRunning, since: now, flight: slotFlight{
+			kind:     work,
+			revision: "rev1",
+			issues:   []string{"1", "2"},
+			pass:     "implement",
+			ciWait:   ciWait{pr: "pr7", runURL: "http://run"},
+		}}
+		got := projectStatus(st, Config{Kinds: []Kind{work}, Awake: win}, now)
+		if got.State != StateWorking {
+			t.Fatalf("state = %q, want working", got.State)
+		}
+		if g := got.Slots[0]; g.Busy || g.Kind != "" || g.Issues != nil {
+			t.Errorf("idle slot = %+v, want bare", g)
+		}
+		if len(got.Slots) != 2 {
+			t.Fatalf("slots = %+v, want two", got.Slots)
+		}
+		g := got.Slots[1]
+		if !g.Busy || g.Kind != work || g.Revision != "rev1" || g.Pass != "implement" || !g.CIWait || g.PRURL != "pr7" || g.CIRunURL != "http://run" {
+			t.Errorf("running slot = %+v", g)
+		}
+		st.slots[1].flight.issues[0] = "mutated"
+		if len(g.Issues) != 2 || g.Issues[0] != "1" {
+			t.Errorf("issues = %v, want a copy unaffected by later writes", g.Issues)
+		}
+	})
+
+	t.Run("halted outranks everything and carries the halt reason", func(t *testing.T) {
+		h := Halt{Class: HaltBreaker, Detail: "d"}
+		st := &state{slots: idle(1), halted: true, reason: h}
+		got := projectStatus(st, Config{Kinds: []Kind{work}, Awake: win}, now)
+		if got.State != StateHalted || got.Reason != h.String() {
+			t.Fatalf("state/reason = %q/%q, want halted/%q", got.State, got.Reason, h.String())
+		}
+	})
+
+	t.Run("self-update carries its since", func(t *testing.T) {
+		since := now.Add(-time.Minute)
+		st := &state{slots: idle(1), self: SelfUpdate{Phase: SelfUpdateBuilding, Revision: "r"}, selfSince: since}
+		got := projectStatus(st, Config{Kinds: []Kind{work}}, now)
+		if got.SelfUpdate == nil || got.SelfUpdate.Phase != SelfUpdateBuilding || got.SelfUpdate.Since != rfc(since) {
+			t.Fatalf("self_update = %+v, want building since %s", got.SelfUpdate, rfc(since))
+		}
+	})
+
+	t.Run("a walk-exhausted window names the reason on asleep and working", func(t *testing.T) {
+		w, at := exhaustingWindow(t)
+		for _, running := range []bool{false, true} {
+			st := &state{slots: idle(1)}
+			want := StateAsleep
+			if running {
+				st.slots[0].phase, want = PhaseRunning, StateWorking
+			}
+			got := projectStatus(st, Config{Kinds: []Kind{work}, Awake: w}, at)
+			if got.State != want || got.Reason != walkExhaustedReason {
+				t.Errorf("running=%v: state/reason = %q/%q, want %q/%q", running, got.State, got.Reason, want, walkExhaustedReason)
+			}
+		}
+	})
+
+	// One tracker for work and research: a limit on either pauses both and
+	// shows once under Trackers.
+	t.Run("a schedule projects jammed, rate limits and per-kind fields", func(t *testing.T) {
+		research, butler := KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)
+		kinds := []Kind{work, research, butler}
+		sched := newSchedule(kinds, 0, time.Minute, time.Hour,
+			map[Kind]time.Duration{work: time.Minute, research: time.Minute},
+			map[Kind]string{work: "gh", research: "gh"})
+		due := now.Add(2 * time.Hour)
+		for _, ev := range []schedEvent{
+			demandProbed{Kind: work, Ready: 2},
+			childDone{Kind: work, Result: childJammed},
+			demandProbed{Kind: research, Ready: 3},
+			demandRateLimited{Kind: research, Reset: now.Add(10 * time.Minute)},
+			childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{At: due}},
+		} {
+			sched, _ = sched.Observe(now, ev)
+		}
+
+		got := projectStatus(&state{slots: idle(1), sched: sched}, Config{Kinds: kinds}, now)
+		if got.State != StateJammed {
+			t.Fatalf("state = %q, want jammed", got.State)
+		}
+		if len(got.Checks) != 3 {
+			t.Fatalf("checks = %+v, want three kinds", got.Checks)
+		}
+		limit := rfc(now.Add(10 * time.Minute))
+		if len(got.Trackers) != 1 || got.Trackers[0].Tracker != "gh" || got.Trackers[0].RateLimitedUntil != limit {
+			t.Errorf("trackers = %+v, want gh limited until %s once", got.Trackers, limit)
+		}
+		w := got.Checks[0]
+		if !w.Jammed || w.Ready == nil || *w.Ready != 2 || w.ReadyAtJam == nil || *w.ReadyAtJam != 2 ||
+			w.ProbedAt != rfc(now) || w.NextProbe != limit || w.JamUntil != rfc(now.Add(time.Minute)) || w.NextCheck != limit {
+			t.Errorf("jammed work = %+v, want ready/ready_at_jam 2, probed now, next_probe and nextCheck at the limit, jam_until +1m", w)
+		}
+		if r := got.Checks[1]; r.Jammed || r.Ready == nil || *r.Ready != 3 || r.JamUntil != "" || r.NextProbe != limit {
+			t.Errorf("research = %+v, want unjammed, ready 3, next_probe at the limit", r)
+		}
+		if b := got.Checks[2]; b.Ready != nil || b.NextDue != rfc(due) || b.NextCheck != rfc(due) {
+			t.Errorf("butler = %+v, want no count and next_due/nextCheck %s", b, rfc(due))
+		}
+	})
+
+	t.Run("a gated kind with no jam is waiting", func(t *testing.T) {
+		sched := newSchedule([]Kind{work}, 0, time.Minute, time.Hour, map[Kind]time.Duration{work: time.Minute}, nil)
+		sched, _ = sched.Observe(now, demandProbed{Kind: work, Ready: 0})
+		got := projectStatus(&state{slots: idle(1), sched: sched}, Config{Kinds: []Kind{work}}, now)
+		if got.State != StateWaiting {
+			t.Fatalf("state = %q, want waiting", got.State)
+		}
+		if len(got.Checks) != 1 || got.Checks[0].Jammed || got.Checks[0].NextCheck != rfc(now.Add(time.Minute)) {
+			t.Errorf("checks = %+v, want unjammed, nextCheck +1m", got.Checks)
+		}
+		if len(got.Trackers) != 1 || got.Trackers[0].RateLimitedUntil != "" {
+			t.Errorf("trackers = %+v, want one unlimited", got.Trackers)
+		}
+	})
+
+	t.Run("kinds are copied, not aliased", func(t *testing.T) {
+		cfg := Config{Kinds: []Kind{work}}
+		got := projectStatus(&state{slots: idle(1)}, cfg, now)
+		got.Kinds[0] = KindOf(dispatchkind.Research)
+		if cfg.Kinds[0] != work {
+			t.Errorf("cfg.Kinds[0] = %v after editing the Status, want the projection to copy", cfg.Kinds[0])
+		}
+	})
+}
