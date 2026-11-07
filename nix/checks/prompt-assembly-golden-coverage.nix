@@ -48,13 +48,13 @@ let
   # Name test functions, not line numbers, in the reasons: lines rot.
   allowlist = {
     "auto-format.md" =
-      "assemble_test.go TestAssembleAutoFormatGate; clause_contract_integration_test.go TestClauseContracts (fragments/auto-format.md entries)";
+      "skill_gate_selection_test.go TestAssembleAutoFormatAndLintGates; clause_contract_integration_test.go TestClauseContracts (fragments/auto-format.md entries)";
     "auto-lint.md" =
-      "assemble_test.go TestAssembleAutoLintGate; clause_contract_integration_test.go TestClauseContracts (fragments/auto-lint.md entries)";
+      "skill_gate_selection_test.go TestAssembleAutoFormatAndLintGates; clause_contract_integration_test.go TestClauseContracts (fragments/auto-lint.md entries)";
     "ci-failure.md" =
-      "assemble_test.go TestAssembleCIFailureSummaryGate; clause_contract_integration_test.go TestClauseContracts (fragments/ci-failure.md entries)";
+      "skill_gate_selection_test.go TestAssembleCIFailureSummaryGateSubstitutesItsValue; clause_contract_integration_test.go TestClauseContracts (fragments/ci-failure.md entries)";
     "local/research-verdict-relay.md" =
-      "assemble_test.go TestAssembleResearchPromptCavemanLocalTracker; orchestrator TestMarkerFragmentParity";
+      "skill_gate_selection_test.go TestAssembleResearchVerdictRelaySelection; orchestrator TestMarkerFragmentParity";
   };
 
   goldenCoverage =
