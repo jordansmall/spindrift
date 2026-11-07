@@ -257,12 +257,11 @@ func setStubFamilyLaunchEnv(t *testing.T) {
 		"ISSUE_TRACKER":              "github",
 		"BASE_BRANCH":                "main",
 		"MERGE_MODE":                 "manual",
-		"RUNTIME":                    "true",
-		"RUNNER_KIND":                stubFamily,
 		"BOX_FORGE_AND_ISSUE_ACCESS": "read-write",
 	} {
 		t.Setenv(k, v)
 	}
+	setRunner(t, "true", stubFamily)
 }
 
 // A LaunchWithConfig prerequisite is enforced by validate()'s fail-fast
@@ -376,15 +375,12 @@ func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 		"ISSUE_TRACKER":              "github",
 		"BASE_BRANCH":                "main",
 		"MERGE_MODE":                 "manual",
-		"RUNTIME":                    "bwrap",
-		"RUNNER_KIND":                "bwrap",
 		"BOX_FORGE_AND_ISSUE_ACCESS": "read-write",
 		"NETWORK_MODE":               "open",
-		"NIX_STORE_WRITABLE":         "",
-		"NIX_CONFIG_FILE":            "",
 	} {
 		t.Setenv(k, v)
 	}
+	setRunner(t, "bwrap", "bwrap")
 }
 
 // RUNNER_KIND=bwrap with the isolate-by-default NETWORK_MODE requires pasta on
@@ -410,8 +406,8 @@ func TestRealBwrapStrategy_DefaultNetworkModeMissingPastaFailsLaunch(t *testing.
 // one.
 func TestRealBwrapStrategy_RequiredOverlayUnsupportedFailsLaunch(t *testing.T) {
 	setRealRunnerLaunchEnv(t, 1, true)
-	t.Setenv("NIX_STORE_WRITABLE", "true")
-	t.Setenv("NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
+	setArtifact(t, "NIX_STORE_WRITABLE", "true")
+	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
 
 	_, err := newGatedContext(&bytes.Buffer{}, dispatchkind.Work, false)
 	if err == nil {

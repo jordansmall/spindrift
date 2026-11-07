@@ -428,7 +428,7 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 // (issue #3722).
 func TestMainRun_Preview_WritesReportToInjectedStdout(t *testing.T) {
 	setFullyLocalEnv(t)
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 	writeLocalReadyIssue(t, os.Getenv("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
 
 	var stdout, stderr bytes.Buffer
@@ -462,8 +462,7 @@ func setBootstrapReadyLocalEnv(t *testing.T) (issuesDir string) {
 	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "bwrap")
+	setRunner(t, "bwrap", "bwrap")
 	t.Setenv("ISSUE_TRACKER", "local")
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
@@ -495,7 +494,7 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 			verb: "preview",
 			setup: func(t *testing.T) string {
 				setFullyLocalEnv(t)
-				t.Setenv("RUNTIME", "echo")
+				setArtifact(t, "RUNTIME", "echo")
 				return os.Getenv("LOCAL_ISSUES_DIR")
 			},
 			wantMsgSuffix: "proof the selective-list preview path was taken with this exact ID",
@@ -777,7 +776,7 @@ func TestConfigHasNoModelFields(t *testing.T) {
 // DRIVER_SKILLS_DIR left this Go-side plumbing in issue #2489; only
 // entrypoint.sh reads it now.
 func TestRunnerConfig_DriverMountTargets(t *testing.T) {
-	t.Setenv("DRIVER_SESSION_CACHE_DIR", "/home/agent/.claude/projects")
+	setArtifact(t, "DRIVER_SESSION_CACHE_DIR", "/home/agent/.claude/projects")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -814,10 +813,10 @@ func TestRunnerConfig_LimitsSkillsOverrides(t *testing.T) {
 func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
 	// Bare store-path files (pkgs.writeText output), not directories holding a
 	// nested passwd/group file: the shape nix/checks/preambles.nix asserts.
-	t.Setenv("PASSWD_FILE", "/nix/store/abc-passwd")
-	t.Setenv("GROUP_FILE", "/nix/store/def-group")
-	t.Setenv("PASSWD_FILE_DRV", "/nix/store/abc-passwd.drv")
-	t.Setenv("GROUP_FILE_DRV", "/nix/store/def-group.drv")
+	setArtifact(t, "PASSWD_FILE", "/nix/store/abc-passwd")
+	setArtifact(t, "GROUP_FILE", "/nix/store/def-group")
+	setArtifact(t, "PASSWD_FILE_DRV", "/nix/store/abc-passwd.drv")
+	setArtifact(t, "GROUP_FILE_DRV", "/nix/store/def-group.drv")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -840,8 +839,8 @@ func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
 // snapshot, issue #2664) reach runner.Config, so the bwrap adapter can mount
 // the config and realize its snapshot closure.
 func TestRunnerConfig_NixConfigFile(t *testing.T) {
-	t.Setenv("NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
-	t.Setenv("NIX_CONFIG_FILE_DRV", "/nix/store/abc-nix-conf.drv")
+	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
+	setArtifact(t, "NIX_CONFIG_FILE_DRV", "/nix/store/abc-nix-conf.drv")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -858,7 +857,7 @@ func TestRunnerConfig_NixConfigFile(t *testing.T) {
 // config.nixStoreWritable, the bwrap adapter's read-write /nix/store overlay
 // gate (issue #2665).
 func TestLoadConfig_NixStoreWritable_ReadsArtifact(t *testing.T) {
-	t.Setenv("NIX_STORE_WRITABLE", "true")
+	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 
 	c := loadConfig()
 
@@ -870,8 +869,6 @@ func TestLoadConfig_NixStoreWritable_ReadsArtifact(t *testing.T) {
 // An unset NIX_STORE_WRITABLE leaves config.nixStoreWritable false, matching
 // every other artifact-backed bool default.
 func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
-	t.Setenv("NIX_STORE_WRITABLE", "")
-
 	c := loadConfig()
 
 	if c.nixStoreWritable {
@@ -883,7 +880,6 @@ func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 // defaults to "spindrift-nix", an override wins, and either reaches
 // runner.Config.
 func TestLoadConfig_NixVolume_DefaultAndOverride(t *testing.T) {
-	t.Setenv("NIX_VOLUME", "")
 	c := loadConfig()
 	if c.nixVolume != "spindrift-nix" {
 		t.Errorf("loadConfig().nixVolume = %q, want %q when NIX_VOLUME is unset", c.nixVolume, "spindrift-nix")
@@ -892,7 +888,7 @@ func TestLoadConfig_NixVolume_DefaultAndOverride(t *testing.T) {
 		t.Errorf("runnerConfig().NixVolume = %q, want %q", got, "spindrift-nix")
 	}
 
-	t.Setenv("NIX_VOLUME", "custom-nix-vol")
+	setArtifact(t, "NIX_VOLUME", "custom-nix-vol")
 	c = loadConfig()
 	if c.nixVolume != "custom-nix-vol" {
 		t.Errorf("loadConfig().nixVolume = %q, want %q from NIX_VOLUME", c.nixVolume, "custom-nix-vol")
@@ -906,7 +902,7 @@ func TestLoadConfig_NixVolume_DefaultAndOverride(t *testing.T) {
 // whether to overlay /nix/store as a writable tmpfs layer (issue #2665,
 // ADR 0042).
 func TestRunnerConfig_NixStoreWritable(t *testing.T) {
-	t.Setenv("NIX_STORE_WRITABLE", "true")
+	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -919,8 +915,6 @@ func TestRunnerConfig_NixStoreWritable(t *testing.T) {
 // An unset NIX_STORE_WRITABLE reaches runner.Config as false, not a stray
 // default.
 func TestRunnerConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
-	t.Setenv("NIX_STORE_WRITABLE", "")
-
 	c := loadConfig()
 	rc := runnerConfig(c)
 
@@ -932,8 +926,6 @@ func TestRunnerConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 // An unset DRIVER_SESSION_CACHE_DIR (a Driver declaring no session-state dir)
 // reaches runner.Config as empty, not a fallback literal.
 func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
-	t.Setenv("DRIVER_SESSION_CACHE_DIR", "")
-
 	c := loadConfig()
 	rc := runnerConfig(c)
 
@@ -6668,8 +6660,7 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 // name, and resolves to "", the empty default every absent getenvArtifact call
 // gets.
 func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "")
+	setArtifact(t, "RUNTIME", "bwrap")
 	os.Unsetenv("RUNNER_KIND")
 
 	c := loadConfig()
@@ -6683,8 +6674,7 @@ func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 // RUNTIME, including a RUNTIME=bwrap with RUNNER_KIND=oci pairing that a
 // runtime-name comparison would get wrong.
 func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
-	t.Setenv("RUNTIME", "bwrap")
-	t.Setenv("RUNNER_KIND", "oci")
+	setRunner(t, "bwrap", "oci")
 
 	c := loadConfig()
 
@@ -6698,7 +6688,7 @@ func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
 // 3): the launcher-currency check needs the launcher's own flake attr,
 // distinct from the OCI image's.
 func TestLoadConfig_FlakeLauncherAttr_ReadsArtifact(t *testing.T) {
-	t.Setenv("FLAKE_LAUNCHER_ATTR", ".#launcher-currency")
+	setArtifact(t, "FLAKE_LAUNCHER_ATTR", ".#launcher-currency")
 
 	c := loadConfig()
 
@@ -6713,7 +6703,7 @@ func TestLoadConfig_FlakeLauncherAttr_ReadsArtifact(t *testing.T) {
 // lib/preambles.nix and lib/mkHarness.nix (issue #2677), distinct from the OCI
 // image's IMAGE_TAG.
 func TestLoadConfig_LoadedLauncherHash_ReadsArtifact(t *testing.T) {
-	t.Setenv("LAUNCHER_CURRENCY_HASH", "abc123")
+	setArtifact(t, "LAUNCHER_CURRENCY_HASH", "abc123")
 
 	c := loadConfig()
 

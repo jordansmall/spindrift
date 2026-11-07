@@ -212,7 +212,7 @@ func TestGateRegistry_EnforceOrderEqualsReportOrder(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "manual")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Setenv("BOX_GH_TOKEN", "box-gh-token-distinct-from-launcher-token")
 

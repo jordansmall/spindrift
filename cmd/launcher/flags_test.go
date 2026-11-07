@@ -1849,8 +1849,7 @@ func TestApplySecretCmdFallback_DriverCredentials(t *testing.T) {
 				t.Setenv(tier, v)
 			}
 			if tc.docDriver != "" {
-				t.Cleanup(func() { loadedDoc = nil })
-				loadedDoc = &inputdoc.Document{Artifacts: map[string]string{"DRIVER": tc.docDriver}}
+				setArtifact(t, "DRIVER", tc.docDriver)
 			}
 			err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", tmpl})
 			if (err != nil) != (len(tc.wantErrNaming) > 0) {
