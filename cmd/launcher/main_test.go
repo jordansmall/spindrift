@@ -2372,7 +2372,7 @@ func TestValidate_MixedLocalStillRequiresRepoSlugAndGhToken(t *testing.T) {
 	}
 }
 
-// The origin/main ordering restored by issue #2559: validateChoice(MERGE_MODE)
+// The original ordering restored by issue #2559: validateChoice(MERGE_MODE)
 // runs, and its enum-choice error wins, before the CODE_FORGE=local cross-knob
 // check that requires MERGE_MODE=immediate. A refactor once moved the
 // cross-knob checks ahead, so the wrong error surfaced.
@@ -4706,8 +4706,8 @@ func TestDoctor_AuthFailure(t *testing.T) {
 
 // A failing built-in Required check is reported exactly once, through the
 // returned error and not also as a "MISSING: ..." row on w: cmdDoctor already
-// prints the returned error to stderr, and origin/main's pre-refactor Run
-// wrote nothing to w on this path.
+// prints the returned error to stderr, and Run wrote nothing to w on this
+// path before the launcher-startup checks moved into doctor.Run (084abc54a).
 func TestDoctor_AuthFailure_NotDoublyReported(t *testing.T) {
 	f := forge.NewFake()
 	f.ProbeErr = forge.ErrAuthFailure
