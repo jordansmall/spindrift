@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -11,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runstate"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -144,7 +147,7 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", dir, err)
 	}
-	reg, err := promptassembly.LoadRegistryFile(repopath.RegistryJSON())
+	reg, err := promptassembly.LoadRegistryFile(seamtest.Path(t, "fragments-registry.json"))
 	if err != nil {
 		t.Fatalf("load fragment registry: %v", err)
 	}
@@ -282,7 +285,7 @@ func TestScoutAndResearchPromptsLeadWithIssueText(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", dir, err)
 	}
-	reg, err := promptassembly.LoadRegistryFile(repopath.RegistryJSON())
+	reg, err := promptassembly.LoadRegistryFile(seamtest.Path(t, "fragments-registry.json"))
 	if err != nil {
 		t.Fatalf("load fragment registry: %v", err)
 	}

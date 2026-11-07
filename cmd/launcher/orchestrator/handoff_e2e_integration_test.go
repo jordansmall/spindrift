@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/seamtest"
 )
 
 const e2eDriverExecPackage = "spindrift.dev/launcher/driver-exec"
@@ -75,6 +78,8 @@ func writeFakeClaudeDriver(t *testing.T, dir, callLog string) string {
 // driver-exec subprocess reads the driver, model, effort and argv shape from
 // that file instead of from per-pass flags.
 func TestHandoffEndToEnd(t *testing.T) {
+	// Resolved first so a Box without Nix skips before the go build below.
+	registry := seamtest.Path(t, "fragments-registry.json")
 	dir := t.TempDir()
 	moduleRoot := moduleRootForTest(t)
 
@@ -123,7 +128,7 @@ func TestHandoffEndToEnd(t *testing.T) {
 		"--auto-lint-skill-baked=true",
 		"--prompts-dir", filepath.Join(moduleRoot, "..", "..", "templates", "default", "prompts"),
 		"--skills-found", "caveman, tdd, commit, code-review",
-		"--registry", filepath.Join(moduleRoot, "internal", "promptassembly", "testdata", "registry.json"),
+		"--registry", registry,
 		"--validate-markers-registry", filepath.Join(moduleRoot, "internal", "promptassembly", "testdata", "validate-markers.json"),
 		"--driver", "claude",
 		"--driver-bin", fakeClaude,
