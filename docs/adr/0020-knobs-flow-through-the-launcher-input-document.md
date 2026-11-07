@@ -157,5 +157,6 @@ recorded:
   `Artifacts map[string]string` gives way to a struct regen derives from
   each runner row's `runArtifacts` outputs: a shared part plus one part per
   family, handed to that family's adapter directly. Artifacts come from the
-  document only; the env-first lookup goes. A typo in an artifact key
-  becomes a compile error instead of a silently empty value.
+  document only: the env-first lookup is gone (shipped in issue #6611). With
+  the struct, a typo in an artifact key becomes a compile error instead of a
+  silently empty value.

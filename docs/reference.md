@@ -2440,7 +2440,6 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Like `REVIEW_MODEL`, an explicit dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged. Under the `pi` Driver an explicit value also wins over a `:<level>` suffix on a dispatch-time `REVIEW_MODEL` |
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked filer. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked worker. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var. The knob itself is a versioned surface; the template an override directory replaces is not — see [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time: mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
 
@@ -8114,9 +8113,8 @@ per image. (An image too old to carry the verb is the version-mismatch
 hard error above, never a cached verdict.) The key covers only the
 reference, though, not the image's
 actual content: the nix pipeline's `imageName:imageHash` tag changes on
-every rebuild and so self-invalidates, but a mutable tag — the
-bare-launcher `spindrift:latest` default, or an `IMAGE` override pinned to
-a moving tag — does not, so a rebuild under one of those is a case the `rm
+every rebuild and so self-invalidates, but a tag that stays put across
+rebuilds does not, so a rebuild under such a tag is a case the `rm
 .spindrift/registry-probe-cache.json` escape hatch below covers.
 `NETWORK_MODE` is keyed too: the socket-incapable path hard-errors rather
 than falling back to TCP under a network mode that denies the host-loopback
