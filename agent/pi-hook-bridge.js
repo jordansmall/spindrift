@@ -71,6 +71,8 @@ for (const { script, tools } of HOOKS) {
 // there a throw, and a rewrite that copies only `command` into output.args. A
 // hook that rewrites any key but `command` would take effect here and be
 // dropped there.
+// nix/checks/guard-runner-twin-parity.nix pins the timeouts, requireJq and
+// runHook; the rest rests on this comment.
 
 // A guard without a working jq exits 0 and allows the call (see guardHook in
 // lib/image.nix), so a silent exit 0 is only trustworthy once jq has run.
