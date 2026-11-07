@@ -85,6 +85,13 @@ func TestSlotFlightFold(t *testing.T) {
 			want:    slotFlight{key: issue7, ciWait: ciWait{pr: "pr", runURL: "run"}},
 		},
 		{
+			name:    "ci_wait without a run url resets the run url",
+			flight:  slotFlight{key: issue7, ciWait: ciWait{pr: "pr", runURL: "run"}},
+			rec:     Record{Event: report.EventCIWait, Key: issue7, PRURL: "pr"},
+			running: true,
+			want:    slotFlight{key: issue7, ciWait: ciWait{pr: "pr"}},
+		},
+		{
 			name:   "ci_wait after the slot cleared is dropped",
 			flight: slotFlight{},
 			rec:    Record{Event: report.EventCIWait, Key: issue7, PRURL: "pr"},
