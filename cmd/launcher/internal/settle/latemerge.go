@@ -149,8 +149,7 @@ func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now t
 			PRURL:    r.PRURL,
 		}
 		ds.MergeCommit = readMergeCommit(mc, r.ID, r.PRURL, warn)
-		if err := appendSettled(path, ds); err != nil {
-			fmt.Fprintf(warn, "    ?? %s: could not append %s to %s: %v\n", r.ID, hostop.OpDispatchSettled, path, err)
+		if !dispatchrecord.AppendSettled(warn, r.ID, path, ds) {
 			continue
 		}
 		merged = append(merged, r.ID)
