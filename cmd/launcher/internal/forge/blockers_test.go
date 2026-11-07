@@ -1,6 +1,7 @@
 package forge_test
 
 import (
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -120,4 +121,39 @@ func TestExtractBulletContent(t *testing.T) {
 			t.Errorf("ExtractBulletContent(%q) = %q, want %q", c.line, got, c.want)
 		}
 	}
+}
+
+func TestUnfencedLines(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"no fences", "a\nb", []string{"a", "b"}},
+		{"backtick fence", "a\n```\nhidden\n```\nb", []string{"a", "b"}},
+		{"tilde fence", "a\n~~~\nhidden\n~~~\nb", []string{"a", "b"}},
+		{"info string", "a\n```go\nhidden\n```\nb", []string{"a", "b"}},
+		{"CRLF", "a\r\n```\r\nhidden\r\n```\r\nb\r\n", []string{"a", "b", ""}},
+		{"lone trailing CR", "a\r\r\nb\r", []string{"a", "b"}},
+		{"unclosed fence drops the rest", "a\n```\nhidden\nmore", []string{"a"}},
+		{"tilde closes backtick fence", "a\n```\nhidden\n~~~\nb", []string{"a", "b"}},
+		{"empty body", "", []string{""}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := slices.Collect(forge.UnfencedLines(c.body)); !slices.Equal(got, c.want) {
+				t.Errorf("UnfencedLines(%q) = %q, want %q", c.body, got, c.want)
+			}
+		})
+	}
+	t.Run("early break", func(t *testing.T) {
+		n := 0
+		for range forge.UnfencedLines("a\nb\nc") {
+			n++
+			break
+		}
+		if n != 1 {
+			t.Errorf("iterated %d times after break, want 1", n)
+		}
+	})
 }
