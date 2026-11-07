@@ -808,10 +808,11 @@ func TestRunnerConfig_LimitsSkillsOverrides(t *testing.T) {
 	}
 }
 
-// PASSWD_FILE/GROUP_FILE and their .drv companions (nix-sourced account
-// files, issue #2663) reach runner.Config, so the bwrap adapter binds them
-// instead of runner-written copies.
-func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
+// The bwrap artifacts (nix-sourced account files, issue #2663; nix.conf plus
+// store-DB snapshot, issue #2664; the writable /nix/store overlay gate, issue
+// #2665) stay on the document's bwrap part in c.artifacts, which the bwrap
+// adapter reads directly.
+func TestLoadConfig_BwrapArtifactsLandOnArtifacts(t *testing.T) {
 	setRunner(t, "bwrap", "bwrap")
 	// Bare store-path files (pkgs.writeText output), not directories holding a
 	// nested passwd/group file: the shape nix/checks/preambles.nix asserts.
@@ -819,64 +820,43 @@ func TestRunnerConfig_PasswdGroupFiles(t *testing.T) {
 	setArtifact(t, "GROUP_FILE", "/nix/store/def-group")
 	setArtifact(t, "PASSWD_FILE_DRV", "/nix/store/abc-passwd.drv")
 	setArtifact(t, "GROUP_FILE_DRV", "/nix/store/def-group.drv")
-
-	c := loadConfig()
-	rc := runnerConfig(c)
-
-	if rc.PasswdFile != "/nix/store/abc-passwd" {
-		t.Errorf("PasswdFile = %q, want /nix/store/abc-passwd", rc.PasswdFile)
-	}
-	if rc.GroupFile != "/nix/store/def-group" {
-		t.Errorf("GroupFile = %q, want /nix/store/def-group", rc.GroupFile)
-	}
-	if rc.PasswdFileDrv != "/nix/store/abc-passwd.drv" {
-		t.Errorf("PasswdFileDrv = %q, want /nix/store/abc-passwd.drv", rc.PasswdFileDrv)
-	}
-	if rc.GroupFileDrv != "/nix/store/def-group.drv" {
-		t.Errorf("GroupFileDrv = %q, want /nix/store/def-group.drv", rc.GroupFileDrv)
-	}
-}
-
-// NIX_CONFIG_FILE/NIX_CONFIG_FILE_DRV (nix-in-a-Box config plus store-DB
-// snapshot, issue #2664) reach runner.Config, so the bwrap adapter can mount
-// the config and realize its snapshot closure.
-func TestRunnerConfig_NixConfigFile(t *testing.T) {
-	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
 	setArtifact(t, "NIX_CONFIG_FILE_DRV", "/nix/store/abc-nix-conf.drv")
-
-	c := loadConfig()
-	rc := runnerConfig(c)
-
-	if rc.NixConfigFile != "/nix/store/abc-nix-conf" {
-		t.Errorf("NixConfigFile = %q, want /nix/store/abc-nix-conf", rc.NixConfigFile)
-	}
-	if rc.NixConfigFileDrv != "/nix/store/abc-nix-conf.drv" {
-		t.Errorf("NixConfigFileDrv = %q, want /nix/store/abc-nix-conf.drv", rc.NixConfigFileDrv)
-	}
-}
-
-// loadConfig() reads the NIX_STORE_WRITABLE artifact into
-// config.nixStoreWritable, the bwrap adapter's read-write /nix/store overlay
-// gate (issue #2665).
-func TestLoadConfig_NixStoreWritable_ReadsArtifact(t *testing.T) {
-	setRunner(t, "bwrap", "bwrap")
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 
-	c := loadConfig()
-
-	if !c.nixStoreWritable {
-		t.Errorf("loadConfig().nixStoreWritable = false, want true")
+	b := loadConfig().artifacts.Bwrap
+	if b == nil {
+		t.Fatal("artifacts.Bwrap = nil, want the document's bwrap part")
+	}
+	for _, tc := range []struct{ name, got, want string }{
+		{"PasswdFile", b.PasswdFile.String(), "/nix/store/abc-passwd"},
+		{"GroupFile", b.GroupFile.String(), "/nix/store/def-group"},
+		{"PasswdFileDrv", b.PasswdFileDrv.String(), "/nix/store/abc-passwd.drv"},
+		{"GroupFileDrv", b.GroupFileDrv.String(), "/nix/store/def-group.drv"},
+		{"NixConfigFile", b.NixConfigFile.String(), "/nix/store/abc-nix-conf"},
+		{"NixConfigFileDrv", b.NixConfigFileDrv.String(), "/nix/store/abc-nix-conf.drv"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("artifacts.Bwrap.%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+	if !b.NixStoreWritable.Bool() {
+		t.Error("artifacts.Bwrap.NixStoreWritable = false, want true")
 	}
 }
 
-// An unset NIX_STORE_WRITABLE leaves config.nixStoreWritable false, matching
-// every other artifact-backed bool default.
-func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
-	c := loadConfig()
+// An absent NIX_STORE_WRITABLE key reads false: the writable-store overlay gate
+// is opt-in, so a document that never mentions it must not enable it.
+func TestLoadConfig_BwrapNixStoreWritable_AbsentIsFalse(t *testing.T) {
+	setRunner(t, "bwrap", "bwrap")
+	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/abc-nix-conf")
 
-	if c.nixStoreWritable {
-		t.Errorf("loadConfig().nixStoreWritable = true, want false when NIX_STORE_WRITABLE is unset")
+	b := loadConfig().artifacts.Bwrap
+	if b == nil {
+		t.Fatal("artifacts.Bwrap = nil, want the document's bwrap part")
+	}
+	if b.NixStoreWritable.Bool() {
+		t.Error("artifacts.Bwrap.NixStoreWritable = true with the key absent, want false")
 	}
 }
 
@@ -900,32 +880,6 @@ func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
 	}
 	if got := runnerConfig(c).NixVolume; got != "custom-nix-vol" {
 		t.Errorf("runnerConfig().NixVolume = %q, want %q", got, "custom-nix-vol")
-	}
-}
-
-// NIX_STORE_WRITABLE reaches runner.Config so the bwrap adapter can decide
-// whether to overlay /nix/store as a writable tmpfs layer (issue #2665,
-// ADR 0042).
-func TestRunnerConfig_NixStoreWritable(t *testing.T) {
-	setRunner(t, "bwrap", "bwrap")
-	setArtifact(t, "NIX_STORE_WRITABLE", "true")
-
-	c := loadConfig()
-	rc := runnerConfig(c)
-
-	if !rc.NixStoreWritable {
-		t.Errorf("rc.NixStoreWritable = false, want true")
-	}
-}
-
-// An unset NIX_STORE_WRITABLE reaches runner.Config as false, not a stray
-// default.
-func TestRunnerConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
-	c := loadConfig()
-	rc := runnerConfig(c)
-
-	if rc.NixStoreWritable {
-		t.Errorf("rc.NixStoreWritable = true, want false when NIX_STORE_WRITABLE is unset")
 	}
 }
 

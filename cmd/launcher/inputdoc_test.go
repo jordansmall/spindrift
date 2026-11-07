@@ -278,8 +278,8 @@ func TestLoadConfig_ArtifactsIgnoreAmbientEnv(t *testing.T) {
 	if c.imageTag != "spindrift:from-doc" {
 		t.Errorf("imageTag = %q, want the document's IMAGE_TAG", c.imageTag)
 	}
-	if c.agentFiles != "/nix/store/from-doc" {
-		t.Errorf("agentFiles = %q, want the document's AGENT_FILES", c.agentFiles)
+	if b := c.artifacts.Bwrap; b == nil || b.AgentFiles.String() != "/nix/store/from-doc" {
+		t.Errorf("artifacts.Bwrap = %+v, want the document's AGENT_FILES", b)
 	}
 	if got := runnerConfig(c).Image; got != "spindrift:from-doc" {
 		t.Errorf("runner Image = %q, want the document's IMAGE_TAG, not ambient IMAGE", got)

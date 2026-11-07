@@ -416,8 +416,8 @@ func strategyWithHook(hook func(art inputdoc.Artifacts, pwd, closure string) err
 }
 
 // runNixInBoxSwap drives one continuous dispatch whose Box-only-stale probe
-// hot-swaps a store-closure, with nixInBox (c.nixConfigFile set) on or off and
-// lookup answering the runner family.
+// hot-swaps a store-closure, with nixInBox (the bwrap part's NixConfigFile
+// set) on or off and lookup answering the runner family.
 func runNixInBoxSwap(t *testing.T, nixInBox bool, lookup func(string) (runner.Strategy, error)) nixInBoxSwapResult {
 	t.Helper()
 	return runNixInBoxSwapTo(t, nixInBox, lookup, false)
@@ -441,11 +441,9 @@ func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.
 	c.codeForge = "local"
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
-	c.passwdFile = "/nix/store/passwd-fixture"
 	bwrapArt := &inputdoc.BwrapArtifacts{PasswdFile: inputdoc.ValueOf("/nix/store/passwd-fixture")}
 	c.artifacts = inputdoc.Artifacts{Bwrap: bwrapArt}
 	if nixInBox {
-		c.nixConfigFile = "/fake/nix.conf"
 		bwrapArt.NixConfigFile = inputdoc.ValueOf("/fake/nix.conf")
 	}
 	// flakeLauncherAttr is configured and genuinely fresh. See
@@ -539,7 +537,7 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_NilHook_SwapsWithoutPrep
 // TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares pins
 // that core calls the family's hook for every store-closure swap (issue
 // #5996): a family can prepare the generation with nixInBox off too, and keys
-// nixInBox-only work off cfg.NixConfigFile.
+// nixInBox-only work off art.Bwrap.NixConfigFile.
 func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares(t *testing.T) {
 	var gotArt inputdoc.Artifacts
 	called := false
