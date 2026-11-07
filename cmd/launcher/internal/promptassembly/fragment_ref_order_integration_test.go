@@ -1,3 +1,5 @@
+//go:build integration
+
 package promptassembly
 
 import (
@@ -6,14 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 // Rows render in order, so a fragment's ${VAR} resolves only when VAR's row is
 // above it; an unresolved name is left in the prompt verbatim (issue #5300).
-// This pins that rule on the registry itself, without a nix build.
+// This pins that rule on the production registry, read from the seam fixtures.
 func TestFragmentsReferenceOnlyRowsAbove(t *testing.T) {
-	reg, err := LoadRegistryFile(repopath.RegistryJSON())
+	reg, err := LoadRegistryFile(seamtest.Path(t, "fragments-registry.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +52,7 @@ func TestFragmentsReferenceOnlyRowsAbove(t *testing.T) {
 // A leaked ${VAR} in a rendered prompt means a parent fragment named a row var
 // that was not yet set when it rendered. The goldens are the rendered prompts.
 func TestGoldenPromptsLeakNoRegistryVar(t *testing.T) {
-	reg, err := LoadRegistryFile(repopath.RegistryJSON())
+	reg, err := LoadRegistryFile(seamtest.Path(t, "fragments-registry.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
