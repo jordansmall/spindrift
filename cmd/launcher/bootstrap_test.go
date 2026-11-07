@@ -408,14 +408,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
 func mustSeedableCheckout(t *testing.T) string {
 	t.Helper()
 	checkout := t.TempDir()
-	testutil.GitRun(t, checkout, "init", "-b", "main")
-	testutil.GitRun(t, checkout, "config", "user.email", "test@example.com")
-	testutil.GitRun(t, checkout, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(checkout, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	testutil.GitRun(t, checkout, "add", "base.txt")
-	testutil.GitRun(t, checkout, "commit", "-m", "base")
+	mustInitCheckout(t, checkout, "main")
 	return checkout
 }
 
