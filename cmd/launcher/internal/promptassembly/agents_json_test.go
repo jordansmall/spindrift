@@ -2,8 +2,6 @@ package promptassembly
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -16,14 +14,18 @@ const (
 // members, filling each prompt from the agent's prompt file, and drops the
 // reviewer because the code-owned review pass replaced it (issue #2037).
 func TestAssembleAgentsJSONRosterMembership(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, baseEnv := syntheticRegistry(t, nil, map[string]string{
+		"scout-prompt.md":   "scout stub\n",
+		"filer-prompt.md":   "filer stub\n",
+		"worker-prompt.md":  "worker stub\n",
+		"auditor-prompt.md": "audit stub\n",
+	})
 
 	cases := []struct {
 		name      string
 		template  string
 		promptMap string
 		mutate    func(*Env)
-		prompts   func(t *testing.T) string
 		want      []string
 		wantNot   []string
 		model     map[string]string
@@ -78,28 +80,18 @@ func TestAssembleAgentsJSONRosterMembership(t *testing.T) {
 			name:      "a custom agent's prompt is injected generically",
 			template:  `{"scout":{"description":"scout","model":"opus","prompt":"","tools":["Read"]},"auditor":{"description":"audit","model":"haiku","prompt":"","tools":["Read"]}}`,
 			promptMap: `{"scout":"scout-prompt.md","auditor":"auditor-prompt.md"}`,
-			prompts: func(t *testing.T) string {
-				dir, _ := promptsDirExceptSubdir(t, "no-such-entry")
-				if err := os.WriteFile(filepath.Join(dir, "auditor-prompt.md"), []byte("audit stub\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return dir
-			},
-			want:    []string{"scout", "auditor"},
-			wantNot: []string{"reviewer"},
+			want:      []string{"scout", "auditor"},
+			wantNot:   []string{"reviewer"},
 		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
+			env := baseEnv
 			env.AgentsJSONTemplate = tc.template
 			env.AgentsPromptFiles = agentsPromptFilesAll
 			if tc.promptMap != "" {
 				env.AgentsPromptFiles = tc.promptMap
-			}
-			if tc.prompts != nil {
-				env.PromptsDir = tc.prompts(t)
 			}
 			if tc.mutate != nil {
 				tc.mutate(&env)
