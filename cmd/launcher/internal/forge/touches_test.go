@@ -67,6 +67,21 @@ func TestParseTouchPaths_IgnoresSectionInFencedBlock(t *testing.T) {
 	}
 }
 
+func TestParseTouchPaths_CRLFBody(t *testing.T) {
+	body := "```\r\n## Touches\r\n- a.go\r\n```\r\n## Touches\r\n- b.go\r\n"
+	paths := forge.ParseTouchPaths(body)
+	if len(paths) != 1 || paths[0] != "b.go" {
+		t.Errorf("expected [b.go] only, got %v", paths)
+	}
+}
+
+func TestParseTouchPaths_UnclosedFenceDropsRest(t *testing.T) {
+	body := "```\n## Touches\n- a.go"
+	if paths := forge.ParseTouchPaths(body); len(paths) != 0 {
+		t.Errorf("expected [], got %v", paths)
+	}
+}
+
 func TestParseTouchPaths_IgnoresPathQuotedInInlineSpan(t *testing.T) {
 	body := "## Touches\n- `cmd/launcher/*.go`\n- lib/env-schema.nix"
 	paths := forge.ParseTouchPaths(body)

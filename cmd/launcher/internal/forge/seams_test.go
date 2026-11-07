@@ -773,6 +773,21 @@ func TestParseBlockerRefs_IgnoresHeaderSectionInFencedBlock(t *testing.T) {
 	}
 }
 
+func TestParseBlockerRefs_CRLFBody(t *testing.T) {
+	body := "```\r\n## Blocked by\r\n- #1\r\n```\r\n## Blocked by\r\n- #2\r\n"
+	refs := forge.ParseBlockerRefs(body)
+	if len(refs) != 1 || refs[0] != "2" {
+		t.Errorf("expected [2] only, got %v", refs)
+	}
+}
+
+func TestParseBlockerRefs_UnclosedFenceDropsRest(t *testing.T) {
+	body := "```\n## Blocked by\n- #1"
+	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
+		t.Errorf("expected [], got %v", refs)
+	}
+}
+
 func TestParseBlockerRefs_IgnoresTriggerInTildeFencedBlock(t *testing.T) {
 	body := "~~~\nblocked by #99\n~~~"
 	if refs := forge.ParseBlockerRefs(body); len(refs) != 0 {
