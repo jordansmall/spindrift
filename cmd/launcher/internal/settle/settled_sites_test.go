@@ -88,7 +88,7 @@ func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.
 	s := newTestSettle(c, fc, fc)
 	s.latchPR("9", testPR)
 	state := forge.Complete
-	if reason != ReasonMerged {
+	if reason != dispatchrecord.ReasonMerged {
 		state = forge.Failed
 	}
 	testutil.CaptureStdout(t, func() {
@@ -101,7 +101,7 @@ func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.
 func TestFlushSettled_MergedCarriesMergeCommit(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetMergeCommit(testPR, "deadbeef")
-	records := flushLatched(t, fc, ReasonMerged)
+	records := flushLatched(t, fc, dispatchrecord.ReasonMerged)
 	if len(records) != 1 || records[0].MergeCommit != "deadbeef" {
 		t.Fatalf("records = %+v, want one carrying merge_commit deadbeef", records)
 	}
@@ -122,8 +122,8 @@ func TestFlushSettled_MergeCommitReadErrorKeepsOutcome(t *testing.T) {
 	fc := forge.NewFake()
 	fc.MergeCommitErr = errors.New("boom")
 	var records []dispatchrecord.Record
-	stderr := testutil.CaptureStderr(t, func() { records = flushLatched(t, fc, ReasonMerged) })
-	if len(records) != 1 || records[0].Outcome != "complete" || records[0].Reason != ReasonMerged || records[0].MergeCommit != "" {
+	stderr := testutil.CaptureStderr(t, func() { records = flushLatched(t, fc, dispatchrecord.ReasonMerged) })
+	if len(records) != 1 || records[0].Outcome != "complete" || records[0].Reason != dispatchrecord.ReasonMerged || records[0].MergeCommit != "" {
 		t.Fatalf("records = %+v, want one complete/merged without a merge commit", records)
 	}
 	if !strings.Contains(stderr, "read merge commit of "+testPR) || !strings.Contains(stderr, "boom") {

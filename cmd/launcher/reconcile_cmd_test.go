@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -18,7 +19,6 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
-	"spindrift.dev/launcher/internal/settle"
 )
 
 // testCapabilities resolves capabilities the same way newReadContext does in
@@ -660,8 +660,8 @@ func lateMergeFixture(t *testing.T) (root, idA string, f *forge.Fake, c config) 
 		}
 		return id
 	}
-	idA = write("1", settle.ReasonAutoMergeEnqueued, prA, 1.5)
-	write("2", settle.ReasonManual, prB, 2.5)
+	idA = write("1", dispatchrecord.ReasonAutoMergeEnqueued, prA, 1.5)
+	write("2", dispatchrecord.ReasonManual, prB, 2.5)
 
 	f = forge.NewFake()
 	f.SetPR("a", forge.PR{URL: prA})

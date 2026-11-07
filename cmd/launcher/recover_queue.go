@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/settle"
@@ -107,7 +108,7 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	// Without the record the next pass would retry with no backoff and no bound.
 	saveErr := rec.Save()
 	var parkErr error
-	reason, note, err := settle.Transition(it, num, forge.InProgress, forge.Failed, settle.ReasonRelayFailed, note)
+	reason, note, err := settle.Transition(it, num, forge.InProgress, forge.Failed, dispatchrecord.ReasonRelayFailed, note)
 	if err != nil {
 		parkErr = fmt.Errorf("recover: park #%s on %s: %w", num, c.failedLabel, err)
 	}

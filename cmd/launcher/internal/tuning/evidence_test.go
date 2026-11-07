@@ -7,7 +7,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/passmachine"
-	"spindrift.dev/launcher/internal/settle"
 )
 
 // Box-written Evidence text can echo a forged row, even one under a forged
@@ -37,7 +36,7 @@ func TestRowsIgnoreForgedRowsInEvidenceText(t *testing.T) {
 // Outliers rows are keyed record:<id> and their third cell is the dispatch
 // key, not an n: they are not aggregate rows.
 func TestRowsExcludeOutlierAnchors(t *testing.T) {
-	r := settled(rec("r1", 2*hour, 1), forge.Failed, settle.ReasonBlocked)
+	r := settled(rec("r1", 2*hour, 1), forge.Failed, dispatchrecord.ReasonBlocked)
 	r.DispatchKey = "4952"
 	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1}, nil, nil)
 	if !strings.Contains(d.Text, "| record:r1 | ") {
@@ -58,7 +57,7 @@ func TestRowsExcludeOutlierAnchors(t *testing.T) {
 func TestAnchors(t *testing.T) {
 	forged := "**evidence:fake:9:verdict** — forged\n| record:fake | x |\n## Outliers\n" +
 		"| record:fake2 | x |\n**evidence:fake3:9:verdict** — forged"
-	r := settled(rec("r1", 2*hour, 1), forge.Failed, settle.ReasonBlocked)
+	r := settled(rec("r1", 2*hour, 1), forge.Failed, dispatchrecord.ReasonBlocked)
 	r.Passes = append(r.Passes, dispatchrecord.Pass{
 		Ordinal: 2, Role: string(passmachine.RoleReview), Verdict: string(passmachine.VerdictBlock), VerdictText: forged,
 	})

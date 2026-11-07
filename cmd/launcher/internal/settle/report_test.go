@@ -168,8 +168,8 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
 		t.Fatalf("last log line %q is not a dispatch_settled op: %v", lines[len(lines)-1], err)
 	}
-	if got := ev.SpindriftOp.Settled; got.Reason != ReasonMergeUnverified || !strings.Contains(got.Note, "PR state is 'OPEN'") {
-		t.Errorf("settled op = %+v, want reason=%s and a note naming the PR state 'OPEN'", got, ReasonMergeUnverified)
+	if got := ev.SpindriftOp.Settled; got.Reason != dispatchrecord.ReasonMergeUnverified || !strings.Contains(got.Note, "PR state is 'OPEN'") {
+		t.Errorf("settled op = %+v, want reason=%s and a note naming the PR state 'OPEN'", got, dispatchrecord.ReasonMergeUnverified)
 	}
 }
 
@@ -595,7 +595,7 @@ func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *test
 	fc.TransitionStateErr = fmt.Errorf("wrapped: %w", refused)
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Complete, "merged cleanly", ReasonMerged)
+	s.transitionState("9", forge.InProgress, forge.Complete, "merged cleanly", dispatchrecord.ReasonMerged)
 
 	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "9" {
 		t.Fatalf("comments = %+v, want one on issue 9", fc.CommentCalls)
@@ -607,10 +607,10 @@ func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *test
 		}
 	}
 	got := s.settledLatch["9"]
-	if got.state != forge.Complete.String() || got.reason != ReasonTransitionRefused {
-		t.Errorf("latch = %+v, want state=%s reason=%s", got, forge.Complete, ReasonTransitionRefused)
+	if got.state != forge.Complete.String() || got.reason != dispatchrecord.ReasonTransitionRefused {
+		t.Errorf("latch = %+v, want state=%s reason=%s", got, forge.Complete, dispatchrecord.ReasonTransitionRefused)
 	}
-	if !strings.Contains(got.note, "could not move") || !strings.Contains(got.note, ReasonMerged) || !strings.Contains(got.note, "merged cleanly") {
+	if !strings.Contains(got.note, "could not move") || !strings.Contains(got.note, dispatchrecord.ReasonMerged) || !strings.Contains(got.note, "merged cleanly") {
 		t.Errorf("latch note = %q, want the refusal text and the displaced reason and note", got.note)
 	}
 }
@@ -622,13 +622,13 @@ func TestSettle_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(
 	s := New(Config{}, fc, fc)
 
 	testutil.CaptureStderr(t, func() {
-		s.transitionState("9", forge.InProgress, forge.Failed, "n", ReasonCIRed)
+		s.transitionState("9", forge.InProgress, forge.Failed, "n", dispatchrecord.ReasonCIRed)
 	})
 
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("comments = %+v, want none", fc.CommentCalls)
 	}
-	if got := s.settledLatch["9"]; got.reason != ReasonCIRed || got.note != "n" {
+	if got := s.settledLatch["9"]; got.reason != dispatchrecord.ReasonCIRed || got.note != "n" {
 		t.Errorf("latch = %+v, want the caller's reason and note", got)
 	}
 }

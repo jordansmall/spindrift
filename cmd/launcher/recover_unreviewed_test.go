@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/passmanifest"
-	"spindrift.dev/launcher/internal/settle"
 )
 
 // seedManifest writes num's outbox pass manifest, as the Box's review loop
@@ -142,7 +142,7 @@ func TestCmdRecover_NoReportStoppedBeforeLandIsSkipped(t *testing.T) {
 	if got == 0 || x.fc.Merged != "" || len(x.fc.RelayBundleCalls) != 0 {
 		t.Errorf("cmdRecover = %d, Merged = %q, relays = %v, want a non-zero exit and nothing landed", got, x.fc.Merged, x.fc.RelayBundleCalls)
 	}
-	if !strings.Contains(stdout.String(), settle.UnreviewedNote) {
+	if !strings.Contains(stdout.String(), dispatchrecord.UnreviewedNote) {
 		t.Errorf("stdout = %q, want the unreviewed skip note", stdout.String())
 	}
 }
@@ -157,7 +157,7 @@ func TestCmdRecover_NoReportStoppedBeforeLandWithOpenPRIsNotDeclined(t *testing.
 
 	out, err := x.openPRRecover(t)
 
-	if strings.Contains(out, settle.UnreviewedNote) {
+	if strings.Contains(out, dispatchrecord.UnreviewedNote) {
 		t.Errorf("stdout = %q, want no unreviewed decline for an open PR with no success self-report", out)
 	}
 	if err != nil || x.fc.Merged != testReconcilePR || len(x.fc.MarkReadyCalls) != 1 {
@@ -189,10 +189,10 @@ func TestCmdRecover_NoReportStoppedBeforeLandNoOpenPRNamesUnreviewed(t *testing.
 			var out strings.Builder
 			err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf), "42", &out, io.Discard)
 
-			if err == nil || !strings.Contains(err.Error(), settle.UnreviewedNote) {
+			if err == nil || !strings.Contains(err.Error(), dispatchrecord.UnreviewedNote) {
 				t.Errorf("err = %v, want the unreviewed decline", err)
 			}
-			if !strings.Contains(out.String(), "status=skipped") || !strings.Contains(out.String(), settle.UnreviewedNote+"; needs human triage") {
+			if !strings.Contains(out.String(), "status=skipped") || !strings.Contains(out.String(), dispatchrecord.UnreviewedNote+"; needs human triage") {
 				t.Errorf("stdout = %q, want the unreviewed skip line", out.String())
 			}
 			if strings.Contains(out.String(), "no open PR") || (err != nil && strings.Contains(err.Error(), "no open PR")) {

@@ -6,6 +6,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
@@ -17,14 +18,14 @@ func TestTally_SettledRecordsOutcome(t *testing.T) {
 
 	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{
 		State:  forge.Complete.String(),
-		Reason: ReasonMerged,
+		Reason: dispatchrecord.ReasonMerged,
 		PRURL:  "https://example.test/pr/1",
 	})
 
 	want := []DispatchOutcome{{
 		Key:    dispatchkey.Issue("7"),
 		State:  forge.Complete.String(),
-		Reason: ReasonMerged,
+		Reason: dispatchrecord.ReasonMerged,
 		PRURL:  "https://example.test/pr/1",
 	}}
 	got := tally.Outcomes()
@@ -37,9 +38,9 @@ func TestTally_LastWriteWinsKeepingFirstSettledPosition(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
 
-	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Failed.String(), Reason: ReasonCIRed})
-	Settled(dispatchkey.Issue("2"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: ReasonMerged})
-	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: ReasonMerged})
+	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Failed.String(), Reason: dispatchrecord.ReasonCIRed})
+	Settled(dispatchkey.Issue("2"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: dispatchrecord.ReasonMerged})
+	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: dispatchrecord.ReasonMerged})
 
 	got := tally.Outcomes()
 	if len(got) != 2 {
@@ -110,7 +111,7 @@ func TestTally_ReadOnlyMissingBundleRecordsMergeBlocked(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(dispatch.NewFake(), num, 0, settleReadyResult(num, "agent/issue-1919"))
 
-	want := DispatchOutcome{Key: dispatchkey.Issue(num), State: forge.InProgress.String(), Reason: ReasonMergeBlocked}
+	want := DispatchOutcome{Key: dispatchkey.Issue(num), State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked}
 	got := tally.Outcomes()
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("Outcomes() = %+v, want [%+v]", got, want)
@@ -130,7 +131,7 @@ func TestTally_PushOnlyLandingFailureRecordsCompleteMergeBlocked(t *testing.T) {
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 	s.Settle(dispatch.NewFake(), num, 0, settleReadyResult(num, "agent/issue-1"))
 
-	want := DispatchOutcome{Key: dispatchkey.Issue(num), State: forge.Complete.String(), Reason: ReasonMergeBlocked}
+	want := DispatchOutcome{Key: dispatchkey.Issue(num), State: forge.Complete.String(), Reason: dispatchrecord.ReasonMergeBlocked}
 	got := tally.Outcomes()
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("Outcomes() = %+v, want [%+v]", got, want)

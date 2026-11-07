@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -208,7 +209,7 @@ func (s *Settle) tryMarkRecoverable(d dispatch.Dispatcher, num string, result di
 		reason = "killed by signal"
 	}
 	fmt.Printf("    #%s  status=recoverable  note=%s; bundle present in outbox; run `spindrift recover %s` to land it\n", num, reason, num)
-	s.transitionState(num, forge.InProgress, forge.Recoverable, reason, ReasonRecoverable)
+	s.transitionState(num, forge.InProgress, forge.Recoverable, reason, dispatchrecord.ReasonRecoverable)
 	return true
 }
 

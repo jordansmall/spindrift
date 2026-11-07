@@ -22,6 +22,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers, backends, and runner families
@@ -772,8 +773,17 @@ func forgeLandedLine(c config) string {
 // forges never latch a PR URL, so their clean Completes count). An
 // already-resolved Complete opened nothing, so it is named too.
 func delivered(o settle.DispatchOutcome) bool {
-	return o.State == forge.Complete.String() && o.Reason != settle.ReasonAlreadyResolved &&
-		(o.PRURL != "" || o.Reason != settle.ReasonMergeBlocked)
+	if o.State != forge.Complete.String() {
+		return false
+	}
+	switch dispatchrecord.ReasonDelivery(o.Reason) {
+	case dispatchrecord.DeliversNothing:
+		return false
+	case dispatchrecord.DeliversWithPR:
+		return o.PRURL != ""
+	default:
+		return true
+	}
 }
 
 // runnerConfig builds the runner.Config a runner adapter needs. Shared by the
@@ -1524,7 +1534,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	}
 	sit := s.SituationFor(iss.number, res.Found, dispatch.Result{Resolved: resolved, Passes: passes})
 	declineUnreviewed := func() error {
-		note := settle.UnreviewedNote + "; needs human triage"
+		note := dispatchrecord.UnreviewedNote + "; needs human triage"
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=%s\n", issueNum, note)
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %s", issueNum, note), stdout, stderr)
 	}
@@ -1607,7 +1617,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			if queue {
 				// A stop arrived after the claim above: put the label back so
 				// the issue is not stranded agent-in-progress with no run.
-				reason, note, restoreErr := settle.Transition(it, iss.number, forge.InProgress, forge.Failed, settle.ReasonStopped, "stopped before the bundle relay")
+				reason, note, restoreErr := settle.Transition(it, iss.number, forge.InProgress, forge.Failed, dispatchrecord.ReasonStopped, "stopped before the bundle relay")
 				// Reported even if the restore failed, as transitionState does.
 				recoverSettled(iss.number, forge.Failed, reason, note)
 				if restoreErr != nil {
@@ -1720,7 +1730,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// caller settles that failure itself. Inline rather than through
 	// settle/gate.go's latch, which exists for a path that can reach a second,
 	// contradicting terminal transition; this one reaches at most one.
-	recoverSettled(num, forge.Complete, settle.ReasonRecoverDeclined, note)
+	recoverSettled(num, forge.Complete, dispatchrecord.ReasonRecoverDeclined, note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}

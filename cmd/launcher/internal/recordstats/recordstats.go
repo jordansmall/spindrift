@@ -11,7 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/passmachine"
-	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -104,7 +103,7 @@ func AggregateRoles(records []dispatchrecord.Record) (rows []RoleRow, passes int
 // Merged reports whether the host settled r merged: its PR landed on the
 // default branch.
 func Merged(r dispatchrecord.Record) bool {
-	return r.Outcome == forge.Complete.String() && r.Reason == settle.ReasonMerged
+	return r.Outcome == forge.Complete.String() && dispatchrecord.ReasonLanded(r.Reason)
 }
 
 // LandedKeys counts distinct (kind, Dispatch key) pairs with a Record the host

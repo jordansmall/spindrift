@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -1056,11 +1057,11 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	if err != nil {
 		t.Errorf("applyMergeMode immediate: unexpected error: %v", err)
 	}
-	if reason != ReasonMerged {
-		t.Errorf("reason = %q, want %q", reason, ReasonMerged)
+	if reason != dispatchrecord.ReasonMerged {
+		t.Errorf("reason = %q, want %q", reason, dispatchrecord.ReasonMerged)
 	}
-	if ReasonLeavesPROpen(reason) {
-		t.Errorf("reason %q must not be ReasonLeavesPROpen: the PR merged", reason)
+	if dispatchrecord.ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must not be dispatchrecord.ReasonLeavesPROpen: the PR merged", reason)
 	}
 	if fc.Merged != testPR {
 		t.Errorf("immediate mode must call Merge; fc.Merged=%q", fc.Merged)
@@ -1078,11 +1079,11 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	if err != nil {
 		t.Errorf("applyMergeMode manual: unexpected error: %v", err)
 	}
-	if reason != ReasonManual {
-		t.Errorf("reason = %q, want %q", reason, ReasonManual)
+	if reason != dispatchrecord.ReasonManual {
+		t.Errorf("reason = %q, want %q", reason, dispatchrecord.ReasonManual)
 	}
-	if !ReasonLeavesPROpen(reason) {
-		t.Errorf("reason %q must be ReasonLeavesPROpen: the PR stays open", reason)
+	if !dispatchrecord.ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must be dispatchrecord.ReasonLeavesPROpen: the PR stays open", reason)
 	}
 	if fc.Merged != "" {
 		t.Errorf("manual mode must not call Merge; fc.Merged=%q", fc.Merged)
@@ -1100,11 +1101,11 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	if err != nil {
 		t.Errorf("applyMergeMode auto: unexpected error: %v", err)
 	}
-	if reason != ReasonAutoMergeEnqueued {
-		t.Errorf("reason = %q, want %q", reason, ReasonAutoMergeEnqueued)
+	if reason != dispatchrecord.ReasonAutoMergeEnqueued {
+		t.Errorf("reason = %q, want %q", reason, dispatchrecord.ReasonAutoMergeEnqueued)
 	}
-	if !ReasonLeavesPROpen(reason) {
-		t.Errorf("reason %q must be ReasonLeavesPROpen: the PR stays open", reason)
+	if !dispatchrecord.ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must be dispatchrecord.ReasonLeavesPROpen: the PR stays open", reason)
 	}
 	if fc.Merged != "" {
 		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)
@@ -1145,11 +1146,11 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	if err != nil {
 		t.Errorf("auto mode enqueue failure must not propagate error; got: %v", err)
 	}
-	if reason != ReasonMergeBlocked {
-		t.Errorf("reason = %q, want %q", reason, ReasonMergeBlocked)
+	if reason != dispatchrecord.ReasonMergeBlocked {
+		t.Errorf("reason = %q, want %q", reason, dispatchrecord.ReasonMergeBlocked)
 	}
-	if !ReasonLeavesPROpen(reason) {
-		t.Errorf("reason %q must be ReasonLeavesPROpen: the PR stays open", reason)
+	if !dispatchrecord.ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must be dispatchrecord.ReasonLeavesPROpen: the PR stays open", reason)
 	}
 	if fc.Merged != "" {
 		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)
