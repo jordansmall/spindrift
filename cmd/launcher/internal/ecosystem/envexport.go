@@ -1,7 +1,7 @@
 package ecosystem
 
 // EnvExport is one name/value pair to export into the child process's environment.
-// Exports render as a sourceable "export NAME=\"value\"" file, so a slice keeps
+// Exports render as a sourceable "export NAME='value'" file, so a slice keeps
 // line order stable across runs; Go randomizes map iteration order.
 type EnvExport struct {
 	Name  string
