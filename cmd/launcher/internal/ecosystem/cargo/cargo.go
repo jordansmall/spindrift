@@ -245,12 +245,12 @@ type cargoUpstreamSource struct {
 // cargoSourceReplacement is the source-replacement plan for one distinct
 // upstream index URL served on one manifest route (issues #3201, #3256). A
 // route matching several registries yields one replacement per distinct index
-// URL, all sharing its Prefix. The planner gives Upstreams exactly one entry.
+// URL, all sharing its Prefix. Upstream is the registry it redirects away from.
 type cargoSourceReplacement struct {
 	Prefix        string
 	ProxySource   string
 	LocalIndexURL string
-	Upstreams     []cargoUpstreamSource
+	Upstream      cargoUpstreamSource
 }
 
 // cargoIndexHost returns the host cargo would connect to for index, stripping
@@ -552,7 +552,7 @@ func cargoSourceReplacements(port int, prefix string, routes []registrymanifest.
 				Prefix:        route.Prefix,
 				ProxySource:   proxySource,
 				LocalIndexURL: localURL,
-				Upstreams:     []cargoUpstreamSource{{SourceName: m.sourceName, IndexURL: m.index}},
+				Upstream:      cargoUpstreamSource{SourceName: m.sourceName, IndexURL: m.index},
 			})
 		}
 	}
@@ -586,12 +586,9 @@ func cargoConfigTOMLWithReplacements(port int, prefix string, replacements []car
 	emittedUpstreamSources := make(map[string]bool)
 
 	for _, rep := range replacements {
-		for _, up := range rep.Upstreams {
-			if emittedUpstreamSources[up.SourceName] {
-				continue
-			}
-			emittedUpstreamSources[up.SourceName] = true
-			fmt.Fprintf(&b, "\n[source.%s]\nregistry = %q\nreplace-with = %q\n", up.SourceName, up.IndexURL, rep.ProxySource)
+		if !emittedUpstreamSources[rep.Upstream.SourceName] {
+			emittedUpstreamSources[rep.Upstream.SourceName] = true
+			fmt.Fprintf(&b, "\n[source.%s]\nregistry = %q\nreplace-with = %q\n", rep.Upstream.SourceName, rep.Upstream.IndexURL, rep.ProxySource)
 		}
 
 		if emittedProxySources[rep.ProxySource] {
