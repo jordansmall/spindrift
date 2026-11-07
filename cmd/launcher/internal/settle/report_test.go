@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
@@ -523,12 +524,13 @@ func TestSettleAdopted_SettledRecordCarriesPR(t *testing.T) {
 	}
 }
 
-// flushSettled appends exactly one dispatch_settled op to the Dispatch's
-// primary Pass log and stamps the same Record ID on the settled record.
-func TestSettle_FlushSettled_AppendsDispatchSettledToPrimaryLog(t *testing.T) {
+// flushSettled settles the Dispatch's Record in the store from the primary Pass
+// log and stamps the same Record ID on the settled report; a second flush finds
+// the latch popped and reports nothing more.
+func TestSettle_FlushSettled_SettlesRecordFromPrimaryLog(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
-	logPath := filepath.Join(t.TempDir(), "issue-9.log")
-	if err := os.WriteFile(logPath, []byte("existing\n"), 0o644); err != nil {
+	logPath := rootLogPath(t, "issue-9.log")
+	if err := os.WriteFile(logPath, []byte(startLine("work:9@t", "")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -542,25 +544,18 @@ func TestSettle_FlushSettled_AppendsDispatchSettledToPrimaryLog(t *testing.T) {
 	s.flushSettled(d, "9")
 	s.flushSettled(d, "9")
 
-	raw, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
+	recs := logRecords(t, logPath)
+	if len(recs) != 1 {
+		t.Fatalf("stored records = %+v, want one", recs)
 	}
-	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-	if len(lines) != 2 || lines[0] != "existing" {
-		t.Fatalf("log = %q, want the prior line plus exactly one appended op", raw)
+	got := recs[0]
+	if got.ID != "work:9@t" || got.Outcome != "failed" || got.Reason != "ci-red" || got.Note != "red" || got.PRURL != testPR ||
+		got.OutcomeSource != dispatchrecord.OutcomeSourceSettled {
+		t.Errorf("stored record = %+v, want work:9@t settled failed/ci-red, note red, PR %s", got, testPR)
 	}
-	var ev hostop.Event
-	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil || ev.SpindriftOp == nil {
-		t.Fatalf("appended line %q is not a spindrift_op: %v", lines[1], err)
-	}
-	want := hostop.DispatchSettled{RecordID: "work:9@t", State: "failed", Reason: "ci-red", Note: "red", PRURL: testPR}
-	if ev.SpindriftOp.Op != hostop.OpDispatchSettled || ev.SpindriftOp.Settled == nil || *ev.SpindriftOp.Settled != want {
-		t.Errorf("op = %+v, want dispatch_settled %+v", ev.SpindriftOp, want)
-	}
-	recs := readRecords()
-	if len(recs) != 1 || recs[0].RecordID != "work:9@t" {
-		t.Errorf("records = %+v, want one settled record with record_id", recs)
+	reports := readRecords()
+	if len(reports) != 1 || reports[0].RecordID != "work:9@t" {
+		t.Errorf("reports = %+v, want one settled report with record_id", reports)
 	}
 }
 

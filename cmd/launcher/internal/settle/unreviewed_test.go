@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -48,9 +49,7 @@ func TestSettle_ReadyFromUnreviewedPass_FailsUnreviewedAndLandsNothing(t *testin
 
 	out := testutil.CaptureStdout(t, func() { s.Settle(d, gateIssue, 0, result) })
 
-	if ops := settledOps(t, path); len(ops) != 1 || ops[0].State != "failed" || ops[0].Reason != ReasonUnreviewed {
-		t.Fatalf("settled ops = %+v, want one failed/%s", ops, ReasonUnreviewed)
-	}
+	assertSettledUnreviewed(t, path)
 	assertOutputHas(t, out, "status=failed")
 	iss, _ := fc.Issue(gateIssue)
 	if !containsLabel(iss.Labels, "agent-failed") || containsLabel(iss.Labels, "agent-complete") {
@@ -179,9 +178,7 @@ func TestSettle_GithubReadOnly_UnreviewedSelfReportDoesNotAdopt(t *testing.T) {
 
 			testutil.CaptureStdout(t, func() { s.Settle(d, issNum, 0, tc.result) })
 
-			if ops := settledOps(t, path); len(ops) != 1 || ops[0].State != "failed" || ops[0].Reason != ReasonUnreviewed {
-				t.Fatalf("settled ops = %+v, want one failed/%s", ops, ReasonUnreviewed)
-			}
+			assertSettledUnreviewed(t, path)
 			if len(fc.RelayBundleCalls) != 0 || len(fc.CreateDraftPRCalls) != 0 || fc.Merged != "" {
 				t.Errorf("must not adopt; RelayBundleCalls=%+v CreateDraftPRCalls=%+v Merged=%q", fc.RelayBundleCalls, fc.CreateDraftPRCalls, fc.Merged)
 			}
@@ -335,9 +332,7 @@ func TestSettle_LocalPushOnly_UnreviewedBundlePresentFailsUnreviewed(t *testing.
 
 			testutil.CaptureStdout(t, func() { s.Settle(d, issNum, 0, tc.result) })
 
-			if ops := settledOps(t, path); len(ops) != 1 || ops[0].State != "failed" || ops[0].Reason != ReasonUnreviewed {
-				t.Fatalf("settled ops = %+v, want one failed/%s", ops, ReasonUnreviewed)
-			}
+			assertSettledUnreviewed(t, path)
 			for _, call := range fc.TransitionStateCalls {
 				if call.To == forge.Recoverable {
 					t.Errorf("must not promote to Recoverable; calls=%+v", fc.TransitionStateCalls)
@@ -392,9 +387,16 @@ func TestSettle_LocalPushOnly_KilledNoReportBundlePresent_FailsUnreviewedUnlessL
 			if recoverable {
 				t.Errorf("must not promote to Recoverable; calls=%+v", fc.TransitionStateCalls)
 			}
-			if ops := settledOps(t, path); len(ops) != 1 || ops[0].State != "failed" || ops[0].Reason != ReasonUnreviewed {
-				t.Fatalf("settled ops = %+v, want one failed/%s", ops, ReasonUnreviewed)
-			}
+			assertSettledUnreviewed(t, path)
 		})
+	}
+}
+
+func assertSettledUnreviewed(t *testing.T, path string) {
+	t.Helper()
+	recs := logRecords(t, path)
+	if len(recs) != 1 || recs[0].Outcome != "failed" || recs[0].Reason != ReasonUnreviewed ||
+		recs[0].OutcomeSource != dispatchrecord.OutcomeSourceSettled {
+		t.Fatalf("stored records = %+v, want one settled failed/%s", recs, ReasonUnreviewed)
 	}
 }

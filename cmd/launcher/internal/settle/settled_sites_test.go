@@ -3,13 +3,12 @@ package settle
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
@@ -19,9 +18,8 @@ import (
 // dispatch_start stamp for recordID.
 func stampedFake(t *testing.T, recordID string) (*dispatch.Fake, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "issue.log")
-	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: recordID}})
-	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
+	path := rootLogPath(t, "issue-1.log")
+	if err := os.WriteFile(path, []byte(startLine(recordID, "")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	d := dispatch.NewFake()
@@ -32,9 +30,9 @@ func stampedFake(t *testing.T, recordID string) (*dispatch.Fake, string) {
 
 func assertOneSettled(t *testing.T, path, recordID, state, reason string, recs []report.Record) {
 	t.Helper()
-	ops := settledOps(t, path)
-	if len(ops) != 1 || ops[0].RecordID != recordID || ops[0].State != state || ops[0].Reason != reason {
-		t.Fatalf("settled ops = %+v, want one %s/%s for %s", ops, state, reason, recordID)
+	stored := logRecords(t, path)
+	if len(stored) != 1 || stored[0].ID != recordID || stored[0].Outcome != state || stored[0].Reason != reason || stored[0].OutcomeSource != dispatchrecord.OutcomeSourceSettled {
+		t.Fatalf("stored records = %+v, want one %s/%s settled for %s", stored, state, reason, recordID)
 	}
 	if len(recs) != 1 || recs[0].Event != report.EventSettled || recs[0].RecordID != recordID || recs[0].State != state {
 		t.Fatalf("reports = %+v, want one settled carrying record_id %s", recs, recordID)
@@ -64,8 +62,8 @@ func TestResearchSettle_FailAppendsSettled(t *testing.T) {
 
 // A nil Dispatcher (the butler patch gate) has no Record: even when the
 // primary log opens with a stamp, which may name an unrelated earlier Record,
-// the settle appends nothing.
-func TestSettleAdopted_NilDispatcherAppendsNothing(t *testing.T) {
+// the settle leaves no Record in the store.
+func TestSettleAdopted_NilDispatcherSettlesNoRecord(t *testing.T) {
 	c := baseConfig()
 	_, path := stampedFake(t, "work:1@old")
 	c.LogPath = func(string) string { return path }
@@ -76,12 +74,12 @@ func TestSettleAdopted_NilDispatcherAppendsNothing(t *testing.T) {
 
 	testutil.CaptureStdout(t, func() { s.SettleAdopted(nil, "1", 0, testPR) })
 
-	if ops := settledOps(t, path); len(ops) != 0 {
-		t.Errorf("settled ops = %+v, want none for a nil Dispatcher", ops)
+	if recs := logRecords(t, path); len(recs) != 0 {
+		t.Errorf("stored records = %+v, want none for a nil Dispatcher", recs)
 	}
 }
 
-func flushLatched(t *testing.T, fc *forge.Fake, reason string) []hostop.DispatchSettled {
+func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.Record {
 	t.Helper()
 	c := baseConfig()
 	d, path := stampedFake(t, "work:9@x")
@@ -97,24 +95,24 @@ func flushLatched(t *testing.T, fc *forge.Fake, reason string) []hostop.Dispatch
 		s.transitionState("9", forge.InProgress, state, "", reason)
 		s.flushSettled(d, "9")
 	})
-	return settledOps(t, path)
+	return logRecords(t, path)
 }
 
 func TestFlushSettled_MergedCarriesMergeCommit(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetMergeCommit(testPR, "deadbeef")
-	ops := flushLatched(t, fc, ReasonMerged)
-	if len(ops) != 1 || ops[0].MergeCommit != "deadbeef" {
-		t.Fatalf("ops = %+v, want one carrying merge_commit deadbeef", ops)
+	records := flushLatched(t, fc, ReasonMerged)
+	if len(records) != 1 || records[0].MergeCommit != "deadbeef" {
+		t.Fatalf("records = %+v, want one carrying merge_commit deadbeef", records)
 	}
 }
 
 func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetMergeCommit(testPR, "deadbeef")
-	ops := flushLatched(t, fc, "ci-red")
-	if len(ops) != 1 || ops[0].MergeCommit != "" {
-		t.Fatalf("ops = %+v, want one without a merge commit", ops)
+	records := flushLatched(t, fc, "ci-red")
+	if len(records) != 1 || records[0].MergeCommit != "" {
+		t.Fatalf("records = %+v, want one without a merge commit", records)
 	}
 }
 
@@ -123,10 +121,10 @@ func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
 func TestFlushSettled_MergeCommitReadErrorKeepsOutcome(t *testing.T) {
 	fc := forge.NewFake()
 	fc.MergeCommitErr = errors.New("boom")
-	var ops []hostop.DispatchSettled
-	stderr := testutil.CaptureStderr(t, func() { ops = flushLatched(t, fc, ReasonMerged) })
-	if len(ops) != 1 || ops[0].State != "complete" || ops[0].Reason != ReasonMerged || ops[0].MergeCommit != "" {
-		t.Fatalf("ops = %+v, want one complete/merged without a merge commit", ops)
+	var records []dispatchrecord.Record
+	stderr := testutil.CaptureStderr(t, func() { records = flushLatched(t, fc, ReasonMerged) })
+	if len(records) != 1 || records[0].Outcome != "complete" || records[0].Reason != ReasonMerged || records[0].MergeCommit != "" {
+		t.Fatalf("records = %+v, want one complete/merged without a merge commit", records)
 	}
 	if !strings.Contains(stderr, "read merge commit of "+testPR) || !strings.Contains(stderr, "boom") {
 		t.Fatalf("stderr = %q, want the read-merge-commit warning", stderr)
