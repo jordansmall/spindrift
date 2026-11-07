@@ -866,7 +866,7 @@ func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision
 		// the child reported before this failure already reached the
 		// stream live through OnRecord, so there is nothing left to
 		// replay here.
-		p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+		p.emit(Event{Event: report.EventChildFinish, Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
 		return p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("%s: %v", seam, err), batonPassChildEnded)
 	}
 
@@ -875,7 +875,7 @@ func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision
 	// was already closed when the child exited; read the latch once,
 	// here, rather than let a later close race Interpret's answer.
 	outcome, action, haltClass := Interpret(exit, p.stopClosed())
-	p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
+	p.emit(Event{Event: report.EventChildFinish, Kind: kind, Key: key, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
 
 	switch action {
 	case Continue:
