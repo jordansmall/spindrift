@@ -299,7 +299,9 @@ harness, not the Agent, counts `base..branch` after the Driver exits and
 appends a synthetic `blocked` line naming the count, pushing or bundling
 the commits as any blocked run's; settle demotes a claim that arrives
 with an outbox bundle itself, and posts the corrective note on either
-path.
+path. If that count itself fails, the line still says `blocked`, but on a
+relay arm it claims no outbox relay, because no bundle is written then
+(issue #6558); the push arm still attempts the push.
 
 No outcome-line grammar change: this adds a value to the work kind's status
 set (`lib/prompt-contract.nix`'s `outcomeStatusSets`, generated into
