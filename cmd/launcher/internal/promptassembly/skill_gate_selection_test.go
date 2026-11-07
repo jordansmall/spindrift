@@ -1,9 +1,6 @@
 package promptassembly
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 // AUTO_FORMAT and AUTO_LINT are plain passthroughs of the Env flags (issue
 // #2354), each independent of the other, so a partial combination renders
@@ -246,9 +243,7 @@ func TestAssembleResearchVerdictRelaySelection(t *testing.T) {
 			if got := unseparated(result.Prompt); got != tc.want {
 				t.Errorf("Prompt = %q, want %q", got, tc.want)
 			}
-			if strings.Contains(result.Prompt, "${") {
-				t.Errorf("Prompt still contains an unsubstituted ${...} token: %q", result.Prompt)
-			}
+			assertNoUnsubstituted(t, t.Name(), result.Prompt)
 		})
 	}
 }
