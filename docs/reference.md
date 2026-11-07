@@ -5486,11 +5486,14 @@ landing: "https://github.com/owner/repo/pull/123"
   self-reported success (or was killed by a signal) leaves a bundle in the
   outbox for `spindrift recover` (ADR 0039), unless its review loop stopped
   before its land pass finished (`agent-failed`, reason `unreviewed`).
-- `parent` is optional and opaque — the local tracker is standalone; any
-  linkage to an upstream tracker (a GitHub URL, a Jira key, another local
-  issue's slug) is out of scope (ADR 0013) and never resolved by spindrift
-  itself. Under `CODE_FORGE=local` it doubles as the seam's broad-ticket
-  key (ADR 0033): the issue lands onto `integration/<sanitized-parent>` in
+- `parent` is optional. A `parent:` naming another local slug is resolved
+  host-side, like a `## Blocked by` entry (see above): that issue's body,
+  plus its own link chain, renders into the prompt's `## Linked issues`
+  block. Linkage to an upstream tracker (a GitHub URL, a Jira key) is out of
+  scope (ADR 0013): spindrift queries no upstream tracker, so a value naming
+  no local issue is listed under `### Unresolved references`. Under
+  `CODE_FORGE=local`, `parent` doubles as the seam's broad-ticket key
+  (ADR 0033): the issue lands onto `integration/<sanitized-parent>` in
   the Accumulation repo, sanitized to a git-ref-safe token (lowercased,
   each run of non-`[a-z0-9]` characters collapsed to a single dash,
   leading/trailing dashes trimmed). A parentless issue lands on
