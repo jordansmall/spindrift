@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // Demand is a kind's tracker-side answer to "is there anything for a child
@@ -137,7 +138,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 				if prev == probeFailed {
 					return nil
 				}
-				return []Event{{Event: "probe_failed", Kind: kind, Slot: intPtr(slot), Reason: fmt.Sprintf("demand: %v", err)}}
+				return []Event{{Event: report.EventProbeFailed, Kind: kind, Slot: intPtr(slot), Reason: fmt.Sprintf("demand: %v", err)}}
 			}
 			s.observe(now, demandRateLimited{Kind: kind, Reset: reset})
 			// A pause that lapsed with no successful probe since is over, so a
@@ -147,7 +148,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 			}
 			v := s.sched.View(kind, now)
 			// The pause always outlasts now: a probed kind has a positive interval.
-			return []Event{{Event: "probe_rate_limited", Kind: kind, Slot: intPtr(slot), Tracker: v.Tracker, Until: v.RateLimitedUntil.UTC().Format(time.RFC3339), Reason: fmt.Sprintf("demand: %v", err)}}
+			return []Event{{Event: report.EventProbeRateLimited, Kind: kind, Slot: intPtr(slot), Tracker: v.Tracker, Until: v.RateLimitedUntil.UTC().Format(time.RFC3339), Reason: fmt.Sprintf("demand: %v", err)}}
 		})
 		return true, err
 	}
@@ -158,19 +159,19 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		s.observe(now, demandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh, IDs: d.IDs})
 		var evs []Event
 		if before.fault != probeClean {
-			evs = append(evs, Event{Event: "probe_resumed", Kind: kind, Slot: intPtr(slot), Tracker: before.Tracker})
+			evs = append(evs, Event{Event: report.EventProbeResumed, Kind: kind, Slot: intPtr(slot), Tracker: before.Tracker})
 		}
 		switch {
 		case before.Counted == 0 && d.Ready > 0:
-			evs = append(evs, Event{Event: "demand_appeared", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
+			evs = append(evs, Event{Event: report.EventDemandAppeared, Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
 		case before.Counted > 0 && d.Ready == 0:
-			evs = append(evs, Event{Event: "demand_drained", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
+			evs = append(evs, Event{Event: report.EventDemandDrained, Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
 		}
 		// This mutate observes only the probe, so a jam gate live before it
 		// and gone after it was lifted by the probe: a rise, or for an
 		// upper-bound kind a new identity.
 		if !before.JamUntil.IsZero() && s.sched.View(kind, now).JamUntil.IsZero() {
-			evs = append(evs, Event{Event: "demand_rose", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
+			evs = append(evs, Event{Event: report.EventDemandRose, Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
 		}
 		return evs
 	})

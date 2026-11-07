@@ -19,7 +19,8 @@
 #   * `time` is stamped by Emitter.Emit, never in a literal, so every event gets
 #     it.
 #   * emit sites are `Event{Event: <name>, ...}` (or slice-element `Event{{Event:
-#     <name>, ...}}`) literals on ONE line, read from
+#     <name>, ...}}`) literals on ONE line, <name> a report.Event* constant
+#     (a quoted literal throws), read from
 #     every non-test .go file directly in the two daemon packages. A line
 #     holding the key `Event: ` that does not parse, or whose literal does not
 #     close at the end of that line (`}` then only `}`/`)`), throws rather than
@@ -30,6 +31,11 @@
 #     literal, the way another package builds an event (any import alias).
 #   * known limit: a field set by assignment after the literal (`ev := Event{...};
 #     ev.Revision = r; p.emit(ev)`) is not seen; set it in the literal.
+#     An `.Event = ` assignment throws instead: Event.Event is a plain string, so
+#     it would dodge the constant rule above.
+#   * report.Events() is parsed from report.go (the `Event*` tokens between
+#     `func Events() []string {` and the next `}` line) and must equal the set of
+#     emitted names, each listed once.
 #
 # `drift` is pure -- text in, mismatch messages out -- so rejection cases can
 # feed it doctored inputs.
@@ -177,20 +183,63 @@ let
         )
     );
 
+  reportTextOf =
+    goSources:
+    let
+      hits = filter (s: s.file == reportFile) goSources;
+    in
+    if hits == [ ] then
+      throw "${me}: ${reportFile} is not among the scanned Go sources."
+    else
+      (builtins.head hits).text;
+
+  # Every Event* token of report.Events()'s body, resolved to its wire name, in
+  # source order (duplicates kept so `drift` can flag them).
+  eventsListed =
+    goSources:
+    let
+      lines = linesOf (reportTextOf goSources);
+      start = findFirstIndex (l: l == "func Events() []string {") (-1) lines;
+      below = drop (start + 1) lines;
+      end = findFirstIndex (l: l == "}") (-1) below;
+      body = map (l: builtins.head (builtins.split "//" l)) (take end below);
+      consts = reportConsts (reportTextOf goSources);
+      tokens = builtins.concatMap (
+        l:
+        filter (w: builtins.match "Event[A-Za-z0-9]+" w != null) (
+          filter builtins.isString (builtins.split "[^A-Za-z0-9_]+" l)
+        )
+      ) body;
+      resolve =
+        t:
+        if consts ? ${t} then
+          consts.${t}
+        else
+          throw "${me}: ${reportFile}: report.Events() lists `${t}`, which is not an `X = \"y\"` constant there.";
+    in
+    if start < 0 then
+      throw "${me}: no `func Events() []string {` line in ${reportFile}."
+    else if end < 0 then
+      throw "${me}: no closing `}` line for `func Events() []string {` in ${reportFile}."
+    else if tokens == [ ] then
+      throw "${me}: found no Event* names in report.Events() in ${reportFile}."
+    else
+      map resolve tokens;
+
   # One entry per emit-site line: { event; file; fields; }.
   emitSites =
     goSources:
     let
       fieldOf = structMap goSources;
-      consts = reportConsts (builtins.head (filter (s: s.file == reportFile) goSources)).text;
+      consts = reportConsts (reportTextOf goSources);
       resolve =
         file: line: raw:
         let
-          q = builtins.match "\"([a-z_]+)\"" raw;
+          q = builtins.match "\"[a-z_]+\"" raw;
           r = builtins.match "report\\.([A-Za-z]+)" raw;
         in
         if q != null then
-          builtins.head q
+          throw "${me}: ${file}: event name `${raw}` is a string literal; use a report.Event* constant, in: ${line}"
         else if r != null && consts ? ${builtins.head r} then
           consts.${builtins.head r}
         else
@@ -239,6 +288,10 @@ let
       s:
       if elem (builtins.dirOf s.file) emitDirs then
         map (parseLine s.file) (filter (l: hasInfix "Event: " l) (linesOf s.text))
+        ++ map (
+          l:
+          throw "${me}: ${s.file}: assigns an Event's name after construction: ${l} -- Event.Event is a plain string, so name the event in the one-line Event{Event: report.X, ...} literal."
+        ) (filter (l: builtins.match ".*[]A-Za-z0-9_)]\\.Event = .*" l != null) (linesOf s.text))
       else
         map (foreignEmit s.file) (
           filter (l: builtins.match ".*[A-Za-z0-9_]\\.Event\\{\\{?Event:.*" l != null) (linesOf s.text)
@@ -258,6 +311,8 @@ let
       docNames = sorted (map (r: r.event) rows);
       goNames = setOf (map (s: s.event) sites);
       allNames = setOf (docNames ++ goNames);
+      listed = eventsListed goSources;
+      listedSet = setOf listed;
 
       forEvent =
         name:
@@ -289,7 +344,20 @@ let
                 "event `${name}`: ${docsFile}'s row lists ${list onlyDocs} but no Go emit site (${where}) sets ${pronoun onlyDocs} -- drop from the docs row, or restore in the emit literal."
         );
     in
-    builtins.concatMap forEvent allNames;
+    builtins.concatMap forEvent allNames
+    ++ map (n: "report.Events() lists event `${n}` more than once -- list each name once.") (
+      filter (n: length (filter (m: m == n) listed) > 1) listedSet
+    )
+    ++ map (
+      n:
+      "event `${n}` is emitted (${
+        concatStringsSep ", " (setOf (map (s: s.file) (filter (s: s.event == n) sites)))
+      }) but report.Events() does not list it -- add it."
+    ) (subtractLists listedSet goNames)
+    ++ map (
+      n:
+      "report.Events() lists event `${n}` but no emit site builds it -- drop it from Events() or restore the emit site."
+    ) (subtractLists goNames listedSet);
 
   # Every non-test .go file under cmd/launcher (testdata fixtures are never
   # built), so a new emit file or package is picked up.
@@ -335,6 +403,20 @@ let
     else
       realInputs // { goSources = out; };
 
+  # Edits report.go alone, where the event-name consts live.
+  editReport =
+    from: to:
+    let
+      out = map (
+        s:
+        if s.file == reportFile then s // { text = builtins.replaceStrings [ from ] [ to ] s.text; } else s
+      ) realInputs.goSources;
+    in
+    if out == realInputs.goSources then
+      throw "${me}: rejection case no longer applies: `${from}` is not in ${reportFile} -- update the case."
+    else
+      realInputs // { goSources = out; };
+
   # jamRow ends at the when cell, so `dup |` completes the inserted row.
   jamRow = "| `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | ";
 
@@ -343,7 +425,7 @@ let
     {
       # e4dbef87 in reverse: the literal gains what the row lacks.
       name = "event-stream-parity-go-gains-field";
-      inputs = editGo "Event{{Event: \"awake_close\", " "Event{{Event: \"awake_close\", Kind: kind, ";
+      inputs = editGo "Event{{Event: report.EventAwakeClose, " "Event{{Event: report.EventAwakeClose, Kind: kind, ";
       expect = [
         "`awake_close`"
         "set `kind`"
@@ -375,7 +457,8 @@ let
     }
     {
       name = "event-stream-parity-emit-site-renamed";
-      inputs = editGo "Event{{Event: \"awake_open\", " "Event{{Event: \"awake_opened\", ";
+      # The name lives in report.go's const, not at the emit site.
+      inputs = editReport "= \"awake_open\"" "= \"awake_opened\"";
       expect = [
         "event `awake_opened` is emitted"
         "lists event `awake_open` but no emit site"
@@ -386,13 +469,32 @@ let
       inputs = editDocs jamRow "${jamRow}dup |\n${jamRow}";
       expect = [ "event `jam` has 2 rows" ];
     }
+    {
+      name = "event-stream-parity-events-omits-emitted";
+      # Only report.Events()'s body holds this token run.
+      inputs = editGo "EventJam, EventPreflight" "EventPreflight";
+      expect = [
+        "report.Events() does not list"
+        "`jam`"
+      ];
+    }
+    {
+      name = "event-stream-parity-events-lists-unemitted";
+      inputs = editGo "EventBox, EventSettled, EventModel" "EventBox, EventSettled, EventNotDue, EventModel";
+      expect = [ "report.Events() lists event `not_due`" ];
+    }
+    {
+      name = "event-stream-parity-events-lists-twice";
+      inputs = editGo "EventJam, EventPreflight" "EventJam, EventJam, EventPreflight";
+      expect = [ "report.Events() lists event `jam` more than once" ];
+    }
   ];
 
   # Inputs `drift` must refuse to read rather than guess at.
   throwCases = [
     {
       name = "event-stream-parity-multiline-literal-throws";
-      inputs = editGo "Event{{Event: \"jam\", " "Event{{\n\t\t\tEvent: \"jam\", ";
+      inputs = editGo "Event{{Event: report.EventJam, " "Event{{\n\t\t\tEvent: report.EventJam, ";
       message = "drift must throw on a multi-line Event literal";
     }
     {
@@ -408,13 +510,24 @@ let
     }
     {
       name = "event-stream-parity-aliased-foreign-emit-throws";
-      inputs = editGo "EventBox     = \"box\"" "EventBox     = \"box\"\nvar _ = d.Event{Event: \"jam\", Outcome: \"x\"}";
+      inputs = editGo "EventBox     = \"box\"" "EventBox     = \"box\"\nvar _ = d.Event{Event: report.EventJam, Outcome: \"x\"}";
       message = "drift must throw on an aliased Event literal outside the daemon packages";
     }
     {
       name = "event-stream-parity-unknown-field-throws";
-      inputs = editGo "Event{{Event: \"idle\", " "Event{{Event: \"idle\", Bogus: 1, ";
+      inputs = editGo "Event{{Event: report.EventIdle, " "Event{{Event: report.EventIdle, Bogus: 1, ";
       message = "drift must throw on a capitalised key that is not an Event field";
+    }
+    {
+      name = "event-stream-parity-literal-name-throws";
+      inputs = editGo "Event{{Event: report.EventJam, " "Event{{Event: \"jam\", ";
+      message = "drift must throw on a quoted-literal event name at an emit site";
+    }
+    {
+      # events.go is in a scanned daemon package; the line only has to exist.
+      name = "event-stream-parity-event-assignment-throws";
+      inputs = editGo "type Event struct {" "var _ = func() { evs[0].Event = \"jam\" }\ntype Event struct {";
+      message = "drift must throw on an .Event assignment in a daemon package";
     }
   ];
 

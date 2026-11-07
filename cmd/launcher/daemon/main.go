@@ -32,6 +32,7 @@ import (
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/stopsignal"
 	"spindrift.dev/launcher/internal/tokenrefresh"
 )
@@ -568,7 +569,7 @@ func announceStop(stop, abort <-chan struct{}, quit <-chan struct{}, cancel cont
 		case <-quit:
 			return
 		}
-		em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownDrain})
+		em.Emit(daemon.Event{Event: report.EventShutdown, Reason: daemon.ShutdownDrain})
 		cancel()
 		close(stopCh)
 
@@ -577,7 +578,7 @@ func announceStop(stop, abort <-chan struct{}, quit <-chan struct{}, cancel cont
 		case <-quit:
 			return
 		}
-		em.Emit(daemon.Event{Event: "shutdown", Reason: daemon.ShutdownEscalate})
+		em.Emit(daemon.Event{Event: report.EventShutdown, Reason: daemon.ShutdownEscalate})
 		close(abortCh)
 	}()
 	return stopCh, abortCh
@@ -652,7 +653,7 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 	if exit == int(exitcode.DoctorRequiredLabelsMissing) && labelsLine != "" {
 		v.Detail = labelsLine
 	}
-	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Exit: &exit, Outcome: v.Outcome})
+	em.Emit(daemon.Event{Event: report.EventPreflight, Revision: revision, Exit: &exit, Outcome: v.Outcome})
 	return v.Halt()
 }
 
@@ -663,7 +664,7 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 // outcome stays "doctor-"-prefixed like ClassifyPreflight's own labels so a
 // preflight outcome can never be read as a child_finish one.
 func preflightRefusal(em *daemon.Emitter, revision, outcome string, h daemon.Halt) daemon.Halt {
-	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Outcome: outcome, Reason: h.String()})
+	em.Emit(daemon.Event{Event: report.EventPreflight, Revision: revision, Outcome: outcome, Reason: h.String()})
 	return h
 }
 
@@ -1200,9 +1201,9 @@ func handoffEvent(h daemon.Handoff) daemon.Event {
 	// Literals, since the handoff's extra fields (FromPath, ToPath, Revision,
 	// Slots) are the ones the event-stream-parity check reads from it.
 	if h.RolledBack {
-		return daemon.Event{Event: "self_update", Phase: string(daemon.SelfUpdateRolledBack), Revision: h.Revision, Reason: h.Reason, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
+		return daemon.Event{Event: report.EventSelfUpdate, Phase: string(daemon.SelfUpdateRolledBack), Revision: h.Revision, Reason: h.Reason, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
 	}
-	return daemon.Event{Event: "self_update", Phase: string(daemon.SelfUpdateHandoff), Revision: h.Revision, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
+	return daemon.Event{Event: report.EventSelfUpdate, Phase: string(daemon.SelfUpdateHandoff), Revision: h.Revision, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
 }
 
 // resumed is what a successor image takes over from its predecessor's exec.

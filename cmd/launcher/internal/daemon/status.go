@@ -100,7 +100,7 @@ const (
 // Event is the self_update event recording su's verdict. It carries no Slot:
 // the build belongs to the pool, not to the slot that noticed the revision.
 func (su SelfUpdate) Event() Event {
-	return Event{Event: "self_update", Phase: string(su.Phase), Revision: su.Revision, Reason: su.Reason}
+	return Event{Event: report.EventSelfUpdate, Phase: string(su.Phase), Revision: su.Revision, Reason: su.Reason}
 }
 
 // TrackerCheck is one tracker's rate-limit standing.

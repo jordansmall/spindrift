@@ -607,9 +607,9 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 			wait = v.Until.Sub(now)
 		}
 		if noneDispatchable && !s.siblingsEngaged(slot) {
-			return []Event{{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is doing anything that could unblock it"}}
+			return []Event{{Event: report.EventJam, Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is doing anything that could unblock it"}}
 		}
-		return []Event{{Event: "idle", Kind: kind, Wait: wait.String(), Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventIdle, Kind: kind, Wait: wait.String(), Slot: intPtr(slot)}}
 	})
 }
 
@@ -680,7 +680,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind], gateGen: s.sched.gateGenOf(kind), childStart: pin}}
 		childLog = childLogPath(now, slot, kind)
 		s.slots[slot].flight.childLog = childLog
-		return []Event{{Event: "child_start", Time: started, Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
+		return []Event{{Event: report.EventChildStart, Time: started, Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
 	})
 	return kind, childLog, ok
 }
@@ -712,7 +712,7 @@ func (p *pool) occupyInherited() {
 				// bootstrap, before any record that permits a handoff.
 				childLog: hs.ChildLog, reported: true,
 			}}
-			evs = append(evs, Event{Event: "child_inherited", Kind: hs.Kind, Key: hs.Key, Revision: hs.Revision, Slot: intPtr(hs.Slot), ChildLog: hs.ChildLog})
+			evs = append(evs, Event{Event: report.EventChildInherited, Kind: hs.Kind, Key: hs.Key, Revision: hs.Revision, Slot: intPtr(hs.Slot), ChildLog: hs.ChildLog})
 		}
 		// Every inherited child is past discovery (a handoff only happens with
 		// the baton free), so the pre-assigned leader's token must not wait on
@@ -954,7 +954,7 @@ func (p *pool) noteAwakeClose(slot int, wait time.Duration, exhausted bool) {
 		if exhausted {
 			reason = walkExhaustedReason
 		}
-		return []Event{{Event: "awake_close", Slot: intPtr(slot), Wait: wait.String(), Reason: reason}}
+		return []Event{{Event: report.EventAwakeClose, Slot: intPtr(slot), Wait: wait.String(), Reason: reason}}
 	})
 }
 
@@ -974,7 +974,7 @@ func (p *pool) noteAwakeOpen(slot int) {
 		if !was {
 			return nil
 		}
-		return []Event{{Event: "awake_open", Slot: intPtr(slot), Reason: "the Awake window reopened"}}
+		return []Event{{Event: report.EventAwakeOpen, Slot: intPtr(slot), Reason: "the Awake window reopened"}}
 	})
 }
 
@@ -1015,7 +1015,7 @@ func (p *pool) awaitBaton(ctx context.Context, slot int) {
 	// alongside that event.
 	p.mutate(func(s *state) []Event {
 		s.slots[slot].phase = PhaseIdle
-		return []Event{{Event: "baton_hold", Slot: intPtr(slot), Reason: batonHoldReason}}
+		return []Event{{Event: report.EventBatonHold, Slot: intPtr(slot), Reason: batonHoldReason}}
 	})
 	select {
 	case <-ctx.Done():
@@ -1064,7 +1064,7 @@ func (p *pool) passBaton(slot int, reason batonReason) {
 	}
 	p.mutate(func(s *state) []Event {
 		s.batonSlot = noBaton
-		return []Event{{Event: "baton_pass", Slot: intPtr(slot), Reason: string(reason)}}
+		return []Event{{Event: report.EventBatonPass, Slot: intPtr(slot), Reason: string(reason)}}
 	})
 	p.baton <- struct{}{}
 }
@@ -1239,7 +1239,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		if !crossed {
 			return nil
 		}
-		return []Event{{Event: "breaker_trip", Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()}}
+		return []Event{{Event: report.EventBreakerTrip, Kind: kind, Slot: intPtr(slot), Failures: &count, Wait: p.cfg.BreakerWindow.String()}}
 	})
 	if crossed {
 		detail := fmt.Sprintf("%d failures within %s reached threshold %d", count, p.cfg.BreakerWindow, p.cfg.BreakerThreshold)
@@ -1261,7 +1261,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 
 	p.mutate(func(s *state) []Event {
 		s.slots[slot].phase = PhaseBackingOff
-		return []Event{{Event: "backoff", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason}}
+		return []Event{{Event: report.EventBackoff, Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: p.cfg.FailureBackoff.String(), Reason: reason}}
 	})
 	p.clk.Sleep(ctx, p.cfg.FailureBackoff)
 	// The sleep is the whole backing-off span; once it returns this slot is
@@ -1437,7 +1437,7 @@ func (p *pool) noteTipMoved(slot int, revision string) {
 		if len(lifted) == 0 {
 			return nil
 		}
-		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue or end a reported kind's on_tip_move wait", Kinds: lifted}}
+		return []Event{{Event: report.EventTipMoved, Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue or end a reported kind's on_tip_move wait", Kinds: lifted}}
 	})
 }
 

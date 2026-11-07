@@ -1,6 +1,10 @@
 package daemon
 
-import "fmt"
+import (
+	"fmt"
+
+	"spindrift.dev/launcher/internal/report"
+)
 
 // HaltClass distinguishes the reasons the daemon loop can halt: distinct
 // enough that String() and ExitCode() can pick documented grammar and a
@@ -160,7 +164,7 @@ func (h Halt) ExitCode() int {
 // omitempty on Event, so a pre-pool halt (h.Kind/h.Revision left zero)
 // marshals identically to today's pre-pool halt events.
 func (h Halt) Event() Event {
-	return Event{Event: "halt", Kind: h.Kind, Revision: h.Revision, Reason: h.String()}
+	return Event{Event: report.EventHalt, Kind: h.Kind, Revision: h.Revision, Reason: h.String()}
 }
 
 // ExitSelfChanged is the daemon's own exit code for the one halt an

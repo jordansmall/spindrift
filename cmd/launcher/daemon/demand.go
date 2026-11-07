@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/recoverrecord"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // demandSources maps each kind the daemon schedules from host-side demand
@@ -271,7 +272,7 @@ func warnUnprobedKinds(missing missingSources, stderr io.Writer, em *daemon.Emit
 	slices.Sort(kinds)
 	for _, k := range kinds {
 		fmt.Fprintf(stderr, "daemon: kind %s has no Demand source: %s; scheduling it from child exits instead\n", k, missing[k])
-		em.Emit(daemon.Event{Event: "demand_source_missing", Kind: k, Reason: missing[k]})
+		em.Emit(daemon.Event{Event: report.EventDemandSourceMissing, Kind: k, Reason: missing[k]})
 	}
 }
 
