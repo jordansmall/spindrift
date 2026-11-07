@@ -88,13 +88,13 @@ const (
 // sanitizeConcurrence truncates s to at most maxConcurrenceLen grapheme
 // clusters and at most maxConcurrenceBytes bytes, cutting only at a
 // grapheme-cluster boundary, and neutralizes backticks. Only an oversized
-// first cluster yields "", which fails closed: eligible rejects an empty
-// concurrence. An oversized later cluster just ends the result at the
-// preceding boundary, an ordinary truncated fragment. internal/butler's
-// promotionNote quotes the result inside a markdown code span; with every
-// backtick gone the Box text can't close that span early, so the span keeps
-// swallowing whatever formatting -- @mentions, links, emphasis, inline HTML
-// -- the Box text tries to spoof.
+// first cluster yields "", which fails closed: internal/butler's
+// promotion.concurred method rejects a blank concurrence. An oversized
+// later cluster just ends the result at the preceding boundary, an ordinary
+// truncated fragment. internal/butler's promotionNote quotes the result
+// inside a markdown code span; with every backtick gone the Box text can't
+// close that span early, so the span keeps swallowing whatever formatting
+// -- @mentions, links, emphasis, inline HTML -- the Box text tries to spoof.
 func sanitizeConcurrence(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
 	lastEnd := 0
