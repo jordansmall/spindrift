@@ -629,7 +629,7 @@ checkedMerge {
 
   # A family row carries its own run-document keys (ADR 0069 decision 7), so a
   # stub row with a made-up key must reach both the rendered artifacts and the
-  # derived schema key list without any preamble naming its family.
+  # artifact keys regen derives without any preamble naming its family.
   runners-stub-row-run-artifacts =
     let
       inherit (pkgs.lib) assertMsg;
@@ -643,7 +643,8 @@ checkedMerge {
           runtime = builtins.head (builtins.head rows).runtimes;
         }
       );
-      keys = preambles.documentArtifactKeysFor rows;
+      keys =
+        builtins.attrNames preambles.sharedArtifactsStub ++ preambles.rowArtifactKeys (builtins.head rows);
     in
     assert assertMsg
       (out.STUB_ONLY_KEY == "x" && out.RUNNER_KIND == "stub" && out.BOX_ARTIFACT == "oci-image")
@@ -651,9 +652,9 @@ checkedMerge {
     assert assertMsg (out.FLAKE_IMAGE_ATTR == "stub:.#packages.dummy.dummy")
       "runners-stub-row-run-artifacts (ADR 0069): FLAKE_IMAGE_ATTR is the row's to render, got: ${builtins.toJSON out}";
     assert assertMsg (builtins.elem "STUB_ONLY_KEY" keys && builtins.elem "RUNNER_KIND" keys)
-      "runners-stub-row-run-artifacts (ADR 0069): documentArtifactKeysFor must include the stub row's key and the shared keys, got: ${builtins.toJSON keys}";
+      "runners-stub-row-run-artifacts (ADR 0069): the keys regen derives (sharedArtifactsStub plus rowArtifactKeys) must include the stub row's key and the shared keys, got: ${builtins.toJSON keys}";
     assert assertMsg (!(builtins.elem "IMAGE_ARCHIVE" keys))
-      "runners-stub-row-run-artifacts (ADR 0069): documentArtifactKeysFor must derive keys from the given rows only, got: ${builtins.toJSON keys}";
+      "runners-stub-row-run-artifacts (ADR 0069): the keys regen derives (sharedArtifactsStub plus rowArtifactKeys) must come from the given row only, got: ${builtins.toJSON keys}";
     pkgs.runCommand "runners-stub-row-run-artifacts" { } "touch $out";
 
   # Each kind row's `filerRelayGate` is the env var the Box tests to decide
@@ -1179,7 +1180,6 @@ checkedMerge {
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
-      preambles = import ../../lib/preambles.nix;
       inherit (pkgs.lib)
         attrValues
         concatStringsSep
@@ -1209,9 +1209,6 @@ checkedMerge {
           "internal/backend/registry_gen.go"
         ]
       );
-      # Nix-computed plumbing read via docArtifact, not
-      # user-facing knobs (ADR 0020, issue #810).
-      documentArtifacts = preambles.documentArtifactKeys;
       schemaEnvNames = map (e: e.env) (attrValues schema);
       # Forwarded to containers via BOX_ENV_VARS only: the Go binary never
       # reads them, so they need no os.Getenv call.
@@ -1253,10 +1250,11 @@ checkedMerge {
         "REGISTRY_PROXY_MANIFEST" # launcher-minted, read by driver-exec bindregistry
         # Naming-convention fallback for --secret-cmd, not a registered knob.
         "SECRET_CMD"
+        "DRIVER" # ambient fallback when no document bakes a Driver (ADR 0064)
+        "NIX_STORE_WRITABLE" # Box-side env the bwrap runner exports, read by box/configure.go
       ];
       # Reverse direction: every name read anywhere in non-test cmd/launcher
       # source; testdata fixtures are skipped since Go never builds them.
-      # docArtifact carries issue #2527's capability signals.
       treeGoSrc = concatStringsSep "\n" (
         map builtins.readFile (
           filter (f: hasSuffix ".go" f && !hasSuffix "_test.go" f && !hasInfix "/testdata/" f) (
@@ -1265,7 +1263,7 @@ checkedMerge {
         )
       );
       # Fragments shared across the passes below so they cannot drift apart.
-      readerPattern = "os\\.Getenv|os\\.LookupEnv|getenv|docArtifact";
+      readerPattern = "os\\.Getenv|os\\.LookupEnv|getenv";
       identRe = "[A-Za-z_][A-Za-z0-9_]*";
       envNameRe = "[A-Z_][A-Z0-9_]*";
       matches = re: filter builtins.isList (builtins.split re treeGoSrc);
@@ -1297,16 +1295,14 @@ checkedMerge {
         ) (matches ''(${identRe})[[:space:]]*([A-Za-z0-9_.]+)?[[:space:]]*:?=[[:space:]]*"(${envNameRe})"'')
       );
       goEnvNames = literalNames ++ boundNames;
-      extraInGo = subtractLists (
-        schemaEnvNames ++ documentArtifacts ++ boxEnvNames ++ nonKnobEnvNames
-      ) goEnvNames;
+      extraInGo = subtractLists (schemaEnvNames ++ boxEnvNames ++ nonKnobEnvNames) goEnvNames;
       # Without this the allowlist could only grow.
       deadNonKnobs = subtractLists goEnvNames nonKnobEnvNames;
     in
     assert pkgs.lib.assertMsg (missingFromGo == [ ])
       "schema knobs absent from main.go/backend.go/schemaconfig_gen.go/registry_gen.go: ${concatStringsSep ", " missingFromGo}";
     assert pkgs.lib.assertMsg (extraInGo == [ ])
-      "cmd/launcher reads env vars absent from schema/documentArtifactKeys/Box env/nonKnobEnvNames: ${concatStringsSep ", " extraInGo}";
+      "cmd/launcher reads env vars absent from schema/Box env/nonKnobEnvNames: ${concatStringsSep ", " extraInGo}";
     assert pkgs.lib.assertMsg (
       deadNonKnobs == [ ]
     ) "nonKnobEnvNames entries no longer read in cmd/launcher: ${concatStringsSep ", " deadNonKnobs}";

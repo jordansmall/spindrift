@@ -4,7 +4,6 @@
 # only (no `pkgs.lib`) so a bare `nix eval` can test this file without a
 # locked nixpkgs (mirrors lib/renderers.nix, issue #402).
 let
-  unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   builtinsCompat = import ./builtins-compat.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList escapeShellArg;
   # The value handed to each row as `flakeImageAttr`, so the attr shape is
@@ -259,30 +258,6 @@ rec {
       artifacts = rowArtifactsStub row;
     }) runnerRows;
   };
-
-  # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
-  # what actually renders instead of a parallel list that can silently drift
-  # (issue #810).
-  documentArtifactKeysFor =
-    rows:
-    builtins.sort builtins.lessThan (
-      unique (
-        builtins.concatMap (
-          row:
-          builtins.attrNames (
-            runArtifacts (
-              dummyRunArtifactArgs
-              // {
-                inherit row;
-                runtime = builtins.head row.runtimes;
-              }
-            )
-          )
-        ) rows
-      )
-    );
-
-  documentArtifactKeys = documentArtifactKeysFor runnerRows;
 
   # The Launcher input document (ADR 0020): a `settings` section of resolved
   # knob values keyed by env var name, and an `artifacts` section of
