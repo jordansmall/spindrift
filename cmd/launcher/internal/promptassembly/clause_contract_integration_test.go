@@ -644,6 +644,11 @@ var clauseContracts = []clauseContract{
 	// caveman-default.md
 	{
 		fragment: "caveman-default.md",
+		clause:   "Default to the `/caveman` skill for all narration",
+		reason:   "a baked caveman skill is the default register for narration, injected into the shared COMMS block (issues #455, #487).",
+	},
+	{
+		fragment: "caveman-default.md",
 		clause:   "Code, commands, error messages, and commit messages are exempt and stay verbatim",
 		reason:   "code, commands, error messages, and commit messages stay exempt from compression (issue #2710).",
 	},
@@ -1087,6 +1092,50 @@ var clauseContracts = []clauseContract{
 		to:       "# LAND THE CHANGE",
 		clause:   "NIX_CHECKS_STEP",
 		reason:   "the nix-checks lore moved into the skill (issue #3223); what the fix pass still needs here is the route to it.",
+	},
+
+	{
+		fragment: "fix-prompt.md",
+		clause:   "Rewriting the branch's own unmerged history is expected",
+		reason:   "the branch's own history may be rewritten under either access mode: a read-only Box never pushes and the host relays the branch (issues #2462, #3225).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "The branch already force-pushes",
+		absent:   true,
+		reason:   "the history-rewrite line must not presuppose the Box pushed, since a read-only Box never does (issues #2462, #3225).",
+	},
+	{
+		fragment: "commit-baked.md",
+		clause:   "Use the `/commit` skill to write every commit message.",
+		reason:   "the baked-skill commit anchor points at the /commit skill, injected into the shared CHECK/COMMIT block (issues #455, #487).",
+	},
+	{
+		fragment: "github/fix-ci-read.md",
+		clause:   "gh pr view",
+		reason:   "a GitHub fix pass reads CI through gh (issue #1963).",
+	},
+	{
+		fragment: "github/fix-ci-read.md",
+		clause:   "fj pr status",
+		absent:   true,
+		reason:   "fj does not exist against a GitHub remote (issue #1963).",
+	},
+	{
+		fragment: "forgejo/fix-ci-read.md",
+		clause:   "fj pr status",
+		reason:   "a Forgejo fix pass reads CI through fj (issue #1963).",
+	},
+	{
+		fragment: "forgejo/fix-ci-read.md",
+		clause:   "gh pr view",
+		absent:   true,
+		reason:   "the gh CI commands do not exist against a Forgejo remote (issue #1963).",
+	},
+	{
+		fragment: "open-pr-create-outbox.md",
+		clause:   "a line with the nonce missing or wrong is silently dropped",
+		reason:   "the read-only log carrier tells the Driver why a wrong nonce loses its PR intent (issues #1938, #1939).",
 	},
 
 	// issue-prompt.md and fix-prompt.md: the code-comments policy sits inside the pass that writes code
