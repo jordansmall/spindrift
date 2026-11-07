@@ -103,8 +103,8 @@ With the variable unset, the `seamtest` package falls back to `nix build
 .#seam-fixtures`, and skips where `nix` is absent. In the check gate, both
 `checks-inbox` and `nix flake check` run them as `launcher-go-seam-test`, with
 the variable set to the built store path. The bats checks export the same
-variable, and `tests/helper.bash` reads the contracts, preambles and fragment
-registry from that directory, so bats and Go test one set of bytes. See [Seam
+variable, and `tests/helper.bash` reads the contracts and preambles from that
+directory, so bats and Go test one set of bytes. See [Seam
 tests](docs/reference.md#seam-tests) for the fixture list and its drift guard.
 
 The `piseam` package (issue #5478) runs the locked `pi` binary against a stub
