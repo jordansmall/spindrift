@@ -866,20 +866,14 @@ func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
 	setRunner(t, "podman", "oci")
 	t.Setenv("NIX_VOLUME", "ambient")
 	c := loadConfig()
-	if c.nixVolume != "" {
-		t.Errorf("loadConfig().nixVolume = %q, want empty when the document has no NIX_VOLUME", c.nixVolume)
-	}
-	if got := runnerConfig(c).NixVolume; got != "" {
-		t.Errorf("runnerConfig().NixVolume = %q, want empty", got)
+	if o := c.artifacts.OCI; o != nil && o.NixVolume.String() != "" {
+		t.Errorf("artifacts.OCI.NixVolume = %q, want empty when the document has no NIX_VOLUME", o.NixVolume.String())
 	}
 
 	setArtifact(t, "NIX_VOLUME", "custom-nix-vol")
 	c = loadConfig()
-	if c.nixVolume != "custom-nix-vol" {
-		t.Errorf("loadConfig().nixVolume = %q, want %q from NIX_VOLUME", c.nixVolume, "custom-nix-vol")
-	}
-	if got := runnerConfig(c).NixVolume; got != "custom-nix-vol" {
-		t.Errorf("runnerConfig().NixVolume = %q, want %q", got, "custom-nix-vol")
+	if o := c.artifacts.OCI; o == nil || o.NixVolume.String() != "custom-nix-vol" {
+		t.Errorf("artifacts.OCI = %+v, want NIX_VOLUME custom-nix-vol", o)
 	}
 }
 
@@ -1694,8 +1688,8 @@ func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 	})}
 
 	c := loadConfig()
-	if c.imageArchive != "/nix/store/doc-image" {
-		t.Errorf("imageArchive = %q, want /nix/store/doc-image", c.imageArchive)
+	if o := c.artifacts.OCI; o == nil || o.ImageArchive.String() != "/nix/store/doc-image" {
+		t.Errorf("artifacts.OCI = %+v, want IMAGE_ARCHIVE /nix/store/doc-image", o)
 	}
 	if c.runtime != "podman" {
 		t.Errorf("runtime = %q, want podman", c.runtime)

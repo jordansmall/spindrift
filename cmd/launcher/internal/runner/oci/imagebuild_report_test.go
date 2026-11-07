@@ -49,7 +49,6 @@ func TestOCIEnsureReady_ColdBuildReportsStartedBeforeNixThenFinished(t *testing.
 		image:        "spindrift:abc123",
 		imageDrv:     "/nix/store/fake.drv",
 		imageArchive: "/tmp/spindrift-image.tar",
-		imageTag:     "spindrift:abc123",
 	}
 
 	if err := a.EnsureReady(); err != nil {

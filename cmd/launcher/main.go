@@ -60,18 +60,13 @@ type config struct {
 	// to the selected runner family, which reads only its own part.
 	artifacts inputdoc.Artifacts
 
-	// OCI image config baked by the nix wrapper. imageArchive/imageDrv/
-	// nixBuilderImage/nixVolume are empty for bwrap. flakeImageAttr/imageTag are
-	// dual-purpose (issue #2667): the OCI image's flake attr and content-hash
-	// tag, or the bundled bwrap agent closure's flake attr and loaded output
-	// path. Core reads both for bwrap too (freshness probe, hot-swap), but the
-	// bwrap adapter takes its ImageTag from its artifacts part, not from here.
+	// imageTag/flakeImageAttr are the only artifacts core reads itself
+	// (freshness probe, preview, console, hot-swap), so loadConfig copies them
+	// out of whichever family part the document carries (issue #2667): the OCI
+	// image's content-hash tag and flake attr, or the bwrap agent closure's
+	// loaded output path and flake attr. Adapters read the rest from artifacts.
 	// flakeLauncherAttr is populated for both runtimes (issue #1364).
-	imageArchive      string
 	imageTag          string
-	imageDrv          string
-	nixBuilderImage   string
-	nixVolume         string
 	flakeImageAttr    string
 	flakeLauncherAttr string
 
@@ -404,11 +399,7 @@ func loadConfig() config {
 		cfg.flakeImageAttr = b.FlakeImageAttr.String()
 	}
 	if o := art.OCI; o != nil {
-		cfg.imageArchive = o.ImageArchive.String()
 		cfg.imageTag = o.ImageTag.String()
-		cfg.imageDrv = o.ImageDrv.String()
-		cfg.nixBuilderImage = o.NixBuilderImage.String()
-		cfg.nixVolume = o.NixVolume.String()
 		cfg.flakeImageAttr = o.FlakeImageAttr.String()
 	}
 	return cfg
@@ -754,21 +745,12 @@ func delivered(o settle.DispatchOutcome) bool {
 // PromptDir/SkillsDir populated is harmless there.
 func runnerConfig(c config) runner.Config {
 	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
-	// Image duplicates ImageTag until #6569's typed per-family artifacts
-	// replace this shape.
 	return runner.Config{
-		Runtime:         c.runtime,
-		Image:           c.imageTag,
-		ImageArchive:    c.imageArchive,
-		ImageDrv:        c.imageDrv,
-		ImageTag:        c.imageTag,
-		NixBuilderImage: c.nixBuilderImage,
-		NixVolume:       c.nixVolume,
-		FlakeImageAttr:  c.flakeImageAttr,
-		NetworkMode:     c.runnerNetworkMode(),
-		PidsLimit:       c.pidsLimit,
-		MemoryLimit:     c.memoryLimit,
-		MaxParallel:     c.maxParallel,
+		Runtime:     c.runtime,
+		NetworkMode: c.runnerNetworkMode(),
+		PidsLimit:   c.pidsLimit,
+		MemoryLimit: c.memoryLimit,
+		MaxParallel: c.maxParallel,
 		MountParams: runner.MountParams{
 			PromptDir:             c.spindriftPromptDir,
 			SkillsDir:             c.spindriftSkillsDir,

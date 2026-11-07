@@ -42,18 +42,6 @@ type Config struct {
 	// "bwrap"). For OCI adapters it also names the CLI binary (via BinaryFor).
 	Runtime string
 
-	// OCI image config, baked by the nix wrapper and empty for bwrap, except
-	// ImageTag and FlakeImageAttr, which are dual-purpose (issue #2667): they
-	// are filled from whichever runner family part the Launcher input document
-	// carries, but only the OCI adapters read them from Config.
-	Image           string
-	ImageArchive    string
-	ImageDrv        string
-	ImageTag        string
-	NixBuilderImage string
-	NixVolume       string
-	FlakeImageAttr  string
-
 	// NetworkMode is the NETWORK_MODE knob. The raw PODMAN_NETWORK and
 	// BWRAP_UNSHARE_NET escape hatches are family row knobs the adapters read,
 	// not Config fields. nix eval rejects setting NETWORK_MODE together with

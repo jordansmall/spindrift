@@ -35,7 +35,7 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ociWant, err := oci.New(rc, config{}.knobLookup, pwd)
+			ociWant, err := oci.New(rc, inputdoc.OCIArtifacts{}, config{}.knobLookup, pwd)
 			if err != nil {
 				t.Fatal(err)
 			}
