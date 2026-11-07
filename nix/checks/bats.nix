@@ -93,9 +93,9 @@ let
     # stubbed nix-eval-jobs/nix.
     GATE_SH = ../../nix/gate.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
-    # The rendered contracts, driver/agent-paths preambles, fragment registry
-    # and Claude settings.json tests/entrypoint-shim.bats and
-    # tests/claude-guard-hooks.bats read: the same bytes the Go seam tests read.
+    # The rendered contracts, driver/agent-paths preambles and Claude
+    # settings.json the bats harness reads (tests/entrypoint-shim.bats,
+    # tests/claude-guard-hooks.bats): the same bytes the Go seam tests read.
     # helper.bash derives the per-file vars from this dir.
     SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
     # The rendered registries entrypoint.sh hands box (see
