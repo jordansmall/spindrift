@@ -1,5 +1,20 @@
 # Migration Guide
 
+## `IMAGE` and exported artifacts no longer reach the launcher (issue #6611)
+
+The launcher now reads every input artifact (`IMAGE_TAG`, `AGENT_FILES`,
+`FLAKE_IMAGE_ATTR`, and the rest) from the Launcher input document only.
+`IMAGE` is no longer an environment override and has no replacement knob, and
+exporting an artifact name in the environment has no effect (`DRIVER` is the
+one exception: a bare launcher with no `--input` document still falls back to
+an ambient `DRIVER`, ADR 0064, and a baked value always wins over it). The
+image a dispatch runs is the one the flake's runner row builds and renders
+into the document, so to run a different image, change or rebuild the flake
+output (`spindrift build`) instead of exporting `IMAGE`. A bare launcher with no
+document no longer falls back to `spindrift:latest` or the `spindrift-nix`
+volume. `GITHUB_OUTPUT` is still read from the environment, as GitHub Actions
+sets it.
+
 ## A Jira tracker's issue-read steps no longer point at GitHub (issue #6344)
 
 On `ISSUE_TRACKER=jira`, `ISSUE_READ_STEP`, `RESEARCH_ISSUE_READ_STEP` and
