@@ -51,10 +51,13 @@ does a different job in each:
   extractor's `tail -1` already resolves.
 
   *Amended by issue #4431:* the in-box `_driver_extract_outcome` (and its
-  `tail -1`) is deleted. The Go driver `ResultText` now does the final-message
-  scoping host-side, and `outcome.ExtractOutcomeLine`'s last match is the
-  within-final-message tiebreak, so structure still defends the outcome line
-  before any nonce.
+  `tail -1`) is deleted. The Driver's Go `ResultText` now does the
+  final-message scoping in-box. The `box` command's `(*boxRun).pass`
+  (`cmd/launcher/box/box.go`) calls it and re-emits the one bare, leading line
+  the host scans. The orchestrator's `scanPassOutcome`
+  (`cmd/launcher/orchestrator/run.go`) applies the same rule per pass.
+  `outcome.ExtractOutcomeLine`'s last match is the within-final-message
+  tiebreak, so structure still defends the outcome line before any nonce.
 
 - **`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` / `SPINDRIFT_ISSUE_INTENT`**
   have no in-box extractor and no leading-line requirement. `parseSignalLine`
