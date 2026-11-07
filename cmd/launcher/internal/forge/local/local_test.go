@@ -685,6 +685,58 @@ func TestLocalTracker_DepsOf_IssueRefLineDoesNotEndSection(t *testing.T) {
 	}
 }
 
+// Fenced lines are example text, not structure: mirrors forge.ParseBlockerRefs.
+func TestLocalTracker_DepsOf_SkipsFencedLines(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "fenced header and bullets ignored",
+			body: "## Context\n\nExample section:\n\n```md\n## Blocked by\n\n- some-slug\n```\n\n## Blocked by\n\n- real-dep\n",
+			want: []string{"real-dep"},
+		},
+		{
+			name: "fenced heading in backtick fence does not close section",
+			body: "## Blocked by\n\n- a\n```sh\n# foo\n```\n- b\n",
+			want: []string{"a", "b"},
+		},
+		{
+			name: "fenced heading in tilde fence does not close section",
+			body: "## Blocked by\n\n- a\n~~~sh\n# foo\n~~~\n- b\n",
+			want: []string{"a", "b"},
+		},
+		{
+			name: "fenced bullet inside section ignored",
+			body: "## Blocked by\n\n- a\n```\n- fenced-dep\n```\n",
+			want: []string{"a"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			labels := testLabels
+			writeLocalIssue(t, dir, "depends-on-others", localIssue{
+				frontmatter: localFrontmatter{Title: "Depends on others", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+				body:        tc.body,
+			})
+
+			deps, err := NewLocalTracker(dir, labels).DepsOf("depends-on-others")
+			if err != nil {
+				t.Fatalf("DepsOf: %v", err)
+			}
+			var want []forge.Dependency
+			for _, id := range tc.want {
+				want = append(want, forge.Dependency{ID: id, Source: forge.DepSourceBody})
+			}
+			if !reflect.DeepEqual(deps, want) {
+				t.Errorf("DepsOf = %v, want %v", deps, want)
+			}
+		})
+	}
+}
+
 func TestLocalTracker_DepsOf_StripsBackticksFromSlug(t *testing.T) {
 	dir := t.TempDir()
 	labels := testLabels
