@@ -286,8 +286,8 @@ func (k kindSched) gated(now time.Time) bool {
 // startable reports whether a child of this kind may start at now, with
 // starting children yet to claim. A starting child's item is still counted in
 // ready, so a probed kind's children in discovery are capped at ready in
-// total: ready-starting is how many more may start. An exit-driven kind has
-// no count to spend.
+// total: the Start budget must be positive for another to start. An exit-driven
+// kind has no count to spend.
 func (k kindSched) startable(now time.Time, starting int) bool {
 	if k.paused(now) {
 		return false
@@ -298,8 +298,11 @@ func (k kindSched) startable(now time.Time, starting int) bool {
 	if !k.probed() {
 		return k.gate.runnable(now)
 	}
-	return !k.gated(now) && !k.stale(now) && k.ready > starting
+	return !k.gated(now) && !k.stale(now) && k.startBudget(starting) > 0
 }
+
+// startBudget is the kind's Start budget: ready less the starting children.
+func (k kindSched) startBudget(starting int) int { return k.ready - starting }
 
 // tipWait reports that only a moved tip can lift this kind's known due state.
 func (k kindSched) tipWait() bool { return k.due.OnTipMove }

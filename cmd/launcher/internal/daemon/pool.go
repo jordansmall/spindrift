@@ -479,7 +479,7 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 }
 
 // occupancy reads what the slot phases say is running, for Schedule.Decide's
-// reservation count and start budget. Only running children count toward the
+// reservation count and Start budget. Only running children count toward the
 // reservation: reserved-tier children that exit early (a run of Continue exits,
 // say) never lift the count, so the reserved kind can keep taking every
 // turnover while normal-tier kinds still have queued work. A running slot with
