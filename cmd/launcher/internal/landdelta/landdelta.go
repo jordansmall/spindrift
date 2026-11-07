@@ -231,7 +231,7 @@ func sumNumstat(dir, from, to string) (files, ins, del int, paths []string, err 
 func parseNumstat(out string) map[string]numstatEntry {
 	entries := map[string]numstatEntry{}
 	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
+		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
 			continue
 		}
