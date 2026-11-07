@@ -225,21 +225,33 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 // for the idle-priority kind added by issue #3878.
 func TestPoolButlerBackoffGrowsIndependently(t *testing.T) {
 	clk := &testClock{}
+	clk.setNow(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	cfg := triKindConfig(1, 0)
+	// Second-scale waits: the published nextCheck is RFC3339, so a
+	// millisecond floor would be invisible there.
+	cfg.IdleFloor, cfg.IdleCap = time.Second, time.Hour
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	p, _ := newPool(context.Background(), cfg, nil, em, clk)
+	butler, work := KindOf(dispatchkind.Butler), KindOf(dispatchkind.Work)
+	rfc := func(d time.Duration) string { return clk.Now().Add(d).UTC().Format(time.RFC3339) }
 
-	wantButler := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
+	wantButler := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 	for i, want := range wantButler {
-		got := p.markNoWork(KindOf(dispatchkind.Butler), clk.Now(), false)
-		if got != want {
-			t.Fatalf("butler markNoWork()[%d] = %v, want %v", i, got, want)
+		p.markNoWork(butler, clk.Now(), false)
+		if got := kindCheck(t, readStatus(t, dir), butler).NextCheck; got != rfc(want) {
+			t.Fatalf("butler nextCheck after check %d = %q, want %q", i, got, rfc(want))
 		}
 		// Dispatch resetting in between must never touch butler's own streak.
-		p.resetKind(KindOf(dispatchkind.Work))
-		if until, gated := p.gateOf(KindOf(dispatchkind.Work), clk.Now()); gated || !until.IsZero() {
-			t.Fatalf("dispatch readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
+		p.resetKind(work)
+		st := readStatus(t, dir)
+		if got := kindCheck(t, st, work).NextCheck; got != "" {
+			t.Fatalf("dispatch nextCheck = %q after reset, want none", got)
+		}
+		if got := kindCheck(t, st, butler).NextCheck; got != rfc(want) {
+			t.Fatalf("butler nextCheck after dispatch reset %d = %q, want %q kept", i, got, rfc(want))
 		}
 	}
 }

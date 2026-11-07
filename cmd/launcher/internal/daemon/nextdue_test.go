@@ -313,6 +313,8 @@ func TestPoolNotDueFromChildStaleAfterSiblingContinue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := butlerOnlyConfig()
 			cfg.Slots = 2
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			clk := &testClock{}
 			clk.setNow(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 			var buf bytes.Buffer
@@ -331,11 +333,12 @@ func TestPoolNotDueFromChildStaleAfterSiblingContinue(t *testing.T) {
 			p.finishChild(1)
 			p.noteWaitResult(1, butler, "rev1", false, flight)
 
-			p.mu.Lock()
-			v := p.st.sched.View(butler, clk.Now())
-			p.mu.Unlock()
-			if v.Gated == tt.wantStartNow {
-				t.Fatalf("butler Gated = %v, want %v", v.Gated, !tt.wantStartNow)
+			want := due.UTC().Format(time.RFC3339)
+			if tt.wantStartNow {
+				want = ""
+			}
+			if got := kindCheck(t, readStatus(t, dir), butler).NextCheck; got != want {
+				t.Fatalf("butler nextCheck = %q, want %q", got, want)
 			}
 		})
 	}

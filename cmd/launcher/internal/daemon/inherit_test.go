@@ -825,11 +825,14 @@ func TestCommittedHandoffCarriesTheCIWait(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
 	defer p.cancel()
 	handed := ChildState{PID: 100}
-	p.st.slots[0] = slotState{phase: PhaseRunning, handed: &handed, flight: slotFlight{
-		kind: workKind, key: dispatchkey.Issue("42"),
-		ciWait: ciWait{pr: ciWaitPRURL, runURL: ciWaitRunURL},
-	}}
-	p.st.self.Phase = SelfUpdateRestarting
+	p.mutate(func(s *state) []Event {
+		s.slots[0] = slotState{phase: PhaseRunning, handed: &handed, flight: slotFlight{
+			kind: workKind, key: dispatchkey.Issue("42"),
+			ciWait: ciWait{pr: ciWaitPRURL, runURL: ciWaitRunURL},
+		}}
+		s.self.Phase = SelfUpdateRestarting
+		return nil
+	})
 
 	h := p.committedHandoff()
 

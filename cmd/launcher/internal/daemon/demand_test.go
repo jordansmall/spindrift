@@ -243,7 +243,10 @@ func TestPoolDemandProbeCoalescesConcurrentSlots(t *testing.T) {
 		<-release
 	}
 	var buf bytes.Buffer
-	p, pctx := newPool(context.Background(), probedConfig(slots, time.Minute, workKind), r, newTestEmitter(&buf), clk)
+	dir, sw := statusDir(t)
+	cfg := probedConfig(slots, time.Minute, workKind)
+	cfg.Status = sw
+	p, pctx := newPool(context.Background(), cfg, r, newTestEmitter(&buf), clk)
 	defer p.cancel()
 	joined := make(chan struct{}, slots)
 	p.onDemandJoin = func() { joined <- struct{}{} }
@@ -279,8 +282,8 @@ func TestPoolDemandProbeCoalescesConcurrentSlots(t *testing.T) {
 			t.Fatalf("slot %d probe result = %v, want probeDecideAgain", s, res)
 		}
 	}
-	if got := p.st.sched.View(workKind, clk.Now()).Ready; got != 1 {
-		t.Fatalf("schedule ready = %d, want the leader's count 1", got)
+	if got := kindCheck(t, readStatus(t, dir), workKind).Ready; got == nil || *got != 1 {
+		t.Fatalf("status ready = %v, want the leader's count 1", got)
 	}
 }
 

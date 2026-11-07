@@ -595,37 +595,44 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 	}
 }
 
-// TestPoolPerKindBackoffGrowsIndependently drives pool.kinds directly
-// (sanctioned here as the only honest way to isolate one kind's streak from
+// TestPoolPerKindBackoffGrowsIndependently drives markNoWork and resetKind
+// directly per kind (the only honest way to isolate one kind's streak from
 // the daemon's normal end-to-end interleaving): dispatch's wait must double
 // across its own consecutive empty results exactly like a lone idleBackoff
 // would, while research resetting in between must never perturb it, and
-// vice versa. The assertions are on markNoWork's return — the same value
-// runSlot stamps onto the idle event's Wait field — not on any private
-// idleBackoff field.
+// vice versa. The assertions are on the published nextCheck, not on any
+// private idleBackoff field.
 func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 	clk := &testClock{}
+	clk.setNow(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	cfg := dualKindConfig(1, 0)
+	// Second-scale waits: the published nextCheck is RFC3339, so a
+	// millisecond floor would be invisible there.
+	cfg.IdleFloor, cfg.IdleCap = time.Second, time.Hour
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	p, _ := newPool(context.Background(), cfg, nil, em, clk)
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
+	rfc := func(d time.Duration) string { return clk.Now().Add(d).UTC().Format(time.RFC3339) }
 
-	wantWork := []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond}
+	wantWork := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second}
 	for i, want := range wantWork {
-		got := p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
-		if got != want {
-			t.Fatalf("dispatch markNoWork()[%d] = %v, want %v", i, got, want)
+		p.markNoWork(work, clk.Now(), false)
+		if got := kindCheck(t, readStatus(t, dir), work).NextCheck; got != rfc(want) {
+			t.Fatalf("dispatch nextCheck after check %d = %q, want %q", i, got, rfc(want))
 		}
 		// Research dispatching (Continue -> reset) between each of dispatch's
 		// empty checks must never touch dispatch's own streak.
-		p.resetKind(KindOf(dispatchkind.Research))
-		if until, gated := p.gateOf(KindOf(dispatchkind.Research), clk.Now()); gated || !until.IsZero() {
-			t.Fatalf("research readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
+		p.resetKind(research)
+		st := readStatus(t, dir)
+		if got := kindCheck(t, st, research).NextCheck; got != "" {
+			t.Fatalf("research nextCheck = %q after reset, want none", got)
 		}
-	}
-
-	if got := p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false); got != 16*time.Millisecond {
-		t.Fatalf("dispatch markNoWork() after 4 prior checks and interleaved research resets = %v, want 16ms (research's timer never advanced dispatch's)", got)
+		if got := kindCheck(t, st, work).NextCheck; got != rfc(want) {
+			t.Fatalf("dispatch nextCheck after research reset %d = %q, want %q kept", i, got, rfc(want))
+		}
 	}
 }
 

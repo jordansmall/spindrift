@@ -2970,11 +2970,3 @@ func TestPoolStatusPublishesButlerPatchCIWait(t *testing.T) {
 		t.Fatalf("CIWait, PRURL = %v, %q; want true, %q", s.CIWait, s.PRURL, pr)
 	}
 }
-
-// snapshot takes p.mu and projects the pool's current state; mutate is the
-// one production path to a fresh snapshot.
-func (p *pool) snapshot() Status {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return projectStatus(&p.st, p.cfg, p.clk.Now())
-}
