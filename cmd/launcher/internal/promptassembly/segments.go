@@ -23,6 +23,10 @@ type Source struct {
 type segment struct {
 	src  Source
 	text string
+	// into, on a var-value segment, is the Source whose raw text the
+	// ${NAME} token sat in. It lets a fragment's own prose be told apart from
+	// a nested fragment's, since the var value carries only its own src.
+	into Source
 	// deprecatedRef, on a zero-byte marker segment, names the deprecated
 	// fragment variable the owner's raw text referenced. Substitution replaces
 	// the ${NAME} token, so the scan could not otherwise see an override
@@ -63,7 +67,8 @@ func (b body) trimTrailingNewlines() body {
 			out = append(out[:i], out[i+1:]...)
 			continue
 		}
-		out[i] = segment{src: seg.src, text: trimmed}
+		seg.text = trimmed
+		out[i] = seg
 		break
 	}
 	return out
@@ -94,7 +99,13 @@ func renderSegments(raw string, owner Source, vars map[string]body) body {
 			if isDeprecatedFragmentVar(name) {
 				out = append(out, segment{src: owner, deprecatedRef: name})
 			}
-			out = append(out, v...)
+			for _, seg := range v {
+				// Innermost owner wins: a nested fragment's own splices keep their tag.
+				if seg.src.Kind == SourceVar && seg.into == (Source{}) {
+					seg.into = owner
+				}
+				out = append(out, seg)
+			}
 		} else {
 			appendLiteral(tok)
 		}

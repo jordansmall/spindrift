@@ -41,6 +41,13 @@ type Result struct {
 	// prompt-assembly golden suite pins (issue #3838).
 	Fragments []string
 
+	// fragmentRenders maps each Fragments name to its own rendered prose in
+	// every body it reached: its literal text and the vars substituted directly
+	// into it, with nested fragments and intervening text left out.
+	// Tests read it through FragmentRenders to check a clause against one
+	// fragment's own prose rather than the whole prompt.
+	fragmentRenders map[string][]string
+
 	// removedVarErr is the first removed fragment variable Assemble found in
 	// an operator-authored segment of a rendered prompt; Validate reports it.
 	// Deferred rather than returned so it surfaces as a *ValidateError via
@@ -667,9 +674,9 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		return Result{}, err
 	}
 
-	frags := map[string]struct{}{}
-	addFragmentNames(frags, bodies.base)
-	addFragmentNames(frags, bodies.review)
+	frags := map[string][]string{}
+	addFragmentRenders(frags, bodies.base)
+	addFragmentRenders(frags, bodies.review)
 
 	var removed removedVarScan
 	removed.check("prompt", bodies.base)
@@ -745,6 +752,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	}
 
 	result.Fragments = slices.Sorted(maps.Keys(frags))
+	result.fragmentRenders = frags
 	result.removedVarErr = removed.err
 	result.deprecatedVarWarnings = removed.warnings
 
@@ -817,13 +825,62 @@ func reviewerPromptOverride(reviewerPrompt string, promptFiles map[string]string
 	return promptFiles
 }
 
-// addFragmentNames adds the lib/fragments.nix fragment names that b's
-// segments carry to set.
-func addFragmentNames(set map[string]struct{}, b body) {
+// fragmentRenderGap marks, in a fragment's render, where something else
+// interrupted it. It is NUL, which is not whitespace, so a clause normalised
+// with strings.Fields cannot match across it. Each nested fragment in the
+// interrupting run follows as name + gap, letting a contract pin where a child
+// is spliced; template text alone leaves a bare gap.
+const fragmentRenderGap = "\x00"
+
+// addFragmentRenders records, for each lib/fragments.nix fragment b's
+// segments carry, that fragment's own rendered prose: its literal segments and
+// the plain vars substituted directly into it. Text of a nested fragment, or
+// of anything between two renders of the fragment, is left out and replaced by
+// a gap naming the fragments that interrupted it.
+func addFragmentRenders(renders map[string][]string, b body) {
+	builders := map[string]*strings.Builder{}
+	var order []string
+	// interrupted has a key for each started fragment whose last segment was
+	// not its own; the value is the distinct other fragments seen since.
+	interrupted := map[string][]string{}
 	for _, seg := range b {
-		if seg.src.Kind == SourceFragment {
-			set[seg.src.Name] = struct{}{}
+		if seg.text == "" {
+			continue
 		}
+		owner := seg.src
+		if owner.Kind == SourceVar {
+			owner = seg.into
+		}
+		isFrag := owner.Kind == SourceFragment
+		for name := range builders {
+			if isFrag && name == owner.Name {
+				continue
+			}
+			names := interrupted[name]
+			if isFrag && !slices.Contains(names, owner.Name) {
+				names = append(names, owner.Name)
+			}
+			interrupted[name] = names
+		}
+		if !isFrag {
+			continue
+		}
+		sb, ok := builders[owner.Name]
+		if !ok {
+			sb = &strings.Builder{}
+			builders[owner.Name] = sb
+			order = append(order, owner.Name)
+		} else if names, gap := interrupted[owner.Name]; gap {
+			sb.WriteString(fragmentRenderGap)
+			for _, n := range names {
+				sb.WriteString(n + fragmentRenderGap)
+			}
+		}
+		delete(interrupted, owner.Name)
+		sb.WriteString(seg.text)
+	}
+	for _, name := range order {
+		renders[name] = append(renders[name], builders[name].String())
 	}
 }
 
@@ -834,7 +891,7 @@ func addFragmentNames(set map[string]struct{}, b body) {
 // reviewerPrompt is the dispatch kind's own
 // reviewer prompt filename, or "" when it has none. Every fragment that
 // reaches a rendered agent prompt is added to frags.
-func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string]struct{},
+func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string][]string,
 	removed *removedVarScan, reviewerPrompt string) (string, error) {
 	var template map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
@@ -863,7 +920,7 @@ func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags 
 			}
 			return "", fmt.Errorf("read agent prompt file %s: %w", promptFile, err)
 		}
-		addFragmentNames(frags, renderedBody)
+		addFragmentRenders(frags, renderedBody)
 		removed.check(fmt.Sprintf("agent %q prompt", name), renderedBody)
 		rendered := renderedBody.text()
 
@@ -985,7 +1042,7 @@ func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, rev
 			return fmt.Errorf("read agent prompt file %s: %w", promptFiles[name], err)
 		}
 		removed.check(fmt.Sprintf("agent %q prompt", name), renderedBody)
-		// Unlike renderAgentsJSON, no addFragmentNames: no golden pins opencode
+		// Unlike renderAgentsJSON, no addFragmentRenders: no golden pins opencode
 		// agent files, so recording these would claim coverage no golden backs.
 		rendered := renderedBody.text()
 

@@ -4728,3 +4728,107 @@ func swapIssueRead(t *testing.T, prompt string) string {
 	}
 	return strings.Replace(prompt, githubStep, fragmentText(t, "issue-read-unreadable.md"), 1)
 }
+
+// A fragment's recorded render is its own span with vars substituted, not the
+// whole prompt: a sibling fragment's text stays out.
+func TestAssembleFragmentRendersSpan(t *testing.T) {
+	renders := assembleRenders(t, "intro ${VAR_A} between ${VAR_B}\n",
+		map[string]string{"a-frag.md": "ay on ${BASE_BRANCH}\n", "b-frag.md": "bee\n"},
+		[]FragmentRow{
+			{Gate: "CAVEMAN_BAKED", Fragment: "a-frag.md", Var: "VAR_A"},
+			{Gate: "CAVEMAN_BAKED", Fragment: "b-frag.md", Var: "VAR_B"},
+		})
+	if got, want := trimAll(renders["a-frag.md"]), []string{"ay on main"}; !slices.Equal(got, want) {
+		t.Errorf("a-frag.md renders = %q, want %q", got, want)
+	}
+	if got, want := trimAll(renders["b-frag.md"]), []string{"bee"}; !slices.Equal(got, want) {
+		t.Errorf("b-frag.md renders = %q, want %q", got, want)
+	}
+}
+
+// assembleRenders assembles a one-body prompt from files under fragments/ and
+// the registry rows, and returns the recorded fragment renders.
+func assembleRenders(t *testing.T, prompt string, frags map[string]string, rows []FragmentRow) map[string][]string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "fragments"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{"issue-prompt.md": prompt, "review-prompt.md": "review\n"}
+	for name, content := range frags {
+		files["fragments/"+name] = content
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+	env := coveredEnv()
+	env.PromptsDir = dir
+	result, err := Assemble(env, Registry{Rows: rows})
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	return FragmentRenders(result)
+}
+
+// A parent's render keeps the vars substituted directly into it but not the
+// prose of a fragment spliced between its own segments; the child's render
+// holds that prose.
+func TestAssembleFragmentRendersExcludeNestedFragment(t *testing.T) {
+	renders := assembleRenders(t, "${PARENT}\n",
+		map[string]string{
+			"child.md":  "kid prose\n",
+			"parent.md": "before ${CHILD}after on ${BASE_BRANCH}\n",
+		},
+		[]FragmentRow{
+			{Gate: "CAVEMAN_BAKED", Fragment: "child.md", Var: "CHILD"},
+			{Gate: "CAVEMAN_BAKED", Fragment: "parent.md", Var: "PARENT"},
+		})
+
+	parent := strings.Join(renders["parent.md"], "")
+	if strings.Contains(parent, "kid prose") {
+		t.Errorf("parent render holds the nested child's prose: %q", parent)
+	}
+	for _, want := range []string{"before", "after on main"} {
+		if !strings.Contains(parent, want) {
+			t.Errorf("parent render %q lacks its own text %q", parent, want)
+		}
+	}
+	if want := "before \x00child.md\x00after"; !strings.Contains(parent, want) {
+		t.Errorf("parent render %q does not name the spliced child in its gap, want %q", parent, want)
+	}
+	if got, want := trimAll(renders["child.md"]), []string{"kid prose"}; !slices.Equal(got, want) {
+		t.Errorf("child.md renders = %q, want %q", got, want)
+	}
+}
+
+// Prose between two renders of one fragment is not part of its span, and a
+// clause cannot match across the gap.
+func TestAssembleFragmentRendersExcludeTextBetweenRenders(t *testing.T) {
+	renders := assembleRenders(t, "${VAR_A} middle ${VAR_A}\n",
+		map[string]string{"a-frag.md": "ay on ${BASE_BRANCH}\n"},
+		[]FragmentRow{{Gate: "CAVEMAN_BAKED", Fragment: "a-frag.md", Var: "VAR_A"}})
+
+	got := strings.Join(renders["a-frag.md"], "")
+	if strings.Contains(got, "middle") {
+		t.Errorf("render holds text between the two renders: %q", got)
+	}
+	if n := strings.Count(got, "ay on main"); n != 2 {
+		t.Errorf("render %q holds %d copies of the fragment, want 2", got, n)
+	}
+	if strings.Contains(strings.Join(strings.Fields(got), " "), "main ay") {
+		t.Errorf("render %q lets a clause match across the gap between renders", got)
+	}
+	if !strings.Contains(got, "main\n\n\x00ay") {
+		t.Errorf("render %q: template text between renders should leave a bare gap", got)
+	}
+}
+
+func trimAll(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = strings.TrimSpace(s)
+	}
+	return out
+}
