@@ -25,6 +25,7 @@ import (
 	"spindrift.dev/launcher/internal/readonlyguards"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -1727,9 +1728,9 @@ func TestAssemble_RunsOnceBeforeTheFirstDriverRun(t *testing.T) {
 	}
 }
 
-// assemblyFixture points assemblePrompt at the repo's real templates and the
-// promptassembly test registries, with tiny contract files and a skills dir
-// holding only the named skills.
+// assemblyFixture points assemblePrompt at the repo's real templates and an
+// empty registry, with tiny contract files and a skills dir holding only the
+// named skills.
 func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 	t.Helper()
 	dir := t.TempDir()
@@ -1752,7 +1753,9 @@ func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 	return assemblyInputs{
 		SkillsDir: skillsDir,
 		AssemblyFlags: promptassembly.AssemblyFlags{
-			RegistryFile:                repopath.RegistryJSON(),
+			// An empty registry: the tests that reach it cover box's wiring around
+			// Assemble, which holds for any registry; probeAssembly supplies rows.
+			RegistryFile:                testutil.WriteRegistry(t, nil),
 			ValidateMarkersFile:         repopath.ValidateMarkersJSON(),
 			PromptsDir:                  repopath.PromptsDir(),
 			CommsContractFile:           contract("comms-contract.md"),
@@ -1777,8 +1780,6 @@ func coveredWorkEnv() promptassembly.Env {
 		InProgressLabel: "agent-in-progress", CompleteLabel: "agent-complete", RunNonce: "n0nce",
 	}
 }
-
-const cavemanSentinel = "Default to the `/caveman` skill for all narration and prose output this run."
 
 func assembledPrompt(t *testing.T, in assemblyInputs) (handoffPath string, h promptassembly.Handoff, prompt string) {
 	t.Helper()
@@ -1895,12 +1896,12 @@ func TestAssemblePrompt_UnsetBudgetsAreZeroCaps(t *testing.T) {
 }
 
 func TestAssemblePrompt_SkillProbesFollowTheSkillsDir(t *testing.T) {
-	_, _, baked := assembledPrompt(t, assemblyFixture(t, "caveman"))
-	_, _, bare := assembledPrompt(t, assemblyFixture(t))
-	if !strings.Contains(baked, cavemanSentinel) {
+	_, _, baked := assembledPrompt(t, probeAssembly(t, "caveman"))
+	_, _, bare := assembledPrompt(t, probeAssembly(t))
+	if !strings.Contains(baked, cavemanProbe) {
 		t.Error("a baked caveman skill did not reach the prompt")
 	}
-	if strings.Contains(bare, cavemanSentinel) {
+	if strings.Contains(bare, cavemanProbe) {
 		t.Error("the caveman fragment rendered with no baked skill")
 	}
 }
@@ -1908,17 +1909,17 @@ func TestAssemblePrompt_SkillProbesFollowTheSkillsDir(t *testing.T) {
 // A skill whose SKILL.md sets disable-model-invocation is human-only: the
 // prompt takes its unbaked arm and leaves it out of the preamble list.
 func TestAssemblePrompt_HumanOnlySkillRendersUnbaked(t *testing.T) {
-	in := assemblyFixture(t, "caveman", "tdd")
+	in := probeAssembly(t, "caveman", "tdd")
 	flagged := "---\nname: tdd\ndisable-model-invocation: true\n---\n"
 	if err := os.WriteFile(filepath.Join(in.SkillsDir, "tdd", "SKILL.md"), []byte(flagged), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, _, prompt := assembledPrompt(t, in)
-	if strings.Contains(prompt, "run `/tdd`") {
-		t.Error("the baked /tdd anchor rendered for a human-only skill")
+	if strings.Contains(prompt, tddBakedProbe) {
+		t.Error("the baked tdd arm rendered for a human-only skill")
 	}
-	if !strings.Contains(prompt, "1. RED: write ONE failing test") {
-		t.Error("the inline red/green/refactor arm did not render")
+	if !strings.Contains(prompt, tddUnbakedProbe) {
+		t.Error("the unbaked tdd arm did not render")
 	}
 	if !strings.Contains(prompt, "Skills available: caveman.") {
 		t.Errorf("skill preamble should list only caveman:\n%s", prompt)
@@ -1943,7 +1944,7 @@ func TestAssemblePrompt_UnsupportedCellFails(t *testing.T) {
 
 func TestRun_AssemblesThenTheFirstPassGetsTheHandoffBoxWrote(t *testing.T) {
 	f := newFixture(t)
-	in := assemblyFixture(t, "caveman")
+	in := probeAssembly(t, "caveman")
 	f.in.Assembly = in
 	f.env = coveredWorkEnv()
 	f.d.Assemble = assemblePrompt
@@ -1961,7 +1962,7 @@ func TestRun_AssemblesThenTheFirstPassGetsTheHandoffBoxWrote(t *testing.T) {
 	if f.firstCall.prompt != strings.TrimRight(string(want), "\n") {
 		t.Errorf("first pass prompt differs from the assembled prompt file %s", h.PromptFile)
 	}
-	if !strings.Contains(f.firstCall.prompt, cavemanSentinel) {
+	if !strings.Contains(f.firstCall.prompt, cavemanProbe) {
 		t.Error("the first pass prompt lacks the baked caveman fragment")
 	}
 }
@@ -2369,4 +2370,42 @@ func TestParseFlags_MalformedEnvFilesRejected(t *testing.T) {
 	if _, err := parseFlags(args, io.Discard); err == nil {
 		t.Fatal("parseFlags accepted a malformed --driver-env-files word")
 	}
+}
+
+// Probe bodies stand in for the production skill fragments, so a test sees
+// whether a skill gate fired without depending on fragment prose.
+const (
+	cavemanProbe    = "probe: caveman baked"
+	tddBakedProbe   = "probe: tdd baked"
+	tddUnbakedProbe = "probe: tdd unbaked"
+)
+
+// probeAssembly is assemblyFixture with a synthetic prompts dir and registry
+// holding the skill-gated rows: a preamble listing the baked skills, caveman,
+// and the tdd on/off pair. It leaves the production templates and fragments
+// out of tests that only ask which skill gates fired.
+func probeAssembly(t *testing.T, skills ...string) assemblyInputs {
+	t.Helper()
+	in := assemblyFixture(t, skills...)
+	dir := t.TempDir()
+	rows := []promptassembly.FragmentRow{
+		{Gate: "SKILLS_FOUND", Fragment: "probe-skills.md", Var: "SKILLS_STEP", ExtraSubstVars: []string{"SKILLS_FOUND"}},
+		{Gate: "CAVEMAN_BAKED", Fragment: "probe-caveman.md", Var: "CAVEMAN_STEP"},
+		{Gate: "TDD_BAKED", Fragment: "probe-tdd-baked.md", Var: "TDD_BAKED_STEP"},
+		{Gate: "TDD_UNBAKED", Fragment: "probe-tdd-unbaked.md", Var: "TDD_UNBAKED_STEP", InverseOf: "TDD_BAKED"},
+	}
+	files := map[string]string{
+		"issue-prompt.md":                "Issue #${ISSUE_NUMBER}\n${SKILLS_STEP}${CAVEMAN_STEP}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}",
+		"review-prompt.md":               "VERDICT: APPROVE\n",
+		"fragments/probe-skills.md":      "Skills available: ${SKILLS_FOUND}.",
+		"fragments/probe-caveman.md":     cavemanProbe,
+		"fragments/probe-tdd-baked.md":   tddBakedProbe,
+		"fragments/probe-tdd-unbaked.md": tddUnbakedProbe,
+	}
+	for name, content := range files {
+		testutil.WriteFixture(t, dir, name, content)
+	}
+	in.RegistryFile = testutil.WriteRegistry(t, rows)
+	in.PromptsDir = dir
+	return in
 }

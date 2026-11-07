@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/conflictresolve"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -35,7 +36,7 @@ func newCRFixture(t *testing.T) *crFixture {
 	f.in.Assembly = assemblyInputs{
 		SkillsDir: t.TempDir(),
 		AssemblyFlags: promptassembly.AssemblyFlags{
-			RegistryFile: repopath.RegistryJSON(),
+			RegistryFile: testutil.WriteRegistry(t, nil),
 			PromptsDir:   repopath.PromptsDir(),
 			Passthrough: promptassembly.Passthrough{
 				Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude-bin",
