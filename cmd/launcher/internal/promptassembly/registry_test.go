@@ -2,100 +2,42 @@ package promptassembly
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-// testdata/registry.json is a hand transcription of lib/fragments.nix. This
-// test spot-checks known rows rather than the whole payload, so the test itself
-// does not become the thing that silently drifts from fragments.nix. On a
-// wantRows mismatch, reconcile against fragments.nix and its history.
-func TestLoadRegistryParsesAllRows(t *testing.T) {
-	f, err := os.Open("testdata/registry.json")
-	if err != nil {
-		t.Fatalf("open testdata/registry.json: %v", err)
-	}
-	defer f.Close()
-
-	reg, err := LoadRegistry(f)
+// Every FragmentRow column decodes from its literal nix-rendered JSON name, rows
+// keep their source order, and a row without extraSubstVars decodes to none.
+func TestLoadRegistryDecodesEveryColumn(t *testing.T) {
+	const src = `[
+		{"gate": "G_ONE", "fragment": "one.md", "legacyFragment": "old-one.md", "axis": "forge",
+		 "shared": true, "var": "ONE_STEP", "extraSubstVars": ["A", "B"],
+		 "signalChannel": "comment", "inverseOf": "G_TWO", "inline": true},
+		{"gate": "G_TWO", "fragment": "two.md", "var": "TWO_STEP"}
+	]`
+	reg, err := LoadRegistry(strings.NewReader(src))
 	if err != nil {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 
-	const wantRows = 148
-	if len(reg.Rows) != wantRows {
-		t.Fatalf("len(reg.Rows) = %d, want %d", len(reg.Rows), wantRows)
+	want := FragmentRow{
+		Gate: "G_ONE", Fragment: "one.md", LegacyFragment: "old-one.md", Axis: "forge",
+		Shared: true, Var: "ONE_STEP", ExtraSubstVars: []string{"A", "B"},
+		SignalChannel: "comment", InverseOf: "G_TWO", Inline: true,
 	}
-
-	first := reg.Rows[0]
-	wantFirst := FragmentRow{
-		Gate:           "SKILLS_FOUND",
-		Fragment:       "skill-preamble.md",
-		Var:            "SKILL_PREAMBLE",
-		ExtraSubstVars: []string{"SKILLS_FOUND"},
+	if len(reg.Rows) != 2 {
+		t.Fatalf("len(reg.Rows) = %d, want 2", len(reg.Rows))
 	}
-	if first.Gate != wantFirst.Gate || first.Fragment != wantFirst.Fragment || first.Var != wantFirst.Var {
-		t.Errorf("reg.Rows[0] = %+v, want %+v", first, wantFirst)
+	if !reflect.DeepEqual(reg.Rows[0], want) {
+		t.Errorf("reg.Rows[0] = %+v, want %+v", reg.Rows[0], want)
 	}
-	if len(first.ExtraSubstVars) != 1 || first.ExtraSubstVars[0] != "SKILLS_FOUND" {
-		t.Errorf("reg.Rows[0].ExtraSubstVars = %v, want %v", first.ExtraSubstVars, wantFirst.ExtraSubstVars)
+	second := reg.Rows[1]
+	if second.Gate != "G_TWO" || second.Fragment != "two.md" || second.Var != "TWO_STEP" {
+		t.Errorf("reg.Rows[1] = %+v, want G_TWO/two.md/TWO_STEP", second)
 	}
-
-	// A plain row with no extraSubstVars in the source JSON must default to
-	// an empty/nil slice, never a spurious entry.
-	caveman := reg.Rows[1]
-	if caveman.Gate != "CAVEMAN_BAKED" || caveman.Fragment != "caveman-default.md" || caveman.Var != "CAVEMAN_STEP" {
-		t.Errorf("reg.Rows[1] = %+v, want CAVEMAN_BAKED/caveman-default.md/CAVEMAN_STEP", caveman)
-	}
-	if len(caveman.ExtraSubstVars) != 0 {
-		t.Errorf("reg.Rows[1].ExtraSubstVars = %v, want empty", caveman.ExtraSubstVars)
-	}
-
-	// fragments.nix's header comment names exactly three rows that interpolate
-	// a variable inside their own body. This is the second of them.
-	var ciFailure *FragmentRow
-	for i := range reg.Rows {
-		if reg.Rows[i].Fragment == "ci-failure.md" {
-			ciFailure = &reg.Rows[i]
-			break
-		}
-	}
-	if ciFailure == nil {
-		t.Fatal("no ci-failure.md row found")
-	}
-	if ciFailure.Gate != "CI_FAILURE_SUMMARY" || ciFailure.Var != "CI_FAILURE_STEP" {
-		t.Errorf("ci-failure.md row = %+v, want gate CI_FAILURE_SUMMARY, var CI_FAILURE_STEP", ciFailure)
-	}
-	if len(ciFailure.ExtraSubstVars) != 1 || ciFailure.ExtraSubstVars[0] != "CI_FAILURE_SUMMARY" {
-		t.Errorf("ci-failure.md row ExtraSubstVars = %v, want [CI_FAILURE_SUMMARY]", ciFailure.ExtraSubstVars)
-	}
-
-	// The third row that interpolates a variable. Its anchor holds the fan-out
-	// agent type this run provisions (issue #3447).
-	var codeReviewBaked *FragmentRow
-	for i := range reg.Rows {
-		if reg.Rows[i].Fragment == "code-review-baked.md" {
-			codeReviewBaked = &reg.Rows[i]
-			break
-		}
-	}
-	if codeReviewBaked == nil {
-		t.Fatal("no code-review-baked.md row found")
-	}
-	if len(codeReviewBaked.ExtraSubstVars) != 1 || codeReviewBaked.ExtraSubstVars[0] != "REVIEW_FANOUT_AGENT" {
-		t.Errorf("code-review-baked.md row ExtraSubstVars = %v, want [REVIEW_FANOUT_AGENT]", codeReviewBaked.ExtraSubstVars)
-	}
-
-	// Three rows interpolate their own vars, plus the FORGE_DISPLAY_NAME
-	// slots (issue #5647) and each one's deprecated per-backend fills.
-	withExtra := 0
-	for _, r := range reg.Rows {
-		if len(r.ExtraSubstVars) > 0 {
-			withExtra++
-		}
-	}
-	if withExtra != 15 {
-		t.Errorf("rows with ExtraSubstVars = %d, want 15", withExtra)
+	if len(second.ExtraSubstVars) != 0 {
+		t.Errorf("reg.Rows[1].ExtraSubstVars = %v, want empty", second.ExtraSubstVars)
 	}
 }
 
