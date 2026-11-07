@@ -33,7 +33,7 @@ func run(in io.Reader, out io.Writer) error {
 		return err
 	}
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "", src, parser.ImportsOnly|parser.ParseComments)
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		return err
 	}
@@ -51,9 +51,6 @@ func run(in io.Reader, out io.Writer) error {
 		if path, _ := strconv.Unquote(imp.Path.Value); path == "C" {
 			return fmt.Errorf("imports \"C\"")
 		}
-	}
-	if _, err := parser.ParseFile(fset, "", src, parser.SkipObjectResolution); err != nil {
-		return err
 	}
 
 	var s scanner.Scanner
