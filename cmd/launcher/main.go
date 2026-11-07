@@ -393,49 +393,61 @@ func hostGitConfigField(env string) string {
 func loadConfig() config {
 	sc := loadSchemaConfig()
 
-	runtime := docArtifact("RUNTIME")
+	art := docArtifacts()
+	shared := art.Shared
+	runtime := shared.Runtime.String()
 	// No runtime-name fallback: the nix pipeline always renders RUNNER_KIND
 	// alongside RUNTIME (issue #2538). A direct binary invocation with no
 	// --input document gets "", which runner.Lookup resolves to the OCI family.
-	runnerKind := docArtifact("RUNNER_KIND")
+	runnerKind := shared.RunnerKind.String()
 	// loadConfig runs from several call sites, so mainRun prints the warning
 	// once instead.
 	driver, _ := resolveDriver()
 
-	return config{
+	cfg := config{
 		schemaConfig: sc,
 
-		imageArchive:       docArtifact("IMAGE_ARCHIVE"),
-		imageTag:           docArtifact("IMAGE_TAG"),
-		imageDrv:           docArtifact("IMAGE_DRV"),
-		nixBuilderImage:    docArtifact("NIX_BUILDER_IMAGE"),
-		nixVolume:          docArtifact("NIX_VOLUME"),
-		flakeImageAttr:     docArtifact("FLAKE_IMAGE_ATTR"),
-		flakeLauncherAttr:  docArtifact("FLAKE_LAUNCHER_ATTR"),
-		loadedLauncherHash: docArtifact("LAUNCHER_CURRENCY_HASH"),
-		agentFiles:         docArtifact("AGENT_FILES"),
-		agentEnv:           docArtifact("AGENT_ENV"),
-		agentFilesDrv:      docArtifact("AGENT_FILES_DRV"),
-		agentEnvDrv:        docArtifact("AGENT_ENV_DRV"),
-		bakedPrefetch:      docArtifact("BAKED_PREFETCH"),
-		passwdFile:         docArtifact("PASSWD_FILE"),
-		groupFile:          docArtifact("GROUP_FILE"),
-		passwdFileDrv:      docArtifact("PASSWD_FILE_DRV"),
-		groupFileDrv:       docArtifact("GROUP_FILE_DRV"),
-		nixConfigFile:      docArtifact("NIX_CONFIG_FILE"),
-		nixConfigFileDrv:   docArtifact("NIX_CONFIG_FILE_DRV"),
-		syscallFilterPath:  docArtifact("SYSCALL_FILTER"),
-		syscallFilterDrv:   docArtifact("SYSCALL_FILTER_DRV"),
-		nixStoreWritable:   docArtifact("NIX_STORE_WRITABLE") == "true",
+		flakeLauncherAttr:  shared.FlakeLauncherAttr.String(),
+		loadedLauncherHash: shared.LauncherCurrencyHash.String(),
 		runtime:            runtime,
 		runnerKind:         runnerKind,
-		boxArtifact:        docArtifact("BOX_ARTIFACT"),
+		boxArtifact:        shared.BoxArtifact.String(),
 		driver:             driver,
 
-		driverSessionCacheDir: docArtifact("DRIVER_SESSION_CACHE_DIR"),
+		driverSessionCacheDir: shared.DriverSessionCacheDir.String(),
 
-		boxEnvVars: docArtifact("BOX_ENV_VARS"),
+		boxEnvVars: shared.BoxEnvVars.String(),
 	}
+
+	// Only the document's runner family part is set; the other family's
+	// fields stay empty.
+	if b := art.Bwrap; b != nil {
+		cfg.imageTag = b.ImageTag.String()
+		cfg.flakeImageAttr = b.FlakeImageAttr.String()
+		cfg.agentFiles = b.AgentFiles.String()
+		cfg.agentEnv = b.AgentEnv.String()
+		cfg.agentFilesDrv = b.AgentFilesDrv.String()
+		cfg.agentEnvDrv = b.AgentEnvDrv.String()
+		cfg.bakedPrefetch = b.BakedPrefetch.String()
+		cfg.passwdFile = b.PasswdFile.String()
+		cfg.groupFile = b.GroupFile.String()
+		cfg.passwdFileDrv = b.PasswdFileDrv.String()
+		cfg.groupFileDrv = b.GroupFileDrv.String()
+		cfg.nixConfigFile = b.NixConfigFile.String()
+		cfg.nixConfigFileDrv = b.NixConfigFileDrv.String()
+		cfg.syscallFilterPath = b.SyscallFilter.String()
+		cfg.syscallFilterDrv = b.SyscallFilterDrv.String()
+		cfg.nixStoreWritable = b.NixStoreWritable.Bool()
+	}
+	if o := art.OCI; o != nil {
+		cfg.imageArchive = o.ImageArchive.String()
+		cfg.imageTag = o.ImageTag.String()
+		cfg.imageDrv = o.ImageDrv.String()
+		cfg.nixBuilderImage = o.NixBuilderImage.String()
+		cfg.nixVolume = o.NixVolume.String()
+		cfg.flakeImageAttr = o.FlakeImageAttr.String()
+	}
+	return cfg
 }
 
 // capabilitySignals bundles the four capability bits nix resolves per
@@ -458,16 +470,17 @@ type capabilitySignals struct {
 // partial render falls back too (issue #2527).
 func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals {
 	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
-		_, hostMediatedRemotePresent := loadedDoc.Artifacts["HOST_MEDIATED_REMOTE"]
-		_, outboxRelayCapablePresent := loadedDoc.Artifacts["OUTBOX_RELAY_CAPABLE"]
-		_, inBoxUnreachableTrackerPresent := loadedDoc.Artifacts["IN_BOX_UNREACHABLE_TRACKER"]
-		_, fullyLocalPresent := loadedDoc.Artifacts["FULLY_LOCAL"]
+		a := loadedDoc.Artifacts.Shared
+		hostMediatedRemote, hostMediatedRemotePresent := a.HostMediatedRemote.LookupBool()
+		outboxRelayCapable, outboxRelayCapablePresent := a.OutboxRelayCapable.LookupBool()
+		inBoxUnreachableTracker, inBoxUnreachableTrackerPresent := a.InBoxUnreachableTracker.LookupBool()
+		fullyLocal, fullyLocalPresent := a.FullyLocal.LookupBool()
 		if hostMediatedRemotePresent && outboxRelayCapablePresent && inBoxUnreachableTrackerPresent && fullyLocalPresent {
 			return capabilitySignals{
-				hostMediatedRemote:      docArtifact("HOST_MEDIATED_REMOTE") == "true",
-				outboxRelayCapable:      docArtifact("OUTBOX_RELAY_CAPABLE") == "true",
-				inBoxUnreachableTracker: docArtifact("IN_BOX_UNREACHABLE_TRACKER") == "true",
-				fullyLocal:              docArtifact("FULLY_LOCAL") == "true",
+				hostMediatedRemote:      hostMediatedRemote,
+				outboxRelayCapable:      outboxRelayCapable,
+				inBoxUnreachableTracker: inBoxUnreachableTracker,
+				fullyLocal:              fullyLocal,
 			}
 		}
 	}
@@ -490,12 +503,13 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 // in at image-build time (issue #2527, issue #2533).
 func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write, filer, forge string) {
 	if loadedDoc != nil && codeForge == loadedDoc.Settings["CODE_FORGE"] && issueTracker == loadedDoc.Settings["ISSUE_TRACKER"] {
-		_, readOK := loadedDoc.Artifacts["TRACKER_AXIS_READ"]
-		_, writeOK := loadedDoc.Artifacts["TRACKER_AXIS_WRITE"]
-		_, filerOK := loadedDoc.Artifacts["TRACKER_AXIS_FILER"]
-		_, forgeOK := loadedDoc.Artifacts["FORGE_BACKEND"]
+		a := loadedDoc.Artifacts.Shared
+		readV, readOK := a.TrackerAxisRead.Lookup()
+		writeV, writeOK := a.TrackerAxisWrite.Lookup()
+		filerV, filerOK := a.TrackerAxisFiler.Lookup()
+		forgeV, forgeOK := a.ForgeBackend.Lookup()
 		if readOK && writeOK && filerOK && forgeOK {
-			return docArtifact("TRACKER_AXIS_READ"), docArtifact("TRACKER_AXIS_WRITE"), docArtifact("TRACKER_AXIS_FILER"), docArtifact("FORGE_BACKEND")
+			return readV, writeV, filerV, forgeV
 		}
 	}
 	read, write, filer = backend.TrackerAxisSignals(issueTracker)
@@ -532,22 +546,23 @@ func resolveAgentPresenceSignals(driverName string) agentPresence {
 	}
 	scoutProvisioned = scoutModel != ""
 	if loadedDoc != nil {
-		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
-		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
+		a := loadedDoc.Artifacts.Shared
+		filerV, filerOK := a.FilerEnabled.LookupBool()
+		workerV, workerOK := a.WorkerProvisioned.LookupBool()
 		if filerOK && workerOK {
 			// Both are fixed eval-time bakes of the roster, so a dispatch-time
 			// FILER_MODEL/WORKER_MODEL override cannot change the roster the box
 			// actually gets. Trust them whenever present, without checking the
 			// live models against the document's baked Settings.
-			filerEnabled = docArtifact("FILER_ENABLED") == "true"
-			workerProvisioned = docArtifact("WORKER_PROVISIONED") == "true"
+			filerEnabled = filerV
+			workerProvisioned = workerV
 		}
 		// Its own gate, not folded into filerOK/workerOK: a document baked
 		// before issue #3157 carries the roster pair but no SCOUT_PROVISIONED
 		// key, and that skew must fall back for scout alone rather than defeat
 		// trust in the still-present pair.
-		if _, scoutOK := loadedDoc.Artifacts["SCOUT_PROVISIONED"]; scoutOK {
-			scoutProvisioned = docArtifact("SCOUT_PROVISIONED") == "true"
+		if scoutV, scoutOK := a.ScoutProvisioned.LookupBool(); scoutOK {
+			scoutProvisioned = scoutV
 		}
 	}
 

@@ -29,7 +29,7 @@ func dispatchStamp(reviewModel string) hostop.DispatchStart {
 	return hostop.DispatchStart{
 		Revision:      revision,
 		RoleModels:    stampRoleModels(reviewModel),
-		DriverVersion: docArtifact("DRIVER_VERSION"),
+		DriverVersion: docArtifacts().Shared.DriverVersion.String(),
 		Knobs:         knobs,
 	}
 }
@@ -52,7 +52,7 @@ func redactUserinfo(v string) string {
 // ReviewModelOverride.
 func stampRoleModels(reviewModel string) map[string]string {
 	models := map[string]string{}
-	if raw := docArtifact("ROLE_MODELS"); raw != "" {
+	if raw := docArtifacts().Shared.RoleModels.String(); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &models); err != nil || models == nil {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "==> ROLE_MODELS artifact is not valid JSON (%v) -- dispatch_start omits the baked roster\n", err)

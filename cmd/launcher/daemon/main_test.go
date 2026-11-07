@@ -2778,12 +2778,12 @@ func assertCapturedEnvT(t *testing.T, label string, env []string) {
 // into the consumer. Returns the input document path; each caller keeps its
 // own doctor/exec stubs and assertions, which diverge between the tests.
 func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
-	return capturedEnvFixtureArtifactsT(t, extra, nil)
+	return capturedEnvFixtureArtifactsT(t, extra, inputdoc.Artifacts{})
 }
 
 // capturedEnvFixtureArtifactsT is capturedEnvFixtureT with extra Artifacts
 // merged into the written document.
-func capturedEnvFixtureArtifactsT(t *testing.T, extra, artifacts map[string]string) string {
+func capturedEnvFixtureArtifactsT(t *testing.T, extra map[string]string, artifacts inputdoc.Artifacts) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -2797,12 +2797,7 @@ func capturedEnvFixtureArtifactsT(t *testing.T, extra, artifacts map[string]stri
 
 	doc := validKnobDocument()
 	doc.Settings["MODEL"] = "opus"
-	if len(artifacts) > 0 {
-		if doc.Artifacts == nil {
-			doc.Artifacts = map[string]string{}
-		}
-		maps.Copy(doc.Artifacts, artifacts)
-	}
+	doc.Artifacts = artifacts
 	for k, v := range extra {
 		doc.Settings[k] = v
 	}
@@ -3646,7 +3641,7 @@ func TestSuccessorArgs(t *testing.T) {
 func TestResolveDriverEnv_MismatchWarnsOnceAndReturnsMarker(t *testing.T) {
 	t.Setenv("DRIVER", "opencode")
 	t.Setenv(inputdoc.DriverWarnedEnv, "")
-	doc := &inputdoc.Document{Artifacts: map[string]string{"DRIVER": "claude"}}
+	doc := &inputdoc.Document{Artifacts: claudeArtifacts()}
 	var stderr bytes.Buffer
 	got := resolveDriverEnv(doc, &stderr)
 	if want := []string{"SPINDRIFT_DRIVER_WARNED=opencode/claude"}; !slices.Equal(got, want) {
@@ -3664,7 +3659,7 @@ func TestResolveDriverEnv_MismatchWarnsOnceAndReturnsMarker(t *testing.T) {
 }
 
 func TestResolveDriverEnv_MatchUnsetOrNoDocIsSilentWithNoMarker(t *testing.T) {
-	baked := &inputdoc.Document{Artifacts: map[string]string{"DRIVER": "claude"}}
+	baked := &inputdoc.Document{Artifacts: claudeArtifacts()}
 	cases := []struct {
 		name    string
 		doc     *inputdoc.Document
@@ -3718,7 +3713,7 @@ func driverMarkerEnvT(env []string) (string, bool) {
 // end at the daemon: one stderr warning, and both the doctor preflight and a
 // dispatch child carry the marker that survives their harness.env re-sourcing.
 func TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren(t *testing.T) {
-	path := capturedEnvFixtureArtifactsT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"}, map[string]string{"DRIVER": "claude"})
+	path := capturedEnvFixtureArtifactsT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"}, claudeArtifacts())
 	t.Setenv("DRIVER", "opencode")
 	unsetEnvT(t, inputdoc.DriverWarnedEnv)
 
@@ -3755,7 +3750,7 @@ func TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren(t *testing.T) {
 }
 
 func TestMainRun_DriverMatch_NoWarningNoMarker(t *testing.T) {
-	path := capturedEnvFixtureArtifactsT(t, nil, map[string]string{"DRIVER": "claude"})
+	path := capturedEnvFixtureArtifactsT(t, nil, claudeArtifacts())
 	t.Setenv("DRIVER", "claude")
 	unsetEnvT(t, inputdoc.DriverWarnedEnv)
 
@@ -4795,4 +4790,8 @@ func TestCapRollbackReason(t *testing.T) {
 	if len(got) > rollbackReasonMax+len("...") {
 		t.Errorf("capRollbackReason() has len %d, want at most %d", len(got), rollbackReasonMax+len("..."))
 	}
+}
+
+func claudeArtifacts() inputdoc.Artifacts {
+	return inputdoc.Artifacts{Shared: inputdoc.SharedArtifacts{Driver: inputdoc.ValueOf("claude")}}
 }

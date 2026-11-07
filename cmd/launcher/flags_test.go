@@ -1542,7 +1542,7 @@ func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
-		Artifacts: map[string]string{"FULLY_LOCAL": "true"},
+		Artifacts: mustArtifacts(map[string]string{"FULLY_LOCAL": "true"}),
 	}
 
 	orig := secretCmdRunner

@@ -67,7 +67,7 @@ func TestStampRoleModels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Cleanup(func() { loadedDoc = nil })
-			loadedDoc = &inputdoc.Document{Artifacts: tt.doc, Settings: map[string]string{}}
+			loadedDoc = &inputdoc.Document{Artifacts: mustArtifacts(tt.doc), Settings: map[string]string{}}
 			t.Setenv("MODEL", tt.model)
 			t.Setenv("REVIEW_MODEL", tt.review)
 			got := stampRoleModels(tt.review)

@@ -18,12 +18,13 @@ import (
 
 // Document mirrors the nix-rendered Launcher input document (ADR 0020):
 // Settings holds resolved knob values keyed by env var name, Artifacts the
-// nix-computed plumbing (image refs, agent files, driver name). It is
+// nix-computed plumbing (image refs, agent files, driver name) as the typed
+// Artifacts rendered from the runner rows. The Document itself is
 // hand-written, not nix-generated (issue #813), and the mkharness-defaults
 // drift gate in nix/checks/equivalence.nix greps hand-picked keys only.
 type Document struct {
 	Settings  map[string]string `json:"settings"`
-	Artifacts map[string]string `json:"artifacts"`
+	Artifacts Artifacts         `json:"artifacts"`
 }
 
 // Load reads and parses the Launcher input document at path.

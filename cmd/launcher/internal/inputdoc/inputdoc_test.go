@@ -13,7 +13,7 @@ import (
 func TestLoad_ParsesSettingsAndArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "input.json")
-	body := `{"settings":{"BASE_BRANCH":"develop"},"artifacts":{"IMAGE_TAG":"spindrift:abc"}}`
+	body := `{"settings":{"BASE_BRANCH":"develop"},"artifacts":{"RUNNER_KIND":"oci","IMAGE_TAG":"spindrift:abc"}}`
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -25,8 +25,11 @@ func TestLoad_ParsesSettingsAndArtifacts(t *testing.T) {
 	if doc.Settings["BASE_BRANCH"] != "develop" {
 		t.Errorf("Settings[BASE_BRANCH] = %q, want develop", doc.Settings["BASE_BRANCH"])
 	}
-	if doc.Artifacts["IMAGE_TAG"] != "spindrift:abc" {
-		t.Errorf("Artifacts[IMAGE_TAG] = %q, want spindrift:abc", doc.Artifacts["IMAGE_TAG"])
+	if doc.Artifacts.OCI == nil || doc.Artifacts.OCI.ImageTag.String() != "spindrift:abc" {
+		t.Errorf("Artifacts.OCI = %+v, want ImageTag spindrift:abc", doc.Artifacts.OCI)
+	}
+	if doc.Artifacts.Bwrap != nil {
+		t.Errorf("Artifacts.Bwrap = %+v, want nil for an oci document", doc.Artifacts.Bwrap)
 	}
 }
 

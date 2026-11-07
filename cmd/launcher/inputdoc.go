@@ -19,33 +19,25 @@ var loadedDoc *inputdoc.Document
 // resolveDriver reads DRIVER, the one artifact with an ambient env fallback,
 // used only when no document bakes one (ADR 0064).
 func resolveDriver() (driver, warning string) {
-	return inputdoc.ResolveDriver(docArtifact("DRIVER"), os.Getenv("DRIVER"), inputdoc.DriverWarned())
+	return inputdoc.ResolveDriver(docArtifacts().Shared.Driver.String(), os.Getenv("DRIVER"), inputdoc.DriverWarned())
 }
 
-// docArtifact is the one artifact lookup: it reads key strictly from the loaded
-// document's Artifacts, never from os.Getenv. Artifacts are nix-resolved
-// (capability, tracker/forge, agent presence, image and store references), so a
-// stray ambient env var must never override what nix baked into the document
-// (issues #2527, #6611). Absent keys read as "": the nix rows render every
-// default, so Go carries none.
-func docArtifact(key string) string {
-	v, _ := lookupDocArtifact(key)
-	return v
-}
-
-// lookupDocArtifact is docArtifact plus whether key is present at all.
-func lookupDocArtifact(key string) (string, bool) {
+// docArtifacts returns the loaded document's artifacts, or the zero value
+// (every key absent) when no document is loaded. Artifacts are nix-resolved
+// (capability, tracker/forge, agent presence, image and store references), so
+// they are read strictly from the document, never from os.Getenv: a stray
+// ambient env var must never override what nix baked in (issues #2527, #6611).
+func docArtifacts() inputdoc.Artifacts {
 	if loadedDoc == nil {
-		return "", false
+		return inputdoc.Artifacts{}
 	}
-	v, ok := loadedDoc.Artifacts[key]
-	return v, ok
+	return loadedDoc.Artifacts
 }
 
 // resolveChoreCatalog reads the CHORE_CATALOG artifact (lib/preambles.nix's
 // runArtifacts) for butlerPreflight's prompt-exists check.
 func resolveChoreCatalog() choreCatalog {
-	raw, ok := lookupDocArtifact("CHORE_CATALOG")
+	raw, ok := docArtifacts().Shared.ChoreCatalog.Lookup()
 	if !ok {
 		return choreCatalog{}
 	}
@@ -67,7 +59,7 @@ var gitConfigLookup = func(key string) string {
 
 // resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: ambient env
 // first (parseFlags lands an explicit flag there via os.Setenv), then the
-// document's settings or artifacts, then the schema default, because the
+// document's settings, then the schema default, because the
 // wrapper no longer pre-populates env with baked defaults (ADR 0020). The
 // host-derived commit identity is not resolved here: hostGitConfigResolver
 // answers it from the launcher's startup snapshot, not re-read per dispatch,
@@ -82,9 +74,6 @@ func resolveBoxEnvVar(name string) string {
 	}
 	if loadedDoc != nil {
 		if v, ok := loadedDoc.Settings[name]; ok && v != "" {
-			return v
-		}
-		if v, ok := loadedDoc.Artifacts[name]; ok && v != "" {
 			return v
 		}
 	}
