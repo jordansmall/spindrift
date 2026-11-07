@@ -232,12 +232,12 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 	}
 }
 
-// npmfamily.TestConfigParserMatchesInTreeConfigPath proves each npm-family Strategy
-// pairs an InTreeConfigPath with a parser; this one proves a Strategy's
-// declaration reaches a subtree. A Strategy whose config parses but
-// derives no path would leave the proxy refusing every request that Strategy
-// makes, with no other test failing. The ecosystem corpus proves the same for
-// each registered Strategy.
+// bundle_test.TestEveryRegisteredStrategyPairsInTreeConfigPathWithParser
+// proves each registered Strategy pairs an InTreeConfigPath with a parser;
+// this one proves a Strategy's declaration reaches a subtree. A Strategy whose config parses
+// but derives no path would leave the proxy refusing every request that
+// Strategy makes, with no other test failing. The ecosystem corpus proves the
+// same for each registered Strategy.
 func TestDerive_DeclarationReachesAdmittingSubtree(t *testing.T) {
 	got := deriveSynthetic(t, "a = https://registry.example.com/repo/index\n")
 	found := false
