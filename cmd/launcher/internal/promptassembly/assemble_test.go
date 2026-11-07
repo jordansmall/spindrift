@@ -47,15 +47,6 @@ func coveredEnv() Env {
 	}
 }
 
-func loadTestRegistry(t *testing.T) Registry {
-	t.Helper()
-	reg, err := LoadRegistryFile("testdata/registry.json")
-	if err != nil {
-		t.Fatalf("LoadRegistryFile: %v", err)
-	}
-	return reg
-}
-
 // Callers assert a whole fragment body against the prompt. Reading the
 // fragment beats hand-copying an excerpt: a review round found a copied one
 // had silently stopped matching after the fragment's wording changed.
@@ -287,12 +278,12 @@ func TestAssembleHandoff(t *testing.T) {
 
 // The --agents JSON injection loop (renderAgentsJSON).
 func TestAssembleAgentsJSON(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, baseEnv := agentFilesRegistry(t)
 
 	t.Run("template present", func(t *testing.T) {
-		env := coveredEnv()
+		env := baseEnv
 		env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
-		env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
+		env.AgentsPromptFiles = `{"scout":"agent-prompt.md"}`
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -316,13 +307,13 @@ func TestAssembleAgentsJSON(t *testing.T) {
 		if scout.Model != "x" {
 			t.Errorf("scout.model = %q, want %q", scout.Model, "x")
 		}
-		if !strings.Contains(scout.Prompt, "/tdd") {
-			t.Errorf("scout.prompt missing substituted tdd-baked.md content: %q", scout.Prompt)
+		if !strings.Contains(scout.Prompt, agentFilesCavemanStub) {
+			t.Errorf("scout.prompt missing the substituted fragment content: %q", scout.Prompt)
 		}
 	})
 
 	t.Run("empty template", func(t *testing.T) {
-		env := coveredEnv()
+		env := baseEnv
 
 		result, err := Assemble(env, reg)
 		if err != nil {
