@@ -316,9 +316,12 @@ func TestSelfUpdateRecordedBuildIsNotRebuiltForNewerTip(t *testing.T) {
 			var buf bytes.Buffer
 			cfg := testConfig(1)
 			cfg.SelfProgram = selfOld
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			p, _ := newPool(context.Background(), cfg, r, newTestEmitter(&buf), &testClock{})
 			defer p.cancel()
-			want := SelfUpdate{Phase: phase, Revision: "rev1"}
+			// mutate stamps Since from the clock, here testClock{}'s zero time.
+			want := SelfUpdate{Phase: phase, Revision: "rev1", Since: time.Time{}.UTC().Format(time.RFC3339)}
 			p.mutate(func(s *state) []Event {
 				s.self = want
 				return nil
@@ -333,8 +336,8 @@ func TestSelfUpdateRecordedBuildIsNotRebuiltForNewerTip(t *testing.T) {
 			if h := p.haltReason(); h.Class == HaltSelfChanged {
 				t.Fatalf("halt = %+v, want none: rev2 was never built", h)
 			}
-			if p.st.self != want {
-				t.Fatalf("self = %+v, want %+v unchanged", p.st.self, want)
+			if got := readStatus(t, dir).SelfUpdate; got == nil || *got != want {
+				t.Fatalf("status self_update = %+v, want %+v unchanged", got, want)
 			}
 		})
 	}

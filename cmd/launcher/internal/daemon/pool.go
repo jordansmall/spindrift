@@ -1461,7 +1461,7 @@ func (p *pool) publish(seq uint64, s Status) {
 // publishInitial reports the pool's startup state before any slot has made
 // its own first change, so a freshly started daemon's status file says
 // something at once instead of only on its first state change. It goes
-// through mutate, changing nothing, rather than calling snapshot/publish
+// through mutate, changing nothing, rather than calling projectStatus/publish
 // directly: the snapshot and its sequence number must come from the one
 // operation that allocates both, or this initial publish could race a
 // slot's first real mutate and overwrite that slot's fresher state with

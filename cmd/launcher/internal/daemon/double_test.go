@@ -1474,29 +1474,18 @@ func (p *pool) pickKind() (Kind, bool) {
 	return st.Kind, ok
 }
 
-// markNoWork folds one no-work child result into the schedule and returns the
-// wait it gates for.
-func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
+// markNoWork folds one no-work child result into the schedule. Like the
+// p.mutate closures elsewhere in these tests, it is setup that writes state,
+// not a read of pool state to assert a result.
+func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) {
 	result := childEmpty
 	if jammed {
 		result = childJammed
 	}
-	var wait time.Duration
 	p.mutate(func(s *state) []Event {
 		s.sched, _ = s.sched.Observe(now, childDone{Kind: kind, Result: result, GateGen: s.sched.gateGenOf(kind)})
-		if v := s.sched.View(kind, now); v.Gated {
-			wait = v.Until.Sub(now)
-		}
 		return nil
 	})
-	return wait
-}
-
-// gateOf is the test view of a kind's gate: the instant it ends, and whether
-// it is gated at now.
-func (p *pool) gateOf(kind Kind, now time.Time) (time.Time, bool) {
-	v := p.st.sched.View(kind, now)
-	return v.Until, v.Gated
 }
 
 // Prebuild counts the call, then answers through onPrebuild if set and
