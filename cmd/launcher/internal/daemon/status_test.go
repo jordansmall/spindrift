@@ -710,9 +710,9 @@ func TestPoolSnapshotOmitsReadyAtJamWhileBaselinePending(t *testing.T) {
 
 	now := clk.Now()
 	s := p.st.sched
-	s, _ = s.Observe(now, DemandProbed{Kind: work, Ready: 2})
-	s, _ = s.Observe(now, Claimed{Kind: work})
-	s, _ = s.Observe(now, ChildDone{Kind: work, Result: ChildJammed})
+	s, _ = s.Observe(now, demandProbed{Kind: work, Ready: 2})
+	s, _ = s.Observe(now, claimed{Kind: work})
+	s, _ = s.Observe(now, childDone{Kind: work, Result: childJammed})
 	p.st.sched = s
 
 	w := p.snapshot().Checks[0]
@@ -735,9 +735,9 @@ func TestPoolSnapshotCarriesDemandFieldsPerKind(t *testing.T) {
 
 	now := clk.Now()
 	s := p.st.sched
-	s, _ = s.Observe(now, DemandProbed{Kind: work, Ready: 0})
-	s, _ = s.Observe(now, DemandProbed{Kind: research, Ready: 3})
-	s, _ = s.Observe(now, ChildDone{Kind: research, Result: ChildJammed})
+	s, _ = s.Observe(now, demandProbed{Kind: work, Ready: 0})
+	s, _ = s.Observe(now, demandProbed{Kind: research, Ready: 3})
+	s, _ = s.Observe(now, childDone{Kind: research, Result: childJammed})
 	p.st.sched = s
 
 	checks := p.snapshot().Checks
@@ -789,7 +789,7 @@ func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
 	}
 
 	due := now.Add(time.Hour)
-	p.st.sched, _ = p.st.sched.Observe(now, ChildDone{Kind: butler, Result: ChildEmpty, NextDue: NextDue{At: due}})
+	p.st.sched, _ = p.st.sched.Observe(now, childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{At: due}})
 	want := due.UTC().Format(time.RFC3339)
 	got := p.snapshot().Checks[0]
 	if got.NextDue != want || got.NextCheck != want {
@@ -803,7 +803,7 @@ func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
 		t.Errorf("JSON = %s, want next_due %s", data, want)
 	}
 
-	p.st.sched, _ = p.st.sched.Observe(now, ChildDone{Kind: butler, Result: ChildEmpty, NextDue: NextDue{OnTipMove: true}})
+	p.st.sched, _ = p.st.sched.Observe(now, childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{OnTipMove: true}})
 	got = p.snapshot().Checks[0]
 	if got.NextDue != "on_tip_move" || got.NextCheck != "" {
 		t.Errorf("tip-only report = next_due %q nextCheck %q, want on_tip_move and none", got.NextDue, got.NextCheck)
@@ -812,7 +812,7 @@ func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
 		t.Error("tip-only report set next_due_on_tip_move, want it only alongside an instant")
 	}
 
-	p.st.sched, _ = p.st.sched.Observe(now, ChildDone{Kind: butler, Result: ChildEmpty, NextDue: NextDue{At: due, OnTipMove: true}})
+	p.st.sched, _ = p.st.sched.Observe(now, childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{At: due, OnTipMove: true}})
 	got = p.snapshot().Checks[0]
 	if got.NextDue != want || !got.NextDueOnTipMove {
 		t.Errorf("instant plus tip report = next_due %q on_tip_move %v, want %q and true", got.NextDue, got.NextDueOnTipMove, want)

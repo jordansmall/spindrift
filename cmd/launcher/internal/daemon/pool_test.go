@@ -2850,8 +2850,8 @@ func TestPoolStartChildDeclinesProbedKindWhoseCountZeroed(t *testing.T) {
 	p, _ := newPool(context.Background(), probedConfig(2, time.Hour, workKind), &scriptedRunner{}, newTestEmitter(&buf), clk)
 	defer p.cancel()
 	p.mutate(func(s *state) []Event {
-		s.sched, _ = s.sched.Observe(clk.Now(), DemandProbed{Kind: workKind, Ready: 1})
-		s.sched, _ = s.sched.Observe(clk.Now(), ChildDone{Kind: workKind, Result: ChildEmpty})
+		s.sched, _ = s.sched.Observe(clk.Now(), demandProbed{Kind: workKind, Ready: 1})
+		s.sched, _ = s.sched.Observe(clk.Now(), childDone{Kind: workKind, Result: childEmpty})
 		return nil
 	})
 

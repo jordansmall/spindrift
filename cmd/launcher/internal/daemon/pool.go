@@ -124,9 +124,9 @@ func (s *state) wakeParked() {
 // grew the startable set or a claim made a kind probe-due, wakes every parked
 // slot. Only that result decides a wake: a phase change or a kind going
 // unstartable cannot grow the set, a claim on an already probe-due kind reports
-// no wake, and a wake never itself produces a Claimed event, so slots never wake
+// no wake, and a wake never itself produces a claimed event, so slots never wake
 // one another in a ring.
-func (s *state) observe(now time.Time, ev SchedEvent) {
+func (s *state) observe(now time.Time, ev schedEvent) {
 	var woke bool
 	s.sched, woke = s.sched.Observe(now, ev)
 	if woke {
@@ -553,7 +553,7 @@ func (p *pool) sleepUntilWoken(ctx, wake context.Context, d time.Duration) (woke
 func (p *pool) resetKind(kind Kind) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
-		s.observe(now, ChildDone{Kind: kind, Result: ChildContinue})
+		s.observe(now, childDone{Kind: kind, Result: childContinue})
 		if s.continues == nil {
 			s.continues = map[Kind]int{}
 		}
@@ -588,15 +588,15 @@ func (p *pool) resetKind(kind Kind) {
 func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool, f slotFlight) {
 	now := p.clk.Now()
 	nextDue := f.nextDue
-	result := ChildEmpty
+	result := childEmpty
 	if noneDispatchable {
-		result = ChildJammed
+		result = childJammed
 	}
 	p.mutate(func(s *state) []Event {
 		if s.reportStale(kind, revision, f.continues, nextDue) {
 			nextDue = NextDue{At: now}
 		}
-		s.observe(now, ChildDone{Kind: kind, Result: result, NextDue: nextDue, GateGen: f.gateGen})
+		s.observe(now, childDone{Kind: kind, Result: result, NextDue: nextDue, GateGen: f.gateGen})
 		// What the kind now waits for: its backoff, or for a probed kind the
 		// interval to its next probe.
 		var wait time.Duration
@@ -763,7 +763,7 @@ func (p *pool) finishChild(slot int) {
 // slot is not currently running: the child reported after the slot
 // cleared, which can only be a race (Wait already returned), not a
 // state worth publishing. Any key change counts as a new claim, folded into the
-// Schedule as Claimed so the kind is re-probed before its next start; a
+// Schedule as claimed so the kind is re-probed before its next start; a
 // repeat of the same key moves no count. A switch back to a key the slot
 // already boxed costs only an extra re-probe.
 func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
@@ -774,7 +774,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 		}
 		flight := &s.slots[slot].flight
 		if flight.key != rec.Key {
-			s.observe(now, Claimed{Kind: kind})
+			s.observe(now, claimed{Kind: kind})
 		}
 		flight.key = rec.Key
 		flight.pass = rec.Phase
