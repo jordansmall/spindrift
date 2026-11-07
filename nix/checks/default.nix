@@ -67,6 +67,7 @@ let
     // (import ./drivers.nix common)
     // (import ./prompt-inject.nix common)
     // (import ./fragment-pairs.nix common)
+    // (import ./gate-vocabulary.nix common)
     // (import ./tdd-fragment-parity.nix common)
     // (import ./commit-fragment-parity.nix common)
     // (import ./mk-fragment-parity-rejects.nix common)

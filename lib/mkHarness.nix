@@ -73,9 +73,13 @@
   # a derivation would turn into import-from-derivation.
   choresDir ? ../templates/default/prompts/chores,
   # The conditional fragment registry (issue #622): rows of (gate, fragment,
-  # var) that box renders into the prompt from fragmentsRegistryJson. Not
-  # Consumer-tunable; a new row needs no entrypoint edit.
+  # var) that box renders into the prompt from fragmentsRegistryJson. A new
+  # row needs no entrypoint edit, but its gate must be in gateVocabulary.
   fragments ? import ./fragments.nix,
+  # The Gate vocabulary (lib/gate-vocabulary.nix, issue #6589): the closed set
+  # of names a fragment row's `gate` may use. Not Consumer-tunable; overridable
+  # only so a check can add a synthetic gate.
+  gateVocabulary ? import ./gate-vocabulary.nix,
   # The directory the fragment registry's files live under, copied whole into
   # the image. Not Consumer-tunable; overridable here only so
   # nix/checks/prompts.nix (issue #2250) can point the
@@ -523,6 +527,22 @@ let
       true
     else
       throw "mkHarness: invalid choice value(s) for ${lib.concatStringsSep "; " choiceViolations}";
+
+  # A fragment row's gate must be in the Gate vocabulary (issue #6589): the
+  # assembler treats an unknown gate as never true, so a typo would silently
+  # drop the fragment. A row omitting `gate` is ungated and legal.
+  unknownGateRows = lib.filter (
+    r: r ? gate && r.gate != "" && !(builtins.isString r.gate && gateVocabulary.gates ? ${r.gate})
+  ) fragments;
+  gateVocabularyOk =
+    if unknownGateRows == [ ] then
+      true
+    else
+      throw "mkHarness: fragment row(s) name a gate outside the Gate vocabulary (lib/gate-vocabulary.nix): ${
+        lib.concatMapStringsSep "; " (
+          r: "gate ${builtins.toJSON r.gate} on fragment '${r.fragment or "?"}' (var '${r.var or "?"}')"
+        ) unknownGateRows
+      }";
 
   # NETWORK_MODE coherence (issue #2562): network.mode and the raw per-runtime
   # knobs say the same thing with no precedence rule between them, so a
@@ -1646,6 +1666,7 @@ in
 if defaultsKeyError != null then
   throw defaultsKeyError
 else
+  assert gateVocabularyOk; # first: later checks assume every row.gate is a string
   assert buildTimeRejectOk;
   assert bareModelCheckOk;
   assert kindPromptKeysOk;
