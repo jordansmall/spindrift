@@ -218,8 +218,9 @@ type Input struct {
 	// fix) does not stop it.
 	PassJustExecuted PassKind
 	// Verdict is the verdict word scanned from the pass that just ran.
-	// Meaningful for KindLegacy and KindReview only; an implement, fix or
-	// land pass log is scanned only for HasOutcome.
+	// Meaningful for KindLegacy, KindReview and KindDeltaReview only; an
+	// implement, fix or land pass log is scanned only for its outcome line
+	// (HasOutcome and OutcomeStatus).
 	Verdict Verdict
 	// HasOutcome is whether the pass that just ran reached its terminal
 	// SPINDRIFT_OUTCOME line. A review pass's decision never consults it.
