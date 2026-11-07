@@ -111,7 +111,9 @@ type Strategy struct {
 	// packument dist.tarball row (issue #3401).
 	RewriteRows []registryvocab.RewriteRow
 
-	// ConfigParser reads InTreeConfigPath and is nil exactly when that is empty.
+	// ConfigParser reads InTreeConfigPath and is nil exactly when that is empty;
+	// driver/bundle's TestEveryRegisteredStrategyPairsInTreeConfigPathWithParser
+	// enforces it.
 	ConfigParser ConfigParser
 
 	RouteDeclaration RouteDeclarationValidator
