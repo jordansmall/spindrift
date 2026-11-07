@@ -693,7 +693,10 @@ and remains only for secrets and launcher→Box plumbing. The document is the
 Consumer flake's voice, flags are the operator's per-run voice, env is
 secrets. Decided 2026-07-13 (ADR 0020), replacing the exported
 `VAR="${VAR:-baked}"` run preamble whose env-wins fallback let ambient
-variables silently override flake settings.
+variables silently override flake settings. Decided 2026-11-07 (ADR 0020
+amendment): the staging ends with an ambient knob being an error, the
+document is resolved once into one value, and its artifacts are typed per
+Runner family and read from the document only.
 _Avoid_: config file (generated, never operator-edited), env preamble,
 defaults preamble.
 
@@ -738,7 +741,8 @@ _Avoid_: issue number (for a butler run), Dispatch ID, subject.
 **Dispatch Record**:
 The durable stored row for one [[Dispatch]] (ADR 0061): who claimed what
 and when, what ran (revision, model per role, template hashes, knob
-snapshot), what each pass cost and said, and how the host settled it.
+snapshot), what each pass cost and said, and how the host settled it (its
+[[Settle reason]]).
 Ingested from Pass logs into a per-root SQLite store and read by `spindrift
 stats`; it outlives the logs it came from. Inferred when backfilled from
 logs that predate the `dispatch_start` stamp.
@@ -1107,7 +1111,9 @@ The [[Daemon]]'s event stream persisted beside its status file, capped and
 rotated, so the history survives however the Daemon is supervised — under
 systemd, in a foreground terminal, or anything else. The stream on stdout is
 unchanged; the file is a second home for the same lines. The status file is
-the present; the Events file is the history.
+the present; the Events file is the history. Its shape is the [[Dashboard]]'s
+contract, versioned and pinned by a fixture the Daemon itself writes
+(decided 2026-11-07, ADR 0060 amendment).
 _Avoid_: journal (that is systemd's copy, absent outside systemd), audit log.
 
 **Child log**:
@@ -1449,15 +1455,57 @@ to env-nonempty on launcher-delivered Box plumbing; computed gates (skills
 discovery, filer, caveman) are precomputed into variables before the loop.
 Replaces the six hand-unrolled "conditional residue" blocks in
 `phase_prompt_assembly`. Decided 2026-07-13; lands with the prompt-registry
-work. _Avoid_: prompt toggle, feature flag, optional section.
+work. A row's gate must name an entry in the [[Gate vocabulary]]; what the
+rendered step must still say is a [[Clause contract]].
+_Avoid_: prompt toggle, feature flag, optional section.
+
+**Gate vocabulary**:
+The declared, closed set of names a [[Conditional fragment]]'s gate may use,
+each with a one-line meaning. A row naming a gate outside it fails the
+Consumer's build instead of silently rendering nothing, and the launcher
+computes exactly this set, no more and no fewer. Decided 2026-11-07.
+_Avoid_: gate list, gate map (that is the per-Box on/off values, not the
+names).
+
+**Clause contract**:
+A named obligation on a prompt fragment: something its rendered prose must
+still say, with the reason it must (commit messages stay full human-quality
+prose, say). Checked against the rendered prompt. Distinct from a golden,
+which pins exact bytes without saying which ones matter. Decided 2026-11-07.
+_Avoid_: content test, prose pin, golden.
 
 **Settle**:
 Driving a Dispatch from Box-exit to its terminal lifecycle state, whatever
 that takes: interpreting the Outcome line, watching CI, self-heal fix passes,
 the merge or push-only landing under `MERGE_MODE` and the Merge guard, and
 merged-verification. "Merge gate" informally names the green→merge segment
-within a settle.
+within a settle. A settle yields one [[Settlement]]; its landing work is a
+[[Lander]]'s.
 _Avoid_: gate (a checkpoint — narrower than the whole settle), finalize, report.
+
+**Settlement**:
+What one Settle yields: the lifecycle state it drove the Dispatch to, its
+[[Settle reason]], the PR it worked if any, and a note. Callers act on it,
+tally it and record it; progress along the way is reported separately, as
+it happens. Decided 2026-11-07.
+_Avoid_: result (the Box's dispatch Result), outcome (the Box's
+[[Outcome line]]).
+
+**Settle reason**:
+The class of a terminal Settle decision, recorded on the
+[[Dispatch Record]]: `merged`, `ci-red`, `already-resolved` and the rest. Each reason
+belongs to exactly one lifecycle state, so naming the reason names the
+state.
+_Avoid_: cause, status (that is the Box's self-report).
+
+**Lander**:
+The part of Settle that takes a green-ready branch or PR to its
+[[Landing]]. The PR Lander watches CI, runs fix passes and merges under
+`MERGE_MODE` and the Merge guard; the push-only Lander pushes and records.
+Chosen once per Settle from the Code Forge's capabilities. Decided
+2026-11-07.
+_Avoid_: landing (the resulting value), landing adapter, merge gate
+(informal, and PR-only).
 
 **Mediation**:
 Settle's host-mediated PR hand-off module (`settle.Mediation`) — relay,
