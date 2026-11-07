@@ -535,7 +535,7 @@ func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 	}
 }
 
-func TestRun_RevListErrorTreatedAsWorkExists(t *testing.T) {
+func TestRun_RevListErrorPushArmTreatedAsWorkExists(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {err: fmt.Errorf("bad revision")},
 	}}
@@ -555,12 +555,85 @@ func TestRun_RevListErrorTreatedAsWorkExists(t *testing.T) {
 	if !strings.Contains(line, "status=ready") {
 		t.Fatalf("expected status=ready (push succeeds by default), got %q", line)
 	}
+	if !strings.Contains(line, "could not count commits on") || !strings.Contains(line, "bad revision") {
+		t.Fatalf("expected the rev-list error in the note, got %q", line)
+	}
 	if git.countCalls("push") != 1 {
 		t.Fatalf("expected a push attempt when rev-list errors, got %v", git.calls)
 	}
 }
 
-func TestRun_RevListUnparseableTreatedAsWorkExists(t *testing.T) {
+// The note is one physical line of the SPINDRIFT_OUTCOME protocol: git's
+// multi-line stderr must not split it, or the host parses only the first line.
+func TestRun_RevListMultiLineStderrKeepsOutcomeOneLine(t *testing.T) {
+	const revListStderr = "fatal: ambiguous argument 'origin/main..b': unknown revision or path not in the working tree.\n" +
+		"Use '--' to separate paths from revisions, like this:\n" +
+		"'git <command> [<revision>...] -- [<file>...]'\n"
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stderr: revListStderr, err: fmt.Errorf("exit status 128")},
+		"push":     {stderr: "boom\n", err: fmt.Errorf("exit status 1")},
+	}}
+	cfg := baseConfig(git, &fakeClock{})
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := buf.String()
+	if strings.Count(out, "\n") != 1 || !strings.HasSuffix(out, "\n") {
+		t.Fatalf("expected exactly one outcome line, got %q", out)
+	}
+	if !strings.Contains(out, "fatal: ambiguous argument") {
+		t.Fatalf("expected the rev-list cause in the note, got %q", out)
+	}
+	if !strings.Contains(out, "push failed") {
+		t.Fatalf("expected the push failure to survive the rev-list note, got %q", out)
+	}
+}
+
+// A CRLF-terminated stderr must not leak a CR into the one-line outcome.
+func TestRun_RevListCRLFStderrDropsCR(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {stderr: "fatal: x\r\nhint\r\n", err: fmt.Errorf("exit status 128")},
+	}}
+	cfg := baseConfig(git, &fakeClock{})
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "\r") {
+		t.Fatalf("expected no CR in the outcome line, got %q", out)
+	}
+	if !strings.Contains(out, "fatal: x") || strings.Contains(out, "hint") {
+		t.Fatalf("expected only the first stderr line in the note, got %q", out)
+	}
+}
+
+func TestRun_RevListEmptyStderrLeavesNoDanglingColon(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"rev-list": {err: fmt.Errorf("bad revision")},
+	}}
+	cfg := baseConfig(git, &fakeClock{})
+	cfg.WriteEnabled = true
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "bad revision") {
+		t.Fatalf("expected the rev-list error in the note, got %q", out)
+	}
+	if strings.Contains(out, "bad revision:") {
+		t.Fatalf("expected no dangling colon after the error, got %q", out)
+	}
+}
+
+func TestRun_RevListUnparseablePushArmTreatedAsWorkExists(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"rev-list": {stdout: "not-a-number\n"},
 	}}
@@ -580,8 +653,49 @@ func TestRun_RevListUnparseableTreatedAsWorkExists(t *testing.T) {
 	if !strings.Contains(line, "status=ready") {
 		t.Fatalf("expected status=ready (push succeeds by default), got %q", line)
 	}
+	if !strings.Contains(line, "could not count commits on") || !strings.Contains(line, "not-a-number") {
+		t.Fatalf("expected the parse error in the note, got %q", line)
+	}
 	if git.countCalls("push") != 1 {
 		t.Fatalf("expected a push attempt when rev-list is unparseable, got %v", git.calls)
+	}
+}
+
+// bundleout writes no bundle when the count fails, so a relay arm that claimed
+// "relayed" would report ready for a branch that never left the Box.
+func TestRun_RevListFailureBlocksRelayArms(t *testing.T) {
+	for armName, mutate := range map[string]func(*Config){
+		"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
+		"read-only":     func(c *Config) { c.OutboxRelayCapable = true; c.WriteEnabled = false },
+	} {
+		for failName, resp := range map[string]fakeResult{
+			"error":       {err: fmt.Errorf("bad revision")},
+			"unparseable": {stdout: "not-a-number\n"},
+		} {
+			t.Run(armName+"/"+failName, func(t *testing.T) {
+				git := &fakeGit{responses: map[string]fakeResult{"rev-list": resp}}
+				cfg := baseConfig(git, &fakeClock{})
+				mutate(&cfg)
+
+				var buf bytes.Buffer
+				if err := Run(cfg, &buf); err != nil {
+					t.Fatalf("Run: %v", err)
+				}
+				line := buf.String()
+				if !strings.Contains(line, "status=blocked") {
+					t.Fatalf("expected status=blocked (no bundle written), got %q", line)
+				}
+				if !strings.Contains(line, "could not count commits on") {
+					t.Fatalf("expected the count error in the note, got %q", line)
+				}
+				if strings.Contains(line, "relayed via outbox bundle") {
+					t.Fatalf("expected no relay claim, got %q", line)
+				}
+				if git.countCalls("push") != 0 {
+					t.Fatalf("expected no push on a relay arm, got %v", git.calls)
+				}
+			})
+		}
 	}
 }
 
