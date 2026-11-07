@@ -4,11 +4,11 @@ import (
 	"testing"
 )
 
-// TestConfigParserMatchesInTreeConfigPath guards against a future Strategy
+// TestConfigParserMatchesInTreeConfigPath guards against a Strategy in strategies
 // acquiring a non-empty InTreeConfigPath with no ConfigParser (registrydiscover's
-// walker silently skips such a Strategy, so a new in-tree ecosystem could go
-// undiscovered with no test failure anywhere) or the reverse -- a
-// ConfigParser with nothing for it to read. Checks both directions.
+// walker silently skips such a Strategy, so it could go undiscovered with no
+// test failure anywhere) or the reverse -- a ConfigParser with nothing for it
+// to read. Checks both directions.
 func TestConfigParserMatchesInTreeConfigPath(t *testing.T) {
 	for _, row := range strategies {
 		hasPath := row.InTreeConfigPath != ""
