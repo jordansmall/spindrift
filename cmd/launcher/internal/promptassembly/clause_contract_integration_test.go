@@ -2976,6 +2976,21 @@ var clauseContracts = []clauseContract{
 		reason:   "a Box without a skill baked must still follow the prompt's inline guidance, so the preamble has to say the skill is preferred, not required.",
 	},
 	{
+		fragment: "chores/bugs.md",
+		clause:   "Look for latent bugs",
+		reason:   "the bugs chore's sweep is defined by this instruction, and the butler reads the chore body as its scope of work (issue #3875).",
+	},
+	{
+		fragment: "butler-prompt.md",
+		clause:   "Relay at most ${CHORE_MAX_FINDINGS} findings",
+		reason:   "the launcher refuses or drops findings beyond the cap, so the Box must be told the cap up front to relay its most important findings first; the placeholder stays literal in the unsubstituted source (issue #3994).",
+	},
+	{
+		fragment: "butler-patch.md",
+		clause:   "Patch-eligible classes for this run",
+		reason:   "only a finding in a patch-eligible class may carry a unified diff, so the Box must be told which classes those are (issue #4072).",
+	},
+	{
 		fragment: "worker-prompt.md",
 		clause:   "A comment earns its place only by carrying something the code cannot state",
 		reason:   "the worker inlines the code-comments policy, so it holds regardless of CODE_COMMENTS_BAKED (issue #3419).",
@@ -3017,6 +3032,11 @@ var clauseContracts = []clauseContract{
 		fragment: "butler-review-prompt.md",
 		clause:   "one butler finding handed to you",
 		reason:   "the butler's reviewer judges a single butler finding, not a branch diff, and the opencode reviewer.md rewrite must carry that framing (ADR 0056).",
+	},
+	{
+		fragment: "butler-review-patch.md",
+		clause:   "**Exact**",
+		reason:   "a patch candidate's diff is judged on doing exactly what the finding says and nothing else, which the reviewer's rubric must name (ADR 0057, issue #4073).",
 	},
 }
 
@@ -3139,6 +3159,28 @@ var sharedClauses = []sharedClause{
 		clauseContract: clauseContract{
 			clause: "The filer runs the command bare — never through `tail`, `head`, or `2>&1 |`",
 			reason: "the relay summaries stay third-person about the filer's bare send, since the reader never runs it (issues #3866, #3909).",
+		},
+	},
+	{
+		fragments: []string{"butler-file-issues-relay.md", "butler-file-issues-relay-socket.md"},
+		clauseContract: clauseContract{
+			clause: "**File findings.**",
+			reason: "the butler's relay step opens as its own FILE FINDINGS paragraph, which is how the butler is told to hand findings to the filer (ADR 0056, issue #3875).",
+		},
+	},
+	{
+		fragments: []string{"butler-file-issues-relay.md", "butler-file-issues-relay-socket.md"},
+		clauseContract: clauseContract{
+			clause: "`agent-butler-finding` label itself",
+			reason: "the launcher applies the butler's provenance label host-side, so the butler must be told it never labels a finding itself (ADR 0056, issue #3875).",
+		},
+	},
+	{
+		fragments: []string{"butler-file-issues-relay.md", "butler-file-issues-relay-socket.md"},
+		clauseContract: clauseContract{
+			clause: "agent-research-finding",
+			absent: true,
+			reason: "a butler finding carries the butler provenance label, never the research one, so the research label must not leak into the butler relay (ADR 0056, issue #3875).",
 		},
 	},
 	{
@@ -3351,6 +3393,16 @@ func generatedContracts() []clauseContract {
 			})
 		}
 	}
+	// Derived from ClassRule so a change to the class grammar fails here
+	// instead of leaving the butler prompt stale.
+	classRule := strings.ReplaceAll(strings.TrimPrefix(signalwire.ClassRule, "must be "), "'-'", "`-`")
+	for _, clause := range []string{classRule, "rejected, and the finding with it"} {
+		out = append(out, clauseContract{
+			fragment: "butler-prompt.md",
+			clause:   clause,
+			reason:   "the butler prompt's class rule must track signalwire.ValidClass, since a Box reporting a class outside it loses the whole finding (issue #4040).",
+		})
+	}
 	for _, fragment := range bareEOFFragments {
 		out = append(out, clauseContract{
 			fragment: fragment,
@@ -3366,8 +3418,8 @@ func generatedContracts() []clauseContract {
 // The assembler records only fragment spans, so a contract on a base prompt
 // template or a skill body checks the file as the seam fixtures hold it: the
 // templates under prompts/ keyed by file name, nix-checks-skill.md, and every
-// fragments/<path> file keyed by its path. Their step placeholders
-// (${CHECK_HYGIENE_STEP}) are unsubstituted.
+// fragments/<path> and chores/<name>.md file keyed by its path. Their step
+// placeholders (${CHECK_HYGIENE_STEP}) are unsubstituted.
 const nixRenderedSources = "nix-rendered-sources"
 
 // nixRenderedSourceRenders reads the pseudo-cell's files, failing if a key
@@ -3399,25 +3451,28 @@ func nixRenderedSourceRenders(t *testing.T, renders renderedFragments) map[strin
 	// would fail the vacuity guard), an obligation on the unsubstituted source
 	// (code-review-baked.md's ${REVIEW_FANOUT_AGENT}), or a fragment that
 	// renders only into the agents JSON. Otherwise contract on the golden-cell
-	// name: raw text is unsubstituted.
-	fragDir := filepath.Join(dir, "fragments")
-	err = filepath.WalkDir(fragDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
-			return err
-		}
-		b, err := os.ReadFile(path)
+	// name: raw text is unsubstituted. A "chores/<name>.md" body is never a
+	// fragment span, so it is only reachable raw.
+	for _, sub := range []string{"fragments", "chores"} {
+		subDir := filepath.Join(dir, sub)
+		err = filepath.WalkDir(subDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+				return err
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(dir, path)
+			if err != nil {
+				return err
+			}
+			sources[filepath.ToSlash(rel)] = []string{string(b)}
+			return nil
+		})
 		if err != nil {
-			return err
+			t.Fatalf("walk %s: %v", subDir, err)
 		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
-		}
-		sources[filepath.ToSlash(rel)] = []string{string(b)}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", fragDir, err)
 	}
 	for name := range sources {
 		for cell, fragments := range renders {
