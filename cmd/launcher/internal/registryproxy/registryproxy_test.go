@@ -1,5 +1,3 @@
-// Package registryproxy implements a credential-free, GET/HEAD-only
-// pass-through reverse proxy served over a unix domain socket (issue #2849).
 package registryproxy
 
 import (
