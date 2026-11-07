@@ -1653,13 +1653,19 @@ func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) 
 // The opencode agent-files twin of the test above: reviewer.md must survive
 // (never removed) and its body must come from the kind's own reviewer prompt.
 func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := syntheticRegistry(t, nil, map[string]string{
+		"butler-prompt.md":        "butler prompt ${CHORE_PROMPT}\n",
+		"butler-review-prompt.md": "butler review stub\n",
+		"review-prompt.md":        "plain review stub\n",
+		"chores/bugs.md":          "bugs chore stub",
+	})
 
 	t.Run("butler", func(t *testing.T) {
 		dir := t.TempDir()
 		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
 		env := butlerEnv()
+		env.PromptsDir = base.PromptsDir
 		env.DriverAgentFilesDir = dir
 		env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
@@ -1668,10 +1674,10 @@ func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
 		}
 
 		body := agentFileBody(t, filepath.Join(dir, "reviewer.md"))
-		if !strings.Contains(body, "one butler finding handed to you") {
+		if !strings.Contains(body, "butler review stub") {
 			t.Errorf("reviewer.md body = %q, want the rendered butler-review-prompt.md, not review-prompt.md", body)
 		}
-		if strings.Contains(body, "adversarially review a branch diff") {
+		if strings.Contains(body, "plain review stub") {
 			t.Errorf("reviewer.md body = %q, want no review-prompt.md content", body)
 		}
 	})
@@ -1681,11 +1687,10 @@ func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
 // already pins the JSON path); this pins the opencode agent-files path's twin,
 // which this issue's rewriteAgentFiles signature change could otherwise regress.
 func TestAssembleWorkDriverAgentFilesReviewerStillDropped(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, nil)
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
@@ -1894,21 +1899,16 @@ func TestAssembleAxisRowResolvesBackendFolder(t *testing.T) {
 // per-name branch, so a custom Nth agent is rewritten like scout and worker.
 // The custom prompt names ISSUE_NUMBER, so this also proves substitution ran.
 func TestAssembleDriverAgentFilesRewritesRosterGenerically(t *testing.T) {
-	reg := loadTestRegistry(t)
-	prompts := t.TempDir()
-	if err := os.CopyFS(prompts, os.DirFS(promptsDir)); err != nil {
-		t.Fatalf("CopyFS: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(prompts, "auditor-prompt.md"), []byte("issue ${ISSUE_NUMBER} body\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
+	reg, env := syntheticRegistry(t, nil, map[string]string{
+		"scout-prompt.md":   "scout stub\n",
+		"worker-prompt.md":  "worker stub\n",
+		"auditor-prompt.md": "issue ${ISSUE_NUMBER} body\n",
+	})
 	dir := t.TempDir()
 	for _, name := range []string{"scout", "worker", "auditor"} {
 		writeAgentFile(t, filepath.Join(dir, name+".md"), name)
 	}
 
-	env := coveredEnv()
-	env.PromptsDir = prompts
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"scout":"scout-prompt.md","worker":"worker-prompt.md","auditor":"auditor-prompt.md"}`
 
@@ -1917,8 +1917,8 @@ func TestAssembleDriverAgentFilesRewritesRosterGenerically(t *testing.T) {
 	}
 
 	for name, want := range map[string]string{
-		"scout":   "Return only the brief's path",
-		"worker":  "Stay inside the slice you were handed",
+		"scout":   "scout stub",
+		"worker":  "worker stub",
 		"auditor": "issue 2349 body",
 	} {
 		body := agentFileBody(t, filepath.Join(dir, name+".md"))
@@ -1938,11 +1938,14 @@ func TestAssembleDriverAgentFilesRewritesRosterGenerically(t *testing.T) {
 // drops a file whose model is empty. With no reviewer.md either, there is no
 // model to extract, so the handoff's ReviewModel stays empty.
 func TestAssembleDriverAgentFilesAbsentRosterFilesAreNotCreated(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, map[string]string{
+		"scout-prompt.md":  "scout stub\n",
+		"filer-prompt.md":  "filer stub\n",
+		"worker-prompt.md": "worker stub\n",
+	})
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}`
 
@@ -1966,7 +1969,7 @@ func TestAssembleDriverAgentFilesAbsentRosterFilesAreNotCreated(t *testing.T) {
 // An unset DriverAgentFilesDir (a Driver with no on-disk agent files) leaves
 // every agent file alone, even with a roster prompt map present.
 func TestAssembleDriverAgentFilesUnsetDirLeavesFilesUntouched(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, map[string]string{"scout-prompt.md": "scout stub\n"})
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 	before, err := os.ReadFile(filepath.Join(dir, "scout.md"))
@@ -1974,7 +1977,6 @@ func TestAssembleDriverAgentFilesUnsetDirLeavesFilesUntouched(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	env := coveredEnv()
 	env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
@@ -1994,10 +1996,9 @@ func TestAssembleDriverAgentFilesUnsetDirLeavesFilesUntouched(t *testing.T) {
 // and opencode's rewritten scout.md body differ only by the single trailing
 // newline the file body carries.
 func TestAssembleScoutPromptMatchesAcrossDrivers(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, claude := syntheticRegistry(t, nil, map[string]string{"scout-prompt.md": "scout stub for issue ${ISSUE_NUMBER}\n"})
 	const roster = `{"scout":"scout-prompt.md"}`
 
-	claude := coveredEnv()
 	claude.AgentsJSONTemplate = `{"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read"]}}`
 	claude.AgentsPromptFiles = roster
 	jsonResult, err := Assemble(claude, reg)
@@ -2011,7 +2012,8 @@ func TestAssembleScoutPromptMatchesAcrossDrivers(t *testing.T) {
 
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
-	opencode := coveredEnv()
+	opencode := claude
+	opencode.AgentsJSONTemplate = ""
 	opencode.DriverAgentFilesDir = dir
 	opencode.AgentsPromptFiles = roster
 	if _, err := Assemble(opencode, reg); err != nil {
