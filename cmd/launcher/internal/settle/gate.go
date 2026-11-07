@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
-	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/report"
@@ -424,74 +422,15 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 }
 
 // Settled is the single terminal-record emitter for every settle path (only
-// LateMerges' reconcile upgrade appends one outside it): it appends ds as a
-// dispatch_settled op to the Dispatch's primary Pass log, ingests the Dispatch
-// into the root's Record store, then reports the settled record.
-//
-// The append and the ingest are best-effort: each warns and never changes the
-// settle outcome. The ingest runs only after a successful append, so every
-// case below that appends nothing skips it too.
-// The log is opened without O_CREATE: a Dispatch that wrote no primary log has
-// no Record to settle, and a stub file would only fake one. With no log path
-// nothing is appended; with no Record ID nothing is appended either, and the
-// log's stamp is deliberately not consulted — it may name an earlier
-// Dispatch's Record that this one must not rewrite (see SettledPrior).
+// LateMerges' reconcile upgrade appends one outside it, through
+// dispatchrecord.AppendSettled): it records ds as a dispatch_settled op in the
+// Dispatch's primary Pass log and the root's Record store, then reports the
+// settled record. Best-effort; what gates the append is documented on
+// dispatchrecord.AppendSettled.
 func Settled(key dispatchkey.Key, logPath string, ds hostop.DispatchSettled) {
-	switch {
-	case logPath == "":
-	case ds.RecordID == "":
-		fmt.Fprintf(os.Stderr, "    ?? %s: no record id, not appending %s to %s\n", key, hostop.OpDispatchSettled, logPath)
-	default:
-		if err := appendSettled(logPath, ds); err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? %s: could not append %s to %s: %v\n", key, hostop.OpDispatchSettled, logPath, err)
-		} else {
-			ingestSettled(key, logPath)
-		}
-	}
+	dispatchrecord.RecordSettled(os.Stderr, key.String(), logPath, ds)
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
 	tallyOutcome(DispatchOutcome{Key: key, State: ds.State, Reason: ds.Reason, PRURL: ds.PRURL})
-}
-
-// ingestSettled ingests the settled Dispatch's own logs so its Record is in the
-// store with no `stats` run. The root is derived from logPath: a log outside a
-// root's .spindrift/logs has no store.
-func ingestSettled(key dispatchkey.Key, logPath string) {
-	root, ok := hostpaths.RootOfLogDir(filepath.Dir(logPath))
-	if !ok {
-		return
-	}
-	err := func() (err error) {
-		store, err := dispatchrecord.Open(root)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if closeErr := store.Close(); err == nil {
-				err = closeErr
-			}
-		}()
-		_, err = store.IngestChain(filepath.Base(logPath))
-		return err
-	}()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? %s: could not ingest into %s: %v\n", key, hostpaths.DispatchRecordsDB(root), err)
-	}
-}
-
-// appendSettled appends ds to the existing log at logPath, never creating it.
-func appendSettled(logPath string, ds hostop.DispatchSettled) error {
-	if s, ok := dispatchrecord.ReadStamp(logPath); ok && s.RecordID == ds.RecordID {
-		ds.HostToken = s.HostToken
-	}
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		return err
-	}
-	_, err = f.WriteString(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &ds}))
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	return err
 }
 
 // SettledPrior is Settled for a Dispatch that never Ran and so minted no
