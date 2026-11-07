@@ -186,47 +186,52 @@ func TestRenderText(t *testing.T) {
 	}
 }
 
-// Default prompts carry literal shell text such as `echo $CODE_FORGE` that the
-// agent must read verbatim; it has to survive assembly untouched.
+// Prompts carry literal shell text such as `echo $CODE_FORGE` that the agent
+// must read verbatim; a bare $NAME has to survive assembly untouched while the
+// braced form beside it is substituted.
 func TestAssembleKeepsBareShellVariablesLiteral(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, map[string]string{
+		"issue-prompt.md": "run `echo $CODE_FORGE` for issue ${ISSUE_NUMBER}\n",
+	})
 
-	result, err := Assemble(coveredEnv(), reg)
+	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	if !strings.Contains(result.Prompt, "echo $CODE_FORGE") {
-		t.Errorf("Prompt lost the literal %q", "echo $CODE_FORGE")
+	const want = "run `echo $CODE_FORGE` for issue 2349"
+	if !strings.Contains(result.Prompt, want) {
+		t.Errorf("Prompt = %q, want it to contain %q", result.Prompt, want)
 	}
 }
 
 // The fragment loop's "\n\n" separator. A fragment ending with a blank line
-// on disk (skill-preamble.md does) must not leak it into the prompt: bash
-// stripped the fragment's own trailing newlines through $(...) before
-// appending exactly two.
+// on disk must not leak it into the prompt: bash stripped the fragment's own
+// trailing newlines through $(...) before appending exactly two.
 func TestAssembleFragmentSeparatorIsExactlyTwoNewlines(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.SkillsFound = "caveman, tdd"
+	reg, env := syntheticRegistry(t,
+		[]FragmentRow{{Fragment: "blank-tail.md", Var: "BLANK_TAIL"}},
+		map[string]string{
+			"issue-prompt.md":         "${BLANK_TAIL}next\n",
+			"fragments/blank-tail.md": "fragment end.\n\n\n",
+		})
 
 	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	const marker = "the inline guidance below is the fallback when a skill is absent."
-	idx := strings.Index(result.Prompt, marker)
-	if idx == -1 {
-		t.Fatalf("Prompt missing skill-preamble.md's trailing sentence:\n%s", result.Prompt)
-	}
-	after := result.Prompt[idx+len(marker):]
-	if !strings.HasPrefix(after, "\n\n") || strings.HasPrefix(after, "\n\n\n") {
-		t.Errorf("text after skill-preamble.md's marker = %q, want exactly two newlines then non-newline content", after[:min(6, len(after))])
+	const want = "fragment end.\n\nnext"
+	if !strings.Contains(result.Prompt, want) {
+		t.Errorf("Prompt = %q, want it to contain %q (exactly two newlines after the fragment)", result.Prompt, want)
 	}
 }
 
 func TestAssembleHandoff(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, baseEnv := syntheticRegistry(t, nil, map[string]string{
+		"issue-prompt.md":  "issue stub\n",
+		"fix-prompt.md":    "fix stub\n",
+		"review-prompt.md": "review stub\n",
+	})
 
 	cases := []struct {
 		name            string
@@ -239,7 +244,7 @@ func TestAssembleHandoff(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
+			env := baseEnv
 			env.ResumeAfterHold = tc.resumeAfterHold
 
 			result, err := Assemble(env, reg)
@@ -251,10 +256,10 @@ func TestAssembleHandoff(t *testing.T) {
 				t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, tc.wantMode)
 			}
 			// Resuming after a hold changes only the session mode, never the prompt.
-			if !strings.Contains(result.Prompt, "Fresh clone, new branch") {
-				t.Errorf("Prompt missing issue-prompt.md's distinguishing text:\n%s", result.Prompt)
+			if !strings.Contains(result.Prompt, "issue stub") {
+				t.Errorf("Prompt missing issue-prompt.md's text:\n%s", result.Prompt)
 			}
-			if strings.Contains(result.Prompt, "This is a warm fix pass") {
+			if strings.Contains(result.Prompt, "fix stub") {
 				t.Errorf("Prompt rendered fix-prompt.md:\n%s", result.Prompt)
 			}
 			if result.Handoff.ReviewPromptFile != "" {
@@ -334,15 +339,11 @@ func writeContractFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// Shared-block injection, run on the fix-pass cell because issue-prompt.md
-// already contains each marker in its own sections while fix-prompt.md
-// does not, so all three blocks append here and stay observable. CODE COMMENTS
-// is no longer one of them (issue #3221): fix-prompt.md carries that anchor in
-// its own FIX section.
+// Shared-block injection, run on the fix-pass cell with a fix-prompt.md stub
+// carrying none of the markers, so all three blocks append and stay observable.
 func TestAssembleInjectsSharedBlocks(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, map[string]string{"fix-prompt.md": "fix stub\n"})
 	dir := t.TempDir()
-	env := coveredEnv()
 	env.FixPass = 1
 	env.CommsContractFile = writeContractFile(t, dir, "comms-contract.md", "# COMMS\n\ncomms body text\n")
 	env.CheckContractFile = writeContractFile(t, dir, "check-contract.md", "# CHECK\n\ncheck body text\n")
@@ -377,36 +378,10 @@ func TestAssembleInjectsSharedBlocks(t *testing.T) {
 // contains a block's marker does not get that block appended again, so the
 // contract file's body text must appear zero times.
 func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
-	reg := loadTestRegistry(t)
-	promptsFixtureDir := t.TempDir()
-	// The fragment loop reads PromptsDir/fragments/* whichever base
-	// template is selected, so the fixture symlinks the real fragments dir
-	// in rather than standing up a full fragments fixture of its own.
-	fragmentsDir, err := filepath.Abs(filepath.Join(promptsDir, "fragments"))
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
-	if err := os.Symlink(fragmentsDir, filepath.Join(promptsFixtureDir, "fragments")); err != nil {
-		t.Fatalf("Symlink: %v", err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(promptsFixtureDir, "issue-prompt.md"),
-		[]byte("# TASK\n\nImplement issue #${ISSUE_NUMBER}.\n\n# COMMS\n\nalready here\n"),
-		0o644,
-	); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(promptsFixtureDir, "review-prompt.md"),
-		[]byte("# REVIEW\n"),
-		0o644,
-	); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
+	reg, env := syntheticRegistry(t, nil, map[string]string{
+		"issue-prompt.md": "# TASK\n\nImplement issue #${ISSUE_NUMBER}.\n\n# COMMS\n\nalready here\n",
+	})
 	contractDir := t.TempDir()
-	env := coveredEnv()
-	env.PromptsDir = promptsFixtureDir
 	env.CommsContractFile = writeContractFile(t, contractDir, "comms-contract.md", "# COMMS\n\ncomms body text\n")
 
 	result, err := Assemble(env, reg)
@@ -422,34 +397,12 @@ func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	}
 }
 
-// overridePromptsDir stages a Consumer prompt-dir override (a
-// SPINDRIFT_PROMPT_DIR mount): the given template files plus the real
-// fragments dir, which the fragment loop reads whichever base is selected.
-func overridePromptsDir(t *testing.T, templates map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
-	fragmentsDir, err := filepath.Abs(filepath.Join(promptsDir, "fragments"))
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
-	if err := os.Symlink(fragmentsDir, filepath.Join(dir, "fragments")); err != nil {
-		t.Fatalf("Symlink: %v", err)
-	}
-	for name, content := range templates {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatalf("WriteFile(%s): %v", name, err)
-		}
-	}
-	return dir
-}
-
 // Issue #420 / #455, the ported entrypoint-outcome-contract.bats cases: a
 // runtime prompt-dir override lacking a shared block gets the canonical one
 // appended exactly once, and an override already carrying it is left alone.
 // Without the appended outcome contract the agent never emits the outcome
 // line and the launcher never learns the PR.
 func TestAssembleOverrideSharedBlocks(t *testing.T) {
-	reg := loadTestRegistry(t)
 	const reviewStub = "reviewer stub\n\nVERDICT: APPROVE or BLOCK\n"
 	const ownBlocks = "stub\n\n# COMMS\n\nown comms\n\n# CHECK\n\nown check\n\n# LAND THE CHANGE\n\nown outcome\n"
 
@@ -498,10 +451,9 @@ func TestAssembleOverrideSharedBlocks(t *testing.T) {
 				"review-prompt.md": reviewStub,
 			}
 			templates[tc.template] = tc.content
+			reg, env := syntheticRegistry(t, nil, templates)
 			contracts := t.TempDir()
-			env := coveredEnv()
 			env.FixPass = tc.fixPass
-			env.PromptsDir = overridePromptsDir(t, templates)
 			env.CommsContractFile = writeContractFile(t, contracts, "comms-contract.md", "# COMMS\n\ncanonical comms\n")
 			env.CheckContractFile = writeContractFile(t, contracts, "check-contract.md", "# CHECK\n\ncanonical check\n")
 			env.OutcomeContractFile = writeContractFile(t, contracts, "outcome-contract.md", "# LAND THE CHANGE\n\ncanonical outcome\n")
@@ -540,9 +492,7 @@ func TestAssembleOverrideSharedBlocks(t *testing.T) {
 // rather than proceed without the contract, the failure mode #420 exists to
 // prevent (ported from entrypoint-outcome-contract.bats).
 func TestAssembleMissingOutcomeContractFileFails(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.PromptsDir = overridePromptsDir(t, map[string]string{
+	reg, env := syntheticRegistry(t, nil, map[string]string{
 		"issue-prompt.md":  "issue stub, no contract here\n",
 		"review-prompt.md": "reviewer stub\n\nVERDICT: APPROVE or BLOCK\n",
 	})
@@ -562,26 +512,10 @@ func TestAssembleMissingOutcomeContractFileFails(t *testing.T) {
 // populated. The fixture omits the "# POST THE VERDICT" marker the real
 // research-prompt.md already carries, so the injected block is observable.
 func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
-	reg := loadTestRegistry(t)
-	promptsFixtureDir := t.TempDir()
-	fragmentsDir, err := filepath.Abs(filepath.Join(promptsDir, "fragments"))
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
-	if err := os.Symlink(fragmentsDir, filepath.Join(promptsFixtureDir, "fragments")); err != nil {
-		t.Fatalf("Symlink: %v", err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(promptsFixtureDir, "research-prompt.md"),
-		[]byte("# TASK\n\nResearch issue #${ISSUE_NUMBER}.\n"),
-		0o644,
-	); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
+	reg, env := syntheticRegistry(t, nil, map[string]string{
+		"research-prompt.md": "# TASK\n\nResearch issue #${ISSUE_NUMBER}.\n",
+	})
 	dir := t.TempDir()
-	env := coveredEnv()
-	env.PromptsDir = promptsFixtureDir
 	env.DispatchKind = "research"
 	env.CommsContractFile = writeContractFile(t, dir, "comms-contract.md", "# COMMS\n\ncomms body text\n")
 	env.CheckContractFile = writeContractFile(t, dir, "check-contract.md", "# CHECK\n\ncheck body text\n")
@@ -607,7 +541,6 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 // follows the same override rules as the work kind's (TestAssembleOverrideSharedBlocks),
 // ported from the deleted research-kind bats suite.
 func TestAssembleResearchOverrideVerdictBlock(t *testing.T) {
-	reg := loadTestRegistry(t)
 	cases := []struct {
 		name     string
 		content  string
@@ -631,9 +564,8 @@ func TestAssembleResearchOverrideVerdictBlock(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
+			reg, env := syntheticRegistry(t, nil, map[string]string{"research-prompt.md": tc.content})
 			env.DispatchKind = "research"
-			env.PromptsDir = overridePromptsDir(t, map[string]string{"research-prompt.md": tc.content})
 			env.ResearchOutcomeContractFile = writeContractFile(t, t.TempDir(), "research-outcome-contract.md", tc.contract)
 
 			result, err := Assemble(env, reg)
@@ -657,10 +589,8 @@ func TestAssembleResearchOverrideVerdictBlock(t *testing.T) {
 // the Box run without the verdict contract (the research twin of
 // TestAssembleMissingOutcomeContractFileFails).
 func TestAssembleMissingResearchOutcomeContractFileFails(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+	reg, env := syntheticRegistry(t, nil, map[string]string{"research-prompt.md": "research stub, no contract here\n"})
 	env.DispatchKind = "research"
-	env.PromptsDir = overridePromptsDir(t, map[string]string{"research-prompt.md": "research stub, no contract here\n"})
 	env.ResearchOutcomeContractFile = filepath.Join(t.TempDir(), "does-not-exist.md")
 
 	_, err := Assemble(env, reg)
@@ -675,9 +605,8 @@ func TestAssembleMissingResearchOutcomeContractFileFails(t *testing.T) {
 // A contract file's own ${...} tokens resolve through the same allowlist as
 // every other file Assemble renders.
 func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, map[string]string{"fix-prompt.md": "fix stub\n"})
 	dir := t.TempDir()
-	env := coveredEnv()
 	env.FixPass = 1
 	env.OutcomeContractFile = writeContractFile(t, dir, "outcome-contract.md", "# LAND THE CHANGE\n\nissue #${ISSUE_NUMBER}\n")
 
@@ -1314,7 +1243,15 @@ func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 // to what Assemble returns, summed lengths included. That catches an
 // attribution refactor that silently drops or double-counts a segment.
 func TestAssembleSegmentAttributionMatchesResult(t *testing.T) {
-	reg := loadTestRegistry(t)
+	// A gated fragment plus a ${...} token give the body fragment, var, and
+	// template segments to sum, not just one literal run.
+	reg, baseEnv := syntheticRegistry(t,
+		[]FragmentRow{{Gate: "CAVEMAN_BAKED", Fragment: "caveman.md", Var: "CAVEMAN_STEP"}},
+		map[string]string{
+			"issue-prompt.md":      "issue ${ISSUE_NUMBER} ${CAVEMAN_STEP}done\n",
+			"review-prompt.md":     "review ${ISSUE_NUMBER}\n",
+			"fragments/caveman.md": "caveman body",
+		})
 
 	assertBodyMatches := func(t *testing.T, b body, want string) {
 		t.Helper()
@@ -1331,11 +1268,14 @@ func TestAssembleSegmentAttributionMatchesResult(t *testing.T) {
 	}
 
 	t.Run("covered cell", func(t *testing.T) {
-		env := coveredEnv()
+		env := baseEnv
 
 		result, err := Assemble(env, reg)
 		if err != nil {
 			t.Fatalf("Assemble: %v", err)
+		}
+		if !strings.Contains(result.Prompt, "caveman body") {
+			t.Fatalf("Prompt missing the gated fragment, so the fragment segment goes unchecked:\n%s", result.Prompt)
 		}
 
 		bodies, err := assemblePromptBodies(env, reg)

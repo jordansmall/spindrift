@@ -2948,6 +2948,23 @@ var clauseContracts = []clauseContract{
 		clause:   "1. Print exactly one line",
 		reason:   "a read-only CODE_FORGE=git Box has no push step before it, so its stop step is step 1 (issue #2526).",
 	},
+
+	// issue-prompt.md, fix-prompt.md: the pass openers
+	{
+		fragment: "issue-prompt.md",
+		clause:   "Fresh clone, new branch",
+		reason:   "the issue pass starts from a clean checkout on a new branch, which is what separates it from the warm fix pass (issue #164).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "run `echo $CODE_FORGE` if unsure",
+		reason:   "the agent reads its Code Forge from the environment, so the template must tell it to run the shell command verbatim rather than have the host substitute a value (ADR 0013).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "This is a warm fix pass",
+		reason:   "a fix pass resumes a branch with prior work, and the agent must know not to re-scout or re-derive the issue.",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
