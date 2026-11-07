@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -144,10 +145,11 @@ func registerMountedArtifactRoots(rootsRoot, generation string, closureSide []st
 }
 
 // ClosureGeneration derives NixVarSnapshotDir's generation subdir from a
-// bwrap-runtime Config.ImageTag. imageTag comes from an environment variable an
-// untrusted source can influence and becomes a path component
-// reclaimStaleSnapshots later os.RemoveAlls, hence SafePathComponent. A rejected
-// non-empty imageTag warns: it would otherwise silently disable stale reclaim.
+// bwrap artifacts part's ImageTag. imageTag originates in the Launcher input
+// document's bwrap part, which an untrusted source can influence, and becomes
+// a path component reclaimStaleSnapshots later os.RemoveAlls, hence
+// SafePathComponent. A rejected non-empty imageTag warns: it would otherwise
+// silently disable stale reclaim.
 func ClosureGeneration(imageTag string) string {
 	gen := runner.SafePathComponent(imageTag)
 	if imageTag != "" && gen == "" {
@@ -251,9 +253,9 @@ func UnlockSnapshot(lf *os.File) {
 // plus the passwd, group and syscall filter the daemon booted with (issue
 // #5995). The root is registered even when db.sqlite already exists, so a
 // re-swap onto a generation still roots it. With nixInBox off
-// (cfg.NixConfigFile empty) only the lock and roots happen: the Box mounts no
+// (art.NixConfigFile empty) only the lock and roots happen: the Box mounts no
 // nix-var snapshot, so none is written and no VACUUM runs (issue #5996).
-func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
+func SnapshotGeneration(art inputdoc.BwrapArtifacts, pwd, closurePath string) error {
 	generation := ClosureGeneration(closurePath)
 	dir := NixVarSnapshotDir(pwd, generation)
 	root := NixVarSnapshotRoot(pwd)
@@ -261,7 +263,7 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create nix-var snapshot root %s (%v); a concurrent build cannot detect this generation is mid-write\n", root, mkErr)
 	}
-	if cfg.NixConfigFile != "" {
+	if art.NixConfigFile.String() != "" {
 		retireFlatSnapshot(dir)
 	}
 	lf, lockErr := LockSnapshotShared(dir)
@@ -270,9 +272,9 @@ func SnapshotGeneration(cfg runner.Config, pwd, closurePath string) error {
 	}
 	defer UnlockSnapshot(lf)
 
-	registerMountedArtifactRoots(NixGCRootsRoot(pwd), generation, []string{closurePath}, cfg.PasswdFile, cfg.GroupFile, cfg.SyscallFilterPath)
+	registerMountedArtifactRoots(NixGCRootsRoot(pwd), generation, []string{closurePath}, art.PasswdFile.String(), art.GroupFile.String(), art.SyscallFilter.String())
 
-	if cfg.NixConfigFile == "" {
+	if art.NixConfigFile.String() == "" {
 		return nil
 	}
 	_, vlf, err := prepareSnapshotVersion(dir)

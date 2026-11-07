@@ -5,28 +5,34 @@ import (
 	"reflect"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
 // Issue #445 replaced a long positional-argument list with a single Config
-// struct, so every bwrap-relevant Config field must reach the adapter.
-func TestNewBwrap_UsesConfigFields(t *testing.T) {
+// struct, so every bwrap-relevant Config field must reach the adapter; the
+// bwrap artifacts reach it from the bwrap part of the Launcher input document.
+func TestNewBwrap_ReadsArtifactsFromBwrapPart(t *testing.T) {
 	cfg := runner.Config{
-		AgentFiles:    "/agent-files",
-		AgentEnv:      "/agent-env",
-		PasswdFile:    "/nix/store/abc-passwd/passwd",
-		GroupFile:     "/nix/store/def-group/group",
-		BakedPrefetch: "prefetch-snippet",
-		NetworkMode:   "none",
-		NixConfigFile: "/nix/store/fake-hash-nix-conf/nix.conf",
+		NetworkMode: "none",
 		MountParams: runner.MountParams{
 			PromptDir:             "/prompts",
 			SkillsDir:             "/skills",
 			DriverSessionCacheDir: "/home/agent/.claude/projects",
 		},
 	}
-	r, err := New(cfg, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "true"}), "/pwd")
+	art := inputdoc.BwrapArtifacts{
+		AgentFiles:       inputdoc.ValueOf("/agent-files"),
+		AgentEnv:         inputdoc.ValueOf("/agent-env"),
+		PasswdFile:       inputdoc.ValueOf("/nix/store/abc-passwd/passwd"),
+		GroupFile:        inputdoc.ValueOf("/nix/store/def-group/group"),
+		BakedPrefetch:    inputdoc.ValueOf("prefetch-snippet"),
+		NixConfigFile:    inputdoc.ValueOf("/nix/store/fake-hash-nix-conf/nix.conf"),
+		NixStoreWritable: inputdoc.FlagOf(true),
+		SyscallFilter:    inputdoc.ValueOf("/nix/store/fff-filter.bpf"),
+	}
+	r, err := New(cfg, art, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "true"}), "/pwd")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,19 +41,21 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 		t.Fatalf("New did not return *bwrapAdapter")
 	}
 	want := bwrapAdapter{
-		prepare:            newBuildAdapter(cfg, "/pwd"),
-		agentFiles:         cfg.AgentFiles,
-		agentEnv:           cfg.AgentEnv,
-		passwdFile:         cfg.PasswdFile,
-		groupFile:          cfg.GroupFile,
-		bakedPrefetch:      cfg.BakedPrefetch,
+		prepare:            newBuildAdapter(cfg, art, "/pwd"),
+		agentFiles:         "/agent-files",
+		agentEnv:           "/agent-env",
+		passwdFile:         "/nix/store/abc-passwd/passwd",
+		groupFile:          "/nix/store/def-group/group",
+		bakedPrefetch:      "prefetch-snippet",
 		mountParams:        cfg.MountParams,
 		network:            cfg.BwrapNetwork(true),
-		nixConfigFile:      cfg.NixConfigFile,
-		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
+		nixConfigFile:      "/nix/store/fake-hash-nix-conf/nix.conf",
+		nixStoreWritable:   true,
+		syscallFilterPath:  "/nix/store/fff-filter.bpf",
+		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration("")),
 		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
 		nixGCRootsRoot:     NixGCRootsRoot("/pwd"),
-		generation:         ClosureGeneration(cfg.ImageTag),
+		generation:         ClosureGeneration(""),
 	}
 	// Compare with reflect.DeepEqual over pointers, not !=: the mu/running
 	// fields Kill uses (issue #649) are not comparable, and dereferencing
@@ -57,32 +65,61 @@ func TestNewBwrap_UsesConfigFields(t *testing.T) {
 	}
 }
 
-// The bwrap build counterpart to the Config-struct constructor (issue #445).
-func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
-	cfg := runner.Config{
-		AgentFilesDrv:    "/files.drv",
-		AgentEnvDrv:      "/env.drv",
-		PasswdFileDrv:    "/passwd.drv",
-		GroupFileDrv:     "/group.drv",
-		NixConfigFileDrv: "/nix-config.drv",
+// The Strategy entry hands New the bwrap part of the document; a document that
+// selected another family carries none, which must read as empty artifacts
+// rather than panic.
+func TestStrategy_ToleratesNilBwrapPart(t *testing.T) {
+	cfg := runner.Config{}
+	for name, mk := range map[string]func() (runner.Runner, error){
+		"New": func() (runner.Runner, error) {
+			return Strategy.New(cfg, inputdoc.Artifacts{}, runnertest.Lookup(nil), "/pwd")
+		},
+		"NewBuild": func() (runner.Runner, error) {
+			return Strategy.NewBuild(cfg, inputdoc.Artifacts{}, runnertest.Lookup(nil), "/pwd")
+		},
+	} {
+		if r, err := mk(); err != nil || r == nil {
+			t.Errorf("Strategy.%s with no bwrap part = (%v, %v), want a runner", name, r, err)
+		}
 	}
-	r, err := NewBuild(cfg, runnertest.Lookup(nil), "/pwd")
+	if got := Strategy.PrerequisitesFor(cfg, inputdoc.Artifacts{}, runnertest.Lookup(nil)); len(got) == 0 {
+		t.Error("Strategy.PrerequisitesFor with no bwrap part returned no rows")
+	}
+	art := inputdoc.Artifacts{Bwrap: &inputdoc.BwrapArtifacts{AgentFiles: inputdoc.ValueOf("/agent-files")}}
+	r, err := Strategy.New(cfg, art, runnertest.Lookup(nil), "/pwd")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := r.(*bwrapAdapter).agentFiles; got != "/agent-files" {
+		t.Errorf("Strategy.New agentFiles = %q, want the bwrap part's /agent-files", got)
+	}
+}
+
+// The bwrap build constructor reads the bwrap artifacts part (issue #445).
+func TestNewBwrapBuild_ReadsArtifactsFromBwrapPart(t *testing.T) {
+	art := inputdoc.BwrapArtifacts{
+		AgentFilesDrv:    inputdoc.ValueOf("/files.drv"),
+		AgentEnvDrv:      inputdoc.ValueOf("/env.drv"),
+		PasswdFileDrv:    inputdoc.ValueOf("/passwd.drv"),
+		GroupFileDrv:     inputdoc.ValueOf("/group.drv"),
+		NixConfigFileDrv: inputdoc.ValueOf("/nix-config.drv"),
+		SyscallFilterDrv: inputdoc.ValueOf("/filter.drv"),
+	}
+	r := NewBuild(runner.Config{}, art, "/pwd")
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
 		t.Fatalf("NewBuild did not return *bwrapBuildAdapter")
 	}
 	want := bwrapBuildAdapter{
-		agentFilesDrv:      cfg.AgentFilesDrv,
-		agentEnvDrv:        cfg.AgentEnvDrv,
-		passwdFileDrv:      cfg.PasswdFileDrv,
-		groupFileDrv:       cfg.GroupFileDrv,
-		nixConfigFileDrv:   cfg.NixConfigFileDrv,
-		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration(cfg.ImageTag)),
+		agentFilesDrv:      "/files.drv",
+		agentEnvDrv:        "/env.drv",
+		passwdFileDrv:      "/passwd.drv",
+		groupFileDrv:       "/group.drv",
+		nixConfigFileDrv:   "/nix-config.drv",
+		syscallFilterDrv:   "/filter.drv",
+		nixVarSnapshotDir:  NixVarSnapshotDir("/pwd", ClosureGeneration("")),
 		nixVarSnapshotRoot: NixVarSnapshotRoot("/pwd"),
-		nixVarGeneration:   ClosureGeneration(cfg.ImageTag),
+		nixVarGeneration:   ClosureGeneration(""),
 		nixGCRootsRoot:     NixGCRootsRoot("/pwd"),
 	}
 	if *a != want {
@@ -95,8 +132,8 @@ func TestNewBwrapBuild_UsesConfigFields(t *testing.T) {
 // generation subdir named after its basename, replacing the flat path every
 // closure collided on.
 func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
-	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
-	r, err := New(cfg, runnertest.Lookup(nil), "/pwd")
+	art := inputdoc.BwrapArtifacts{ImageTag: inputdoc.ValueOf("/nix/store/abc123-agent-closure")}
+	r, err := New(runner.Config{}, art, runnertest.Lookup(nil), "/pwd")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,11 +150,8 @@ func TestNewBwrap_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
 // The build side writes the snapshot the run side above mounts, so both must
 // resolve to the same generation-scoped path for a given ImageTag.
 func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T) {
-	cfg := runner.Config{ImageTag: "/nix/store/abc123-agent-closure"}
-	r, err := NewBuild(cfg, runnertest.Lookup(nil), "/pwd")
-	if err != nil {
-		t.Fatal(err)
-	}
+	art := inputdoc.BwrapArtifacts{ImageTag: inputdoc.ValueOf("/nix/store/abc123-agent-closure")}
+	r := NewBuild(runner.Config{}, art, "/pwd")
 	a, ok := r.(*bwrapBuildAdapter)
 	if !ok {
 		t.Fatalf("NewBuild did not return *bwrapBuildAdapter")
@@ -133,7 +167,7 @@ func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T
 func TestNewBwrap_IsolatesUnderMismatchedRuntime(t *testing.T) {
 	for _, rt := range []string{"podman", "docker", "rancher", ""} {
 		cfg := runner.Config{Runtime: rt, NetworkMode: runner.NetworkModeOpen}
-		r, err := New(cfg, runnertest.Lookup(nil), "/pwd")
+		r, err := New(cfg, inputdoc.BwrapArtifacts{}, runnertest.Lookup(nil), "/pwd")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,14 +191,14 @@ func testNet(mode runner.NetworkMode) runner.BwrapNetwork {
 // can force isolation on even under NETWORK_MODE=host.
 func TestNewBwrap_ReadsUnshareNetFromLookup(t *testing.T) {
 	cfg := runner.Config{NetworkMode: runner.NetworkModeHost}
-	r, err := New(cfg, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "true"}), "/pwd")
+	r, err := New(cfg, inputdoc.BwrapArtifacts{}, runnertest.Lookup(map[string]string{"BWRAP_UNSHARE_NET": "true"}), "/pwd")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := r.(*bwrapAdapter).network; !got.Isolate {
 		t.Errorf("network = %+v, want Isolate", got)
 	}
-	r, err = New(cfg, runnertest.Lookup(nil), "/pwd")
+	r, err = New(cfg, inputdoc.BwrapArtifacts{}, runnertest.Lookup(nil), "/pwd")
 	if err != nil {
 		t.Fatal(err)
 	}

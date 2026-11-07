@@ -56,6 +56,10 @@ type config struct {
 	// like applyDispatchKind can never alias the caller's config through it.
 	schemaConfig
 
+	// artifacts is the Launcher input document's artifacts section, handed whole
+	// to the selected runner family, which reads only its own part.
+	artifacts inputdoc.Artifacts
+
 	// OCI image config baked by the nix wrapper. imageArchive/imageDrv/
 	// nixBuilderImage/nixVolume are empty for bwrap. flakeImageAttr/imageTag are
 	// dual-purpose (issue #2667): the OCI image's flake attr and content-hash
@@ -407,6 +411,7 @@ func loadConfig() config {
 
 	cfg := config{
 		schemaConfig: sc,
+		artifacts:    art,
 
 		flakeLauncherAttr:  shared.FlakeLauncherAttr.String(),
 		loadedLauncherHash: shared.LauncherCurrencyHash.String(),
@@ -839,7 +844,7 @@ func runnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, error
 	if err != nil {
 		return nil, err
 	}
-	return s.New(rc, c.knobLookup, pwd)
+	return s.New(rc, c.artifacts, c.knobLookup, pwd)
 }
 
 // buildRunnerForKind is runnerForKind's `launcher build` counterpart, using
@@ -849,7 +854,7 @@ func buildRunnerForKind(c config, rc runner.Config, pwd string) (runner.Runner, 
 	if err != nil {
 		return nil, err
 	}
-	return s.NewBuild(rc, c.knobLookup, pwd)
+	return s.NewBuild(rc, c.artifacts, c.knobLookup, pwd)
 }
 
 // newDriver returns the Go Driver strategy selected by c.driver (ADR 0009).
@@ -1973,7 +1978,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 				return drain()
 			}
 			if s.PrepareHotSwap != nil {
-				if err := s.PrepareHotSwap(runnerConfig(c), pwd, res.TipTag); err != nil {
+				if err := s.PrepareHotSwap(c.artifacts, pwd, res.TipTag); err != nil {
 					fmt.Fprintf(stderr, "==> %s hot-swap: preparing generation failed, draining instead: %v\n", art.Name, err)
 					return drain()
 				}

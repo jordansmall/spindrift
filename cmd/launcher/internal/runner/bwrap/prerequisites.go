@@ -1,6 +1,9 @@
 package bwrap
 
-import "spindrift.dev/launcher/internal/runner"
+import (
+	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/runner"
+)
 
 // Seams so a test can substitute a distinguishable fake per capability.
 // Without them, swapping ValidateOverlay and ValidatePasta between the two
@@ -16,10 +19,10 @@ var (
 // enforced at launch when Required; bwrap-cgroup-delegation has no launch gate
 // (ADR 0042) and is always Advisory. A launch-gate Probe returns the raw
 // Validate* error, which the launch path surfaces verbatim.
-func Prerequisites(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite {
+func Prerequisites(cfg runner.Config, art inputdoc.BwrapArtifacts, l runner.KnobLookup) []runner.Prerequisite {
 	// The overlay flags only render under this AND-gate in bwrap.go, so the
 	// check is enforced exactly when they would.
-	overlayRequired := cfg.NixStoreWritable && cfg.NixConfigFile != ""
+	overlayRequired := art.NixStoreWritable.Bool() && art.NixConfigFile.String() != ""
 
 	// The Pasta decision comes from network, the same helper New renders from,
 	// so the check never fires for a Box that will not invoke pasta. A malformed

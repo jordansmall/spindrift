@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 	"spindrift.dev/launcher/internal/runner/runnertest/contract"
@@ -30,8 +31,18 @@ func (bwrapLifecycleHarness) adapter(t *testing.T, child func() *exec.Cmd) (*bwr
 		func() (string, error) { return "", nil },
 		func(string, ...string) *exec.Cmd { return child() },
 	)
-	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok", network: testNet(runner.NetworkModeHost)}
-	return a, root
+	r, err := New(
+		runner.Config{NetworkMode: runner.NetworkModeHost},
+		inputdoc.BwrapArtifacts{
+			AgentFiles:    inputdoc.ValueOf("/fake/agent"),
+			AgentEnv:      inputdoc.ValueOf("/fake/env"),
+			BakedPrefetch: inputdoc.ValueOf("echo ok"),
+		},
+		runnertest.Lookup(nil), t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return r.(*bwrapAdapter), root
 }
 
 func (h bwrapLifecycleHarness) Exiting(t *testing.T, _ string, code int) runner.Runner {

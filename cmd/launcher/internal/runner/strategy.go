@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // KnobLookup resolves one knob's env name to its already-resolved value (after
@@ -18,22 +20,23 @@ type KnobLookup = func(env string) (value string, ok bool)
 type Strategy struct {
 	Name string
 	// New constructs the Runner for the run command; a malformed family knob
-	// read through l is an error.
-	New func(cfg Config, l KnobLookup, pwd string) (Runner, error)
+	// read through l is an error. Each family reads only its own part of art:
+	// only the selected RUNNER_KIND's part is non-nil.
+	New func(cfg Config, art inputdoc.Artifacts, l KnobLookup, pwd string) (Runner, error)
 	// NewBuild constructs the Runner for the build command.
-	NewBuild func(cfg Config, l KnobLookup, pwd string) (Runner, error)
+	NewBuild func(cfg Config, art inputdoc.Artifacts, l KnobLookup, pwd string) (Runner, error)
 	// Prerequisites declares the family's host checks in report order. Tiers and
-	// remedies depend on cfg and the family's knobs, read through l; nil means
-	// none.
-	Prerequisites func(cfg Config, l KnobLookup) []Prerequisite
+	// remedies depend on cfg, its part of art, and the family's knobs, read
+	// through l; nil means none.
+	Prerequisites func(cfg Config, art inputdoc.Artifacts, l KnobLookup) []Prerequisite
 	// PrepareHotSwap prepares a realized store-closure (a /nix/store path) before
 	// a hot-swap binds it as the new agent generation; core calls it for every
 	// store-closure hot-swap, nixInBox or not (issue #5996), so a family can root
-	// the generation either way and keys nixInBox-only work off cfg.NixConfigFile.
-	// nil means the family needs no preparation (ADR 0069
-	// decision 2). cfg carries the daemon's startup-config artifacts a hot-swapped
-	// Box still mounts, which the family must keep alive alongside closure.
-	PrepareHotSwap func(cfg Config, pwd, closure string) error
+	// the generation either way and keys nixInBox-only work off its nix-config
+	// artifact. nil means the family needs no preparation (ADR 0069 decision 2).
+	// art carries the daemon's startup-config artifacts a hot-swapped Box still
+	// mounts, which the family must keep alive alongside closure.
+	PrepareHotSwap func(art inputdoc.Artifacts, pwd, closure string) error
 	// RawNetworkKnobs returns the env names of the family's raw network knobs
 	// set in l, read through the family's own reader; core refuses a non-open
 	// NETWORK_MODE beside any of them. nil means the family has none.
@@ -96,13 +99,13 @@ func LaunchGates(ps []Prerequisite, stage Launch) []Prerequisite {
 // and still prints it, with its Remedy, as an advisory line.
 var ErrDegraded = errors.New("check degraded: probe could not determine result")
 
-// PrerequisitesFor returns the family's prerequisites for cfg and l, or nil when it
-// declares none.
-func (s Strategy) PrerequisitesFor(cfg Config, l KnobLookup) []Prerequisite {
+// PrerequisitesFor returns the family's prerequisites for cfg, art and l, or
+// nil when it declares none.
+func (s Strategy) PrerequisitesFor(cfg Config, art inputdoc.Artifacts, l KnobLookup) []Prerequisite {
 	if s.Prerequisites == nil {
 		return nil
 	}
-	return s.Prerequisites(cfg, l)
+	return s.Prerequisites(cfg, art, l)
 }
 
 var strategies = map[string]Strategy{}

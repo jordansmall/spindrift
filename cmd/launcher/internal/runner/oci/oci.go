@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
@@ -50,7 +51,19 @@ var execCommand = exec.Command
 
 // Strategy is the oci family's entry in the runner registry; its build
 // command constructs the same adapter as its run command.
-var Strategy = runner.Strategy{Name: runner.KindOCI, New: New, NewBuild: New, Prerequisites: Prerequisites, RawNetworkKnobs: RawNetworkKnobs}
+var Strategy = runner.Strategy{
+	Name:     runner.KindOCI,
+	New:      newRunner,
+	NewBuild: newRunner,
+	Prerequisites: func(cfg runner.Config, _ inputdoc.Artifacts, l runner.KnobLookup) []runner.Prerequisite {
+		return Prerequisites(cfg, l)
+	},
+	RawNetworkKnobs: RawNetworkKnobs,
+}
+
+func newRunner(cfg runner.Config, _ inputdoc.Artifacts, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+	return New(cfg, l, pwd)
+}
 
 // New constructs an OCI adapter from cfg and the family knobs read through l;
 // the error is a malformed family knob. pwd is the working directory the
