@@ -450,6 +450,64 @@ func TestRun_SalvageFails(t *testing.T) {
 	}
 }
 
+func TestRun_SalvageStatusFails(t *testing.T) {
+	git := &fakeGit{responses: map[string]fakeResult{
+		"status":   {err: fmt.Errorf("index corrupt")},
+		"rev-list": {stdout: "1\n"},
+	}}
+	clk := &fakeClock{}
+	cfg := baseConfig(git, clk)
+	cfg.WriteEnabled = true
+	cfg.OutboxRelayCapable = true
+
+	var buf bytes.Buffer
+	if err := Run(cfg, &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "could not check the tree for uncommitted work") {
+		t.Fatalf("expected tree-check-failed note, got %q", line)
+	}
+	if !strings.Contains(line, "status=blocked") {
+		t.Fatalf("expected status=blocked (tree state unknown), got %q", line)
+	}
+	for _, sub := range []string{"add", "commit", "push"} {
+		if git.countCalls(sub) != 0 {
+			t.Fatalf("expected no %s after status failed, got %v", sub, git.calls)
+		}
+	}
+}
+
+// The relay arms never push, so only the !salvageOK arm's place first in
+// Run's switch keeps a status failure from reporting ready under them.
+func TestRun_SalvageStatusFailsBlocksRelayArms(t *testing.T) {
+	for name, mutate := range map[string]func(*Config){
+		"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
+		"read-only":     func(c *Config) { c.OutboxRelayCapable = true; c.WriteEnabled = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			git := &fakeGit{responses: map[string]fakeResult{
+				"status":   {err: fmt.Errorf("index corrupt")},
+				"rev-list": {stdout: "1\n"},
+			}}
+			cfg := baseConfig(git, &fakeClock{})
+			mutate(&cfg)
+
+			var buf bytes.Buffer
+			if err := Run(cfg, &buf); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			line := buf.String()
+			if !strings.Contains(line, "status=blocked") {
+				t.Fatalf("expected status=blocked (tree state unknown), got %q", line)
+			}
+			if strings.Contains(line, "branch relayed via outbox bundle") {
+				t.Fatalf("expected relay arm not reached, got %q", line)
+			}
+		})
+	}
+}
+
 func TestRun_SalvageAddFailsSkipsCommit(t *testing.T) {
 	git := &fakeGit{responses: map[string]fakeResult{
 		"status":   {stdout: " M some/file.go\n"},
