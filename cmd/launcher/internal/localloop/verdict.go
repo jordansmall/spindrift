@@ -31,8 +31,10 @@ type Verdict struct {
 	Branch    string
 	SeamCount int
 	// Held names the first unmet gate, from the closed set Surface always
-	// checks in this order: open seam, stuck landing, target branch checked
-	// out, diverged, never landed.
+	// checks in this order: stuck landing, open seam, never landed, target
+	// branch checked out, diverged. The first two are judged only on the
+	// group's first open seam, so a stuck landing on a later seam is never
+	// reported.
 	Held string
 }
 

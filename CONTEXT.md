@@ -594,10 +594,11 @@ auto-run after dispatch and the standalone `spindrift reconcile`) so no
 touched broad ticket is ever silent. Two shapes: `VerdictSurfaced` names the
 branch Surface made current and how many seams it took
 (`surfaced → branch <name> (N seams)`); `VerdictHeld` names the first unmet
-gate, in order — open seam, stuck landing (reusing the wording of the typed
-**Landing**'s stuck-verdict repair check), target branch checked out,
-diverged, never landed — (`held — <reason>`). Those gates evaluate over the
-group's seams, so a broad-ticket issue excluded from its own group (issue
+gate, in order — stuck landing (reusing the wording of the typed
+**Landing**'s stuck-verdict repair check), open seam, never landed, target
+branch checked out, diverged — (`held — <reason>`). The first two are judged
+only on the group's first open seam, so a stuck landing on a later seam is
+never reported, and a broad-ticket issue excluded from its own group (issue
 #3439) never produces a `stuck landing` verdict for its own landing —
 `reconcile`'s `status=stuck` line reports that instead (issue #3440). A
 parented broad ticket's surfaced branch keeps ADR 0033's sanitized-parent
