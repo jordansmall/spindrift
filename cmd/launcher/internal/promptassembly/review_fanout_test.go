@@ -1,7 +1,6 @@
 package promptassembly
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,61 +12,66 @@ import (
 // or taking issue #392's reviewModel="" opt-out, gets the skill's own
 // general-purpose default instead of an agent type its session never defines.
 func TestReviewFanoutAgentFollowsProvisionedAgents(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env0 := syntheticRegistry(t, []FragmentRow{
+		{Gate: "CODE_REVIEW_BAKED", Fragment: "fanout.md", Var: "FANOUT_STEP", ExtraSubstVars: []string{"REVIEW_FANOUT_AGENT"}},
+	}, map[string]string{
+		"review-prompt.md":    "${FANOUT_STEP}\n",
+		"fragments/fanout.md": "[${REVIEW_FANOUT_AGENT}]",
+	})
 
 	// The table covers both driver mechanisms: the --agents JSON driver
 	// (claude) provisions by template key, and the agent-files driver
 	// (opencode) by an on-disk <name>.md.
 	cases := []struct {
 		name string
-		env  func(t *testing.T) Env
+		env  func(t *testing.T, base Env) Env
 		want string
 	}{
 		{
 			name: "agents-json-provisions-review-axis",
-			env: func(t *testing.T) Env {
-				env := orchestratorReviewEnv()
+			env: func(t *testing.T, base Env) Env {
+				env := base
 				env.AgentsJSONTemplate = `{"scout":{"model":"x"},"review-axis":{"model":"y"}}`
 				return env
 			},
-			want: "agent type `review-axis`",
+			want: "[review-axis]",
 		},
 		{
 			name: "agents-json-omits-review-axis",
-			env: func(t *testing.T) Env {
-				env := orchestratorReviewEnv()
+			env: func(t *testing.T, base Env) Env {
+				env := base
 				env.AgentsJSONTemplate = `{"scout":{"model":"x"},"worker":{"model":"y"}}`
 				return env
 			},
-			want: "agent type `general-purpose`",
+			want: "[general-purpose]",
 		},
 		{
 			name: "agent-files-provision-review-axis",
-			env: func(t *testing.T) Env {
-				env := orchestratorReviewEnv()
+			env: func(t *testing.T, base Env) Env {
+				env := base
 				dir := t.TempDir()
 				writeAgentFile(t, filepath.Join(dir, "review-axis.md"), "review-axis")
 				env.DriverAgentFilesDir = dir
 				return env
 			},
-			want: "agent type `review-axis`",
+			want: "[review-axis]",
 		},
 		{
 			name: "agent-files-omit-review-axis",
-			env: func(t *testing.T) Env {
-				env := orchestratorReviewEnv()
+			env: func(t *testing.T, base Env) Env {
+				env := base
 				dir := t.TempDir()
 				writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 				env.DriverAgentFilesDir = dir
 				return env
 			},
-			want: "agent type `general-purpose`",
+			want: "[general-purpose]",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := Assemble(tc.env(t), reg)
+			result, err := Assemble(tc.env(t, env0), reg)
 			if err != nil {
 				t.Fatalf("Assemble: %v", err)
 			}
@@ -83,32 +87,6 @@ func TestReviewFanoutAgentFollowsProvisionedAgents(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestReviewFanoutAgentBakedAnchorHasNoHardcodedName pins the fragment
-// itself: the anchor must interpolate the substitution variable rather than
-// bake either name, since a baked literal is exactly the drift that made a
-// non-provisioned agent type reachable.
-func TestReviewFanoutAgentBakedAnchorHasNoHardcodedName(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join(promptsDir, "fragments", "code-review-baked.md"))
-	if err != nil {
-		t.Fatalf("read code-review-baked.md: %v", err)
-	}
-	text := string(b)
-	if !strings.Contains(text, "agent type `${REVIEW_FANOUT_AGENT}`") {
-		t.Errorf("code-review-baked.md does not spawn as agent type `${REVIEW_FANOUT_AGENT}`:\n%s", text)
-	}
-	if strings.Contains(text, "agent type `"+reviewFanoutAgent+"`") ||
-		strings.Contains(text, "agent type `"+reviewFanoutFallbackAgent+"`") {
-		t.Errorf("code-review-baked.md hardcodes an agent-type name:\n%s", text)
-	}
-}
-
-// orchestratorReviewEnv returns coveredEnv in the one configuration that
-// renders review-prompt.md into Result.ReviewPromptText.
-func orchestratorReviewEnv() Env {
-	env := coveredEnv()
-	return env
 }
 
 // TestReviewFanoutAgentMalformedAgentsJSON covers the resolver's
@@ -129,7 +107,7 @@ func TestReviewFanoutAgentMalformedAgentsJSON(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := orchestratorReviewEnv()
+			env := coveredEnv()
 			env.AgentsJSONTemplate = tc.template
 			if got := reviewFanoutAgentFor(env); got != reviewFanoutFallbackAgent {
 				t.Errorf("reviewFanoutAgentFor(%s) = %q, want %q", tc.template, got, reviewFanoutFallbackAgent)

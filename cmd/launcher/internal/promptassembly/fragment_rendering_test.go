@@ -78,20 +78,9 @@ const (
 	targetReview                        // Result.ReviewPromptText
 )
 
-// assertSelection checks the rows against the work prompt, or the filer's
-// prompt in the agent roster when filer is set.
-func assertSelection(t *testing.T, rows []gatedRow, filer bool, cases []selectionCase) {
-	t.Helper()
-	target := targetPrompt
-	if filer {
-		target = targetFiler
-	}
-	assertSelectionIn(t, rows, target, cases)
-}
-
-// assertSelectionIn assembles the rows against each case's environment and
+// assertSelection assembles the rows against each case's environment and
 // checks the exact set of rendered markers in the target's text.
-func assertSelectionIn(t *testing.T, rows []gatedRow, target selectionTarget, cases []selectionCase) {
+func assertSelection(t *testing.T, rows []gatedRow, target selectionTarget, cases []selectionCase) {
 	t.Helper()
 	var fragRows []FragmentRow
 	files := map[string]string{}
@@ -142,7 +131,6 @@ func assertSelectionIn(t *testing.T, rows []gatedRow, target selectionTarget, ca
 	}
 }
 
-func fragJira(e *Env)     { e.IssueTracker = "jira" }
 func fragLocalRef(e *Env) { e.LocalIssueReference = true }
 
 // The PR body references its issue per tracker: github closes it, a local
@@ -152,7 +140,7 @@ func TestAssemblePRBodyReferenceSelection(t *testing.T) {
 		{"PR_BODY_CLOSES", "PRB_CLOSES"},
 		{"PR_BODY_LOCAL_REF", "PRB_LOCAL_REF"},
 		{"PR_BODY_LOCAL_NOREF", "PRB_LOCAL_NOREF"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"github closes", nil, []string{"PRB_CLOSES"}},
 		{"local default names no issue", []func(*Env){fragLocalTracker}, []string{"PRB_LOCAL_NOREF"}},
 		{"local opt-in names the breadcrumb", []func(*Env){fragLocalTracker, fragLocalRef}, []string{"PRB_LOCAL_REF"}},
@@ -174,11 +162,11 @@ func TestAssembleIssueReadSelection(t *testing.T) {
 		mutate []func(*Env)
 	}{{"work", nil}, {"research", []func(*Env){fragResearch}}} {
 		t.Run(kind.name, func(t *testing.T) {
-			assertSelection(t, rows, false, []selectionCase{
+			assertSelection(t, rows, targetPrompt, []selectionCase{
 				{"github", kind.mutate, []string{"IR_GITHUB"}},
 				{"local", append([]func(*Env){fragLocalTracker}, kind.mutate...), []string{"IR_LOCAL"}},
 				{"forgejo", append([]func(*Env){fragForgejoTracker}, kind.mutate...), []string{"IR_FORGEJO"}},
-				{"jira", append([]func(*Env){fragJira}, kind.mutate...), []string{"IR_UNREADABLE"}},
+				{"jira", append([]func(*Env){fragJiraTracker}, kind.mutate...), []string{"IR_UNREADABLE"}},
 			})
 		})
 	}
@@ -196,7 +184,7 @@ func TestAssembleResearchVerdictSelection(t *testing.T) {
 		{"ISSUE_TRACKER_FORGEJO_READONLY_SOCKET", "RV_FORGEJO_RO_SOCKET"},
 		{"ISSUE_TRACKER_LOCAL_LOG", "RV_LOCAL_LOG"},
 		{"ISSUE_TRACKER_LOCAL_SOCKET", "RV_LOCAL_SOCKET"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"github read-write", []func(*Env){fragResearch}, []string{"RV_GITHUB"}},
 		{"github read-only", []func(*Env){fragResearch, fragReadOnly}, []string{"RV_GITHUB_RO_LOG"}},
 		{"github read-only socket", []func(*Env){fragResearch, fragReadOnly, fragSocket}, []string{"RV_GITHUB_RO_SOCKET"}},
@@ -205,6 +193,8 @@ func TestAssembleResearchVerdictSelection(t *testing.T) {
 		{"forgejo read-only socket", []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly, fragSocket}, []string{"RV_FORGEJO_RO_SOCKET"}},
 		{"local", []func(*Env){fragResearch, fragLocalTracker}, []string{"RV_LOCAL_LOG"}},
 		{"local socket", []func(*Env){fragResearch, fragLocalTracker, fragSocket}, []string{"RV_LOCAL_SOCKET"}},
+		{"jira", []func(*Env){fragResearch, fragJiraTracker}, []string{"RV_GITHUB_RO_LOG"}},
+		{"jira with the Filer", []func(*Env){fragResearch, fragJiraTracker, fragFiler}, []string{"RV_GITHUB_RO_LOG"}},
 	})
 }
 
@@ -219,12 +209,14 @@ func TestAssembleResearchOutcomeLandingSelection(t *testing.T) {
 		{"RESEARCH_VERDICT_RELAYED_LOG", "OL_RELAYED_LOG"},
 		{"RESEARCH_VERDICT_RELAYED_SOCKET", "OL_RELAYED_SOCKET"},
 	}
-	assertSelection(t, rows, false, []selectionCase{
+	assertSelection(t, rows, targetPrompt, []selectionCase{
 		{"github read-write", []func(*Env){fragResearch}, []string{"OL_GITHUB"}},
 		{"github read-write with the Filer", []func(*Env){fragResearch, fragFiler}, []string{"OL_RELAYED_LOG"}},
 		{"github read-write with the Filer on the socket", []func(*Env){fragResearch, fragFiler, fragSocket}, []string{"OL_RELAYED_SOCKET"}},
 		{"github read-only", []func(*Env){fragResearch, fragReadOnly}, []string{"OL_RELAYED_LOG"}},
 		{"local", []func(*Env){fragResearch, fragLocalTracker}, []string{"OL_RELAYED_LOG"}},
+		{"jira", []func(*Env){fragResearch, fragJiraTracker}, []string{"OL_RELAYED_LOG"}},
+		{"jira with the Filer", []func(*Env){fragResearch, fragJiraTracker, fragFiler}, []string{"OL_RELAYED_LOG"}},
 		{"forgejo read-write", []func(*Env){fragResearch, fragForgejoTracker}, []string{"OL_FORGEJO"}},
 		{"forgejo read-only", []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly}, []string{"OL_RELAYED_LOG"}},
 	})
@@ -241,12 +233,12 @@ func TestAssembleBlockedCommentSelection(t *testing.T) {
 		{"ISSUE_TRACKER_FORGEJO_READONLY", "BC_FORGEJO_RO"},
 		{"ISSUE_TRACKER_LOCAL", "BC_LOCAL"},
 		{"ISSUE_TRACKER_UNWRITABLE_READWRITE", "BC_UNWRITABLE"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"github read-write", nil, []string{"BC_GITHUB"}},
 		{"github read-only", []func(*Env){fragReadOnly}, []string{"BC_GITHUB_RO"}},
 		{"local", []func(*Env){fragLocalTracker}, []string{"BC_LOCAL"}},
-		{"jira read-write", []func(*Env){fragJira}, []string{"BC_UNWRITABLE"}},
-		{"jira read-only", []func(*Env){fragJira, fragReadOnly}, []string{"BC_GITHUB_RO"}},
+		{"jira read-write", []func(*Env){fragJiraTracker}, []string{"BC_UNWRITABLE"}},
+		{"jira read-only", []func(*Env){fragJiraTracker, fragReadOnly}, []string{"BC_GITHUB_RO"}},
 		{"forgejo read-write", []func(*Env){fragForgejoTracker}, []string{"BC_FORGEJO"}},
 		{"forgejo read-only", []func(*Env){fragForgejoTracker, fragReadOnly}, []string{"BC_FORGEJO_RO"}},
 	})
@@ -278,7 +270,7 @@ func TestAssembleLandingSelection(t *testing.T) {
 		{"PR_FORGE_READ_WRITE", "BLOCKED_LANDING_PR"},
 		{"NO_PR_FORGE", "BLOCKED_LANDING_BRANCH"},
 		{"PR_FORGE_READ_ONLY", "BLOCKED_LANDING_RO"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"github read-write", nil, []string{
 			"OPEN_PUSH_RW", "OPEN_CREATE_GITHUB", "COMMIT_PUSH_RW", "BLOCKED_TRIAGE_RW", "BLOCKED_PUSH_RW",
 			"BLOCKED_PR_GITHUB", "BLOCKED_LANDING_PR",
@@ -311,7 +303,7 @@ func TestAssembleGitForgeBlockedSelection(t *testing.T) {
 		{"NO_PR_FORGE", "BLOCKED_PR_NONE"},
 		{"PR_FORGE_READ_WRITE", "BLOCKED_LANDING_PR"},
 		{"NO_PR_FORGE", "BLOCKED_LANDING_BRANCH"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"git forge", []func(*Env){fragGitForge}, []string{"BLOCKED_PUSH_RW", "BLOCKED_PR_NONE", "BLOCKED_LANDING_BRANCH"}},
 		{"git forge read-only", []func(*Env){fragGitForge, fragReadOnly}, []string{"BLOCKED_PR_NONE", "BLOCKED_LANDING_BRANCH"}},
 	})
@@ -330,13 +322,36 @@ func TestAssembleFilerPromptSelection(t *testing.T) {
 		{"ISSUE_TRACKER_FORGEJO", "DEDUP_FORGEJO"},
 		{"ISSUE_TRACKER_LOCAL", "DEDUP_LOCAL"},
 		{"ISSUE_TRACKER_UNWRITABLE", "DEDUP_UNWRITABLE"},
-	}, true, []selectionCase{
+	}, targetFiler, []selectionCase{
 		{"github read-write", nil, []string{"FILE_GITHUB", "DEDUP_GITHUB"}},
 		{"github read-only", []func(*Env){fragReadOnly}, []string{"FILE_RELAY_LOG", "DEDUP_GITHUB"}},
 		{"github read-only socket", []func(*Env){fragReadOnly, fragSocket}, []string{"FILE_RELAY_SOCKET", "DEDUP_GITHUB"}},
 		{"forgejo read-write", []func(*Env){fragForgejoTracker}, []string{"FILE_FORGEJO", "DEDUP_FORGEJO"}},
-		{"jira", []func(*Env){fragJira}, []string{"FILE_RELAY_LOG", "DEDUP_UNWRITABLE"}},
+		{"jira", []func(*Env){fragJiraTracker}, []string{"FILE_RELAY_LOG", "DEDUP_UNWRITABLE"}},
 	})
+}
+
+// The relay's stated reason follows the tracker, not the Box's access mode: a
+// read-write Box on a tracker with no in-Box client never claims a read-only
+// token, while a read-only Box on a writable tracker still does, on both
+// signal carriers (issue #6354).
+func TestAssembleFilerRelayReasonSelection(t *testing.T) {
+	for _, target := range []struct {
+		name string
+		to   selectionTarget
+	}{{"prompt", targetPrompt}, {"filer", targetFiler}} {
+		t.Run(target.name, func(t *testing.T) {
+			assertSelection(t, []gatedRow{
+				{"ISSUE_TRACKER_WRITABLE", "FRR_READONLY"},
+				{"ISSUE_TRACKER_UNWRITABLE", "FRR_UNWRITABLE"},
+			}, target.to, []selectionCase{
+				{"jira read-write log", []func(*Env){fragJiraTracker}, []string{"FRR_UNWRITABLE"}},
+				{"jira read-write socket", []func(*Env){fragJiraTracker, fragSocket}, []string{"FRR_UNWRITABLE"}},
+				{"github read-only log", []func(*Env){fragReadOnly}, []string{"FRR_READONLY"}},
+				{"github read-only socket", []func(*Env){fragReadOnly, fragSocket}, []string{"FRR_READONLY"}},
+			})
+		})
+	}
 }
 
 // The work prompt's FILE ISSUES step forks the same way: a writable Box files
@@ -346,7 +361,7 @@ func TestAssembleFileIssuesStepSelection(t *testing.T) {
 		{"FILER_FILE_DIRECT_ANY", "FILE_ISSUES_DIRECT"},
 		{"FILER_FILE_RELAY_LOG", "FILE_ISSUES_RELAY_LOG"},
 		{"FILER_FILE_RELAY_SOCKET", "FILE_ISSUES_RELAY_SOCKET"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"read-write", []func(*Env){fragFiler}, []string{"FILE_ISSUES_DIRECT"}},
 		{"read-only", []func(*Env){fragFiler, fragReadOnly}, []string{"FILE_ISSUES_RELAY_LOG"}},
 		{"read-only socket", []func(*Env){fragFiler, fragReadOnly, fragSocket}, []string{"FILE_ISSUES_RELAY_SOCKET"}},
@@ -363,7 +378,7 @@ func TestAssembleKnobStepSelection(t *testing.T) {
 	assertSelection(t, []gatedRow{
 		{"AUTO_FORMAT", "AUTO_FORMAT_ROW"},
 		{"AUTO_LINT", "AUTO_LINT_ROW"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"both off", nil, nil},
 		{"format", []func(*Env){format}, []string{"AUTO_FORMAT_ROW"}},
 		{"lint", []func(*Env){lint}, []string{"AUTO_LINT_ROW"}},
@@ -382,14 +397,14 @@ func TestAssembleSkillBakedPairSelection(t *testing.T) {
 		{"TDD_UNBAKED", "TDD_UNBAKED_ROW"},
 		{"COMMIT_BAKED", "COMMIT_BAKED_ROW"},
 		{"COMMIT_UNBAKED", "COMMIT_UNBAKED_ROW"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"all baked", nil, []string{"TDD_BAKED_ROW", "COMMIT_BAKED_ROW"}},
 		{"tdd unbaked", []func(*Env){tddOff}, []string{"TDD_UNBAKED_ROW", "COMMIT_BAKED_ROW"}},
 		{"commit unbaked", []func(*Env){commitOff}, []string{"TDD_BAKED_ROW", "COMMIT_UNBAKED_ROW"}},
 		{"both unbaked", []func(*Env){tddOff, commitOff}, []string{"TDD_UNBAKED_ROW", "COMMIT_UNBAKED_ROW"}},
 	})
 
-	assertSelectionIn(t, []gatedRow{
+	assertSelection(t, []gatedRow{
 		{"CODE_REVIEW_BAKED", "CODE_REVIEW_BAKED_ROW"},
 		{"CODE_REVIEW_UNBAKED", "CODE_REVIEW_UNBAKED_ROW"},
 	}, targetReview, []selectionCase{
@@ -406,7 +421,7 @@ func TestAssembleFilerAndWorkerStepSelection(t *testing.T) {
 		{"FILER_ENABLED", "WITH_FILER"},
 		{"FILER_ABSENT", "WITHOUT_FILER"},
 		{"WORKER_PROVISIONED", "COORDINATOR"},
-	}, false, []selectionCase{
+	}, targetPrompt, []selectionCase{
 		{"neither", nil, []string{"WITHOUT_FILER"}},
 		{"filer", []func(*Env){fragFiler}, []string{"WITH_FILER"}},
 		{"worker", []func(*Env){fragWorker}, []string{"WITHOUT_FILER", "COORDINATOR"}},
