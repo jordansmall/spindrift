@@ -640,10 +640,10 @@ slotLoop:
 	decide:
 		for {
 			switch d := p.decide(p.clk.Now()).(type) {
-			case Start:
+			case start:
 				kind = d.Kind
 				break decide
-			case Probe:
+			case probe:
 				switch p.probe(ctx, slot, d.Kinds) {
 				case probeHalted:
 					return

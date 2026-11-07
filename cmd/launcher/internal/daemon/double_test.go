@@ -1470,7 +1470,7 @@ func pollUntil(t *testing.T, cond func() bool, what string) {
 
 // pickKind is the test view of decide: the kind a free slot would start now.
 func (p *pool) pickKind() (Kind, bool) {
-	st, ok := p.decide(p.clk.Now()).(Start)
+	st, ok := p.decide(p.clk.Now()).(start)
 	return st.Kind, ok
 }
 

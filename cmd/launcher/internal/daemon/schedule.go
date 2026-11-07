@@ -20,7 +20,7 @@ import (
 type Schedule struct {
 	kinds       []Kind        // configured order; slotOrder derives priority from it
 	reservation int           // floor of running reserved-tier children kept before normal-tier starts
-	idleCap     time.Duration // the backoff cap: how far ahead a tip-only Park sets Until
+	idleCap     time.Duration // the backoff cap: how far ahead a tip-only park sets Until
 	state       map[Kind]kindSched
 }
 
@@ -127,43 +127,43 @@ const (
 	probeRateLimited                   // refused by the tracker's rate limit
 )
 
-// Occupancy is what the pool's slot phases say is running, passed in on each
+// occupancy is what the pool's slot phases say is running, passed in on each
 // Decide rather than tracked twice.
 //
 // Starting counts the slots that chose a kind and whose child has not yet
 // reported its claim; the pool counts a running slot with no flight key as
 // starting, so Starting is a subset of Running. Running alone feeds the
 // reservation floor.
-type Occupancy struct {
+type occupancy struct {
 	Running  map[Kind]int
 	Starting map[Kind]int
 }
 
-// Decision is what a free slot should do next: Start, Probe, or Park.
-type Decision interface{ isDecision() }
+// decision is what a free slot should do next: start, probe, or park.
+type decision interface{ isDecision() }
 
-// Start says start a child of Kind.
-type Start struct{ Kind Kind }
+// start says start a child of Kind.
+type start struct{ Kind Kind }
 
-// Probe says re-count Demand for Kinds before deciding again: each is stale
+// probe says re-count Demand for Kinds before deciding again: each is stale
 // and sits ahead of every startable kind in priority order. A jam-gated kind is
 // probed too, since a rising count lifts the jam.
-type Probe struct{ Kinds []Kind }
+type probe struct{ Kinds []Kind }
 
-// Park says nothing is startable; wait until Until. TipPoll reports that a
+// park says nothing is startable; wait until Until. TipPoll reports that a
 // moved tip can end the wait early — a jammed kind's gate, or a reported kind
 // waiting on a tip move — so the caller slices it by IdleFloor to poll the
 // tip. Until may be a probe due sooner than the jam's end, and is after the
 // Decide's now whenever TipPoll is set, or idleSleep would return at once and
 // the slot would spin instead of slicing.
-type Park struct {
+type park struct {
 	Until   time.Time
 	TipPoll bool
 }
 
-func (Start) isDecision() {}
-func (Probe) isDecision() {}
-func (Park) isDecision()  {}
+func (start) isDecision() {}
+func (probe) isDecision() {}
+func (park) isDecision()  {}
 
 // ChildOutcome is how a child's check ended, as far as scheduling cares.
 type ChildOutcome int
@@ -329,7 +329,7 @@ func (k kindSched) deadline(now time.Time) time.Time {
 }
 
 // Decide chooses the next action for a free slot at now.
-func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
+func (s Schedule) Decide(now time.Time, occ occupancy) decision {
 	running := 0
 	for k, n := range occ.Running {
 		switch kindPriority(k) {
@@ -342,16 +342,16 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 		ks := s.state[kind]
 		if ks.startable(now, occ.Starting[kind]) {
 			if len(stale) > 0 {
-				return Probe{Kinds: stale}
+				return probe{Kinds: stale}
 			}
-			return Start{Kind: kind}
+			return start{Kind: kind}
 		}
 		if ks.probed() && !ks.paused(now) && ks.stale(now) {
 			stale = append(stale, kind)
 		}
 	}
 	if len(stale) > 0 {
-		return Probe{Kinds: stale}
+		return probe{Kinds: stale}
 	}
 	var until time.Time
 	tipPoll, tipWait := false, false
@@ -373,7 +373,7 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 			until = now.Add(s.idleCap)
 		}
 	}
-	return Park{Until: until, TipPoll: tipPoll}
+	return park{Until: until, TipPoll: tipPoll}
 }
 
 // Observe folds ev into the schedule at now and returns the updated copy.
@@ -600,8 +600,8 @@ func (s Schedule) with(kind Kind, ks kindSched) Schedule {
 	return s
 }
 
-// KindView is a read-only per-kind picture for status and events.
-type KindView struct {
+// kindView is a read-only per-kind picture for status and events.
+type kindView struct {
 	// Gated reports the kind cannot start at now, with Until the instant that
 	// ends it: the backoff for an unprobed kind, the jam (or an upper-bound
 	// kind's no-work backoff) or the fresh-empty Demand for a probed one, the
@@ -631,11 +631,11 @@ type KindView struct {
 	NextDue NextDue // a child-reported kind's due state; zero when none is known
 }
 
-// View describes kind at now; the zero KindView for an unknown kind.
-func (s Schedule) View(kind Kind, now time.Time) KindView {
+// View describes kind at now; the zero kindView for an unknown kind.
+func (s Schedule) View(kind Kind, now time.Time) kindView {
 	ks, ok := s.state[kind]
 	if !ok {
-		return KindView{}
+		return kindView{}
 	}
 	v := ks.view(now)
 	v.Tracker, v.fault = ks.tracker, ks.fault
@@ -649,8 +649,8 @@ func (s Schedule) View(kind Kind, now time.Time) KindView {
 }
 
 // view is View without the tracker or rate-limit pause.
-func (ks kindSched) view(now time.Time) KindView {
-	v := KindView{Jammed: ks.gate.jammedNow(), NextDue: ks.due}
+func (ks kindSched) view(now time.Time) kindView {
+	v := kindView{Jammed: ks.gate.jammedNow(), NextDue: ks.due}
 	if !ks.due.IsZero() {
 		if !ks.startable(now, 0) {
 			v.Gated, v.Until = true, ks.due.At

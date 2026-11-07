@@ -282,7 +282,7 @@ const (
 	// can, on its very first round.
 	batonPassIdle batonReason = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
 	// batonPassOutpaced fires when the holder re-decides at startChild and
-	// finds a sibling's result since took away the Start it decided on
+	// finds a sibling's result since took away the start it decided on
 	// before blocking on the baton (a sibling's exit 2 zeroing the count the
 	// holder was about to spend). The holder loops back to decide again, so
 	// the baton must not stay with it through that round's probe or idle
@@ -478,7 +478,7 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 	return dispatchkind.PriorityNormal
 }
 
-// occupancy reads what the slot phases say is running, for Schedule.Decide's
+// occupancyOf reads what the slot phases say is running, for Schedule.Decide's
 // reservation count and Start budget. Only running children count toward the
 // reservation: reserved-tier children that exit early (a run of Continue exits,
 // say) never lift the count, so the reserved kind can keep taking every
@@ -486,7 +486,7 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 // no flight key has not yet reported its claim, so it is also starting. The
 // deciding slot is not itself PhaseRunning, so neither count includes it. The
 // caller holds p.mu.
-func occupancy(s *state) Occupancy {
+func occupancyOf(s *state) occupancy {
 	running := make(map[Kind]int)
 	starting := make(map[Kind]int)
 	for _, sl := range s.slots {
@@ -497,7 +497,7 @@ func occupancy(s *state) Occupancy {
 			}
 		}
 	}
-	return Occupancy{Running: running, Starting: starting}
+	return occupancy{Running: running, Starting: starting}
 }
 
 // liveKeys is the set of dispatch keys the pool's running children hold. A
@@ -520,7 +520,7 @@ func liveKeys(s *state) dispatchkey.Set {
 // startChild re-decides in the same p.mu hold as the PhaseRunning flip, so two
 // slots can never both take the last reserved seat, and nothing is claimed
 // before startChild, so no early-exit path needs cleanup.
-func (p *pool) decide(now time.Time) Decision {
+func (p *pool) decide(now time.Time) decision {
 	d, _ := p.decideWithWake(now)
 	return d
 }
@@ -528,10 +528,10 @@ func (p *pool) decide(now time.Time) Decision {
 // decideWithWake is decide plus the wake generation, read in the same p.mu
 // hold: a wake landing between the two reads would cancel a generation the
 // caller never sleeps on, and the slot would sleep through a startable kind.
-func (p *pool) decideWithWake(now time.Time) (Decision, context.Context) {
+func (p *pool) decideWithWake(now time.Time) (decision, context.Context) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.st.sched.Decide(now, occupancy(&p.st)), p.st.wake
+	return p.st.sched.Decide(now, occupancyOf(&p.st)), p.st.wake
 }
 
 // sleepUntilWoken sleeps d on the Clock, ending early if ctx ends or the wake
@@ -629,8 +629,8 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 // therefore always visible to any snapshot that publishes alongside this
 // event, which a hand-placed write after a separately-emitted child_start
 // could not otherwise guarantee. The kind is re-chosen inside that same
-// mutate (see Schedule.Decide). When that re-decide is not a Start (or is a
-// Start onto an issue-keyed kind that a non-holder deciding on a Chore-keyed
+// mutate (see Schedule.Decide). When that re-decide is not a start (or is a
+// start onto an issue-keyed kind that a non-holder deciding on a Chore-keyed
 // provisional is refused), what follows depends on provisional, the kind
 // runSlot decided on. A probed kind's count is what says there is work, so a
 // sibling's exit 2 zeroing it while this slot waited on the baton means
@@ -656,7 +656,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 		// provisional kind, must not switch to an issue-keyed one: only the
 		// holder discovers issues.
 		discovers := !provisional.choreKeyed() || p.baton == nil || s.batonSlot == slot
-		if st, started := s.sched.Decide(now, occupancy(s)).(Start); started && (discovers || st.Kind.choreKeyed()) {
+		if st, started := s.sched.Decide(now, occupancyOf(s)).(start); started && (discovers || st.Kind.choreKeyed()) {
 			kind = st.Kind
 		} else if v := s.sched.View(provisional, now); v.Probed || !v.NextDue.IsZero() {
 			return nil
@@ -1337,10 +1337,10 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 
 // idleSleep is what a slot calls when Schedule.Decide finds nothing to start
 // and nothing to probe: a genuine drought, not just a kind this slot doesn't
-// prefer right now. It re-decides rather than taking the caller's Park, so a
-// sibling's reset or a probe landing since is seen; anything but a Park with
+// prefer right now. It re-decides rather than taking the caller's park, so a
+// sibling's reset or a probe landing since is seen; anything but a park with
 // time left returns at once for the caller to re-decide. With no jammed kind
-// or reported kind's tip wait gating the wait (Park.TipPoll false), it sleeps
+// or reported kind's tip wait gating the wait (park.TipPoll false), it sleeps
 // the whole wait in one sleep: a merge can unblock a jammed queue, but it
 // cannot create new work in a kind that is merely queue-empty, so resolving
 // early there would only spend a fetch for nothing.
@@ -1362,13 +1362,13 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 	// must never run under it.
 	now := p.clk.Now()
 	d, wake := p.decideWithWake(now)
-	park, ok := d.(Park)
-	if !ok || !park.Until.After(now) {
+	pk, ok := d.(park)
+	if !ok || !pk.Until.After(now) {
 		return false
 	}
-	wait := park.Until.Sub(now)
+	wait := pk.Until.Sub(now)
 
-	if !park.TipPoll {
+	if !pk.TipPoll {
 		p.sleepUntilWoken(ctx, wake, wait)
 		return false
 	}

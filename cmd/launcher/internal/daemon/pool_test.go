@@ -2881,7 +2881,7 @@ func TestOccupancyCountsRunningAndStartingPerKind(t *testing.T) {
 		{phase: PhaseBackingOff, flight: slotFlight{kind: research}},
 		{phase: PhaseIdle},
 	}}
-	occ := occupancy(s)
+	occ := occupancyOf(s)
 	if want := map[Kind]int{work: 3, research: 2}; !reflect.DeepEqual(occ.Running, want) {
 		t.Errorf("Running = %v, want %v", occ.Running, want)
 	}
