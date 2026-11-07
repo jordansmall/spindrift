@@ -8,12 +8,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// issueTrackerOnly wraps a forge.IssueTracker so its dynamic type exposes only
-// that interface's method set, hiding optional interfaces such as
-// forge.BlockersLister that the wrapped value's concrete type implements. It
-// simulates a tracker shaped like the local adapter (issue #1744).
-type issueTrackerOnly struct{ forge.IssueTracker }
-
 // resolveEdgeRefs reuses resolveBlockerRef, so each ref's title and state come
 // from the backlog list rather than a second fetch (issue #1744).
 func TestResolveEdgeRefs_ResolvesFromFetch(t *testing.T) {

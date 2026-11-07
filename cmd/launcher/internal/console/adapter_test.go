@@ -135,21 +135,20 @@ func (errTracker) ListOpenIssues() ([]forge.Issue, error) {
 	return nil, errBoom
 }
 
-// Embedding the interface promotes only the methods forge.IssueTracker itself
-// declares, so plainTracker never satisfies a forge.LabeledTracker assertion
-// even when the value it wraps implements StateLabels.
-type plainTracker struct {
-	forge.IssueTracker
-}
+// issueTrackerOnly wraps a forge.IssueTracker so its dynamic type exposes only
+// that interface's method set, hiding every optional interface the wrapped
+// value's concrete type implements, such as forge.LabeledTracker and
+// forge.BlockersLister.
+type issueTrackerOnly struct{ forge.IssueTracker }
 
-// This test pins countRecoverable's !ok branch: a tracker that does not
-// implement forge.LabeledTracker at all (Jira, ADR 0039) reports zero even when
-// a fetched issue carries a label string that would otherwise match.
+// A tracker that exposes no forge.LabeledTracker (Jira, ADR 0039) resolves a
+// nil caps.LabeledTracker, so countRecoverable reports zero even when a fetched
+// issue carries a label string that would otherwise match.
 func TestRefresh_RecoverableCount_NonLabeledTrackerIsZero(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Recoverable: "agent-recoverable"})
 	f.SetIssue(forge.Issue{Number: "1", Title: "looks recoverable", State: forge.IssueOpen, Labels: []string{"agent-recoverable"}})
 
-	msg := Refresh(plainTracker{f})
+	msg := Refresh(issueTrackerOnly{f})
 
 	loaded, ok := msg.(IssuesLoadedMsg)
 	if !ok {
