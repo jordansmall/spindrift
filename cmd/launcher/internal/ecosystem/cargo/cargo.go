@@ -239,8 +239,10 @@ type cargoUpstreamSource struct {
 	IndexURL   string
 }
 
-// cargoSourceReplacement is the source-replacement plan for one manifest route
-// with at least one matching declared cargo registry (issue #3201).
+// cargoSourceReplacement is the source-replacement plan for one distinct
+// upstream index URL served on one manifest route (issues #3201, #3256). A
+// route matching several registries yields one replacement per distinct index
+// URL, all sharing its Prefix. The planner gives Upstreams exactly one entry.
 type cargoSourceReplacement struct {
 	Prefix        string
 	ProxySource   string
@@ -621,7 +623,7 @@ func cargoRepoAwareConfig(port int, prefix string, routes []registrymanifest.Rou
 
 // cargoReplacementPlaceholders renders replacements into one
 // CARGO_REGISTRIES_<PROXY-SOURCE>_TOKEN EnvExport each, deduped by var name:
-// two routes sharing one ProxySource must not emit the same export twice.
+// two replacements sharing one ProxySource must not emit the same export twice.
 func cargoReplacementPlaceholders(replacements []cargoSourceReplacement) []ecosystem.EnvExport {
 	seen := make(map[string]bool)
 	var exports []ecosystem.EnvExport
