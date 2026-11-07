@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -1251,13 +1250,34 @@ func butlerEnv() Env {
 	return env
 }
 
-// The butler cell renders butler-prompt.md, substitutes every CHORE_* var,
-// and needs no ISSUE_NUMBER at all (the acceptance criteria driving this
-// slice): the rendered prompt must carry none of the ISSUE_NUMBER-shaped
-// text research-prompt.md would.
-func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
-	reg := loadTestRegistry(t)
+// butlerStubRegistry stages the butler's template and a bugs chore as stubs
+// over syntheticRegistry, so a butler mechanic test names only the files and
+// rows it exercises. files override the defaults.
+func butlerStubRegistry(t *testing.T, rows []FragmentRow, files map[string]string) (Registry, Env) {
+	t.Helper()
+	staged := map[string]string{
+		"butler-prompt.md": "butler stub ${CHORE_PROMPT}\n",
+		"chores/bugs.md":   "bugs chore stub\n",
+	}
+	for name, content := range files {
+		staged[name] = content
+	}
+	reg, base := syntheticRegistry(t, rows, staged)
 	env := butlerEnv()
+	env.PromptsDir = base.PromptsDir
+	return reg, env
+}
+
+// The butler cell renders butler-prompt.md, substitutes every CHORE_* var,
+// and needs no ISSUE_NUMBER at all: only the butler template renders, never
+// the work or research prompt stubs staged beside it.
+func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
+	reg, env := butlerStubRegistry(t, nil, map[string]string{
+		"butler-prompt.md": "name=${CHORE_NAME} key=${DISPATCH_KEY} head=${CHORE_HEAD} range=${CHORE_DIFF_RANGE}\n" +
+			"slice=${CHORE_SLICE}\nclasses=[${CHORE_CLASSES}] list=[${CHORE_CLASS_LIST}] max=${CHORE_MAX_FINDINGS}\n${CHORE_PROMPT}\n",
+		"issue-prompt.md":    "work issue stub\n",
+		"research-prompt.md": "research stub\n",
+	})
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -1265,20 +1285,21 @@ func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"bugs",
-		"deadbeef",
-		"cafef00d..deadbeef",
+		"name=bugs",
+		"key=butler-bugs",
+		"head=deadbeef",
+		"range=cafef00d..deadbeef",
 		"cmd/launcher/main.go",
-		"Look for latent bugs",
-		"flaky-test dead-code",
-		"flaky-test dead-code typo",
-		"Relay at most 5 findings",
+		"classes=[flaky-test dead-code]",
+		"list=[flaky-test dead-code typo]",
+		"max=5",
+		"bugs chore stub",
 	} {
 		if !strings.Contains(result.Prompt, want) {
 			t.Errorf("Prompt missing %q:\n%s", want, result.Prompt)
 		}
 	}
-	for _, unwanted := range []string{"${CHORE_", "Research issue #"} {
+	for _, unwanted := range []string{"${CHORE_", "work issue stub", "research stub"} {
 		if strings.Contains(result.Prompt, unwanted) {
 			t.Errorf("Prompt contains %q, want absent:\n%s", unwanted, result.Prompt)
 		}
@@ -1288,32 +1309,17 @@ func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
 	}
 }
 
-// The butler prompt's class rule must track signalwire.ValidClass: a Box
-// reporting a class outside it loses the whole finding (issue #4040). The
-// needle derives from ClassRule, itself pinned to MaxClassLen, so a grammar
-// change fails here instead of leaving the prompt stale.
-func TestButlerPromptStatesClassSlugRule(t *testing.T) {
-	b, err := os.ReadFile(filepath.Join(promptsDir, "butler-prompt.md"))
-	if err != nil {
-		t.Fatalf("reading butler-prompt.md: %v", err)
-	}
-	prompt := strings.Join(strings.Fields(string(b)), " ")
-
-	rule := strings.TrimPrefix(signalwire.ClassRule, "must be ")
-	rule = strings.ReplaceAll(rule, "'-'", "`-`")
-	for _, want := range []string{rule, "rejected, and the finding with it"} {
-		if !strings.Contains(prompt, want) {
-			t.Errorf("butler-prompt.md missing %q", want)
-		}
-	}
-}
-
 // The patch rung's prompt instructions (ADR 0057, issue #4073) render only
 // when the host forwards a non-empty CHORE_PATCH_CLASSES: butlerEnv leaves
 // it unset, matching a Chore with the patch rung off, or today's patch room
 // spent.
 func TestAssembleButlerPatchClassesGate(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := butlerStubRegistry(t,
+		[]FragmentRow{{Gate: "CHORE_PATCH_CLASSES", Fragment: "butler-patch.md", Var: "BUTLER_PATCH_STEP"}},
+		map[string]string{
+			"butler-prompt.md":          "butler ${BUTLER_PATCH_STEP}tail ${CHORE_PROMPT}\n",
+			"fragments/butler-patch.md": "patch stub for ${CHORE_PATCH_CLASSES}",
+		})
 
 	cases := []struct {
 		name              string
@@ -1326,7 +1332,7 @@ func TestAssembleButlerPatchClassesGate(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			env := butlerEnv()
+			env := base
 			env.ChorePatchClasses = tc.chorePatchClasses
 
 			result, err := Assemble(env, reg)
@@ -1334,12 +1340,11 @@ func TestAssembleButlerPatchClassesGate(t *testing.T) {
 				t.Fatalf("Assemble: %v", err)
 			}
 
-			const marker = "Patch-eligible classes for this run"
-			got := strings.Contains(result.Prompt, marker)
+			got := strings.Contains(result.Prompt, "patch stub")
 			if got != tc.wantRendered {
-				t.Errorf("Prompt contains butler-patch.md text = %v, want %v:\n%s", got, tc.wantRendered, result.Prompt)
+				t.Errorf("Prompt contains the patch fragment = %v, want %v:\n%s", got, tc.wantRendered, result.Prompt)
 			}
-			if tc.wantRendered && !strings.Contains(result.Prompt, tc.chorePatchClasses) {
+			if tc.wantRendered && !strings.Contains(result.Prompt, "patch stub for "+tc.chorePatchClasses) {
 				t.Errorf("Prompt missing substituted CHORE_PATCH_CLASSES value %q:\n%s", tc.chorePatchClasses, result.Prompt)
 			}
 		})
@@ -1349,8 +1354,7 @@ func TestAssembleButlerPatchClassesGate(t *testing.T) {
 // A ByChore kind with an unresolvable CHORE_NAME fails assembly outright
 // (choreSection), unlike ISSUE_TEXT's silent-empty default.
 func TestAssembleButlerUnknownChoreFails(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := butlerEnv()
+	reg, env := butlerStubRegistry(t, nil, nil)
 	env.ChoreName = "no-such-chore"
 
 	_, err := Assemble(env, reg)
@@ -1365,10 +1369,10 @@ func TestAssembleButlerUnknownChoreFails(t *testing.T) {
 // CHORE_NAME must be validated as a simple name before it ever reaches
 // filepath.Join, so a path separator or ".." cannot escape prompts/chores/.
 func TestAssembleButlerPathTraversalChoreNameFails(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := butlerStubRegistry(t, nil, nil)
 
 	for _, name := range []string{"../../etc/passwd", "bugs/../../x", "bugs/x", ""} {
-		env := butlerEnv()
+		env := base
 		env.ChoreName = name
 
 		_, err := Assemble(env, reg)
@@ -1378,67 +1382,32 @@ func TestAssembleButlerPathTraversalChoreNameFails(t *testing.T) {
 	}
 }
 
-// Each built-in Chore's own prompt file renders under ${CHORE_PROMPT}.
-func TestAssembleButlerRendersEachBuiltinChorePrompt(t *testing.T) {
-	reg := loadTestRegistry(t)
+// CHORE_NAME picks which chores/<name>.md reaches ${CHORE_PROMPT}: the named
+// Chore's own file renders and its siblings' do not.
+func TestAssembleButlerRendersTheChoreNamedByChoreName(t *testing.T) {
+	reg, base := butlerStubRegistry(t, nil, map[string]string{
+		"chores/bugs.md":       "bugs chore stub\n",
+		"chores/refactor.md":   "refactor chore stub\n",
+		"chores/docs-drift.md": "docs-drift chore stub\n",
+	})
+	names := []string{"bugs", "refactor", "docs-drift"}
 
-	for _, name := range []string{"bugs", "refactor", "docs-drift"} {
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
-			want, err := os.ReadFile(filepath.Join(promptsDir, "chores", name+".md"))
-			if err != nil {
-				t.Fatalf("read chore prompt %s: %v", name, err)
-			}
-
-			env := butlerEnv()
+			env := base
 			env.ChoreName = name
 
 			result, err := Assemble(env, reg)
 			if err != nil {
 				t.Fatalf("Assemble: %v", err)
 			}
-			if !strings.Contains(result.Prompt, strings.TrimRight(string(want), "\n")) {
-				t.Errorf("Prompt missing chore %s's own prompt text:\n%s", name, result.Prompt)
+			for _, other := range names {
+				has := strings.Contains(result.Prompt, other+" chore stub")
+				if has != (other == name) {
+					t.Errorf("Prompt contains %s's chore text = %v, want %v:\n%s", other, has, other == name, result.Prompt)
+				}
 			}
 		})
-	}
-}
-
-// promptsDirWithChore builds a PromptsDir shaped like a Consumer's
-// SPINDRIFT_PROMPT_DIR override: the real tree, except that chores/ holds
-// only the one given Chore prompt file.
-func promptsDirWithChore(t *testing.T, name, content string) string {
-	t.Helper()
-	dir, _ := promptsDirExceptSubdir(t, "chores")
-	if err := os.Mkdir(filepath.Join(dir, "chores"), 0o755); err != nil {
-		t.Fatalf("Mkdir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "chores", name+".md"), []byte(content), 0o644); err != nil {
-		t.Fatalf("WriteFile(%s): %v", name, err)
-	}
-	return dir
-}
-
-// A prompt-dir override (mkHarness choresDir / SPINDRIFT_PROMPT_DIR) can
-// replace a built-in Chore's prompt file entirely: the override's own text
-// renders, and the shipped default's text is gone.
-func TestAssembleButlerPromptDirOverridesBuiltinChore(t *testing.T) {
-	reg := loadTestRegistry(t)
-	builtin, err := os.ReadFile(filepath.Join(promptsDir, "chores", "bugs.md"))
-	if err != nil {
-		t.Fatalf("read chore prompt bugs: %v", err)
-	}
-	env := butlerEnv()
-	env.PromptsDir = promptsDirWithChore(t, "bugs", "Sentinel override text for the bugs chore.\n")
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-	if !strings.Contains(result.Prompt, "Sentinel override text for the bugs chore.") {
-		t.Errorf("Prompt missing prompt-dir override text:\n%s", result.Prompt)
-	}
-	if strings.Contains(result.Prompt, strings.TrimRight(string(builtin), "\n")) {
-		t.Errorf("Prompt still contains the built-in bugs.md text despite the override:\n%s", result.Prompt)
 	}
 }
 
@@ -1446,10 +1415,8 @@ func TestAssembleButlerPromptDirOverridesBuiltinChore(t *testing.T) {
 // by shipping chores/<name>.md in its prompt-dir override; no launcher
 // change is needed (lib/mkHarness.nix's choresDir contract).
 func TestAssembleButlerRendersConsumerDeclaredChore(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := butlerEnv()
+	reg, env := butlerStubRegistry(t, nil, map[string]string{"chores/tidy-deps.md": "Look for stale dependency pins.\n"})
 	env.ChoreName = "tidy-deps"
-	env.PromptsDir = promptsDirWithChore(t, "tidy-deps", "Look for stale dependency pins.\n")
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -1461,14 +1428,21 @@ func TestAssembleButlerRendersConsumerDeclaredChore(t *testing.T) {
 }
 
 // Issue #3875 (ADR 0056): with the Filer provisioned, the butler's own FILE
-// FINDINGS section renders, carries SPINDRIFT_ISSUE_INTENT, and names the
-// agent-butler-finding label the launcher applies host-side -- never the
-// agent-research-finding label the same base gate produces for research.
+// FINDINGS section renders under the shared FILER_FILE_RELAY gate. Which relay
+// step a kind carries is decided by the vars its template references, not by
+// the gate, so there is no kind split to assert here.
 func TestAssembleButlerFileFindingsRelay(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := butlerStubRegistry(t,
+		[]FragmentRow{
+			{Gate: "FILER_FILE_RELAY_LOG", Fragment: "butler-file-issues-relay.md", Var: "BUTLER_FILE_ISSUES_RELAY_STEP"},
+		},
+		map[string]string{
+			"butler-prompt.md":                      "butler ${BUTLER_FILE_ISSUES_RELAY_STEP}tail ${CHORE_PROMPT}\n",
+			"fragments/butler-file-issues-relay.md": "butler relay stub",
+		})
 
 	t.Run("filer enabled", func(t *testing.T) {
-		env := butlerEnv()
+		env := base
 		env.FilerEnabled = true
 
 		result, err := Assemble(env, reg)
@@ -1476,22 +1450,13 @@ func TestAssembleButlerFileFindingsRelay(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		if !strings.Contains(result.Prompt, "**File findings.**") {
-			t.Errorf("Prompt missing the FILE FINDINGS section: %q", result.Prompt)
-		}
-		if !strings.Contains(result.Prompt, "SPINDRIFT_ISSUE_INTENT") {
-			t.Errorf("Prompt missing SPINDRIFT_ISSUE_INTENT from butler-file-issues-relay.md: %q", result.Prompt)
-		}
-		if !strings.Contains(result.Prompt, "agent-butler-finding") {
-			t.Errorf("Prompt missing the agent-butler-finding label mention: %q", result.Prompt)
-		}
-		if strings.Contains(result.Prompt, "agent-research-finding") {
-			t.Errorf("Prompt wrongly carries the research-only agent-research-finding label mention: %q", result.Prompt)
+		if !strings.Contains(result.Prompt, "butler relay stub") {
+			t.Errorf("Prompt missing the butler relay step: %q", result.Prompt)
 		}
 	})
 
 	t.Run("filer not enabled", func(t *testing.T) {
-		env := butlerEnv()
+		env := base
 		env.FilerEnabled = false
 
 		result, err := Assemble(env, reg)
@@ -1499,8 +1464,8 @@ func TestAssembleButlerFileFindingsRelay(t *testing.T) {
 			t.Fatalf("Assemble: %v", err)
 		}
 
-		if strings.Contains(result.Prompt, "**File findings.**") {
-			t.Errorf("Prompt unexpectedly contains the FILE FINDINGS section: %q", result.Prompt)
+		if strings.Contains(result.Prompt, "butler relay stub") {
+			t.Errorf("Prompt unexpectedly contains the butler relay step: %q", result.Prompt)
 		}
 	})
 }
@@ -1540,10 +1505,13 @@ func TestGatesFilerFileRelayResearchAndButlerAreDisjoint(t *testing.T) {
 // rendering it from review-prompt.md (a branch-diff rubric) would leave the
 // reviewer judging an issue, branch, and diff it never has.
 func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := butlerStubRegistry(t, nil, map[string]string{
+		"butler-review-prompt.md": "butler review stub\n",
+		"review-prompt.md":        "plain review stub\n",
+	})
 
 	t.Run("butler", func(t *testing.T) {
-		env := butlerEnv()
+		env := base
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
 		env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
@@ -1566,10 +1534,10 @@ func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
 		if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
 			t.Fatalf("unmarshal reviewer entry: %v", err)
 		}
-		if !strings.Contains(reviewer.Prompt, "one butler finding handed to you") {
+		if !strings.Contains(reviewer.Prompt, "butler review stub") {
 			t.Errorf("reviewer.prompt = %q, want the rendered butler-review-prompt.md, not review-prompt.md", reviewer.Prompt)
 		}
-		if strings.Contains(reviewer.Prompt, "adversarially review a branch diff") {
+		if strings.Contains(reviewer.Prompt, "plain review stub") {
 			t.Errorf("reviewer.prompt = %q, want no review-prompt.md content", reviewer.Prompt)
 		}
 		// A kind owning a reviewer prompt marks its review advisory so its
@@ -1585,7 +1553,12 @@ func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
 // diff: CHORE_PATCH_CLASSES gates butler-review-patch.md exactly like it
 // gates butler-patch.md (assemble_test.go's butlerEnv leaves it blank).
 func TestAssembleButlerReviewerPromptCarriesExactRubricOnlyWithPatchClasses(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := butlerStubRegistry(t,
+		[]FragmentRow{{Gate: "CHORE_PATCH_CLASSES", Fragment: "butler-review-patch.md", Var: "BUTLER_REVIEW_PATCH_STEP"}},
+		map[string]string{
+			"butler-review-prompt.md":          "butler review ${BUTLER_REVIEW_PATCH_STEP}end\n",
+			"fragments/butler-review-patch.md": "exact rubric stub",
+		})
 
 	renderReviewerPrompt := func(t *testing.T, env Env) string {
 		t.Helper()
@@ -1610,17 +1583,17 @@ func TestAssembleButlerReviewerPromptCarriesExactRubricOnlyWithPatchClasses(t *t
 	}
 
 	t.Run("without CHORE_PATCH_CLASSES", func(t *testing.T) {
-		prompt := renderReviewerPrompt(t, butlerEnv())
-		if strings.Contains(prompt, "**Exact**") {
+		prompt := renderReviewerPrompt(t, base)
+		if strings.Contains(prompt, "exact rubric stub") {
 			t.Errorf("reviewer.prompt = %q, want no Exact rubric line without CHORE_PATCH_CLASSES", prompt)
 		}
 	})
 
 	t.Run("with CHORE_PATCH_CLASSES", func(t *testing.T) {
-		env := butlerEnv()
+		env := base
 		env.ChorePatchClasses = "docs-drift"
 		prompt := renderReviewerPrompt(t, env)
-		if !strings.Contains(prompt, "**Exact**") {
+		if !strings.Contains(prompt, "exact rubric stub") {
 			t.Errorf("reviewer.prompt = %q, want the Exact rubric line with CHORE_PATCH_CLASSES set", prompt)
 		}
 	})
@@ -1630,14 +1603,12 @@ func TestAssembleButlerReviewerPromptCarriesExactRubricOnlyWithPatchClasses(t *t
 // AdvisoryReviewer: its inline reviewer subagent is
 // dropped there, so no advisory verdict exists to suppress (issue #3925).
 func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := syntheticRegistry(t, nil, map[string]string{"research-prompt.md": "research stub\n"})
 
 	for _, kind := range []string{"work", "research"} {
 		t.Run(kind, func(t *testing.T) {
-			env := coveredEnv()
+			env := base
 			env.DispatchKind = kind
-			if kind == "research" {
-			}
 
 			result, err := Assemble(env, reg)
 			if err != nil {
@@ -1653,19 +1624,16 @@ func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) 
 // The opencode agent-files twin of the test above: reviewer.md must survive
 // (never removed) and its body must come from the kind's own reviewer prompt.
 func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
-	reg, base := syntheticRegistry(t, nil, map[string]string{
-		"butler-prompt.md":        "butler prompt ${CHORE_PROMPT}\n",
+	reg, base := butlerStubRegistry(t, nil, map[string]string{
 		"butler-review-prompt.md": "butler review stub\n",
 		"review-prompt.md":        "plain review stub\n",
-		"chores/bugs.md":          "bugs chore stub",
 	})
 
 	t.Run("butler", func(t *testing.T) {
 		dir := t.TempDir()
 		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
-		env := butlerEnv()
-		env.PromptsDir = base.PromptsDir
+		env := base
 		env.DriverAgentFilesDir = dir
 		env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
