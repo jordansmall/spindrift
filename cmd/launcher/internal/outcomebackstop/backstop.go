@@ -90,19 +90,23 @@ func Run(cfg Config, w io.Writer) error {
 
 	note, salvageOK := salvage(git, note)
 
-	count, err := commitCount(git, cfg.Base, cfg.Branch)
-	if err != nil {
-		// Assume work exists rather than let an unresolvable count skip the
-		// always-emit outcome invariant (#593): a needless push attempt beats a
-		// "no work to preserve" note reporting the wrong thing.
-		count = 1
+	count, countErr := commitCount(git, cfg.Base, cfg.Branch)
+	if countErr != nil {
+		note += fmt.Sprintf("; could not count commits on %s: %v", cfg.Branch, countErr)
 	}
+	viaOutbox := cfg.HostMediatedRemote || (!cfg.WriteEnabled && cfg.OutboxRelayCapable)
 
 	status := "blocked"
 	switch {
 	case !salvageOK:
 		// A tree that could not be checked or cleaned is not a landed state.
-	case count == 0:
+	case countErr != nil && viaOutbox:
+		// bundleout fails on the same rev-list error and writes no bundle
+		// (bundleout.go), so nothing is relayed.
+	case countErr == nil && count == 0:
+		// An unknown count on the push arm falls through to the push: a
+		// successful push is its own evidence, and a needless attempt beats a
+		// "no work to preserve" note reporting the wrong thing (#593).
 		note += "; no work to preserve"
 	case cfg.HostMediatedRemote:
 		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
@@ -165,7 +169,10 @@ func salvage(git func(args ...string) (string, string, error), note string) (str
 func commitCount(git func(args ...string) (string, string, error), base, branch string) (int, error) {
 	stdout, stderr, err := git("rev-list", "--count", base+".."+branch)
 	if err != nil {
-		return 0, fmt.Errorf("outcomebackstop: rev-list --count %s..%s: %w: %s", base, branch, err, stderr)
+		if cause := firstLine(stderr); cause != "" {
+			return 0, fmt.Errorf("outcomebackstop: rev-list --count %s..%s: %w: %s", base, branch, err, cause)
+		}
+		return 0, fmt.Errorf("outcomebackstop: rev-list --count %s..%s: %w", base, branch, err)
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(stdout))
 	if err != nil {
@@ -206,6 +213,17 @@ func pushWithRetry(git func(args ...string) (string, string, error), clock retry
 func leaseRejected(stderr string) bool {
 	return strings.Contains(stderr, "(remote ref updated since checkout)") ||
 		strings.Contains(stderr, "(stale info)")
+}
+
+// firstLine suits rev-list: git leads with the "fatal:" cause and trails hint
+// lines, the reverse of push's trailing status text that lastLine picks.
+func firstLine(s string) string {
+	for _, l := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+		if strings.TrimSpace(l) != "" {
+			return l
+		}
+	}
+	return ""
 }
 
 func lastLine(s string) string {
