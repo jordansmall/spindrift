@@ -622,3 +622,30 @@ func TestCoveredBy(t *testing.T) {
 		})
 	}
 }
+
+// locationsBeyond matches paths by exact bytes: a path with a trailing space
+// is compared against its own hunks and rendered untrimmed, not failed open.
+func TestLocationsBeyondTrailingSpacePath(t *testing.T) {
+	const path = "foo "
+	delta := landdelta.Delta{
+		Known:  true,
+		Paths:  []string{path},
+		Ranges: map[string][]landdelta.Range{path: {{Start: 10, Count: 2}}},
+	}
+	cases := []struct {
+		name       string
+		line, end  int
+		wantBeyond []string
+	}{
+		{name: "span covering the hunk", line: 10, end: 11},
+		{name: "line outside the hunk", line: 50, wantBeyond: []string{"foo :10-11"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := locationsBeyond(delta, []Location{{Path: path, Line: c.line, End: c.end}})
+			if !reflect.DeepEqual(got, c.wantBeyond) {
+				t.Errorf("locationsBeyond(line %d) = %q, want %q", c.line, got, c.wantBeyond)
+			}
+		})
+	}
+}
