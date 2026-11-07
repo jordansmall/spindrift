@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
 	"spindrift.dev/launcher/internal/runner"
@@ -2636,13 +2637,13 @@ func TestKill_RemovalFailureOnExistingContainer_ReturnsError(t *testing.T) {
 }
 
 // loadImage issues `load -i <archive>` followed by `tag spindrift:latest
-// <imageTag>`, in that order.
+// <image>`, in that order.
 func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
 	script, dir := runnertest.NewFakeCLI(t,
 		runnertest.Call{},
 		runnertest.Call{},
 	)
-	a := &ociAdapter{cli: script, imageTag: "spindrift:abc123"}
+	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
 
 	if err := a.loadImage("/tmp/spindrift-image.tar"); err != nil {
 		t.Fatalf("loadImage: %v", err)
@@ -2662,7 +2663,7 @@ func TestLoadImage_InvokesLoadThenTag(t *testing.T) {
 }
 
 // loadImage re-tags from "<repo>:latest" where repo is derived from the
-// adapter's own imageTag, not a hardcoded "spindrift:latest", so a
+// adapter's own image tag, not a hardcoded "spindrift:latest", so a
 // driver-scoped archive (an opencode image loads as
 // "spindrift-opencode:latest") is found by the re-tag (#262).
 func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
@@ -2670,7 +2671,7 @@ func TestLoadImage_DriverScopedRepo_TagsFromMatchingSourceTag(t *testing.T) {
 		runnertest.Call{},
 		runnertest.Call{},
 	)
-	a := &ociAdapter{cli: script, imageTag: "spindrift-opencode:abc123"}
+	a := &ociAdapter{cli: script, image: "spindrift-opencode:abc123"}
 
 	if err := a.loadImage("/tmp/spindrift-opencode-image.tar"); err != nil {
 		t.Fatalf("loadImage: %v", err)
@@ -2813,7 +2814,6 @@ func TestEnsureReady_ImageAbsentFallsBackToContainerBuild(t *testing.T) {
 		cli:             cliScript,
 		image:           "spindrift:abc123",
 		imageDrv:        "/nix/store/fake.drv",
-		imageTag:        "spindrift:abc123",
 		nixBuilderImage: "docker.io/nixos/nix:latest", // unpinned, so the warning fires
 		nixVolume:       "spindrift-nix",
 		pwd:             "/work",
@@ -2914,7 +2914,6 @@ func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
 		image:        "spindrift:abc123",
 		imageDrv:     "/nix/store/fake.drv",
 		imageArchive: "/tmp/spindrift-image.tar",
-		imageTag:     "spindrift:abc123",
 	}
 
 	var ensureErr error
@@ -2955,7 +2954,6 @@ func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
 		cli:             cliScript,
 		image:           "spindrift:abc123",
 		imageDrv:        "/nix/store/fake.drv",
-		imageTag:        "spindrift:abc123",
 		nixBuilderImage: pinned,
 		nixVolume:       "custom-nix-vol",
 		pwd:             pwd,
@@ -3021,7 +3019,6 @@ func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
 		cli:             cliScript,
 		image:           "spindrift:abc123",
 		imageDrv:        "/nix/store/fake.drv",
-		imageTag:        "spindrift:abc123",
 		nixBuilderImage: "docker.io/nixos/nix@sha256:0123456789abcdef",
 		nixVolume:       "spindrift-nix",
 		pwd:             t.TempDir(),
@@ -3224,7 +3221,7 @@ func TestNoHostLoopbackNetwork(t *testing.T) {
 // rancher (nerdctl) render bridge, through the real constructor.
 func TestNew_NoHostLoopbackRendersRuntimeDialect(t *testing.T) {
 	for runtime, want := range map[string]string{"podman": "pasta", "docker": "bridge", "rancher": "bridge"} {
-		r, err := New(runner.Config{Runtime: runtime, NetworkMode: runner.NetworkModeNoHostLoopback}, runnertest.Lookup(map[string]string{}), "/pwd")
+		r, err := New(runner.Config{Runtime: runtime, NetworkMode: runner.NetworkModeNoHostLoopback}, inputdoc.OCIArtifacts{}, runnertest.Lookup(map[string]string{}), "/pwd")
 		if err != nil {
 			t.Fatal(err)
 		}

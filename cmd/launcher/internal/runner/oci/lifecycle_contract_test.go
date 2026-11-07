@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 	"spindrift.dev/launcher/internal/runner/runnertest/contract"
@@ -19,8 +20,17 @@ type ociLifecycleHarness struct{}
 
 var _ contract.LifecycleHarness = ociLifecycleHarness{}
 
-func (ociLifecycleHarness) adapter(script string) *ociAdapter {
-	return &ociAdapter{cli: script, image: "spindrift:test"}
+func (ociLifecycleHarness) adapter(t *testing.T, script string) *ociAdapter {
+	t.Helper()
+	// The fake CLI's path stands in for Runtime: runner.BinaryFor passes an
+	// unknown runtime through unchanged as the CLI to invoke.
+	r, err := New(runner.Config{Runtime: script},
+		inputdoc.OCIArtifacts{ImageTag: inputdoc.ValueOf("spindrift:test")},
+		runnertest.Lookup(nil), "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return r.(*ociAdapter)
 }
 
 func (h ociLifecycleHarness) Exiting(t *testing.T, _ string, code int) runner.Runner {
@@ -29,7 +39,7 @@ func (h ociLifecycleHarness) Exiting(t *testing.T, _ string, code int) runner.Ru
 		"ps":      {},
 		"run":     {Exit: code},
 	})
-	return h.adapter(script)
+	return h.adapter(t, script)
 }
 
 func (h ociLifecycleHarness) Foreign(t *testing.T, name string) runner.Runner {
@@ -39,7 +49,7 @@ func (h ociLifecycleHarness) Foreign(t *testing.T, name string) runner.Runner {
 		"inspect": {Stdout: inspectJSONStdout(t, "cid-1", "running", time.Now())},
 		"ps":      {Stdout: name},
 	})
-	return h.adapter(script)
+	return h.adapter(t, script)
 }
 
 func (h ociLifecycleHarness) Killable(t *testing.T, name string) (runner.Runner, func()) {
@@ -71,7 +81,7 @@ func (h ociLifecycleHarness) Killable(t *testing.T, name string) (runner.Runner,
 			return err == nil
 		})
 	}
-	return h.adapter(script), started
+	return h.adapter(t, script), started
 }
 
 func TestOCI_LifecycleContract(t *testing.T) {

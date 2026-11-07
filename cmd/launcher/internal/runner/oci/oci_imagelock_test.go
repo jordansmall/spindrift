@@ -129,7 +129,6 @@ func TestEnsureReady_LockUncontended_StillRunsHostBuild(t *testing.T) {
 		image:        "spindrift:abc123",
 		imageDrv:     "/nix/store/fake.drv",
 		imageArchive: "/tmp/spindrift-image.tar",
-		imageTag:     "spindrift:abc123",
 	}
 
 	if err := a.EnsureReady(); err != nil {
@@ -178,7 +177,6 @@ func TestEnsureReady_LockAcquireFails_ContinuesUnlockedWithWarning(t *testing.T)
 		image:        "spindrift:abc123",
 		imageDrv:     "/nix/store/fake.drv",
 		imageArchive: "/tmp/spindrift-image.tar",
-		imageTag:     "spindrift:abc123",
 	}
 
 	var ensureErr error

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 	"spindrift.dev/launcher/internal/runner/runnertest/contract"
@@ -43,11 +44,15 @@ func (ociRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	a := &ociAdapter{
-		cli:         "podman",
-		image:       contractImage,
-		network:     runner.Config{Runtime: "podman", NetworkMode: l.Network}.OCINetwork("", "pasta"),
-		mountParams: runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
+	cfg := runner.Config{
+		Runtime:     "podman",
+		NetworkMode: l.Network,
+		MountParams: runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
+	}
+	art := inputdoc.OCIArtifacts{ImageTag: inputdoc.ValueOf(contractImage)}
+	a, err := New(cfg, art, runnertest.Lookup(nil), "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
 	if err := a.Run(l.Box); err != nil {
 		t.Fatalf("Run: %v", err)

@@ -29,10 +29,9 @@ import (
 // are one adapter differing only by CLI name.
 type ociAdapter struct {
 	cli             string // "podman" or "docker"
-	image           string // tag to run
+	image           string // content-hash tag the Box runs and the archive is re-tagged to
 	imageArchive    string // baked nix store path to the OCI tarball
 	imageDrv        string // baked .drv path; used by nix build for host realize
-	imageTag        string // content-hash tag applied after loading
 	nixBuilderImage string // fallback container image that carries nix
 	nixVolume       string // named volume for /nix (incremental rebuilds)
 	flakeImageAttr  string // nix flake attr for the image (.#packages.x.agent-image)
@@ -61,28 +60,38 @@ var Strategy = runner.Strategy{
 	RawNetworkKnobs: RawNetworkKnobs,
 }
 
-func newRunner(cfg runner.Config, _ inputdoc.Artifacts, l runner.KnobLookup, pwd string) (runner.Runner, error) {
-	return New(cfg, l, pwd)
+func newRunner(cfg runner.Config, art inputdoc.Artifacts, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+	return New(cfg, ociPart(art), l, pwd)
 }
 
-// New constructs an OCI adapter from cfg and the family knobs read through l;
-// the error is a malformed family knob. pwd is the working directory the
-// container-fallback build mounts as /workspace, a per-invocation dependency
-// passed separately from cfg.
-func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+// ociPart returns the oci family's artifacts, or the zero part when there are
+// none: the document selected another RUNNER_KIND, or a direct binary
+// invocation passed no --input document.
+func ociPart(art inputdoc.Artifacts) inputdoc.OCIArtifacts {
+	if art.OCI == nil {
+		return inputdoc.OCIArtifacts{}
+	}
+	return *art.OCI
+}
+
+// New constructs an OCI adapter from cfg, art (the OCI part of the Launcher
+// input artifacts) and the family knobs read through l; the error is a
+// malformed family knob. pwd is the working directory the container-fallback
+// build mounts as /workspace, a per-invocation dependency passed separately
+// from cfg.
+func New(cfg runner.Config, art inputdoc.OCIArtifacts, l runner.KnobLookup, pwd string) (runner.Runner, error) {
 	k, err := ReadKnobs(l)
 	if err != nil {
 		return nil, err
 	}
 	return &ociAdapter{
 		cli:             runner.BinaryFor(cfg.Runtime),
-		image:           cfg.Image,
-		imageArchive:    cfg.ImageArchive,
-		imageDrv:        cfg.ImageDrv,
-		imageTag:        cfg.ImageTag,
-		nixBuilderImage: cfg.NixBuilderImage,
-		nixVolume:       cfg.NixVolume,
-		flakeImageAttr:  cfg.FlakeImageAttr,
+		image:           art.ImageTag.String(),
+		imageArchive:    art.ImageArchive.String(),
+		imageDrv:        art.ImageDrv.String(),
+		nixBuilderImage: art.NixBuilderImage.String(),
+		nixVolume:       art.NixVolume.String(),
+		flakeImageAttr:  art.FlakeImageAttr.String(),
 		pwd:             pwd,
 		mountParams:     cfg.MountParams,
 		network:         cfg.OCINetwork(k.PodmanNetwork, noHostLoopbackNetwork(runner.BinaryFor(cfg.Runtime))),
@@ -254,16 +263,16 @@ func (a *ociAdapter) loadImage(archive string) error {
 		return fmt.Errorf("load failed: %w", err)
 	}
 	// buildLayeredImage names the archive "<repo>:latest" where repo matches
-	// a.imageTag's own repo, so re-tag from that derived source rather than a
+	// a.image's own repo, so re-tag from that derived source rather than a
 	// hardcoded "spindrift:latest", which misses a driver-scoped archive.
-	sourceTag := freshness.ImageRepo(a.imageTag) + ":latest"
-	tag := exec.Command(a.cli, "tag", sourceTag, a.imageTag)
+	sourceTag := freshness.ImageRepo(a.image) + ":latest"
+	tag := exec.Command(a.cli, "tag", sourceTag, a.image)
 	tag.Stdout = os.Stdout
 	tag.Stderr = os.Stderr
 	if err := tag.Run(); err != nil {
 		return fmt.Errorf("tag failed: %w", err)
 	}
-	fmt.Printf("==> done: %s + %s\n", sourceTag, a.imageTag)
+	fmt.Printf("==> done: %s + %s\n", sourceTag, a.image)
 	return nil
 }
 
