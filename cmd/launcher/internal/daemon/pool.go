@@ -93,7 +93,7 @@ type state struct {
 	self SelfUpdate
 	// selfSince is when self.Phase last changed; mutate maintains it, so no
 	// phase assignment site needs to. Kept off self so self's zero test and
-	// equality comparisons ignore it; snapshotLocked publishes it.
+	// equality comparisons ignore it; projectStatus publishes it.
 	selfSince time.Time
 
 	// wake is the current wake generation: a parked slot sleeps on a context
@@ -150,7 +150,7 @@ func (s *state) tipMoved(now time.Time) (lifted []Kind) {
 // slotState is one slot's own state: where it is in its iteration, and
 // what its child has in flight while it is running. flight is meaningful
 // only while phase == PhaseRunning: finishChild zeroes it on the way out
-// of that phase, and snapshotLocked reads it for a running slot only, so a
+// of that phase, and projectStatus reads it for a running slot only, so a
 // flight a bare setPhase left behind is never reachable as stale occupancy
 // data.
 type slotState struct {
@@ -217,7 +217,9 @@ func (p *pool) mutate(f func(s *state) []Event) {
 	}
 	p.seq++
 	seq := p.seq
-	snap := p.snapshotLocked()
+	// Clock is read under p.mu: no Clock takes it. One hold keeps the
+	// projection from stitching state of two instants together.
+	snap := projectStatus(&p.st, p.cfg, p.clk.Now())
 	p.mu.Unlock()
 	p.publish(seq, snap)
 }
@@ -311,7 +313,7 @@ const (
 // outsideWindowReason and walkExhaustedReason are the two Reason strings an
 // awake_close event can carry (the ordinary shut-window case, and Until's
 // walk exhausting untilHorizon without finding an opening). walkExhaustedReason
-// also surfaces on a non-halted Status (asleep or working) via snapshotLocked,
+// also surfaces on a non-halted Status (asleep or working) via projectStatus,
 // since the same degraded walk floors every checks[].nextCheck there too.
 const (
 	outsideWindowReason = "outside the Awake window"
@@ -880,19 +882,6 @@ func (p *pool) flightReport(slot int) slotFlight {
 	return p.st.slots[slot].flight
 }
 
-// working reports whether any slot's phase is running — snapshotLocked's
-// StateWorking predicate, one bool derived from the same per-slot phase
-// siblingsEngaged reads, rather than a second occupancy notion tracked
-// alongside it.
-func (s *state) working() bool {
-	for _, ss := range s.slots {
-		if ss.phase == PhaseRunning {
-			return true
-		}
-	}
-	return false
-}
-
 // siblingsEngaged reports whether any slot other than slot could release a
 // claim the none-dispatchable read found blocked (#3922's can-it-explain-
 // the-read test): a sibling PhaseRunning a non-butler child. Every other
@@ -1450,191 +1439,6 @@ func (p *pool) noteTipMoved(slot int, revision string) {
 		}
 		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue or end a reported kind's on_tip_move wait", Kinds: lifted}}
 	})
-}
-
-// snapshot takes p.mu and builds a Status from pool state alone; see
-// snapshotLocked for the build itself. Kept for the package's own tests:
-// mutate is the one production path to a fresh snapshot, and no production
-// caller reaches for this one.
-func (p *pool) snapshot() Status {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.snapshotLocked()
-}
-
-// snapshotLocked builds a Status from pool state alone; the caller must
-// already hold p.mu. Building the whole Status under one lock hold means a
-// reader never sees state from two different instants stitched together,
-// and lets it call p.clk.Now() under that same hold — safe, since no Clock
-// implementation takes p.mu — so readyAt can tell a kind whose deadline has
-// already elapsed from one still gated, the same now-aware check idleSleep
-// makes outside the lock.
-func (p *pool) snapshotLocked() Status {
-	slots := make([]SlotStatus, len(p.st.slots))
-	for i, ss := range p.st.slots {
-		slots[i] = SlotStatus{Slot: i, Phase: ss.phase, Busy: ss.phase == PhaseRunning, Since: ss.since.UTC().Format(time.RFC3339)}
-		if ss.phase != PhaseRunning {
-			continue
-		}
-		slots[i].Kind = ss.flight.kind
-		slots[i].Revision = ss.flight.revision
-		slots[i].ChildStart = ss.flight.childStart.time
-		slots[i].ChildStartN = ss.flight.childStart.n
-		_, slots[i].Chore = ss.flight.key.Fields()
-		slots[i].Pass = ss.flight.pass
-		slots[i].Model = ss.flight.model
-		slots[i].ModelRole = ss.flight.modelRole
-		slots[i].CIWait = ss.flight.ciWait.pr != ""
-		slots[i].PRURL = ss.flight.ciWait.pr
-		slots[i].CIRunURL = ss.flight.ciWait.runURL
-		if !ss.flight.imageBuildSince.IsZero() {
-			slots[i].ImageBuildSince = ss.flight.imageBuildSince.UTC().Format(time.RFC3339)
-		}
-		if len(ss.flight.issues) > 0 {
-			// A snapshot handed to a writer must not alias state this slot
-			// keeps appending to.
-			issues := make([]string, len(ss.flight.issues))
-			copy(issues, ss.flight.issues)
-			slots[i].Issues = issues
-		}
-	}
-
-	now := p.clk.Now()
-	// A shut Awake window gates every kind whatever its own backoff says:
-	// no slot starts a child until awaitWindow returns. Until is 0 both
-	// while the window is open and for the nil always-awake window, so
-	// this stays the zero Time in the ordinary case.
-	var windowOpensAt time.Time
-	var windowWalkExhausted bool
-	if d, exhausted := p.cfg.Awake.Until(now); d > 0 {
-		windowOpensAt = now.Add(d)
-		windowWalkExhausted = exhausted
-	}
-	checks := make([]KindCheck, 0, len(p.cfg.Kinds))
-	var trackers []TrackerCheck
-	seenTracker := make(map[string]bool)
-	allGated := true
-	anyJammed := false
-	for _, k := range p.cfg.Kinds {
-		v := p.st.sched.View(k, now)
-		at := v.Until // zero unless Gated, never a stale deadline
-		kc := KindCheck{Kind: k}
-		if v.Probed && !seenTracker[v.Tracker] {
-			seenTracker[v.Tracker] = true
-			tc := TrackerCheck{Tracker: v.Tracker}
-			if !v.RateLimitedUntil.IsZero() {
-				tc.RateLimitedUntil = v.RateLimitedUntil.UTC().Format(time.RFC3339)
-			}
-			trackers = append(trackers, tc)
-		}
-		if v.Gated {
-			// A probed kind's Jammed flag lingers past its gate; only a live
-			// jam gate (JamUntil) counts, not a fresh-empty Demand's wait.
-			if v.Jammed && (!v.Probed || !v.JamUntil.IsZero()) {
-				anyJammed = true
-				kc.Jammed = true
-			}
-		} else {
-			allGated = false
-		}
-		if v.Probed && !v.ProbedAt.IsZero() {
-			// A Continue exit zeroes ProbedAt until the re-probe lands; there
-			// is no count to report in that gap.
-			ready := v.Ready
-			kc.Ready = &ready
-			kc.ProbedAt = v.ProbedAt.UTC().Format(time.RFC3339)
-			next := v.NextProbe
-			if v.RateLimitedUntil.After(next) {
-				next = v.RateLimitedUntil
-			}
-			kc.NextProbe = next.UTC().Format(time.RFC3339)
-		}
-		if !v.NextDue.IsZero() {
-			if v.NextDue.At.IsZero() {
-				kc.NextDue = report.NextDueOnTipMove
-			} else {
-				kc.NextDue = v.NextDue.At.UTC().Format(time.RFC3339)
-				kc.NextDueOnTipMove = v.NextDue.OnTipMove
-			}
-		}
-		if !v.JamUntil.IsZero() {
-			kc.JamUntil = v.JamUntil.UTC().Format(time.RFC3339)
-			if v.Probed && !v.JamBaselinePending {
-				readyAtJam := v.ReadyAtJam
-				kc.ReadyAtJam = &readyAtJam
-			}
-		}
-		if windowOpensAt.After(at) {
-			at = windowOpensAt
-		}
-		if !at.IsZero() {
-			kc.NextCheck = at.UTC().Format(time.RFC3339)
-		}
-		checks = append(checks, kc)
-	}
-
-	// Precedence, most urgent first: halted outranks everything, since the
-	// pool is already on its way out regardless of what else is true.
-	// Working outranks asleep, since a child started before the Awake
-	// window closed is still genuinely running even though the window has
-	// since shut — "working" is the honest state, not "asleep". Jammed vs
-	// waiting only applies once every kind is gated, and only jammedNow (a
-	// none-dispatchable result) tells them apart; checking is the default
-	// when nothing is gated and nothing is running.
-	//
-	// Asleep is keyed off windowOpensAt (the same now-aware Awake.Until
-	// check nextCheck already floors on above), not p.st.awakeShut:
-	// awakeShut is edge-triggered by whichever slot's awaitWindow observes
-	// the close, so a pool built outside its window and snapshotted before
-	// any slot parks would still read awakeShut false and disagree with a
-	// nextCheck already naming the reopening. p.st.awakeShut therefore has
-	// no reader left outside the note*Awake* pair itself, which still needs
-	// it to edge-trigger awake_close/awake_open.
-	computedState := StateChecking
-	reason := ""
-	switch {
-	case p.st.halted:
-		computedState = StateHalted
-		reason = p.st.reason.String()
-	case p.st.working():
-		computedState = StateWorking
-	case !windowOpensAt.IsZero():
-		computedState = StateAsleep
-	case allGated && anyJammed:
-		computedState = StateJammed
-	case allGated:
-		computedState = StateWaiting
-	}
-	// Outside the switch so a still-working pool marks its floored
-	// nextCheck as a re-check too, not only an asleep one.
-	if windowWalkExhausted && computedState != StateHalted {
-		reason = walkExhaustedReason
-	}
-
-	// Copied, not aliased, matching the issues copy above: nothing
-	// mutates cfg.Kinds today, but a returned Status must never assume a
-	// future writer keeps that true.
-	kinds := make([]Kind, len(p.cfg.Kinds))
-	copy(kinds, p.cfg.Kinds)
-
-	var selfUpdate *SelfUpdate
-	if p.st.self != (SelfUpdate{}) {
-		su := p.st.self
-		su.Since = p.st.selfSince.UTC().Format(time.RFC3339)
-		selfUpdate = &su
-	}
-
-	return Status{
-		Kinds:    kinds,
-		State:    computedState,
-		Reason:   reason,
-		Slots:    slots,
-		Checks:   checks,
-		Trackers: trackers,
-		RepoURL:  p.cfg.RepoURL,
-
-		SelfUpdate: selfUpdate,
-	}
 }
 
 // publish writes s (already sequence-numbered by mutate) to Config.Status,

@@ -542,7 +542,7 @@ func sortedKeys[V any](m map[Kind]V) []Kind { return slices.Sorted(maps.Keys(m))
 //
 // No Kind is stamped on the halt event: this rejection happens before any
 // pool exists to have picked one. It also publishes a StateHalted status
-// directly, bypassing pool.snapshot (there is no pool yet to snapshot): cfg
+// directly, bypassing projectStatus (there is no pool yet to snapshot): cfg
 // is otherwise unvalidated at this point, so cfg.Kinds is copied over as
 // given rather than assumed well-formed.
 func invalidConfig(em *Emitter, cfg Config, detail string) Halt {

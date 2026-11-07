@@ -2332,7 +2332,7 @@ func TestLoopNilStatusPublishesNothing(t *testing.T) {
 
 // TestLoopInvalidConfigPublishesHaltedStatus pins invalidConfig's Write:
 // Loop rejects a bad config before any pool exists, so there is no
-// pool.snapshot to publish through, yet a wired Status must still end up
+// projectStatus to publish through, yet a wired Status must still end up
 // holding a StateHalted record naming the same reason returned to the
 // caller — otherwise a checkout's status file is left at whatever a
 // predecessor run last published, under a lock this run now holds.
