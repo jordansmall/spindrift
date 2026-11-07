@@ -81,8 +81,8 @@ rec {
       # Capability signals resolved by lib/mkHarness.nix from the backend
       # descriptor registry for the active CODE_FORGE/ISSUE_TRACKER pairing
       # (issue #2527 slice 1). Rendered below as the literal strings
-      # "true"/"false": inputdoc.Document.Artifacts is a map[string]string,
-      # and the launcher compares docArtifact(...) against the literal "true".
+      # "true"/"false": the document carries every artifact as a string, and
+      # the generated inputdoc Flag accessor (artifacts_gen.go) reads "true".
       hostMediatedRemote,
       outboxRelayCapable,
       inBoxUnreachableTracker,
@@ -229,8 +229,36 @@ rec {
 
   # The run-document keys one row renders by itself (without the shared
   # trailer), for checks that compare a row against the whole document.
-  rowArtifactKeys =
-    row: builtins.attrNames (row.runArtifacts (dummyRunArtifactArgs // { flakeImageAttr = "dummy"; }));
+  rowArtifactKeys = row: builtins.attrNames (rowArtifactsStub row);
+
+  # One row's own artifacts rendered against dummyRunArtifactArgs: key to
+  # placeholder value. Every string arg is "dummy" and every bool arg false, so
+  # a stub value of "true"/"false" marks a boolean artifact, which
+  # lib/renderers.nix's renderLauncherArtifactsGo types as a Flag.
+  rowArtifactsStub = row: row.runArtifacts (dummyRunArtifactArgs // { flakeImageAttr = "dummy"; });
+
+  # The shared trailer's artifacts alone (a row rendering nothing of its own),
+  # same placeholder convention as rowArtifactsStub.
+  sharedArtifactsStub = renderRunArtifacts (
+    dummyRunArtifactArgs
+    // {
+      row = {
+        name = "dummy";
+        artifact = "dummy";
+        runArtifacts = _: { };
+      };
+    }
+  );
+
+  # The input renderLauncherArtifactsGo takes, so nix/regen.nix and the
+  # launcher-artifacts-gen drift check derive the same Go from the same rows.
+  launcherArtifactsInput = {
+    shared = sharedArtifactsStub;
+    families = map (row: {
+      inherit (row) name goName;
+      artifacts = rowArtifactsStub row;
+    }) runnerRows;
+  };
 
   # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
   # what actually renders instead of a parallel list that can silently drift

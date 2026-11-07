@@ -38,6 +38,8 @@ let
   credentialVarsFile = renderers.renderCredentialVarsFile driverRegistry.credentialEnv;
   driverCredentialEnvFile = renderers.renderDriverCredentialEnvGo driverRegistry.credentialEnv;
   runnerFamiliesFile = renderers.renderRunnerFamiliesGo (import ../lib/runners/index.nix { }).rows;
+  launcherArtifactsFile = renderers.renderLauncherArtifactsGo (import ../lib/preambles.nix)
+    .launcherArtifactsInput;
   quickstartPathTable = import ../lib/quickstart-path-table.nix;
   quickstartPathsFile = renderers.renderQuickstartPathsGo quickstartPathTable;
   subcommands = import ../lib/subcommands.nix;
@@ -184,6 +186,8 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/internal/agentpaths/agentpaths_gen.go" agentPathsFile}
     ${writeGenerated "cmd/launcher/internal/runner/families_gen.go" runnerFamiliesFile}
     gofmt -w "$root/cmd/launcher/internal/runner/families_gen.go"
+    ${writeGenerated "cmd/launcher/internal/inputdoc/artifacts_gen.go" launcherArtifactsFile}
+    gofmt -w "$root/cmd/launcher/internal/inputdoc/artifacts_gen.go"
     ${writeGenerated "agent/credential-vars" credentialVarsFile}
     ${writeGenerated "cmd/launcher/internal/runner/credentialenv_gen.go" driverCredentialEnvFile}
     ${writeGenerated "cmd/launcher/quickstart/quickstart_paths_gen.go" quickstartPathsFile}
