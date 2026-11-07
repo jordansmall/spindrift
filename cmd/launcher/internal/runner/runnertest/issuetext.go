@@ -34,11 +34,6 @@ func AssertIssueTextReachesPrompt(t *testing.T, name string, runEnv func(boxEnv 
 	t.Helper()
 	const issueText = "issue-3470 title line\n\nA multi-line private issue body,\nwith a second paragraph and a trailing note."
 
-	reg, err := promptassembly.LoadRegistryFile(repopath.RegistryJSON())
-	if err != nil {
-		t.Fatalf("LoadRegistryFile: %v", err)
-	}
-
 	for _, v := range promptassembly.BoxEnvVarNames {
 		t.Setenv(v, "")
 	}
@@ -48,7 +43,7 @@ func AssertIssueTextReachesPrompt(t *testing.T, name string, runEnv func(boxEnv 
 	env := promptassembly.EnvFromEnviron()
 	env.PromptsDir = repopath.PromptsDir()
 
-	result, err := promptassembly.Assemble(env, reg)
+	result, err := promptassembly.Assemble(env, promptassembly.Registry{})
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
