@@ -309,6 +309,26 @@ func TestEveryDeclaredStrategyIsRegisteredByTheBundle(t *testing.T) {
 	}
 }
 
+// registrydiscover.Extract, and registrypathset through it, silently skips a
+// Strategy whose InTreeConfigPath and ConfigParser disagree, so this is the
+// only tripwire.
+// Looping Registered() covers every future ecosystem package, since
+// TestEveryDeclaredStrategyIsRegisteredByTheBundle keeps the list complete.
+func TestEveryRegisteredStrategyPairsInTreeConfigPathWithParser(t *testing.T) {
+	registered := ecosystem.Registered()
+	if len(registered) == 0 {
+		t.Fatal("the Bundle registered no ecosystem Strategies")
+	}
+	for _, s := range registered {
+		if s.InTreeConfigPath != "" && s.ConfigParser == nil {
+			t.Errorf("Strategy %q declares InTreeConfigPath %q but has no ConfigParser", s.Name, s.InTreeConfigPath)
+		}
+		if s.ConfigParser != nil && s.InTreeConfigPath == "" {
+			t.Errorf("Strategy %q has a ConfigParser but no InTreeConfigPath", s.Name)
+		}
+	}
+}
+
 func TestUnregisteredStrategiesClassifiesPlantedInput(t *testing.T) {
 	eco := t.TempDir()
 	testutil.WriteFixture(t, eco, "rows.go", `package ecosystem
