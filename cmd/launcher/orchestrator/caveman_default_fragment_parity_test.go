@@ -26,8 +26,9 @@ func TestCavemanDefaultFragmentParity(t *testing.T) {
 	researchFragment := readFragment("caveman-default-research.md")
 
 	allFragments := []fragment{baseFragment, reviewFragment, researchFragment}
-	// Base is checked here too, not just review: TestCavemanDefaultFragmentContract
-	// does not pin every clause in full, so a base-only drift would pass silently.
+	// Base is checked here too, not just review: the clause-contract table
+	// (TestClauseContracts in internal/promptassembly) does not pin every clause
+	// in full, so a base-only drift would pass silently.
 	baseAndReview := []fragment{baseFragment, reviewFragment}
 
 	assertClauseIn := func(t *testing.T, fragments []fragment, clause string) {
