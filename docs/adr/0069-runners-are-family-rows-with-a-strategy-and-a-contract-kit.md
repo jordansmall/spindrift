@@ -116,3 +116,13 @@ Runners get the backend kit of ADR 0068, keyed by family.
   hot-swap, not only for a nixInBox Consumer: a bwrap family roots the
   generation's mounted artifacts with nixInBox off too, and keys its
   snapshot-only work off `Config.NixConfigFile`.
+
+## Amendment (architecture review 2026-11-07): twin adapter tests are intended
+
+Each family keeps its own `mount_test.go`, `lifecycle_contract_test.go` and
+`config_test.go`, built from the shared `runnertest` fixtures. With two
+families, folding those twins into `runnertest/contract` harnesses saves
+about what the harnesses would cost, so they stay as they are. Fold them,
+on the pattern of `contract.Rendering`, when a third family lands. Decision
+6's core-resolved network plan (`runner/network.go`) is also intended, not
+a leak: core decides, and adapters only render.

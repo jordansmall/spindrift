@@ -137,3 +137,25 @@ The #4290 relaxation is a single rule, `flagEntry.emptyIsSetting()`: a knob's
 set-but-empty env counts as set when its kind is bool or its schema entry
 declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`, `MERGE_GUARD_PATHS`).
 Every other knob still treats an empty env value as unset.
+
+## Amendment (architecture review 2026-11-07): staging completes, artifacts are typed
+
+Decided, not yet landed. Three changes close the gaps the #813 amendment
+recorded:
+
+- **Release N+1 arrives.** The warning has run since v0.5.0. An ambient
+  non-secret knob env var becomes a config-invalid error (exit 6), naming
+  the variable and its flag and settings replacement, so env carries only
+  secrets and launcher→Box plumbing.
+- **One pure resolver.** The flag table moves out of package main into
+  `internal/inputdoc`, and `inputdoc.Resolve(args, doc, env)` returns the
+  resolved knobs, artifacts and Box-env forwarding as one value. Flags stop
+  round-tripping through `os.Setenv`, the `loadedDoc` global goes, and the
+  defaults and the empty-is-setting rule are generated once instead of
+  twice.
+- **Artifacts are typed per Runner family.** The hand-written
+  `Artifacts map[string]string` gives way to a struct regen derives from
+  each runner row's `runArtifacts` outputs: a shared part plus one part per
+  family, handed to that family's adapter directly. Artifacts come from the
+  document only; the env-first lookup goes. A typo in an artifact key
+  becomes a compile error instead of a silently empty value.
