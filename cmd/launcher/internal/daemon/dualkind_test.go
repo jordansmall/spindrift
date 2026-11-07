@@ -21,7 +21,7 @@ import (
 func dualKindConfig(slots, reservation int) Config {
 	cfg := testConfig(slots)
 	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
-	cfg.ResearchReservation = reservation
+	cfg.Reservation = reservation
 	return cfg
 }
 
@@ -155,8 +155,8 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 }
 
 // TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork pins
-// ResearchReservation as a live floor (issue #3582): with Slots: 3,
-// ResearchReservation: 1 and both queues always dispatching, the pool holds
+// Reservation as a live floor (issue #3582): with Slots: 3,
+// Reservation: 1 and both queues always dispatching, the pool holds
 // exactly one research and two work children at once, and whichever slot
 // turns over is refilled with the kind that keeps that mix. No slot identity
 // is asserted: the floor follows the running count, not a reserved slot.
@@ -259,7 +259,7 @@ func TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork(t *testing.T) {
 
 // TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty pins the burst
 // contract: a reservation is a floor, not a ceiling. Slots: 2,
-// ResearchReservation: 1; research empties on its first check (and, with a
+// Reservation: 1; research empties on its first check (and, with a
 // frozen fake clock, never becomes runnable again), so both slots settle
 // into running work. The reservation is a live running count, so any slot
 // turning over while no research runs prefers research until that gate lands.
@@ -424,7 +424,7 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 }
 
 // TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers pins
-// ResearchReservation: 0's contract at a single slot (deterministic: no
+// Reservation: 0's contract at a single slot (deterministic: no
 // sibling to race against): every dispatch while work has queued work, and
 // research only once work has gated itself empty.
 func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
@@ -472,7 +472,7 @@ func TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers(t *testing.T) {
 
 // TestPoolReservationEqualsSlotsIsResearchFirst mirrors
 // TestPoolZeroReservationIsWorkFirstWithResearchOnLeftovers, but exercised
-// across every slot (ResearchReservation == Slots means every slot, not
+// across every slot (Reservation == Slots means every slot, not
 // just one, prefers research) to prove the reservation applies pool-wide,
 // not to a single hardcoded slot.
 func TestPoolReservationEqualsSlotsIsResearchFirst(t *testing.T) {
@@ -588,7 +588,7 @@ func TestLoopIdlesOnlyOnceBothKindsHaveBackedOff(t *testing.T) {
 		t.Fatalf("run calls = %v, want exactly 2: one check per kind before the pool idles", calls)
 	}
 	if calls[0].Kind != KindOf(dispatchkind.Work) || calls[1].Kind != KindOf(dispatchkind.Research) {
-		t.Fatalf("run calls = %v, want [dispatch research] (work-first order at ResearchReservation 0)", calls)
+		t.Fatalf("run calls = %v, want [dispatch research] (work-first order at Reservation 0)", calls)
 	}
 	if clk.waitCount() != 1 || clk.waits()[0] != testIdleFloor {
 		t.Fatalf("waits = %v, want exactly one wait of %v, taken only once both kinds had gated", clk.waits(), testIdleFloor)
@@ -631,13 +631,13 @@ func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 
 // TestLoopSingleKindConfigurationsNeverRunTheOtherKind pins issue #3541's
 // backward-compatible edge: Kinds: {KindOf(dispatchkind.Work)} alone must never produce a
-// research child, whatever ResearchReservation is set to (it only has
+// research child, whatever Reservation is set to (it only has
 // meaning once a second kind exists), and Kinds: {KindOf(dispatchkind.Research)} alone must
 // never produce a dispatch child.
 func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 	t.Run("dispatch-only", func(t *testing.T) {
 		cfg := testConfig(1)
-		cfg.ResearchReservation = 1 // nonsensical if it mattered; must be inert with one kind
+		cfg.Reservation = 1 // nonsensical if it mattered; must be inert with one kind
 		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
 		clk := &testClock{}
 		var buf bytes.Buffer
@@ -655,7 +655,7 @@ func TestLoopSingleKindConfigurationsNeverRunTheOtherKind(t *testing.T) {
 	t.Run("research-only", func(t *testing.T) {
 		cfg := testConfig(1)
 		cfg.Kinds = []Kind{KindOf(dispatchkind.Research)}
-		cfg.ResearchReservation = 0
+		cfg.Reservation = 0
 		r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 0}, {Exit: 5}}}
 		clk := &testClock{}
 		var buf bytes.Buffer

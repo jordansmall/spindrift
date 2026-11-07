@@ -2397,7 +2397,7 @@ func TestPoolSnapshotCopiesKindsSlice(t *testing.T) {
 // TestPoolSnapshotChecksOrderAndNextCheck pins that Checks is built in
 // cfg.Kinds order (not the p.kinds map's undefined order) and carries a
 // nextCheck only for a gated kind. Driven through Loop with
-// ResearchReservation: 1 so the sole slot prefers research first: its
+// Reservation: 1 so the sole slot prefers research first: its
 // first iteration gates research (exit 2) and continues, its second picks
 // dispatch — the onStart hook reads the status file there, while dispatch
 // is occupying the slot and research is already gated from the round
@@ -2427,7 +2427,7 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 	}
 	cfg := testConfig(1)
 	cfg.Kinds = []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)}
-	cfg.ResearchReservation = 1
+	cfg.Reservation = 1
 	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -2762,7 +2762,7 @@ func startChildAs(p *pool, slot int, kind Kind, revision string) {
 // TestPoolStartChildChoosesKindFromLiveReservedCount pins issue #3582: the
 // research floor is a live count of running research children, not a
 // per-slot preference, so a free slot picks research whenever fewer than
-// ResearchReservation research children are running, whichever slot it is.
+// Reservation research children are running, whichever slot it is.
 func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
 	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
 	tests := []struct {

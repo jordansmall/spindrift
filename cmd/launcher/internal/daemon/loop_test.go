@@ -737,8 +737,8 @@ func TestLoopRejectsInvalidBreakerConfig(t *testing.T) {
 }
 
 // TestLoopRejectsInvalidKindsConfig mirrors TestLoopRejectsInvalidBreakerConfig
-// for the Kinds/ResearchReservation knobs issue #3541 adds: an empty Kinds, an
-// unknown or duplicate kind, or a ResearchReservation outside [0, Slots] is a
+// for the Kinds/Reservation knobs issue #3541 adds: an empty Kinds, an
+// unknown or duplicate kind, or a Reservation outside [0, Slots] is a
 // config error Loop rejects up front.
 func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 	invalid := func(mutate func(*Config)) Config {
@@ -753,8 +753,8 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 		{"empty kinds", invalid(func(c *Config) { c.Kinds = nil })},
 		{"unknown kind", invalid(func(c *Config) { c.Kinds = []Kind{Kind("bogus")} })},
 		{"duplicate kind", invalid(func(c *Config) { c.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Work)} })},
-		{"negative reservation", invalid(func(c *Config) { c.ResearchReservation = -1 })},
-		{"reservation above slots", invalid(func(c *Config) { c.ResearchReservation = 3 })},
+		{"negative reservation", invalid(func(c *Config) { c.Reservation = -1 })},
+		{"reservation above slots", invalid(func(c *Config) { c.Reservation = 3 })},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

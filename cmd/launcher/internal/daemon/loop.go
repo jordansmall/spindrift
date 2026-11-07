@@ -185,13 +185,14 @@ type Config struct {
 	// MEMORY_LIMIT x MAX_PARALLEL sizing. Must be non-empty.
 	Kinds []Kind
 
-	// ResearchReservation is the minimum number of research children the pool
-	// keeps running. It is a floor, not a ceiling: research is preferred only
-	// while research has queued work, and either kind bursts into the whole pool
-	// when the other has backed off into an empty result. Zero is work-first with
-	// research on the leftovers; Slots is research-first. Must be
-	// 0 <= ResearchReservation <= Slots.
-	ResearchReservation int
+	// Reservation is the minimum number of children of the reserved-priority
+	// kind (the row carrying dispatchkind.PriorityReserved) the pool keeps
+	// running. It is a floor, not a ceiling: the reserved kind is preferred only
+	// while it has queued work, and either tier bursts into the whole pool when
+	// the other has backed off into an empty result. Zero is normal-first with
+	// the reserved kind on the leftovers; Slots is reserved-first. Must be
+	// 0 <= Reservation <= Slots.
+	Reservation int
 
 	Slots int
 
@@ -465,8 +466,8 @@ func (cfg Config) Validate() error {
 			return fmt.Errorf("tracker for kind %q, which is not in kinds", k)
 		}
 	}
-	if cfg.ResearchReservation < 0 || cfg.ResearchReservation > cfg.Slots {
-		return fmt.Errorf("research reservation must be between 0 and slots (%d), got %d", cfg.Slots, cfg.ResearchReservation)
+	if cfg.Reservation < 0 || cfg.Reservation > cfg.Slots {
+		return fmt.Errorf("research reservation must be between 0 and slots (%d), got %d", cfg.Slots, cfg.Reservation)
 	}
 	if cfg.IdleFloor <= 0 {
 		return fmt.Errorf("idle floor must be positive, got %s", cfg.IdleFloor)

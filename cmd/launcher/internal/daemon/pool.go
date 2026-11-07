@@ -399,7 +399,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 			slots:     slots,
 			lastStart: make([]childStartPin, cfg.Slots),
 			b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
-			sched:     newSchedule(cfg.Kinds, cfg.ResearchReservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals, cfg.Trackers),
+			sched:     newSchedule(cfg.Kinds, cfg.Reservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals, cfg.Trackers),
 			batonSlot: leadSlot,
 
 			wake:       wake,
@@ -480,11 +480,12 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 
 // occupancy reads what the slot phases say is running, for Schedule.Decide's
 // reservation count and start budget. Only running children count toward the
-// reservation: research children that exit early (a run of Continue exits,
-// say) never lift the count, so research can keep taking every turnover while
-// work still has queued work. A running slot with no flight key has not yet
-// reported its claim, so it is also starting. The deciding slot is not itself
-// PhaseRunning, so neither count includes it. The caller holds p.mu.
+// reservation: reserved-tier children that exit early (a run of Continue exits,
+// say) never lift the count, so the reserved kind can keep taking every
+// turnover while normal-tier kinds still have queued work. A running slot with
+// no flight key has not yet reported its claim, so it is also starting. The
+// deciding slot is not itself PhaseRunning, so neither count includes it. The
+// caller holds p.mu.
 func occupancy(s *state) Occupancy {
 	running := make(map[Kind]int)
 	starting := make(map[Kind]int)

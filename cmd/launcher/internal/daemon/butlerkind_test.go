@@ -19,7 +19,7 @@ import (
 func triKindConfig(slots, reservation int) Config {
 	cfg := testConfig(slots)
 	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}
-	cfg.ResearchReservation = reservation
+	cfg.Reservation = reservation
 	return cfg
 }
 

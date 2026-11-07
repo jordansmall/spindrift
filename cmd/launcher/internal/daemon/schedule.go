@@ -19,7 +19,7 @@ import (
 // map, so an older copy never sees a later Observe.
 type Schedule struct {
 	kinds       []Kind        // configured order; slotOrder derives priority from it
-	reservation int           // running reserved-tier children the reserved tier is owed first
+	reservation int           // floor of running reserved-tier children kept before normal-tier starts
 	idleCap     time.Duration // the backoff cap: how far ahead a tip-only Park sets Until
 	state       map[Kind]kindSched
 }

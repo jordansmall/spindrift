@@ -549,7 +549,7 @@ func TestPoolReservationFloorsResearchAlongsideDemand(t *testing.T) {
 	r.setDemand(workKind, 1)
 	r.setDemand(researchKind, 1)
 	cfg := probedConfig(2, time.Hour, workKind, researchKind)
-	cfg.ResearchReservation = 1
+	cfg.Reservation = 1
 	var buf bytes.Buffer
 	p, _ := newPool(context.Background(), cfg, r, newTestEmitter(&buf), clk)
 	defer p.cancel()
@@ -600,7 +600,7 @@ func TestLoopReservationFloorsResearchAlongsideDemand(t *testing.T) {
 			r.holdSlots(tt.slots)
 			r.announceEachSlot()
 			cfg := probedConfig(tt.slots, time.Hour, tt.kinds...)
-			cfg.ResearchReservation = tt.reservation
+			cfg.Reservation = tt.reservation
 			var buf bytes.Buffer
 			done := make(chan Halt, 1)
 			go func() { done <- Loop(ctx, cfg, r, newTestEmitter(&buf), clk) }()
@@ -640,7 +640,7 @@ func TestPoolEmptyDemandKindYieldsToTheOther(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clk := &testClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
 			cfg := probedConfig(1, time.Hour, workKind, researchKind)
-			cfg.ResearchReservation = tt.reservation
+			cfg.Reservation = tt.reservation
 			var buf bytes.Buffer
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
 			defer p.cancel()
