@@ -3,8 +3,6 @@ package main
 import (
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -23,30 +21,16 @@ var shaPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // newStaleProbeRepo builds two real local git repos, dir (the checkout the
 // probe fetches from) with an "origin" remote pointing at a second temp repo,
 // each carrying one base.txt commit. fetchBaseTip needs that real git
-// round-trip to resolve a genuine non-empty Rev instead of a canned one.
+// round-trip to resolve a genuine non-empty Rev instead of a canned one. Both
+// commits share tree, identity, and message, so FETCH_HEAD can equal dir's
+// HEAD: never assert that the two histories differ.
 func newStaleProbeRepo(t *testing.T) (dir, origin string) {
 	t.Helper()
 
-	dir = tempLogDir(t)
-
 	origin = t.TempDir()
-	testutil.GitRun(t, origin, "init", "-b", "main")
-	testutil.GitRun(t, origin, "config", "user.email", "origin@example.com")
-	testutil.GitRun(t, origin, "config", "user.name", "Origin")
-	if err := os.WriteFile(filepath.Join(origin, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	testutil.GitRun(t, origin, "add", "base.txt")
-	testutil.GitRun(t, origin, "commit", "-m", "base")
-
-	testutil.GitRun(t, dir, "init", "-b", "main")
-	testutil.GitRun(t, dir, "config", "user.email", "pwd@example.com")
-	testutil.GitRun(t, dir, "config", "user.name", "Pwd")
-	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	testutil.GitRun(t, dir, "add", "base.txt")
-	testutil.GitRun(t, dir, "commit", "-m", "base")
+	mustInitCheckout(t, origin, "main")
+	dir = tempLogDir(t)
+	mustInitCheckout(t, dir, "main")
 	testutil.GitRun(t, dir, "remote", "add", "origin", origin)
 
 	return dir, origin

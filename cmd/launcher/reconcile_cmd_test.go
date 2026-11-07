@@ -19,7 +19,6 @@ import (
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/testutil"
 )
 
 // testCapabilities resolves capabilities the same way newReadContext does in
@@ -248,20 +247,6 @@ func setGitIdentityEnv(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-}
-
-// mustInitCheckout builds the bare-bones operator checkout that stands in for
-// pwd in the surface tests.
-func mustInitCheckout(t *testing.T, dir, branch string) {
-	t.Helper()
-	testutil.GitRun(t, dir, "init", "-b", branch)
-	testutil.GitRun(t, dir, "config", "user.email", "test@example.com")
-	testutil.GitRun(t, dir, "config", "user.name", "Test")
-	if err := os.WriteFile(filepath.Join(dir, "base.txt"), []byte("base"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	testutil.GitRun(t, dir, "add", "base.txt")
-	testutil.GitRun(t, dir, "commit", "-m", "base")
 }
 
 type surfaceFixture struct {

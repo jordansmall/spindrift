@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // The lifecycle-label set mirrored from lib/env-schema.nix and pinned against
@@ -182,4 +183,17 @@ func doctorReadContext(c config, f *forge.Fake) readContext {
 // production does, through forge.ResolveCapabilities.
 func fakeCapabilities(f *forge.Fake) forge.Capabilities {
 	return forge.ResolveCapabilities(f, f.AsIssueFiler(), backend.Descriptor{}, backend.Descriptor{})
+}
+
+// mustInitCheckout builds the bare-bones repo the package's git fixtures start
+// from: dir initialised on branch, with the repo-local test@example.com / Test
+// identity later commits rely on, and one committed base.txt.
+func mustInitCheckout(t *testing.T, dir, branch string) {
+	t.Helper()
+	testutil.GitRun(t, dir, "init", "-b", branch)
+	testutil.GitRun(t, dir, "config", "user.email", "test@example.com")
+	testutil.GitRun(t, dir, "config", "user.name", "Test")
+	testutil.WriteFixture(t, dir, "base.txt", "base")
+	testutil.GitRun(t, dir, "add", "base.txt")
+	testutil.GitRun(t, dir, "commit", "-m", "base")
 }
