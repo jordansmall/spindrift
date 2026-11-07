@@ -4619,8 +4619,8 @@ func TestRunDoctor_WiresBwrapCapabilityChecksIntoOutput(t *testing.T) {
 	t.Cleanup(func() { lookupRunnerStrategy = orig })
 	lookupRunnerStrategy = func(string) (runner.Strategy, error) {
 		s := real
-		s.Prerequisites = func(cfg runner.Config, l runner.KnobLookup) []runner.Prerequisite {
-			ps := real.PrerequisitesFor(cfg, l)
+		s.Prerequisites = func(cfg runner.Config, art inputdoc.Artifacts, l runner.KnobLookup) []runner.Prerequisite {
+			ps := real.PrerequisitesFor(cfg, art, l)
 			for i := range ps {
 				fail := ps[i].Name == "bwrap-cgroup-delegation"
 				ps[i].Probe = func() (any, error) {

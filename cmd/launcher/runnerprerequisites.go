@@ -18,7 +18,7 @@ func runnerPrerequisites(c config) []runner.Prerequisite {
 	if err != nil {
 		return nil
 	}
-	return s.PrerequisitesFor(runnerConfig(c), c.knobLookup)
+	return s.PrerequisitesFor(runnerConfig(c), c.artifacts, c.knobLookup)
 }
 
 // checkRunnerLaunchPrerequisites runs each Required LaunchGate prerequisite in

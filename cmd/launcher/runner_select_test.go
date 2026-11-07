@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/bwrap"
 	"spindrift.dev/launcher/internal/runner/oci"
@@ -30,7 +31,7 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 
 	for _, sel := range selectors {
 		t.Run(sel.name, func(t *testing.T) {
-			bwrapWant, err := bwrap.New(rc, config{}.knobLookup, pwd)
+			bwrapWant, err := bwrap.New(rc, inputdoc.BwrapArtifacts{}, config{}.knobLookup, pwd)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -39,10 +40,7 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 				t.Fatal(err)
 			}
 			if sel.name == "buildRunnerForKind" {
-				bwrapWant, err = bwrap.NewBuild(rc, config{}.knobLookup, pwd)
-				if err != nil {
-					t.Fatal(err)
-				}
+				bwrapWant = bwrap.NewBuild(rc, inputdoc.BwrapArtifacts{}, pwd)
 			}
 			cases := []struct {
 				name       string
@@ -107,7 +105,7 @@ func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := bwrap.New(runnerConfig(c), runnertest.Lookup(map[string]string{
+			want, err := bwrap.New(runnerConfig(c), *c.artifacts.Bwrap, runnertest.Lookup(map[string]string{
 				"BWRAP_UNSHARE_NET": boolKnob(tc.wantIsolate),
 			}), "/pwd")
 			if err != nil {

@@ -10,18 +10,14 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
-func prereqByName(t *testing.T, cfg runner.Config, name string) runner.Prerequisite {
+func prereq(t *testing.T, cfg runner.Config, art inputdoc.BwrapArtifacts, knobs map[string]string, name string) runner.Prerequisite {
 	t.Helper()
-	return prereqWithKnobs(t, cfg, nil, name)
-}
-
-func prereqWithKnobs(t *testing.T, cfg runner.Config, knobs map[string]string, name string) runner.Prerequisite {
-	t.Helper()
-	for _, p := range Prerequisites(cfg, runnertest.Lookup(knobs)) {
+	for _, p := range Prerequisites(cfg, art, runnertest.Lookup(knobs)) {
 		if p.Name == name {
 			return p
 		}
@@ -48,9 +44,9 @@ func stubValidators(t *testing.T, overlay, pasta func() error, cgroup func([]str
 
 // render runs cfg's prerequisites through the doctor adapter and returns the
 // rendered report.
-func render(cfg runner.Config) string {
+func render(cfg runner.Config, art inputdoc.BwrapArtifacts) string {
 	var checks []doctor.Check
-	for _, p := range Prerequisites(cfg, runnertest.Lookup(nil)) {
+	for _, p := range Prerequisites(cfg, art, runnertest.Lookup(nil)) {
 		checks = append(checks, doctor.PrerequisiteCheck(p))
 	}
 	var buf bytes.Buffer
@@ -59,13 +55,13 @@ func render(cfg runner.Config) string {
 }
 
 func TestStrategyDeclaresPrerequisites(t *testing.T) {
-	if got := Strategy.PrerequisitesFor(runner.Config{}, runnertest.Lookup(nil)); len(got) != 4 {
+	if got := Strategy.PrerequisitesFor(runner.Config{}, inputdoc.Artifacts{}, runnertest.Lookup(nil)); len(got) != 4 {
 		t.Errorf("Strategy.PrerequisitesFor returned %d rows, want 4", len(got))
 	}
 }
 
 func TestPrerequisites_ReturnsRowsInOrder(t *testing.T) {
-	got := Prerequisites(runner.Config{}, runnertest.Lookup(nil))
+	got := Prerequisites(runner.Config{}, inputdoc.BwrapArtifacts{}, runnertest.Lookup(nil))
 	want := []string{"runtime", "bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"}
 	if len(got) != len(want) {
 		t.Fatalf("returned %d rows, want %d", len(got), len(want))
@@ -80,7 +76,7 @@ func TestPrerequisites_ReturnsRowsInOrder(t *testing.T) {
 // Reporter.Results prints Remedy alongside a failure, so a row with no Remedy
 // leaves an operator with only the bare error text.
 func TestPrerequisites_RemedyNonEmpty(t *testing.T) {
-	for _, p := range Prerequisites(runner.Config{}, runnertest.Lookup(nil)) {
+	for _, p := range Prerequisites(runner.Config{}, inputdoc.BwrapArtifacts{}, runnertest.Lookup(nil)) {
 		if p.Remedy == "" {
 			t.Errorf("prerequisite %q has empty Remedy", p.Name)
 		}
@@ -102,7 +98,7 @@ func TestPrerequisites_OverlayRequired(t *testing.T) {
 		{"writable without config file", true, "", false},
 		{"config file without writable", false, "/nix/store/example/nix.conf", false},
 	} {
-		got := prereqByName(t, runner.Config{NixStoreWritable: tc.writable, NixConfigFile: tc.conf}, "bwrap-overlay-support")
+		got := prereq(t, runner.Config{}, overlayArt(tc.writable, tc.conf), nil, "bwrap-overlay-support")
 		if got.Required != tc.want {
 			t.Errorf("%s: Required = %v, want %v", tc.name, got.Required, tc.want)
 		}
@@ -129,7 +125,7 @@ func TestPrerequisites_NetworkIsolationRequired(t *testing.T) {
 		if tc.unshare {
 			knobs["BWRAP_UNSHARE_NET"] = "1"
 		}
-		got := prereqWithKnobs(t, runner.Config{NetworkMode: tc.mode}, knobs, "bwrap-network-isolation")
+		got := prereq(t, runner.Config{NetworkMode: tc.mode}, inputdoc.BwrapArtifacts{}, knobs, "bwrap-network-isolation")
 		if got.Required != tc.want {
 			t.Errorf("NetworkMode=%q BWRAP_UNSHARE_NET=%v: Required = %v, want %v", tc.mode, tc.unshare, got.Required, tc.want)
 		}
@@ -141,9 +137,9 @@ func TestPrerequisites_NetworkIsolationRequired(t *testing.T) {
 func TestPrerequisites_CgroupDelegationNeverRequired(t *testing.T) {
 	for _, cfg := range []runner.Config{
 		{},
-		{PidsLimit: "256", MemoryLimit: "1g", NixStoreWritable: true, NixConfigFile: "x", NetworkMode: runner.NetworkModeOpen},
+		{PidsLimit: "256", MemoryLimit: "1g", NetworkMode: runner.NetworkModeOpen},
 	} {
-		if prereqByName(t, cfg, "bwrap-cgroup-delegation").Required {
+		if prereq(t, cfg, overlayArt(true, "x"), nil, "bwrap-cgroup-delegation").Required {
 			t.Errorf("cgroup delegation Required for %+v", cfg)
 		}
 	}
@@ -156,17 +152,18 @@ func TestPrerequisites_CgroupDelegationNeverRequired(t *testing.T) {
 func TestPrerequisites_RenderTiers(t *testing.T) {
 	fail := func() error { return errors.New("boom") }
 	advisoryCfg := runner.Config{NetworkMode: runner.NetworkModeHost}
-	requiredCfg := runner.Config{NixStoreWritable: true, NixConfigFile: "/nix/store/example/nix.conf", NetworkMode: runner.NetworkModeOpen}
+	requiredCfg := runner.Config{NetworkMode: runner.NetworkModeOpen}
+	requiredArt := overlayArt(true, "/nix/store/example/nix.conf")
 	stubValidators(t, fail, fail, func([]string) error { return errors.New("boom") })
 
-	adv := render(advisoryCfg)
+	adv := render(advisoryCfg, inputdoc.BwrapArtifacts{})
 	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"} {
 		if !strings.Contains(adv, "advisory: "+name) || strings.Contains(adv, "MISSING: "+name) {
 			t.Errorf("want advisory framing only for %s, got:\n%s", name, adv)
 		}
 	}
 
-	req := render(requiredCfg)
+	req := render(requiredCfg, requiredArt)
 	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation"} {
 		if !strings.Contains(req, "MISSING: "+name) || strings.Contains(req, "advisory: "+name) {
 			t.Errorf("want MISSING framing only for %s, got:\n%s", name, req)
@@ -183,7 +180,7 @@ func TestPrerequisites_RenderOkWhenPassing(t *testing.T) {
 		func() error { return nil },
 		func() error { return nil },
 		func([]string) error { return nil })
-	out := render(runner.Config{})
+	out := render(runner.Config{}, inputdoc.BwrapArtifacts{})
 	for _, name := range []string{"bwrap-overlay-support", "bwrap-network-isolation", "bwrap-cgroup-delegation"} {
 		if !strings.Contains(out, "ok: "+name) {
 			t.Errorf("want ok: framing for %s, got:\n%s", name, out)
@@ -194,11 +191,11 @@ func TestPrerequisites_RenderOkWhenPassing(t *testing.T) {
 // Telling an operator to unset nixStoreWritable when it is already unset is
 // nonsensical, so the hint appears only while the row is Required.
 func TestPrerequisites_OverlayRemedyHint(t *testing.T) {
-	adv := prereqByName(t, runner.Config{}, "bwrap-overlay-support")
+	adv := prereq(t, runner.Config{}, inputdoc.BwrapArtifacts{}, nil, "bwrap-overlay-support")
 	if strings.Contains(adv.Remedy, "unset nixStoreWritable") {
 		t.Errorf("Advisory Remedy should not tell operator to unset nixStoreWritable, got: %s", adv.Remedy)
 	}
-	req := prereqByName(t, runner.Config{NixStoreWritable: true, NixConfigFile: "/nix/store/example/nix.conf"}, "bwrap-overlay-support")
+	req := prereq(t, runner.Config{}, overlayArt(true, "/nix/store/example/nix.conf"), nil, "bwrap-overlay-support")
 	if !strings.Contains(req.Remedy, "unset nixStoreWritable") {
 		t.Errorf("Required Remedy should tell operator to unset nixStoreWritable, got: %s", req.Remedy)
 	}
@@ -207,11 +204,11 @@ func TestPrerequisites_OverlayRemedyHint(t *testing.T) {
 // Telling an operator to set NETWORK_MODE=host when it already is host is
 // nonsensical, so the hint appears only while the row is Required.
 func TestPrerequisites_NetworkIsolationRemedyHint(t *testing.T) {
-	adv := prereqByName(t, runner.Config{NetworkMode: runner.NetworkModeHost}, "bwrap-network-isolation")
+	adv := prereq(t, runner.Config{NetworkMode: runner.NetworkModeHost}, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation")
 	if strings.Contains(adv.Remedy, "set NETWORK_MODE=host") {
 		t.Errorf("Advisory Remedy should not tell operator to set NETWORK_MODE=host, got: %s", adv.Remedy)
 	}
-	req := prereqByName(t, runner.Config{NetworkMode: runner.NetworkModeOpen}, "bwrap-network-isolation")
+	req := prereq(t, runner.Config{NetworkMode: runner.NetworkModeOpen}, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation")
 	if !strings.Contains(req.Remedy, "set NETWORK_MODE=host") {
 		t.Errorf("Required Remedy should tell operator to set NETWORK_MODE=host, got: %s", req.Remedy)
 	}
@@ -231,7 +228,7 @@ func TestPrerequisites_CgroupDelegationPassesConfiguredControllers(t *testing.T)
 		got = controllers
 		return nil
 	})
-	row := prereqByName(t, runner.Config{PidsLimit: "256"}, "bwrap-cgroup-delegation")
+	row := prereq(t, runner.Config{PidsLimit: "256"}, inputdoc.BwrapArtifacts{}, nil, "bwrap-cgroup-delegation")
 	if _, err := row.Probe(); err != nil {
 		t.Fatalf("Probe() = %v, want nil", err)
 	}
@@ -257,7 +254,7 @@ func TestPrerequisites_ProbeWiring(t *testing.T) {
 		"bwrap-network-isolation": pastaErr,
 		"bwrap-cgroup-delegation": cgroupErr,
 	} {
-		if _, err := prereqByName(t, runner.Config{}, name).Probe(); err != want {
+		if _, err := prereq(t, runner.Config{}, inputdoc.BwrapArtifacts{}, nil, name).Probe(); err != want {
 			t.Errorf("%s Probe() = %v, want %v verbatim", name, err, want)
 		}
 	}
@@ -283,13 +280,13 @@ func TestPrerequisites_NetworkIsolationRealProbe(t *testing.T) {
 	cfg := runner.Config{NetworkMode: runner.NetworkModeOpen}
 
 	pinPATH(t, false)
-	_, err := prereqByName(t, cfg, "bwrap-network-isolation").Probe()
+	_, err := prereq(t, cfg, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation").Probe()
 	if err == nil || !strings.Contains(err.Error(), "pasta") {
 		t.Errorf("Probe() = %v, want an error mentioning pasta when it is absent", err)
 	}
 
 	pinPATH(t, true)
-	if _, err := prereqByName(t, cfg, "bwrap-network-isolation").Probe(); err != nil {
+	if _, err := prereq(t, cfg, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation").Probe(); err != nil {
 		t.Errorf("Probe() = %v, want nil when pasta is on PATH", err)
 	}
 }
@@ -301,7 +298,7 @@ func TestPrerequisites_LaunchStages(t *testing.T) {
 		"bwrap-network-isolation": runner.LaunchGate,
 		"bwrap-cgroup-delegation": runner.DoctorOnly,
 	}
-	for _, p := range Prerequisites(runner.Config{}, runnertest.Lookup(nil)) {
+	for _, p := range Prerequisites(runner.Config{}, inputdoc.BwrapArtifacts{}, runnertest.Lookup(nil)) {
 		if p.Launch != want[p.Name] {
 			t.Errorf("%s Launch = %v, want %v", p.Name, p.Launch, want[p.Name])
 		}
@@ -314,12 +311,13 @@ func TestPrerequisites_LaunchStages(t *testing.T) {
 func TestPrerequisites_LaunchChecksPastaBeforeOverlay(t *testing.T) {
 	errOverlay, errPasta := errors.New("overlay failed"), errors.New("pasta failed")
 	stubValidators(t, func() error { return errOverlay }, func() error { return errPasta }, nil)
-	cfg := runner.Config{NixStoreWritable: true, NixConfigFile: "/nix/store/example/nix.conf"}
+	cfg := runner.Config{}
+	art := overlayArt(true, "/nix/store/example/nix.conf")
 	if !cfg.BwrapNetwork(false).Pasta {
 		t.Fatal("zero NetworkMode no longer runs pasta; pick a mode that does")
 	}
 	var got error
-	for _, p := range runner.LaunchGates(Prerequisites(cfg, runnertest.Lookup(nil)), runner.LaunchGate) {
+	for _, p := range runner.LaunchGates(Prerequisites(cfg, art, runnertest.Lookup(nil)), runner.LaunchGate) {
 		if _, err := p.Probe(); err != nil {
 			got = err
 			break
@@ -350,7 +348,7 @@ func TestPrerequisites_NetworkIsolationProbeOutcomes(t *testing.T) {
 			var args []string
 			run := fakeRun(tt.script, &name, &args)
 			stubValidators(t, nil, func() error { return validatePastaWith(tt.look, run, pastaFlags()) }, nil)
-			row := prereqByName(t, runner.Config{NetworkMode: runner.NetworkModeOpen}, "bwrap-network-isolation")
+			row := prereq(t, runner.Config{NetworkMode: runner.NetworkModeOpen}, inputdoc.BwrapArtifacts{}, nil, "bwrap-network-isolation")
 			_, err := row.Probe()
 			if tt.wantErr == "" {
 				if err != nil {
@@ -363,4 +361,13 @@ func TestPrerequisites_NetworkIsolationProbeOutcomes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// overlayArt builds the bwrap artifacts the overlay gate reads.
+func overlayArt(writable bool, conf string) inputdoc.BwrapArtifacts {
+	a := inputdoc.BwrapArtifacts{NixStoreWritable: inputdoc.FlagOf(writable)}
+	if conf != "" {
+		a.NixConfigFile = inputdoc.ValueOf(conf)
+	}
+	return a
 }

@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 )
@@ -408,7 +409,7 @@ type nixInBoxSwapResult struct {
 
 // strategyWithHook answers lookupRunnerStrategy with a bare Strategy carrying
 // only hook as its PrepareHotSwap, the one field hot-swap reads.
-func strategyWithHook(hook func(cfg runner.Config, pwd, closure string) error) func(string) (runner.Strategy, error) {
+func strategyWithHook(hook func(art inputdoc.Artifacts, pwd, closure string) error) func(string) (runner.Strategy, error) {
 	return func(string) (runner.Strategy, error) {
 		return runner.Strategy{PrepareHotSwap: hook}, nil
 	}
@@ -441,8 +442,11 @@ func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.
 	c.flakeImageAttr = ".#packages.x86_64-linux.agent-closure"
 	c.imageTag = "/nix/store/" + loadedHash + "-agent-closure"
 	c.passwdFile = "/nix/store/passwd-fixture"
+	bwrapArt := &inputdoc.BwrapArtifacts{PasswdFile: inputdoc.ValueOf("/nix/store/passwd-fixture")}
+	c.artifacts = inputdoc.Artifacts{Bwrap: bwrapArt}
 	if nixInBox {
 		c.nixConfigFile = "/fake/nix.conf"
+		bwrapArt.NixConfigFile = inputdoc.ValueOf("/fake/nix.conf")
 	}
 	// flakeLauncherAttr is configured and genuinely fresh. See
 	// TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefilling
@@ -481,9 +485,9 @@ func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.
 // launch fails bwrapAdapter.Run's "no longer exists" stat guard.
 func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PreparesClosureBeforeBinding(t *testing.T) {
 	var calls []struct{ pwd, closure string }
-	var gotCfg runner.Config
-	r := runNixInBoxSwap(t, true, strategyWithHook(func(cfg runner.Config, pwd, closure string) error {
-		gotCfg = cfg
+	var gotArt inputdoc.Artifacts
+	r := runNixInBoxSwap(t, true, strategyWithHook(func(art inputdoc.Artifacts, pwd, closure string) error {
+		gotArt = art
 		calls = append(calls, struct{ pwd, closure string }{pwd, closure})
 		return nil
 	}))
@@ -497,8 +501,8 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PreparesClosureBeforeBin
 	if calls[0].pwd != r.dir {
 		t.Errorf("PrepareHotSwap pwd = %q, want %q", calls[0].pwd, r.dir)
 	}
-	if gotCfg.PasswdFile != "/nix/store/passwd-fixture" {
-		t.Errorf("PrepareHotSwap cfg.PasswdFile = %q, want the startup config's passwd", gotCfg.PasswdFile)
+	if gotArt.Bwrap == nil || gotArt.Bwrap.PasswdFile.String() != "/nix/store/passwd-fixture" {
+		t.Errorf("PrepareHotSwap art.Bwrap = %+v, want the startup document's passwd", gotArt.Bwrap)
 	}
 	if calls[0].closure != r.stale {
 		t.Errorf("PrepareHotSwap closure = %q, want %q (res.TipTag)", calls[0].closure, r.stale)
@@ -537,11 +541,11 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_NilHook_SwapsWithoutPrep
 // #5996): a family can prepare the generation with nixInBox off too, and keys
 // nixInBox-only work off cfg.NixConfigFile.
 func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares(t *testing.T) {
-	var gotCfg runner.Config
+	var gotArt inputdoc.Artifacts
 	called := false
-	r := runNixInBoxSwap(t, false, strategyWithHook(func(cfg runner.Config, _, _ string) error {
+	r := runNixInBoxSwap(t, false, strategyWithHook(func(art inputdoc.Artifacts, _, _ string) error {
 		called = true
-		gotCfg = cfg
+		gotArt = art
 		return nil
 	}))
 	if r.err != nil {
@@ -550,8 +554,8 @@ func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares(t *tes
 	if !called {
 		t.Error("PrepareHotSwap was not called with nixInBox off")
 	}
-	if gotCfg.NixConfigFile != "" {
-		t.Errorf("PrepareHotSwap cfg.NixConfigFile = %q, want empty (nixInBox off)", gotCfg.NixConfigFile)
+	if gotArt.Bwrap == nil || gotArt.Bwrap.NixConfigFile.String() != "" {
+		t.Errorf("PrepareHotSwap art.Bwrap = %+v, want a part with no nix-config (nixInBox off)", gotArt.Bwrap)
 	}
 	if len(r.fr.RunCalls) != 1 || r.fr.RunCalls[0].ClosureGeneration == nil {
 		t.Fatalf("fr.RunCalls = %v, want one Run call carrying the swapped generation", r.fr.RunCalls)
@@ -564,7 +568,7 @@ func TestRunContinuousDispatch_StoreClosureSwap_NotNixInBox_StillPrepares(t *tes
 // not exist, which would otherwise appear only as every later Box launch's
 // "no longer exists" stat-guard failure (issue #2682).
 func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_PrepareFails_FallsBackToDrain(t *testing.T) {
-	r := runNixInBoxSwap(t, true, strategyWithHook(func(runner.Config, string, string) error {
+	r := runNixInBoxSwap(t, true, strategyWithHook(func(inputdoc.Artifacts, string, string) error {
 		return errors.New("boom: vacuum into failed")
 	}))
 	if got := exitCodeFor(r.err); got != 4 {
@@ -607,7 +611,7 @@ func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_UnknownFamily_FallsBackT
 // drains without ever reaching the runner family's preparation.
 func TestRunContinuousDispatch_StoreClosureNixInBoxSwap_EmptyTipTag_SkipsPreparation(t *testing.T) {
 	called := false
-	r := runNixInBoxSwapTo(t, true, strategyWithHook(func(runner.Config, string, string) error {
+	r := runNixInBoxSwapTo(t, true, strategyWithHook(func(inputdoc.Artifacts, string, string) error {
 		called = true
 		return nil
 	}), true)

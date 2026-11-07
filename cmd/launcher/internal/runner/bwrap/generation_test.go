@@ -6,11 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -224,7 +225,7 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 	closure := "/nix/store/abc-agent-closure"
 	dest := snapshotDest(pwd, closure)
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err == nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err == nil {
 		t.Fatal("SnapshotGeneration [1st] = nil, want error from scripted sqlite3 failure")
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
@@ -234,7 +235,7 @@ func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
 		t.Errorf("leftover siblings after failure: %v, want none", left)
 	}
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err == nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err == nil {
 		t.Fatal("SnapshotGeneration [2nd] = nil, want the scripted failure again")
 	}
 	if vacuums != 2 {
@@ -256,7 +257,7 @@ func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testi
 		}
 	})
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	got, err := os.ReadFile(dest)
@@ -293,7 +294,7 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) = %v, want nil", pwd, closure, err)
 	}
 	if len(gotNames) != 1 || gotNames[0] != "sqlite3" {
@@ -341,13 +342,13 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) [1st] = %v, want nil", pwd, closure, err)
 	}
 
 	// The first call installs the (empty) temp as dest, so the second call
 	// finds an existing snapshot without any setup here.
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) [2nd] = %v, want nil", pwd, closure, err)
 	}
 
@@ -382,7 +383,7 @@ func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
 		}
 	}
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
@@ -546,11 +547,41 @@ func TestLockedFDMatchesPath(t *testing.T) {
 }
 
 // The bwrap family prepares a hot-swapped closure by snapshotting it; core
-// reaches that only through the Strategy hook.
-func TestStrategy_PrepareHotSwapIsSet(t *testing.T) {
-	got := reflect.ValueOf(Strategy.PrepareHotSwap).Pointer()
-	if want := reflect.ValueOf(SnapshotGeneration).Pointer(); got != want {
-		t.Fatal("bwrap Strategy.PrepareHotSwap is not SnapshotGeneration")
+// reaches that only through the Strategy hook, which must forward the
+// document's bwrap part (a zero part would skip rooting and the snapshot).
+func TestStrategy_PrepareHotSwapForwardsBwrapPart(t *testing.T) {
+	calls := swapStubs(t, false)
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	art := inputdoc.Artifacts{Bwrap: &swapArt}
+
+	if err := Strategy.PrepareHotSwap(art, pwd, closure); err != nil {
+		t.Fatalf("PrepareHotSwap = %v, want nil", err)
+	}
+	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v", got, want)
+	}
+	if _, err := os.Stat(snapshotDest(pwd, closure)); err != nil {
+		t.Errorf("nix-var snapshot: want written, got err=%v", err)
+	}
+}
+
+// A document that selected another family carries no bwrap part: the hook
+// reads it as empty artifacts, rooting only the closure and writing no snapshot.
+func TestStrategy_PrepareHotSwapToleratesNilBwrapPart(t *testing.T) {
+	calls := swapStubs(t, false)
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+
+	if err := Strategy.PrepareHotSwap(inputdoc.Artifacts{}, pwd, closure); err != nil {
+		t.Fatalf("PrepareHotSwap = %v, want nil", err)
+	}
+	genDir := filepath.Join(pwd, ".spindrift", "nix-gcroots", ClosureGeneration(closure))
+	if got, want := outLinkCalls(*calls), wantOutLinkCalls(genDir, closure); !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("out-link calls = %v, want %v", got, want)
+	}
+	if _, err := os.Stat(snapshotDest(pwd, closure)); !os.IsNotExist(err) {
+		t.Errorf("nix-var snapshot: want absent without a nix config, got err=%v", err)
 	}
 }
 
@@ -870,7 +901,7 @@ func TestSnapshotGeneration_WritesIntoCurrentVersionDir(t *testing.T) {
 	genDir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
 	old := seedSnapshotDir(t, snapshotVersionDir(genDir, "4"), "v4")
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if got, err := os.ReadFile(snapshotDBPath(snapshotVersionDir(genDir, "9"))); err != nil || string(got) != "v9" {
@@ -963,7 +994,7 @@ func TestSnapshotGeneration_RetiresIdleFlatSnapshotThenWritesVersion(t *testing.
 	genDir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
 	flat := seedSnapshotDir(t, genDir, "flat")
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	assertExists(t, flat, false)
@@ -981,7 +1012,7 @@ func TestSnapshotGeneration_VacuumFailureAfterRetireLeavesNoSnapshot(t *testing.
 	genDir := NixVarSnapshotDir(pwd, ClosureGeneration(closure))
 	flat := seedSnapshotDir(t, genDir, "flat")
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err == nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err == nil {
 		t.Fatal("SnapshotGeneration = nil, want the VACUUM error")
 	}
 	assertExists(t, flat, false)

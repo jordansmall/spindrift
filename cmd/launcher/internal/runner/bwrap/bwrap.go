@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
@@ -144,38 +145,63 @@ type bwrapAdapter struct {
 }
 
 // Strategy is the bwrap family's entry in the runner registry.
-var Strategy = runner.Strategy{Name: runner.KindBwrap, New: New, NewBuild: NewBuild, Prerequisites: Prerequisites, PrepareHotSwap: SnapshotGeneration, RawNetworkKnobs: RawNetworkKnobs}
+var Strategy = runner.Strategy{
+	Name: runner.KindBwrap,
+	New: func(cfg runner.Config, art inputdoc.Artifacts, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+		return New(cfg, bwrapPart(art), l, pwd)
+	},
+	NewBuild: func(cfg runner.Config, art inputdoc.Artifacts, _ runner.KnobLookup, pwd string) (runner.Runner, error) {
+		return NewBuild(cfg, bwrapPart(art), pwd), nil
+	},
+	Prerequisites: func(cfg runner.Config, art inputdoc.Artifacts, l runner.KnobLookup) []runner.Prerequisite {
+		return Prerequisites(cfg, bwrapPart(art), l)
+	},
+	PrepareHotSwap: func(art inputdoc.Artifacts, pwd, closure string) error {
+		return SnapshotGeneration(bwrapPart(art), pwd, closure)
+	},
+	RawNetworkKnobs: RawNetworkKnobs,
+}
 
-// New constructs a bwrap adapter for the run command from cfg, the family
-// knobs read through l (the error is a malformed family knob), and pwd (the
-// launcher's own working directory); call NewBuild for the build command.
+// bwrapPart returns the bwrap family's artifacts, or the zero part when the
+// document selected another RUNNER_KIND and carries none.
+func bwrapPart(art inputdoc.Artifacts) inputdoc.BwrapArtifacts {
+	if art.Bwrap == nil {
+		return inputdoc.BwrapArtifacts{}
+	}
+	return *art.Bwrap
+}
+
+// New constructs a bwrap adapter for the run command from cfg, art (the bwrap
+// part of the Launcher input artifacts), the family knobs read through l (the
+// error is a malformed family knob), and pwd (the launcher's own working
+// directory); call NewBuild for the build command.
 // By default (any cfg.NetworkMode except the "host" opt-out, issue #2666) the
 // adapter isolates the sandbox into its own network namespace, with egress
 // restored via a hardened pasta helper (ADR 0042), matching rootless podman.
-func New(cfg runner.Config, l runner.KnobLookup, pwd string) (runner.Runner, error) {
+func New(cfg runner.Config, art inputdoc.BwrapArtifacts, l runner.KnobLookup, pwd string) (runner.Runner, error) {
 	net, err := network(cfg, l)
 	if err != nil {
 		return nil, err
 	}
-	generation := ClosureGeneration(cfg.ImageTag)
+	generation := ClosureGeneration(art.ImageTag.String())
 	return &bwrapAdapter{
-		prepare:            newBuildAdapter(cfg, pwd),
-		agentFiles:         cfg.AgentFiles,
-		agentEnv:           cfg.AgentEnv,
-		passwdFile:         cfg.PasswdFile,
-		groupFile:          cfg.GroupFile,
-		bakedPrefetch:      cfg.BakedPrefetch,
-		nixConfigFile:      cfg.NixConfigFile,
+		prepare:            newBuildAdapter(cfg, art, pwd),
+		agentFiles:         art.AgentFiles.String(),
+		agentEnv:           art.AgentEnv.String(),
+		passwdFile:         art.PasswdFile.String(),
+		groupFile:          art.GroupFile.String(),
+		bakedPrefetch:      art.BakedPrefetch.String(),
+		nixConfigFile:      art.NixConfigFile.String(),
 		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, generation),
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixGCRootsRoot:     NixGCRootsRoot(pwd),
 		generation:         generation,
-		nixStoreWritable:   cfg.NixStoreWritable,
+		nixStoreWritable:   art.NixStoreWritable.Bool(),
 		mountParams:        cfg.MountParams,
 		network:            net,
 		pidsLimit:          cfg.PidsLimit,
 		memoryLimit:        cfg.MemoryLimit,
-		syscallFilterPath:  cfg.SyscallFilterPath,
+		syscallFilterPath:  art.SyscallFilter.String(),
 	}, nil
 }
 
@@ -1233,36 +1259,34 @@ type bwrapBuildAdapter struct {
 	nixGCRootsRoot    string
 }
 
-// NewBuild constructs a bwrap adapter for the build command from cfg and
+// NewBuild constructs a bwrap adapter for the build command from cfg, art and
 // pwd (the launcher's own working directory). EnsureReady realizes the agent
 // store closures and, when nixInBox is on, snapshots the host nix store DB.
-// The knob lookup is unused and the error always nil; both exist only for the
-// shared runner.Strategy signature.
-func NewBuild(cfg runner.Config, _ runner.KnobLookup, pwd string) (runner.Runner, error) {
-	b := newBuildAdapter(cfg, pwd)
-	return &b, nil
+func NewBuild(cfg runner.Config, art inputdoc.BwrapArtifacts, pwd string) runner.Runner {
+	b := newBuildAdapter(cfg, art, pwd)
+	return &b
 }
 
 // newBuildAdapter is shared with New, whose run adapter prepares a cold
 // generation through the same steps.
-func newBuildAdapter(cfg runner.Config, pwd string) bwrapBuildAdapter {
-	generation := ClosureGeneration(cfg.ImageTag)
+func newBuildAdapter(cfg runner.Config, art inputdoc.BwrapArtifacts, pwd string) bwrapBuildAdapter {
+	generation := ClosureGeneration(art.ImageTag.String())
 	return bwrapBuildAdapter{
-		agentFilesDrv:      cfg.AgentFilesDrv,
-		agentEnvDrv:        cfg.AgentEnvDrv,
-		passwdFileDrv:      cfg.PasswdFileDrv,
-		groupFileDrv:       cfg.GroupFileDrv,
-		nixConfigFileDrv:   cfg.NixConfigFileDrv,
-		syscallFilterDrv:   cfg.SyscallFilterDrv,
+		agentFilesDrv:      art.AgentFilesDrv.String(),
+		agentEnvDrv:        art.AgentEnvDrv.String(),
+		passwdFileDrv:      art.PasswdFileDrv.String(),
+		groupFileDrv:       art.GroupFileDrv.String(),
+		nixConfigFileDrv:   art.NixConfigFileDrv.String(),
+		syscallFilterDrv:   art.SyscallFilterDrv.String(),
 		nixVarSnapshotDir:  NixVarSnapshotDir(pwd, generation),
 		nixVarSnapshotRoot: NixVarSnapshotRoot(pwd),
 		nixVarGeneration:   generation,
-		agentFiles:         cfg.AgentFiles,
-		agentEnv:           cfg.AgentEnv,
-		passwdFile:         cfg.PasswdFile,
-		groupFile:          cfg.GroupFile,
-		nixConfigFile:      cfg.NixConfigFile,
-		syscallFilterPath:  cfg.SyscallFilterPath,
+		agentFiles:         art.AgentFiles.String(),
+		agentEnv:           art.AgentEnv.String(),
+		passwdFile:         art.PasswdFile.String(),
+		groupFile:          art.GroupFile.String(),
+		nixConfigFile:      art.NixConfigFile.String(),
+		syscallFilterPath:  art.SyscallFilter.String(),
 		nixGCRootsRoot:     NixGCRootsRoot(pwd),
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 )
 
@@ -285,11 +285,11 @@ func swapStubs(t *testing.T, failRoot bool) *[][]string {
 	return nixCalls
 }
 
-var swapCfg = runner.Config{
-	NixConfigFile:     "/nix/store/eee-nix.conf",
-	PasswdFile:        "/nix/store/ccc-passwd",
-	GroupFile:         "/nix/store/ddd-group",
-	SyscallFilterPath: "/nix/store/fff-filter.bpf",
+var swapArt = inputdoc.BwrapArtifacts{
+	NixConfigFile: inputdoc.ValueOf("/nix/store/eee-nix.conf"),
+	PasswdFile:    inputdoc.ValueOf("/nix/store/ccc-passwd"),
+	GroupFile:     inputdoc.ValueOf("/nix/store/ddd-group"),
+	SyscallFilter: inputdoc.ValueOf("/nix/store/fff-filter.bpf"),
 }
 
 func wantSwapRoot(pwd, closure string) [][]string {
@@ -303,7 +303,7 @@ func TestSnapshotGeneration_RootsClosureAndStartupArtifacts(t *testing.T) {
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {
@@ -323,7 +323,7 @@ func TestSnapshotGeneration_RootsWhenSnapshotAlreadyExists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {
@@ -337,7 +337,7 @@ func TestSnapshotGeneration_RootRegistrationHoldsSnapshotLock(t *testing.T) {
 	closure := "/nix/store/abc-agent-closure"
 	lockPath := SnapshotLockPath(NixVarSnapshotDir(pwd, ClosureGeneration(closure)))
 	probed := assertOutLinkHoldsSnapshotLock(t, lockPath)
-	if err := SnapshotGeneration(swapCfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(swapArt, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if !*probed {
@@ -351,7 +351,7 @@ func TestSnapshotGeneration_RootFailureWarnsAndSucceeds(t *testing.T) {
 
 	var err error
 	out := runnertest.CaptureStdoutDuring(t, func() {
-		err = SnapshotGeneration(swapCfg, pwd, "/nix/store/abc-agent-closure")
+		err = SnapshotGeneration(swapArt, pwd, "/nix/store/abc-agent-closure")
 	})
 	if err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil (a root failure must not fail the swap)", err)
@@ -375,10 +375,10 @@ func TestSnapshotGeneration_NixInBoxOff_RootsAndLocksWithoutSnapshot(t *testing.
 	}
 	pwd := t.TempDir()
 	closure := "/nix/store/abc-agent-closure"
-	cfg := swapCfg
-	cfg.NixConfigFile = ""
+	art := swapArt
+	art.NixConfigFile = inputdoc.Value{}
 
-	if err := SnapshotGeneration(cfg, pwd, closure); err != nil {
+	if err := SnapshotGeneration(art, pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration = %v, want nil", err)
 	}
 	if got, want := outLinkCalls(*calls), wantSwapRoot(pwd, closure); !slices.EqualFunc(got, want, slices.Equal) {

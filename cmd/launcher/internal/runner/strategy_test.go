@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // isolateRegistry swaps in an empty registry for the test, so fake families
@@ -63,20 +65,20 @@ func TestLookupReturnsRegisteredConstructors(t *testing.T) {
 	built := ""
 	Register(Strategy{
 		Name:     "fake",
-		New:      func(Config, KnobLookup, string) (Runner, error) { built = "run"; return nil, nil },
-		NewBuild: func(Config, KnobLookup, string) (Runner, error) { built = "build"; return nil, nil },
+		New:      func(Config, inputdoc.Artifacts, KnobLookup, string) (Runner, error) { built = "run"; return nil, nil },
+		NewBuild: func(Config, inputdoc.Artifacts, KnobLookup, string) (Runner, error) { built = "build"; return nil, nil },
 	})
 	s, err := Lookup("fake")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.New(Config{}, nil, ""); err != nil {
+	if _, err := s.New(Config{}, inputdoc.Artifacts{}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if built != "run" {
 		t.Errorf("New dispatched to %q", built)
 	}
-	if _, err := s.NewBuild(Config{}, nil, ""); err != nil {
+	if _, err := s.NewBuild(Config{}, inputdoc.Artifacts{}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if built != "build" {
@@ -95,16 +97,16 @@ func TestNamesSorted(t *testing.T) {
 }
 
 func TestPrerequisitesForNilFuncIsNil(t *testing.T) {
-	if got := (Strategy{Name: "fake"}).PrerequisitesFor(Config{}, nil); got != nil {
+	if got := (Strategy{Name: "fake"}).PrerequisitesFor(Config{}, inputdoc.Artifacts{}, nil); got != nil {
 		t.Errorf("PrerequisitesFor with nil func = %v, want nil", got)
 	}
 }
 
 func TestPrerequisitesForPassesConfig(t *testing.T) {
-	s := Strategy{Name: "fake", Prerequisites: func(cfg Config, _ KnobLookup) []Prerequisite {
+	s := Strategy{Name: "fake", Prerequisites: func(cfg Config, _ inputdoc.Artifacts, _ KnobLookup) []Prerequisite {
 		return []Prerequisite{{Name: cfg.Runtime, Required: cfg.MaxParallel > 1}}
 	}}
-	got := s.PrerequisitesFor(Config{Runtime: "x", MaxParallel: 2}, nil)
+	got := s.PrerequisitesFor(Config{Runtime: "x", MaxParallel: 2}, inputdoc.Artifacts{}, nil)
 	if len(got) != 1 || got[0].Name != "x" || !got[0].Required {
 		t.Errorf("PrerequisitesFor = %+v, want one Required row named x", got)
 	}

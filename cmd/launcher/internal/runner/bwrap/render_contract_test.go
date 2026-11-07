@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/runner/runnertest"
 	"spindrift.dev/launcher/internal/runner/runnertest/contract"
@@ -74,18 +75,29 @@ func (bwrapRenderingHarness) Render(t *testing.T, l contract.Launch) []string {
 		seedSnapshot(t, snapshotDBPath(snapshotVersionDir(filepath.Join(snapshotRoot, d), testHostVersion)), "snapshot")
 	}
 
-	a := &bwrapAdapter{
-		agentFiles:         bakedAgentFiles,
-		agentEnv:           bakedAgentEnv,
-		passwdFile:         "/nix/store/contract-passwd",
-		groupFile:          "/nix/store/contract-group",
-		bakedPrefetch:      "echo ok",
-		nixConfigFile:      bakedNixConfigFile,
-		nixVarSnapshotRoot: snapshotRoot,
-		nixVarSnapshotDir:  filepath.Join(snapshotRoot, bakedGeneration),
-		network:            runner.Config{NetworkMode: l.Network}.BwrapNetwork(false),
-		mountParams:        runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
+	r, err := New(
+		runner.Config{
+			NetworkMode: l.Network,
+			MountParams: runner.MountParams{DriverSessionCacheDir: runnertest.DriverSessionCacheTarget},
+		},
+		inputdoc.BwrapArtifacts{
+			AgentFiles:    inputdoc.ValueOf(bakedAgentFiles),
+			AgentEnv:      inputdoc.ValueOf(bakedAgentEnv),
+			PasswdFile:    inputdoc.ValueOf("/nix/store/contract-passwd"),
+			GroupFile:     inputdoc.ValueOf("/nix/store/contract-group"),
+			BakedPrefetch: inputdoc.ValueOf("echo ok"),
+			NixConfigFile: inputdoc.ValueOf(bakedNixConfigFile),
+		},
+		runnertest.Lookup(nil), t.TempDir())
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
+	a := r.(*bwrapAdapter)
+	// The seeded snapshot lives in its own root, and the contract run roots
+	// no artifacts.
+	a.nixVarSnapshotRoot = snapshotRoot
+	a.nixVarSnapshotDir = filepath.Join(snapshotRoot, bakedGeneration)
+	a.nixGCRootsRoot = ""
 	if err := a.Run(l.Box); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
