@@ -5111,7 +5111,10 @@ nearest heading's anchor, `file.md:<anchor>`, with each run of spaces and
 hyphens folded to one hyphen and a repeated heading taking a `-1`, `-2`
 suffix; text above a file's first heading keys on the bare path
 `file.md`) and uses a bare line only when none exists. A docs-drift
-finding keys its doc site alongside its code site, never instead of it.
+finding keys its doc site alongside its code site, never instead of it; a
+`wrong-code-comment` finding keys on the commented symbol alone, never on the
+files it cites as evidence of the contradiction, and a comment that documents
+no symbol (a package doc comment, a file header) keys on the bare `.go` path.
 
 The two direct filing paths (`gh`, Forgejo) never reach the Launcher,
 so their dedup stays entirely the Filer's own: it runs the open-issue
