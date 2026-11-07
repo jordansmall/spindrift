@@ -28,7 +28,7 @@ import (
 // are one adapter differing only by CLI name.
 type ociAdapter struct {
 	cli             string // "podman" or "docker"
-	image           string // tag to run (may be overridden by IMAGE env)
+	image           string // tag to run
 	imageArchive    string // baked nix store path to the OCI tarball
 	imageDrv        string // baked .drv path; used by nix build for host realize
 	imageTag        string // content-hash tag applied after loading

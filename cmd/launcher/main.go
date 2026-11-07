@@ -123,11 +123,6 @@ type config struct {
 	// "claude", matching the nix side's default.
 	driver string
 
-	// image is the OCI runtime image reference; defaults to imageTag, which for
-	// bwrap holds the bundled agent closure's store path instead (issue #2667).
-	// Only oci.go reads it, and oci.go is never reached for a bwrap runnerKind.
-	image string
-
 	// driverSessionCacheDir is the in-box mount target for the selected
 	// Driver's session-state dir (ADR 0009), nix-baked at wrap time. Empty
 	// when the Driver declares no session-state dir.
@@ -396,17 +391,13 @@ func hostGitConfigField(env string) string {
 }
 
 func loadConfig() config {
-	imageTag := getenvArtifact("IMAGE_TAG", "spindrift:latest")
-	image := getenvArtifact("IMAGE", imageTag)
-
 	sc := loadSchemaConfig()
 
-	runtime := getenvArtifact("RUNTIME", "")
+	runtime := docArtifact("RUNTIME")
 	// No runtime-name fallback: the nix pipeline always renders RUNNER_KIND
 	// alongside RUNTIME (issue #2538). A direct binary invocation with no
-	// --input document that also omits RUNNER_KIND gets "", which
-	// runner.Lookup resolves to the OCI family.
-	runnerKind := getenvArtifact("RUNNER_KIND", "")
+	// --input document gets "", which runner.Lookup resolves to the OCI family.
+	runnerKind := docArtifact("RUNNER_KIND")
 	// loadConfig runs from several call sites, so mainRun prints the warning
 	// once instead.
 	driver, _ := resolveDriver()
@@ -414,37 +405,36 @@ func loadConfig() config {
 	return config{
 		schemaConfig: sc,
 
-		imageArchive:       getenvArtifact("IMAGE_ARCHIVE", ""),
-		imageTag:           imageTag,
-		imageDrv:           getenvArtifact("IMAGE_DRV", ""),
-		nixBuilderImage:    getenvArtifact("NIX_BUILDER_IMAGE", ""),
-		nixVolume:          getenvArtifact("NIX_VOLUME", "spindrift-nix"),
-		flakeImageAttr:     getenvArtifact("FLAKE_IMAGE_ATTR", ""),
-		flakeLauncherAttr:  getenvArtifact("FLAKE_LAUNCHER_ATTR", ""),
-		loadedLauncherHash: getenvArtifact("LAUNCHER_CURRENCY_HASH", ""),
-		agentFiles:         getenvArtifact("AGENT_FILES", ""),
-		agentEnv:           getenvArtifact("AGENT_ENV", ""),
-		agentFilesDrv:      getenvArtifact("AGENT_FILES_DRV", ""),
-		agentEnvDrv:        getenvArtifact("AGENT_ENV_DRV", ""),
-		bakedPrefetch:      getenvArtifact("BAKED_PREFETCH", ""),
-		passwdFile:         getenvArtifact("PASSWD_FILE", ""),
-		groupFile:          getenvArtifact("GROUP_FILE", ""),
-		passwdFileDrv:      getenvArtifact("PASSWD_FILE_DRV", ""),
-		groupFileDrv:       getenvArtifact("GROUP_FILE_DRV", ""),
-		nixConfigFile:      getenvArtifact("NIX_CONFIG_FILE", ""),
-		nixConfigFileDrv:   getenvArtifact("NIX_CONFIG_FILE_DRV", ""),
-		syscallFilterPath:  getenvArtifact("SYSCALL_FILTER", ""),
-		syscallFilterDrv:   getenvArtifact("SYSCALL_FILTER_DRV", ""),
-		nixStoreWritable:   getenvArtifact("NIX_STORE_WRITABLE", "") == "true",
+		imageArchive:       docArtifact("IMAGE_ARCHIVE"),
+		imageTag:           docArtifact("IMAGE_TAG"),
+		imageDrv:           docArtifact("IMAGE_DRV"),
+		nixBuilderImage:    docArtifact("NIX_BUILDER_IMAGE"),
+		nixVolume:          docArtifact("NIX_VOLUME"),
+		flakeImageAttr:     docArtifact("FLAKE_IMAGE_ATTR"),
+		flakeLauncherAttr:  docArtifact("FLAKE_LAUNCHER_ATTR"),
+		loadedLauncherHash: docArtifact("LAUNCHER_CURRENCY_HASH"),
+		agentFiles:         docArtifact("AGENT_FILES"),
+		agentEnv:           docArtifact("AGENT_ENV"),
+		agentFilesDrv:      docArtifact("AGENT_FILES_DRV"),
+		agentEnvDrv:        docArtifact("AGENT_ENV_DRV"),
+		bakedPrefetch:      docArtifact("BAKED_PREFETCH"),
+		passwdFile:         docArtifact("PASSWD_FILE"),
+		groupFile:          docArtifact("GROUP_FILE"),
+		passwdFileDrv:      docArtifact("PASSWD_FILE_DRV"),
+		groupFileDrv:       docArtifact("GROUP_FILE_DRV"),
+		nixConfigFile:      docArtifact("NIX_CONFIG_FILE"),
+		nixConfigFileDrv:   docArtifact("NIX_CONFIG_FILE_DRV"),
+		syscallFilterPath:  docArtifact("SYSCALL_FILTER"),
+		syscallFilterDrv:   docArtifact("SYSCALL_FILTER_DRV"),
+		nixStoreWritable:   docArtifact("NIX_STORE_WRITABLE") == "true",
 		runtime:            runtime,
 		runnerKind:         runnerKind,
-		boxArtifact:        getenvArtifact("BOX_ARTIFACT", ""),
+		boxArtifact:        docArtifact("BOX_ARTIFACT"),
 		driver:             driver,
-		image:              image,
 
-		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
+		driverSessionCacheDir: docArtifact("DRIVER_SESSION_CACHE_DIR"),
 
-		boxEnvVars: getenvArtifact("BOX_ENV_VARS", ""),
+		boxEnvVars: docArtifact("BOX_ENV_VARS"),
 	}
 }
 
@@ -776,9 +766,11 @@ func delivered(o settle.DispatchOutcome) bool {
 // PromptDir/SkillsDir populated is harmless there.
 func runnerConfig(c config) runner.Config {
 	sig := resolveCapabilitySignals(c.codeForge, c.issueTracker)
+	// Image duplicates ImageTag until #6569's typed per-family artifacts
+	// replace this shape.
 	return runner.Config{
 		Runtime:           c.runtime,
-		Image:             c.image,
+		Image:             c.imageTag,
 		ImageArchive:      c.imageArchive,
 		ImageDrv:          c.imageDrv,
 		ImageTag:          c.imageTag,
@@ -2133,7 +2125,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 // that is unset. Newlines in value become spaces, so one cannot corrupt the
 // single-line format.
 func writeGithubOutput(key, value string) error {
-	path := getenvArtifact("GITHUB_OUTPUT", "")
+	path := os.Getenv("GITHUB_OUTPUT")
 	if path == "" {
 		return nil
 	}

@@ -12,33 +12,22 @@ import (
 
 // loadedDoc is populated once by inputdoc.Load, before loadConfig runs. It
 // stays nil when the binary runs without --input (tests, manual debugging), and
-// every lookup then falls through to os.Getenv or schemaFlags.
+// every artifact then reads as empty (DRIVER alone falls back to the env, see
+// resolveDriver).
 var loadedDoc *inputdoc.Document
 
-// getenvArtifact reads key from the environment, then the loaded document's
-// artifacts section, then def. Artifacts are nix-computed plumbing, never
-// operator knobs, so an ambient artifact env var draws no deprecation warning.
-func getenvArtifact(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	if loadedDoc != nil {
-		if v, ok := loadedDoc.Artifacts[key]; ok && v != "" {
-			return v
-		}
-	}
-	return def
-}
-
+// resolveDriver reads DRIVER, the one artifact with an ambient env fallback,
+// used only when no document bakes one (ADR 0064).
 func resolveDriver() (driver, warning string) {
 	return inputdoc.ResolveDriver(docArtifact("DRIVER"), os.Getenv("DRIVER"), inputdoc.DriverWarned())
 }
 
-// docArtifact reads key strictly from the loaded document's Artifacts, never
-// from os.Getenv. The keys it backs are nix-resolved policy signals
-// (capability, tracker/forge, agent presence), so a stray ambient env var must
-// never override what nix baked into the document (issue #2527). Its only
-// callers are the matching-document trust branches, not dispatchConfig (#2533).
+// docArtifact is the one artifact lookup: it reads key strictly from the loaded
+// document's Artifacts, never from os.Getenv. Artifacts are nix-resolved
+// (capability, tracker/forge, agent presence, image and store references), so a
+// stray ambient env var must never override what nix baked into the document
+// (issues #2527, #6611). Absent keys read as "": the nix rows render every
+// default, so Go carries none.
 func docArtifact(key string) string {
 	v, _ := lookupDocArtifact(key)
 	return v
