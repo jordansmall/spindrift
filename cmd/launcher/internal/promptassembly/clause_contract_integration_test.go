@@ -1065,6 +1065,70 @@ var clauseContracts = []clauseContract{
 		clause:   "Write those lines in full human-quality prose too",
 		reason:   "the reviewer must get the full-prose directive, not just its rationale, which alone would survive a paragraph that inverts the order (issue #3265).",
 	},
+	{
+		fragment: "caveman-default-review.md",
+		clause:   "Default to the `/caveman` skill for all narration and prose output this run",
+		reason:   "the review prompt carries the caveman directive itself, not just its exemptions (issue #2707).",
+	},
+	{
+		fragment: "caveman-default-review.md",
+		clause:   "the `VERDICT: APPROVE` / `VERDICT: BLOCK` line",
+		reason:   "the verdict line is machine-parsed, so it stays exempt from caveman narration (issue #2707).",
+	},
+	{
+		fragment: "caveman-default-review.md",
+		clause:   "A Non-blocking finding is not throwaway narration",
+		reason:   "the Filer turns a Non-blocking finding into an issue body verbatim, so it must not be caveman-compressed (issue #2707).",
+	},
+
+	// caveman-default-research.md
+	{
+		fragment: "caveman-default-research.md",
+		clause:   "Default to the `/caveman` skill for all narration and prose output this run",
+		reason:   "the research prompt carries the caveman directive itself, not just its exemptions (issue #2708).",
+	},
+	{
+		fragment: "caveman-default-research.md",
+		clause:   "the context-for-a-worker section",
+		reason:   "the posted verdict's context-for-a-worker section is picked up cold by a later worker, so it stays exempt from compression (issue #2708).",
+	},
+	{
+		fragment: "caveman-default-research.md",
+		clause:   "The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME` line and its `note=` field, and any host-relay signal line such as `SPINDRIFT_COMMENT`",
+		reason:   "the marker-grammar exemption must name SPINDRIFT_COMMENT, not just SPINDRIFT_OUTCOME: a read-only research box relays its verdict on that line, and a narrating box could reword the sole carrier and silently drop it. One contiguous clause ties the phrase to SPINDRIFT_COMMENT (issue #2708).",
+	},
+	{
+		fragment: "caveman-default-research.md",
+		clause:   "`SPINDRIFT_COMMENT` is the sole carrier of the posted verdict comment",
+		reason:   "under the log carrier the relay line is the verdict's only path to the tracker, so the exemption says why it is exempt (issue #2708).",
+	},
+
+	// ci-failure.md
+	{
+		fragment: "fragments/ci-failure.md",
+		clause:   "The launcher captured this from the failing PR checks",
+		reason:   "a fix pass must say the summary came from the launcher's PR-check capture, so the agent reads the failing job's log rather than treating the summary as the failure (issue #2354).",
+	},
+
+	// local/research-verdict-relay.md
+	{
+		fragment: "fragments/local/research-verdict-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_COMMENT \$\{RUN_NONCE\} <base64-encoded verdict comment body`),
+		reason:   "a local tracker has no in-box client, so the research box relays its verdict as one SPINDRIFT_COMMENT line carrying the run nonce and a base64 payload (issue #2708).",
+	},
+
+	// check-hygiene-default.md
+	{
+		fragment: "check-hygiene-default.md",
+		clause:   "Before running the first gate, invoke the `/check-hygiene` skill.",
+		reason:   "the anchor tells the agent to invoke the skill before its first gate run (issue #3227).",
+	},
+	{
+		fragment: "research-self-contained-prompt.md",
+		clause:   "CHECK_HYGIENE_STEP",
+		absent:   true,
+		reason:   "the self-contained research prompt has no repo and nothing to run, so it never wires CHECK_HYGIENE_STEP whatever the skill's baked state (issue #3227).",
+	},
 
 	// filer-file-relay.md
 	{
