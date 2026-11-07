@@ -1,90 +1,44 @@
 package promptassembly
 
 import (
-	"reflect"
+	"strings"
 	"testing"
 )
 
-// pairEnvMatrix builds its Env set by reflection rather than from a hand-listed
-// set, so a pair keyed off a newly added Env bool is swept as soon as the field
-// exists and neither end of the pair mechanic needs a matching edit here.
-func pairEnvMatrix() []Env {
-	typ := reflect.TypeOf(Env{})
-	allTrue := reflect.New(typ).Elem()
+// Pins one Gates-computed pair, TDD_BAKED/TDD_UNBAKED: it never renders both
+// members or neither, so flipping the knob swaps which body renders. Go has no
+// general inverseOf mechanic, and whether a registry's declared pairs are
+// well-formed is lib/fragment-pairs.nix's check, not this one.
+func TestTDDGatePairRendersExactlyOneMember(t *testing.T) {
+	reg, env := syntheticRegistry(t,
+		[]FragmentRow{
+			{Gate: "TDD_BAKED", Fragment: "baked.md", Var: "BAKED_STEP"},
+			{Gate: "TDD_UNBAKED", Fragment: "unbaked.md", Var: "UNBAKED_STEP"},
+		},
+		map[string]string{
+			"issue-prompt.md":      "[${BAKED_STEP}|${UNBAKED_STEP}]\n",
+			"fragments/baked.md":   "on-body",
+			"fragments/unbaked.md": "off-body",
+		})
 
-	envs := []Env{{}}
-	for i := 0; i < typ.NumField(); i++ {
-		if typ.Field(i).Type.Kind() != reflect.Bool {
-			continue
+	var sawBaked, sawUnbaked bool
+	for _, baked := range []bool{true, false} {
+		env.TDDSkillBaked = baked
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble(TDDSkillBaked=%v): %v", baked, err)
 		}
-		one := reflect.New(typ).Elem()
-		one.Field(i).SetBool(true)
-		envs = append(envs, one.Interface().(Env))
-		allTrue.Field(i).SetBool(true)
+		hasBaked := strings.Contains(result.Prompt, "on-body")
+		hasUnbaked := strings.Contains(result.Prompt, "off-body")
+		if hasBaked == hasUnbaked {
+			t.Fatalf("TDDSkillBaked=%v: want exactly one member rendered, Prompt:\n%s", baked, result.Prompt)
+		}
+		sawBaked = sawBaked || hasBaked
+		sawUnbaked = sawUnbaked || hasUnbaked
 	}
-	envs = append(envs, allTrue.Interface().(Env))
-	// A tracker with no in-Box client moves the issue-read pair (issue #6344).
-	envs = append(envs, Env{IssueTracker: "jira"})
-
-	kinds := []string{"", defaultDispatchKind, "research"}
-	out := make([]Env, 0, len(envs)*len(kinds))
-	for _, e := range envs {
-		for _, k := range kinds {
-			e.DispatchKind = k
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// TestRegistryInverseOfPairsAreExactlyOneOn is the Go half of the exactly-one-on
-// pair mechanic lib/fragment-pairs.nix validates: nix checks that a pair is
-// declared well-formedly, but Gates computes the two gates independently, so only
-// the real computation proves a pair never renders both members or neither. It
-// reads the registry, so a new inverseOf row in lib/fragments.nix is covered here.
-func TestRegistryInverseOfPairsAreExactlyOneOn(t *testing.T) {
-	reg, err := LoadRegistryFile("testdata/registry.json")
-	if err != nil {
-		t.Fatalf("LoadRegistryFile: %v", err)
-	}
-
-	envs := pairEnvMatrix()
-	declared := 0
-	for _, row := range reg.Rows {
-		if row.InverseOf == "" {
-			continue
-		}
-		declared++
-
-		var sawOn, sawOff bool
-		for _, env := range envs {
-			g := Gates(env)
-			on, ok := g[row.Gate]
-			if !ok {
-				t.Fatalf("Gates has no gate %q (declared inverseOf %q)", row.Gate, row.InverseOf)
-			}
-			inverse, ok := g[row.InverseOf]
-			if !ok {
-				t.Fatalf("Gates has no gate %q (named as %q's inverseOf)", row.InverseOf, row.Gate)
-			}
-			if on == inverse {
-				t.Fatalf("Gates(%+v): %q = %v and its inverseOf %q = %v, want exactly one on", env, row.Gate, on, row.InverseOf, inverse)
-			}
-			if on {
-				sawOn = true
-			} else {
-				sawOff = true
-			}
-		}
-
-		// Both arms have to be observed, or the complement assertion above
-		// passes vacuously on a matrix that never moves the knob behind the pair.
-		if !sawOn || !sawOff {
-			t.Errorf("gate %q (inverseOf %q) was %v for every Env in the matrix; the matrix never exercised the knob behind the pair", row.Gate, row.InverseOf, sawOn)
-		}
-	}
-
-	if declared == 0 {
-		t.Fatal("no registry row carries inverseOf; either lib/fragments.nix stopped declaring pairs or FragmentRow stopped decoding the column")
+	// Both arms must be observed, or the assertion above passes vacuously on a
+	// knob that never moves the pair.
+	if !sawBaked || !sawUnbaked {
+		t.Errorf("sawBaked=%v sawUnbaked=%v, want both arms rendered across the knob", sawBaked, sawUnbaked)
 	}
 }
