@@ -212,3 +212,17 @@ func TestReasonConstsHaveRows(t *testing.T) {
 		t.Fatal("found no Reason* consts; reason.go was restructured")
 	}
 }
+
+func TestReasonState(t *testing.T) {
+	for _, r := range reasons {
+		if got := ReasonState(r.Name); got != r.State {
+			t.Errorf("ReasonState(%q) = %q, want %q", r.Name, got, r.State)
+		}
+	}
+	if got := ReasonState(ReasonMergeByHand); got != StateComplete {
+		t.Errorf("ReasonState(ReasonMergeByHand) = %q, want %q", got, StateComplete)
+	}
+	if got := ReasonState("no-such-reason"); got != "" {
+		t.Errorf("ReasonState(unknown) = %q, want empty", got)
+	}
+}

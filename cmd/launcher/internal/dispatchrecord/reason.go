@@ -1,5 +1,7 @@
 package dispatchrecord
 
+import "slices"
+
 // The reason classes a terminal settle records on its dispatch_settled op,
 // across every dispatch kind. Values are the on-disk vocabulary; the
 // per-state lists are in docs/reference.md under "The settled outcome", and
@@ -171,3 +173,13 @@ func ReasonDelivery(name string) Delivery {
 	r, _ := reasonRow(name)
 	return r.Delivery
 }
+
+// ReasonState returns name's lifecycle state (a State* const), AnyState for
+// transition-refused, or "" for an unknown name.
+func ReasonState(name string) string {
+	r, _ := reasonRow(name)
+	return r.State
+}
+
+// Reasons returns a copy of the reason table.
+func Reasons() []ReasonRow { return slices.Clone(reasons) }
