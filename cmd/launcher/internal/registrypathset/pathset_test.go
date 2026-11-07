@@ -219,10 +219,10 @@ remote = https://artifacts.example.com/artifactory/api/remote/index
 		"/artifactory/api/repositories",
 		"/artifactory/api/remote/index/../../security/token",
 		// A download endpoint that is a sibling of the index, not under it, is
-		// something nothing committed in the repo declares, so it is refused
-		// today. Spec #3253 decision 3 has the Forwarder learn the download
-		// base from upstream in a later ticket. This derivation must not
-		// invent that path.
+		// something nothing committed in the repo declares, so it is refused.
+		// The Registry proxy learns that download base from upstream at run
+		// time (routeLogHandler.learnRewriteBase), so this static derivation
+		// must not invent the path.
 		"/artifactory/api/remote/v1/pkgs/axum/0.7.5/download",
 	}
 	for _, p := range refuse {

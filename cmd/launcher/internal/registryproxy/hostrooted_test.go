@@ -615,8 +615,8 @@ func TestHostRooted_TwoIndexBasesLearnIndependently(t *testing.T) {
 }
 
 // Learning the same download subtree twice for one route must not grow its learned
-// set past one entry, or repeat index.json fetches would leak memory over a
-// long-lived Forwarder process.
+// set past one entry, or repeat index.json fetches would leak memory in the
+// long-lived launcher process hosting the Registry proxy.
 func TestRouteLogHandler_LearnRewriteBaseDedups(t *testing.T) {
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

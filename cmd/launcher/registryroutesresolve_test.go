@@ -480,9 +480,9 @@ credential = { env = "SPINDRIFT_TEST_ALLOW_LOOP_CRED" }
 
 // Issue #3259: registrypathset.ApplyToRoute tags each derived path with its
 // declaring ecosystem in EnforcedSubtrees, not just the flat, untagged
-// EnforcedPaths the Forwarder's admission check already used. The fixture
-// declares a synthetic and a twin registry on one host, so each declaration
-// must get its own tag.
+// EnforcedPaths the Registry proxy's admission check already used. The
+// fixture declares a synthetic and a twin registry on one host, so each
+// declaration must get its own tag.
 func TestBuildRegistryProxyRoutes_HostRooted_DerivesEnforcedSubtrees(t *testing.T) {
 	repoDir := t.TempDir()
 	testutil.WriteFixture(t, repoDir, synthetic.Strategy.InTreeConfigPath, "main = https://host.example.com/index\n")

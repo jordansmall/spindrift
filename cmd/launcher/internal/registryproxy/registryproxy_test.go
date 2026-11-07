@@ -2641,7 +2641,7 @@ func TestManifestRoutes_ProjectsPrefixAndEcosystems(t *testing.T) {
 // that ManifestRoutes converts Route's EnforcedSubtrees
 // one-to-one into registrymanifest.Route's tagged EnforcedPaths (issue
 // #3259), distinct from the untagged EnforcedPaths Route also
-// carries for the Forwarder's admission check and never copies here.
+// carries for the Registry proxy's admission check and never copies here.
 func TestManifestRoutes_ProjectsEnforcedSubtreesAsEnforcedPaths(t *testing.T) {
 	routes := []Route{
 		{
