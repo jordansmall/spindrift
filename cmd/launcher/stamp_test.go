@@ -38,11 +38,10 @@ func TestDispatchStamp_KnobsCarryEffectiveValuesAndNeverSecrets(t *testing.T) {
 }
 
 func TestDispatchStamp_RevisionAndDriverVersion(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 	old := revision
 	t.Cleanup(func() { revision = old })
 	revision = "abc123"
-	loadedDoc = &inputdoc.Document{Artifacts: map[string]string{"DRIVER_VERSION": "2.0.1"}}
+	setArtifact(t, "DRIVER_VERSION", "2.0.1")
 
 	st := dispatchStamp("")
 	if st.Revision != "abc123" || st.DriverVersion != "2.0.1" {

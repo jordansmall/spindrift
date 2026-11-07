@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,30 @@ import (
 
 	"spindrift.dev/launcher/internal/inputdoc"
 )
+
+func setRunner(t *testing.T, runtime, kind string) {
+	t.Helper()
+	setArtifact(t, "RUNTIME", runtime)
+	setArtifact(t, "RUNNER_KIND", kind)
+}
+
+// setArtifact adds key to the loaded document's artifacts for the calling test
+// only. It copies the document, so a shared fixture is never mutated.
+func setArtifact(t *testing.T, key, value string) {
+	t.Helper()
+	prev := loadedDoc
+	doc := &inputdoc.Document{}
+	if prev != nil {
+		*doc = *prev
+	}
+	doc.Artifacts = maps.Clone(doc.Artifacts)
+	if doc.Artifacts == nil {
+		doc.Artifacts = map[string]string{}
+	}
+	doc.Artifacts[key] = value
+	loadedDoc = doc
+	t.Cleanup(func() { loadedDoc = prev })
+}
 
 // ADR 0020 requires the warning to say where the knob belongs, so for a
 // flakeOption-backed knob it names the variable, its flag, and its domain-tree

@@ -25,7 +25,7 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 	t.Setenv("GIT_USER_NAME", "bot")
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -56,7 +56,7 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 	t.Setenv("GIT_USER_NAME", "bot")
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 	t.Setenv("LABEL", "ready-for-agent")
 
 	var w bytes.Buffer
@@ -86,7 +86,7 @@ func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing
 	t.Setenv("GIT_USER_NAME", "bot")
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Research, true)
@@ -111,7 +111,7 @@ func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) 
 	t.Setenv("GIT_USER_NAME", "bot")
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, true)
@@ -138,7 +138,7 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 	t.Setenv("GIT_USER_NAME", "bot")
 	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -168,7 +168,7 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	t.Setenv("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "manual")
-	t.Setenv("RUNTIME", "echo")
+	setArtifact(t, "RUNTIME", "echo")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 
 	var w bytes.Buffer
@@ -206,9 +206,9 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "manual")
-	t.Setenv("RUNTIME", "true")
+	setArtifact(t, "RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
-	t.Setenv("RUNNER_KIND", "bwrap")
+	setArtifact(t, "RUNNER_KIND", "bwrap")
 	t.Setenv("NETWORK_MODE", "open") // not host/none, so the pasta launch gate actually calls bwrap.ValidatePasta()
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate
 	// (readonly_token_gate.go) would also fail if the walk reached it.
@@ -250,12 +250,12 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "manual")
-	t.Setenv("RUNTIME", "true")
+	setArtifact(t, "RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
-	t.Setenv("RUNNER_KIND", "bwrap")
+	setArtifact(t, "RUNNER_KIND", "bwrap")
 	t.Setenv("NETWORK_MODE", "host") // the pasta launch gate no-ops (issue #2666), isolating the overlay gate's failure
-	t.Setenv("NIX_STORE_WRITABLE", "true")
-	t.Setenv("NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
+	setArtifact(t, "NIX_STORE_WRITABLE", "true")
+	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate would also
 	// fail if the walk reached it.
 
@@ -294,9 +294,9 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	t.Setenv("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "manual")
-	t.Setenv("RUNTIME", "true")
+	setArtifact(t, "RUNTIME", "true")
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
-	t.Setenv("RUNNER_KIND", "bwrap")
+	setArtifact(t, "RUNNER_KIND", "bwrap")
 	t.Setenv("NETWORK_MODE", "open") // not host/none, so the pasta launch gate would call bwrap.ValidatePasta() if reached
 
 	var w bytes.Buffer
@@ -332,8 +332,7 @@ func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *test
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("BASE_BRANCH", "main")
 	t.Setenv("MERGE_MODE", "manual")
-	t.Setenv("RUNTIME", "echo")
-	t.Setenv("RUNNER_KIND", "bwrap")
+	setRunner(t, "echo", "bwrap")
 	t.Setenv("NETWORK_MODE", "no-host-loopback")
 
 	var w bytes.Buffer

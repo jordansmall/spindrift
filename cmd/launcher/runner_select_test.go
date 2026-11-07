@@ -99,7 +99,7 @@ func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("NETWORK_MODE", "host")
-			t.Setenv("RUNNER_KIND", "bwrap")
+			setArtifact(t, "RUNNER_KIND", "bwrap")
 			t.Setenv("BWRAP_UNSHARE_NET", tc.unshareNet)
 			c := loadConfig()
 
