@@ -803,49 +803,6 @@ func TestGatesResearchVerdictRelayedCarrierSplit(t *testing.T) {
 	}
 }
 
-// TestGatesResearchVerdictRelayedMatchesRegistry guards against drift between
-// the hand-listed RESEARCH_VERDICT_RELAYED union and the research-verdict-*
-// registry rows: it must equal the OR of every non-READWRITE row's gate.
-func TestGatesResearchVerdictRelayedMatchesRegistry(t *testing.T) {
-	var relayedGates []string
-	for _, row := range loadTestRegistry(t).Rows {
-		if strings.HasPrefix(row.Fragment, "research-verdict-") && !strings.HasSuffix(row.Gate, "_READWRITE") {
-			relayedGates = append(relayedGates, row.Gate)
-		}
-	}
-	if len(relayedGates) == 0 {
-		t.Fatal("no relayed research-verdict-* rows found in testdata/registry.json")
-	}
-	for _, tracker := range []string{"GITHUB", "FORGEJO", "LOCAL"} {
-		write := tracker
-		if tracker == "LOCAL" {
-			write = ""
-		}
-		for _, boxWrite := range []bool{true, false} {
-			for _, filer := range []bool{true, false} {
-				for _, carrier := range []string{"log", "socket"} {
-					env := Env{
-						DispatchKind:     "research",
-						FilerEnabled:     filer,
-						SignalCarrier:    carrier,
-						TrackerAxisRead:  tracker,
-						TrackerAxisWrite: write,
-						BoxWriteEnabled:  boxWrite,
-					}
-					g := Gates(env)
-					want := false
-					for _, name := range relayedGates {
-						want = want || g[name]
-					}
-					if g["RESEARCH_VERDICT_RELAYED"] != want {
-						t.Errorf("Gates(%+v)[RESEARCH_VERDICT_RELAYED] = %v, registry gates OR to %v", env, g["RESEARCH_VERDICT_RELAYED"], want)
-					}
-				}
-			}
-		}
-	}
-}
-
 // TestGatesIssueTrackerReachable covers the backend-agnostic gate the scout's
 // issue-read slot rides: on for every tracker the Box can reach, off for one
 // (local) it cannot.

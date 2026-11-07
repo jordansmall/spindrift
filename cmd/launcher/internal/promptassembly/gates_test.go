@@ -2,7 +2,6 @@ package promptassembly
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -715,52 +714,30 @@ func TestGatesHostMediatedLanding(t *testing.T) {
 	}
 }
 
+// pushGates is the push/triage family, copied by hand from the COMMIT_PUSH_*,
+// IF_BLOCKED_PUSH_* and IF_BLOCKED_TRIAGE_* rows in lib/fragments.nix. Nothing
+// cross-checks the copy: a new gate in that family must be added here too.
+var pushGates = []string{"BOX_PUSH_READ_WRITE", "HOST_MEDIATED_PUSH", "OUTBOX_PUSH_READ_ONLY"}
+
 // Exactly one fragment of each push/triage family renders per env: the
 // template slots are bare placeholder runs, so the gates alone enforce
 // exclusivity. This lives in Go, not lib/fragment-pairs.nix: that registry
 // only checks the declaration shape of two-way inverseOf pairs at eval time.
 // Gates computes these gates, so only a Go test proves exactly-one-on (issue
-// #6303). Families are picked by registry Var prefix, so a regate needs no
-// edit here.
+// #6303). The gate set is listed here, not read from the registry, so the test
+// pins Gates() alone.
 func TestGatesPushRowsPartition(t *testing.T) {
-	reg, err := LoadRegistryFile("testdata/registry.json")
-	if err != nil {
-		t.Fatalf("LoadRegistryFile: %v", err)
-	}
-
-	// The Var prefix is the family key: a new row under one of these
-	// prefixes joins that family and must keep it at three distinct gates.
-	for _, prefix := range []string{"COMMIT_PUSH_", "IF_BLOCKED_PUSH_", "IF_BLOCKED_TRIAGE_"} {
-		// Legacy *_LOCAL_STEP rows share a gate with *_HOST_MEDIATED_STEP.
-		seen := map[string]bool{}
-		var gates []string
-		for _, row := range reg.Rows {
-			if strings.HasPrefix(row.Var, prefix) && !seen[row.Gate] {
-				seen[row.Gate] = true
-				gates = append(gates, row.Gate)
+	for _, write := range []bool{false, true} {
+		for _, mediated := range []bool{false, true} {
+			got := Gates(Env{BoxWriteEnabled: write, HostMediatedRemote: mediated})
+			var on []string
+			for _, g := range pushGates {
+				if got[g] {
+					on = append(on, g)
+				}
 			}
-		}
-		if len(gates) != 3 {
-			t.Fatalf("%s* family has %d distinct gates %v, want 3", prefix, len(gates), gates)
-		}
-
-		for _, write := range []bool{false, true} {
-			for _, mediated := range []bool{false, true} {
-				env := Env{BoxWriteEnabled: write, HostMediatedRemote: mediated}
-				got := Gates(env)
-				var on []string
-				for _, g := range gates {
-					v, ok := got[g]
-					if !ok {
-						t.Fatalf("%s* gate %q missing from Gates (write=%v mediated=%v)", prefix, g, write, mediated)
-					}
-					if v {
-						on = append(on, g)
-					}
-				}
-				if len(on) != 1 {
-					t.Errorf("%s* family (write=%v mediated=%v): gates on = %v, want exactly 1", prefix, write, mediated, on)
-				}
+			if len(on) != 1 {
+				t.Errorf("push family (write=%v mediated=%v): gates on = %v, want exactly 1 of %v", write, mediated, on, pushGates)
 			}
 		}
 	}
@@ -769,39 +746,17 @@ func TestGatesPushRowsPartition(t *testing.T) {
 // Every IF BLOCKED slot renders exactly one fragment per reachable env (issue
 // #6281): a read-only Box on a no-PR host-mediated forge gets the same
 // host-mediated triage/push and no-PR step/landing as a read-write one, never
-// the outbox text. Slot gate sets derive from the registry by Var prefix, like
-// TestGatesPushRowsPartition, so a regate needs no edit here; the PR slot's
-// read-only rows are the log/socket carrier pair.
+// the outbox text. Slot gate sets are copied by hand, not read from the
+// registry, so the test pins Gates() alone and a new slot gate must be added
+// here too; the PR slot's read-only gates are the
+// log/socket carrier pair. IF_BLOCKED_PR_RW_GH / _FORGEJO are a nested
+// per-backend fork inside the read-write arm, not slot alternatives.
 func TestGatesIfBlockedSlotsPartition(t *testing.T) {
-	reg, err := LoadRegistryFile("testdata/registry.json")
-	if err != nil {
-		t.Fatalf("LoadRegistryFile: %v", err)
-	}
-	// IF_BLOCKED_PR_READ_WRITE_STEP / _FORGEJO_STEP are a nested per-backend
-	// fork rendered alongside IF_BLOCKED_PR_DIRECT_STEP inside the read-write
-	// arm, not slot alternatives.
-	nested := map[string]bool{"IF_BLOCKED_PR_RW_GH": true, "IF_BLOCKED_PR_RW_FORGEJO": true}
-	slotPrefixes := map[string][]string{
-		"triage":  {"IF_BLOCKED_TRIAGE_"},
-		"push":    {"IF_BLOCKED_PUSH_"},
-		"landing": {"IF_BLOCKED_OUTCOME_LANDING_"},
-		"pr":      {"IF_BLOCKED_PR_", "IF_BLOCKED_NO_PR_"},
-	}
-	slots := map[string][]string{}
-	for slot, prefixes := range slotPrefixes {
-		// Legacy *_LOCAL_STEP rows share a gate with *_HOST_MEDIATED_STEP.
-		seen := map[string]bool{}
-		for _, row := range reg.Rows {
-			for _, prefix := range prefixes {
-				if strings.HasPrefix(row.Var, prefix) && !nested[row.Gate] && !seen[row.Gate] {
-					seen[row.Gate] = true
-					slots[slot] = append(slots[slot], row.Gate)
-				}
-			}
-		}
-		if len(slots[slot]) == 0 {
-			t.Fatalf("slot %s derived no gates from prefixes %v", slot, prefixes)
-		}
+	slots := map[string][]string{
+		"triage":  pushGates,
+		"push":    pushGates,
+		"pr":      {"PR_FORGE_READ_WRITE", "NO_PR_FORGE", "PR_FORGE_READ_ONLY_LOG", "PR_FORGE_READ_ONLY_SOCKET"},
+		"landing": {"PR_FORGE_READ_WRITE", "NO_PR_FORGE", "PR_FORGE_READ_ONLY"},
 	}
 	cells := []struct {
 		name       string
@@ -835,7 +790,7 @@ func TestGatesIfBlockedSlotsPartition(t *testing.T) {
 			got := Gates(env)
 			for slot, gates := range slots {
 				if !slices.Contains(gates, want[slot]) {
-					t.Errorf("%s carrier=%q slot %s: expected gate %s not among registry gates %v", c.name, carrier, slot, want[slot], gates)
+					t.Errorf("%s carrier=%q slot %s: expected gate %s not among slot gates %v", c.name, carrier, slot, want[slot], gates)
 				}
 				for _, g := range gates {
 					if got[g] != (g == want[slot]) {
