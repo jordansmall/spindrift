@@ -6,7 +6,8 @@ import "testing"
 // store path (res.TipTag under bwrap), not the agentFiles derivation: it
 // derives the "files", "env", "nix-config" and "prefetch" children (issue
 // #2954). Generation comes from the closure path via the same
-// SafePathComponent rule bwrap.ClosureGeneration uses for a baked Config.ImageTag.
+// SafePathComponent rule bwrap.ClosureGeneration applies to its artifacts part's
+// ImageTag.
 func TestNewAgentGeneration_DerivesFilesAndEnvFromAgentClosurePath(t *testing.T) {
 	cases := []struct {
 		name    string

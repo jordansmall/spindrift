@@ -115,7 +115,7 @@ Runners get the backend kit of ADR 0068, keyed by family.
 - Since issue #5996 core calls the preparation hook on every store-closure
   hot-swap, not only for a nixInBox Consumer: a bwrap family roots the
   generation's mounted artifacts with nixInBox off too, and keys its
-  snapshot-only work off `Config.NixConfigFile`.
+  snapshot-only work off its artifacts part's `NixConfigFile`.
 
 ## Amendment (architecture review 2026-11-07): twin adapter tests are intended
 

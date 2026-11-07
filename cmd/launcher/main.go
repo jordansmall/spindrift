@@ -63,7 +63,9 @@ type config struct {
 	// nixBuilderImage/nixVolume are empty for bwrap. flakeImageAttr/imageTag are
 	// dual-purpose (issue #2667): the OCI image's flake attr and content-hash
 	// tag, or the bundled bwrap agent closure's flake attr and loaded output
-	// path. flakeLauncherAttr is populated for both runtimes (issue #1364).
+	// path. Core reads both for bwrap too (freshness probe, hot-swap), but the
+	// bwrap adapter takes its ImageTag from its artifacts part, not from here.
+	// flakeLauncherAttr is populated for both runtimes (issue #1364).
 	imageArchive      string
 	imageTag          string
 	imageDrv          string
@@ -77,36 +79,6 @@ type config struct {
 	// (LAUNCHER_CURRENCY_HASH; issue #2677, issue #1364). freshness.Probe
 	// compares it against a freshly-evaluated hash at the base-branch tip.
 	loadedLauncherHash string
-
-	// bwrap agent closure paths (bwrap only)
-	agentFiles    string
-	agentEnv      string
-	agentFilesDrv string // .drv path, realized by `launcher build`
-	agentEnvDrv   string // .drv path, realized by `launcher build`
-	bakedPrefetch string
-	passwdFile    string
-	groupFile     string
-	passwdFileDrv string // .drv path, realized by `launcher build`
-	groupFileDrv  string // .drv path, realized by `launcher build`
-
-	// nixConfigFile is the baked nix store path for /etc/nix/nix.conf (ADR
-	// 0042, bwrap only); empty when the Consumer's nixInBox knob is off.
-	nixConfigFile string
-	// nixConfigFileDrv is its .drv path; `launcher build` realizes it and
-	// snapshots the host nix store DB (ADR 0042).
-	nixConfigFileDrv string
-
-	// syscallFilterPath is the baked nix store path to the compiled BPF
-	// syscall-filter file (issue #2670, bwrap only). Always populated, unlike
-	// nixConfigFile: the filter is independent of the nixInBox knob.
-	syscallFilterPath string
-	// syscallFilterDrv is its .drv path, realized by `launcher build`.
-	syscallFilterDrv string
-
-	// nixStoreWritable gates whether the bwrap adapter overlays /nix/store as
-	// an ephemeral tmpfs-backed writable layer instead of a plain read-only
-	// bind (ADR 0042, bwrap only; issue #2665).
-	nixStoreWritable bool
 
 	// Runtime: podman | docker | rancher | bwrap (runner.ValidValues)
 	runtime string
@@ -429,20 +401,6 @@ func loadConfig() config {
 	if b := art.Bwrap; b != nil {
 		cfg.imageTag = b.ImageTag.String()
 		cfg.flakeImageAttr = b.FlakeImageAttr.String()
-		cfg.agentFiles = b.AgentFiles.String()
-		cfg.agentEnv = b.AgentEnv.String()
-		cfg.agentFilesDrv = b.AgentFilesDrv.String()
-		cfg.agentEnvDrv = b.AgentEnvDrv.String()
-		cfg.bakedPrefetch = b.BakedPrefetch.String()
-		cfg.passwdFile = b.PasswdFile.String()
-		cfg.groupFile = b.GroupFile.String()
-		cfg.passwdFileDrv = b.PasswdFileDrv.String()
-		cfg.groupFileDrv = b.GroupFileDrv.String()
-		cfg.nixConfigFile = b.NixConfigFile.String()
-		cfg.nixConfigFileDrv = b.NixConfigFileDrv.String()
-		cfg.syscallFilterPath = b.SyscallFilter.String()
-		cfg.syscallFilterDrv = b.SyscallFilterDrv.String()
-		cfg.nixStoreWritable = b.NixStoreWritable.Bool()
 	}
 	if o := art.OCI; o != nil {
 		cfg.imageArchive = o.ImageArchive.String()
@@ -789,32 +747,18 @@ func runnerConfig(c config) runner.Config {
 	// Image duplicates ImageTag until #6569's typed per-family artifacts
 	// replace this shape.
 	return runner.Config{
-		Runtime:           c.runtime,
-		Image:             c.imageTag,
-		ImageArchive:      c.imageArchive,
-		ImageDrv:          c.imageDrv,
-		ImageTag:          c.imageTag,
-		NixBuilderImage:   c.nixBuilderImage,
-		NixVolume:         c.nixVolume,
-		FlakeImageAttr:    c.flakeImageAttr,
-		NetworkMode:       c.runnerNetworkMode(),
-		PidsLimit:         c.pidsLimit,
-		MemoryLimit:       c.memoryLimit,
-		AgentFiles:        c.agentFiles,
-		AgentEnv:          c.agentEnv,
-		AgentFilesDrv:     c.agentFilesDrv,
-		AgentEnvDrv:       c.agentEnvDrv,
-		BakedPrefetch:     c.bakedPrefetch,
-		PasswdFile:        c.passwdFile,
-		GroupFile:         c.groupFile,
-		PasswdFileDrv:     c.passwdFileDrv,
-		GroupFileDrv:      c.groupFileDrv,
-		NixConfigFile:     c.nixConfigFile,
-		NixConfigFileDrv:  c.nixConfigFileDrv,
-		NixStoreWritable:  c.nixStoreWritable,
-		SyscallFilterPath: c.syscallFilterPath,
-		SyscallFilterDrv:  c.syscallFilterDrv,
-		MaxParallel:       c.maxParallel,
+		Runtime:         c.runtime,
+		Image:           c.imageTag,
+		ImageArchive:    c.imageArchive,
+		ImageDrv:        c.imageDrv,
+		ImageTag:        c.imageTag,
+		NixBuilderImage: c.nixBuilderImage,
+		NixVolume:       c.nixVolume,
+		FlakeImageAttr:  c.flakeImageAttr,
+		NetworkMode:     c.runnerNetworkMode(),
+		PidsLimit:       c.pidsLimit,
+		MemoryLimit:     c.memoryLimit,
+		MaxParallel:     c.maxParallel,
 		MountParams: runner.MountParams{
 			PromptDir:             c.spindriftPromptDir,
 			SkillsDir:             c.spindriftSkillsDir,
