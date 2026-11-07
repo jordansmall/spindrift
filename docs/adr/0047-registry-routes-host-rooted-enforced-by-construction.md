@@ -26,7 +26,7 @@ three failures in sequence, all traceable to one modeling error in ADR
   failure.
 - After both of those were fixed by hand, crate downloads still failed,
   because Artifactory's download endpoint is a *sibling* of the index
-  path rather than something nested under it, and the Forwarder's
+  path rather than something nested under it, and the Registry proxy's
   under-base-path rewrite refuses to touch a URL that isn't under the
   route's own base path:
 
@@ -64,8 +64,8 @@ existed to soften it.
 
 ### Enforcement is unconditional, not advisory or scoped-credential
 
-The Forwarder forwards a request only if its path is in the enforced set;
-everything else is answered 403 before any upstream dial, with no
+The Registry proxy forwards a request only if its path is in the enforced
+set; everything else is answered 403 before any upstream dial, with no
 credential attached. There is no advisory mode and no `enforce = false`.
 The `enforce-allowlist` route key and the advisory allowlist-miss logging
 machinery ADR 0045 introduced are retired outright; the 403 body follows
@@ -83,30 +83,30 @@ registry rather than being refused early and loudly. A false denial's
 cost — presenting as a registry outage to an Agent mid-build — no longer
 outweighs a leak's cost now that the field run has shown a real Consumer
 leaking: the pass-through leg forwarded cargo's placeholder token to
-Artifactory (see [The Forwarder always strips the inbound Authorization
-header](#the-forwarder-always-strips-the-inbound-authorization-header)),
+Artifactory (see [The Registry proxy always strips the inbound Authorization
+header](#the-registry-proxy-always-strips-the-inbound-authorization-header)),
 the benign version of exactly the seam a real credential would travel.
 **Scoped-credential postures** — minting a credential that is itself
 restricted to the allowed paths, so an out-of-policy request fails at the
-upstream rather than at the Forwarder — were rejected because that
+upstream rather than at the Registry proxy — were rejected because that
 restriction lives in a system the launcher doesn't control (the upstream
 registry's own credential scoping, where it exists at all) and does
 nothing about a response-body-derived URL like `dl`: the failure that
 mattered most in the field run was never about the credential being too
-powerful, it was about the Forwarder not knowing a path was in-policy at
-all. Enforcement has to live at the one point that sees every request,
-which is the Forwarder itself.
+powerful, it was about the Registry proxy not knowing a path was in-policy
+at all. Enforcement has to live at the one point that sees every request,
+which is the Registry proxy itself.
 
 ### The enforced set is derived host-side, pre-Box
 
 The launcher scans the Target repo's committed registry configuration at
-the ref it dispatches, and hands the Forwarder the derived path-set
+the ref it dispatches, and hands the Registry proxy the derived path-set
 before the Box starts. The in-Box re-render — the textual rewrite ADR
 0045 already performs for npm, yarn, and pnpm, and the source-replacement
 stanza it performs for cargo — continues to do client binding only and
 contributes nothing to policy. A mid-run Agent edit to the repo's
-registry configuration cannot change what the Forwarder enforces,
-because the Forwarder never looks at the Box's copy of that
+registry configuration cannot change what the Registry proxy enforces,
+because the Registry proxy never looks at the Box's copy of that
 configuration again after dispatch.
 
 Two alternatives were rejected. **In-box relay** — deriving the enforced
@@ -126,7 +126,7 @@ source of truth the client bindings already read.
 
 ### The cargo `dl` base is learned from upstream, same-host pinned
 
-On rewriting a `config.json` response, the Forwarder records the `dl`
+On rewriting a `config.json` response, the Registry proxy records the `dl`
 base it observes and adds its subtree to the enforced set — if, and only
 if, the `dl` URL's host matches the route's own matched host. A
 cross-host `dl` is refused: logged, not added, and left unrewritten so
@@ -148,16 +148,17 @@ subtree — was rejected because it reintroduces a human in a path that is
 supposed to run unattended at dispatch time and during an agent's build,
 and because the information needed to judge the request correctly — is
 this `dl` host the same host the route already trusts — is exactly the
-same-host check the Forwarder can already make itself. Same-host pinning
-answers both alternatives without adding either a heuristic or a human.
+same-host check the Registry proxy can already make itself. Same-host
+pinning answers both alternatives without adding either a heuristic or
+a human.
 
 ### Gap recourse is an additive `allow` key, never an off switch
 
 A route may declare extra path patterns that extend the derived
 enforced set. The key is empty in the happy path — nothing needs to be
 declared for a registry whose committed configuration already says
-everything the Forwarder needs — and is validated like every other route
-field.
+everything the Registry proxy needs — and is validated like every other
+route field.
 
 Two alternatives were rejected. **An off switch** — a route-level knob
 that disables enforcement entirely, mirroring the `enforce-allowlist`
@@ -227,8 +228,8 @@ already argues for elsewhere. Client bindings embed full upstream paths
 under the route prefix: the cargo replacement source URL becomes the
 Forwarder origin plus prefix plus the registry's full index path, the
 rewritten `dl` points at prefix plus the full `dl` path, and go — or any
-other env-bound ecosystem — rides the same shape. The Forwarder's side of
-the mapping is symmetric: a prefixed request maps to the upstream origin
+other env-bound ecosystem — rides the same shape. The Registry proxy's side
+of the mapping is symmetric: a prefixed request maps to the upstream origin
 plus the verbatim remaining path. There is no join step left at all — no
 base path to relativize a request against, and so no ambiguity a wrong
 relativization could introduce. What 0045 bought by keeping paths short
@@ -254,7 +255,7 @@ continues to record the real upstream URL, not a proxy-local address, and
 the settle-time lockfile tripwire that guards against a "the real thing"
 regression remains the acceptance criterion it already was. None of the
 host-rooted route table changes touch this:
-they change what the Forwarder enforces and how a route names its
+they change what the Registry proxy enforces and how a route names its
 upstream, not how the client-side binding is rendered.
 
 The repo-claimed-source-name collision fix (issue #3248) remains valid
@@ -263,10 +264,10 @@ the repo's own source name where one already exists, now simply pointed
 at the full-path local URL a host-rooted route resolves to, rather than
 one carrying a hand-transcribed base path.
 
-### The Forwarder always strips the inbound Authorization header
+### The Registry proxy always strips the inbound Authorization header
 
 Before attaching the route's own credential — or forwarding
-unauthenticated, for a route that declares none — the Forwarder strips
+unauthenticated, for a route that declares none — the Registry proxy strips
 whatever `Authorization` header the client sent inbound. This closes a
 placeholder-leak the field run also surfaced: a pass-through leg
 forwarded cargo's own placeholder token to Artifactory untouched,
@@ -327,7 +328,7 @@ client-side placeholder or stale token could ever reach a real upstream.
   for any request outside the derived-plus-`allow` set. This is the
   intended tightening — the field run is the evidence that the advisory
   default let a real failure travel all the way to a broken build
-  instead of stopping at the Forwarder — but it means a Consumer whose
+  instead of stopping at the Registry proxy — but it means a Consumer whose
   registry serves paths the derivation and `allow` don't yet cover needs
   to add an `allow` entry rather than relying on advisory pass-through.
 - **The enforced set now depends on the dispatch-time snapshot, not the
