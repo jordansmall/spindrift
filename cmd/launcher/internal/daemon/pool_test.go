@@ -2191,7 +2191,7 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindOf(dispatchkind.Work), "rev1")
-	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("42")})
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("42")})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
@@ -2201,21 +2201,21 @@ func TestPoolSnapshotCopiesIssuesSlice(t *testing.T) {
 		t.Fatalf("chore = %q, want empty: an issue-keyed slot must never carry a Chore", snap.Slots[0].Chore)
 	}
 
-	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("99")}) // mutate the pool's copy after snapshotting
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("99")}) // mutate the pool's copy after snapshotting
 
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"42"}) {
 		t.Fatalf("snapshot issues changed after mutating pool state: got %v, want [42]", snap.Slots[0].Issues)
 	}
 }
 
-// TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents pins the fix for
+// TestPoolNoteRecordBoxDedupesRepeatIssueInStatusButNotInEvents pins the fix for
 // a repeat-issue regression: a child that boxes the same issue twice (a
 // fix-pass box after its own initial box) must publish that issue once in
 // the slot's status Issues list — restoring origin/main's dedupe semantics
 // — while the box event itself still fires once per record, since a
 // fix-pass box is a real thing that happened and the stream must show
 // both phases (issue #3627's review finding).
-func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
+func TestPoolNoteRecordBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
 	var buf bytes.Buffer
@@ -2223,8 +2223,8 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
 	p.startChild(0, KindOf(dispatchkind.Work), "rev1")
-	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "initial"})
-	p.noteBox(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "fix-pass-1"})
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "initial"})
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "fix-pass-1"})
 
 	snap := p.snapshot()
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"123"}) {
@@ -2255,7 +2255,7 @@ func TestPoolSnapshotPublishesLatestBoxPhaseAsPass(t *testing.T) {
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 	work := KindOf(dispatchkind.Work)
 	box := func(phase string) {
-		p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: phase})
+		p.noteRecord(0, work, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: phase})
 	}
 	pass := func() string { return p.snapshot().Slots[0].Pass }
 	start := func() {
@@ -2306,7 +2306,7 @@ func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
 	work := KindOf(dispatchkind.Work)
 	key := dispatchkey.Issue("123")
 	model := func(id, role string) {
-		p.noteModel(0, work, "rev1", Record{Event: report.EventModel, Key: key, Model: id, ModelRole: role})
+		p.noteRecord(0, work, "rev1", Record{Event: report.EventModel, Key: key, Model: id, ModelRole: role})
 	}
 	got := func() (string, string) {
 		s := p.snapshot().Slots[0]
@@ -2331,7 +2331,7 @@ func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
 	want("after model record", "claude-sonnet-5-5", "worker")
 	model("claude-opus-5-5", "")
 	want("after later model record", "claude-opus-5-5", "")
-	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
 	want("after box record", "", "")
 	model("claude-opus-5-5", "reviewer")
 	want("after model record in new pass", "claude-opus-5-5", "reviewer")
@@ -2350,16 +2350,16 @@ func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
 	}
 }
 
-// TestPoolNoteModelDroppedWhenSlotNotRunning pins noteBox's race guard for
-// model records: one reported after the slot cleared changes nothing and
-// emits nothing.
-func TestPoolNoteModelDroppedWhenSlotNotRunning(t *testing.T) {
+// TestPoolNoteRecordModelDroppedWhenSlotNotRunning pins slotFlight.fold's
+// late-record drop for model records: one reported after the slot cleared
+// changes nothing and emits nothing.
+func TestPoolNoteRecordModelDroppedWhenSlotNotRunning(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
-	p.noteModel(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventModel, Key: dispatchkey.Issue("1"), Model: "m"})
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventModel, Key: dispatchkey.Issue("1"), Model: "m"})
 	if s := p.snapshot().Slots[0]; s.Model != "" {
 		t.Errorf("model on idle slot = %q, want empty", s.Model)
 	}
@@ -2957,7 +2957,7 @@ func TestPoolSnapshotPublishesCIWait(t *testing.T) {
 	key := dispatchkey.Issue("123")
 	const pr = "https://example.test/pr/7"
 	wait := func() {
-		p.noteCIWait(0, Record{Event: report.EventCIWait, Key: key, PRURL: pr})
+		p.noteRecord(0, work, "rev1", Record{Event: report.EventCIWait, Key: key, PRURL: pr})
 	}
 	want := func(step string, ciWait bool, url string) {
 		t.Helper()
@@ -2977,11 +2977,11 @@ func TestPoolSnapshotPublishesCIWait(t *testing.T) {
 	want("before any ci_wait record", false, "")
 	wait()
 	want("after ci_wait record", true, pr)
-	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
 	want("after box record", false, "")
 	wait()
 	want("after second ci_wait record", true, pr)
-	p.noteSettled(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
 	want("after settled record", false, "")
 	wait()
 	p.finishChild(0)
@@ -3007,22 +3007,23 @@ func TestPoolSnapshotPublishesButlerPatchCIWait(t *testing.T) {
 	if got, _, started := p.startChild(slot, butler, "rev1"); !started || got != butler {
 		t.Fatalf("startChild chose %q (started=%v), want the butler", got, started)
 	}
-	p.noteCIWait(slot, rec)
+	p.noteRecord(slot, butler, "rev1", rec)
 
 	if s := p.snapshot().Slots[slot]; !s.CIWait || s.PRURL != pr {
 		t.Fatalf("CIWait, PRURL = %v, %q; want true, %q", s.CIWait, s.PRURL, pr)
 	}
 }
 
-// TestPoolNoteCIWaitDroppedWhenSlotNotRunning pins noteBox's race guard for
-// ci_wait records: one reported after the slot cleared changes nothing.
-func TestPoolNoteCIWaitDroppedWhenSlotNotRunning(t *testing.T) {
+// TestPoolNoteRecordCIWaitDroppedWhenSlotNotRunning pins slotFlight.fold's
+// late-record drop for ci_wait records: one reported after the slot cleared
+// changes nothing.
+func TestPoolNoteRecordCIWaitDroppedWhenSlotNotRunning(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
-	p.noteCIWait(0, Record{Event: report.EventCIWait, Key: dispatchkey.Issue("1"), PRURL: "https://example.test/pr/1"})
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventCIWait, Key: dispatchkey.Issue("1"), PRURL: "https://example.test/pr/1"})
 	if s := p.snapshot().Slots[0]; s.CIWait || s.PRURL != "" {
 		t.Errorf("CI wait on idle slot = %v, %q, want none", s.CIWait, s.PRURL)
 	}
@@ -3045,7 +3046,7 @@ func TestPoolSnapshotPublishesCIRunURL(t *testing.T) {
 	const pr = "https://example.test/pr/7"
 	const run = "https://example.test/runs/9"
 	wait := func(runURL string) {
-		p.noteCIWait(0, Record{Event: report.EventCIWait, Key: key, PRURL: pr, RunURL: runURL})
+		p.noteRecord(0, work, "rev1", Record{Event: report.EventCIWait, Key: key, PRURL: pr, RunURL: runURL})
 	}
 	want := func(step, url string) {
 		t.Helper()
@@ -3068,10 +3069,10 @@ func TestPoolSnapshotPublishesCIRunURL(t *testing.T) {
 	wait("")
 	want("new wait resets", "")
 	wait(run)
-	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
 	want("after box record", "")
 	wait(run)
-	p.noteSettled(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
 	want("after settled record", "")
 	wait(run)
 	p.finishChild(0)
@@ -3093,7 +3094,7 @@ func TestPoolSnapshotPublishesImageBuild(t *testing.T) {
 	work := KindOf(dispatchkind.Work)
 	key := dispatchkey.Issue("123")
 	note := func(state report.ImageBuildState) {
-		p.noteImageBuild(0, work, "rev1", Record{Event: report.EventImageBuild, State: string(state)})
+		p.noteRecord(0, work, "rev1", Record{Event: report.EventImageBuild, State: string(state)})
 	}
 	want := func(step, since string) {
 		t.Helper()
@@ -3116,10 +3117,10 @@ func TestPoolSnapshotPublishesImageBuild(t *testing.T) {
 	note(report.ImageBuildFinished)
 	want("after finished", "")
 	note(report.ImageBuildStarted)
-	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "initial"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "initial"})
 	want("after box record", "")
 	note(report.ImageBuildStarted)
-	p.noteSettled(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
+	p.noteRecord(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
 	want("after settled record", "")
 	note(report.ImageBuildStarted)
 	p.finishChild(0)
@@ -3136,16 +3137,16 @@ func TestPoolSnapshotPublishesImageBuild(t *testing.T) {
 	}
 }
 
-// TestPoolNoteImageBuildDroppedWhenSlotNotRunning pins noteBox's race guard
-// for image_build records: one reported after the slot cleared changes and
-// emits nothing.
-func TestPoolNoteImageBuildDroppedWhenSlotNotRunning(t *testing.T) {
+// TestPoolNoteRecordImageBuildDroppedWhenSlotNotRunning pins
+// slotFlight.fold's late-record drop for image_build records: one reported
+// after the slot cleared changes and emits nothing.
+func TestPoolNoteRecordImageBuildDroppedWhenSlotNotRunning(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
-	p.noteImageBuild(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventImageBuild, State: string(report.ImageBuildStarted)})
+	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventImageBuild, State: string(report.ImageBuildStarted)})
 	if got := p.snapshot().Slots[0].ImageBuildSince; got != "" {
 		t.Errorf("ImageBuildSince on idle slot = %q, want none", got)
 	}

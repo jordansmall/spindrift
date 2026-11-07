@@ -350,15 +350,16 @@ type slotFlight struct {
 	// record.
 	pass string
 	// model and modelRole are the exact model id and optional role of the
-	// child's latest model record; noteBox clears them, since a new Pass
+	// child's latest model record; a box record clears them, since a new Pass
 	// starts on a model of its own.
 	model     string
 	modelRole string
-	// ciWait is the child's latest ci_wait record; noteBox and noteSettled
+	// ciWait is the child's latest ci_wait record; a box and a settled record
 	// clear it.
 	ciWait ciWait
 	// imageBuildSince is when the child's Box image build started, zero when
-	// none is running; its finished record, noteBox and noteSettled clear it.
+	// none is running; its finished record, a box record and a settled record
+	// clear it.
 	imageBuildSince time.Time
 }
 
@@ -642,7 +643,7 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 // waiting to emit child_start until then would either hide a started child
 // from the stream for its whole queue scan, or emit nothing at all for a
 // child that never claims — the "box" event is where the slot↔key binding
-// first appears (see noteBox).
+// first appears (see slotFlight.fold).
 func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, childLog string, ok bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
@@ -747,132 +748,107 @@ func (p *pool) finishChild(slot int) {
 	})
 }
 
-// noteBox records rec.Key as slot's most recently boxed claim and, the
-// first time this child run boxes a tracker-issue key, appends it to slot's
-// in-flight issue list for a snapshot to report while the child is still
-// running — deduped, to match origin/main's "seen" semantics, since a
-// fix-pass box for an issue already open in this slot is the same claim
-// continuing, not a second one (issue #3627's review finding). A Chore key
-// (ADR 0056, issue #3878) is never added to that list: SlotStatus.Issues
-// names tracker issues, and a Chore is not one — flight.key alone tracks
-// it, for flightClaim and SlotStatus.Chore to read. It emits the box event
-// unconditionally, dedup or not: a fix-pass box is a real thing that
-// happened, and only the status-file issue list collapses repeats, not the
-// event stream. Both in one mutate so the event and the status snapshot it
-// rides alongside always agree. A no-op — no state change, no event — if
-// slot is not currently running: the child reported after the slot
-// cleared, which can only be a race (Wait already returned), not a
-// state worth publishing. Any key change counts as a new claim, folded into the
-// Schedule as claimed so the kind is re-probed before its next start; a
-// repeat of the same key moves no count. A switch back to a key the slot
-// already boxed costs only an extra re-probe.
-func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
+// noteRecord folds a child-report record into slot's flight under the lock,
+// emitting its events and feeding the Schedule in the same mutate as the
+// status snapshot.
+func (p *pool) noteRecord(slot int, kind Kind, revision string, rec Record) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
-		if s.slots[slot].phase != PhaseRunning {
-			return nil
+		sl := &s.slots[slot]
+		var evs []Event
+		var sched schedEvent
+		sl.flight, evs, sched = sl.flight.fold(rec, slotFacts{slot: slot, kind: kind, revision: revision, now: now, running: sl.phase == PhaseRunning})
+		if sched != nil {
+			s.observe(now, sched)
 		}
-		flight := &s.slots[slot].flight
-		if flight.key != rec.Key {
-			s.observe(now, claimed{Kind: kind})
-		}
-		flight.key = rec.Key
-		flight.pass = rec.Phase
-		flight.model, flight.modelRole = "", ""
-		flight.clearTransient()
-		if issue, _ := rec.Key.Fields(); issue != "" {
-			seen := false
-			for _, existing := range flight.issues {
-				if existing == issue {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				flight.issues = append(flight.issues, issue)
-			}
-		}
-		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Key: rec.Key, Phase: rec.Phase, PassLog: rec.PassLog, RecordID: rec.RecordID, Slot: intPtr(slot)}}
+		return evs
 	})
 }
 
-// noteModel folds a model record into slot's flight and emits it as a model
-// event. A no-op if slot is not running: a late record from a child whose slot
-// already cleared.
-func (p *pool) noteModel(slot int, kind Kind, revision string, rec Record) {
-	p.mutate(func(s *state) []Event {
-		if s.slots[slot].phase != PhaseRunning {
-			return nil
-		}
-		flight := &s.slots[slot].flight
-		flight.model, flight.modelRole = rec.Model, rec.ModelRole
-		return []Event{{Event: report.EventModel, Kind: kind, Revision: revision, Key: rec.Key, Model: rec.Model, ModelRole: rec.ModelRole, Slot: intPtr(slot)}}
-	})
+// slotFacts is the slot context slotFlight.fold needs beyond the flight.
+// kind and revision come from the caller, not the flight: a settled record
+// still emits after the slot cleared and zeroed its flight.
+type slotFacts struct {
+	slot     int
+	kind     Kind
+	revision string
+	now      time.Time
+	running  bool
 }
 
-// noteCIWait folds a ci_wait record into slot's flight. It emits nothing and
-// is dropped like noteBox's race when slot is no longer running.
-func (p *pool) noteCIWait(slot int, rec Record) {
-	p.mutate(func(s *state) []Event {
-		if s.slots[slot].phase != PhaseRunning {
-			return nil
+// fold applies one child-report record to f, returning the new flight, the
+// events for the Events file, and the Schedule event to observe (nil for
+// none). It is pure: f is not written through, so the pool applies the result
+// inside one mutate and the event and status snapshot always agree.
+//
+// A record arriving when the slot is not running is a late record from a child
+// whose slot already cleared (Wait returned) — a race, not a state worth
+// publishing — so every case but settled drops it.
+func (f slotFlight) fold(rec Record, sf slotFacts) (slotFlight, []Event, schedEvent) {
+	if !sf.running && rec.Event != report.EventSettled {
+		return f, nil, nil
+	}
+	slot := intPtr(sf.slot)
+	var evs []Event
+	var sched schedEvent
+	switch rec.Event {
+	case report.EventBox:
+		// Any key change counts as a new claim, so the kind is re-probed
+		// before its next start; a repeat of the same key moves no count.
+		// A switch back to a key the slot already boxed costs only an extra
+		// re-probe.
+		if f.key != rec.Key {
+			sched = claimed{Kind: sf.kind}
 		}
-		s.slots[slot].flight.ciWait = ciWait{pr: rec.PRURL, runURL: rec.RunURL}
-		return nil
-	})
-}
-
-// noteImageBuild folds an image_build record into slot's flight and emits it
-// as an image_build event: started stamps the build's start, finished clears
-// it. The record is keyless, so the event carries no key. A no-op if slot is
-// not running: a late record from a child whose slot already cleared.
-func (p *pool) noteImageBuild(slot int, kind Kind, revision string, rec Record) {
-	now := p.clk.Now()
-	p.mutate(func(s *state) []Event {
-		if s.slots[slot].phase != PhaseRunning {
-			return nil
+		f.key = rec.Key
+		f.pass = rec.Phase
+		f.model, f.modelRole = "", ""
+		f.clearTransient()
+		// SlotStatus.Issues names tracker issues, so a Chore key (ADR 0056,
+		// issue #3878) stays out of it — f.key alone tracks it. Deduped: a
+		// fix-pass box for an issue already open in this slot is the same
+		// claim continuing (issue #3627's review finding). Clipped so the
+		// append copies instead of writing the input's backing array.
+		if issue, _ := rec.Key.Fields(); issue != "" && !slices.Contains(f.issues, issue) {
+			f.issues = append(slices.Clip(f.issues), issue)
 		}
-		since := time.Time{}
+		// The event is emitted even for a deduped issue: a fix-pass box is a
+		// real thing that happened, and only the status-file issue list
+		// collapses repeats.
+		evs = []Event{{Event: report.EventBox, Kind: sf.kind, Revision: sf.revision, Key: rec.Key, Phase: rec.Phase, PassLog: rec.PassLog, RecordID: rec.RecordID, Slot: slot}}
+	case report.EventModel:
+		f.model, f.modelRole = rec.Model, rec.ModelRole
+		evs = []Event{{Event: report.EventModel, Kind: sf.kind, Revision: sf.revision, Key: rec.Key, Model: rec.Model, ModelRole: rec.ModelRole, Slot: slot}}
+	case report.EventCIWait:
+		f.ciWait = ciWait{pr: rec.PRURL, runURL: rec.RunURL}
+	case report.EventImageBuild:
+		// started stamps the build's start, finished clears it. The record is
+		// keyless, so the event carries no key.
+		f.imageBuildSince = time.Time{}
 		if report.ImageBuildState(rec.State) == report.ImageBuildStarted {
-			since = now
+			f.imageBuildSince = sf.now
 		}
-		s.slots[slot].flight.imageBuildSince = since
-		return []Event{{Event: report.EventImageBuild, Kind: kind, Revision: revision, State: rec.State, Slot: intPtr(slot)}}
-	})
-}
-
-// noteNotDue folds a not_due record into slot's flight, for runSlot to hand
-// the schedule when the child exits empty (flightReport). It touches neither
-// the claim key nor the baton — a not_due Chore was never claimed — and emits
-// nothing. Dropped like noteBox's race when slot is no longer running.
-func (p *pool) noteNotDue(slot int, rec Record) {
-	p.mutate(func(s *state) []Event {
-		if s.slots[slot].phase != PhaseRunning {
-			return nil
+		evs = []Event{{Event: report.EventImageBuild, Kind: sf.kind, Revision: sf.revision, State: rec.State, Slot: slot}}
+	case report.EventNotDue:
+		// For runSlot to hand the schedule when the child exits empty
+		// (flightReport). Neither the claim key nor the baton moves — a
+		// not_due Chore was never claimed.
+		f.nextDue = f.nextDue.Merge(rec.NextDue)
+	case report.EventSettled:
+		// Always emits, though the running check covers the transient clear:
+		// a settled record names the issue's (or Chore's) terminal outcome,
+		// true whether or not the slot still runs, and dropping it would lose
+		// the one event that answers "what happened to #123". It grows no
+		// in-flight issue list.
+		if sf.running {
+			f.clearTransient()
 		}
-		flight := &s.slots[slot].flight
-		flight.nextDue = flight.nextDue.Merge(rec.NextDue)
-		return nil
-	})
-}
-
-// noteSettled emits the settled event through the same mutate-ordered path
-// as noteBox, so a settled record is never reordered against the status
-// snapshot or another pool event. Unlike noteBox it grows no in-flight
-// SlotStatus.Issues list: a settled record names a terminal outcome. It only
-// ends a running slot's CI wait.
-// The `phase == PhaseRunning` check covers only that clear, never the emitted
-// event: though noteBox's race applies here too, a settled record names the
-// issue's (or Chore's) terminal outcome, true whether or not the slot still
-// runs, and dropping it would lose the one event that answers "what happened
-// to #123".
-func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
-	p.mutate(func(s *state) []Event {
-		if s.slots[slot].phase == PhaseRunning {
-			s.slots[slot].flight.clearTransient()
-		}
-		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, RecordID: rec.RecordID, Slot: intPtr(slot)}}
-	})
+		evs = []Event{{Event: report.EventSettled, Kind: sf.kind, Revision: sf.revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, RecordID: rec.RecordID, Slot: slot}}
+	}
+	// An event fold does not know leaves the flight unchanged and emits
+	// nothing, though noteRecord's mutate still publishes the status:
+	// ParseRecord already dropped a genuinely unknown one upstream (record.go).
+	return f, evs, sched
 }
 
 // clearTransient resets the per-child transient indicators that a new Pass or
@@ -883,7 +859,7 @@ func (f *slotFlight) clearTransient() {
 }
 
 // flightClaim returns the key slot's child most recently boxed (the value
-// noteBox recorded, regardless of whether that box was a repeat and so
+// slotFlight.fold recorded, regardless of whether that box was a repeat and so
 // never grew the deduped issues list). Read directly under p.mu rather than
 // through mutate, since it changes nothing; callers that need it for a
 // child_finish event must call it before finishChild zeroes the slot's
