@@ -162,13 +162,25 @@ What breaks in an override prompt directory:
   `issue-read.md`, not `github/issue-read.md`, so an override directory on the
   unreleased #5646 layout that still uses them must move its file to the root.
 
-A leftover deprecated variable warns at `nix build` (`mkHarness` eval) and
-again when the launcher assembles the prompt, with text like:
+A leftover deprecated variable warns when the launcher assembles the prompt,
+with a line like the one below. The leading label is `prompt`, `review prompt`,
+or `agent "<name>" prompt`, never a file name:
 
 ```text
-issue-prompt.md still references ${ISSUE_READ_GITHUB_STEP}, a fragment
-variable deprecated in issue #5646 that still renders; use
-${ISSUE_READ_STEP} instead (see MIGRATING.md)
+prompt still references ${ISSUE_READ_GITHUB_STEP}, a fragment variable deprecated in issue #5646 and slated for removal; use ${ISSUE_READ_STEP} instead (see MIGRATING.md)
+```
+
+When the leftover sits in a Nix-level prompt arg, a file under `fragmentsDir`,
+or a top-level file under `choresDir`, `mkHarness` also warns at `nix build`,
+with a header line and one line per variable naming where it was found:
+`prompt arg <name>`, `fragment file <path under fragmentsDir>`, or `chore file
+<file name>`. A run-time `--prompt-dir` (`SPINDRIFT_PROMPT_DIR`) directory is
+never scanned at eval, so it gets only the launcher line. Nix adds its own
+warning prefix, which varies by version:
+
+```text
+mkHarness: a prompt arg, fragment file or chore file references a deprecated fragment variable, slated for removal (see MIGRATING.md):
+  ${ISSUE_READ_GITHUB_STEP} in prompt arg prompt (deprecated in issue #5646); use ${ISSUE_READ_STEP} instead
 ```
 
 The deprecated variables are deprecated from 0.29.0 and may be removed from
