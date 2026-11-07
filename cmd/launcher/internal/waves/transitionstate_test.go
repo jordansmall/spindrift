@@ -10,10 +10,10 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/report"
-	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -34,7 +34,7 @@ func TestTransitionState_NoteReported(t *testing.T) {
 	d.LogPathResult = path
 	d.RecordIDResult = "work:42@x"
 
-	transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box never launched: boom", settle.ReasonBoxFailed)
+	transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box never launched: boom", dispatchrecord.ReasonBoxFailed)
 
 	recs := read()
 	if len(recs) != 1 {
@@ -76,7 +76,7 @@ func TestTransitionState_WarnsWithTrackerError(t *testing.T) {
 	d := dispatch.NewFake()
 
 	got := testutil.CaptureStderr(t, func() {
-		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "", settle.ReasonBoxFailed)
+		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "", dispatchrecord.ReasonBoxFailed)
 	})
 
 	if want := "    ?? #42: could not transition to state failed: boom\n"; !strings.Contains(got, want) {
@@ -102,7 +102,7 @@ func TestTransitionState_Refused_CommentsAndSettlesDistinctReason(t *testing.T) 
 	d.RecordIDResult = "work:42@x"
 
 	testutil.CaptureStderr(t, func() {
-		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box crashed", settle.ReasonBoxFailed)
+		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box crashed", dispatchrecord.ReasonBoxFailed)
 	})
 
 	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "42" || !strings.Contains(fc.CommentCalls[0].Body, `"Blocked"`) {
@@ -119,10 +119,10 @@ func TestTransitionState_Refused_CommentsAndSettlesDistinctReason(t *testing.T) 
 			settled = append(settled, *ev.SpindriftOp.Settled)
 		}
 	}
-	if len(settled) != 1 || settled[0].State != "failed" || settled[0].Reason != settle.ReasonTransitionRefused {
+	if len(settled) != 1 || settled[0].State != "failed" || settled[0].Reason != dispatchrecord.ReasonTransitionRefused {
 		t.Fatalf("settled ops = %+v, want one failed/transition-refused", settled)
 	}
-	if n := settled[0].Note; !strings.Contains(n, "box crashed") || !strings.Contains(n, settle.ReasonBoxFailed) {
+	if n := settled[0].Note; !strings.Contains(n, "box crashed") || !strings.Contains(n, dispatchrecord.ReasonBoxFailed) {
 		t.Errorf("note = %q, want the displaced reason and note kept", n)
 	}
 }

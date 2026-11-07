@@ -24,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/exitcode"
@@ -3238,24 +3239,24 @@ func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 		{
 			"github", "github",
 			[]settle.DispatchOutcome{
-				{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/1"},
-				{Key: dispatchkey.Issue("12"), State: complete, Reason: settle.ReasonManual, PRURL: "https://github.com/owner/repo/pull/2"},
+				{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/1"},
+				{Key: dispatchkey.Issue("12"), State: complete, Reason: dispatchrecord.ReasonManual, PRURL: "https://github.com/owner/repo/pull/2"},
 			},
 			"==> all agents finished — branches pushed and PRs opened on owner/repo.\n",
 		},
 		{
 			"git", "git",
-			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged}},
+			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged}},
 			"==> all agents finished — branches pushed on owner/repo.\n",
 		},
 		{
 			"forgejo", "forgejo",
-			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged}},
+			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged}},
 			"==> all agents finished — branches pushed on owner/repo.\n",
 		},
 		{
 			"local", "local",
-			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged}},
+			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged}},
 			"==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n",
 		},
 	}
@@ -3283,8 +3284,8 @@ func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing
 		reason string
 		want   string
 	}{
-		{dispatchkind.Research, settle.ReasonVerdict, "==> all agents finished — verdicts posted.\n"},
-		{dispatchkind.Butler, settle.ReasonFindingsFiled, "==> all agents finished — findings filed.\n"},
+		{dispatchkind.Research, dispatchrecord.ReasonVerdict, "==> all agents finished — verdicts posted.\n"},
+		{dispatchkind.Butler, dispatchrecord.ReasonFindingsFiled, "==> all agents finished — findings filed.\n"},
 	} {
 		for _, codeForge := range []string{"github", "forgejo", "git", "local"} {
 			t.Run(tc.kind.Name+"/"+codeForge, func(t *testing.T) {
@@ -3302,7 +3303,7 @@ func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing
 
 func TestDispatchCompletionBanner_ResearchFailureStillNamed(t *testing.T) {
 	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
-	outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: forge.Failed.String(), Reason: settle.ReasonResearchFailed}}
+	outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: forge.Failed.String(), Reason: dispatchrecord.ReasonResearchFailed}}
 	want := "==> all agents finished — 1 of 1 dispatches did not deliver: #11 (research-failed).\n"
 	if got := dispatchCompletionBanner(c, outcomes); got != want {
 		t.Errorf("dispatchCompletionBanner = %q, want %q", got, want)
@@ -3320,15 +3321,15 @@ func TestDispatchCompletionBanner_ResearchFailureStillNamed(t *testing.T) {
 func mixedOutcomes() []settle.DispatchOutcome {
 	complete, failed := forge.Complete.String(), forge.Failed.String()
 	return []settle.DispatchOutcome{
-		{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/11"},
-		{Key: dispatchkey.Issue("12"), State: forge.InProgress.String(), Reason: settle.ReasonMergeBlocked},
-		{Key: dispatchkey.Issue("13"), State: complete, Reason: settle.ReasonMergeBlocked},
-		{Key: dispatchkey.Issue("14"), State: failed, Reason: settle.ReasonRelayFailed},
-		{Key: dispatchkey.Issue("15"), State: failed, Reason: settle.ReasonCIRed, PRURL: "https://github.com/owner/repo/pull/15"},
-		{Key: dispatchkey.Issue("16"), State: complete, Reason: settle.ReasonAlreadyResolved},
-		{Key: dispatchkey.Issue("17"), State: failed, Reason: settle.ReasonBlocked},
-		{Key: dispatchkey.Issue("18"), State: forge.Ambiguous.String(), Reason: settle.ReasonAmbiguous},
-		{Key: dispatchkey.Chore("docs-drift"), State: complete, Reason: settle.ReasonMergeBlocked},
+		{Key: dispatchkey.Issue("11"), State: complete, Reason: dispatchrecord.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/11"},
+		{Key: dispatchkey.Issue("12"), State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked},
+		{Key: dispatchkey.Issue("13"), State: complete, Reason: dispatchrecord.ReasonMergeBlocked},
+		{Key: dispatchkey.Issue("14"), State: failed, Reason: dispatchrecord.ReasonRelayFailed},
+		{Key: dispatchkey.Issue("15"), State: failed, Reason: dispatchrecord.ReasonCIRed, PRURL: "https://github.com/owner/repo/pull/15"},
+		{Key: dispatchkey.Issue("16"), State: complete, Reason: dispatchrecord.ReasonAlreadyResolved},
+		{Key: dispatchkey.Issue("17"), State: failed, Reason: dispatchrecord.ReasonBlocked},
+		{Key: dispatchkey.Issue("18"), State: forge.Ambiguous.String(), Reason: dispatchrecord.ReasonAmbiguous},
+		{Key: dispatchkey.Chore("docs-drift"), State: complete, Reason: dispatchrecord.ReasonMergeBlocked},
 		{Key: dispatchkey.Issue("19"), State: failed},
 	}
 }
@@ -3340,14 +3341,17 @@ func TestDelivered(t *testing.T) {
 		o    settle.DispatchOutcome
 		want bool
 	}{
-		{"merged with PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonMerged, PRURL: "u"}, true},
-		{"merge-blocked without PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonMergeBlocked}, false},
-		{"merge-blocked with PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonMergeBlocked, PRURL: "u"}, true},
-		{"already-resolved", settle.DispatchOutcome{State: complete, Reason: settle.ReasonAlreadyResolved}, false},
-		{"relay-failed", settle.DispatchOutcome{State: failed, Reason: settle.ReasonRelayFailed}, false},
-		{"ci-red with PR", settle.DispatchOutcome{State: failed, Reason: settle.ReasonCIRed, PRURL: "u"}, false},
-		{"push-only manual without PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonManual}, true},
-		{"in-progress merge-blocked", settle.DispatchOutcome{State: forge.InProgress.String(), Reason: settle.ReasonMergeBlocked}, false},
+		{"merged with PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonMerged, PRURL: "u"}, true},
+		{"merge-blocked without PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonMergeBlocked}, false},
+		{"merge-blocked with PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonMergeBlocked, PRURL: "u"}, true},
+		{"already-resolved", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonAlreadyResolved}, false},
+		{"relay-failed", settle.DispatchOutcome{State: failed, Reason: dispatchrecord.ReasonRelayFailed}, false},
+		{"ci-red with PR", settle.DispatchOutcome{State: failed, Reason: dispatchrecord.ReasonCIRed, PRURL: "u"}, false},
+		{"push-only manual without PR", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonManual}, true},
+		{"in-progress merge-blocked", settle.DispatchOutcome{State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked}, false},
+		{"transition-refused complete", settle.DispatchOutcome{State: complete, Reason: dispatchrecord.ReasonTransitionRefused}, true},
+		{"unknown reason complete", settle.DispatchOutcome{State: complete, Reason: "no-such-reason"}, true},
+		{"empty reason complete", settle.DispatchOutcome{State: complete}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

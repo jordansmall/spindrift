@@ -79,10 +79,10 @@ func TestLateMerges(t *testing.T) {
 	root := t.TempDir()
 	fc := forge.NewFake()
 	const prA, prB, prC, prD = "https://x/pull/1", "https://x/pull/2", "https://x/pull/3", "https://x/pull/4"
-	idA, pathA := writeSettledLog(t, root, "1", ReasonAutoMergeEnqueued, prA)
-	idB, _ := writeSettledLog(t, root, "2", ReasonManual, prB)
-	idC, pathC := writeSettledLog(t, root, "3", ReasonMergeBlocked, prC)
-	idD, _ := writeSettledLog(t, root, "4", ReasonManual, prD) // PR unknown to the forge: PRState errors
+	idA, pathA := writeSettledLog(t, root, "1", dispatchrecord.ReasonAutoMergeEnqueued, prA)
+	idB, _ := writeSettledLog(t, root, "2", dispatchrecord.ReasonManual, prB)
+	idC, pathC := writeSettledLog(t, root, "3", dispatchrecord.ReasonMergeBlocked, prC)
+	idD, _ := writeSettledLog(t, root, "4", dispatchrecord.ReasonManual, prD) // PR unknown to the forge: PRState errors
 	fc.SetPR("a", forge.PR{URL: prA})
 	fc.SetPR("b", forge.PR{URL: prB})
 	fc.SetPR("c", forge.PR{URL: prC})
@@ -110,13 +110,13 @@ func TestLateMerges(t *testing.T) {
 
 	recs := storedRecordsByID(t, root)
 	a := recs[idA]
-	if a.Outcome != "complete" || a.Reason != ReasonMerged || a.PRURL != prA {
+	if a.Outcome != "complete" || a.Reason != dispatchrecord.ReasonMerged || a.PRURL != prA {
 		t.Fatalf("A = %+v, want complete/merged keeping its PR", a)
 	}
-	if recs[idB].Reason != ReasonManual {
+	if recs[idB].Reason != dispatchrecord.ReasonManual {
 		t.Fatalf("B reason = %q, want unchanged manual (PR closed unmerged)", recs[idB].Reason)
 	}
-	if c, ok := recs[idC]; !ok || c.Reason != ReasonMergeBlocked {
+	if c, ok := recs[idC]; !ok || c.Reason != dispatchrecord.ReasonMergeBlocked {
 		t.Fatalf("C reason = %q, want present and unchanged merge-blocked", recs[idC].Reason)
 	}
 
@@ -157,9 +157,10 @@ func (a *askedPR) PRState(u string) (forge.PRState, error) {
 	return a.PRForge.PRState(u)
 }
 
-// Only a Complete settle with a ReasonLeavesPROpen reason, a usable PR URL, and a claim
-// inside LateMergeWindow is asked about; the forge must never see the rest, and
-// a PR that merged outside the filter stays as stored.
+// Only a Complete settle with a dispatchrecord.ReasonLeavesPROpen reason, a
+// usable PR URL, and a claim inside LateMergeWindow is asked about; the forge
+// must never see the rest, and a PR that merged outside the filter stays as
+// stored.
 func TestLateMerges_SkipsRecordsOutsideTheCandidateSet(t *testing.T) {
 	const pr = "https://x/pull/9"
 	old := lateMergeNow.Add(-LateMergeWindow - time.Hour)
@@ -183,7 +184,7 @@ func TestLateMerges_SkipsRecordsOutsideTheCandidateSet(t *testing.T) {
 			fake.SetPRState(pr, forge.PRMerged)
 			fake.SetPRState(tc.url, forge.PRMerged)
 			fc := &askedPR{PRForge: fake}
-			id, path := writeLogAt(t, root, "9", tc.claim, tc.state, ReasonManual, tc.url)
+			id, path := writeLogAt(t, root, "9", tc.claim, tc.state, dispatchrecord.ReasonManual, tc.url)
 			before, _ := os.Stat(path)
 
 			var w bytes.Buffer
@@ -195,7 +196,7 @@ func TestLateMerges_SkipsRecordsOutsideTheCandidateSet(t *testing.T) {
 			if len(merged) != 0 || w.Len() != 0 || after.Size() != before.Size() {
 				t.Fatalf("merged %v, warnings %q, size %d -> %d; want untouched", merged, w.String(), before.Size(), after.Size())
 			}
-			if got := storedRecordsByID(t, root)[id].Reason; got != ReasonManual {
+			if got := storedRecordsByID(t, root)[id].Reason; got != dispatchrecord.ReasonManual {
 				t.Fatalf("reason = %q, want unchanged manual", got)
 			}
 			if len(fc.asked) != 0 {
@@ -210,7 +211,7 @@ func TestLateMerges_UpgradesClaimJustInsideTheWindow(t *testing.T) {
 	fc := forge.NewFake()
 	const pr = "https://x/pull/9"
 	fc.SetPRState(pr, forge.PRMerged)
-	id, _ := writeLogAt(t, root, "9", lateMergeNow.Add(-LateMergeWindow+time.Hour), "complete", ReasonManual, pr)
+	id, _ := writeLogAt(t, root, "9", lateMergeNow.Add(-LateMergeWindow+time.Hour), "complete", dispatchrecord.ReasonManual, pr)
 	merged, err := LateMerges(root, fc, fc, lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 1 || merged[0] != id {
 		t.Fatalf("merged = %v, %v; want [%s]", merged, err, id)
@@ -224,7 +225,7 @@ func TestLateMerges_StopsAtFirstRateLimit(t *testing.T) {
 	fake := forge.NewFake()
 	const prA, prB, prC = "https://x/pull/1", "https://x/pull/2", "https://x/pull/3"
 	for i, u := range []string{prA, prB, prC} {
-		writeSettledLog(t, root, fmt.Sprint(i+1), ReasonManual, u)
+		writeSettledLog(t, root, fmt.Sprint(i+1), dispatchrecord.ReasonManual, u)
 		fake.SetPRState(u, forge.PRMerged)
 	}
 	fake.PRStateErr = &forge.RateLimitError{Err: errors.New("HTTP 403")}
@@ -248,7 +249,7 @@ func TestLateMerges_RateLimitKeepsEarlierMerges(t *testing.T) {
 	root := t.TempDir()
 	fake := forge.NewFake()
 	for _, k := range []string{"1", "2", "3"} {
-		writeSettledLog(t, root, k, ReasonManual, "https://x/pull/"+k)
+		writeSettledLog(t, root, k, dispatchrecord.ReasonManual, "https://x/pull/"+k)
 		fake.SetPRState("https://x/pull/"+k, forge.PRMerged)
 	}
 	fake.PRStateErrs = []error{nil, &forge.RateLimitError{Err: errors.New("HTTP 403")}}
@@ -261,7 +262,7 @@ func TestLateMerges_RateLimitKeepsEarlierMerges(t *testing.T) {
 	if len(fc.asked) != 2 || len(merged) != 1 {
 		t.Fatalf("asked %v, merged %v; want two calls and one merge", fc.asked, merged)
 	}
-	if got := storedRecordsByID(t, root)[merged[0]].Reason; got != ReasonMerged {
+	if got := storedRecordsByID(t, root)[merged[0]].Reason; got != dispatchrecord.ReasonMerged {
 		t.Fatalf("reason = %q, want merged (re-ingested before returning)", got)
 	}
 }
@@ -342,7 +343,7 @@ func TestLateMerges_FillsMergeCommit(t *testing.T) {
 	root := t.TempDir()
 	fc := forge.NewFake()
 	const prA, prB = "https://x/pull/1", "https://x/pull/2"
-	idA, _ := writeSettledLog(t, root, "1", ReasonManual, prA)
+	idA, _ := writeSettledLog(t, root, "1", dispatchrecord.ReasonManual, prA)
 	fc.SetPR("a", forge.PR{URL: prA})
 	fc.SetPRState(prA, forge.PRMerged)
 	fc.SetMergeCommit(prA, "abc123")
@@ -355,7 +356,7 @@ func TestLateMerges_FillsMergeCommit(t *testing.T) {
 		t.Fatalf("MergeCommit = %q, want abc123", got)
 	}
 
-	idB, _ := writeSettledLog(t, root, "2", ReasonManual, prB)
+	idB, _ := writeSettledLog(t, root, "2", dispatchrecord.ReasonManual, prB)
 	fc.SetPR("b", forge.PR{URL: prB})
 	fc.SetPRState(prB, forge.PRMerged)
 	fc.MergeCommitErr = errors.New("boom")
@@ -365,7 +366,7 @@ func TestLateMerges_FillsMergeCommit(t *testing.T) {
 		t.Fatalf("LateMerges = %v, %v; want %s merged despite the failed read", merged, err, idB)
 	}
 	b := storedRecordsByID(t, root)[idB]
-	if b.Reason != ReasonMerged || b.MergeCommit != "" {
+	if b.Reason != dispatchrecord.ReasonMerged || b.MergeCommit != "" {
 		t.Fatalf("B = reason %q merge commit %q, want merged with none", b.Reason, b.MergeCommit)
 	}
 	if !strings.Contains(w.String(), "boom") || strings.Count(w.String(), "??") != 1 {

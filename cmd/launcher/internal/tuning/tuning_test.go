@@ -245,7 +245,7 @@ func assertLandedShareCountsWorkOnly(t *testing.T) {
 	t.Helper()
 	landed := func(id, key string) dispatchrecord.Record {
 		r := rec(id, hour, 1)
-		r.DispatchKey, r.Outcome, r.Reason = key, forge.Complete.String(), settle.ReasonMerged
+		r.DispatchKey, r.Outcome, r.Reason = key, forge.Complete.String(), dispatchrecord.ReasonMerged
 		return r
 	}
 	records := []dispatchrecord.Record{landed("b", "1"), landed("w1", "2")}
@@ -530,12 +530,12 @@ func TestRenderOutliersListEveryFailureFirst(t *testing.T) {
 		records = append(records, rec(fmt.Sprintf("dear%d", i), hour, 100+float64(i)))
 	}
 	records = append(records,
-		settled(rec("cheap-failed", hour, 0.1), forge.Failed, settle.ReasonCIRed),
-		settled(rec("cheap-blocked", hour, 0.2), forge.Failed, settle.ReasonBlocked),
+		settled(rec("cheap-failed", hour, 0.1), forge.Failed, dispatchrecord.ReasonCIRed),
+		settled(rec("cheap-blocked", hour, 0.2), forge.Failed, dispatchrecord.ReasonBlocked),
 		settled(rec("cheap-ambiguous", hour, 0.3), forge.Ambiguous, ""),
-		settled(rec("cheap-complete", hour, 0.4), forge.Complete, settle.ReasonMerged),
+		settled(rec("cheap-complete", hour, 0.4), forge.Complete, dispatchrecord.ReasonMerged),
 		// The dearest Record failed: it is listed once, in the failure group.
-		settled(rec("dearest-failed", hour, 999), forge.Failed, settle.ReasonFixExhausted),
+		settled(rec("dearest-failed", hour, 999), forge.Failed, dispatchrecord.ReasonFixExhausted),
 	)
 
 	d := Render(records, "", now, Limits{MinSample: 1}, nil, nil)
@@ -560,7 +560,7 @@ func TestRenderOutliersListEveryFailureFirst(t *testing.T) {
 
 func TestRenderOutliersOnlyCoverTheWindow(t *testing.T) {
 	records := []dispatchrecord.Record{
-		settled(rec("old-failed", 2*hour, 50), forge.Failed, settle.ReasonBlocked),
+		settled(rec("old-failed", 2*hour, 50), forge.Failed, dispatchrecord.ReasonBlocked),
 		rec("cursor", hour, 1),
 		rec("w", hour, 2),
 	}
@@ -672,7 +672,7 @@ func TestRenderNoEvidenceSectionWithoutEvidence(t *testing.T) {
 func capRecords() []dispatchrecord.Record {
 	text := strings.Repeat("x", 300)
 	mk := func(id string, usd float64, state forge.DispatchState) dispatchrecord.Record {
-		r := settled(rec(id, hour, usd), state, settle.ReasonCIRed)
+		r := settled(rec(id, hour, usd), state, dispatchrecord.ReasonCIRed)
 		r.Passes = []dispatchrecord.Pass{
 			{Ordinal: 1, Role: string(passmachine.RoleImplement), USD: usd},
 			{Ordinal: 2, Role: string(passmachine.RoleReview), Verdict: string(passmachine.VerdictBlock), VerdictText: id + text},

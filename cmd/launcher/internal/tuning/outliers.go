@@ -11,7 +11,6 @@ import (
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptfence"
 	"spindrift.dev/launcher/internal/recordstats"
-	"spindrift.dev/launcher/internal/settle"
 )
 
 // OutlierTopK is how many of the window's dearest Records the Outliers section
@@ -51,7 +50,8 @@ func cell(s string) string {
 // outliers from the tail first; a failed Record also among the dearest appears
 // once, in the failure group.
 func outliers(window []dispatchrecord.Record) section {
-	// Blocked runs arrive as Outcome=failed: settle maps them to Reason=settle.ReasonBlocked.
+	// Blocked runs arrive as Outcome=failed: settle maps them to
+	// Reason=dispatchrecord.ReasonBlocked.
 	flagged, rest := []dispatchrecord.Record{}, []dispatchrecord.Record{}
 	for _, r := range window {
 		if r.Outcome == forge.Failed.String() || r.Outcome == forge.Ambiguous.String() {
@@ -73,8 +73,8 @@ func outliers(window []dispatchrecord.Record) section {
 		"| Anchor | Kind | Key | Outcome | Reason | USD | Why |\n|---|---|---|---|---|---|---|\n", OutlierTopK)}
 	for _, r := range flagged {
 		why := r.Outcome
-		if r.Reason == settle.ReasonBlocked {
-			why = settle.ReasonBlocked
+		if r.Reason == dispatchrecord.ReasonBlocked {
+			why = dispatchrecord.ReasonBlocked
 		}
 		s.items = append(s.items, row(r, safe(why)))
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -922,8 +923,8 @@ func TestSettle_GithubReadOnly_ReadyDraftPRCreateFailureParksFailedWithBundlePre
 	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
 		t.Fatalf("appended line %q is not a dispatch_settled op: %v", lines[1], err)
 	}
-	if got := ev.SpindriftOp.Settled; got.State != forge.Failed.String() || got.Reason != ReasonDraftPRFailed {
-		t.Errorf("settled = %+v, want state=failed reason=%q", got, ReasonDraftPRFailed)
+	if got := ev.SpindriftOp.Settled; got.State != forge.Failed.String() || got.Reason != dispatchrecord.ReasonDraftPRFailed {
+		t.Errorf("settled = %+v, want state=failed reason=%q", got, dispatchrecord.ReasonDraftPRFailed)
 	}
 	if !parked {
 		t.Errorf("want a comment naming the forge error, the preserved outbox bundle, and `spindrift recover %s`; got %+v", issNum, fc.CommentCalls)

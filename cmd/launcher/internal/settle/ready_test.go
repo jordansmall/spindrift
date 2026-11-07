@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -977,14 +978,15 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	}
 }
 
-// assertLatchedLeftOpen ties landingManual's reasons to ReasonLeavesPROpen: a green PR
-// handed off unmerged must latch a reason LateMerges will watch.
+// assertLatchedLeftOpen ties landingManual's reasons to
+// dispatchrecord.ReasonLeavesPROpen: a green PR handed off unmerged must latch
+// a reason LateMerges will watch.
 func assertLatchedLeftOpen(t *testing.T, s *Settle, num string) {
 	t.Helper()
 	s.settledMu.Lock()
 	defer s.settledMu.Unlock()
-	if r := s.settledLatch[num].reason; !ReasonLeavesPROpen(r) {
-		t.Errorf("latched reason %q for a landingManual settle is not ReasonLeavesPROpen", r)
+	if r := s.settledLatch[num].reason; !dispatchrecord.ReasonLeavesPROpen(r) {
+		t.Errorf("latched reason %q for a landingManual settle is not dispatchrecord.ReasonLeavesPROpen", r)
 	}
 }
 
@@ -1012,8 +1014,8 @@ func assertTuningHeld(t *testing.T, s *Settle, fc *forge.Fake, landing landingRe
 	s.settledMu.Lock()
 	reason := s.settledLatch["1"].reason
 	s.settledMu.Unlock()
-	if reason != ReasonMergeByHand {
-		t.Errorf("latched reason = %q, want %q", reason, ReasonMergeByHand)
+	if reason != dispatchrecord.ReasonMergeByHand {
+		t.Errorf("latched reason = %q, want %q", reason, dispatchrecord.ReasonMergeByHand)
 	}
 	assertLatchedLeftOpen(t, s, "1")
 	if fc.Merged != "" {
@@ -1145,8 +1147,8 @@ func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
 	s.settledMu.Lock()
 	reason := s.settledLatch["1"].reason
 	s.settledMu.Unlock()
-	if reason != ReasonMergeGuardCheckError {
-		t.Errorf("latched reason = %q, want %q", reason, ReasonMergeGuardCheckError)
+	if reason != dispatchrecord.ReasonMergeGuardCheckError {
+		t.Errorf("latched reason = %q, want %q", reason, dispatchrecord.ReasonMergeGuardCheckError)
 	}
 }
 
@@ -1248,8 +1250,8 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 	s.settledMu.Lock()
 	reason := s.settledLatch["1"].reason
 	s.settledMu.Unlock()
-	if reason != ReasonMergeByHand {
-		t.Errorf("latched reason = %q, want %q", reason, ReasonMergeByHand)
+	if reason != dispatchrecord.ReasonMergeByHand {
+		t.Errorf("latched reason = %q, want %q", reason, dispatchrecord.ReasonMergeByHand)
 	}
 	if fc.Merged != "" {
 		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
@@ -1387,22 +1389,22 @@ type handOffExit struct {
 	arm    func(s *Settle, fc *forge.Fake)
 }
 
-var guardHitExit = handOffExit{"guard-hit", ReasonMergeGuardHit, func(s *Settle, fc *forge.Fake) {
+var guardHitExit = handOffExit{"guard-hit", dispatchrecord.ReasonMergeGuardHit, func(s *Settle, fc *forge.Fake) {
 	s.cfg.MergeGuardPaths = ".github/**"
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 }}
 
 var handOffExits = []handOffExit{
 	guardHitExit,
-	{"guard-check-error", ReasonMergeGuardCheckError, func(s *Settle, fc *forge.Fake) {
+	{"guard-check-error", dispatchrecord.ReasonMergeGuardCheckError, func(s *Settle, fc *forge.Fake) {
 		s.cfg.MergeGuardPaths = ".github/**"
 		fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	}},
-	{"merge-by-hand", ReasonMergeByHand, func(s *Settle, fc *forge.Fake) {
+	{"merge-by-hand", dispatchrecord.ReasonMergeByHand, func(s *Settle, fc *forge.Fake) {
 		iss, _ := fc.Issue("1")
 		fc.SetIssue(forge.Issue{Number: "1", Labels: append(iss.Labels, "agent-tuning-finding")})
 	}},
-	{"merge-by-hand-check-error", ReasonMergeGuardCheckError, func(s *Settle, fc *forge.Fake) {
+	{"merge-by-hand-check-error", dispatchrecord.ReasonMergeGuardCheckError, func(s *Settle, fc *forge.Fake) {
 		fc.IssueErr = errors.New("gh issue view: 502")
 	}},
 }
@@ -1591,7 +1593,7 @@ func TestSelfHeal_HandOffConflict_FailedResponseFailsLanding(t *testing.T) {
 				if landing != landingFailed {
 					t.Fatalf("selfHeal = %v (%q), want landingFailed", landing, reason)
 				}
-				assertLatchedReason(t, s, "1", ReasonLandingFailed)
+				assertLatchedReason(t, s, "1", dispatchrecord.ReasonLandingFailed)
 				if labels := clearErrAndReadLabels(fc); !containsLabel(labels, "agent-failed") || containsLabel(labels, "agent-complete") {
 					t.Errorf("issue must carry agent-failed only; labels=%v", labels)
 				}
@@ -1621,7 +1623,7 @@ func TestSelfHeal_HandOffConflict_RedResolvedHeadDrawsFixPass(t *testing.T) {
 	if len(d.FixCalls) != 1 {
 		t.Errorf("FixCalls = %+v, want one fix pass", d.FixCalls)
 	}
-	assertHandedOff(t, s, fc, landing, ReasonMergeGuardHit)
+	assertHandedOff(t, s, fc, landing, dispatchrecord.ReasonMergeGuardHit)
 	if len(fc.RebasedURLs) != 2 {
 		t.Errorf("Rebase called %d times, want 2 (one per response)", len(fc.RebasedURLs))
 	}
@@ -1629,8 +1631,9 @@ func TestSelfHeal_HandOffConflict_RedResolvedHeadDrawsFixPass(t *testing.T) {
 
 // A response that cannot even try to resolve (rebases disabled, or a rebase
 // failing without a conflict) blocks the merge the way the immediate path does:
-// the PR is left demoted, the landing settles manual with ReasonMergeBlocked and
-// says so in a comment, and the hold's own notice still reaches the human.
+// the PR is left demoted, the landing settles manual with
+// dispatchrecord.ReasonMergeBlocked and says so in a comment, and the hold's
+// own notice still reaches the human.
 func TestSelfHeal_HandOffConflict_UnresolvableBlocksMerge(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1652,7 +1655,7 @@ func TestSelfHeal_HandOffConflict_UnresolvableBlocksMerge(t *testing.T) {
 
 				landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-				assertHandedOff(t, s, fc, landing, ReasonMergeBlocked)
+				assertHandedOff(t, s, fc, landing, dispatchrecord.ReasonMergeBlocked)
 				if len(fc.RebasedURLs) != tc.wantRebase {
 					t.Errorf("Rebase called %d times, want %d", len(fc.RebasedURLs), tc.wantRebase)
 				}

@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/settle"
@@ -157,7 +158,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 						result.ReportFailureReason(iss.Number)
-						transitionState(d, it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote(), settle.ReasonBoxFailed)
+						transitionState(d, it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote(), dispatchrecord.ReasonBoxFailed)
 						return struct{}{}
 					},
 					func(result dispatch.Result) struct{} {

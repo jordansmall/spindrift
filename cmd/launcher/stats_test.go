@@ -16,7 +16,6 @@ import (
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/passmachine"
-	"spindrift.dev/launcher/internal/settle"
 )
 
 func statsOp(op hostop.SpindriftOp) string { return hostop.EncodeSpindriftOp(op) }
@@ -310,17 +309,17 @@ func TestRenderStats_LandedKeysAndSourceMix(t *testing.T) {
 		}
 	}
 	records := []dispatchrecord.Record{
-		rec("work", "1", "complete", settle.ReasonMerged, settled, 1),
-		rec("work", "1", "complete", settle.ReasonMerged, settled, 1), // a re-run of the same key
-		rec("work", "2", "failed", settle.ReasonCIRed, settled, 2),
+		rec("work", "1", "complete", dispatchrecord.ReasonMerged, settled, 1),
+		rec("work", "1", "complete", dispatchrecord.ReasonMerged, settled, 1), // a re-run of the same key
+		rec("work", "2", "failed", dispatchrecord.ReasonCIRed, settled, 2),
 		rec("work", "3", "unknown", "", dispatchrecord.OutcomeSourceNone, 4),
-		rec("research", "1", "complete", settle.ReasonVerdict, settled, 2), // a verdict, not a landing
-		rec("work", "4", "complete", settle.ReasonMerged, settled, 2),
-		rec("work", "5", "complete", settle.ReasonAlreadyResolved, settled, 0),
-		rec("work", "6", "complete", settle.ReasonManual, settled, 0),
-		rec("work", "7", "complete", settle.ReasonAutoMergeEnqueued, settled, 0),
-		rec("work", "8", "complete", settle.ReasonMergeBlocked, settled, 0),
-		rec("butler", "chore", "complete", settle.ReasonFindingsFiled, settled, 0),
+		rec("research", "1", "complete", dispatchrecord.ReasonVerdict, settled, 2), // a verdict, not a landing
+		rec("work", "4", "complete", dispatchrecord.ReasonMerged, settled, 2),
+		rec("work", "5", "complete", dispatchrecord.ReasonAlreadyResolved, settled, 0),
+		rec("work", "6", "complete", dispatchrecord.ReasonManual, settled, 0),
+		rec("work", "7", "complete", dispatchrecord.ReasonAutoMergeEnqueued, settled, 0),
+		rec("work", "8", "complete", dispatchrecord.ReasonMergeBlocked, settled, 0),
+		rec("butler", "chore", "complete", dispatchrecord.ReasonFindingsFiled, settled, 0),
 	}
 	summary := func(records []dispatchrecord.Record) string {
 		var buf bytes.Buffer

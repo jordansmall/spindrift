@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
@@ -337,7 +338,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Fprintf(s.out, "    #%s  status=ledger-finish-failed  !! %v\n", num, err)
-		s.settled(d, forge.Failed, settle.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
+		s.settled(d, forge.Failed, dispatchrecord.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
 		// Still gate the already-open draft PRs, or they orphan (issue
 		// #4118). #4076's ordering has nothing left to protect: a lost CAS
 		// means a rival owns the Chore, and any other error leaves this
@@ -356,7 +357,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
-	s.settled(d, forge.Complete, settle.ReasonFindingsFiled, note)
+	s.settled(d, forge.Complete, dispatchrecord.ReasonFindingsFiled, note)
 	fmt.Fprintf(s.out, "    #%s  status=%s  note=%s\n", num, o.Status, note)
 
 	// On the success path, hand each patch to the work merge gate only after
@@ -527,7 +528,7 @@ func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string
 // lastSwept/cursor stay at the prior run's values for the next run to resume
 // from.
 func (s *settleRun) fail(d dispatch.Dispatcher, num, note string) {
-	s.settled(d, forge.Failed, settle.ReasonChoreFailed, note)
+	s.settled(d, forge.Failed, dispatchrecord.ReasonChoreFailed, note)
 	fmt.Fprintf(s.out, "    #%s  status=failed  note=%s\n", num, note)
 }
 

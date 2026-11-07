@@ -32,7 +32,6 @@ import (
 	"spindrift.dev/launcher/internal/promptfence"
 	"spindrift.dev/launcher/internal/recordsdigest"
 	"spindrift.dev/launcher/internal/seamtest"
-	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/tuning"
@@ -765,7 +764,7 @@ func TestSweep_Tuning_InputListsEveryFailureWhenTopKIsFull(t *testing.T) {
 
 	var failures []string
 	for i, f := range []struct{ state, reason string }{
-		{"failed", settle.ReasonBlocked}, {"failed", "ci_red"}, {"ambiguous", ""},
+		{"failed", dispatchrecord.ReasonBlocked}, {"failed", "ci_red"}, {"ambiguous", ""},
 	} {
 		failures = append(failures, writeRecordLog(t, root, fmt.Sprint(1+i), claim.Add(time.Duration(i)*time.Hour),
 			f.state, f.reason, pass, resultLine(ts, 1, "x")))
@@ -1629,7 +1628,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanShowsDelta(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
+		hostop.DispatchSettled{State: "complete", Reason: dispatchrecord.ReasonMergeByHand, PRURL: pr})
 	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 	closed := []forge.Issue{
 		tuningFinding("100", "avg-usd", "role:implement:avg-usd"),
@@ -1661,7 +1660,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanThenReopened(t *testing.T) 
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
+		hostop.DispatchSettled{State: "complete", Reason: dispatchrecord.ReasonMergeByHand, PRURL: pr})
 	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 	iss := tuningFinding("100", "avg-usd", "role:implement:avg-usd")
 	iss.Reopened = true
@@ -1685,7 +1684,7 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedWithoutCommit(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
+		hostop.DispatchSettled{State: "complete", Reason: dispatchrecord.ReasonMergeByHand, PRURL: pr})
 	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 	iss := tuningFinding("100", "usd-per-record")
 	iss.State = forge.IssueClosed
@@ -1717,7 +1716,7 @@ func TestSweep_Tuning_PriorFindingHeldPRNotMergedShowsNoDelta(t *testing.T) {
 			root := t.TempDir()
 			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
 			seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
-				hostop.DispatchSettled{State: "complete", Reason: settle.ReasonMergeByHand, PRURL: pr})
+				hostop.DispatchSettled{State: "complete", Reason: dispatchrecord.ReasonMergeByHand, PRURL: pr})
 			seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
 			iss := tuningFinding("100", "usd-per-record")
 			iss.State = forge.IssueClosed

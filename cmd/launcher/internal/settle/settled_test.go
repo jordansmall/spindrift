@@ -93,7 +93,7 @@ func TestSettledBy_EmptyRecordIDLeavesEarlierRecordUntouched(t *testing.T) {
 	}
 	storedRecordsByID(t, logRoot(t, path)) // ingest the landed Record
 
-	SettledBy(&dispatch.Fake{LogPathResult: path}, dispatchkey.Issue("7"), "failed", ReasonBoxFailed, "claim failed")
+	SettledBy(&dispatch.Fake{LogPathResult: path}, dispatchkey.Issue("7"), "failed", dispatchrecord.ReasonBoxFailed, "claim failed")
 
 	recs := logRecords(t, path)
 	if len(recs) != 1 || recs[0].ID != "work:7@x" || recs[0].Outcome != "complete" || recs[0].Reason != "merged" {
@@ -111,12 +111,12 @@ func TestSettledBy_AppendsUnderDispatchRecordID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SettledBy(&dispatch.Fake{LogPathResult: path, RecordIDResult: "work:7@y"}, dispatchkey.Issue("7"), "failed", ReasonBoxFailed, "boom")
+	SettledBy(&dispatch.Fake{LogPathResult: path, RecordIDResult: "work:7@y"}, dispatchkey.Issue("7"), "failed", dispatchrecord.ReasonBoxFailed, "boom")
 
 	recs := logRecords(t, path)
-	if len(recs) != 1 || recs[0].ID != "work:7@y" || recs[0].Outcome != "failed" || recs[0].Reason != ReasonBoxFailed ||
+	if len(recs) != 1 || recs[0].ID != "work:7@y" || recs[0].Outcome != "failed" || recs[0].Reason != dispatchrecord.ReasonBoxFailed ||
 		recs[0].Note != "boom" || recs[0].OutcomeSource != dispatchrecord.OutcomeSourceSettled {
-		t.Fatalf("stored records = %+v, want work:7@y settled failed/%s with note boom", recs, ReasonBoxFailed)
+		t.Fatalf("stored records = %+v, want work:7@y settled failed/%s with note boom", recs, dispatchrecord.ReasonBoxFailed)
 	}
 }
 

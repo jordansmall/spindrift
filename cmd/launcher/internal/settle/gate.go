@@ -102,7 +102,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Failed, o.Note, ReasonBlocked)
+		s.transitionState(num, forge.InProgress, forge.Failed, o.Note, dispatchrecord.ReasonBlocked)
 		// A read-only Box never pushes or opens a PR in-box (issue #1933), so a
 		// bundle it wrote to the outbox and a PR-intent line it printed would
 		// be stranded once the container exits. Applies to PR-shaped and
@@ -184,7 +184,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			if err != nil || !ok {
 				const reason = "no PR found on branch to verify merge"
 				fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
-				s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonNoPR)
+				s.transitionState(num, forge.InProgress, forge.Failed, reason, dispatchrecord.ReasonNoPR)
 			} else {
 				s.verifyMerged(num, pr)
 			}
@@ -208,7 +208,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			}
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Ambiguous, o.Note, ReasonAmbiguous)
+		s.transitionState(num, forge.InProgress, forge.Ambiguous, o.Note, dispatchrecord.ReasonAmbiguous)
 		s.postUsageComment(num, d)
 	case outcome.StatusAlreadyResolved:
 		// The Box found the change already on the default branch: zero
@@ -222,7 +222,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved comment: %v\n", num, err)
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Complete, o.Note, ReasonAlreadyResolved)
+		s.transitionState(num, forge.InProgress, forge.Complete, o.Note, dispatchrecord.ReasonAlreadyResolved)
 		s.closeResolvedIssue(num)
 		s.postUsageComment(num, d)
 	default:
@@ -296,7 +296,7 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 		// #3627) so a settled record is diagnosable on disk without the
 		// daemon's terminal.
 		note := missingNote + clsNote
-		s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonNoOutcome)
+		s.transitionState(num, forge.InProgress, forge.Failed, note, dispatchrecord.ReasonNoOutcome)
 		return
 	}
 	// No transitionState here, on purpose, regardless of draft-ness (issue
@@ -330,7 +330,7 @@ func Transition(it forge.IssueTracker, num string, from, to forge.DispatchState,
 	if note != "" {
 		displaced += ": " + note
 	}
-	return ReasonTransitionRefused, fmt.Sprintf("%s (settle reason was %s)", refused.Error(), displaced), err
+	return dispatchrecord.ReasonTransitionRefused, fmt.Sprintf("%s (settle reason was %s)", refused.Error(), displaced), err
 }
 
 // settledLatch is one issue's most recently latched terminal decision,
@@ -402,7 +402,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 		return
 	}
 	ds := hostop.DispatchSettled{State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr}
-	if d != nil && rec.reason == ReasonMerged && pr != "" {
+	if d != nil && dispatchrecord.ReasonLanded(rec.reason) && pr != "" {
 		ds.MergeCommit = readMergeCommit(s.cfg.Capabilities.MergeCommitReader, "#"+num, pr, os.Stderr)
 	}
 	if d == nil {
@@ -607,8 +607,8 @@ func (s *Settle) unreviewedLanding(num string, result dispatch.Result) string {
 // signal-killed run stopped before land (issue #5984). Nothing is landed and
 // selfHeal never runs.
 func (s *Settle) failUnreviewed(d dispatch.Dispatcher, num, landing string) {
-	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, landing, UnreviewedNote)
-	s.transitionState(num, forge.InProgress, forge.Failed, UnreviewedNote, ReasonUnreviewed)
+	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, landing, dispatchrecord.UnreviewedNote)
+	s.transitionState(num, forge.InProgress, forge.Failed, dispatchrecord.UnreviewedNote, dispatchrecord.ReasonUnreviewed)
 	retry := "re-apply the dispatch label"
 	if s.cfg.DispatchLabel != "" {
 		retry = fmt.Sprintf("re-apply `%s`", s.cfg.DispatchLabel)

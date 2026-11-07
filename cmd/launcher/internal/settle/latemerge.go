@@ -74,12 +74,12 @@ func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
 }
 
 // LateMerges upgrades each Record settled with its PR left open
-// (ReasonLeavesPROpen) whose PR has since merged and whose claim falls within
-// LateMergeWindow of now. The host never re-settles such a PR, so without this
-// a landed change keeps the open-PR reason forever. The upgrade is a second
-// dispatch_settled op (reason merged) appended to the Record's primary log,
-// where the parser's last-wins rule picks it up; each appended log's chain is
-// re-ingested so the Record reads back upgraded. It returns the IDs it
+// (dispatchrecord.ReasonLeavesPROpen) whose PR has since merged and whose claim
+// falls within LateMergeWindow of now. The host never re-settles such a PR, so
+// without this a landed change keeps the open-PR reason forever. The upgrade is
+// a second dispatch_settled op (reason merged) appended to the Record's primary
+// log, where the parser's last-wins rule picks it up; each appended log's chain
+// is re-ingested so the Record reads back upgraded. It returns the IDs it
 // upgraded.
 //
 // A Record whose primary log is gone, or with no claim time (an older log
@@ -119,7 +119,7 @@ func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now t
 	var stopErr error
 	for _, r := range recs {
 		if r.OutcomeSource != dispatchrecord.OutcomeSourceSettled || r.Outcome != forge.Complete.String() ||
-			!ReasonLeavesPROpen(r.Reason) || !QueryablePRURL(r.PRURL) {
+			!dispatchrecord.ReasonLeavesPROpen(r.Reason) || !QueryablePRURL(r.PRURL) {
 			continue
 		}
 		if r.ClaimTime.IsZero() || r.ClaimTime.Before(now.Add(-LateMergeWindow)) {
@@ -144,7 +144,7 @@ func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now t
 		ds := hostop.DispatchSettled{
 			RecordID: r.ID,
 			State:    forge.Complete.String(),
-			Reason:   ReasonMerged,
+			Reason:   dispatchrecord.ReasonMerged,
 			Note:     "merged after settling " + r.Reason,
 			PRURL:    r.PRURL,
 		}

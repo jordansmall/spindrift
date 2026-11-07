@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -153,7 +154,7 @@ func (s *Settle) blockHandoff(num, branch string, err error) {
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
 	// Never transitions, so Settled never sees this Dispatch, yet the
 	// all-finished banner must not count it delivered (issue #5145).
-	tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String(), Reason: ReasonMergeBlocked})
+	tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String(), Reason: dispatchrecord.ReasonMergeBlocked})
 }
 
 // parkRelayFailure fails an issue whose bundle relay failed (issue #4651).
@@ -165,7 +166,7 @@ func (s *Settle) parkRelayFailure(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=relay-failed  !! %v\n", num, branch, err)
 	next := relayFailureNext(num, err, fmt.Sprintf("run `spindrift recover %s` to retry relaying and landing it.", num))
 	s.it.Comment(num, fmt.Sprintf("bundle relay failed: %v. The Box's bundle is preserved in the outbox; %s", err, next))
-	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox", ReasonRelayFailed)
+	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox", dispatchrecord.ReasonRelayFailed)
 }
 
 // relayFailureNext swaps a park comment's recover hint for the workflow-scope
@@ -184,7 +185,7 @@ func relayFailureNext(num string, err error, fallback string) string {
 func (s *Settle) parkDraftPRFailure(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=draft-pr-failed  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("%v. The branch was relayed and the Box's bundle is preserved in the outbox; run `spindrift recover %s` to retry opening and landing the PR.", err, num))
-	s.transitionState(num, forge.InProgress, forge.Failed, "draft PR create failed; work preserved in outbox", ReasonDraftPRFailed)
+	s.transitionState(num, forge.InProgress, forge.Failed, "draft PR create failed; work preserved in outbox", dispatchrecord.ReasonDraftPRFailed)
 }
 
 // closingKeywordPattern matches GitHub's closing keywords (close, fix, resolve

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/retry"
@@ -244,7 +245,7 @@ func TestSelfHeal_ReadOnlyFixPassMissingBundleFallsThrough(t *testing.T) {
 	if strings.Contains(out, "status=relay-failed") {
 		t.Errorf("a missing bundle must not park as relay-failed; got: %q", out)
 	}
-	assertLatchedReason(t, s, "1", ReasonFixNoOp)
+	assertLatchedReason(t, s, "1", dispatchrecord.ReasonFixNoOp)
 }
 
 // A parkable relay failure after a fix pass leaves the bundle in the outbox
@@ -286,7 +287,7 @@ func TestSelfHeal_ReadOnlyFixPassParkableRelayFailureParks(t *testing.T) {
 	if n := len(fc.TransitionStateCalls); n == 0 || fc.TransitionStateCalls[n-1].To != forge.Failed {
 		t.Errorf("issue must be transitioned to Failed; calls=%+v", fc.TransitionStateCalls)
 	}
-	assertLatchedReason(t, s, "1", ReasonRelayFailed)
+	assertLatchedReason(t, s, "1", dispatchrecord.ReasonRelayFailed)
 	var named bool
 	for _, cc := range fc.CommentCalls {
 		if strings.Contains(cc.Body, "`spindrift recover 1`") {
@@ -333,7 +334,7 @@ func TestSelfHeal_ReadOnlyFixPassWorkflowPermissionDeniedParksWithRemedy(t *test
 	if n := len(fc.TransitionStateCalls); n == 0 || fc.TransitionStateCalls[n-1].To != forge.Failed {
 		t.Errorf("issue must be transitioned to Failed; calls=%+v", fc.TransitionStateCalls)
 	}
-	assertLatchedReason(t, s, "1", ReasonRelayFailed)
+	assertLatchedReason(t, s, "1", dispatchrecord.ReasonRelayFailed)
 }
 
 // A mark landing during the relay's final attempt is not a backoff, so the

@@ -395,8 +395,8 @@ func TestSettle_LocalPushOnly_KilledNoReportBundlePresent_FailsUnreviewedUnlessL
 func assertSettledUnreviewed(t *testing.T, path string) {
 	t.Helper()
 	recs := logRecords(t, path)
-	if len(recs) != 1 || recs[0].Outcome != "failed" || recs[0].Reason != ReasonUnreviewed ||
+	if len(recs) != 1 || recs[0].Outcome != "failed" || recs[0].Reason != dispatchrecord.ReasonUnreviewed ||
 		recs[0].OutcomeSource != dispatchrecord.OutcomeSourceSettled {
-		t.Fatalf("stored records = %+v, want one settled failed/%s", recs, ReasonUnreviewed)
+		t.Fatalf("stored records = %+v, want one settled failed/%s", recs, dispatchrecord.ReasonUnreviewed)
 	}
 }
