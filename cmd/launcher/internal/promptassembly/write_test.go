@@ -45,16 +45,35 @@ func mustRead(t *testing.T, path string) string {
 	return string(b)
 }
 
+// writeRegistry is the synthetic cell the WriteAssembly tests share: one
+// rendering fragment, a review prompt carrying the VERDICT: marker
+// testValidateMarkerRows demands of it, and the scout and research prompts.
+func writeRegistry(t *testing.T) (Registry, Env) {
+	t.Helper()
+	return syntheticRegistry(t,
+		[]FragmentRow{{Gate: "CAVEMAN_BAKED", Fragment: "caveman.md", Var: "CAVEMAN_STEP"}},
+		map[string]string{
+			"issue-prompt.md":      "issue ${ISSUE_NUMBER} ${CAVEMAN_STEP}\n",
+			"review-prompt.md":     "review VERDICT:\n",
+			"research-prompt.md":   "research\n",
+			"scout-prompt.md":      "scout\n",
+			"fragments/caveman.md": "caveman body",
+		})
+}
+
 func TestWriteAssemblyWritesFilesAndLayersHandoff(t *testing.T) {
-	env := coveredEnv()
+	reg, env := writeRegistry(t)
 	env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
+	env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
 	out := writeTestOutputs(t)
 	var warn strings.Builder
 
-	result, err := WriteAssembly(env, loadTestRegistry(t), testValidateMarkerRows(), testPassthrough(), out, &warn)
+	result, err := WriteAssembly(env, reg, testValidateMarkerRows(), testPassthrough(), out, &warn)
 	if err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
+	}
+	if len(result.Fragments) == 0 {
+		t.Fatal("fixture renders no fragments, so the fragments file assertion is vacuous")
 	}
 
 	if got := mustRead(t, out.Prompt); got != result.Prompt {
@@ -103,8 +122,9 @@ func TestWriteAssemblyWritesFilesAndLayersHandoff(t *testing.T) {
 
 func TestWriteAssemblyNoAgentsJSONLeavesAgentsFileEmpty(t *testing.T) {
 	out := writeTestOutputs(t)
+	reg, env := writeRegistry(t)
 
-	result, err := WriteAssembly(coveredEnv(), loadTestRegistry(t), testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
+	result, err := WriteAssembly(env, reg, testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
 	if err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
@@ -120,7 +140,8 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 	t.Run("no path given", func(t *testing.T) {
 		out := writeTestOutputs(t)
 		out.ReviewPrompt = ""
-		result, err := WriteAssembly(coveredEnv(), loadTestRegistry(t), testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
+		reg, env := writeRegistry(t)
+		result, err := WriteAssembly(env, reg, testValidateMarkerRows(), testPassthrough(), out, &strings.Builder{})
 		if err != nil {
 			t.Fatalf("WriteAssembly: %v", err)
 		}
@@ -134,10 +155,10 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 
 	t.Run("not rendered", func(t *testing.T) {
 		out := writeTestOutputs(t)
-		env := coveredEnv()
+		reg, env := writeRegistry(t)
 		env.DispatchKind = "research"
 		env.BoxWriteEnabled = true
-		result, err := WriteAssembly(env, loadTestRegistry(t), nil, testPassthrough(), out, &strings.Builder{})
+		result, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
 		if err != nil {
 			t.Fatalf("WriteAssembly: %v", err)
 		}
@@ -154,7 +175,7 @@ func TestWriteAssemblyReviewPromptOnlyWhenRendered(t *testing.T) {
 }
 
 func TestWriteAssemblyValidateRejectWritesNoHandoff(t *testing.T) {
-	env := coveredEnv()
+	reg, env := writeRegistry(t)
 	env.DispatchKind = "research"
 	env.BoxWriteEnabled = false
 	out := writeTestOutputs(t)
@@ -163,7 +184,7 @@ func TestWriteAssemblyValidateRejectWritesNoHandoff(t *testing.T) {
 		When: "readOnlyResearch", Message: "reject-message",
 	}}
 
-	_, err := WriteAssembly(env, loadTestRegistry(t), rows, testPassthrough(), out, &strings.Builder{})
+	_, err := WriteAssembly(env, reg, rows, testPassthrough(), out, &strings.Builder{})
 	var ve *ValidateError
 	if !errors.As(err, &ve) {
 		t.Fatalf("err = %v, want *ValidateError", err)
@@ -180,7 +201,7 @@ func TestWriteAssemblyValidateRejectWritesNoHandoff(t *testing.T) {
 }
 
 func TestWriteAssemblyWarningsGoToWriter(t *testing.T) {
-	env := coveredEnv()
+	reg, env := writeRegistry(t)
 	env.DispatchKind = "research"
 	env.BoxWriteEnabled = false
 	rows := []ValidateMarkerRow{{
@@ -189,7 +210,7 @@ func TestWriteAssemblyWarningsGoToWriter(t *testing.T) {
 	}}
 	var warn strings.Builder
 
-	if _, err := WriteAssembly(env, loadTestRegistry(t), rows, testPassthrough(), writeTestOutputs(t), &warn); err != nil {
+	if _, err := WriteAssembly(env, reg, rows, testPassthrough(), writeTestOutputs(t), &warn); err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
 	if warn.String() != "warn-message\n" {
@@ -200,8 +221,9 @@ func TestWriteAssemblyWarningsGoToWriter(t *testing.T) {
 func TestWriteAssemblyWriteErrorIsWrappedNotValidate(t *testing.T) {
 	out := writeTestOutputs(t)
 	out.Prompt = filepath.Join(t.TempDir(), "missing-dir", "prompt.md")
+	reg, env := writeRegistry(t)
 
-	_, err := WriteAssembly(coveredEnv(), loadTestRegistry(t), nil, testPassthrough(), out, &strings.Builder{})
+	_, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
 	if err == nil || !strings.HasPrefix(err.Error(), "write prompt output: ") {
 		t.Fatalf("err = %v, want 'write prompt output:' prefix", err)
 	}
@@ -267,14 +289,14 @@ func TestWriteAssemblyReviewModelSuffixSetsReviewEffort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := coveredEnv()
+			reg, env := writeRegistry(t)
 			env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"` + tt.baked + `"}}`
 			env.ReviewModelOverride = tt.model
 			env.ReviewEffortOverride = tt.effort
 			p := testPassthrough()
 			p.Driver = tt.driver
 
-			result, err := WriteAssembly(env, loadTestRegistry(t), testValidateMarkerRows(), p, writeTestOutputs(t), &strings.Builder{})
+			result, err := WriteAssembly(env, reg, testValidateMarkerRows(), p, writeTestOutputs(t), &strings.Builder{})
 			if err != nil {
 				t.Fatalf("WriteAssembly: %v", err)
 			}
