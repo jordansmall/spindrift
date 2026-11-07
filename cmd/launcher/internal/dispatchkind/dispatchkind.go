@@ -72,7 +72,7 @@ type DaemonPriority int
 
 const (
 	PriorityNormal   DaemonPriority = iota // preferred whenever the research floor is met
-	PriorityReserved                       // preferred only while fewer than RESEARCH_RESERVATION of them are running, last otherwise
+	PriorityReserved                       // preferred only while fewer than RESEARCH_RESERVATION of them are running, behind PriorityNormal otherwise; always behind PriorityFirst and ahead of PriorityIdle
 	PriorityIdle                           // tried only after every other kind on every slot (butler, ADR 0056: a slot picks it only when nothing else has work)
 	PriorityFirst                          // tried ahead of every other kind on every slot (recover, issue #4656: stranded finished work lands before new work starts, rebasing onto as little new main as possible)
 )
