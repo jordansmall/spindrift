@@ -64,7 +64,8 @@ var Strategy = ecosystem.Strategy{
 // filtered, so a name outside [A-Za-z0-9_-] could never match; and the
 // undeclared-registry warning interpolates it unquoted. Rejecting a
 // repeated name is input hygiene only.
-// Errors are bare noun-phrases; the caller prefixes the key and the route.
+// Errors are predicates (e.g. "must be an array of strings"); the caller
+// prefixes "<route>: <key> ", see RouteDeclarationValidator.
 func validateCargoRouteDeclaration(key string, value any) error {
 	if key != ecosystem.CargoRouteRegistriesKey {
 		return errors.New("is not a key cargo's route declaration accepts")

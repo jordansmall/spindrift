@@ -19,8 +19,9 @@ func TestCargoRowRouteDeclaration_AcceptsValidRegistriesList(t *testing.T) {
 	}
 }
 
-// RouteDeclarationValidator's contract requires a bare noun phrase, so the error
-// must not echo the key: the caller prefixes the operator's own spelling of it.
+// RouteDeclarationValidator's contract requires a predicate, so the error must
+// not echo the key: the caller prefixes "<route>: <key> " with the operator's
+// own spelling of it.
 func TestCargoRowRouteDeclaration_RejectsUnknownKey(t *testing.T) {
 	row := Strategy
 
