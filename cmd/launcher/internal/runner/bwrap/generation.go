@@ -55,7 +55,7 @@ func NixVarSnapshotRoot(pwd string) string {
 // NixGCRootsRoot is the directory holding one GC-root dir per closure
 // generation (issue #5995). A sibling of NixVarSnapshotRoot, never inside it:
 // reclaimStaleSnapshots treats every entry under the snapshot root as a
-// generation, and buildArgs binds the generation dir into the Box.
+// generation, so a GC-roots dir there would be swept as a stale one.
 func NixGCRootsRoot(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "nix-gcroots")
 }
