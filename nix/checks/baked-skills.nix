@@ -83,24 +83,21 @@ in
         renderers.renderBakedSkillGatesGo withExtra
       );
 
-      # The check splices this synthetic Go test into the reconstructed tree's
-      # driver-exec package, where it reuses that package's coveredCellArgs and
-      # replaceArg helpers. The injected row shares CAVEMAN_BAKED's real fragment
-      # and var (caveman-default.md/CAVEMAN_STEP) so its effect shows up in the
-      # rendered prompt, and the test forces the real gate off so only it can.
+      # Spliced into the reconstructed tree's driver-exec package, reusing its
+      # coveredCellArgs and replaceArg helpers.
       testFile = pkgs.writeText "bakedskillsaddrowguard_test.go" ''
         package main
 
         import (
         	"bytes"
-        	"encoding/json"
         	"io"
         	"os"
         	"path/filepath"
         	"strings"
         	"testing"
 
-        	"spindrift.dev/launcher/internal/testutil/repopath"
+        	"spindrift.dev/launcher/internal/promptassembly"
+        	"spindrift.dev/launcher/internal/testutil"
         )
 
         // TestBakedSkillsAddRowGuard is spliced into a reconstructed, compiled
@@ -116,35 +113,14 @@ in
         // rendered into the assembled prompt -- not a string comparison
         // against a renderer's raw output.
         func TestBakedSkillsAddRowGuard(t *testing.T) {
-        	registryBytes, err := os.ReadFile(repopath.RegistryJSON())
-        	if err != nil {
-        		t.Fatalf("read registry fixture: %v", err)
-        	}
-        	var rows []map[string]any
-        	if err := json.Unmarshal(registryBytes, &rows); err != nil {
-        		t.Fatalf("unmarshal registry fixture: %v", err)
-        	}
-        	// Appends a row sharing CAVEMAN_BAKED's real fragment/var
-        	// (caveman-default.md / CAVEMAN_STEP) under the injected gate name
-        	// -- reusing a real fragment/var pair (rather than a synthetic,
-        	// unused one) means the injected gate's effect is actually
-        	// observable in the final assembled prompt text, since Assemble
-        	// only surfaces a row's rendered fragment into the prompt when the
-        	// base template already references that row's var as a ''${VAR}
-        	// placeholder.
-        	rows = append(rows, map[string]any{
-        		"gate":     "TEST_SKILL_BAKED",
-        		"fragment": "caveman-default.md",
-        		"var":      "CAVEMAN_STEP",
-        	})
-        	appendedRegistryBytes, err := json.Marshal(rows)
-        	if err != nil {
-        		t.Fatalf("marshal appended registry: %v", err)
-        	}
-        	appendedRegistryPath := filepath.Join(t.TempDir(), "registry-with-test-skill-row.json")
-        	if err := os.WriteFile(appendedRegistryPath, appendedRegistryBytes, 0o644); err != nil {
-        		t.Fatalf("write appended registry: %v", err)
-        	}
+        	// The registry is only the injected row, so the sentinel can come from
+        	// nowhere else. It borrows a real fragment/var pair so its effect is
+        	// observable through the ''${CAVEMAN_STEP} placeholder.
+        	registryPath := testutil.WriteRegistry(t, []promptassembly.FragmentRow{{
+        		Gate:     "TEST_SKILL_BAKED",
+        		Fragment: "caveman-default.md",
+        		Var:      "CAVEMAN_STEP",
+        	}})
 
         	// distinctiveSentinel is caveman-default.md's first sentence --
         	// unique enough that it never otherwise appears in the
@@ -156,12 +132,7 @@ in
         		agentsJSONOutput := filepath.Join(t.TempDir(), "agents.json")
         		handoffOutput := filepath.Join(t.TempDir(), "handoff.json")
         		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-        		args = replaceArg(args, "--registry", appendedRegistryPath)
-        		// Force the real CAVEMAN_BAKED gate off so only the injected
-        		// TEST_SKILL_BAKED row (sharing
-        		// caveman-default.md/CAVEMAN_STEP) can put the sentinel in
-        		// the prompt.
-        		args = replaceArg(args, "--caveman-skill-baked", "false")
+        		args = replaceArg(args, "--registry", registryPath)
         		if testSkillBaked {
         			args = replaceArg(args, "--test-skill-skill-baked", "true")
         		} else {
