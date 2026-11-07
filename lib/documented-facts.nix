@@ -21,6 +21,7 @@ let
   schema = import ./env-schema.nix;
   structuralTemplateExamples = import ./structural-template-examples.nix { inherit lib; };
   bakedSkills = import ./baked-skills.nix;
+  gateVocabulary = import ./gate-vocabulary.nix;
   structuralPaths = import ./structural-paths.nix;
   extraOptionPaths = import ./extra-option-paths.nix;
   driverMap = import ./driver-map.nix;
@@ -191,10 +192,10 @@ map assertMarkerShape [
     name = "baked-skills-gates-gen";
     docPath = "cmd/launcher/internal/promptassembly/gates.go";
     blockName = "SKILL-BAKED GATES";
-    sourceDesc = "lib/baked-skills.nix";
+    sourceDesc = "lib/gate-vocabulary.nix";
     beginMarker = "\t// BEGIN GENERATED SKILL-BAKED GATES -- nix run .#regen -- DO NOT EDIT\n";
     endMarker = "\t// END GENERATED SKILL-BAKED GATES";
-    generated = renderers.renderBakedSkillGatesGo bakedSkills;
+    generated = renderers.renderBakedSkillGatesGo gateVocabulary.skillBaked;
     postSplice = "gofmt";
   }
   {
