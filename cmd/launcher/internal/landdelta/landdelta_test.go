@@ -560,10 +560,10 @@ func TestDeltaRangesJSONTag(t *testing.T) {
 	}
 }
 
-// TestCompute_Ranges pins Delta.Ranges (issue #3503) across both Compute
-// paths: direct-diff and rebase-invariant. Each subtest builds its own
-// disposable repo since the setups differ (single-line change, rebase,
-// insertion, deletion, multi-hunk).
+// TestCompute_Ranges pins Delta.Ranges (issue #3503), plus Files and Paths for
+// trailing-space paths (issue #6561), across both Compute paths: direct-diff
+// and rebase-invariant. Each subtest builds its own disposable repo since the
+// setups differ (single-line change, rebase, insertion, deletion, multi-hunk).
 func TestCompute_Ranges(t *testing.T) {
 	// The direct-diff path twice over one fixture: once in a pristine repo,
 	// once in one whose ambient config rewrites the diff preImageRanges
@@ -611,6 +611,56 @@ func TestCompute_Ranges(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got.Ranges, want) {
 				t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
+			}
+		})
+	}
+
+	// A path ending in a space keys identically in numstat and in the diff
+	// headers (which stop only at TAB); a collision with its trimmed twin
+	// "foo" must not merge the two (issue #6561).
+	for _, c := range []struct {
+		name      string
+		edit      []string
+		wantPaths []string
+		want      map[string][]Range
+	}{
+		{
+			name:      "trailing-space path alone",
+			edit:      []string{"foo "},
+			wantPaths: []string{"foo "},
+			want:      map[string][]Range{"foo ": {{Start: 1, Count: 1, PostCount: 1}}},
+		},
+		{
+			name:      "trailing-space path beside its trimmed twin",
+			edit:      []string{"foo", "foo "},
+			wantPaths: []string{"foo", "foo "},
+			want: map[string][]Range{
+				"foo":  {{Start: 1, Count: 1, PostCount: 1}},
+				"foo ": {{Start: 1, Count: 1, PostCount: 1}},
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := newRepo(t)
+			writeFileT(t, dir, "foo", "twin\n")
+			writeFileT(t, dir, "foo ", "spaced\n")
+			runGitT(t, dir, "add", "foo", "foo ")
+			runGitT(t, dir, "commit", "-m", "add foo and 'foo '")
+			anchor := runGitT(t, dir, "rev-parse", "HEAD")
+
+			for _, p := range c.edit {
+				writeFileT(t, dir, p, "changed\n")
+				runGitT(t, dir, "add", p)
+			}
+			runGitT(t, dir, "commit", "-m", "land: edit trailing-space path")
+
+			got := Compute(dir, anchor, "")
+
+			if got.Files != len(c.wantPaths) || !reflect.DeepEqual(got.Paths, c.wantPaths) {
+				t.Fatalf("Files = %d, Paths = %q, want %q", got.Files, got.Paths, c.wantPaths)
+			}
+			if !reflect.DeepEqual(got.Ranges, c.want) {
+				t.Fatalf("Ranges = %+v, want %+v", got.Ranges, c.want)
 			}
 		})
 	}
