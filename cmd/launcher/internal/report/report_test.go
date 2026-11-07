@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -625,4 +626,18 @@ func TestImageBuild_NilReporterIsNoOp(t *testing.T) {
 	var rep *Reporter
 	rep.ImageBuild(ImageBuildStarted)
 	rep.ImageBuild(ImageBuildFinished)
+}
+
+func TestEvents_UniqueAndWellFormed(t *testing.T) {
+	wellFormed := regexp.MustCompile(`^[a-z_]+$`)
+	seen := map[string]bool{}
+	for _, e := range Events() {
+		if !wellFormed.MatchString(e) {
+			t.Errorf("event %q is not lower_snake", e)
+		}
+		if seen[e] {
+			t.Errorf("event %q listed twice", e)
+		}
+		seen[e] = true
+	}
 }

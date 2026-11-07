@@ -172,6 +172,53 @@ const (
 	EventImageBuild = "image_build"
 )
 
+// The names below are the events the Daemon itself writes to the Events file,
+// as opposed to the Record.Event values above, which a child writes and the
+// Daemon relays.
+const (
+	EventAwakeClose          = "awake_close"
+	EventAwakeOpen           = "awake_open"
+	EventBackoff             = "backoff"
+	EventBatonHold           = "baton_hold"
+	EventBatonPass           = "baton_pass"
+	EventBreakerTrip         = "breaker_trip"
+	EventChildFinish         = "child_finish"
+	EventChildInherited      = "child_inherited"
+	EventChildStart          = "child_start"
+	EventDemandAppeared      = "demand_appeared"
+	EventDemandDrained       = "demand_drained"
+	EventDemandRose          = "demand_rose"
+	EventDemandSourceMissing = "demand_source_missing"
+	EventHalt                = "halt"
+	EventIdle                = "idle"
+	EventJam                 = "jam"
+	EventPreflight           = "preflight"
+	EventProbeFailed         = "probe_failed"
+	EventProbeRateLimited    = "probe_rate_limited"
+	EventProbeResumed        = "probe_resumed"
+	EventSelfUpdate          = "self_update"
+	EventShutdown            = "shutdown"
+	EventTipMoved            = "tip_moved"
+)
+
+// Events is every event name the Daemon writes to the Events file: the relayed
+// child Record events that reach it (box, settled, model, image_build) plus the
+// Daemon's own. not_due and ci_wait are Record-only: they update a flight and
+// never reach the file. nix/checks/event-stream-parity.nix holds this equal to
+// the emit sites. A fresh slice each call, so a caller cannot mutate shared
+// state.
+func Events() []string {
+	return []string{
+		EventBox, EventSettled, EventModel, EventImageBuild,
+		EventAwakeClose, EventAwakeOpen, EventBackoff, EventBatonHold, EventBatonPass,
+		EventBreakerTrip, EventChildFinish, EventChildInherited, EventChildStart,
+		EventDemandAppeared, EventDemandDrained, EventDemandRose, EventDemandSourceMissing,
+		EventHalt, EventIdle, EventJam, EventPreflight, EventProbeFailed,
+		EventProbeRateLimited, EventProbeResumed, EventSelfUpdate, EventShutdown,
+		EventTipMoved,
+	}
+}
+
 // ImageBuildState is an image_build record's State. The type keeps a typo in a
 // state a compile error (issue #3627); Record.State stays a plain string
 // because ci_wait shares it. Only the daemon parses it.
