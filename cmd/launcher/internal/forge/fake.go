@@ -1,6 +1,8 @@
 package forge
 
-// Fake is an in-memory Client for unit tests, safe for concurrent use.
+// Fake is an in-memory IssueTracker, CodeForge, and PRForge for unit tests,
+// safe for concurrent use; the optional host-mediation interfaces are reachable
+// only through its As* wrappers (see HostMediationFake).
 // CheckState pops from a scripted RollupState queue, so polling tests need no
 // real sleeps. Fake embeds *core plus the four capability slices below, and no
 // two of those five may declare a name in common. Probe overrides the one
@@ -21,7 +23,7 @@ type Fake struct {
 	*HostMediationFake
 }
 
-// NewFake returns an empty Fake client. labels configures the
+// NewFake returns an empty Fake. labels configures the
 // DispatchState-to-label mapping; omit it for tests that never exercise
 // ListIssues(state) or TransitionState.
 func NewFake(labels ...DispatchLabels) *Fake {

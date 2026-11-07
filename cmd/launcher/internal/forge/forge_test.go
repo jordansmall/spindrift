@@ -367,8 +367,8 @@ func TestFake_AgentBranch(t *testing.T) {
 	}
 }
 
-// An empty BranchPrefix is what an unconfigured config.branchPrefix gives, so
-// the bare issue number is the correct result, not a bug.
+// An empty BranchPrefix yields the bare issue number (AgentBranchName is
+// prefix+num); the launcher's unconfigured default is "agent/issue-" instead.
 func TestFake_AgentBranch_ZeroValue(t *testing.T) {
 	f := forge.NewFake()
 	if got := f.AgentBranch("7"); got != "7" {
