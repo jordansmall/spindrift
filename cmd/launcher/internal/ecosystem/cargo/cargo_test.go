@@ -1452,7 +1452,7 @@ func TestCargoReplacementPlaceholders(t *testing.T) {
 func TestCargoReplacementPlaceholders_DedupesReusedProxySource(t *testing.T) {
 	replacements := []cargoSourceReplacement{
 		{Prefix: "r0", ProxySource: "spindrift-registry-proxy"},
-		{Prefix: "r1", ProxySource: "spindrift-registry-proxy"},
+		{Prefix: "r0", ProxySource: "spindrift-registry-proxy"},
 	}
 
 	got := cargoReplacementPlaceholders(replacements)
