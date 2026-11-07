@@ -1,24 +1,20 @@
 {
   "lastSwept": "26c5f8ec840674ddd4167bd2a4921c92443328a7",
   "cursor": "cmd/launcher/internal/settle/refusal_test.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6550",
-    "https://github.com/jordansmall/spindrift/issues/6551",
-    "https://github.com/jordansmall/spindrift/issues/6552",
-    "https://github.com/jordansmall/spindrift/issues/6553"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/6553"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-07T03:30:24.968330855-05:00"
+  },
   "usage": {
-    "input_tokens": 60,
-    "output_tokens": 77541,
-    "cache_read_input_tokens": 1610383,
-    "cache_creation_input_tokens": 74288,
-    "total_cost_usd": 6.466667070000001,
-    "duration_ms": 431517,
-    "duration_api_ms": 858323,
-    "num_turns": 35
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
