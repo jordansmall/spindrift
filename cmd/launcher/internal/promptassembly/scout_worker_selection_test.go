@@ -1,22 +1,10 @@
 package promptassembly
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
-
-// agentPrompt assembles env against reg and returns the named roster agent's
-// rendered prompt, whose template is staged as <agent>-prompt.md.
-func agentPrompt(t *testing.T, env Env, reg Registry, agent string) string {
-	t.Helper()
-	env.AgentsJSONTemplate = `{"` + agent + `":{"model":"x"}}`
-	env.AgentsPromptFiles = `{"` + agent + `":"` + agent + `-prompt.md"}`
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-	return agentPromptFromJSON(t, result.AgentsJSON, agent)
-}
 
 // Issue #4562: a roster subagent's SKILL_PREAMBLE follows SKILLS_FOUND alone,
 // not the per-skill baked flags (the scout and worker carry no caveman anchor,
@@ -41,9 +29,7 @@ func TestAgentSkillPreambleFollowsSkillsFound(t *testing.T) {
 			if strings.Contains(got, "PREAMBLE") {
 				t.Errorf("SkillsFound empty: prompt = %q, want no preamble", got)
 			}
-			if strings.Contains(got, "${") {
-				t.Errorf("SkillsFound empty: prompt = %q, want no unsubstituted ${...} token", got)
-			}
+			assertNoUnsubstituted(t, "SkillsFound empty", got)
 		})
 	}
 }
@@ -64,9 +50,7 @@ func TestWorkerPromptScoutBriefFollowsScoutProvisioned(t *testing.T) {
 		if has := strings.Contains(got, "BRIEF-STEP"); has != scout {
 			t.Errorf("ScoutProvisioned=%v: brief step rendered = %v, want %v: %q", scout, has, scout, got)
 		}
-		if strings.Contains(got, "${") {
-			t.Errorf("ScoutProvisioned=%v: prompt = %q, want no unsubstituted ${...} token", scout, got)
-		}
+		assertNoUnsubstituted(t, fmt.Sprintf("ScoutProvisioned=%v", scout), got)
 	}
 }
 
@@ -114,9 +98,7 @@ func TestWorkerPromptTestFirstAndPrincipleGates(t *testing.T) {
 					t.Errorf("%s rendered = %v, want %v: %q", marker, has, want, got)
 				}
 			}
-			if strings.Contains(got, "${") {
-				t.Errorf("prompt = %q, want no unsubstituted ${...} token", got)
-			}
+			assertNoUnsubstituted(t, t.Name(), got)
 		})
 	}
 }
@@ -170,9 +152,7 @@ func TestIssuePromptScoutAndCoordinatorBriefGates(t *testing.T) {
 					t.Errorf("Prompt contains %s, want absent:\n%s", m, result.Prompt)
 				}
 			}
-			if strings.Contains(result.Prompt, "${") {
-				t.Errorf("Prompt has an unsubstituted ${...} token:\n%s", result.Prompt)
-			}
+			assertNoUnsubstituted(t, tc.name, result.Prompt)
 		})
 	}
 }

@@ -64,20 +64,13 @@ func relayCarrierRegistry(t *testing.T) (Registry, Env) {
 		})
 }
 
-// filerRoster provisions the filer subagent, whose prompt template is staged
-// as filer-prompt.md.
-func filerRoster(env *Env) {
-	env.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
-	env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
-}
-
 // Issue #3726: each signal channel (research verdict comment, PR intent at
 // OPEN A PULL REQUEST and IF BLOCKED, issue intent in the coordinator's and
 // the Filer's own prompt) forks on SignalCarrier alone, to exactly one of its
 // log or socket fragments. An unset carrier is the log one (issue #4376).
 func TestAssembleSignalCarrierSelectsLogOrSocketFragment(t *testing.T) {
 	reg, base := relayCarrierRegistry(t)
-	filerRoster(&base)
+	stageAgentRoster(&base, "filer")
 
 	cases := []struct {
 		name         string
@@ -157,9 +150,7 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 						if strings.Contains(result.Prompt, "DIRECT-FILE,") {
 							t.Errorf("prompt contains the direct-file step, want never in a research prompt: %q", result.Prompt)
 						}
-						if strings.Contains(result.Prompt, "${") {
-							t.Errorf("prompt contains an unsubstituted ${...} token: %q", result.Prompt)
-						}
+						assertNoUnsubstituted(t, t.Name(), result.Prompt)
 					})
 				}
 			}
@@ -198,9 +189,7 @@ func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 					t.Errorf("filer prompt = %q, want %q absent", got, bad)
 				}
 			}
-			if strings.Contains(got, "${") {
-				t.Errorf("filer prompt = %q, want no unsubstituted ${...} token", got)
-			}
+			assertNoUnsubstituted(t, t.Name(), got)
 		})
 	}
 }

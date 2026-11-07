@@ -256,7 +256,3 @@ func TestAssembleSkillArmsAreIndependent(t *testing.T) {
 		})
 	}
 }
-
-// unseparated drops the blank line Assemble puts between rendered fragments,
-// so a test can compare the spliced markers as one string.
-func unseparated(prompt string) string { return strings.ReplaceAll(prompt, "\n\n", "") }
