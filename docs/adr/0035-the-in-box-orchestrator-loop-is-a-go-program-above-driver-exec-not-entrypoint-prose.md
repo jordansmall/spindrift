@@ -61,7 +61,9 @@ Concretely:
   condition (the verdict wording itself stays prose — see Consequences):
   `max-review-rounds` (default 3, additional passes a `BLOCK` verdict may
   trigger) and `max-slices` (default 5, the total `driver-exec` invocation
-  count regardless of verdict); either set to `0` disables that cap. The loop
+  count regardless of verdict; amended by issue #6462: the default is now 9,
+  and a run whose cap fires makes `max-slices + 1` invocations, see the
+  amendment below); either set to `0` disables that cap. The loop
   terminates the instant a pass's own log carries a terminal
   `SPINDRIFT_OUTCOME` line — unconditionally, ahead of either cap — or as
   soon as a pass's verdict is anything but `BLOCK`.
@@ -135,7 +137,8 @@ Concretely:
 - A run under `ORCHESTRATOR_ENABLED` produces up to `max-slices` separate
   Driver sessions and log files instead of one; anything downstream that
   assumed a single session per box needs to account for N passes, not just
-  N=1.
+  N=1. (Amended by issue #6462: up to `max-slices + 1`, counting the terminal
+  land pass; see the amendment below.)
 - The orchestrator's hardcoded `claude` Driver in `scanPassLog` is a known
   gap against ADR 0009's Driver-agnostic goal, left for whichever issue lands
   the opencode Driver rather than solved speculatively here. (Amended by
@@ -257,3 +260,21 @@ that into `config.driver`, where an empty value means `claude`, matching
 the same way. The opencode Driver therefore gets its own `RenderTranscript`
 strategy for every log the orchestrator reads, and the loop is
 Driver-agnostic end to end, as ADR 0009 aims.
+
+## Amendment (issue #6462): the `max-slices` default is 9
+
+Commit 8aa00b1c4 (issue #2460, `fix(orchestrator): make review-round cap
+reachable`) raised the shipped `max-slices` default from 5 to 9. With 5, the
+code-owned review-pass loop always hit `max-slices` before the review-round
+counter could reach `max-review-rounds`' default of 3, silently shadowing that
+cap. That loop needs at least `2N + 3` invocations to reach N review rounds,
+and 9 is `2N + 3` at N = 3.
+
+The Decision's gloss "the total `driver-exec` invocation count" is also loose:
+when the `max-slices` cap fires, the run makes one more pass beyond it, the
+terminal land pass (issue #2457), so a capped run makes `max-slices + 1`
+invocations. `promptassembly.DefaultMaxSlices`
+(`cmd/launcher/internal/promptassembly/handoff.go`) is the source of truth for
+the value. The "Code-owned caps" bullet in `docs/reference.md` holds the
+current description, including each loop's minimum `max-slices` and when the
+orchestrator warns about an incoherent pair of caps.
