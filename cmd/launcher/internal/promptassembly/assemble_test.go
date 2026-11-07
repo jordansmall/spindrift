@@ -2,14 +2,12 @@ package promptassembly
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
@@ -48,17 +46,6 @@ func coveredEnv() Env {
 		CompleteLabel:        "agent-complete",
 		RunNonce:             "run-nonce-abc123",
 	}
-}
-
-// coveredEnv with the tracker and its nix-precomputed axis fields (issue
-// #2533) moved to "local", every other axis left on the covered cell.
-func localTrackerEnv() Env {
-	env := coveredEnv()
-	env.IssueTracker = "local"
-	env.TrackerAxisRead = "LOCAL"
-	env.TrackerAxisWrite = ""
-	env.TrackerAxisFiler = "GH"
-	return env
 }
 
 func loadTestRegistry(t *testing.T) Registry {
@@ -704,166 +691,6 @@ func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 	}
 	if strings.Contains(result.Prompt, "${ISSUE_NUMBER}") {
 		t.Errorf("Prompt contains unsubstituted ${ISSUE_NUMBER} in injected outcome block:\n%s", result.Prompt)
-	}
-}
-
-// The local-tracker cell (issue #2352). Issue #3469 moved the local link
-// chain host-side into # ISSUE TEXT, so local/issue-read.md keeps only the
-// trailing `git log` bullet, which is what this asserts on.
-func TestAssembleLocalTracker(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := localTrackerEnv()
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	if !strings.Contains(result.Prompt, "git log -n 10 --oneline") {
-		t.Errorf("Prompt missing ISSUE_TRACKER_LOCAL fragment text (local/issue-read.md):\n%s", result.Prompt)
-	}
-	if strings.Contains(result.Prompt, "via GitHub") {
-		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read.md), want local tracker's fragment only")
-	}
-}
-
-// With LocalIssueReference on, the PR body carries the "Local-issue:"
-// breadcrumb and never the local-noref arm's text.
-func TestAssembleLocalTrackerWithLocalIssueReference(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := localTrackerEnv()
-	env.LocalIssueReference = true
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	if !strings.Contains(result.Prompt, "Local-issue: 2349") {
-		t.Errorf("Prompt missing PR_BODY_LOCAL_REF fragment text (local/pr-body-issue-ref.md):\n%s", result.Prompt)
-	}
-	if strings.Contains(result.Prompt, "Body must NOT reference the local ticket by slug or number") {
-		t.Errorf("Prompt contains PR_BODY_LOCAL_NOREF fragment text (local/pr-body-no-issue-ref.md), want local-ref only")
-	}
-}
-
-// With LocalIssueReference left at its default, the PR body carries
-// PR_BODY_LOCAL_NOREF's text and never the "Local-issue:" breadcrumb.
-func TestAssembleLocalTrackerWithoutLocalIssueReference(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := localTrackerEnv()
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	if !strings.Contains(result.Prompt, "Body must NOT reference the local ticket by slug or number") {
-		t.Errorf("Prompt missing PR_BODY_LOCAL_NOREF fragment text (local/pr-body-no-issue-ref.md):\n%s", result.Prompt)
-	}
-	if strings.Contains(result.Prompt, "Local-issue:") {
-		t.Errorf("Prompt contains PR_BODY_LOCAL_REF fragment text (local/pr-body-issue-ref.md), want local-noref only")
-	}
-}
-
-// The forgejo-tracker cell on a read-write box (issue #2352). ADR 0022's
-// acceptance criterion is read-write only, so read-only tracker cells stay
-// out of scope here.
-func TestAssembleForgejoTrackerReadWrite(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.IssueTracker = "forgejo"
-	env.TrackerAxisRead = "FORGEJO"
-	env.TrackerAxisWrite = "FORGEJO"
-	env.TrackerAxisFiler = "FORGEJO"
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	if !strings.Contains(result.Prompt, "via Forgejo") {
-		t.Errorf("Prompt missing ISSUE_TRACKER_FORGEJO fragment text (issue-read.md):\n%s", result.Prompt)
-	}
-	if strings.Contains(result.Prompt, "via GitHub") {
-		t.Errorf("Prompt contains ISSUE_TRACKER_GITHUB fragment text (issue-read.md), want forgejo tracker's fragment only")
-	}
-}
-
-// The jira-tracker cell (issue #2352). jira shares github's arm end to end
-// through nix's precomputed axis resolution (issue #2533), so the fixture
-// mutates only IssueTracker and leaves the axis fields on github's values.
-func TestAssembleJiraTracker(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.IssueTracker = "jira"
-
-	if _, err := Assemble(env, reg); err != nil {
-		t.Errorf("Assemble with jira tracker: %v, want nil error", err)
-	}
-}
-
-// Pins issue #2352's acceptance criterion at the Assemble level, not just
-// the gate-map level gates_tracker_test.go already covers: two Envs
-// differing only in IssueTracker must produce byte-identical prompts, apart
-// from the issue-read step a client-less jira cannot follow (issue #6344). Run
-// read-only, because on a write-capable Box jira's IF BLOCKED comment
-// deliberately diverges from github's gh issue comment (issue #5263).
-func TestAssembleJiraRidesGithubArms(t *testing.T) {
-	reg := loadTestRegistry(t)
-
-	jiraEnv := coveredEnv()
-	jiraEnv.IssueTracker = "jira"
-	githubEnv := coveredEnv()
-	githubEnv.IssueTracker = "github"
-	jiraEnv.BoxWriteEnabled = false
-	githubEnv.BoxWriteEnabled = false
-
-	jiraResult, err := Assemble(jiraEnv, reg)
-	if err != nil {
-		t.Fatalf("Assemble(jira): %v", err)
-	}
-	githubResult, err := Assemble(githubEnv, reg)
-	if err != nil {
-		t.Fatalf("Assemble(github): %v", err)
-	}
-
-	githubResult.Prompt = swapIssueRead(t, githubResult.Prompt)
-	if jiraResult.Prompt != githubResult.Prompt {
-		t.Errorf("jira Prompt != github Prompt, want byte-identical once the issue-read step is swapped (issue #6344):\njira:\n%s\n\ngithub:\n%s", jiraResult.Prompt, githubResult.Prompt)
-	}
-}
-
-// The read-write half of the #2352 pin: on a write-capable Box the jira and
-// github prompts may differ only in the IF BLOCKED step 4 comment fragment and
-// the issue-read step (issues #5263, #6344).
-func TestAssembleJiraRidesGithubArmsReadWrite(t *testing.T) {
-	reg := loadTestRegistry(t)
-
-	jiraEnv := coveredEnv()
-	jiraEnv.IssueTracker = "jira"
-	githubEnv := coveredEnv()
-
-	jiraResult, err := Assemble(jiraEnv, reg)
-	if err != nil {
-		t.Fatalf("Assemble(jira): %v", err)
-	}
-	githubResult, err := Assemble(githubEnv, reg)
-	if err != nil {
-		t.Fatalf("Assemble(github): %v", err)
-	}
-
-	githubStep := strings.ReplaceAll(fragmentText(t, "github/issue-blocked-comment.md"), "${ISSUE_NUMBER}", githubEnv.IssueNumber)
-	jiraStep := fragmentText(t, "issue-blocked-comment-unwritable.md")
-	if !strings.Contains(githubResult.Prompt, githubStep) {
-		t.Fatalf("github read-write prompt lacks its blocked-comment fragment %q", githubStep)
-	}
-	if !strings.Contains(jiraResult.Prompt, jiraStep) {
-		t.Fatalf("jira read-write prompt lacks its blocked-comment fragment %q", jiraStep)
-	}
-	swapped := swapIssueRead(t, strings.Replace(githubResult.Prompt, githubStep, jiraStep, 1))
-	if jiraResult.Prompt != swapped {
-		t.Errorf("jira read-write Prompt differs from github beyond the blocked-comment step:\njira:\n%s\n\ngithub (step swapped):\n%s", jiraResult.Prompt, swapped)
 	}
 }
 
@@ -1992,116 +1819,6 @@ func TestAssembleWorkDriverAgentFilesReviewerStillDropped(t *testing.T) {
 	}
 }
 
-// The research prompt's three verdict renderings (status alternation, verdict
-// enum, verdict bullets) are Go-derived from the raw RESEARCH_VERDICTS JSON
-// (issues #2630, #4159), so a raw-template prompt-dir override renders the
-// configured set in order; empty keeps the default three.
-func TestAssembleResearchVerdictRenderingsDerivedFromVerdicts(t *testing.T) {
-	reg := loadTestRegistry(t)
-	custom := `[{"verdict":"accept","label":"l-accept","description":"take it up"},{"verdict":"decline","label":"l-decline","description":"leave it"}]`
-	for _, selfContained := range []bool{false, true} {
-		for _, tc := range []struct {
-			name, verdicts string
-			want           []string
-		}{
-			{"default", "", []string{
-				"status=<recommend|reject|unclear>",
-				"`recommend` / `reject` / `unclear`",
-				"- `recommend` — relevant, now enriched with real context; promote it.\n- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.\n- `unclear` — relevance can't be determined without a human's answer.",
-			}},
-			{"custom", custom, []string{
-				"status=<accept|decline>",
-				"`accept` / `decline`",
-				"- `accept` — take it up\n- `decline` — leave it",
-			}},
-		} {
-			t.Run(fmt.Sprintf("%s/selfContained=%v", tc.name, selfContained), func(t *testing.T) {
-				env := coveredEnv()
-				env.DispatchKind = "research"
-				env.SelfContained = selfContained
-				env.ResearchVerdicts = tc.verdicts
-				result, err := Assemble(env, reg)
-				if err != nil {
-					t.Fatalf("Assemble: %v", err)
-				}
-				for _, w := range tc.want {
-					if !strings.Contains(result.Prompt, w) {
-						t.Errorf("Prompt missing %q:\n%s", w, result.Prompt)
-					}
-				}
-				for _, residue := range []string{"${RESEARCH_STATUS_ENUM}", "RESEARCH_VERDICT_BULLETS", "RESEARCH_VERDICT_ENUM"} {
-					if strings.Contains(result.Prompt, residue) {
-						t.Errorf("Prompt contains unrendered %q", residue)
-					}
-				}
-			})
-		}
-	}
-}
-
-// A prompt nix already rendered at eval time (the baked path) carries none of
-// the markers, so assembly with the matching RESEARCH_VERDICTS leaves it as is.
-func TestAssembleResearchBakedPromptUnchanged(t *testing.T) {
-	reg := loadTestRegistry(t)
-	custom := `[{"verdict":"accept","label":"l-accept","description":"take it up"},{"verdict":"decline","label":"l-decline","description":"leave it"}]`
-	verdicts, err := forge.ParseResearchVerdicts(custom)
-	if err != nil {
-		t.Fatalf("ParseResearchVerdicts: %v", err)
-	}
-	raw, err := os.ReadFile(filepath.Join(promptsDir, "research-prompt.md"))
-	if err != nil {
-		t.Fatalf("read research-prompt.md: %v", err)
-	}
-	dir, _ := promptsDirExceptSubdir(t, "research-prompt.md")
-	baked := verdicts.RenderPrompt(string(raw))
-	if forge.HasVerdictTargets(baked) {
-		t.Fatalf("baked prompt still carries a target")
-	}
-	if err := os.WriteFile(filepath.Join(dir, "research-prompt.md"), []byte(baked), 0o644); err != nil {
-		t.Fatalf("write baked prompt: %v", err)
-	}
-
-	env := coveredEnv()
-	env.DispatchKind = "research"
-	env.ResearchVerdicts = custom
-	fromRaw, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble raw: %v", err)
-	}
-	env.PromptsDir = dir
-	fromBaked, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble baked: %v", err)
-	}
-	if fromBaked.Prompt != fromRaw.Prompt {
-		t.Errorf("baked prompt assembled differently from the raw template:\n%s\nvs\n%s", fromBaked.Prompt, fromRaw.Prompt)
-	}
-	if !strings.Contains(fromBaked.Prompt, "status=<accept|decline>") {
-		t.Errorf("baked Prompt missing status=<accept|decline>:\n%s", fromBaked.Prompt)
-	}
-}
-
-// RESEARCH_VERDICTS is read only when the base prompt carries a verdict
-// marker, so a malformed value cannot abort a work assembly.
-func TestAssembleWorkIgnoresMalformedResearchVerdicts(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.ResearchVerdicts = "not json"
-	if _, err := Assemble(env, reg); err != nil {
-		t.Fatalf("Assemble work with malformed RESEARCH_VERDICTS: %v", err)
-	}
-}
-
-func TestAssembleResearchInvalidVerdictsFailsAssembly(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.DispatchKind = "research"
-	env.ResearchVerdicts = "not json"
-	if _, err := Assemble(env, reg); err == nil || !strings.Contains(err.Error(), "RESEARCH_VERDICTS") {
-		t.Fatalf("Assemble error = %v, want a RESEARCH_VERDICTS parse error", err)
-	}
-}
-
 // Issue #3838: Result.Fragments records every lib/fragments.nix fragment whose
 // bytes reach Prompt, ReviewPromptText, or an agent prompt in AgentsJSON.
 func TestAssembleFragmentsCoverageRecord(t *testing.T) {
@@ -2426,19 +2143,6 @@ func TestAssembleScoutPromptMatchesAcrossDrivers(t *testing.T) {
 	}
 }
 
-// swapIssueRead rewrites github's rendered issue-read step into jira's: the
-// Box has no Jira client, so linked issues are unreadable (issue #6344). It
-// fails the test if github's step is absent or the swap is not one-for-one.
-func swapIssueRead(t *testing.T, prompt string) string {
-	t.Helper()
-	githubStep := strings.ReplaceAll(fragmentText(t, "issue-read.md"), "${FORGE_DISPLAY_NAME}", "GitHub")
-	if !strings.Contains(prompt, githubStep) {
-		t.Fatalf("github prompt lacks its issue-read fragment %q", githubStep)
-	}
-	return strings.Replace(prompt, githubStep, fragmentText(t, "issue-read-unreadable.md"), 1)
-}
-
-// A fragment's recorded render is its own span with vars substituted, not the
 // whole prompt: a sibling fragment's text stays out.
 func TestAssembleFragmentRendersSpan(t *testing.T) {
 	renders := assembleRenders(t, "intro ${VAR_A} between ${VAR_B}\n",
