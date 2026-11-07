@@ -1405,10 +1405,10 @@ widget = "gizmo"
 	}
 }
 
-// A hook error is a bare noun phrase per RouteDeclarationValidator's contract,
-// so the caller must wrap it with the block's own "ecosystems.<name>.<key>"
-// spelling.
-func TestParseRoutes_FakeRowHookErrorIsWrappedWithBlockSpelling(t *testing.T) {
+// A hook error is a predicate per RouteDeclarationValidator's contract, so
+// the caller must prefix it with "<route>: ecosystems.<name>.<key> ", the
+// block's own spelling followed by a single space.
+func TestParseRoutes_FakeRowHookErrorIsSpaceJoinedToBlockSpelling(t *testing.T) {
 	row := ecosystem.Strategy{
 		Name: "fake",
 		RouteDeclaration: func(key string, value any) error {
@@ -1427,11 +1427,8 @@ widget = "gizmo"
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "ecosystems.fake.widget") {
-		t.Errorf("expected error to name the block spelling, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "boom") {
-		t.Errorf("expected error to carry the hook's own message, got: %v", err)
+	if !strings.Contains(err.Error(), "ecosystems.fake.widget boom") {
+		t.Errorf("expected the block spelling, a space, then the hook's predicate, got: %v", err)
 	}
 }
 
