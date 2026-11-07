@@ -297,8 +297,8 @@ credential = { netrc = "~/.netrc" }
 //   - ".", ".." and an interior doubled slash, which the path.Clean-based
 //     consumers downstream can never produce or match;
 //   - the whole host ("/" or "//"): path only adds a subtree on top of an
-//     already-resolved host-rooted route, and TrimSuffix strips only one
-//     slash, so "//" must collapse to "" and hit the same check.
+//     already-resolved host-rooted route, and TrimRight strips every trailing
+//     slash, so "//" collapses to "" and hits the same check.
 func TestParse_BlockPathInvalidIsError(t *testing.T) {
 	const host = "repo.example.com"
 	const wholeHost = "whole host"
