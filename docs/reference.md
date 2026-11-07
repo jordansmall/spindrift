@@ -928,17 +928,21 @@ targeted fix, committing, pushing, and waiting for CI — emitting the same
 `SPINDRIFT_OUTCOME` grammar. `FIX_PASS` unset (the initial run) is
 byte-identical to before this prompt existed.
 
-On genuine-red, `selfHeal` also fetches the failed check names plus a bounded
-log excerpt for the PR's head commit (`forge.PRForge.FailureDetail`, the same
-fine-grained-PAT-safe GraphQL `statusCheckRollup` query `CheckState` uses) and
-forwards it into the fix box as `CI_FAILURE_SUMMARY`. `fix-prompt.md` renders
-it as a `# CI FAILURE` section ahead of `# CONTEXT`, so the fix agent goes
-straight to the failing check instead of rediscovering it via a blind local
-re-run — which misses CI-only failures (flaky, environment-specific, or
-checks the repo's local CHECK step doesn't run). The fetch is best-effort:
-a failure to fetch it never blocks the fix pass, and `CI_FAILURE_SUMMARY`
-unset or empty leaves `fix-prompt.md` byte-identical to the no-detail case,
-falling back to the local re-run with no error.
+On genuine-red, `selfHeal` also fetches each failing check's name, its
+conclusion or state, and its check-run summary or status description for the
+PR's head commit (`forge.PRForge.FailureDetail`), and forwards it into the fix
+box as `CI_FAILURE_SUMMARY`. On GitHub that is the check runs' summaries and
+the commit statuses' descriptions, read off the same fine-grained-PAT-safe
+GraphQL `statusCheckRollup` root `CheckState` reads; on Forgejo it is the
+commit statuses' descriptions. No job logs are fetched, and a GitHub Actions
+check-run summary is usually empty. `fix-prompt.md` renders it as a
+`# CI FAILURE` section ahead of `# CONTEXT`, so the fix agent knows which
+checks failed and reads their CI logs before its local re-run — which alone
+misses CI-only failures (flaky, environment-specific, or checks the repo's
+local CHECK step doesn't run). The fetch is best-effort: a failure
+to fetch it never blocks the fix pass, and `CI_FAILURE_SUMMARY` unset or empty
+leaves `fix-prompt.md` byte-identical to the no-detail case; the fix prompt's
+own CI read then finds the failing checks.
 
 A fix box also resumes the *same Driver session* the initial run used,
 instead of cold-starting a fresh one: the launcher creates an ephemeral,
@@ -3166,14 +3170,14 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
            │                       an agent conflict-resolve box keep the
            │                       issue agent-in-progress until this settles)
            │           auto      → enqueue the forge's native auto-merge
-           ├─ red   → capture the failed checks + a bounded log excerpt
-           │          (best-effort), then dispatch fix boxes (up to
-           │          MAX_FIX_ATTEMPTS, each driving prompts/fix-prompt.md
+           ├─ red   → capture each failing check's name, state + summary/
+           │          description (best-effort), then dispatch fix boxes (up
+           │          to MAX_FIX_ATTEMPTS, each driving prompts/fix-prompt.md
            │          instead of issue-prompt.md — the branch is already
-           │          checked out and CI_FAILURE_SUMMARY carries the known
-           │          failure, so the box skips SCOUT, re-implementation,
-           │          and blind rediscovery and goes straight to check/fix/
-           │          commit/push), then re-gate
+           │          checked out and CI_FAILURE_SUMMARY names the failing
+           │          checks, so the box skips SCOUT and re-implementation,
+           │          reads those checks' logs, and goes straight to
+           │          check/fix/commit/push), then re-gate
            ├─ stale base, no conflict (immediate) → merge as-is by default;
            │                                        only when PREFLIGHT_STALE_BASE
            │                                        is on, preflight-rebase and
@@ -4080,12 +4084,16 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   has no initial batch, so the original run's file stays until a fix pass records
   warnings, whose first batch then replaces it. They are never appended to the Box
   log, which is re-scanned for outcome lines.
-- **The fix box gets the concrete failure, not a guess.** At the moment
-  genuine-red is declared, `selfHeal` fetches the failed check names plus a
-  bounded log excerpt for the PR's head commit and forwards it into the fix
-  box as `CI_FAILURE_SUMMARY`. The fetch is best-effort — a fetch failure
-  never blocks the fix pass, it just falls back to the fix box rediscovering
-  the failure itself (`gh run view --log-failed`, the pre-#426 behavior).
+- **The fix box is told which checks failed, not left to guess.** At the
+  moment genuine-red is declared, `selfHeal` fetches each failing check's name,
+  its conclusion or state, and its check-run summary or status description for
+  the PR's head commit (no job logs; a GitHub Actions summary is usually empty)
+  and forwards it into the fix box as `CI_FAILURE_SUMMARY`. The summary is a
+  pointer to which checks failed, not the failure itself: the fix prompt's
+  CI-log read step (`gh run view --log-failed` on GitHub, the Actions UI or
+  REST API on Forgejo) is how the fix box reaches the failing log lines. The
+  fetch is best-effort — a fetch failure never blocks the fix pass, it just
+  leaves the summary empty.
 - **`agent-complete` also covers an already-resolved issue, closed as
   completed where the tracker can close it.** When a Box finds, after scouting, that the issue's change is
   already on the fetched default branch, it prints `status=already-resolved`
