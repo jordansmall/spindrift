@@ -101,7 +101,7 @@ func Run(cfg Config, w io.Writer) error {
 	status := "blocked"
 	switch {
 	case !salvageOK:
-		// A tree that could not be cleaned is not a landed state.
+		// A tree that could not be checked or cleaned is not a landed state.
 	case count == 0:
 		note += "; no work to preserve"
 	case cfg.HostMediatedRemote:
@@ -143,10 +143,14 @@ func emit(w io.Writer, issue, landing, status, note string) error {
 
 // salvage commits any dirty tree before the commit-count check runs, so that
 // check sees the salvaged state too. A failure never aborts the caller: a
-// needless note beats skipping the always-emit outcome invariant (#593).
+// needless note beats skipping the always-emit outcome invariant (#593). It
+// reports false unless the tree is known clean or was salvaged.
 func salvage(git func(args ...string) (string, string, error), note string) (string, bool) {
 	stdout, _, err := git("status", "--porcelain")
-	if err != nil || strings.TrimSpace(stdout) == "" {
+	if err != nil {
+		return note + "; could not check the tree for uncommitted work", false
+	}
+	if strings.TrimSpace(stdout) == "" {
 		return note, true
 	}
 	if _, _, addErr := git("add", "-A"); addErr != nil {

@@ -244,8 +244,8 @@ change"):
   exist, exactly the "bundle-out writes only when `commits > 0`" evidence
   this ADR's own Decision already names.
 - `status=blocked`, unchanged, when there is no work (`count == 0`), the
-  tree could not be cleaned (salvage's own add/commit failed), or a push
-  attempt exhausted its retries.
+  tree could not be checked or cleaned (salvage's own status, add, or commit
+  failed), or a push attempt exhausted its retries.
 
 This is not the rejected "in-box finalizer" option from the Considered
 Options above: no LLM-authored claim is ever read or trusted here, and the
