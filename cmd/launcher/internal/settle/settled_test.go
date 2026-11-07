@@ -65,7 +65,7 @@ func TestSettledPrior_FillsRecordIDFromLogStamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SettledPrior(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "complete", Reason: "merged", PRURL: "https://x/pr/1"})
+	SettledPrior(dispatchkey.Issue("7"), path, ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{PRURL: "https://x/pr/1"})
 
 	recs := logRecords(t, path)
 	if len(recs) != 1 || recs[0].ID != "work:7@x" || recs[0].Outcome != "complete" || recs[0].PRURL != "https://x/pr/1" ||
@@ -93,7 +93,7 @@ func TestSettledBy_EmptyRecordIDLeavesEarlierRecordUntouched(t *testing.T) {
 	}
 	storedRecordsByID(t, logRoot(t, path)) // ingest the landed Record
 
-	SettledBy(&dispatch.Fake{LogPathResult: path}, dispatchkey.Issue("7"), "failed", dispatchrecord.ReasonBoxFailed, "claim failed")
+	SettledBy(&dispatch.Fake{LogPathResult: path}, dispatchkey.Issue("7"), ForReason(dispatchrecord.ReasonBoxFailed), "claim failed")
 
 	recs := logRecords(t, path)
 	if len(recs) != 1 || recs[0].ID != "work:7@x" || recs[0].Outcome != "complete" || recs[0].Reason != "merged" {
@@ -111,7 +111,7 @@ func TestSettledBy_AppendsUnderDispatchRecordID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SettledBy(&dispatch.Fake{LogPathResult: path, RecordIDResult: "work:7@y"}, dispatchkey.Issue("7"), "failed", dispatchrecord.ReasonBoxFailed, "boom")
+	SettledBy(&dispatch.Fake{LogPathResult: path, RecordIDResult: "work:7@y"}, dispatchkey.Issue("7"), ForReason(dispatchrecord.ReasonBoxFailed), "boom")
 
 	recs := logRecords(t, path)
 	if len(recs) != 1 || recs[0].ID != "work:7@y" || recs[0].Outcome != "failed" || recs[0].Reason != dispatchrecord.ReasonBoxFailed ||
@@ -129,9 +129,9 @@ func TestSettled_ExplicitRecordIDWinsOverStamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Settled(dispatchkey.Issue("7"), path, hostop.DispatchSettled{RecordID: "work:7@y", State: "failed"})
+	Settled(dispatchkey.Issue("7"), path, ForReason(dispatchrecord.ReasonBoxFailed), hostop.DispatchSettled{RecordID: "work:7@y"})
 
-	op := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{RecordID: "work:7@y", State: "failed"}})
+	op := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{RecordID: "work:7@y", State: "failed", Reason: dispatchrecord.ReasonBoxFailed}})
 	if body, err := os.ReadFile(path); err != nil || !strings.HasSuffix(string(body), op) {
 		t.Errorf("log = %q (err %v), want it to end with the settled op for work:7@y", body, err)
 	}
@@ -147,8 +147,8 @@ func TestSettled_MissingLogStillReports(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	path := rootLogPath(t, "issue-7.log")
 
-	Settled(dispatchkey.Issue("7"), path, hostop.DispatchSettled{RecordID: "work:7@x", State: "failed"})
-	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{State: "failed"})
+	Settled(dispatchkey.Issue("7"), path, ForReason(dispatchrecord.ReasonBoxFailed), hostop.DispatchSettled{RecordID: "work:7@x"})
+	Settled(dispatchkey.Issue("7"), "", ForReason(dispatchrecord.ReasonBoxFailed), hostop.DispatchSettled{})
 
 	if recs := readRecords(); len(recs) != 2 {
 		t.Errorf("reports = %+v, want 2", recs)
@@ -164,7 +164,7 @@ func TestSettled_UnstampedLogSettlesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SettledPrior(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "failed"})
+	SettledPrior(dispatchkey.Issue("7"), path, ForReason(dispatchrecord.ReasonBoxFailed), hostop.DispatchSettled{})
 
 	if recs := logRecords(t, path); len(recs) != 0 {
 		t.Fatalf("stored records = %+v, want none", recs)
@@ -185,12 +185,13 @@ func TestSettled_EchoesStampHostToken(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				ds := hostop.DispatchSettled{State: "complete", Reason: "merged"}
+				ds := hostop.DispatchSettled{}
+				v := ForReason(dispatchrecord.ReasonMerged)
 				if explicit {
 					ds.RecordID = "work:7@x"
-					Settled(dispatchkey.Issue("7"), path, ds)
+					Settled(dispatchkey.Issue("7"), path, v, ds)
 				} else {
-					SettledPrior(dispatchkey.Issue("7"), path, ds)
+					SettledPrior(dispatchkey.Issue("7"), path, v, ds)
 				}
 
 				recs := logRecords(t, path)
@@ -218,7 +219,7 @@ func TestSettledPrior_ReadsStampLongerThanAReadBuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SettledPrior(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "complete", Reason: "merged"})
+	SettledPrior(dispatchkey.Issue("7"), path, ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{})
 
 	if recs := logRecords(t, path); len(recs) != 1 || recs[0].ID != "work:7@x" || recs[0].OutcomeSource != dispatchrecord.OutcomeSourceSettled {
 		t.Fatalf("stored records = %+v, want one settled under the stamp's Record ID", recs)

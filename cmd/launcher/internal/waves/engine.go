@@ -22,20 +22,18 @@ import (
 
 // transitionState logs a failed dispatch-state transition rather than
 // propagating the error. note carries the most specific reason live at the
-// call site, "" where none exists; reason is that site's status= class.
-// Unlike settle.Settle's method of the same name it takes d first and settles
-// d's Record directly rather than latching.
-func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, from, to forge.DispatchState, note, reason string) {
-	reason, note, err := settle.Transition(it, num, from, to, reason, note)
+// call site, "" where none exists; v carries that site's status= class and
+// the state it fixes. Unlike settle.Settle's method of the same name it takes
+// d first and always settles d's Record directly rather than latching.
+func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, v settle.Verdict, note string) {
+	v, note, err := settle.Transition(it, num, forge.InProgress, v, note)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, to, err)
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s: %v\n", num, v.State(), err)
 	}
 	// Same failed-write-still-reports rule as settle.Settle.transitionState
 	// (issue #3627): the record is what the host decided, not whether the
 	// tracker write landed.
-	if to.Terminal() {
-		settle.SettledBy(d, dispatchkey.Issue(num), to.String(), reason, note)
-	}
+	settle.SettledBy(d, dispatchkey.Issue(num), v, note)
 }
 
 // blockedMarker is the file under .spindrift/logs/ that tells the dispatching
@@ -158,7 +156,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 						result.ReportFailureReason(iss.Number)
-						transitionState(d, it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote(), dispatchrecord.ReasonBoxFailed)
+						transitionState(d, it, iss.Number, settle.ForReason(dispatchrecord.ReasonBoxFailed), result.FailureNote())
 						return struct{}{}
 					},
 					func(result dispatch.Result) struct{} {

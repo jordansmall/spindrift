@@ -3,8 +3,10 @@ package settle
 import (
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 func TestForReasonStateFromTable(t *testing.T) {
@@ -20,6 +22,15 @@ func TestForReasonStateFromTable(t *testing.T) {
 			t.Errorf("ForReason(%q).State() = %s, want %s", row.Name, v.State(), row.State)
 		}
 	}
+}
+
+func TestSettledPanicsOnZeroVerdict(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Settled with a zero Verdict did not panic")
+		}
+	}()
+	Settled(dispatchkey.Issue("7"), "", Verdict{}, hostop.DispatchSettled{})
 }
 
 func TestForReasonPanicsWithoutFixedState(t *testing.T) {

@@ -338,7 +338,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Fprintf(s.out, "    #%s  status=ledger-finish-failed  !! %v\n", num, err)
-		s.settled(d, forge.Failed, dispatchrecord.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
+		s.settled(d, dispatchrecord.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
 		// Still gate the already-open draft PRs, or they orphan (issue
 		// #4118). #4076's ordering has nothing left to protect: a lost CAS
 		// means a rival owns the Chore, and any other error leaves this
@@ -357,7 +357,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
-	s.settled(d, forge.Complete, dispatchrecord.ReasonFindingsFiled, note)
+	s.settled(d, dispatchrecord.ReasonFindingsFiled, note)
 	fmt.Fprintf(s.out, "    #%s  status=%s  note=%s\n", num, o.Status, note)
 
 	// On the success path, hand each patch to the work merge gate only after
@@ -528,14 +528,14 @@ func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string
 // lastSwept/cursor stay at the prior run's values for the next run to resume
 // from.
 func (s *settleRun) fail(d dispatch.Dispatcher, num, note string) {
-	s.settled(d, forge.Failed, dispatchrecord.ReasonChoreFailed, note)
+	s.settled(d, dispatchrecord.ReasonChoreFailed, note)
 	fmt.Fprintf(s.out, "    #%s  status=failed  note=%s\n", num, note)
 }
 
 // settled is the Chore Dispatch's one terminal settle: it appends
 // dispatch_settled to the Dispatch's primary Pass log and reports it.
-func (s *settleRun) settled(d dispatch.Dispatcher, state forge.DispatchState, reason, note string) {
-	settle.SettledBy(d, dispatchkey.Chore(s.chore), state.String(), reason, note)
+func (s *settleRun) settled(d dispatch.Dispatcher, reason, note string) {
+	settle.SettledBy(d, dispatchkey.Chore(s.chore), settle.ForReason(reason), note)
 }
 
 // extraLabels is the Decoration label set for a finding: the Chore's own

@@ -697,7 +697,7 @@ func assertLatchedReason(t *testing.T, s *Settle, num, want string) {
 	t.Helper()
 	s.settledMu.Lock()
 	defer s.settledMu.Unlock()
-	if r := s.settledLatch[num].reason; r != want {
+	if r := s.settledLatch[num].verdict.Reason(); r != want {
 		t.Errorf("latched reason = %q, want %q", r, want)
 	}
 }

@@ -152,7 +152,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			fmt.Printf("    #%s  landing=%s  status=gate-terminal  !! %s\n", num, pr, gateReason)
 			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
-			s.transitionState(num, forge.InProgress, forge.Failed, gateReason, dispatchrecord.ReasonGateTerminal)
+			s.transitionState(num, ForReason(dispatchrecord.ReasonGateTerminal), gateReason)
 			return landingFailed, gateReason
 		case gateRedRetry:
 			// Catches a mark landing mid-poll, before the fix-exhausted and
@@ -185,7 +185,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						fmt.Fprintf(os.Stderr, "    ?? #%s: post unclaimed-failure comment: %v\n", num, commentErr)
 					}
 				}
-				s.transitionState(num, forge.InProgress, forge.Failed, reason, exhaustedReason)
+				s.transitionState(num, ForReason(exhaustedReason), reason)
 				return landingFailed, reason
 			}
 			if landing, note, stop := s.fixPass(d, num, gen, pr, attempt); stop {
@@ -206,7 +206,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 func (s *Settle) failForcePushedHead(num, pr string, err error, budgetNote string) (landingResult, string) {
 	fmt.Printf("    #%s  landing=%s  status=landing-failed  !! %v\n", num, pr, err)
 	s.it.Comment(num, fmt.Sprintf("landing failed: %v%s — no green PR exists at the current head", err, budgetNote))
-	s.transitionState(num, forge.InProgress, forge.Failed, err.Error(), dispatchrecord.ReasonLandingFailed)
+	s.transitionState(num, ForReason(dispatchrecord.ReasonLandingFailed), err.Error())
 	return landingFailed, err.Error()
 }
 
@@ -234,7 +234,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			fmt.Printf("    #%s  landing=%s  status=budget-exhausted  !! %s\n", num, pr, reason)
 			s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
 			note := fmt.Sprintf("budget-exhausted: %s", reason)
-			s.transitionState(num, forge.InProgress, forge.Failed, note, dispatchrecord.ReasonBudgetExhausted)
+			s.transitionState(num, ForReason(dispatchrecord.ReasonBudgetExhausted), note)
 			return landingFailed, note, true
 		}
 	}
@@ -276,7 +276,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			result.ReportFailureReason(num)
 			s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
 			note := fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
-			s.transitionState(num, forge.InProgress, forge.Failed, note, dispatchrecord.ReasonFixFailed)
+			s.transitionState(num, ForReason(dispatchrecord.ReasonFixFailed), note)
 			return fixStop{landing: landingFailed, note: note, stop: true}
 		},
 		func(result dispatch.Result) fixStop {
@@ -312,7 +312,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			next := relayFailureNext(num, err, fmt.Sprintf("run `spindrift recover %s` to re-gate the PR (recover does not relay this bundle).", num))
 			s.it.Comment(num, fmt.Sprintf("fix pass %d's bundle relay failed: %v. Its commits never reached the PR; %s", attempt+1, err, next))
 			note := fmt.Sprintf("relay-failed: fix pass %d's bundle relay failed; its commits never reached the PR", attempt+1)
-			s.transitionState(num, forge.InProgress, forge.Failed, note, dispatchrecord.ReasonRelayFailed)
+			s.transitionState(num, ForReason(dispatchrecord.ReasonRelayFailed), note)
 			return landingFailed, note, true
 		}
 		fmt.Printf("    #%s  landing=%s  status=fix-relay-failed  !! %v\n", num, pr, err)
@@ -335,7 +335,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 				fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
 				s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
 				note := fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
-				s.transitionState(num, forge.InProgress, forge.Failed, note, dispatchrecord.ReasonFixNoOp)
+				s.transitionState(num, ForReason(dispatchrecord.ReasonFixNoOp), note)
 				return landingFailed, note, true
 			}
 		}
@@ -361,7 +361,7 @@ func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, r
 	if s.cfg.Unclaimed && landed != landingMerged {
 		return landed
 	}
-	s.transitionState(num, forge.InProgress, forge.Complete, "", reason)
+	s.transitionState(num, ForReason(reason), "")
 	return landed
 }
 

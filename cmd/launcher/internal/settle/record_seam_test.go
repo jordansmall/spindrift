@@ -365,7 +365,7 @@ func TestSettled_ConcurrentSettlesAllLand(t *testing.T) {
 			defer wg.Done()
 			ready.Done()
 			<-start
-			SettledBy(sl.d, dispatchkey.Issue(sl.num), "complete", "merged", "")
+			SettledBy(sl.d, dispatchkey.Issue(sl.num), ForReason(dispatchrecord.ReasonMerged), "")
 		}()
 	}
 	ready.Wait()

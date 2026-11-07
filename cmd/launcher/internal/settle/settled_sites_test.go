@@ -87,12 +87,8 @@ func flushLatched(t *testing.T, fc *forge.Fake, reason string) []dispatchrecord.
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := newTestSettle(c, fc, fc)
 	s.latchPR("9", testPR)
-	state := forge.Complete
-	if reason != dispatchrecord.ReasonMerged {
-		state = forge.Failed
-	}
 	testutil.CaptureStdout(t, func() {
-		s.transitionState("9", forge.InProgress, state, "", reason)
+		s.transitionState("9", ForReason(reason), "")
 		s.flushSettled(d, "9")
 	})
 	return logRecords(t, path)
@@ -110,7 +106,7 @@ func TestFlushSettled_MergedCarriesMergeCommit(t *testing.T) {
 func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
 	fc := forge.NewFake()
 	fc.SetMergeCommit(testPR, "deadbeef")
-	records := flushLatched(t, fc, "ci-red")
+	records := flushLatched(t, fc, dispatchrecord.ReasonCIRed)
 	if len(records) != 1 || records[0].MergeCommit != "" {
 		t.Fatalf("records = %+v, want one without a merge commit", records)
 	}

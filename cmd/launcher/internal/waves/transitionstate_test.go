@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -34,7 +35,7 @@ func TestTransitionState_NoteReported(t *testing.T) {
 	d.LogPathResult = path
 	d.RecordIDResult = "work:42@x"
 
-	transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box never launched: boom", dispatchrecord.ReasonBoxFailed)
+	transitionState(d, fc, "42", settle.ForReason(dispatchrecord.ReasonBoxFailed), "box never launched: boom")
 
 	recs := read()
 	if len(recs) != 1 {
@@ -76,7 +77,7 @@ func TestTransitionState_WarnsWithTrackerError(t *testing.T) {
 	d := dispatch.NewFake()
 
 	got := testutil.CaptureStderr(t, func() {
-		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "", dispatchrecord.ReasonBoxFailed)
+		transitionState(d, fc, "42", settle.ForReason(dispatchrecord.ReasonBoxFailed), "")
 	})
 
 	if want := "    ?? #42: could not transition to state failed: boom\n"; !strings.Contains(got, want) {
@@ -102,7 +103,7 @@ func TestTransitionState_Refused_CommentsAndSettlesDistinctReason(t *testing.T) 
 	d.RecordIDResult = "work:42@x"
 
 	testutil.CaptureStderr(t, func() {
-		transitionState(d, fc, "42", forge.InProgress, forge.Failed, "box crashed", dispatchrecord.ReasonBoxFailed)
+		transitionState(d, fc, "42", settle.ForReason(dispatchrecord.ReasonBoxFailed), "box crashed")
 	})
 
 	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "42" || !strings.Contains(fc.CommentCalls[0].Body, `"Blocked"`) {
