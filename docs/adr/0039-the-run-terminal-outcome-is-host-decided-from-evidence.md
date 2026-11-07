@@ -245,7 +245,9 @@ change"):
   this ADR's own Decision already names.
 - `status=blocked`, unchanged, when there is no work (`count == 0`), the
   tree could not be checked or cleaned (salvage's own status, add, or commit
-  failed), or a push attempt exhausted its retries.
+  failed), a push attempt exhausted its retries, or a relay arm's
+  `base..branch` count itself failed (no bundle is written then; the push arm
+  still assumes work exists and attempts the push).
 
 This is not the rejected "in-box finalizer" option from the Considered
 Options above: no LLM-authored claim is ever read or trusted here, and the
