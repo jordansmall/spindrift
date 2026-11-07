@@ -2965,6 +2965,44 @@ var clauseContracts = []clauseContract{
 		clause:   "This is a warm fix pass",
 		reason:   "a fix pass resumes a branch with prior work, and the agent must know not to re-scout or re-derive the issue.",
 	},
+	{
+		fragment: "skill-preamble.md",
+		clause:   "Skills available:",
+		reason:   "the preamble tells a Box which skills it has baked.",
+	},
+	{
+		fragment: "skill-preamble.md",
+		clause:   "the inline guidance below is the fallback when a skill is absent.",
+		reason:   "a Box without a skill baked must still follow the prompt's inline guidance, so the preamble has to say the skill is preferred, not required.",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "A comment earns its place only by carrying something the code cannot state",
+		reason:   "the worker inlines the code-comments policy, so it holds regardless of CODE_COMMENTS_BAKED (issue #3419).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "/code-comments",
+		absent:   true,
+		reason:   "the worker inlines the code-comments policy instead of pointing at the skill anchor, which it may not have baked (issue #3419).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "/caveman",
+		absent:   true,
+		reason:   "the worker's only output is a report to the coordinator, not narration, so its prompt must not carry the caveman anchor (issue #4562).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "/caveman",
+		absent:   true,
+		reason:   "the scout's only output is the brief the coordinator reads back, not narration, so its prompt must not carry the caveman anchor (issue #4562).",
+	},
+	{
+		fragment: "filer-prompt.md",
+		clause:   "turn the review findings the work loop escalated",
+		reason:   "the Filer's job is to file the escalated review findings as issues, and the opencode Filer rewrite relies on it saying so (issue #5330).",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
@@ -3255,6 +3293,19 @@ var bareEOFFragments = []string{
 	"local/research-verdict-relay-socket.md",
 }
 
+// workerReachableFragments is worker-prompt.md plus the fragments it injects
+// through its ${...} vars, so the marker check covers the whole rendered
+// worker body.
+var workerReachableFragments = []string{
+	"worker-prompt.md",
+	"principle-laziness-protocol-default.md",
+	"principle-redesign-from-first-principles-default.md",
+	"skill-preamble.md",
+	"tdd-baked.md",
+	"tdd-unbaked.md",
+	"worker-scout-brief.md",
+}
+
 // generatedContracts expands the contracts shared by several fragments.
 func generatedContracts() []clauseContract {
 	var out []clauseContract
@@ -3273,6 +3324,17 @@ func generatedContracts() []clauseContract {
 			verbatim: true,
 			reason:   "a code-out action must not appear in a fragment a read-only Box can reach (issue #3214).",
 		})
+	}
+	for _, fragment := range workerReachableFragments {
+		for _, marker := range []string{"SPINDRIFT_OUTCOME", "VERDICT: APPROVE", "VERDICT: BLOCK"} {
+			out = append(out, clauseContract{
+				fragment: fragment,
+				clause:   marker,
+				absent:   true,
+				verbatim: true,
+				reason:   "a worker's own prompt must never teach it a marker literal that a parroting worker could echo, which would be mistaken for the coordinator's own outcome or verdict line and defeat the quarantine (issues #2059, #2491).",
+			})
+		}
 	}
 	for _, fragment := range bareEOFFragments {
 		out = append(out, clauseContract{
