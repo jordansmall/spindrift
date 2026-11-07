@@ -296,6 +296,33 @@ func TestParsePreImageRanges(t *testing.T) {
 			},
 		},
 		{
+			name: "tab-terminated headers of a path with a space",
+			diff: "diff --git a/foo bar.txt b/foo bar.txt\n" +
+				"--- a/foo bar.txt\t\n" +
+				"+++ b/foo bar.txt\t\n" +
+				"@@ -3,2 +3,2 @@\n" +
+				"-old1\n" +
+				"-old2\n" +
+				"+new1\n" +
+				"+new2\n",
+			want: map[string][]Range{
+				"foo bar.txt": {{Start: 3, Count: 2, PostCount: 2}},
+			},
+		},
+		{
+			name: "deleted path with a space falls back to the tab-terminated pre-image",
+			diff: "diff --git a/foo bar.txt b/foo bar.txt\n" +
+				"deleted file mode 100644\n" +
+				"--- a/foo bar.txt\t\n" +
+				"+++ /dev/null\n" +
+				"@@ -1,2 +0,0 @@\n" +
+				"-old1\n" +
+				"-old2\n",
+			want: map[string][]Range{
+				"foo bar.txt": {{Start: 1, Count: 2, PostCount: 0}},
+			},
+		},
+		{
 			name: "pure insertion",
 			diff: "diff --git a/foo.txt b/foo.txt\n" +
 				"--- a/foo.txt\n" +
@@ -563,15 +590,25 @@ func TestCompute_Ranges(t *testing.T) {
 			for _, kv := range c.config {
 				runGitT(t, dir, "config", kv[0], kv[1])
 			}
+			// Committed before the anchor so the land commit edits it and git
+			// emits both `---` and `+++` headers, each ending in a TAB for a
+			// path with a space.
+			writeFileT(t, dir, "foo bar.txt", "spaced\n")
+			runGitT(t, dir, "add", "foo bar.txt")
+			runGitT(t, dir, "commit", "-m", "add foo bar.txt")
 			anchor := runGitT(t, dir, "rev-parse", "HEAD")
 
 			writeFileT(t, dir, "base.txt", "line1changed\n")
-			runGitT(t, dir, "add", "base.txt")
-			runGitT(t, dir, "commit", "-m", "land: change line1")
+			writeFileT(t, dir, "foo bar.txt", "spaced changed\n")
+			runGitT(t, dir, "add", "base.txt", "foo bar.txt")
+			runGitT(t, dir, "commit", "-m", "land: change line1 and foo bar.txt")
 
 			got := Compute(dir, anchor, "")
 
-			want := map[string][]Range{"base.txt": {{Start: 1, Count: 1, PostCount: 1}}}
+			want := map[string][]Range{
+				"base.txt":    {{Start: 1, Count: 1, PostCount: 1}},
+				"foo bar.txt": {{Start: 1, Count: 1, PostCount: 1}},
+			}
 			if !reflect.DeepEqual(got.Ranges, want) {
 				t.Fatalf("Ranges = %+v, want %+v", got.Ranges, want)
 			}

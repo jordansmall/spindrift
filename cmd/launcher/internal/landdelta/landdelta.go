@@ -33,7 +33,8 @@ type Delta struct {
 	// hunk; on a rebased branch, a path the moved base also touched; a
 	// renamed path (numstat reports it as the composite "d/{old => new}"
 	// key, which never matches a diff header); or a path git renders quoted
-	// (core.quotePath, e.g. non-ASCII).
+	// (core.quotePath, e.g. non-ASCII; a control character such as TAB is
+	// quoted regardless).
 	Ranges map[string][]Range `json:"ranges,omitempty"`
 	// Reason names why Known is false. Empty when Known is true.
 	Reason string `json:"reason,omitempty"`
@@ -318,9 +319,11 @@ var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(?:(\d+)(?:,(\d+)
 // oldPathHeaderRe matches a `--- a/<path>` line, the pre-image path, and
 // newPathHeaderRe the `+++ b/<path>` post-image one. Hunk content takes
 // those shapes too, so parsePreImageRanges consults them only before a
-// file's first hunk.
-var oldPathHeaderRe = regexp.MustCompile(`^--- a/(.+)$`)
-var newPathHeaderRe = regexp.MustCompile(`^\+\+\+ b/(.+)$`)
+// file's first hunk. The capture stops at a TAB: git ends the header of a
+// path containing a space with one (a real-TAB name is C-quoted and never
+// matches).
+var oldPathHeaderRe = regexp.MustCompile(`^--- a/([^\t]+)`)
+var newPathHeaderRe = regexp.MustCompile(`^\+\+\+ b/([^\t]+)`)
 
 // parsePreImageRanges parses `git diff -U0` output into per-path pre-image
 // ranges. A path header is trusted only before the file's first hunk: hunk
