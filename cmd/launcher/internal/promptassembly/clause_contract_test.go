@@ -18,6 +18,7 @@ type clauseContract struct {
 	reason   string
 	from, to string
 	absent   bool
+	verbatim bool // for clauses whose whitespace is the obligation
 }
 
 // renderedFragments maps a cell name to fragment name to that fragment's
@@ -64,9 +65,13 @@ func checkClauseContract(c clauseContract, renders renderedFragments) error {
 }
 
 func checkSpan(c clauseContract, span string) error {
-	region := normalizeWhitespace(span)
+	norm := normalizeWhitespace
+	if c.verbatim {
+		norm = func(s string) string { return s }
+	}
+	region := norm(span)
 	if c.from != "" {
-		from := normalizeWhitespace(c.from)
+		from := norm(c.from)
 		i := strings.Index(region, from)
 		if i < 0 {
 			return fmt.Errorf("scope start %q not found", c.from)
@@ -74,14 +79,14 @@ func checkSpan(c clauseContract, span string) error {
 		region = region[i+len(from):]
 	}
 	if c.to != "" {
-		to := normalizeWhitespace(c.to)
+		to := norm(c.to)
 		i := strings.Index(region, to)
 		if i < 0 {
 			return fmt.Errorf("scope end %q not found", c.to)
 		}
 		region = region[:i]
 	}
-	has := strings.Contains(region, normalizeWhitespace(c.clause))
+	has := strings.Contains(region, norm(c.clause))
 	switch {
 	case c.absent && has:
 		return fmt.Errorf("clause is present but must be absent")
@@ -96,6 +101,7 @@ func TestCheckClauseContract(t *testing.T) {
 	renders := renderedFragments{
 		"cell-a": {"wrap.md": {rewrapped}, "scope.md": {"alpha beta MARK gamma"}},
 		"cell-b": {"wrap.md": {rewrapped + " again"}, "scope.md": {"alpha  beta\nMARK gamma"}},
+		"cell-c": {"delim-ok.md": {"a\nX\nb"}, "delim-indented.md": {"a\n  X\nb"}},
 	}
 	tests := []struct {
 		name    string
@@ -139,6 +145,15 @@ func TestCheckClauseContract(t *testing.T) {
 			name:    "absent clause that is present fails",
 			c:       clauseContract{fragment: "scope.md", clause: "gamma", absent: true, reason: "r"},
 			wantErr: []string{"must be absent"},
+		},
+		{
+			name: "verbatim clause at column one passes",
+			c:    clauseContract{fragment: "delim-ok.md", clause: "\nX\n", verbatim: true, reason: "r"},
+		},
+		{
+			name:    "verbatim clause indented fails",
+			c:       clauseContract{fragment: "delim-indented.md", clause: "\nX\n", verbatim: true, reason: "r"},
+			wantErr: []string{"clause is missing"},
 		},
 		{
 			name: "absent clause that is absent passes",
