@@ -9,6 +9,56 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.30.2 — 2026-11-07
+
+Jira grows up: it can file issues, drive the work lifecycle by status alone,
+and get checked by `doctor`. Plus a pi loop breaker and a round of landing
+and registry fixes.
+
+No breaking changes.
+
+- **Jira files its own issues.** Findings from the Filer and from research
+  now land as issues in your Jira project, of the type `JIRA_ISSUE_TYPE`
+  names. Before, a read-write Box filed them into GitHub instead, and
+  relayed ones were dropped. Comments and descriptions go up as Jira wiki
+  markup so they render properly, and spindrift's bookkeeping markers ride
+  in hidden properties instead of showing up as stray text.
+- **Status-only Jira lifecycle.** Set `JIRA_LIFECYCLE=status` to make the
+  mapped workflow status the whole work state, with no lifecycle labels;
+  the default, `hybrid`, behaves as before. A mapping can now name a
+  resolution to send on the move to Done, and a new `ambiguous` key maps
+  the ambiguous-spec halt to a status. Only `failed` and `ambiguous` may
+  share a status; any other duplicate is rejected at startup. When the
+  workflow refuses a move, the issue gets a comment saying which move
+  failed and what was on offer.
+- **`doctor` checks your Jira config.** It confirms the project offers your
+  issue type, warns about required create fields spindrift won't fill, and
+  fails when the status mapping names a status your workflow doesn't have.
+- **Fewer silent failures.** A butler daemon now refuses to start on a
+  tracker that can't file issues, rather than running its chores and filing
+  nothing. A finding the tracker can't file shows up as "(filing failed)"
+  with a warning instead of vanishing. Jira Boxes also stop being told to
+  read linked issues through GitHub. If you run Jira with an override
+  prompt directory, add the three new issue-read fragments (see the
+  migration guide) or those steps render empty.
+- **pi breaks out of loops.** A pi agent that makes the same tool call three
+  times in a row gets refused, and if it keeps going pi exits with an error
+  instead of spinning for hundreds of turns. pi Pass logs also keep only
+  the latest progress update for a running subagent, so they no longer
+  balloon into gigabytes.
+- **Cleaner merge hand-offs.** Under `MERGE_MODE=immediate`, a PR held by
+  the merge guard or a merge-by-hand hold is checked for conflicts and
+  rebased before it's handed to you, so you don't get a PR that no longer
+  merges. The merge guard's comment now goes on the PR, where the reviewer
+  will see it.
+- **Registry and forge fixes.** yarn berry installs through the Forwarder
+  now work. npm tokens in `.npmrc` with inline comments or quotes are read
+  the way npm reads them, so they stop drawing 401s. `doctor` on Forgejo
+  asks Forgejo whether the base branch is protected, so rules like `Main`
+  or `{main,release/*}` are recognised.
+
+---
+
 ## 0.30.1 — 2026-11-03
 
 Mostly a fix-up release: the bwrap runner works end to end, Box prompts
