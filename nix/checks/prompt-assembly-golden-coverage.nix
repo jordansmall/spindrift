@@ -48,10 +48,11 @@ let
   # Name test functions, not line numbers, in the reasons: lines rot.
   allowlist = {
     "auto-format.md" =
-      "assemble_test.go TestAssembleAutoFormatGate; fragment_rendering_test.go TestAssembleStepRendering/AUTO-FORMAT_on_points_at_the_skill,_no_inline_nix_fmt_rationale";
+      "assemble_test.go TestAssembleAutoFormatGate; clause_contract_integration_test.go TestClauseContracts (fragments/auto-format.md entries)";
     "auto-lint.md" =
-      "assemble_test.go TestAssembleAutoLintGate; fragment_rendering_test.go TestAssembleStepRendering/AUTO-LINT_on_points_at_the_skill,_no_inline_linter_procedure";
-    "ci-failure.md" = "assemble_test.go TestAssembleCIFailureSummaryGate";
+      "assemble_test.go TestAssembleAutoLintGate; clause_contract_integration_test.go TestClauseContracts (fragments/auto-lint.md entries)";
+    "ci-failure.md" =
+      "assemble_test.go TestAssembleCIFailureSummaryGate; clause_contract_integration_test.go TestClauseContracts (fragments/ci-failure.md entries)";
     "local/research-verdict-relay.md" =
       "assemble_test.go TestAssembleResearchPromptCavemanLocalTracker; orchestrator TestMarkerFragmentParity";
   };

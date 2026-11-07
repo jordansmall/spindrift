@@ -331,10 +331,10 @@ A few invariants worth calling out:
   [`templates/default/prompts/fragments/tdd-baked.md`](templates/default/prompts/fragments/tdd-baked.md)
   — currently ``Work test-first: run `/tdd` for each slice.`` — is the source
   of truth; the same bytes recur as the Go literal `tddAnchorClause`
-  (`cmd/launcher/internal/promptassembly/assemble_test.go`), as `want` and
-  `wantNot` strings in
-  `cmd/launcher/internal/promptassembly/fragment_rendering_test.go` (a
-  half-done reword leaves the `wantNot` arm passing), in the goldens under
+  (`cmd/launcher/internal/promptassembly/assemble_test.go`), as the
+  `tdd-baked.md` clause entry and the `absent: true` `tdd-unbaked.md` entry in
+  `cmd/launcher/internal/promptassembly/clause_contract_integration_test.go` (a
+  half-done reword leaves the `absent` entry passing), in the goldens under
   `tests/testdata/prompt-assembly-golden/`, and in this bullet's own quote.
   The pair's other arm, `tdd-unbaked.md`, pins its opening line separately: a
   full-sentence grep, a `Work test-first, one slice` prefix grep that resolves
@@ -345,9 +345,10 @@ A few invariants worth calling out:
   `code-review-baked.md` follow the same idiom with their own copies, and a
   pin may cover only a leading clause — the Go and bats pins on
   `code-review-baked.md` stop before the `${REVIEW_FANOUT_AGENT}`
-  interpolation, while its goldens hold the rendered sentence whole. So grep
-  both the whole sentence and its first few words before rewording any
-  anchor: it is a coordinated edit, not a one-line change.
+  interpolation (bar the clause contract's raw-source pin on
+  `agent type ${REVIEW_FANOUT_AGENT}`), while its goldens hold the rendered
+  sentence whole. So grep both the whole sentence and its first few words
+  before rewording any anchor: it is a coordinated edit, not a one-line change.
   `lib/fragments.nix` and [`MIGRATING.md`](MIGRATING.md) are near-misses —
   they name the gate and the fragment **file**, never the phrase.
 

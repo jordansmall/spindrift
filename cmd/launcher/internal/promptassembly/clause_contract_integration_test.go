@@ -2132,6 +2132,204 @@ var clauseContracts = []clauseContract{
 		absent:   true,
 		reason:   "gh would query the wrong tracker.",
 	},
+
+	// Knob- and skill-gated steps point at their skill instead of restating it.
+	// AUTO_FORMAT and AUTO_LINT are Consumer knobs off in every golden cell, so
+	// their fragments are checked as raw source (nixRenderedSources).
+	{
+		fragment: "fragments/auto-format.md",
+		clause:   "invoke the `/auto-format` skill",
+		reason:   "the AUTO-FORMAT step points at the baked skill, which owns the procedure.",
+	},
+	{
+		fragment: "fragments/auto-format.md",
+		clause:   "`nix fmt` when the target flake defines a formatter",
+		absent:   true,
+		reason:   "the formatter selection lives in the auto-format skill; a restated copy in the step is the duplication baking the skill removed.",
+	},
+	{
+		fragment: "fragments/auto-format.md",
+		clause:   "store-lock permission error",
+		absent:   true,
+		reason:   "the store-lock workaround lives in the auto-format skill; a restated copy in the step is the duplication baking the skill removed.",
+	},
+	{
+		fragment: "fragments/auto-lint.md",
+		clause:   "invoke the `/auto-lint` skill",
+		reason:   "the AUTO-LINT step points at the baked skill, which owns the procedure.",
+	},
+	{
+		fragment: "fragments/auto-lint.md",
+		clause:   "Apply the linter's safe auto-fix mode",
+		absent:   true,
+		reason:   "the linter procedure lives in the auto-lint skill; a restated copy in the step is the duplication baking the skill removed.",
+	},
+	{
+		fragment: "tdd-baked.md",
+		clause:   "Work test-first: run `/tdd` for each slice.",
+		reason:   "baking the tdd skill leaves a bare anchor pointing at /tdd (issue #3219).",
+	},
+	{
+		fragment: "tdd-baked.md",
+		clause:   "RED: write ONE failing test",
+		absent:   true,
+		reason:   "baking the tdd skill subtracts the inline red/green/refactor fallback instead of restating it beside the anchor (issue #3219).",
+	},
+	{
+		fragment: "tdd-unbaked.md",
+		clause:   "RED: write ONE failing test",
+		reason:   "with no tdd skill baked, the red/green/refactor rule renders inline so the discipline survives (issue #3219).",
+	},
+	{
+		fragment: "tdd-unbaked.md",
+		clause:   "Work test-first: run `/tdd` for each slice.",
+		absent:   true,
+		reason:   deadSkillReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "RED: write ONE failing test",
+		absent:   true,
+		reason:   "the red/green/refactor fallback moved out of the template into the unbaked arm, so a baked run does not carry it (issue #3219).",
+	},
+	{
+		fragment: "commit-unbaked.md",
+		clause:   "hard-wrapped (subject",
+		reason:   "with no commit skill baked, the Conventional Commits format rules render inline (issue #3222).",
+	},
+	{
+		fragment: "commit-unbaked.md",
+		clause:   "Use the `/commit` skill to write every commit message",
+		absent:   true,
+		reason:   deadSkillReason,
+	},
+	{
+		fragment: "commit-baked.md",
+		clause:   "hard-wrapped (subject",
+		absent:   true,
+		reason:   "baking the commit skill subtracts the inline format rules instead of restating them beside the anchor (issue #3222).",
+	},
+	{
+		fragment: "code-review-baked.md",
+		clause:   "Run the `/code-review` skill and fold its two-axis (Standards + Spec) findings",
+		reason:   "the baked arm orders the skill's two-axis fan-out and folds its findings back into the hunt (issue #3222).",
+	},
+	{
+		fragment: "code-review-unbaked.md",
+		clause:   "Run the `/code-review` skill",
+		absent:   true,
+		reason:   deadSkillReason,
+	},
+	{
+		fragment: "code-review-unbaked.md",
+		clause:   "run every dimension below yourself in this one context",
+		reason:   "with no review skill baked, the reviewer hunts solo; there are no reviewer subagents to fan out to (issue #3222).",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "Hunt every dimension",
+		reason:   "the hunt dimensions render unconditionally, outside both code-review arms, so a depth obligation does not vanish on unbaked runs (issue #3226).",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "VERDICT: APPROVE | BLOCK",
+		reason:   "the verdict grammar scanPassLog parses stays in the template whichever code-review arm renders (ADR 0035).",
+	},
+
+	// coordinator.md
+	{
+		fragment: "coordinator.md",
+		clause:   "**coordinator**",
+		reason:   "a provisioned worker makes the main session the coordinator rather than the implementor (issue #2056).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "delegate each slice",
+		reason:   "the coordinator's job is to hand each slice to the worker (issue #2056).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "gitignore",
+		absent:   true,
+		reason:   "the coordinator step must not touch the Consumer repo's .gitignore.",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "WORK_DIR",
+		absent:   true,
+		reason:   "the coordinator step must not name an unexported $WORK_DIR.",
+	},
+
+	// review-loop-orchestrator.md: the code-owned review pass
+	{
+		fragment: "review-loop-orchestrator.md",
+		clause:   "Review is handled by the orchestrator as a separate, code-owned pass",
+		reason:   "the Driver does not run the review; the orchestrator's code-owned pass does (issue #2037).",
+	},
+	{
+		fragment: "review-loop-orchestrator.md",
+		clause:   "spawn a fresh `reviewer` subagent",
+		absent:   true,
+		reason:   "the reviewer subagent was replaced by the code-owned review pass, so the prompt must not order one (issue #2037).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "spawn a fresh `reviewer` subagent",
+		absent:   true,
+		reason:   "the reviewer subagent was replaced by the code-owned review pass, so the template must not order one (issue #2037).",
+	},
+	{
+		fragment: "review-loop-orchestrator-no-filer.md",
+		clause:   "Do not run LAND THE CHANGE, OPEN A",
+		reason:   "with no Filer, the stop-after-COMMIT bullet names the landing steps without FILE ISSUES (issue #5300).",
+	},
+	{
+		fragment: "review-loop-orchestrator-no-filer.md",
+		clause:   "then continue straight into LAND THE CHANGE,",
+		reason:   "with no Filer, the APPROVE bullet continues straight into LAND THE CHANGE (issue #5300).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "FILE ISSUES",
+		absent:   true,
+		reason:   "the heading and every step mention live in Filer-gated fragments, so a run with no Filer never names a step it does not render (issue #5300).",
+	},
+
+	// scout
+	{
+		fragment: "scout-delegate.md",
+		clause:   "Delegate exploration to the `scout` subagent",
+		reason:   "a provisioned scout maps the repo before the main session reads source (issue #3157).",
+	},
+	{
+		fragment: "fragments/scout-issue-read.md",
+		clause:   "via ${FORGE_DISPLAY_NAME}",
+		reason:   "the scout's issue-read step is shared across trackers and names the active one, so linked issues are fetched through the right client; it renders into the agents JSON, which no checked prompt captures, so it is checked as raw source.",
+	},
+	{
+		fragment: "fragments/scout-issue-read-unreadable.md",
+		clause:   "cannot be read from this Box",
+		reason:   "a tracker with no in-Box client (jira) leaves linked issues unreadable, and the scout must be told so rather than try a client that does not exist (issue #6344); it renders into the agents JSON, so it is checked as raw source.",
+	},
+
+	// ci-failure.md: a fix-pass step no golden cell renders, so checked as raw source
+	{
+		fragment: "fragments/ci-failure.md",
+		clause:   "failure itself",
+		reason:   "the summary only names which checks failed, so the step must frame it as a pointer and send the agent to the job log rather than present it as the failure.",
+	},
+	{
+		fragment: "fragments/ci-failure.md",
+		clause:   "known failure",
+		absent:   true,
+		reason:   "the summary is a pointer, not a diagnosis, so it must not be framed as a known failure the agent can act on without reading the log.",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "skip anything CI FAILURE",
+		absent:   true,
+		reason:   "the CI FAILURE summary does not replace reading the failing job's log, so the template must not say to skip anything on its account.",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
@@ -2528,6 +2726,7 @@ const (
 	outcomeEnumReason    = "Parse() does not enforce a status enum, so ready or blocked is a prompt-level contract and the prompt must call a value like SUCCESS wrong, without claiming it is lost since it still parses (issues #1901, #3224)."
 	ifBlockedReason      = "the Driver never flips a PR to ready (only the launcher does, at green; issue #1651), so a blocked run has nothing to revert to draft; the closing SPINDRIFT_OUTCOME line renders from a read-write and read-only fragment pair, so both are checked (issues #1653, #1933)."
 	fixDraftRevertReason = "the Driver never flips a PR to ready, so the fix prompt's override bullet must not tell a blocked fix pass to convert the PR back to draft; it never left draft (issue #1653)."
+	deadSkillReason      = "a prompt naming a skill the Box does not carry is dead text (issue #120)."
 	contractBlockReason  = "a prompt missing a harness-owned contract block ships an agent that never emits the outcome line (issue #419)."
 )
 
