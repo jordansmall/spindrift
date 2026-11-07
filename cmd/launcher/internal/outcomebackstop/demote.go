@@ -53,6 +53,9 @@ func DemoteAlreadyResolved(cfg Config, priorOutcomeLine string, w io.Writer) err
 
 	relay := cfg.relayNote()
 	switch {
+	case countErr != nil && relay != "":
+		// bundleout fails on the same count error and writes no bundle, so
+		// nothing is relayed.
 	case relay != "":
 		note += relay
 	default:
