@@ -9217,7 +9217,7 @@ sibling that is `running` suppresses it — except one whose child is a
 butler Chore, which never does (issue #3922). The issues arrive
 live, appended (once per new issue) via `ChildRequest.OnRecord` as each
 `box` record is read off
-the report pipe (`pool.noteBox`, see **Event stream** below) — there is
+the report pipe (`pool.noteRecord`, see **Event stream** below) — there is
 no post-exit carrier at all any more, so what a slot's status shows is
 always what it currently has, never a stale replay of what it once had.
 Per-kind,

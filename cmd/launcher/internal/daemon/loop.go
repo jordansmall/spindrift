@@ -801,31 +801,15 @@ func (p *pool) childRequest(slot int, kind Kind, revision, childLog string) Chil
 		OnRecord: func(rec Record) {
 			// image_build comes from bootstrap, before discovery, so it must not
 			// count as the report that permits an in-place handoff.
-			if rec.Event == report.EventImageBuild {
-				p.noteImageBuild(slot, kind, revision, rec)
-				return
+			if rec.Event != report.EventImageBuild {
+				p.noteReported(slot)
 			}
-			p.noteReported(slot)
-			switch rec.Event {
-			case report.EventBox:
-				p.noteBox(slot, kind, revision, rec)
+			p.noteRecord(slot, kind, revision, rec)
+			if rec.Event == report.EventBox {
 				// A claim settles discovery the moment it happens, live,
 				// rather than waiting for this child to exit.
 				p.passBaton(slot, batonPassClaimed)
-			case report.EventModel:
-				p.noteModel(slot, kind, revision, rec)
-			case report.EventCIWait:
-				p.noteCIWait(slot, rec)
-			case report.EventSettled:
-				p.noteSettled(slot, kind, revision, rec)
-			case report.EventNotDue:
-				p.noteNotDue(slot, rec)
 			}
-			// No default clause: an event this switch hasn't been
-			// taught yet is silently ignored. ParseRecord already
-			// dropped a genuinely unknown event upstream (record.go),
-			// so only a known-but-unhandled Event value can reach
-			// this switch and fall through unmatched.
 		},
 	}
 }

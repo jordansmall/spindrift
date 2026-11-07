@@ -152,10 +152,10 @@ func TestLoopButlerExitTwoWithoutReportStillBacksOff(t *testing.T) {
 	}
 }
 
-// TestPoolNoteNotDueMergesWithoutClaiming: not_due records fold into the
+// TestPoolNoteRecordNotDueMergesWithoutClaiming: not_due records fold into the
 // slot's flight (earliest instant, tip-move OR'd) but are not a claim — the
 // key stays unset — and one arriving after the slot cleared is dropped.
-func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
+func TestPoolNoteRecordNotDueMergesWithoutClaiming(t *testing.T) {
 	cfg := butlerOnlyConfig()
 	var buf bytes.Buffer
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
@@ -166,9 +166,9 @@ func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
 	if _, _, ok := p.startChild(0, KindOf(dispatchkind.Butler), "rev1"); !ok {
 		t.Fatal("startChild did not start the butler")
 	}
-	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: late}})
-	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("b"), NextDue: report.NextDue{At: early}})
-	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("c"), NextDue: report.NextDue{OnTipMove: true}})
+	p.noteRecord(0, KindOf(dispatchkind.Butler), "rev1", Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: late}})
+	p.noteRecord(0, KindOf(dispatchkind.Butler), "rev1", Record{Event: report.EventNotDue, Key: dispatchkey.Chore("b"), NextDue: report.NextDue{At: early}})
+	p.noteRecord(0, KindOf(dispatchkind.Butler), "rev1", Record{Event: report.EventNotDue, Key: dispatchkey.Chore("c"), NextDue: report.NextDue{OnTipMove: true}})
 
 	gotDue := p.flightReport(0).nextDue
 	if got, want := gotDue, (NextDue{At: early, OnTipMove: true}); !got.At.Equal(want.At) || got.OnTipMove != want.OnTipMove {
@@ -179,7 +179,7 @@ func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
 	}
 
 	p.finishChild(0)
-	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: early}})
+	p.noteRecord(0, KindOf(dispatchkind.Butler), "rev1", Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: early}})
 	if got := p.flightReport(0).nextDue; !got.IsZero() {
 		t.Fatalf("flightReport nextDue after finish = %+v, want zero: a late record is dropped", got)
 	}
@@ -322,7 +322,7 @@ func TestPoolNotDueFromChildStaleAfterSiblingContinue(t *testing.T) {
 			p.startChild(0, butler, "rev1")
 			p.startChild(1, butler, "rev1")
 			due := clk.Now().Add(time.Hour)
-			p.noteNotDue(1, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: due}})
+			p.noteRecord(1, butler, "rev1", Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: due}})
 			if tt.siblingEnds {
 				p.finishChild(0)
 				p.resetKind(butler)
