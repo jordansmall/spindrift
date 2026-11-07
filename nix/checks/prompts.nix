@@ -1493,7 +1493,7 @@ in
   # three PR_BODY_* fragments is unconditional prose for one case, since
   # promptassembly picks exactly one gate per run, so a static grep on
   # the fragment source pins each case. The runtime gate selection is
-  # pinned by promptassembly's TestGatesPRBodyReference and TestAssembleFragmentRendering.
+  # pinned by promptassembly's TestGatesPRBodyReference and TestAssemblePRBodyReferenceSelection.
   pr-body-reference-github-unchanged = pkgs.runCommand "pr-body-reference-github-unchanged" { } ''
     grep -qF 'Closes #''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-closes.md}
     touch $out
