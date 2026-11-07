@@ -951,18 +951,23 @@ func TestProjectStatus(t *testing.T) {
 			issues:   []string{"1", "2"},
 			pass:     "implement",
 			ciWait:   ciWait{pr: "pr7", runURL: "http://run"},
+
+			imageBuildSince: now.Add(-time.Minute).In(time.FixedZone("x", 3600)),
 		}}
 		got := projectStatus(st, Config{Kinds: []Kind{work}, Awake: win}, now)
 		if got.State != StateWorking {
 			t.Fatalf("state = %q, want working", got.State)
 		}
-		if g := got.Slots[0]; g.Busy || g.Kind != "" || g.Issues != nil {
+		if g := got.Slots[0]; g.Busy || g.Kind != "" || g.Issues != nil || g.ImageBuildSince != "" {
 			t.Errorf("idle slot = %+v, want bare", g)
 		}
 		if len(got.Slots) != 2 {
 			t.Fatalf("slots = %+v, want two", got.Slots)
 		}
 		g := got.Slots[1]
+		if want := rfc(now.Add(-time.Minute)); g.ImageBuildSince != want {
+			t.Errorf("ImageBuildSince = %q, want %q (RFC3339 UTC)", g.ImageBuildSince, want)
+		}
 		if !g.Busy || g.Kind != work || g.Revision != "rev1" || g.Pass != "implement" || !g.CIWait || g.PRURL != "pr7" || g.CIRunURL != "http://run" {
 			t.Errorf("running slot = %+v", g)
 		}
