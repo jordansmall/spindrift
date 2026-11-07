@@ -281,8 +281,8 @@ func TestServe_RemovesStaleSocket(t *testing.T) {
 	defer p.Close()
 }
 
-// An accepted empty route table would panic on the first request, where
-// selectRoute indexes routes[0] of an empty slice.
+// An accepted empty route table would refuse every request, so New rejects it
+// as a configuration error up front.
 func TestNew_RejectsEmptyRoutes(t *testing.T) {
 	if _, err := New(nil, nil); err == nil {
 		t.Fatal("New(nil) = nil error, want error")
