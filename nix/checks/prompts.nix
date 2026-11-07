@@ -2570,6 +2570,7 @@ in
     let
       inherit (pkgs.lib) assertMsg;
       syntheticGate = "FILER_FILE_DIRECT_GITLAB";
+      vocabulary = import ../../lib/gate-vocabulary.nix;
       syntheticRow = {
         gate = syntheticGate;
         fragment = "skill-preamble.md";
@@ -2579,6 +2580,13 @@ in
         inherit nixpkgs system;
         packages = p: [ p.hello ];
         fragments = (import ../../lib/fragments.nix) ++ [ syntheticRow ];
+        # The synthetic gate is hypothetical, so the Gate vocabulary has to be
+        # told about it or mkHarness rejects the fixture.
+        gateVocabulary = vocabulary // {
+          gates = vocabulary.gates // {
+            ${syntheticGate} = "hypothetical direct-file gate (fixture)";
+          };
+        };
       };
       directRows = testHarness.internals.directFileFragmentRows;
       readOnlyReachableRows = testHarness.internals.readOnlyReachableFragmentRows;
