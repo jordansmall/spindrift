@@ -126,7 +126,9 @@ type Runner interface {
 	EnsureReady() error
 
 	// IsReady reports whether the sandbox is usable right now, without
-	// building. bwrap always returns nil; OCI errors with a build hint.
+	// building. bwrap returns nil unless nixInBox is on and no usable store
+	// snapshot exists; OCI errors when the image is absent. bwrap's
+	// missing-snapshot errors and OCI's absent-image error carry a build hint.
 	IsReady() error
 
 	// Run dispatches box and blocks until it exits; a non-zero exit is an
