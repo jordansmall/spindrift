@@ -330,8 +330,7 @@ A few invariants worth calling out:
 - **A baked fragment's anchor line is pinned verbatim across languages.**
   [`templates/default/prompts/fragments/tdd-baked.md`](templates/default/prompts/fragments/tdd-baked.md)
   — currently ``Work test-first: run `/tdd` for each slice.`` — is the source
-  of truth; the same bytes recur as the Go literal `tddAnchorClause`
-  (`cmd/launcher/internal/promptassembly/assemble_test.go`), as the
+  of truth; the same bytes recur as the
   `tdd-baked.md` clause entry and the `absent: true` `tdd-unbaked.md` entry in
   `cmd/launcher/internal/promptassembly/clause_contract_integration_test.go` (a
   half-done reword leaves the `absent` entry passing), in the goldens under
