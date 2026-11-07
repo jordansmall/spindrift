@@ -77,21 +77,3 @@ func assertPromptClauses(t *testing.T, promptFile string, cases []promptClause) 
 		})
 	}
 }
-
-// sharedSpanBetween returns raw from the start of the line beginning with
-// marker through the following blank line, for pinning a shared paragraph
-// byte-for-byte even when the surrounding fragments diverge before and
-// after it.
-func sharedSpanBetween(t *testing.T, raw, marker string) string {
-	t.Helper()
-
-	idx := strings.Index(raw, marker)
-	if idx == -1 {
-		t.Fatalf("marker %q not found", marker)
-	}
-	rest := raw[idx:]
-	if end := strings.Index(rest, "\n\n"); end != -1 {
-		return rest[:end]
-	}
-	return rest
-}
