@@ -1446,3 +1446,22 @@ func TestScheduleUpperBoundContinueResetsAndTrackerKindKeepsOneIntervalRest(t *t
 		t.Fatalf("work after one interval and the same count: %#v, want Start", d)
 	}
 }
+
+func TestKindSchedStartBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		ready, starting int
+		want            int
+	}{
+		{"nothing starting spends all ready", 3, 0, 3},
+		{"starting children are subtracted", 3, 2, 1},
+		{"all ready already starting", 2, 2, 0},
+		{"over-committed budget is negative", 1, 2, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (kindSched{ready: tc.ready}).startBudget(tc.starting); got != tc.want {
+				t.Fatalf("startBudget(%d) with ready %d = %d, want %d", tc.starting, tc.ready, got, tc.want)
+			}
+		})
+	}
+}
