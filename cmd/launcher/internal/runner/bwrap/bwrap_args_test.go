@@ -72,8 +72,9 @@ func TestBwrapArgs_IssueTextAbsentOrEmpty(t *testing.T) {
 	})
 }
 
-// Without --clearenv the sandbox inherits secrets from the launcher's process
-// environment.
+// --clearenv is deliberately absent: the OffArgvKeys subset of box.Env reaches
+// the sandbox through resolvedRunEnv, which Run sets as cmd.Env and bwrap
+// inherits. Passing --clearenv would drop those secrets.
 func TestBwrapArgs_NoClearEnv(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
