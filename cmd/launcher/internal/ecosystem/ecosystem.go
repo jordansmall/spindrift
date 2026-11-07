@@ -60,8 +60,10 @@ type ConfigParser func(content string) (decls []Declaration, namedAny bool, err 
 // RouteDeclarationValidator validates one key of a route's
 // [routes.ecosystems.<name>] block other than "path" (issue #3403). value
 // arrives exactly as go-toml decoded it, so a TOML array is []any, never
-// []string. The error is a bare noun phrase; the caller prefixes "<route>:
-// <key>: ". Nil means the caller must reject every key beyond "path".
+// []string. The error is a predicate such as "must be an array of strings";
+// the caller prefixes "registryroutes: <route>: ecosystems.<name>.<key> " (a
+// space, no colon, before the predicate). Nil means the caller must reject
+// every key beyond "path".
 type RouteDeclarationValidator func(key string, value any) error
 
 // Strategy is one ecosystem's entry in the registered list. A nil hook field
