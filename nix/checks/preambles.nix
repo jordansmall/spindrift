@@ -44,9 +44,8 @@ let
 
   stubRow = import ../fixtures/stub-runner-row.nix;
 
-  # Shared by preambles-run-artifacts-bwrap and its -nix-config-omitted
-  # sibling below, which differ only in whether nixConfigPath is set
-  # (issue #2664).
+  # Base args for the runArtifacts checks below; each overrides only the
+  # fields it exercises (issue #2664).
   bwrapRunArtifactsBase = {
     row = bwrapRow;
     driverEntry = {
@@ -320,32 +319,31 @@ runArtifactsRowChecks allRows
     ) "renderBoxEnvVarsList must space-join only boxEnv=true entries' env names, got: ${out}";
     pkgs.runCommand "preambles-box-env-vars-list" { } "touch $out";
 
-  preambles-driver-mount-with-cache =
+  preambles-run-artifacts-session-cache-dir-set =
     let
-      out = preambles.renderDriverMountPreamble {
-        skillsDirRelative = ".claude/skills";
-        sessionCacheDirRelative = ".claude/projects";
-      };
+      out = preambles.runArtifacts (
+        bwrapRunArtifactsBase
+        // {
+          driverEntry = bwrapRunArtifactsBase.driverEntry // {
+            sessionCacheDirRelative = ".claude/projects";
+          };
+        }
+      );
     in
-    assert assertMsg (hasInfix "export DRIVER_SKILLS_DIR=/home/agent/.claude/skills" out)
-      "renderDriverMountPreamble must export DRIVER_SKILLS_DIR under /home/agent, got: ${out}";
-    assert assertMsg (hasInfix "export DRIVER_SESSION_CACHE_DIR=/home/agent/.claude/projects" out)
-      "renderDriverMountPreamble must export DRIVER_SESSION_CACHE_DIR when the Driver declares one, got: ${out}";
-    pkgs.runCommand "preambles-driver-mount-with-cache" { } "touch $out";
+    assert assertMsg (out.DRIVER_SESSION_CACHE_DIR == "/home/agent/.claude/projects")
+      "runArtifacts must set DRIVER_SESSION_CACHE_DIR when the Driver declares one, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-session-cache-dir-set" { } "touch $out";
 
-  preambles-driver-mount-without-cache =
+  preambles-run-artifacts-session-cache-dir-empty =
     let
-      out = preambles.renderDriverMountPreamble {
-        skillsDirRelative = ".claude/skills";
-      };
+      out = preambles.runArtifacts bwrapRunArtifactsBase;
     in
-    assert assertMsg (hasInfix "export DRIVER_SESSION_CACHE_DIR=''" out)
-      "renderDriverMountPreamble must export an empty DRIVER_SESSION_CACHE_DIR when the Driver declares none, got: ${out}";
-    pkgs.runCommand "preambles-driver-mount-without-cache" { } "touch $out";
+    assert assertMsg (out.DRIVER_SESSION_CACHE_DIR == "")
+      "runArtifacts must set an empty DRIVER_SESSION_CACHE_DIR when the Driver declares none, got: ${builtins.toJSON out}";
+    pkgs.runCommand "preambles-run-artifacts-session-cache-dir-empty" { } "touch $out";
 
   # renderAgentPathsPreamble must emit `VAR=${VAR:-<baked>}` lines
-  # (issue #2531), not renderDriverMountPreamble's unconditional
-  # `export VAR=`: these 8 vars stay overridable by an already-exported
+  # (issue #2531): these 8 vars stay overridable by an already-exported
   # env var.
   preambles-agent-paths-shape =
     let
