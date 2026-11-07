@@ -452,24 +452,25 @@ nightly `nix-collect-garbage --delete-older-than 30d`,
 had this exposure, because images live in the runtime's own storage.
 
 Each closure generation, the generation that scopes the nix-var snapshot
-(issue #2680), now has one GC root over those artifacts: out-links from a
-single `nix build --out-link` at
-`.spindrift/nix-gcroots/<generation>/artifact*`. The directory is a sibling
-of `.spindrift/nix-var-snapshot`, not inside it, because reclaim treats every
+(issue #2680), now has GC roots over those artifacts: one
+`nix build --out-link` per artifact path, at
+`.spindrift/nix-gcroots/<generation>/artifact-<i>`, so a path that fails to
+build leaves the others rooted. The directory is a sibling of
+`.spindrift/nix-var-snapshot`, not inside it, because reclaim treats every
 entry there as a generation and the run adapter binds the generation
 directory into the Box. (Amended by issue #6072: the run adapter now mounts
 only the generation's `db-<V>` child, never the generation directory itself,
 so reclaim is the only reason left.)
-`launcher build` registers the root under the generation's shared snapshot
-lock. The Box-only staleness hot-swap (ADR 0043) registers it too, for the
+`launcher build` registers the roots under the generation's shared snapshot
+lock. The Box-only staleness hot-swap (ADR 0043) registers them too, for the
 agent closure plus the passwd, group and syscall filter the daemon booted
 with, even when the snapshot already exists.
 
-Stale-generation reclaim drops the root together with the snapshot, under the
+Stale-generation reclaim drops the roots together with the snapshot, under the
 same exclusive-flock liveness probe: never while a Box holds the generation's
 shared lock, and never for the current generation. A root directory with no
 snapshot, left by a crashed build or a nixInBox-off one, is reclaimed the same
-way. Removing the out-link drops the indirect root. A failure to register
+way. Removing an out-link drops its indirect root. A failure to register
 warns and degrades, like snapshot-lock degradation, and never fails the build.
 
 Only the mounted artifacts are rooted. Store paths the snapshot database
@@ -478,10 +479,10 @@ race in the paragraph above still applies to them. A per-Box root added at
 launch and removed at exit was rejected: it leaves the build-to-launch
 window unrooted and needs its own crash cleanup.
 
-The lock and the root cover every bwrap Box, `nixInBox` on or off (issue
+The lock and the roots cover every bwrap Box, `nixInBox` on or off (issue
 #5996). With it off there is no snapshot dir and no `/nix/var` overlay, only
 the `<generation>.lock` file under `.spindrift/nix-var-snapshot` and the roots
-dir. `launcher build` takes the lock and registers the root either way, and
+dir. `launcher build` takes the lock and registers the roots either way, and
 only the store-DB snapshot stays `nixInBox`-only. Run holds the shared lock for
 the Box's whole life whatever the setting; only the snapshot-dir stat guard is
 `nixInBox`-only. With it off, Run re-registers the generation's roots under its
