@@ -4,15 +4,19 @@ package promptassembly_test
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
-// clauseContracts binds spindrift's own prompt fragments; a Consumer override
+// clauseContracts binds spindrift's own prompt fragments and, through the
+// nixRenderedSources pseudo-cell, its Nix-rendered templates; a Consumer override
 // of a fragment keeps free wording. A clause several fragments carry alike is
 // in sharedClauses, and one a hand-mirrored pair must keep in step is also
 // compared in twinContracts, which pins the pair equal where this table pins
@@ -768,6 +772,698 @@ var clauseContracts = []clauseContract{
 		clause:   "no intent is queued: follow IF BLOCKED below instead, which ends in `status=blocked` with a `note=` naming the rejection.",
 		reason:   "a send that never exited zero must route to IF BLOCKED rather than claim ready (issue #3866).",
 	},
+
+	// scout-prompt.md, review-prompt.md, conflict-resolve-prompt.md
+	{
+		fragment: "scout-prompt.md",
+		clause:   "Do not narrate between tool calls",
+		reason:   "the scout's only output is its final pointer message, so mid-turn narration is wasted output.",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "Do not narrate between tool calls",
+		reason:   "the reviewer's only output is its final verdict, so mid-turn narration is wasted output.",
+	},
+	{
+		fragment: "conflict-resolve-prompt.md",
+		clause:   "Do not narrate between tool calls",
+		reason:   "the conflict resolver's only output is one short final message, so mid-turn narration is wasted output.",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "at one line",
+		reason:   "a reviewer finding is capped at one line, so a verdict stays scannable and the host can file it as one title.",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "git fetch origin",
+		reason:   "the implementor rebases against origin/BASE_BRANCH, so the reviewer must diff against the same freshly fetched ref, not a possibly stale local one.",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "git diff origin/${BASE_BRANCH}...HEAD",
+		reason:   "the reviewer diffs against the fetched origin ref the implementor rebased onto, not a local branch.",
+	},
+	{
+		fragment: "review-prompt.md",
+		clause:   "git log origin/${BASE_BRANCH}..HEAD",
+		reason:   "the reviewer lists commits against the fetched origin ref the implementor rebased onto, not a local branch.",
+	},
+	{
+		fragment: "conflict-resolve-prompt.md",
+		clause:   "\"DO NOT EDIT\" notice",
+		reason:   "a conflicted file that declares itself generated must be recognized by its header, and the wording stays repo-agnostic (issue #403).",
+	},
+	{
+		fragment: "conflict-resolve-prompt.md",
+		clause:   "never hand-merge the conflict markers",
+		reason:   "a generated file's conflict is never hand-merged (issue #403).",
+	},
+	{
+		fragment: "conflict-resolve-prompt.md",
+		clause:   "Resolve the conflict in its source of truth instead",
+		reason:   "a generated file is resolved in its source of truth, wording kept repo-agnostic (issue #403).",
+	},
+	{
+		fragment: "conflict-resolve-prompt.md",
+		clause:   "regenerate the artifact",
+		reason:   "after resolving the source of truth the artifact is regenerated, not merged (issue #403).",
+	},
+
+	// issue-prompt.md: the pre-implement gates
+	{
+		fragment: "issue-prompt.md",
+		clause:   "OPEN A PULL REQUEST",
+		reason:   "the launcher gates on CI green itself (issue #1651), so the Driver's OPEN A PULL REQUEST step stops at opening the draft (issue #1653).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		pattern:  regexp.MustCompile(`(?m)^# WATCH CI$`),
+		verbatim: true,
+		absent:   true,
+		reason:   "the launcher already gates on CI green before flipping the PR ready and merging (issue #1651), so the Driver polling for CI registration too is a redundant LLM step (issue #1653).",
+	},
+
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "Compare the issue's title against its body",
+		reason:   coherenceReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "merely elaborates, restates, or adds acceptance criteria to the title's own topic is exempt and must pass through",
+		reason:   "a body that only elaborates on the title's own topic is exempt and must pass through (issue #3224).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "On a genuine, contradictory mismatch, halt immediately",
+		reason:   coherenceReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "do not scout, do not open a branch's worth of commits, do not write any diff",
+		reason:   coherenceReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "naming both interpretations, what the title implies and what the body implies, and asking a human which one governs",
+		reason:   coherenceReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "SPINDRIFT_OUTCOME line's `note=` field below. Post nothing yourself: the launcher posts that note as the issue comment, host-side",
+		reason:   "the escalation lives in the note= field; the launcher posts it host-side, never the agent itself (issue #3224).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=ambiguous note=<escalation naming both interpretations>",
+		reason:   coherenceReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "raw plain text, not wrapped in backticks, a code fence, or any other markdown formatting, nothing after it",
+		reason:   "the outcome line is parsed from the final message, so it must be raw plain text with nothing after it (issue #3224).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "`status=ambiguous` is a distinct, successful, non-crash stop — never `status=blocked`",
+		reason:   "status=ambiguous is a successful stop, never status=blocked (issue #3224).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ISSUE COHERENCE GATE",
+		to:       "# COMMS",
+		clause:   "proceed straight into # SCOUT",
+		reason:   "a coherent issue passes through the gate to SCOUT with no further comment (issue #3224).",
+	},
+
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "Run `git fetch origin`, then verify directly against `origin/${BASE_BRANCH}`",
+		reason:   "already-resolved is verified against the fetched default branch, not the worker's own seed (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "A partial or speculative match does not qualify",
+		reason:   "only a demonstrable match counts as already resolved (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "the existing check or test that proves it named in the note",
+		reason:   "the note names the proving check or test (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "no commits, no push, no PR, no in-box comment, no in-box close: the launcher does the rest host-side",
+		reason:   "an already-resolved stop makes no commit, push, PR, comment or close; the launcher does the rest host-side (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "Name the resolving commit SHA or PR, and the check or test proving it",
+		reason:   "the note names the resolving commit or PR and its proof (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=${BRANCH} status=already-resolved note=",
+		reason:   "the stop is a distinct status the launcher parses (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "raw plain text, not wrapped in backticks, a code fence, or any other markdown formatting, nothing after it",
+		reason:   "the outcome line is parsed from the final message, so it must be raw plain text with nothing after it (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "`status=already-resolved` is a distinct, successful, non-crash stop — never `status=blocked`",
+		reason:   "already-resolved is a successful stop, never status=blocked, mirroring the coherence gate (issue #4015).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# ALREADY RESOLVED",
+		to:       "# IMPLEMENT",
+		clause:   "If the change is not already present, proceed straight into",
+		reason:   "an unresolved issue proceeds to IMPLEMENT with no further comment (issue #4015).",
+	},
+
+	// issue-prompt.md: COMMS and CHECK
+	{
+		fragment: "issue-prompt.md",
+		from:     "# COMMS",
+		to:       "# SCOUT",
+		clause:   "Your text output is a machine-parsed log, not a conversation",
+		reason:   commsReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# COMMS",
+		to:       "# SCOUT",
+		clause:   "no pleasantries, acknowledgements, praise, or apologies; never restate what a subagent returned; no narrative framing. One terse, data-bearing status line per step",
+		reason:   commsReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# COMMS",
+		to:       "# SCOUT",
+		clause:   "Human-quality prose is reserved exclusively for: commit messages (Conventional Commits section), the PR title and body, the issue comment required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.",
+		reason:   "the carve-out keeps commits, the PR body, the IF BLOCKED comment and the outcome note= human prose; scoped to COMMS so dropping the sentence fails even though those parts are named elsewhere.",
+	},
+
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		clause:   "Run every check or build gate in the foreground and block on it yourself — never background it",
+		reason:   backgroundGateReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		clause:   "SPINDRIFT_OUTCOME",
+		reason:   backgroundGateReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		clause:   "CHECK_HYGIENE_STEP",
+		reason:   "CHECK keeps the obligation and the foreground-gate rule while the elaborated guidance lives in the check-hygiene skill, reached through a bakedness-gated fragment (issue #3220).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		clause:   "until its `SPINDRIFT_OUTCOME` line",
+		reason:   "the dispatcher parses SPINDRIFT_OUTCOME, so the terminal-outcome mandate must not depend on the agent having read an on-demand skill body (issue #3220).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		clause:   "told to stop right after COMMIT",
+		reason:   "the terminal-outcome mandate is scoped to the owning pass, so the implement and fix passes the orchestrator stops after COMMIT are not ordered to print an outcome (issue #5129).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		pattern:  regexp.MustCompile(`(?i)do not stop this run`),
+		absent:   true,
+		reason:   checkRestatedReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		pattern:  regexp.MustCompile("(?i)\\(`status=ready` or `status=blocked`\\)"),
+		absent:   true,
+		reason:   checkRestatedReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		pattern:  regexp.MustCompile(`(?i)vanished`),
+		absent:   true,
+		reason:   checkRestatedReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# CHECK",
+		to:       "# REVIEW",
+		pattern:  regexp.MustCompile("(?i)never `cat`"),
+		absent:   true,
+		reason:   checkRestatedReason,
+	},
+	{
+		fragment: "check-hygiene-default.md",
+		clause:   "/check-hygiene",
+		reason:   "the CHECK anchor renders from a bakedness-gated fragment, so the section carries the variable and this fragment carries the pointer to the skill (issue #3220).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		from:     "# CHECK",
+		to:       "# LAND THE CHANGE",
+		clause:   "CHECK_HYGIENE_STEP",
+		reason:   "the fix pass's CHECK section anchors the check-hygiene skill through the same bakedness-gated fragment as the implement pass (issue #726).",
+	},
+	{
+		fragment: "fix-prompt.md",
+		from:     "# CHECK",
+		to:       "# LAND THE CHANGE",
+		clause:   "NIX_CHECKS_STEP",
+		reason:   "the nix-checks lore moved into the skill (issue #3223); what the fix pass still needs here is the route to it.",
+	},
+
+	// issue-prompt.md and fix-prompt.md: the code-comments policy sits inside the pass that writes code
+	{
+		fragment: "issue-prompt.md",
+		from:     "# IMPLEMENT",
+		to:       "# CHECK",
+		clause:   "the non-obvious why, a constraint, or a gotcha",
+		reason:   codeCommentsReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "CODE_COMMENTS_STEP",
+		absent:   true,
+		reason:   codeCommentsReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "/code-comments",
+		absent:   true,
+		reason:   codeCommentsReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "# CODE COMMENTS",
+		absent:   true,
+		reason:   codeCommentsReason,
+	},
+	{
+		fragment: "fix-prompt.md",
+		from:     "# FIX",
+		to:       "# COMMS",
+		clause:   "the non-obvious why, a constraint, or a gotcha",
+		reason:   codeCommentsReason,
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "CODE_COMMENTS_STEP",
+		absent:   true,
+		reason:   codeCommentsReason,
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "/code-comments",
+		absent:   true,
+		reason:   codeCommentsReason,
+	},
+
+	// nix-checks-skill.md
+	{
+		fragment: "nix-checks-skill.md",
+		to:       "flake.nix",
+		clause:   "git add",
+		reason:   "nix flakes only evaluate git-tracked files, so an agent that runs `nix build` before staging a new file burns a checks cycle; the guidance must land before the flake.nix paragraph so it primes every nix invocation (issues #714, #3223).",
+	},
+	{
+		fragment: "nix-checks-skill.md",
+		clause:   "is not tracked by Git",
+		reason:   "a bare 'tracked' pin false-passes if this sentence is rewritten away, because \"git-tracked files\" earlier in the same body still contains the word; the pin follows its subject to the skill body (issues #782, #3223).",
+	},
+
+	// issue-prompt.md: CODE_FORGE=git, OPEN A PULL REQUEST
+	{
+		fragment: "issue-prompt.md",
+		clause:   "CODE_FORGE=git",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "skip OPEN A PULL REQUEST below entirely",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "LAND_GIT_STOP_READ_WRITE_STEP",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "LAND_GIT_STOP_READ_ONLY_STEP",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "land-git-stop-read-write.md",
+		clause:   "landing=agent/issue-7 status=ready",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "land-git-stop-read-write.md",
+		clause:   "Do not open a pull request and do not attempt to merge",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "land-git-stop-read-only.md",
+		clause:   "landing=agent/issue-7 status=ready",
+		reason:   codeForgeGitReason,
+	},
+	{
+		fragment: "land-git-stop-read-only.md",
+		clause:   "Do not open a pull request and do not attempt to merge",
+		reason:   codeForgeGitReason,
+	},
+
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OPEN A PULL REQUEST",
+		to:       "# OUTCOME",
+		clause:   "OPEN_PR_CREATE_DIRECT_STEP",
+		reason:   openDraftReason,
+	},
+	{
+		fragment: "github/open-pr-create.md",
+		clause:   "gh pr create --draft",
+		reason:   openDraftReason,
+	},
+
+	// issue-prompt.md: OUTCOME
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "OUTCOME_LANDING_READ_WRITE_STEP",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "OUTCOME_LANDING_READ_ONLY_STEP",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "OUTCOME_LANDING_READ_ONLY_SOCKET_STEP",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "outcome-landing-git.md",
+		clause:   "status=ready",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "outcome-landing-outbox.md",
+		clause:   "status=ready",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "outcome-landing-outbox-socket.md",
+		clause:   "status=ready",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "outcome-ready-means-outbox-socket.md",
+		clause:   "signal pr-intent accepted",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "outcome-ready-means-outbox-socket.md",
+		clause:   "status=blocked",
+		reason:   outcomeLandingReason,
+	},
+	{
+		fragment: "outcome-landing-outbox-socket.md",
+		clause:   "PR-intent line",
+		absent:   true,
+		reason:   socketNoMarkerReason,
+	},
+	{
+		fragment: "outcome-landing-outbox-socket.md",
+		clause:   "SPINDRIFT_PR_INTENT",
+		absent:   true,
+		reason:   socketNoMarkerReason,
+	},
+	{
+		fragment: "outcome-ready-means-outbox-socket.md",
+		clause:   "PR-intent line",
+		absent:   true,
+		reason:   socketNoMarkerReason,
+	},
+	{
+		fragment: "outcome-ready-means-outbox-socket.md",
+		clause:   "SPINDRIFT_PR_INTENT",
+		absent:   true,
+		reason:   socketNoMarkerReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		pattern:  regexp.MustCompile(`(?m)^gh pr ready`),
+		verbatim: true,
+		absent:   true,
+		reason:   "the launcher, not the Driver, owns the draft to ready flip (issue #1651), so the OUTCOME step must never carry a bare `gh pr ready` invocation line; the prose forbidding it below is not an invocation (issue #1653).",
+	},
+
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing-ref> status=<status> note=<text>",
+		reason:   outcomeGrammarReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "The only valid `status` values here are `ready` and `blocked`",
+		reason:   outcomeGrammarReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "`status=already-resolved`",
+		reason:   outcomeGrammarReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "the ALREADY RESOLVED gate",
+		reason:   outcomeGrammarReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "SPINDRIFT_OUTCOME:",
+		absent:   true,
+		reason:   outcomeColonReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		pattern:  regexp.MustCompile(`(?i)trailing colon`),
+		absent:   true,
+		reason:   outcomeColonReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "a prefix before the token",
+		reason:   outcomePrefixReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "starting at column one",
+		reason:   outcomePrefixReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "status=SUCCESS",
+		reason:   outcomeEnumReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "an out-of-enum status",
+		reason:   outcomeEnumReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "still parses",
+		reason:   outcomeEnumReason,
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "status=<status> note=<text>`",
+		to:       "# IF BLOCKED",
+		pattern:  regexp.MustCompile(`(?m)^[^\n]*SPINDRIFT_OUTCOME[^\n]*status=[^\n]*note=`),
+		verbatim: true,
+		absent:   true,
+		reason:   "an agent editing this prose parrots a fully-formed counter-example back out as its own final message, so only the canonical Grammar line may carry the full token, status= and note= shape; the scope starts after that line (issue #3224).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "Grammar:",
+		pattern:  regexp.MustCompile(`(?m)^[^\n]*SPINDRIFT_OUTCOME[^\n]*status=[^\n]*note=`),
+		verbatim: true,
+		absent:   true,
+		reason:   "the same parroting guard for the OUTCOME header lines before the Grammar line (issue #3224).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		from:     "# OUTCOME",
+		to:       "# IF BLOCKED",
+		clause:   "This must be the literal final message — nothing after it",
+		reason:   "the agent must be told, in the OUTCOME section itself, that nothing may follow the outcome line (issue #1901).",
+	},
+
+	// issue-prompt.md and fix-prompt.md: IF BLOCKED, fix pass overrides
+	{
+		fragment: "issue-prompt.md",
+		from:     "# IF BLOCKED",
+		clause:   "--undo",
+		absent:   true,
+		reason:   ifBlockedReason,
+	},
+	{
+		fragment: "if-blocked-outcome-landing-git.md",
+		clause:   "--undo",
+		absent:   true,
+		reason:   ifBlockedReason,
+	},
+	{
+		fragment: "if-blocked-outcome-landing-outbox.md",
+		clause:   "--undo",
+		absent:   true,
+		reason:   ifBlockedReason,
+	},
+	{
+		fragment: "if-blocked-outcome-landing-git.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_OUTCOME .* status=blocked`),
+		reason:   ifBlockedReason,
+	},
+	{
+		fragment: "if-blocked-outcome-landing-outbox.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_OUTCOME .* status=blocked`),
+		reason:   ifBlockedReason,
+	},
+	{
+		fragment: "fix-prompt.md",
+		pattern:  regexp.MustCompile(`(?i)leave the existing PR as-is`),
+		absent:   true,
+		reason:   fixDraftRevertReason,
+	},
+	{
+		fragment: "fix-prompt.md",
+		pattern:  regexp.MustCompile(`(?i)draft-revert`),
+		absent:   true,
+		reason:   fixDraftRevertReason,
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "do not run `gh pr create`",
+		reason:   "the fix pass's override bullet keeps telling the agent not to open a second PR (issue #1653).",
+	},
+
+	// the harness-owned contract blocks: one distinctive sentence per block per injecting prompt;
+	// the golden prompts pin the blocks' full bytes
+	{
+		fragment: "issue-prompt.md",
+		clause:   "This grammar's leading token is load-bearing (ADR 0035)",
+		reason:   contractBlockReason + " The outcome contract must reach issue-prompt.md.",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "This grammar's leading token is load-bearing (ADR 0035)",
+		reason:   contractBlockReason + " The outcome contract must reach fix-prompt.md.",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "Human-quality prose is reserved exclusively for",
+		reason:   contractBlockReason + " The comms contract must reach fix-prompt.md.",
+	},
+	{
+		fragment: "fix-prompt.md",
+		clause:   "Run every check or build gate in the foreground and block on it yourself",
+		reason:   contractBlockReason + " The check contract must reach fix-prompt.md.",
+	},
+	{
+		fragment: "research-prompt.md",
+		clause:   "Carry the machine marker `<!-- spindrift-research -->` in the comment body",
+		reason:   contractBlockReason + " The research outcome contract must reach research-prompt.md.",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
@@ -1042,8 +1738,70 @@ func generatedContracts() []clauseContract {
 	return out
 }
 
+// nixRenderedSources names the pseudo-cell of Nix-rendered source files.
+// The assembler records only fragment spans, so a contract on a base prompt
+// template or a skill body checks the file as the seam fixtures hold it: the
+// templates under prompts/ keyed by file name, plus nix-checks-skill.md.
+// Their step placeholders (${CHECK_HYGIENE_STEP}) are unsubstituted.
+const nixRenderedSources = "nix-rendered-sources"
+
+// nixRenderedSourceRenders reads the pseudo-cell's files, failing if a key
+// would shadow a fragment name any golden cell rendered.
+func nixRenderedSourceRenders(t *testing.T, renders renderedFragments) map[string][]string {
+	t.Helper()
+	sources := map[string][]string{}
+	dir := seamtest.Path(t, "prompts")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read prompt %s: %v", e.Name(), err)
+		}
+		sources[e.Name()] = []string{string(b)}
+	}
+	skill, err := os.ReadFile(seamtest.Path(t, "nix-checks-skill.md"))
+	if err != nil {
+		t.Fatalf("read nix-checks skill: %v", err)
+	}
+	sources["nix-checks-skill.md"] = []string{string(skill)}
+	for name := range sources {
+		for cell, fragments := range renders {
+			if _, clash := fragments[name]; clash {
+				t.Fatalf("source %s shadows the fragment of that name rendered in cell %s", name, cell)
+			}
+		}
+	}
+	return sources
+}
+
+// Reasons several source-prompt contracts share.
+const (
+	coherenceReason      = "issue #3224's pass shrank the ISSUE COHERENCE GATE, and each obligation of its pre-tightening prose must survive."
+	commsReason          = "output is a machine-parsed log except on the parts that stay human prose; the COMMS section must say so."
+	backgroundGateReason = "the never-background rule (issue #571) must cover CHECK's long build and test gates: an agent that backgrounds a gate and ends its turn never emits SPINDRIFT_OUTCOME (issues #3221, #3505)."
+	checkRestatedReason  = "the elaborated check guidance lives in the check-hygiene skill (issues #3220, #3223); a restated copy in CHECK is the duplication that move removed, so its absence is pinned, not just the anchor's presence."
+	codeCommentsReason   = "the code-comments policy renders inside the pass that writes code; the ${CODE_COMMENTS_STEP} anchor, its fragment and the skill pointer are gone, and prompt-code-comments-inlined owns equality against SKILL.md (issue #3505)."
+	codeForgeGitReason   = "CODE_FORGE=git (issue #330) skips PR creation and CI-watch and emits a branch ref where a PR URL would go; the stop step lives in a read-write and read-only fragment pair, so the section carries only the LAND_GIT_STOP_*_STEP references (issue #2526)."
+	openDraftReason      = "the draft bit is the readiness signal the entrypoint backstop and launcher trust, so the PR must never open non-draft (issue #1614); the invocation lives in github/open-pr-create.md, so the section carries only the OPEN_PR_CREATE_DIRECT_STEP reference (issue #1919)."
+	outcomeLandingReason = "the Driver's OUTCOME step prints status=ready without ever calling `gh pr ready`, because the launcher owns the draft to ready flip (issue #1651); the print instruction lives in the OUTCOME_LANDING_READ_*_STEP fragments (issues #1653, #3224)."
+	socketNoMarkerReason = "the socket carrier prints no PR-intent marker line, so its fragments must not point back at one (issue #1653)."
+	outcomeGrammarReason = "an agent following the prompt must see the accepted grammar and status enum, not infer it from one worked example; landing is <landing-ref> because it carries a branch name, not a PR URL, under read-only (issues #1901, #1919)."
+	outcomeColonReason   = "the parser tolerates a colon after the token, so the prompt must not list it as an invalid (lost) form (issues #2012, #5298)."
+	outcomePrefixReason  = "lastInLog only recognizes a line that starts with the prefix, so text before the token hides the whole line (issue #1901); the rule's own wording and the column-one consequence are pinned (issue #3224)."
+	outcomeEnumReason    = "Parse() does not enforce a status enum, so ready or blocked is a prompt-level contract and the prompt must call a value like SUCCESS wrong, without claiming it is lost since it still parses (issues #1901, #3224)."
+	ifBlockedReason      = "the Driver never flips a PR to ready (only the launcher does, at green; issue #1651), so a blocked run has nothing to revert to draft; the closing SPINDRIFT_OUTCOME line renders from a read-write and read-only fragment pair, so both are checked (issues #1653, #1933)."
+	fixDraftRevertReason = "the Driver never flips a PR to ready, so the fix prompt's override bullet must not tell a blocked fix pass to convert the PR back to draft; it never left draft (issue #1653)."
+	contractBlockReason  = "a prompt missing a harness-owned contract block ships an agent that never emits the outcome line (issue #419)."
+)
+
 // goldenRenders assembles every golden cell once and returns the fragment
-// text each rendered.
+// text each rendered, plus the nixRenderedSources pseudo-cell.
 func goldenRenders(t *testing.T) renderedFragments {
 	t.Helper()
 	renders := renderedFragments{}
@@ -1053,6 +1811,7 @@ func goldenRenders(t *testing.T) renderedFragments {
 		result, _ := assembleCell(t, c, t.TempDir())
 		renders[cell.name] = promptassembly.FragmentRenders(result)
 	}
+	renders[nixRenderedSources] = nixRenderedSourceRenders(t, renders)
 	return renders
 }
 
