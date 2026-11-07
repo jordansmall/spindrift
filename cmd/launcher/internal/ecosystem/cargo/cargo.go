@@ -59,9 +59,11 @@ var Strategy = ecosystem.Strategy{
 }
 
 // validateCargoRouteDeclaration is Cargo's RouteDeclaration hook (issue
-// #3403). Each name must match cargoBareKeyPattern and appear once: a name
-// becomes a CARGO_REGISTRIES_<NAME>_TOKEN shell env var, so anything outside
-// [A-Za-z0-9_-] risks smuggling shell metadata into a sourced env file.
+// #3403). Each name must match cargoBareKeyPattern: a name only filters
+// the repo's [registries.NAME] entries, which are themselves bare-key
+// filtered, so a name outside [A-Za-z0-9_-] could never match; and the
+// undeclared-registry warning interpolates it unquoted. Rejecting a
+// repeated name is input hygiene only.
 // Errors are bare noun-phrases; the caller prefixes the key and the route.
 func validateCargoRouteDeclaration(key string, value any) error {
 	if key != ecosystem.CargoRouteRegistriesKey {
