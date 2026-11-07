@@ -48,25 +48,6 @@ rec {
       map (e: e.env) (builtins.filter (e: e.boxEnv or false) (builtins.attrValues schema))
     );
 
-  # The Driver's in-box mount targets (ADR 0009) so the launcher's runner
-  # adapters mount over the Driver's declared paths instead of a hardcoded
-  # ".claude" literal. DRIVER_SESSION_CACHE_DIR is empty when the selected
-  # Driver declares no session-state dir, and the launcher then mounts no
-  # driver cache on either backend.
-  renderDriverMountPreamble =
-    driverEntry:
-    "export DRIVER_SKILLS_DIR="
-    + escapeShellArg "/home/agent/${driverEntry.skillsDirRelative}"
-    + "\n"
-    + "export DRIVER_SESSION_CACHE_DIR="
-    + escapeShellArg (
-      if driverEntry ? sessionCacheDirRelative then
-        "/home/agent/${driverEntry.sessionCacheDirRelative}"
-      else
-        ""
-    )
-    + "\n";
-
   # The baked /agent/* path fallbacks (lib/agent-paths.nix), rendered the
   # fallback-preserving `VAR=${VAR:-<baked>}` way rather than as an
   # unconditional overwrite: these vars must stay overridable by an
@@ -137,6 +118,8 @@ rec {
       RUNTIME = runtime;
       DRIVER = driverEntry.name;
       DRIVER_SKILLS_DIR = "/home/agent/${driverEntry.skillsDirRelative}";
+      # Empty when the Driver declares no session-state dir; the launcher then
+      # mounts no driver cache on either backend.
       DRIVER_SESSION_CACHE_DIR =
         if driverEntry ? sessionCacheDirRelative then
           "/home/agent/${driverEntry.sessionCacheDirRelative}"
