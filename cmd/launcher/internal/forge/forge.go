@@ -281,7 +281,8 @@ const (
 )
 
 // MaxFailureDetailBytes bounds the string RenderFailureDetail returns, so a
-// large CI log excerpt cannot blow the fix Box's env/prompt budget.
+// PR with many failing checks, or long check-run summaries or status
+// descriptions, cannot blow the fix Box's env/prompt budget.
 const MaxFailureDetailBytes = 4000
 
 // FailureDetailEntry is one failing check or status, normalized from an
@@ -292,7 +293,7 @@ type FailureDetailEntry struct {
 	Summary string
 }
 
-// RenderFailureDetail formats failing entries into a bounded excerpt, truncated
+// RenderFailureDetail formats failing entries into a bounded report, truncated
 // to MaxFailureDetailBytes. Callers must filter entries down to failing ones
 // first.
 func RenderFailureDetail(entries []FailureDetailEntry) string {

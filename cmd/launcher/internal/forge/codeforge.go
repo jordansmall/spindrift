@@ -108,8 +108,9 @@ type PRForge interface {
 	// MERGEABLE. That gap let #670 and #672 land a combined compile break on
 	// main even though each was individually green (issue #936).
 	NeedsUpdate(url string) (bool, error)
-	// FailureDetail returns the failed check names plus a bounded log excerpt
-	// for the PR's head commit, or "" when nothing is currently failing.
+	// FailureDetail returns each failing check's name, conclusion or state, and
+	// summary or description (no job logs) for the PR's head commit, or ""
+	// when nothing is currently failing.
 	// Best-effort: a non-nil error means detail unavailable, and callers must
 	// proceed without it rather than failing their own operation.
 	FailureDetail(url string) (string, error)
