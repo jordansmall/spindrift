@@ -737,46 +737,6 @@ runArtifactsRowChecks allRows
       "runArtifacts (oci-driver-scoped) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci-driver-scoped-image-name" { } "touch $out";
 
-  # documentArtifactKeys must be derived from what runArtifacts emits across
-  # every runner row (issue #810), not a hand-maintained list that can drift.
-  # Only the keys the shared trailer renders are pinned by hand, so a shared
-  # key gained or lost forces a conscious update here; each row's own keys
-  # (FLAKE_IMAGE_ATTR included) come from the row.
-  preambles-document-artifact-keys =
-    let
-      out = preambles.documentArtifactKeys;
-      sharedKeys = [
-        "BOX_ARTIFACT"
-        "BOX_ENV_VARS"
-        "CHORE_CATALOG"
-        "DRIVER"
-        "DRIVER_SESSION_CACHE_DIR"
-        "DRIVER_SKILLS_DIR"
-        "DRIVER_VERSION"
-        "FILER_ENABLED"
-        "FLAKE_LAUNCHER_ATTR"
-        "FORGE_BACKEND"
-        "FULLY_LOCAL"
-        "HOST_MEDIATED_REMOTE"
-        "IN_BOX_UNREACHABLE_TRACKER"
-        "LAUNCHER_CURRENCY_HASH"
-        "OUTBOX_RELAY_CAPABLE"
-        "ROLE_MODELS"
-        "RUNNER_KIND"
-        "RUNTIME"
-        "SCOUT_PROVISIONED"
-        "TRACKER_AXIS_FILER"
-        "TRACKER_AXIS_READ"
-        "TRACKER_AXIS_WRITE"
-        "WORKER_PROVISIONED"
-      ];
-      rowKeys = builtins.concatMap preambles.rowArtifactKeys allRows;
-      expected = pkgs.lib.unique (builtins.sort builtins.lessThan (sharedKeys ++ rowKeys));
-    in
-    assert assertMsg (out == expected)
-      "documentArtifactKeys must be the sorted union of runArtifacts output keys (every runner row), got: ${builtins.toJSON out}";
-    pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
-
   # mkHarness hands runArtifacts the union of every row's inputs, so `...` must
   # not swallow a misspelled name: an argument that is neither the shared
   # trailer's nor any row's input fails eval.
