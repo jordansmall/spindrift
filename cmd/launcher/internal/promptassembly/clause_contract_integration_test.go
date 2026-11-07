@@ -2675,6 +2675,27 @@ var clauseContracts = []clauseContract{
 		absent:   true,
 		reason:   "the CI FAILURE summary does not replace reading the failing job's log, so the template must not say to skip anything on its account.",
 	},
+
+	// issue-read.md
+	{
+		fragment: "issue-read.md",
+		pattern:  regexp.MustCompile(`references too via [A-Z]\w+`),
+		reason:   "the parent/linked-issue pull names the tracker's forge through FORGE_DISPLAY_NAME, so the agent reads linked issues from the right backend.",
+	},
+
+	// land-git-stop-read-write.md
+	{
+		fragment: "land-git-stop-read-write.md",
+		clause:   "2. Print exactly one line",
+		reason:   "a read-write CODE_FORGE=git Box pushes first, so its stop step is step 2; the numbering must follow the push step it renders after (issue #2526).",
+	},
+
+	// land-git-stop-read-only.md
+	{
+		fragment: "land-git-stop-read-only.md",
+		clause:   "1. Print exactly one line",
+		reason:   "a read-only CODE_FORGE=git Box has no push step before it, so its stop step is step 1 (issue #2526).",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
