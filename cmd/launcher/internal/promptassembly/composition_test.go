@@ -7,25 +7,60 @@ import (
 	"spindrift.dev/launcher/internal/passmachine"
 )
 
+const cavemanBody = "caveman body"
+
+// composeRegistry is the synthetic cell the Compose tests share: a gated-on
+// and a gated-off fragment plus a template per kind. ${ISSUE_NUMBER} appears
+// twice in the work base and once in the review template, so var attribution
+// is shared across the two bodies. The ungated rows cover the other attribution
+// paths the source-sum reconciliation must hold through: an Inline var spliced
+// mid-sentence by a parent fragment, a Shared axis row read from the root file
+// (no forge folder is staged), a LegacyFragment fallback (only the legacy file
+// is staged), and a body interpolating ${FORGE_DISPLAY_NAME}.
+func composeRegistry(t *testing.T) (Registry, Env) {
+	t.Helper()
+	return syntheticRegistry(t,
+		[]FragmentRow{
+			{Gate: "CAVEMAN_BAKED", Fragment: "caveman.md", Var: "CAVEMAN_STEP"},
+			{Gate: "TDD_UNBAKED", Fragment: "tdd-unbaked.md", Var: "TDD_UNBAKED_STEP"},
+			{Fragment: "inline.md", Var: "INLINE_NAME", Inline: true},
+			{Fragment: "parent.md", Var: "PARENT_STEP"},
+			{Axis: "forge", Fragment: "forge-step.md", Shared: true, Var: "FORGE_STEP", ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}},
+			{Fragment: "new.md", LegacyFragment: "old.md", Var: "LEGACY_STEP"},
+		},
+		map[string]string{
+			"issue-prompt.md":          "issue ${ISSUE_NUMBER} ${CAVEMAN_STEP}${TDD_UNBAKED_STEP}${PARENT_STEP}${FORGE_STEP}${LEGACY_STEP}on ${ISSUE_NUMBER}\n",
+			"review-prompt.md":         "review ${ISSUE_NUMBER} ${BASE_BRANCH}\n",
+			"fix-prompt.md":            "fix\n",
+			"research-prompt.md":       "research\n",
+			"fragments/caveman.md":     cavemanBody,
+			"fragments/tdd-unbaked.md": "tdd unbaked body",
+			"fragments/inline.md":      "the tracker",
+			"fragments/parent.md":      "see ${INLINE_NAME} now",
+			"fragments/forge-step.md":  "land via ${FORGE_DISPLAY_NAME}",
+			"fragments/old.md":         "legacy body",
+		})
+}
+
 // The four Env shapes are here because Compose derives a different pass set for
 // each: a legacy single pass, five orchestrator passes split across two bodies,
 // a single research pass, and a single fix-pass-on-warm-box pass.
 func TestComposeReconcilesAgainstAssemble(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := composeRegistry(t)
 
-	orchestratorEnv := coveredEnv()
+	orchestratorEnv := base
 
-	researchEnv := coveredEnv()
+	researchEnv := base
 	researchEnv.DispatchKind = "research"
 
-	fixPassEnv := coveredEnv()
+	fixPassEnv := base
 	fixPassEnv.FixPass = 1
 
 	cases := []struct {
 		name string
 		env  Env
 	}{
-		{"legacy", coveredEnv()},
+		{"legacy", base},
 		{"orchestrator", orchestratorEnv},
 		{"research", researchEnv},
 		{"fix pass", fixPassEnv},
@@ -70,10 +105,10 @@ func TestComposeReconcilesAgainstAssemble(t *testing.T) {
 }
 
 func TestComposePassKindDerivation(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := composeRegistry(t)
 
 	t.Run("fresh work: five passes across two templates", func(t *testing.T) {
-		env := coveredEnv()
+		env := base
 
 		comp, err := Compose(env, reg, nil)
 		if err != nil {
@@ -99,7 +134,7 @@ func TestComposePassKindDerivation(t *testing.T) {
 	})
 
 	t.Run("fix pass: single legacy pass on fix-prompt.md", func(t *testing.T) {
-		env := coveredEnv()
+		env := base
 		env.FixPass = 1
 		comp, err := Compose(env, reg, nil)
 		if err != nil {
@@ -117,7 +152,7 @@ func TestComposePassKindDerivation(t *testing.T) {
 	})
 
 	t.Run("research: single pass on research-prompt.md", func(t *testing.T) {
-		env := coveredEnv()
+		env := base
 		env.DispatchKind = "research"
 
 		comp, err := Compose(env, reg, nil)
@@ -137,29 +172,29 @@ func TestComposePassKindDerivation(t *testing.T) {
 }
 
 func TestComposeAttribution(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := composeRegistry(t)
 
 	t.Run("gated-on fragment contributes a fragment source, separator included", func(t *testing.T) {
-		// coveredEnv's CavemanSkillBaked bakes CAVEMAN_BAKED on.
-		comp, err := Compose(coveredEnv(), reg, nil)
+		// base's CavemanSkillBaked (from coveredEnv) bakes CAVEMAN_BAKED on.
+		comp, err := Compose(base, reg, nil)
 		if err != nil {
 			t.Fatalf("Compose: %v", err)
 		}
-		want := len(fragmentText(t, "caveman-default.md")) + len("\n\n")
+		want := len(cavemanBody) + len("\n\n")
 		got := -1
 		for _, s := range comp.Passes[0].Sources {
-			if s.Kind == SourceFragment && s.Name == "caveman-default.md" {
+			if s.Kind == SourceFragment && s.Name == "caveman.md" {
 				got = s.Bytes
 			}
 		}
 		if got != want {
-			t.Errorf("caveman-default.md fragment source Bytes = %d, want %d", got, want)
+			t.Errorf("caveman.md fragment source Bytes = %d, want %d", got, want)
 		}
 	})
 
 	t.Run("gated-off fragment contributes no source", func(t *testing.T) {
-		// coveredEnv's TDDSkillBaked=true leaves TDD_UNBAKED off.
-		comp, err := Compose(coveredEnv(), reg, nil)
+		// base's TDDSkillBaked=true (from coveredEnv) leaves TDD_UNBAKED off.
+		comp, err := Compose(base, reg, nil)
 		if err != nil {
 			t.Fatalf("Compose: %v", err)
 		}
@@ -172,7 +207,7 @@ func TestComposeAttribution(t *testing.T) {
 
 	t.Run("actually-injected contract file contributes a contract source", func(t *testing.T) {
 		dir := t.TempDir()
-		env := coveredEnv()
+		env := base
 		env.FixPass = 1 // fix-prompt.md lacks its own "# COMMS" marker, so injection actually appends.
 		env.CommsContractFile = writeContractFile(t, dir, "comms-contract.md", "# COMMS\n\ncomms body text\n")
 
@@ -194,8 +229,35 @@ func TestComposeAttribution(t *testing.T) {
 		}
 	})
 
+	t.Run("inline, shared-axis and legacy rows attribute to the file actually read", func(t *testing.T) {
+		comp, err := Compose(base, reg, nil)
+		if err != nil {
+			t.Fatalf("Compose: %v", err)
+		}
+		got := map[Source]int{}
+		for _, s := range comp.Passes[0].Sources {
+			got[s.Source] = s.Bytes
+		}
+		// forge-step.md is read from the root (Shared), so its Source names the
+		// root file, not github/forge-step.md; the interpolated display name is a
+		// var source. The Inline row omits the "\n\n" separator, and its bytes stay
+		// attributed to inline.md even where the parent splices them.
+		want := map[Source]int{
+			{Kind: SourceFragment, Name: "inline.md"}:     len("the tracker"),
+			{Kind: SourceFragment, Name: "parent.md"}:     len("see  now") + len("\n\n"),
+			{Kind: SourceFragment, Name: "forge-step.md"}: len("land via ") + len("\n\n"),
+			{Kind: SourceVar, Name: "FORGE_DISPLAY_NAME"}: len("GitHub"),
+			{Kind: SourceFragment, Name: "old.md"}:        len("legacy body") + len("\n\n"),
+		}
+		for src, bytes := range want {
+			if got[src] != bytes {
+				t.Errorf("Source %+v Bytes = %d, want %d (all: %+v)", src, got[src], bytes, got)
+			}
+		}
+	})
+
 	t.Run("substitution variable contributes a var source", func(t *testing.T) {
-		env := coveredEnv() // IssueNumber "2349" is non-empty.
+		env := base // IssueNumber "2349" is non-empty.
 		comp, err := Compose(env, reg, nil)
 		if err != nil {
 			t.Fatalf("Compose: %v", err)
@@ -204,9 +266,8 @@ func TestComposeAttribution(t *testing.T) {
 		for _, s := range comp.Passes[0].Sources {
 			if s.Kind == SourceVar && s.Name == "ISSUE_NUMBER" {
 				found = true
-				// ${ISSUE_NUMBER} appears more than once across the base
-				// template and its gated-on fragments, so the total is a
-				// multiple of one occurrence's length, not that length.
+				// ${ISSUE_NUMBER} appears twice in the implement pass body, so the
+				// total is a multiple of one occurrence's length, not that length.
 				if s.Bytes == 0 || s.Bytes%len(env.IssueNumber) != 0 {
 					t.Errorf("ISSUE_NUMBER source Bytes = %d, want a positive multiple of %d", s.Bytes, len(env.IssueNumber))
 				}
@@ -219,8 +280,8 @@ func TestComposeAttribution(t *testing.T) {
 }
 
 func TestComposeCarriedTextTargeting(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+	reg, base := composeRegistry(t)
+	env := base
 
 	const everyText = "shared handoff text"
 	const fixText = "reviewer findings text"
@@ -264,8 +325,8 @@ func TestComposeCarriedTextTargeting(t *testing.T) {
 }
 
 func TestDiffPasses(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+	reg, base := composeRegistry(t)
+	env := base
 
 	comp, err := Compose(env, reg, nil)
 	if err != nil {
@@ -447,8 +508,8 @@ func TestDiffPassesHandConstructed(t *testing.T) {
 // issue #3444), and two carried blocks sharing one name, which fold through
 // sourceAggregator instead of appending two rows.
 func TestComposeCarriedNoDuplicateSources(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+	reg, base := composeRegistry(t)
+	env := base
 
 	carried := []CarriedText{
 		{Name: "ISSUE_NUMBER", Text: "carried block text"},
@@ -494,8 +555,8 @@ func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 // pass kind this cell does not render must error and name both the block and
 // the pass, rather than silently vanishing from every pass.
 func TestComposeUnknownCarriedPassErrors(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+	reg, base := composeRegistry(t)
+	env := base
 
 	carried := []CarriedText{{Pass: "settel", Name: "typo", Text: "x"}}
 
@@ -515,9 +576,9 @@ func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 // #3445: an Env carrying IssueText, so the base and review body's ISSUE_TEXT
 // segment reconcile too, with Remainder staying 0.
 func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, base := composeRegistry(t)
 
-	baseEnv := coveredEnv()
+	baseEnv := base
 	baseEnv.IssueText = "issue body text"
 
 	orchestratorEnv := baseEnv
@@ -577,13 +638,13 @@ func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
 
 // Passes must name exactly the passes Compose reports, in the same order.
 func TestPassesMatchesCompose(t *testing.T) {
-	reg := loadTestRegistry(t)
-	legacy := coveredEnv()
+	reg, base := composeRegistry(t)
+	legacy := base
 	legacy.FixPass = 1
-	research := coveredEnv()
+	research := base
 	research.DispatchKind = "research"
 
-	for name, env := range map[string]Env{"orchestrator": coveredEnv(), "legacy": legacy, "research": research} {
+	for name, env := range map[string]Env{"orchestrator": base, "legacy": legacy, "research": research} {
 		t.Run(name, func(t *testing.T) {
 			comp, err := Compose(env, reg, nil)
 			if err != nil {
