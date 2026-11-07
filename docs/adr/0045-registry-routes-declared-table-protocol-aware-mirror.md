@@ -181,10 +181,10 @@ tightening-only knob — the inverse of the read-only rule, which forbids
 knobs that loosen. An operator whose registry host also fronts non-registry
 paths now has a real bound on what the Box can reach with their credential,
 instead of an advisory one. This tolerance has a sharp edge on a cargo route:
-the Forwarder re-points a cargo registry's `dl` field at this proxy (see
-above), but that rewritten download path is deliberately outside the derived
-allowlist, so `enforce-allowlist = true` on a cargo route 403s the crate
-downloads it's routing, not just stray non-registry traffic.
+the Registry proxy re-points a cargo registry's `dl` field at the Forwarder
+(see above), but that rewritten download path is deliberately outside the
+derived allowlist, so `enforce-allowlist = true` on a cargo route 403s the
+crate downloads it's routing, not just stray non-registry traffic.
 
 The advisory logging is kept per route (issue #3176), named by prefix in
 every line: one route's upstream matching the allowlist says nothing about
