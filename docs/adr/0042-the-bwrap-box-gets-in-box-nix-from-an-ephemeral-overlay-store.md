@@ -457,7 +457,9 @@ single `nix build --out-link` at
 `.spindrift/nix-gcroots/<generation>/artifact*`. The directory is a sibling
 of `.spindrift/nix-var-snapshot`, not inside it, because reclaim treats every
 entry there as a generation and the run adapter binds the generation
-directory into the Box.
+directory into the Box. (Amended by issue #6072: the run adapter now mounts
+only the generation's `db-<V>` child, never the generation directory itself,
+so reclaim is the only reason left.)
 `launcher build` registers the root under the generation's shared snapshot
 lock. The Box-only staleness hot-swap (ADR 0043) registers it too, for the
 agent closure plus the passwd, group and syscall filter the daemon booted
