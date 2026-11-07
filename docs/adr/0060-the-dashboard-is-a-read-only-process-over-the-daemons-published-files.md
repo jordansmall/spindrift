@@ -142,3 +142,19 @@ stack" the rejection named, kept to built-ins so there is no lockfile to
 churn. The limit is that the fake DOM has no layout or CSS, so the test
 sets scroll metrics itself and never exercises the rule that hides
 `.ln.stream`. It pins the logic, not the rendering.
+
+## Amendment (architecture review 2026-11-07): a Daemon-produced fixture pins the contract
+
+Decided, not yet landed. The Dashboard keeps its own tolerant structs and
+reader; it still imports nothing from the launcher. What changes is how
+drift is caught. Today regexes over both sides' Go source pin nine
+constants (`nix/checks/dashboard-constant-parity.nix`), and nothing pins
+the event names and fields the Dashboard actually decodes. A Daemon test
+instead writes one of every event it emits, plus a status file, to a
+committed fixture under `dashboard/testdata/contract/`; a golden test fails
+when the Daemon's output and the fixture disagree. The Dashboard's own
+tests decode that fixture and assert every event name and field they
+handle. The fixture is plain files, so it survives the Dashboard moving to
+its own repo: it becomes a published artifact rather than shared code.
+Generating event rows into both modules was considered and rejected: it
+pins names but not fields, and it binds the Dashboard to this repo's regen.
