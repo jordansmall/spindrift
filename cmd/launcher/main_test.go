@@ -958,8 +958,9 @@ func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
 
 // The config to runner hand-off that used to carry the /issues mount source
 // (issue #3471). It asserts by string containment over fmt.Sprintf("%+v", rc)
-// rather than naming a field, so it still compiles on origin/main, where
-// runner.MountParams.LocalIssuesDir carries the dir through and it fails.
+// rather than naming a field, so it compiled before issue #3471 too, when
+// runner.MountParams.LocalIssuesDir carried the dir through and the test
+// failed.
 func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ISSUE_TRACKER", "local")
