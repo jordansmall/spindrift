@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runstate"
 	"spindrift.dev/launcher/internal/seedblock"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -22,7 +23,9 @@ import (
 // so every one is set explicitly, even to "", or a leftover value in the test
 // process's own environment leaks into the run. Blanking the generated
 // promptassembly.BoxEnvVarNames keeps that true as rows are added (issue
-// #4044).
+// #4044). It passes an empty registry: the mechanics it covers (flag parsing,
+// output files, composition, run state) hold for any registry, and a test that
+// cares about a row's effect supplies its own.
 func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	t.Helper()
 	for _, name := range promptassembly.BoxEnvVarNames {
@@ -49,13 +52,39 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--auto-lint-skill-baked=true",
 		"--prompts-dir", repopath.PromptsDir(),
 		"--skills-found", "caveman, tdd, commit, code-review",
-		"--registry", repopath.RegistryJSON(),
+		"--registry", testutil.WriteRegistry(t, nil),
 		"--validate-markers-registry", repopath.ValidateMarkersJSON(),
 		"--prompt-output", promptOutput,
 		"--agents-json-output", agentsJSONOutput,
 		"--handoff-output", handoffOutput,
 	}
 }
+
+// withGateProbes points args at a temp prompts dir and registry holding one
+// row per gate. Each row's fragment body is gateProbe(gate), so a test sees
+// whether a gate fired without depending on production fragment prose, and the
+// run is hermetic to the real registry and fragment set.
+func withGateProbes(t *testing.T, args []string, gates ...string) []string {
+	t.Helper()
+	dir := t.TempDir()
+	template := "# TASK\n\nIssue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n\n"
+	var rows []promptassembly.FragmentRow
+	for _, gate := range gates {
+		row := promptassembly.FragmentRow{Gate: gate, Fragment: "probe-" + gate + ".md", Var: "PROBE_" + gate}
+		rows = append(rows, row)
+		template += "${" + row.Var + "}\n"
+		testutil.WriteFixture(t, dir, "fragments/"+row.Fragment, gateProbe(gate))
+	}
+	// A fresh work dispatch renders the review prompt and a fix pass reads
+	// fix-prompt.md, so both must exist.
+	for name, content := range map[string]string{"issue-prompt.md": template, "fix-prompt.md": template, "review-prompt.md": "VERDICT: APPROVE\n"} {
+		testutil.WriteFixture(t, dir, name, content)
+	}
+	args = replaceArg(args, "--prompts-dir", dir)
+	return replaceArg(args, "--registry", testutil.WriteRegistry(t, rows))
+}
+
+func gateProbe(gate string) string { return "probe fired: " + gate }
 
 // Pins that flag parsing reaches promptassembly.Assemble with the right Env
 // and Registry, and that the run writes all three output files (issue #2349).
@@ -129,7 +158,8 @@ func TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt([]string{
-		"--registry", repopath.RegistryJSON(),
+		"--registry", testutil.WriteRegistry(t, nil),
+		"--validate-markers-registry", repopath.ValidateMarkersJSON(),
 		"--prompt-output", filepath.Join(dir, "prompt.txt"),
 		"--agents-json-output", filepath.Join(dir, "agents.json"),
 	}, &stdout, io.Discard)
@@ -318,8 +348,6 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 // (issue #2533 slice 2). gates_tracker.go reads the axis fields directly
 // instead of re-deriving them, and checkCoveredCell no longer re-validates
 // IssueTracker (issue #2540), so the axis fields are the sole gate input.
-// ISSUE_TRACKER is set to match only because ${ISSUE_READ_STEP} resolves its
-// fragment from the tracker's own folder (issue #5646), not from a gate.
 func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	dir := t.TempDir()
 	promptOutput := filepath.Join(dir, "prompt.txt")
@@ -327,10 +355,10 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	t.Setenv("ISSUE_TRACKER", "forgejo")
 	t.Setenv("BOX_TRACKER_AXIS_READ", "FORGEJO")
 	t.Setenv("BOX_TRACKER_AXIS_WRITE", "FORGEJO")
 	t.Setenv("BOX_TRACKER_AXIS_FILER", "FORGEJO")
+	args = withGateProbes(t, args, "ISSUE_TRACKER_FORGEJO", "ISSUE_TRACKER_GITHUB_LINKS_READABLE")
 
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout, io.Discard)
@@ -343,11 +371,11 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 		t.Fatalf("read prompt output: %v", err)
 	}
 	prompt := string(promptBytes)
-	if !strings.Contains(prompt, "via Forgejo") {
-		t.Errorf("prompt does not contain %q (forgejo issue-read fragment), want it rendered when --tracker-axis-read=FORGEJO", "via Forgejo")
+	if want := gateProbe("ISSUE_TRACKER_FORGEJO"); !strings.Contains(prompt, want) {
+		t.Errorf("prompt does not contain %q, want the FORGEJO read gate firing when --tracker-axis-read=FORGEJO", want)
 	}
-	if strings.Contains(prompt, "via GitHub") {
-		t.Errorf("prompt contains %q (github issue-read fragment), want it absent when --tracker-axis-read=FORGEJO", "via GitHub")
+	if unwant := gateProbe("ISSUE_TRACKER_GITHUB_LINKS_READABLE"); strings.Contains(prompt, unwant) {
+		t.Errorf("prompt contains %q, want the GITHUB read gate off when --tracker-axis-read=FORGEJO", unwant)
 	}
 }
 
@@ -364,6 +392,7 @@ func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
 	t.Setenv("FIX_PASS", "1")
 	t.Setenv("BOX_FORGE_BACKEND", "FORGEJO")
+	args = withGateProbes(t, args, "FIX_CI_READ_FORGEJO", "FIX_CI_READ_GH")
 
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout, io.Discard)
@@ -376,26 +405,24 @@ func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 		t.Fatalf("read prompt output: %v", err)
 	}
 	prompt := string(promptBytes)
-	if !strings.Contains(prompt, "fj pr status") {
-		t.Errorf("prompt does not contain %q (forgejo fix-ci-read fragment), want it rendered when --forge-backend=FORGEJO", "fj pr status")
+	if want := gateProbe("FIX_CI_READ_FORGEJO"); !strings.Contains(prompt, want) {
+		t.Errorf("prompt does not contain %q, want FIX_CI_READ_FORGEJO firing when --forge-backend=FORGEJO", want)
 	}
-	if strings.Contains(prompt, "gh pr view --json") {
-		t.Errorf("prompt contains %q (github fix-ci-read fragment), want it absent when --forge-backend=FORGEJO", "gh pr view --json")
+	if unwant := gateProbe("FIX_CI_READ_GH"); strings.Contains(prompt, unwant) {
+		t.Errorf("prompt contains %q, want FIX_CI_READ_GH off when --forge-backend=FORGEJO", unwant)
 	}
 }
 
-// Marker strings copied from the fragment files under
-// templates/default/prompts/fragments/ and grep-confirmed to appear nowhere
-// else under templates/default/prompts/, so a Contains check on the rendered
-// prompt is unambiguous. file-issues-direct.md and file-issues-relay.md share
-// filerEnabledMarker, and both forks require e.FilerEnabled.
-const (
-	filerEnabledMarker      = "# FILE ISSUES"
-	workerProvisionedMarker = "rather than editing the source yourself"
+// What the FILER_ENABLED and WORKER_PROVISIONED gate probes render; see
+// withGateProbes.
+var (
+	filerEnabledMarker      = gateProbe("FILER_ENABLED")
+	workerProvisionedMarker = gateProbe("WORKER_PROVISIONED")
 )
 
 func assemblePromptForTest(t *testing.T, dir string, args []string) string {
 	t.Helper()
+	args = withGateProbes(t, args, "FILER_ENABLED", "WORKER_PROVISIONED")
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
@@ -1079,6 +1106,8 @@ func TestRunAssemblePrompt_FragmentsOutput(t *testing.T) {
 		fragmentsOutput := filepath.Join(dir, "fragments.txt")
 		args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
 		args = append(args, "--fragments-output", fragmentsOutput)
+		// Registry order is deliberately unsorted so the sort check has teeth.
+		args = withGateProbes(t, args, "SKILLS_FOUND", "CAVEMAN_BAKED")
 
 		var stdout bytes.Buffer
 		if rc := runAssemblePrompt(args, &stdout, io.Discard); rc != 0 {
