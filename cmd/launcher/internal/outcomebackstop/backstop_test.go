@@ -661,17 +661,23 @@ func TestRun_RevListUnparseablePushArmTreatedAsWorkExists(t *testing.T) {
 	}
 }
 
+// relayArms and countFailures cross every relay arm with every way the commit
+// count can fail, shared by Run's and DemoteAlreadyResolved's relay-arm tests.
+var relayArms = map[string]func(*Config){
+	"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
+	"read-only":     func(c *Config) { c.OutboxRelayCapable = true; c.WriteEnabled = false },
+}
+
+var countFailures = map[string]fakeResult{
+	"error":       {err: fmt.Errorf("bad revision")},
+	"unparseable": {stdout: "not-a-number\n"},
+}
+
 // bundleout writes no bundle when the count fails, so a relay arm that claimed
 // "relayed" would report ready for a branch that never left the Box.
 func TestRun_RevListFailureBlocksRelayArms(t *testing.T) {
-	for armName, mutate := range map[string]func(*Config){
-		"host-mediated": func(c *Config) { c.HostMediatedRemote = true; c.WriteEnabled = true },
-		"read-only":     func(c *Config) { c.OutboxRelayCapable = true; c.WriteEnabled = false },
-	} {
-		for failName, resp := range map[string]fakeResult{
-			"error":       {err: fmt.Errorf("bad revision")},
-			"unparseable": {stdout: "not-a-number\n"},
-		} {
+	for armName, mutate := range relayArms {
+		for failName, resp := range countFailures {
 			t.Run(armName+"/"+failName, func(t *testing.T) {
 				git := &fakeGit{responses: map[string]fakeResult{"rev-list": resp}}
 				cfg := baseConfig(git, &fakeClock{})
@@ -1160,6 +1166,38 @@ func TestDemoteAlreadyResolved_CommitCountErrorDemotes(t *testing.T) {
 	}
 	if git.countCalls("push") != 1 {
 		t.Fatalf("expected a push attempt on the fail-closed path, got %v", git.calls)
+	}
+}
+
+// The demote path shares Run's reason: a failed count writes no bundle, so a
+// relay arm must not claim the branch was relayed.
+func TestDemoteAlreadyResolved_RevListFailureBlocksRelayArms(t *testing.T) {
+	for armName, mutate := range relayArms {
+		for failName, resp := range countFailures {
+			t.Run(armName+"/"+failName, func(t *testing.T) {
+				git := &fakeGit{responses: map[string]fakeResult{"rev-list": resp}}
+				cfg := baseConfig(git, &fakeClock{})
+				mutate(&cfg)
+
+				var buf bytes.Buffer
+				if err := DemoteAlreadyResolved(cfg, alreadyResolvedLine(), &buf); err != nil {
+					t.Fatalf("DemoteAlreadyResolved: %v", err)
+				}
+				line := buf.String()
+				if !strings.Contains(line, "status=blocked") {
+					t.Fatalf("expected status=blocked, got %q", line)
+				}
+				if !strings.Contains(line, "could not be counted") {
+					t.Fatalf("expected the count error in the note, got %q", line)
+				}
+				if strings.Contains(line, "relayed via outbox bundle") {
+					t.Fatalf("expected no relay claim, got %q", line)
+				}
+				if git.countCalls("push") != 0 {
+					t.Fatalf("expected no push on a relay arm, got %v", git.calls)
+				}
+			})
+		}
 	}
 }
 
