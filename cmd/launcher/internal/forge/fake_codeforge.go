@@ -10,8 +10,9 @@ var _ BranchProtectionForge = (*CodeForgeFake)(nil)
 type CodeForgeFake struct {
 	*core
 
-	// BranchPrefix's zero value "" matches an unconfigured config.branchPrefix;
-	// set it to exercise a real prefix such as "agent/issue-".
+	// BranchPrefix's zero value "" yields bare-number branch names (see
+	// AgentBranchName); set it to the BRANCH_PREFIX default "agent/issue-" to
+	// match an unconfigured launcher.
 	BranchPrefix string
 	branchExists map[string]bool
 	// BranchExistsErr, if non-nil, is returned by every BranchExists call.

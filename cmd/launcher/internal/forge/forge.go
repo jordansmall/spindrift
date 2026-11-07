@@ -48,8 +48,9 @@ func WorkflowPermissionRemedy(num string) string {
 // backoff.
 var ErrMergeTransient = errors.New("transient merge failure")
 
-// ErrAuthFailure is returned by Probe when the forge credentials are missing or
-// invalid. Callers should advise the user to check GH_TOKEN.
+// ErrAuthFailure means the forge credentials are missing or invalid: Probe
+// returns it, as do the REST adapters on a 401 or 403. Callers should name the
+// selected backend's token (doctor's Config.TokenHint).
 var ErrAuthFailure = errors.New("forge auth failure")
 
 // ErrRepoNotFound is returned by Probe when the configured repository cannot be
