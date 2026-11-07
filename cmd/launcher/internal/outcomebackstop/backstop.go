@@ -59,6 +59,18 @@ type Config struct {
 	RunStateFilePath string
 }
 
+// relayNote is the note suffix for an arm whose branch leaves via the outbox
+// bundle rather than an in-box push; "" means the push arm.
+func (cfg Config) relayNote() string {
+	switch {
+	case cfg.HostMediatedRemote:
+		return "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
+	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
+		return "; branch relayed via outbox bundle (read-only Box)"
+	}
+	return ""
+}
+
 // Run salvages a dirty tree, pushes Branch when there is a writable remote, and
 // always emits one synthetic SPINDRIFT_OUTCOME line so the launcher gets a
 // terminal signal to classify (issue #593). Status lands on "ready" only when
@@ -94,13 +106,13 @@ func Run(cfg Config, w io.Writer) error {
 	if countErr != nil {
 		note += fmt.Sprintf("; could not count commits on %s: %v", cfg.Branch, countErr)
 	}
-	viaOutbox := cfg.HostMediatedRemote || (!cfg.WriteEnabled && cfg.OutboxRelayCapable)
+	relay := cfg.relayNote()
 
 	status := "blocked"
 	switch {
 	case !salvageOK:
 		// A tree that could not be checked or cleaned is not a landed state.
-	case countErr != nil && viaOutbox:
+	case countErr != nil && relay != "":
 		// bundleout fails on the same rev-list error and writes no bundle
 		// (bundleout.go), so nothing is relayed.
 	case countErr == nil && count == 0:
@@ -108,13 +120,8 @@ func Run(cfg Config, w io.Writer) error {
 		// successful push is its own evidence, and a needless attempt beats a
 		// "no work to preserve" note reporting the wrong thing (#593).
 		note += "; no work to preserve"
-	case cfg.HostMediatedRemote:
-		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
-		if !unresolvedBlock {
-			status = "ready"
-		}
-	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
-		note += "; branch relayed via outbox bundle (read-only Box)"
+	case relay != "":
+		note += relay
 		if !unresolvedBlock {
 			status = "ready"
 		}

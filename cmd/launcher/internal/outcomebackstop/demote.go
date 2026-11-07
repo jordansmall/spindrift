@@ -51,11 +51,10 @@ func DemoteAlreadyResolved(cfg Config, priorOutcomeLine string, w io.Writer) err
 		note = fmt.Sprintf("agent reported already-resolved but %d commits exist on %s", count, cfg.Branch)
 	}
 
+	relay := cfg.relayNote()
 	switch {
-	case cfg.HostMediatedRemote:
-		note += "; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
-	case !cfg.WriteEnabled && cfg.OutboxRelayCapable:
-		note += "; branch relayed via outbox bundle (read-only Box)"
+	case relay != "":
+		note += relay
 	default:
 		note, _ = pushWithRetry(git, clock, cfg, note)
 	}
