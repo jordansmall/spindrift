@@ -1159,6 +1159,81 @@ var clauseContracts = []clauseContract{
 		reason:   "the heredoc example carries -dedup, the one concrete site-key shape a filer must match (issue #3866).",
 	},
 
+	{
+		fragment: "filer-file-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_ISSUE_INTENT [^\s$]+ <base64-payload>`),
+		reason:   "the log-carrier filer prints one SPINDRIFT_ISSUE_INTENT line per issue, and the substituted run nonce is the field the host matches it by (issue #3726).",
+	},
+	{
+		fragment: "filer-file-relay-socket.md",
+		clause:   "Both `-title` and `-type` are required",
+		reason:   "signal_cmd.go's issue-intent case rejects an empty -title and an empty -type with exit 1 (issue #3726).",
+	},
+	{
+		fragment: "filer-file-relay-socket.md",
+		clause:   "Unlike `-title`, `-type` is required",
+		absent:   true,
+		reason:   "the prose must not claim -title is optional, since the send is rejected without it (issue #3726).",
+	},
+
+	// open-pr-create-outbox.md, if-blocked-pr-outbox.md
+	{
+		fragment: "open-pr-create-outbox.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT [^\s$]+ <base64-encoded title`),
+		reason:   "a read-only work box prints its PR intent as one SPINDRIFT_PR_INTENT line carrying the substituted run nonce, the field the host matches it by (issue #3726).",
+	},
+	{
+		fragment: "if-blocked-pr-outbox.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT [^\s$]+ <base64-encoded title`),
+		reason:   "the IF BLOCKED step prints its PR intent as one SPINDRIFT_PR_INTENT line carrying the substituted run nonce, the field the host matches it by (issue #3726).",
+	},
+
+	// file-issues-relay.md, file-issues-relay-socket.md
+	{
+		fragment: "file-issues-relay.md",
+		clause:   "it emits `SPINDRIFT_ISSUE_INTENT` lines instead, and the launcher files each one host-side",
+		reason:   "the log-carrier relay names the stdout marker as its mechanism, which is what tells the coordinator the filer cannot file (issue #3726).",
+	},
+	{
+		fragment: "file-issues-relay-socket.md",
+		clause:   "it sends each one over the Signal socket via `driver-exec signal issue-intent` instead",
+		reason:   "the socket-carrier relay names the driver-exec verb as its mechanism, which is what tells the coordinator the filer cannot file (issue #3726).",
+	},
+
+	// filer-label-relay.md, filer-label-relay-research.md
+	{
+		fragment: "filer-label-relay.md",
+		clause:   "applies the `agent-review-finding` label itself",
+		reason:   "on the work path the launcher applies the work provenance label host-side, so the filer is told to skip creating it (issue #2593).",
+	},
+	{
+		fragment: "filer-label-relay-research.md",
+		clause:   "applies the `agent-research-finding` label itself",
+		reason:   "on the research path the launcher applies the research provenance label host-side, not the work one (issue #2593).",
+	},
+
+	// research-file-issues-relay.md, research-file-issues-relay-socket.md
+	{
+		fragment: "research-file-issues-relay.md",
+		clause:   "**File findings.**",
+		reason:   "with the Filer provisioned the research prompt carries a FILE FINDINGS section whatever the box's write access (issue #2593, ADR 0041).",
+	},
+	{
+		fragment: "research-file-issues-relay.md",
+		clause:   "`agent-research-finding` label",
+		reason:   "the research relay names the provenance label the launcher applies host-side (issue #2593).",
+	},
+	{
+		fragment: "research-file-issues-relay-socket.md",
+		clause:   "**File findings.**",
+		reason:   "with the Filer provisioned the research prompt carries a FILE FINDINGS section whatever the box's write access (issue #2593, ADR 0041).",
+	},
+	{
+		fragment: "research-file-issues-relay-socket.md",
+		clause:   "`agent-research-finding` label",
+		reason:   "the research relay names the provenance label the launcher applies host-side (issue #2593).",
+	},
+
 	// if-blocked-pr-outbox-socket.md
 	{
 		fragment: "if-blocked-pr-outbox-socket.md",
