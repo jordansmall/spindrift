@@ -548,6 +548,8 @@ func TestPoolExit3SiblingPhasesNotEngaged(t *testing.T) {
 			em := newTestEmitter(nw)
 			cfg := testConfig(2)
 			cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 			defer p.cancel()
 
@@ -563,7 +565,7 @@ func TestPoolExit3SiblingPhasesNotEngaged(t *testing.T) {
 			if gotJam != tt.wantJam {
 				t.Fatalf("events = %v, want jam=%v", eventNames(events), tt.wantJam)
 			}
-			if !p.st.sched.View(tt.reportingKind, clk.Now()).Jammed {
+			if !kindCheck(t, readStatus(t, dir), tt.reportingKind).Jammed {
 				t.Fatalf("kind %v jammed = false, want true on every exit 3 regardless of sibling phase", tt.reportingKind)
 			}
 		})
@@ -1106,6 +1108,8 @@ func TestAwaitWindowReportsAwaitingWindowThenIdle(t *testing.T) {
 
 	cfg := testConfig(1)
 	cfg.Awake = win
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
@@ -1117,14 +1121,14 @@ func TestAwaitWindowReportsAwaitingWindowThenIdle(t *testing.T) {
 	}()
 
 	clk.awaitSleep(t, 1)
-	if got := p.snapshot().Slots[0].Phase; got != PhaseAwaitingWindow {
+	if got := readStatus(t, dir).Slots[0].Phase; got != PhaseAwaitingWindow {
 		t.Fatalf("phase while parked on a shut window = %q, want %q", got, PhaseAwaitingWindow)
 	}
 
 	clk.step(time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC)) // window opens
 	wg.Wait()
 
-	if got := p.snapshot().Slots[0].Phase; got != PhaseIdle {
+	if got := readStatus(t, dir).Slots[0].Phase; got != PhaseIdle {
 		t.Fatalf("phase after the window opened = %q, want %q", got, PhaseIdle)
 	}
 }
@@ -1183,6 +1187,8 @@ func TestBatonParkPublishesIdle(t *testing.T) {
 	em := newTestEmitter(nw)
 
 	cfg := testConfig(slots)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	p, pctx := newPool(context.Background(), cfg, &scriptedRunner{revisions: []string{"rev1"}}, em, clk)
 	defer p.cancel()
 
@@ -1199,7 +1205,9 @@ func TestBatonParkPublishesIdle(t *testing.T) {
 	// phase, so observing the line proves the phase is already written.
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
-	if got := p.snapshot().Slots[1].Phase; got != PhaseIdle {
+	// The slot publishes after releasing p.mu, so the line can precede the file.
+	p.publishNow()
+	if got := readStatus(t, dir).Slots[1].Phase; got != PhaseIdle {
 		t.Fatalf("phase while parked on the baton = %q, want %q", got, PhaseIdle)
 	}
 
@@ -1335,30 +1343,37 @@ func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 			em := newTestEmitter(&buf)
 
 			cfg := dualKindConfig(1, 0)
+			// Minute-scale floor: the published nextCheck is RFC3339, so a
+			// re-gate at a later now must shift it by whole seconds.
+			cfg.IdleFloor, cfg.IdleCap = time.Minute, time.Hour
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			p, _ := newPool(context.Background(), cfg, r, em, clk)
 			defer p.cancel()
 
 			for _, k := range tc.jam {
 				p.markNoWork(k, clk.Now(), true)
 			}
-			readyAt := func(k Kind) time.Time {
-				until, _ := p.gateOf(k, clk.Now())
-				return until
+			nextCheck := func(k Kind) string {
+				return kindCheck(t, readStatus(t, dir), k).NextCheck
 			}
-			gateBefore := map[Kind]time.Time{}
+			gateBefore := map[Kind]string{}
 			for _, k := range tc.queueEmpty {
 				p.markNoWork(k, clk.Now(), false)
-				gateBefore[k] = readyAt(k)
-				if gateBefore[k].IsZero() {
+				gateBefore[k] = nextCheck(k)
+				if gateBefore[k] == "" {
 					t.Fatalf("queue-empty gate for %v was never set", k)
 				}
 			}
 
+			// Still inside the one-minute gate, but late enough that a re-gate
+			// from here would land on a different instant.
+			clk.advanceBy(10 * time.Second)
 			p.noteTipMoved(0, "rev2")
 
 			for _, k := range tc.queueEmpty {
-				if got := readyAt(k); !got.Equal(gateBefore[k]) {
-					t.Fatalf("queue-empty %v readyAt = %v after tip move, want untouched %v", k, got, gateBefore[k])
+				if got := nextCheck(k); got != gateBefore[k] {
+					t.Fatalf("queue-empty %v nextCheck = %v after tip move, want untouched %v", k, got, gateBefore[k])
 				}
 			}
 
@@ -1455,6 +1470,8 @@ func TestResolveTipPostPickKindSiteReportsMoved(t *testing.T) {
 	em := newTestEmitter(&buf)
 
 	cfg := dualKindConfig(1, 0)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
@@ -1481,7 +1498,7 @@ func TestResolveTipPostPickKindSiteReportsMoved(t *testing.T) {
 	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindOf(dispatchkind.Work)}) {
 		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
 	}
-	if p.st.sched.View(KindOf(dispatchkind.Work), clk.Now()).Jammed {
+	if kindCheck(t, readStatus(t, dir), KindOf(dispatchkind.Work)).Jammed {
 		t.Fatalf("dispatch still jammedNow after a post-pickKind resolve observed Moved=true, want the gate cleared")
 	}
 }
@@ -1585,8 +1602,7 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
 	}
 
-	// pickKind, not a bare p.st read, is the lock-respecting way to observe
-	// dispatch's gate cleared.
+	// A cleared gate makes pickKind offer dispatch again.
 	if kind, ok := p.pickKind(); !ok || kind != KindOf(dispatchkind.Work) {
 		t.Fatalf("pickKind() after the resolve = (%q, %v), want (dispatch, true): dispatch's gate must be cleared", kind, ok)
 	}
@@ -1741,7 +1757,7 @@ func windowFromOffsets(t *testing.T, now time.Time, openIn, shutIn time.Duration
 }
 
 // statusDir builds a temp status directory and a StatusWriter pointed at it
-// with a fixed clock, the wiring TestPoolSnapshotState's Loop-driven cases
+// with a fixed clock, the wiring TestPoolStatusState's Loop-driven cases
 // and TestPoolPublishReportsWriteFailureDiagnostic both need.
 func statusDir(t *testing.T) (string, *StatusWriter) {
 	t.Helper()
@@ -1749,6 +1765,10 @@ func statusDir(t *testing.T) (string, *StatusWriter) {
 	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
 	return dir, sw
 }
+
+// publishNow forces a publish of the current state (via publishInitial's
+// no-op mutate) so a Status read reflects the test clock's now.
+func (p *pool) publishNow() { p.publishInitial() }
 
 // readStatusErr is readStatus's non-fatal twin, for hooks that run on a
 // pool slot goroutine rather than the test's own: t.Fatalf there runs
@@ -1777,6 +1797,18 @@ func readStatus(t *testing.T, dir string) *Status {
 	return st
 }
 
+// kindCheck picks k's entry out of a published Status's Checks.
+func kindCheck(t *testing.T, st *Status, k Kind) KindCheck {
+	t.Helper()
+	for _, kc := range st.Checks {
+		if kc.Kind == k {
+			return kc
+		}
+	}
+	t.Fatalf("status Checks = %+v, want an entry for kind %q", st.Checks, k)
+	return KindCheck{}
+}
+
 // openWindowClosingSoon builds an Awake window guaranteed open at now but
 // due to close in closesIn, the mirror image of shutWindow: it lets a test
 // start a child while the window is genuinely open and only later advance
@@ -1788,7 +1820,7 @@ func openWindowClosingSoon(t *testing.T, now time.Time, closesIn time.Duration) 
 	return windowFromOffsets(t, now, -time.Hour, closesIn)
 }
 
-// TestPoolSnapshotState pins snapshot's State precedence (issue #3545):
+// TestPoolStatusState pins projectStatus's State precedence (issue #3545):
 // halted outranks everything, working outranks asleep (a child started
 // before the window closed is still running), then jammed vs waiting is
 // distinguished by whether any gated kind is jammedNow, and checking is the
@@ -1797,7 +1829,7 @@ func openWindowClosingSoon(t *testing.T, now time.Time, closesIn time.Duration) 
 // (a hook or a parked clock), per issue #3620 slice 7a; the "asleep from a
 // shut window" case builds a pool directly instead, because it pins the
 // instant before any Loop hook can reach — see that case's own comment.
-func TestPoolSnapshotState(t *testing.T) {
+func TestPoolStatusState(t *testing.T) {
 	tests := []struct {
 		name string
 		run  func(t *testing.T, dir string, sw *StatusWriter) *Status
@@ -1926,14 +1958,15 @@ func TestPoolSnapshotState(t *testing.T) {
 			// is before the flip, but nothing the double can hook fires
 			// between the two.
 			name: "asleep from a shut window even before any slot parks",
-			run: func(t *testing.T, _ string, _ *StatusWriter) *Status {
+			run: func(t *testing.T, dir string, sw *StatusWriter) *Status {
 				clk := &testClock{}
 				cfg := testConfig(1)
 				cfg.Awake = shutWindow(t, clk.Now())
+				cfg.Status = sw
 				var buf bytes.Buffer
 				p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
-				snap := p.snapshot()
-				return &snap
+				p.publishNow()
+				return readStatus(t, dir)
 			},
 			want: StateAsleep,
 		},
@@ -2020,13 +2053,13 @@ func TestPoolSnapshotState(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotReasonWalkExhausted pins that projectStatus surfaces
+// TestPoolStatusReasonWalkExhausted pins that projectStatus surfaces
 // Until's walk-exhausted degraded case (awake.go) in Status.Reason regardless
 // of which non-halted State it lands on: the window really is shut (or a
 // child is still running under a since-shut window) and NextCheck only names
 // a re-check instant, not a real reopening, so Reason is how a reader tells
 // the two apart (issue #3590).
-func TestPoolSnapshotReasonWalkExhausted(t *testing.T) {
+func TestPoolStatusReasonWalkExhausted(t *testing.T) {
 	tests := []struct {
 		name  string
 		start bool
@@ -2042,12 +2075,16 @@ func TestPoolSnapshotReasonWalkExhausted(t *testing.T) {
 			clk := &testClock{now: now}
 			cfg := testConfig(1)
 			cfg.Awake = w
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			var buf bytes.Buffer
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
 			if tc.start {
 				p.startChild(0, KindOf(dispatchkind.Work), "rev1")
+			} else {
+				p.publishNow()
 			}
-			snap := p.snapshot()
+			snap := readStatus(t, dir)
 
 			if snap.State != tc.want {
 				t.Fatalf("state = %q, want %q", snap.State, tc.want)
@@ -2068,8 +2105,9 @@ func TestPoolSnapshotReasonWalkExhausted(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotSlots pins that snapshot names each slot's kind, revision
-// and in-flight issues from occupancy, leaving an unoccupied slot bare.
+// TestPoolStatusSlots pins that the published Status names each slot's
+// kind, revision and in-flight issues from occupancy, leaving an unoccupied
+// slot bare.
 // Driven against a 2-slot pool: slot 0 is the pre-assigned initial baton
 // holder (pool.go's leadSlot), so it alone occupies on the first round
 // while slot 1 parks in awaitBaton.
@@ -2091,7 +2129,7 @@ func TestPoolSnapshotReasonWalkExhausted(t *testing.T) {
 // the status read onStart makes. Without it slot 0 can reach onStart
 // before slot 1's goroutine is scheduled at all, snapshotting slot 1 as
 // still idle.
-func TestPoolSnapshotSlots(t *testing.T) {
+func TestPoolStatusSlots(t *testing.T) {
 	dir, sw := statusDir(t)
 	clk := &testClock{}
 	var st *Status
@@ -2126,7 +2164,7 @@ func TestPoolSnapshotSlots(t *testing.T) {
 
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
-	p.publishInitial()
+	p.publishNow()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -2187,6 +2225,8 @@ func TestPoolSnapshotSlots(t *testing.T) {
 func TestPoolNoteRecordBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
@@ -2195,7 +2235,7 @@ func TestPoolNoteRecordBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T)
 	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "initial"})
 	p.noteRecord(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: "fix-pass-1"})
 
-	snap := p.snapshot()
+	snap := readStatus(t, dir)
 	if !reflect.DeepEqual(snap.Slots[0].Issues, []string{"123"}) {
 		t.Fatalf("issues = %v, want [123] (deduped)", snap.Slots[0].Issues)
 	}
@@ -2213,12 +2253,14 @@ func TestPoolNoteRecordBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T)
 	}
 }
 
-// TestPoolSnapshotPublishesLatestBoxPhaseAsPass pins that a running slot's
+// TestPoolStatusPublishesLatestBoxPhaseAsPass pins that a running slot's
 // status carries the phase of its child's most recent box record, and that
 // neither a finished child nor a fresh one on the same slot inherits it.
-func TestPoolSnapshotPublishesLatestBoxPhaseAsPass(t *testing.T) {
+func TestPoolStatusPublishesLatestBoxPhaseAsPass(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
@@ -2226,13 +2268,13 @@ func TestPoolSnapshotPublishesLatestBoxPhaseAsPass(t *testing.T) {
 	box := func(phase string) {
 		p.noteRecord(0, work, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: phase})
 	}
-	pass := func() string { return p.snapshot().Slots[0].Pass }
+	pass := func() string { return readStatus(t, dir).Slots[0].Pass }
 	start := func() {
 		t.Helper()
 		if _, _, ok := p.startChild(0, work, "rev1"); !ok {
 			t.Fatal("startChild refused the slot")
 		}
-		if ph := p.snapshot().Slots[0].Phase; ph != PhaseRunning {
+		if ph := readStatus(t, dir).Slots[0].Phase; ph != PhaseRunning {
 			t.Fatalf("phase after startChild = %q, want %q", ph, PhaseRunning)
 		}
 	}
@@ -2261,14 +2303,16 @@ func TestPoolSnapshotPublishesLatestBoxPhaseAsPass(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotPublishesLatestModelRecord pins that a running slot's
+// TestPoolStatusPublishesLatestModelRecord pins that a running slot's
 // status carries its child's latest model record, that a later model record
 // replaces it and a later box record clears it, and that neither a finished
 // child nor a fresh one on the same slot inherits it. Each record is also
 // emitted as a model event.
-func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
+func TestPoolStatusPublishesLatestModelRecord(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
@@ -2278,7 +2322,7 @@ func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
 		p.noteRecord(0, work, "rev1", Record{Event: report.EventModel, Key: key, Model: id, ModelRole: role})
 	}
 	got := func() (string, string) {
-		s := p.snapshot().Slots[0]
+		s := readStatus(t, dir).Slots[0]
 		return s.Model, s.ModelRole
 	}
 	want := func(step, id, role string) {
@@ -2319,15 +2363,15 @@ func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotChecksOrderAndNextCheck pins that Checks is built in
-// cfg.Kinds order (not the p.kinds map's undefined order) and carries a
+// TestPoolStatusChecksOrderAndNextCheck pins that Checks is built in
+// cfg.Kinds order (not a map's undefined order) and carries a
 // nextCheck only for a gated kind. Driven through Loop with
 // Reservation: 1 so the sole slot prefers research first: its
 // first iteration gates research (exit 2) and continues, its second picks
 // dispatch — the onStart hook reads the status file there, while dispatch
 // is occupying the slot and research is already gated from the round
 // before.
-func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
+func TestPoolStatusChecksOrderAndNextCheck(t *testing.T) {
 	dir, sw := statusDir(t)
 	clk := &testClock{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2372,9 +2416,9 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting pins the fix for the
+// TestPoolStatusElapsedGateReadsAsCheckingNotWaiting pins the fix for the
 // finding at backoff.go:98: once a gated kind's deadline has passed, a
-// snapshot taken before anything re-runs pickKind must report the kind as
+// Status published before anything re-runs pickKind must report the kind as
 // runnable now (empty NextCheck) and the pool as StateChecking, never a
 // stale past NextCheck under StateWaiting — the seven-hours-stale
 // awake_open publish from the finding's own reproduction. Stays on direct
@@ -2383,19 +2427,25 @@ func TestPoolSnapshotChecksOrderAndNextCheck(t *testing.T) {
 // deadline passing and the slot's next pickKind call — what this test
 // pins — has no Loop-driven publish landing inside it for ReadStatus to
 // observe.
-func TestPoolSnapshotElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
+func TestPoolStatusElapsedGateReadsAsCheckingNotWaiting(t *testing.T) {
 	clk := &testClock{}
 	cfg := testConfig(1)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
 
-	wait := p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
-	clk.advanceBy(wait + time.Millisecond) // past the deadline
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
+	if readStatus(t, dir).State != StateWaiting {
+		t.Fatalf("state right after the empty result = %q, want %q: the gate must be live before it can elapse", readStatus(t, dir).State, StateWaiting)
+	}
+	clk.advanceBy(testIdleFloor + time.Millisecond) // past the deadline
+	p.publishNow()
 
-	snap := p.snapshot()
+	snap := readStatus(t, dir)
 	if snap.Checks[0].NextCheck != "" {
-		t.Fatalf("nextCheck = %q, want empty: the gate elapsed before this snapshot", snap.Checks[0].NextCheck)
+		t.Fatalf("nextCheck = %q, want empty: the gate elapsed before this publish", snap.Checks[0].NextCheck)
 	}
 	if snap.State != StateChecking {
 		t.Fatalf("state = %q, want %q (elapsed gate reads as runnable, not waiting)", snap.State, StateChecking)
@@ -2431,6 +2481,8 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	em := newTestEmitter(nw)
 	cfg := testConfig(slots)
 	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
+	dir, sw := statusDir(t)
+	cfg.Status = sw
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
 	defer p.cancel()
 
@@ -2456,18 +2508,19 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// rather than a sample taken mid-iteration.
 	<-clk.sleepSignal
 
-	if !p.st.sched.View(KindOf(dispatchkind.Work), clk.Now()).Jammed {
+	if !kindCheck(t, readStatus(t, dir), KindOf(dispatchkind.Work)).Jammed {
 		t.Fatalf("dispatch jammedNow = false with a sibling occupied, want true (exit 3 alone gates this)")
 	}
 
-	// A busy slot outranks jammed/waiting in snapshot's precedence, so the
+	// A busy slot outranks jammed/waiting in projectStatus's precedence, so the
 	// sibling has to clear before the state under test is observable.
 	p.finishChild(1)
 
-	if !p.st.sched.View(KindOf(dispatchkind.Work), clk.Now()).Jammed {
+	st := readStatus(t, dir)
+	if !kindCheck(t, st, KindOf(dispatchkind.Work)).Jammed {
 		t.Fatalf("dispatch jammedNow = false after the sibling cleared, want still true")
 	}
-	if s := p.snapshot().State; s != StateJammed {
+	if s := st.State; s != StateJammed {
 		t.Fatalf("state = %q, want %q (never %q)", s, StateJammed, StateWaiting)
 	}
 
@@ -2475,14 +2528,14 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	<-done
 }
 
-// TestPoolSnapshotChecksCarryPerKindJammed pins the standing finding on
+// TestPoolStatusChecksCarryPerKindJammed pins the standing finding on
 // KindCheck.Jammed: which kind is jammed must be recoverable from the
 // published Checks, not just the pool-level State. Driven through Loop the
-// same way as TestPoolSnapshotState's "jammed when every kind gated and
+// same way as TestPoolStatusState's "jammed when every kind gated and
 // one jammed" case: a single slot cycles both kinds to exit-3/exit-2 until
 // pickKind finds everything gated and parks in idleSleep, the one instant
 // clk.Sleep is entered, so onSleep reads the status file exactly there.
-func TestPoolSnapshotChecksCarryPerKindJammed(t *testing.T) {
+func TestPoolStatusChecksCarryPerKindJammed(t *testing.T) {
 	dir, sw := statusDir(t)
 	clk := &testClock{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2555,17 +2608,17 @@ func TestPoolPublishReportsWriteFailureDiagnostic(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotNextCheckFloorsOnAwakeWindow pins the review finding on
+// TestPoolStatusNextCheckFloorsOnAwakeWindow pins the review finding on
 // projectStatus: with the Awake window shut no slot starts a child until
 // awaitWindow returns, so every kind's nextCheck must be the later of its
 // own backoff deadline and the window's reopening — never empty, which
-// means "runnable now". Stays on direct construction: this is snapshot's
+// means "runnable now". Stays on direct construction: this is projectStatus's
 // own arithmetic over hand-set state (an explicit awakeShut, a chosen
 // backoff floor, per-row gated kinds), including a row that asserts state
 // reads asleep even before awakeShut has ever flipped — a combination
 // Loop's own edge-triggered noteAwakeClose never produces on its own, so
 // there is no instant to drive it to.
-func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
+func TestPoolStatusNextCheckFloorsOnAwakeWindow(t *testing.T) {
 	const (
 		reopen   = "2026-01-01T22:00:00Z"
 		farLater = "2026-01-03T08:00:00Z"
@@ -2650,14 +2703,19 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 				cfg.IdleFloor = tc.floor
 				cfg.IdleCap = tc.floor
 			}
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			var buf bytes.Buffer
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
-			p.st.awakeShut = tc.awakeShut
+			p.mutate(func(s *state) []Event {
+				s.awakeShut = tc.awakeShut
+				return nil
+			})
 			for _, k := range tc.gate {
 				p.markNoWork(k, clk.Now(), false)
 			}
 
-			snap := p.snapshot()
+			snap := readStatus(t, dir)
 
 			if len(snap.Checks) != len(tc.want) {
 				t.Fatalf("checks = %+v, want %d entries", snap.Checks, len(tc.want))
@@ -2704,6 +2762,8 @@ func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := dualKindConfig(3, tt.reservation)
+			dir, sw := statusDir(t)
+			cfg.Status = sw
 			var buf bytes.Buffer
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
 			defer p.cancel()
@@ -2714,7 +2774,7 @@ func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
 			if got, _, _ := p.startChild(1, work, "rev1"); got != tt.want {
 				t.Fatalf("startChild chose %q, want %q", got, tt.want)
 			}
-			if got := p.snapshot().Slots[1].Kind; got != tt.want {
+			if got := readStatus(t, dir).Slots[1].Kind; got != tt.want {
 				t.Fatalf("slot 1 flight kind = %q, want the chosen %q", got, tt.want)
 			}
 		})
@@ -2772,7 +2832,10 @@ func TestPoolStartChildFallsBackToProvisionalKindWhenNothingRunnable(t *testing.
 func TestPoolStartChildDeclinesProbedKindWhoseCountZeroed(t *testing.T) {
 	clk := &testClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
 	var buf bytes.Buffer
-	p, _ := newPool(context.Background(), probedConfig(2, time.Hour, workKind), &scriptedRunner{}, newTestEmitter(&buf), clk)
+	cfg := probedConfig(2, time.Hour, workKind)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
 	defer p.cancel()
 	p.mutate(func(s *state) []Event {
 		s.sched, _ = s.sched.Observe(clk.Now(), demandProbed{Kind: workKind, Ready: 1})
@@ -2783,7 +2846,7 @@ func TestPoolStartChildDeclinesProbedKindWhoseCountZeroed(t *testing.T) {
 	if kind, _, ok := p.startChild(0, workKind, "rev1"); ok {
 		t.Fatalf("startChild started %q, want no start", kind)
 	}
-	if got := p.snapshot().Slots[0].Phase; got == PhaseRunning {
+	if got := readStatus(t, dir).Slots[0].Phase; got == PhaseRunning {
 		t.Fatalf("slot 0 phase = %q, want not running", got)
 	}
 	if strings.Contains(buf.String(), "child_start") {
@@ -2830,10 +2893,15 @@ func TestPoolConcurrentNoWorkUnderOneGateRaisesBackoffOnce(t *testing.T) {
 	p, _ := newPool(context.Background(), testConfig(slots), &scriptedRunner{}, newTestEmitter(&buf), clk)
 	defer p.cancel()
 
-	if got := p.markNoWork(work, clk.Now(), false); got != testIdleFloor {
-		t.Fatalf("first empty result gated for %v, want the floor %v", got, testIdleFloor)
+	p.markNoWork(work, clk.Now(), false)
+	clk.advanceBy(testIdleFloor - time.Nanosecond)
+	if _, ok := p.pickKind(); ok {
+		t.Fatalf("work runnable before the floor %v elapsed, want the first empty result gated for the floor", testIdleFloor)
 	}
-	clk.advanceBy(testIdleFloor)
+	clk.advanceBy(time.Nanosecond)
+	if _, ok := p.pickKind(); !ok {
+		t.Fatalf("work still gated at the floor %v, want the first empty result gated for exactly the floor", testIdleFloor)
+	}
 
 	for slot := 0; slot < slots; slot++ {
 		p.startChild(slot, work, "rev1")
@@ -2844,14 +2912,21 @@ func TestPoolConcurrentNoWorkUnderOneGateRaisesBackoffOnce(t *testing.T) {
 		p.noteWaitResult(slot, work, "rev1", false, flight)
 	}
 
-	p.mu.Lock()
-	v := p.st.sched.View(work, clk.Now())
-	p.mu.Unlock()
-	if !v.Gated {
-		t.Fatal("work not gated after four concurrent empty exits")
+	if _, ok := p.pickKind(); ok {
+		t.Fatal("work runnable after four concurrent empty exits, want it gated")
 	}
-	if got, want := v.Until.Sub(clk.Now()), 2*testIdleFloor; got != want {
-		t.Fatalf("work gated for %v, want one step up to %v (cap %v)", got, want, testIdleCap)
+	idles := 0
+	for _, ev := range decodeEvents(t, &buf) {
+		if ev.Event != "idle" {
+			continue
+		}
+		idles++
+		if want := (2 * testIdleFloor).String(); ev.Wait != want {
+			t.Fatalf("idle wait = %q, want one step up to %q (cap %v)", ev.Wait, want, testIdleCap)
+		}
+	}
+	if idles != slots {
+		t.Fatalf("idle events = %d, want %d", idles, slots)
 	}
 }
 
@@ -2869,11 +2944,14 @@ func TestLiveKeysCollectsOnlyRunningSlotsKeys(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotPublishesButlerPatchCIWait pins issue #4966: a butler child's
+// TestPoolStatusPublishesButlerPatchCIWait pins issue #4966: a butler child's
 // chore-keyed ci_wait line parses and marks its running slot as waiting on CI.
-func TestPoolSnapshotPublishesButlerPatchCIWait(t *testing.T) {
+func TestPoolStatusPublishesButlerPatchCIWait(t *testing.T) {
 	var buf bytes.Buffer
-	p, _ := newPool(context.Background(), triKindConfig(2, 0), &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
+	cfg := triKindConfig(2, 0)
+	dir, sw := statusDir(t)
+	cfg.Status = sw
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
 	defer p.cancel()
 	butler := KindOf(dispatchkind.Butler)
 	const pr = "https://example.test/pr/9"
@@ -2888,7 +2966,7 @@ func TestPoolSnapshotPublishesButlerPatchCIWait(t *testing.T) {
 	}
 	p.noteRecord(slot, butler, "rev1", rec)
 
-	if s := p.snapshot().Slots[slot]; !s.CIWait || s.PRURL != pr {
+	if s := readStatus(t, dir).Slots[slot]; !s.CIWait || s.PRURL != pr {
 		t.Fatalf("CIWait, PRURL = %v, %q; want true, %q", s.CIWait, s.PRURL, pr)
 	}
 }
