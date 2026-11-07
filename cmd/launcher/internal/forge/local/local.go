@@ -401,16 +401,7 @@ func parseLocalBlockers(body string) []string {
 	seen := map[string]bool{}
 	var refs []string
 	inSection := false
-	inFence := false
-	for _, rawLine := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
-		line := strings.TrimRight(rawLine, "\r")
-		if forge.IsFenceDelimiter(line) {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
+	for line := range forge.UnfencedLines(body) {
 		if forge.IsBlockedByHeader(line) {
 			inSection = true
 			continue
