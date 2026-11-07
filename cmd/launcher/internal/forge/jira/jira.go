@@ -781,8 +781,8 @@ func (j *jiraClient) refuseTransition(num string, refusal *forge.TransitionRefus
 // CompleteVerdict swaps num's InProgress fallback label for verdict's terminal
 // label; Jira has no native status mapping for research verdicts yet (ADR
 // 0022). It first asserts the InProgress label is present as a double-dispatch
-// guard (#701), a check-then-edit with the same TOCTOU window exec.go's
-// CompleteVerdict documents.
+// guard (#701), a check-then-edit with the same TOCTOU window github's
+// execClient.CompleteVerdict documents.
 func (j *jiraClient) CompleteVerdict(num string, verdict forge.Verdict) error {
 	add := j.cfg.VerdictLabels.Label(verdict)
 	if add == "" {
