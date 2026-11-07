@@ -26,6 +26,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers, backends, and runner families
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
@@ -1240,19 +1241,6 @@ var errQueueEmpty = errors.New("queue empty")
 // test binary (#3520, #3521, #3651).
 var installStopSignal = stopsignal.Notify
 
-// exitConfigInvalid is the exit code for a bootstrap failure whose error wraps
-// errConfigInvalid; see bootstrapExitCode.
-const exitConfigInvalid = 6
-
-// exitSignalledStop is the exit code for waves.ErrSignalledStop (issue
-// #3520; see its doc for why a stop wins over a stale-image or empty-queue
-// verdict in the same drain). The daemon, the only driving loop left, must
-// stop on this code rather than continue into the next iteration the way
-// it does on exit 4. It collides with no other dispatch exit code above;
-// doctor's own exit-code table is a separate space where the same integers
-// mean unrelated things, so this constant must never be read as doctor's.
-const exitSignalledStop = 7
-
 func containsLabel(labels []string, target string) bool {
 	for _, l := range labels {
 		if l == target {
@@ -2168,7 +2156,7 @@ func (lc *launchContext) runRecover(issueNum string, stdout, stderr io.Writer) e
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open PR
 // with no outcome line and drive it through the merge gate, honouring the
 // two-stage operator-shutdown latch the same as every other Box-launching
-// path (#3522) — a signalled stop maps to exitSignalledStop ahead of the
+// path (#3522) — a signalled stop maps to exitcode.SignalledStop ahead of the
 // blanket failure return below, writing neither the recover-reason output nor
 // a stderr line, since a requested stop is not a recover failure. Tests pass
 // a spy cleanup to exercise the cleanup-on-every-exit contract.
@@ -2176,16 +2164,16 @@ func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) in
 	defer lc.cleanup()
 	err := lc.runRecover(issueNum, stdout, stderr)
 	if err == nil {
-		return 0
+		return int(exitcode.Dispatched)
 	}
 	if errors.Is(err, waves.ErrSignalledStop) {
-		return exitSignalledStop
+		return int(exitcode.SignalledStop)
 	}
 	if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
 		fmt.Fprintf(stderr, "warning: writing recover-reason output: %v\n", writeErr)
 	}
 	fmt.Fprintf(stderr, "%s\n", err)
-	return 1
+	return int(exitcode.Failed)
 }
 
 // cmdRecoverQueue is `recover` with no issue number: recover one eligible
@@ -2196,7 +2184,7 @@ func cmdRecoverQueue(lc *launchContext, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
 	err := recoverQueueOne(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), stdout, stderr)
 	code := exitCodeFor(err)
-	if code == 1 && err != nil {
+	if code == int(exitcode.Failed) && err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 	}
 	return code
@@ -2213,25 +2201,25 @@ func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
 }
 
 // selectiveDispatchExitCode translates selectiveListDispatch's result into an
-// exit code: 7 for an operator stop request (SIGTERM), ahead of every other
-// verdict below (issue #3522, mirrors exitCodeFor/runExitCode -- not printed
-// to stderr, since a requested stop is not a failure), 3 when open issues
-// exist but none are dispatchable (a selective wave can defer every listed
-// issue, just as a queue drain can), 1 for any other error, 0 on success.
-// Split out so it is testable without bootstrap.
+// exitcode.Dispatch code. An operator stop request (SIGTERM) wins ahead of
+// every other verdict (issue #3522, as in exitCodeFor/runExitCode -- not
+// printed to stderr, since a requested stop is not a failure).
+// NoneDispatchable applies because a selective wave can defer every listed
+// issue, just as a queue drain can. Split out so it is testable without
+// bootstrap.
 func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool, stdout, stderr io.Writer) int {
 	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, isStdinTTY(), os.Stdin, stdout)
 	if err == nil {
-		return 0
+		return int(exitcode.Dispatched)
 	}
 	if errors.Is(err, waves.ErrSignalledStop) {
-		return exitSignalledStop
+		return int(exitcode.SignalledStop)
 	}
 	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
-		return 3
+		return int(exitcode.NoneDispatchable)
 	}
 	fmt.Fprintf(stderr, "%s\n", err)
-	return 1
+	return int(exitcode.Failed)
 }
 
 // cmdDispatchSelective is the `dispatch <nums>` subcommand: an
@@ -2241,46 +2229,45 @@ func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool, stdou
 	return selectiveDispatchExitCode(lc, nums, forceYes, stdout, stderr)
 }
 
-// exitCodeFor translates a run or runContinuousDispatch error into an exit
-// code: 2 for an empty queue, 3 for open issues none of which are
-// dispatchable, 4 for a stale image (rebuild and retry), 5 for a
-// host-tainted stale image that no rebuild can fix, so the driving loop must
-// stop rather than loop on exit 4 forever (issue #2113), 7 for an operator
-// stop request (SIGTERM) that drained outstanding work and wants no rebuild
-// (issue #3520) -- reachable from both run's one-shot dispatch and
-// runContinuousDispatch, not a CONTINUOUS_DISPATCH-only verdict (#3522) --
-// 1 otherwise.
+// exitCodeFor translates a run or runContinuousDispatch error into an
+// exitcode.Dispatch code. A stop wins over a stale-image or empty-queue
+// verdict in the same drain (issue #3520): the daemon must stop on it rather
+// than continue into the next iteration the way it does on ImageStale. It is
+// reachable from both run's one-shot dispatch and runContinuousDispatch, not a
+// CONTINUOUS_DISPATCH-only verdict (#3522). HostTainted is a stale image no
+// rebuild can fix, so the driving loop must stop rather than loop on
+// ImageStale forever (issue #2113).
 func exitCodeFor(err error) int {
 	switch {
 	case err == nil:
-		return 0
+		return int(exitcode.Dispatched)
 	case errors.Is(err, waves.ErrSignalledStop):
-		return exitSignalledStop
+		return int(exitcode.SignalledStop)
 	case errors.Is(err, errQueueEmpty):
-		return 2
+		return int(exitcode.QueueEmpty)
 	case errors.Is(err, waves.ErrOpenNoneDispatchable):
-		return 3
+		return int(exitcode.NoneDispatchable)
 	case errors.Is(err, waves.ErrImageStale):
-		return 4
+		return int(exitcode.ImageStale)
 	case errors.Is(err, errImageHostTainted):
-		return 5
+		return int(exitcode.HostTainted)
 	default:
-		return 1
+		return int(exitcode.Failed)
 	}
 }
 
-// bootstrapExitCode translates a bootstrap error into an exit code:
-// exitConfigInvalid (6) when it wraps errConfigInvalid, so a caller can tell a
-// config-validation failure from any other bootstrap failure (issue #2568), 1
-// otherwise.
+// bootstrapExitCode translates a bootstrap error into an exitcode.Dispatch
+// code: ConfigInvalid when it wraps errConfigInvalid, so a caller can tell a
+// config-validation failure from any other bootstrap failure (issue #2568),
+// Failed otherwise.
 func bootstrapExitCode(err error) int {
 	switch {
 	case err == nil:
-		return 0
+		return int(exitcode.Dispatched)
 	case errors.Is(err, errConfigInvalid):
-		return exitConfigInvalid
+		return int(exitcode.ConfigInvalid)
 	default:
-		return 1
+		return int(exitcode.Failed)
 	}
 }
 
@@ -2289,7 +2276,7 @@ func bootstrapExitCode(err error) int {
 func runExitCode(lc *launchContext, stdout, stderr io.Writer) int {
 	err := run(lc, stdout, stderr)
 	code := exitCodeFor(err)
-	if code == 1 && err != nil {
+	if code == int(exitcode.Failed) && err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 	}
 	return code

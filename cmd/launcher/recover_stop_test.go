@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -24,7 +25,7 @@ import (
 
 // TestCmdRecover_SignalledStop_NoFailedLabel pins the first checkpoint: a
 // stop closed before recoverByNumber acts on it.Issue must exit
-// exitSignalledStop, write no recover-reason output, leave the issue off the
+// exitcode.SignalledStop, write no recover-reason output, leave the issue off the
 // failed label, and still run cleanup -- a requested stop is not a recover
 // failure (issue #3522).
 func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
@@ -51,8 +52,8 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 
 	got := cmdRecover(lc, "42", io.Discard, io.Discard)
 
-	if got != exitSignalledStop {
-		t.Errorf("cmdRecover(lc, \"42\") = %d, want %d (exitSignalledStop)", got, exitSignalledStop)
+	if got != int(exitcode.SignalledStop) {
+		t.Errorf("cmdRecover(lc, \"42\") = %d, want %d (exitcode.SignalledStop)", got, int(exitcode.SignalledStop))
 	}
 	if !cleaned {
 		t.Error("cmdRecover did not run lc.cleanup()")
@@ -97,8 +98,8 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 
 	got := cmdRecover(lc, "42", io.Discard, io.Discard)
 
-	if got != exitSignalledStop {
-		t.Errorf("cmdRecover(lc, \"42\") = %d, want %d (exitSignalledStop)", got, exitSignalledStop)
+	if got != int(exitcode.SignalledStop) {
+		t.Errorf("cmdRecover(lc, \"42\") = %d, want %d (exitcode.SignalledStop)", got, int(exitcode.SignalledStop))
 	}
 	if !cleaned {
 		t.Error("cmdRecover did not run lc.cleanup()")

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -21,7 +22,7 @@ import (
 
 // TestRunExitCode_SignalledStop_NoBoxLaunched pins the base case: a stop
 // closed before run's wave ever starts means no Box launches, and the
-// caller learns why through exitSignalledStop.
+// caller learns why through exitcode.SignalledStop.
 func TestRunExitCode_SignalledStop_NoBoxLaunched(t *testing.T) {
 	withClosedStopSignal(t)
 
@@ -40,8 +41,8 @@ func TestRunExitCode_SignalledStop_NoBoxLaunched(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, int(exitcode.SignalledStop))
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls: got %+v, want none (a pre-closed stop must claim nothing)", fc.TransitionStateCalls)
@@ -67,8 +68,8 @@ func TestRunExitCode_SignalledStop_WinsOverEmptyQueue(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, int(exitcode.SignalledStop))
 	}
 }
 
@@ -98,8 +99,8 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 3", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 3", got, int(exitcode.SignalledStop))
 	}
 }
 
@@ -108,7 +109,7 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 // the blocked marker and returns a bare nil from drainMaxJobs's OriginClaimed
 // branch, a return the old signalledOr wrapper -- applied only to
 // waves.Dispatch's non-nil returns -- could never catch. A Stop already
-// closed by the time Dispatch returns must still exit exitSignalledStop, and
+// closed by the time Dispatch returns must still exit exitcode.SignalledStop, and
 // must never reach the dispatch completion banner or reconcileAfterDispatch.
 func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 	withClosedStopSignal(t)
@@ -131,8 +132,8 @@ func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 	var buf bytes.Buffer
 	got := runExitCode(lc, &buf, io.Discard)
 	out := buf.String()
-	if got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 0", got, exitSignalledStop)
+	if got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 0", got, int(exitcode.SignalledStop))
 	}
 	if strings.Contains(out, "all agents finished") {
 		t.Errorf("output must not print the dispatch completion banner after a signalled stop; got:\n%s", out)
@@ -158,8 +159,8 @@ func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d", got, int(exitcode.SignalledStop))
 	}
 }
 
@@ -181,8 +182,8 @@ func TestRunExitCode_AbortOnly_WinsOverEmptyQueue(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, int(exitcode.SignalledStop))
 	}
 }
 
@@ -209,8 +210,8 @@ func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, int(exitcode.SignalledStop))
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionStateCalls: got %+v, want none (a pre-closed abort must claim nothing)", fc.TransitionStateCalls)
@@ -220,7 +221,7 @@ func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
 	}
 }
 
-// selectiveDispatchExitCode must map a pre-closed stop to exitSignalledStop
+// selectiveDispatchExitCode must map a pre-closed stop to exitcode.SignalledStop
 // ahead of its own 3 (ErrOpenNoneDispatchable) and 1 (default) verdicts, and
 // must not print anything to stderr for it -- a requested stop is not a
 // failure (mirrors runExitCode's own silence on ErrSignalledStop).
@@ -244,8 +245,8 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 
 	var stderr bytes.Buffer
 	got := selectiveDispatchExitCode(lc, []string{"1"}, true, io.Discard, &stderr)
-	if got != exitSignalledStop {
-		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, exitSignalledStop)
+	if got != int(exitcode.SignalledStop) {
+		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, int(exitcode.SignalledStop))
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty (a requested stop is not a failure)", stderr.String())
@@ -274,8 +275,8 @@ func TestSelectiveDispatchExitCode_SignalledStop_BeatsNonTTYUnlabeledAbort(t *te
 	}
 
 	var stderr bytes.Buffer
-	if got := selectiveDispatchExitCode(lc, []string{"1"}, false, io.Discard, &stderr); got != exitSignalledStop {
-		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, exitSignalledStop)
+	if got := selectiveDispatchExitCode(lc, []string{"1"}, false, io.Discard, &stderr); got != int(exitcode.SignalledStop) {
+		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, int(exitcode.SignalledStop))
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
@@ -304,8 +305,8 @@ func TestSelectiveDispatchExitCode_SignalledAbort(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := selectiveDispatchExitCode(lc, []string{"1"}, true, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, exitSignalledStop)
+	if got := selectiveDispatchExitCode(lc, []string{"1"}, true, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, int(exitcode.SignalledStop))
 	}
 }
 
@@ -330,8 +331,8 @@ func TestCmdDispatch_SignalledStop_StillRunsCleanup(t *testing.T) {
 		cleanup:      func() { cleaned = true },
 	}
 
-	if got := cmdDispatch(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("cmdDispatch(lc) = %d, want %d", got, exitSignalledStop)
+	if got := cmdDispatch(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("cmdDispatch(lc) = %d, want %d", got, int(exitcode.SignalledStop))
 	}
 	if !cleaned {
 		t.Error("lc.cleanup was never called on a signalled one-shot dispatch")
@@ -359,8 +360,8 @@ func TestCmdDispatchSelective_SignalledStop_StillRunsCleanup(t *testing.T) {
 		cleanup:      func() { cleaned = true },
 	}
 
-	if got := cmdDispatchSelective(lc, []string{"1"}, true, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("cmdDispatchSelective(lc, ...) = %d, want %d", got, exitSignalledStop)
+	if got := cmdDispatchSelective(lc, []string{"1"}, true, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("cmdDispatchSelective(lc, ...) = %d, want %d", got, int(exitcode.SignalledStop))
 	}
 	if !cleaned {
 		t.Error("lc.cleanup was never called on a signalled selective dispatch")

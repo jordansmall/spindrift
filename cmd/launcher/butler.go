@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/recordsdigest"
@@ -307,7 +308,7 @@ func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchF
 // clears every host-side gate (allow-listed class, file limit, reviewer
 // concurrence, and daily promotion room); BUTLER_MAX_PROMOTIONS_PER_DAY
 // defaults to 0, off. A resolveButlerSettings failure exits
-// exitConfigInvalid (6) rather than 1, so the daemon's shared breaker
+// exitcode.ConfigInvalid rather than Failed, so the daemon's shared breaker
 // (internal/daemon/outcome.go) never treats a config problem as an
 // unclassified error (issue #3920).
 func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
@@ -316,13 +317,13 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 	settings, err := resolveButlerSettings(lc.config, lc.capabilities, choreName)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
-		return exitConfigInvalid
+		return int(exitcode.ConfigInvalid)
 	}
 	// config.kind() would silently resolve a nil kind to work's, filing findings
 	// under the wrong label.
 	if lc.config.dispatchKind == nil {
 		fmt.Fprintln(stderr, "butler: no dispatch kind set; refusing to file findings under another kind's label")
-		return exitConfigInvalid
+		return int(exitcode.ConfigInvalid)
 	}
 	budgets := butlerBudgets(lc.config)
 
@@ -333,14 +334,14 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 	host, err := os.Hostname()
 	if err != nil {
 		fmt.Fprintf(stderr, "butler: hostname: %v\n", err)
-		return 1
+		return int(exitcode.Failed)
 	}
 	// butlerPreflight already checked row.NewLedger != nil for this CODE_FORGE.
 	row, _ := backendkit.ByName(lc.config.codeForge)
 	backend, tree, ledgerCleanup, err := ledgerFor(lc.config, row)
 	if err != nil {
 		fmt.Fprintf(stderr, "butler: %v\n", err)
-		return 1
+		return int(exitcode.Failed)
 	}
 	defer ledgerCleanup()
 
@@ -392,7 +393,7 @@ func butlerVerbHandler(args []string, stdout, stderr io.Writer) int {
 	choreName, noBuild, err := parseButlerArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
+		return int(exitcode.Failed)
 	}
 	lc, err := bootstrap(stdout, !noBuild, dispatchkind.Butler, false)
 	if err != nil {

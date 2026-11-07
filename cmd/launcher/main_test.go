@@ -26,6 +26,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -210,8 +211,8 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 	for _, argv := range cases {
 		var stdout, stderr bytes.Buffer
 		code := mainRun(argv, &stdout, &stderr)
-		if code != exitConfigInvalid {
-			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, exitConfigInvalid)
+		if code != int(exitcode.ConfigInvalid) {
+			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, int(exitcode.ConfigInvalid))
 		}
 		if !strings.Contains(stderr.String(), "REPO_SLUG") {
 			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
@@ -222,15 +223,15 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 // The bare `--continuous` flag sets CONTINUOUS_DISPATCH the same way
 // `--continuous-dispatch=1` does (issue #2033). `dispatch` routes a
 // config-invalid bootstrap error through bootstrapExitCode, so the expected
-// code is exitConfigInvalid rather than the generic 1 (issue #2568 slice 2).
+// code is exitcode.ConfigInvalid rather than the generic 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 	t.Setenv("CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"dispatch", "--continuous"}, &stdout, &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("mainRun(dispatch --continuous) code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun(dispatch --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
@@ -240,7 +241,7 @@ func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 // The #2032 repro: CODE_FORGE=local with ISSUE_TRACKER at its github default
 // is not the fully-local exemption (repoRequirementExempt), which needs both
 // axes local, so REPO_SLUG stays required. `dispatch` surfaces that as
-// exitConfigInvalid rather than a bare 1 (issue #2568 slice 2).
+// exitcode.ConfigInvalid rather than a bare 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *testing.T) {
 	t.Setenv("CODE_FORGE", "local")
 	t.Setenv("ISSUE_TRACKER", "github")
@@ -248,8 +249,8 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"dispatch"}, &stdout, &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("mainRun(dispatch) code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun(dispatch) code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("mainRun(dispatch) stdout = %q, want empty", stdout.String())
@@ -266,8 +267,8 @@ func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"research", "--continuous"}, &stdout, &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("mainRun(research --continuous) code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun(research --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
@@ -365,8 +366,8 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"recover", "--yes"}, &stdout, &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("mainRun(recover --yes) code = %d, want %d (queue-mode bootstrap exit code)", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun(recover --yes) code = %d, want %d (queue-mode bootstrap exit code)", code, int(exitcode.ConfigInvalid))
 	}
 	if !strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("mainRun(recover --yes) stderr = %q, want a REPO_SLUG validation error (queue mode reached bootstrap; --yes not read as an issue ID)", stderr.String())
@@ -561,8 +562,8 @@ func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"research"}, &stdout, &stderr)
 
-	if code != exitConfigInvalid {
-		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
+	if code != int(exitcode.ConfigInvalid) {
+		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
 	out := stderr.String()
 	if !strings.Contains(out, "MAX_JOBS=5 set in environment") {
@@ -693,8 +694,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"--input", docPath, "research"}, &stdout, &stderr)
-	if code != exitConfigInvalid {
-		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
+	if code != int(exitcode.ConfigInvalid) {
+		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
 	if strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("stderr = %q, want REPO_SLUG resolved from the document (no REPO_SLUG complaint)", stderr.String())
@@ -706,8 +707,8 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code = mainRun([]string{"--input", docPath, "--repo-slug", "flag-org/flag-repo", "research"}, &stdout, &stderr)
-	if code != exitConfigInvalid {
-		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
+	if code != int(exitcode.ConfigInvalid) {
+		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
 	if strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("stderr = %q, want REPO_SLUG resolved (flag overrides document)", stderr.String())
@@ -6744,7 +6745,7 @@ func TestEngageAliasRemoved(t *testing.T) {
 
 // bootstrapExitCode's full error-to-exit-code mapping (issue #2568 slice 1):
 // nil maps to 0, an error wrapping errConfigInvalid to the dedicated
-// exitConfigInvalid (6), and any other error to the generic 1.
+// exitcode.ConfigInvalid, and any other error to the generic 1.
 func TestBootstrapExitCode(t *testing.T) {
 	cases := []struct {
 		name string
@@ -6752,7 +6753,7 @@ func TestBootstrapExitCode(t *testing.T) {
 		want int
 	}{
 		{"nil", nil, 0},
-		{"wrapped errConfigInvalid", fmt.Errorf("%w: %w", errConfigInvalid, errors.New("REPO_SLUG is required")), exitConfigInvalid},
+		{"wrapped errConfigInvalid", fmt.Errorf("%w: %w", errConfigInvalid, errors.New("REPO_SLUG is required")), int(exitcode.ConfigInvalid)},
 		{"other error", errors.New("boom"), 1},
 	}
 	for _, tc := range cases {
@@ -6780,8 +6781,8 @@ func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testin
 		t.Errorf("stdout dispatch=%q research=%q, want both empty", dispatchOut.String(), researchOut.String())
 	}
 
-	if dispatchCode != exitConfigInvalid {
-		t.Fatalf("mainRun(dispatch) code = %d, want %d; stderr=%s", dispatchCode, exitConfigInvalid, dispatchErr.String())
+	if dispatchCode != int(exitcode.ConfigInvalid) {
+		t.Fatalf("mainRun(dispatch) code = %d, want %d; stderr=%s", dispatchCode, int(exitcode.ConfigInvalid), dispatchErr.String())
 	}
 	if researchCode != dispatchCode {
 		t.Errorf("mainRun(research) code = %d, want the same as mainRun(dispatch) = %d; stderr=%s", researchCode, dispatchCode, researchErr.String())
@@ -6792,7 +6793,7 @@ func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testin
 // two read-only token gates are called by bootstrap() and preview() too, not
 // only by runDoctor. Wrapping their misconfiguration errors with
 // errConfigInvalid, the sentinel meant for bootstrap()'s own validate()
-// failure, would award exitConfigInvalid (6) to dispatch, recover and console.
+// failure, would award exitcode.ConfigInvalid to dispatch, recover and console.
 func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"
@@ -6817,7 +6818,7 @@ func TestBootstrapExitCode_ReadOnlyTokenGateMisconfigured_ExitsOne(t *testing.T)
 // The Forgejo-side sibling of the test above: checkReadOnlyTokenGate
 // wraps the same errReadOnlyGateMisconfigured sentinel, but only the GitHub
 // gate had a dispatch-path regression test pinning the fall-through to exit 1
-// rather than exitConfigInvalid (6).
+// rather than exitcode.ConfigInvalid.
 func TestBootstrapExitCode_ReadOnlyForgejoTokenGateMisconfigured_ExitsOne(t *testing.T) {
 	c := minimalValidConfig()
 	c.boxForgeAndIssueAccess = "read-only"

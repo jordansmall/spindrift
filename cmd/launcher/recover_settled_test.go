@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/recoverrecord"
@@ -99,8 +100,8 @@ func TestRecoverQueueOne_StoppedAfterClaimAppendsSettled(t *testing.T) {
 	stop := withControlledStop(t)
 	read := testutil.InstallPipeReporter(t)
 
-	if code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf)); code != exitSignalledStop {
-		t.Fatalf("exit = %d, want %d", code, exitSignalledStop)
+	if code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf)); code != int(exitcode.SignalledStop) {
+		t.Fatalf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 
 	requireRecoverSettled(t, path, "failed", "stopped", read())
