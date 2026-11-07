@@ -86,7 +86,7 @@ func newKindBackoff(floor, cap time.Duration) kindBackoff {
 // worth polling a moved tip for.
 //
 // Deliberately exit-3-alone: sibling occupancy plays no part. jammed doubles
-// as idleSleep's tip-poll gate (Park.TipPoll, schedule.go) as well as status
+// as idleSleep's tip-poll gate (park.TipPoll, schedule.go) as well as status
 // data, and a sibling that actually drains the queue clears it through
 // reset() on its own next Continue — so occupancy is the jam *event*'s
 // narrower predicate (state.siblingsEngaged, reached from noteWaitResult, an
