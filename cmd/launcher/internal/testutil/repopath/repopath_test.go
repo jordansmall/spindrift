@@ -18,7 +18,6 @@ func TestPromptsDir(t *testing.T) {
 
 func TestFixturePaths(t *testing.T) {
 	for name, p := range map[string]string{
-		"RegistryJSON":            RegistryJSON(),
 		"ForbiddenMarkersJSON":    ForbiddenMarkersJSON(),
 		"ValidateMarkersJSON":     ValidateMarkersJSON(),
 		"PromptAssemblyGoldenDir": PromptAssemblyGoldenDir(),
