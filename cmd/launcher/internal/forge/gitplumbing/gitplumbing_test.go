@@ -68,6 +68,7 @@ func TestMarkerVars_AreLowercase(t *testing.T) {
 	// Register every package-level marker slice here as it is added.
 	sets := map[string][]string{
 		"mergeConflictMarkers":      mergeConflictMarkers,
+		"sharedTransientMarkers":    sharedTransientMarkers,
 		"mergeTransientMarkers":     mergeTransientMarkers,
 		"stalePushRejectionMarkers": stalePushRejectionMarkers,
 		"pushTransientMarkers":      pushTransientMarkers,
@@ -82,6 +83,14 @@ func TestMarkerVars_AreLowercase(t *testing.T) {
 			if marker != strings.ToLower(marker) {
 				t.Errorf("%s: marker %q is not lowercase", name, marker)
 			}
+		}
+	}
+}
+
+func TestMergeTransientMarkers_HaveNoBareWords(t *testing.T) {
+	for _, marker := range mergeTransientMarkers {
+		if marker == "timeout" || marker == "eof" {
+			t.Errorf("mergeTransientMarkers: bare %q matches branch names and rejection text", marker)
 		}
 	}
 }
@@ -128,6 +137,66 @@ func TestIsMergeTransient(t *testing.T) {
 			name:   "timeout",
 			stderr: "error: context deadline exceeded: request timeout",
 			want:   true,
+		},
+		{
+			name:   "branch name containing eof-like text is not transient",
+			stderr: "GraphQL: Resource not accessible by integration (mergePullRequest) agent/issue-42-geoff-fix",
+			want:   false,
+		},
+		{
+			name:   "merge-queue timeout policy rejection is not transient",
+			stderr: "GraphQL: Pull request is in clean status but merge-queue timeout policy blocks it (mergePullRequest)",
+			want:   false,
+		},
+		{
+			name:   "transport EOF",
+			stderr: `Post "https://api.github.com/graphql": EOF`,
+			want:   true,
+		},
+		{
+			name:   "transport unexpected EOF",
+			stderr: `Post "https://api.github.com/graphql": unexpected EOF`,
+			want:   true,
+		},
+		{
+			name:   "TLS handshake timeout",
+			stderr: `Post "https://api.github.com/graphql": net/http: TLS handshake timeout`,
+			want:   true,
+		},
+		{
+			name:   "context deadline exceeded awaiting headers",
+			stderr: `Post "https://api.github.com/graphql": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`,
+			want:   true,
+		},
+		{
+			name:   "transport EOF with trailing newline",
+			stderr: "Post \"https://api.github.com/graphql\": EOF\n",
+			want:   true,
+		},
+		{
+			name:   "branch name starting with eof is not transient",
+			stderr: "GraphQL: Base branch was modified (mergePullRequest) head branch: eof-fix",
+			want:   false,
+		},
+		{
+			name:   "GraphQL query timeout",
+			stderr: "GraphQL: Something went wrong while executing your query. This may be the result of a timeout, or it could be a GitHub bug. Please include `ABCD:1234:5678` when reporting this issue.",
+			want:   true,
+		},
+		{
+			name:   "client timeout exceeded while awaiting headers",
+			stderr: `Post "https://api.github.com/graphql": net/http: request canceled (Client.Timeout exceeded while awaiting headers)`,
+			want:   true,
+		},
+		{
+			name:   "timeout awaiting response headers",
+			stderr: `Post "https://api.github.com/graphql": net/http: timeout awaiting response headers`,
+			want:   true,
+		},
+		{
+			name:   "HTTP 408 is a client error, not transient",
+			stderr: "HTTP 408: Request Timeout (https://api.github.com/repos/org/repo/pulls/1/merge)",
+			want:   false,
 		},
 		{
 			name:   "genuine merge conflict",

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -37,29 +38,47 @@ func IsMergeConflict(stderr string) bool {
 	return MatchesAnyMarker(stderr, mergeConflictMarkers)
 }
 
-// mergeTransientMarkers' "http 5xx" entries anchor on gh's status-line
-// prefix; bare digits would match PR numbers, branch names and URLs in stderr.
-var mergeTransientMarkers = []string{
-	"http 502",
-	"http 503",
-	"http 504",
+// sharedTransientMarkers are the transport and server faults both
+// mergeTransientMarkers and pushTransientMarkers include, so the entries cannot
+// drift between them. None may be a bare "timeout" or "eof": those match
+// branch names and unrelated rejection text.
+var sharedTransientMarkers = []string{
+	"connection reset",
+	"i/o timeout",
+	"temporary failure in name resolution",
 	"bad gateway",
 	"service unavailable",
 	"gateway timeout",
-	"timeout",
-	"connection reset",
-	"eof",
-	"i/o timeout",
-	"temporary failure in name resolution",
-	"context deadline exceeded",
 }
 
+// mergeTransientMarkers' "http 5xx" entries anchor on gh's status-line prefix,
+// since bare digits match PR numbers, branch names and URLs. The EOF and
+// timeout entries are specific phrases from Go net/http transport errors
+// (`Post "<url>": EOF`, which carries no status line) and the GraphQL timeout
+// text GitHub's API returns, never the bare words. Residual exposure: a PR
+// title or branch echoed into stderr that contains a full phrase (e.g.
+// "unexpected EOF"), or ends a line in ": eof" (a branch named "eof"), still
+// matches. The ": eof\n" entry is end-anchored on an LF line ending;
+// IsMergeTransient appends the newline.
+var mergeTransientMarkers = slices.Concat(sharedTransientMarkers, []string{
+	"http 502",
+	"http 503",
+	"http 504",
+	": eof\n",
+	"unexpected eof",
+	"tls handshake timeout",
+	"context deadline exceeded",
+	"may be the result of a timeout",
+	"client.timeout exceeded",
+	"timeout awaiting response headers",
+})
+
 // IsMergeTransient reports whether gh's stderr indicates a transient
-// transport or server failure rather than a genuine merge rejection. The
-// "timeout" and "eof" markers are broad enough to appear in unrelated stderr,
-// so callers must check IsMergeConflict first.
+// transport or server failure rather than a genuine merge rejection. Callers
+// check IsMergeConflict first: a conflict's stderr is classified by mergeable
+// state, not by these markers.
 func IsMergeTransient(stderr string) bool {
-	return MatchesAnyMarker(stderr, mergeTransientMarkers)
+	return MatchesAnyMarker(stderr+"\n", mergeTransientMarkers)
 }
 
 // GitForcePush force-with-lease-pushes the current branch checked out at dir,
@@ -146,11 +165,9 @@ func isStalePushRejection(stderr string) bool {
 // pushTransientMarkers match transport and server faults a retry may clear. The
 // "returned error: 5" and "rpc failed; http 5" entries catch curl's HTTP 5xx
 // lines without bare digit markers, which would match SHAs and URLs in stderr.
-var pushTransientMarkers = []string{
-	"connection reset",
+var pushTransientMarkers = slices.Concat(sharedTransientMarkers, []string{
 	"connection refused",
 	"timed out",
-	"i/o timeout",
 	"remote end hung up",
 	"unexpected disconnect",
 	"early eof",
@@ -159,15 +176,11 @@ var pushTransientMarkers = []string{
 	"gnutls_handshake() failed",
 	"ssl_error_syscall",
 	"could not resolve host",
-	"temporary failure in name resolution",
 	"network is unreachable",
 	"returned error: 5",
 	"rpc failed; http 5",
 	"internal server error",
-	"bad gateway",
-	"service unavailable",
-	"gateway timeout",
-}
+})
 
 // pushClientErrorMarkers flag an HTTP 4xx from git's POST stage. Git follows
 // those with "the remote end hung up unexpectedly", so without this veto the
