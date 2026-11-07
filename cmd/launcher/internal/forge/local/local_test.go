@@ -712,6 +712,16 @@ func TestLocalTracker_DepsOf_SkipsFencedLines(t *testing.T) {
 			body: "## Blocked by\n\n- a\n```\n- fenced-dep\n```\n",
 			want: []string{"a"},
 		},
+		{
+			name: "CRLF body with fenced example",
+			body: "```\r\n## Blocked by\r\n- fenced-dep\r\n```\r\n## Blocked by\r\n- real-dep\r\n",
+			want: []string{"real-dep"},
+		},
+		{
+			name: "unclosed fence drops the rest",
+			body: "## Blocked by\n- a\n```\n- fenced-dep\n",
+			want: []string{"a"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
