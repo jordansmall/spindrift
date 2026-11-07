@@ -506,7 +506,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 						result.ReportFailureReason(iss.Number)
-						transitionState(d, it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote(), dispatchrecord.ReasonBoxFailed)
+						transitionState(d, it, iss.Number, settle.ForReason(dispatchrecord.ReasonBoxFailed), result.FailureNote())
 						s.Fail(iss.Number, iss.Generation, result)
 						return struct{}{}
 					},

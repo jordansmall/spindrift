@@ -985,7 +985,7 @@ func assertLatchedLeftOpen(t *testing.T, s *Settle, num string) {
 	t.Helper()
 	s.settledMu.Lock()
 	defer s.settledMu.Unlock()
-	if r := s.settledLatch[num].reason; !dispatchrecord.ReasonLeavesPROpen(r) {
+	if r := s.settledLatch[num].verdict.Reason(); !dispatchrecord.ReasonLeavesPROpen(r) {
 		t.Errorf("latched reason %q for a landingManual settle is not dispatchrecord.ReasonLeavesPROpen", r)
 	}
 }
@@ -1012,7 +1012,7 @@ func assertTuningHeld(t *testing.T, s *Settle, fc *forge.Fake, landing landingRe
 		t.Errorf("selfHeal = %v, want landingManual (tuning provenance hold)", landing)
 	}
 	s.settledMu.Lock()
-	reason := s.settledLatch["1"].reason
+	reason := s.settledLatch["1"].verdict.Reason()
 	s.settledMu.Unlock()
 	if reason != dispatchrecord.ReasonMergeByHand {
 		t.Errorf("latched reason = %q, want %q", reason, dispatchrecord.ReasonMergeByHand)
@@ -1145,7 +1145,7 @@ func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
 	}
 	assertHoldPRComment(t, fc, "precautionary comment")
 	s.settledMu.Lock()
-	reason := s.settledLatch["1"].reason
+	reason := s.settledLatch["1"].verdict.Reason()
 	s.settledMu.Unlock()
 	if reason != dispatchrecord.ReasonMergeGuardCheckError {
 		t.Errorf("latched reason = %q, want %q", reason, dispatchrecord.ReasonMergeGuardCheckError)
@@ -1248,7 +1248,7 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 		t.Fatalf("selfHeal = %v, want landingManual", landing)
 	}
 	s.settledMu.Lock()
-	reason := s.settledLatch["1"].reason
+	reason := s.settledLatch["1"].verdict.Reason()
 	s.settledMu.Unlock()
 	if reason != dispatchrecord.ReasonMergeByHand {
 		t.Errorf("latched reason = %q, want %q", reason, dispatchrecord.ReasonMergeByHand)

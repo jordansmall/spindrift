@@ -1566,9 +1566,9 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			if queue {
 				// A stop arrived after the claim above: put the label back so
 				// the issue is not stranded agent-in-progress with no run.
-				reason, note, restoreErr := settle.Transition(it, iss.number, forge.InProgress, forge.Failed, dispatchrecord.ReasonStopped, "stopped before the bundle relay")
+				v, note, restoreErr := settle.Transition(it, iss.number, forge.InProgress, settle.ForReason(dispatchrecord.ReasonStopped), "stopped before the bundle relay")
 				// Reported even if the restore failed, as transitionState does.
-				recoverSettled(iss.number, forge.Failed, reason, note)
+				recoverSettled(iss.number, v, note)
 				if restoreErr != nil {
 					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
 				}
@@ -1668,8 +1668,9 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	if !found || prior != forge.Complete {
 		return origErr
 	}
-	// The returned reason and note are dropped: the caller settles the failure.
-	if _, _, err := settle.Transition(it, num, forge.InProgress, forge.Complete, "", ""); err != nil {
+	v := settle.ForReason(dispatchrecord.ReasonRecoverDeclined)
+	// The returned Verdict and note are dropped: the caller settles the failure.
+	if _, _, err := settle.Transition(it, num, forge.InProgress, v, ""); err != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not restore agent-complete: %v\n", num, err)
 		return origErr
 	}
@@ -1679,7 +1680,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// caller settles that failure itself. Inline rather than through
 	// settle/gate.go's latch, which exists for a path that can reach a second,
 	// contradicting terminal transition; this one reaches at most one.
-	recoverSettled(num, forge.Complete, dispatchrecord.ReasonRecoverDeclined, note)
+	recoverSettled(num, v, note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}
@@ -2498,6 +2499,6 @@ func primaryLogPath(num string) string {
 // recoverSettled is a recover terminal settle that holds no Dispatcher: it
 // settles the prior work Dispatch's Record, so the empty RecordID makes
 // settle.SettledPrior read the ID from the primary log's dispatch_start stamp.
-func recoverSettled(num string, state forge.DispatchState, reason, note string) {
-	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), hostop.DispatchSettled{State: state.String(), Reason: reason, Note: note})
+func recoverSettled(num string, v settle.Verdict, note string) {
+	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), v, hostop.DispatchSettled{Note: note})
 }

@@ -94,7 +94,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
 	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
-	s.transitionState(num, forge.InProgress, forge.Failed, reason, dispatchrecord.ReasonMergeUnverified)
+	s.transitionState(num, ForReason(dispatchrecord.ReasonMergeUnverified), reason)
 }
 
 // retryVerifyRead runs read, retrying a failure up to Policy.Max times with

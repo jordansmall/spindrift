@@ -114,7 +114,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	// state twice for one issue (completeLanding's Complete, then
 	// verifyMerged's demotion). Every ResearchSettle path reaches exactly one,
 	// so inline is already "once".
-	SettledBy(d, dispatchkey.Issue(num), forge.Complete.String(), dispatchrecord.ReasonVerdict, "verdict "+string(verdict))
+	SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonVerdict), "verdict "+string(verdict))
 	fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
 }
 
@@ -142,7 +142,7 @@ func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) {
 	// Inline, not through the transitionState/flushSettled latch (see the
 	// comment at ResearchSettle's other Settled call above): this path also
 	// reaches exactly one terminal state per issue.
-	SettledBy(d, dispatchkey.Issue(num), forge.Failed.String(), dispatchrecord.ReasonResearchFailed, note)
+	SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonResearchFailed), note)
 	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
 }
 

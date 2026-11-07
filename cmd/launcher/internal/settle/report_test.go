@@ -28,7 +28,7 @@ func TestSettle_TransitionState_Terminal_LatchesWithoutEmittingUntilFlush(t *tes
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
 
 	if recs := readRecords(); len(recs) != 0 {
 		t.Fatalf("records: got %+v, want none before flushSettled pops the latch", recs)
@@ -45,7 +45,7 @@ func TestSettle_FlushSettled_EmitsLatchedRecordOnce(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "some reason", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "some reason")
 	s.flushSettled(&dispatch.Fake{}, "9")
 	// A second flush must not re-emit: the pop already drained the latch.
 	s.flushSettled(&dispatch.Fake{}, "9")
@@ -69,8 +69,8 @@ func TestSettle_TransitionState_SecondTerminalCallOverwritesLatch(t *testing.T) 
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Complete, "", "failed")
-	s.transitionState("9", forge.InProgress, forge.Failed, "demoted", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonMerged), "")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "demoted")
 	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
@@ -79,24 +79,6 @@ func TestSettle_TransitionState_SecondTerminalCallOverwritesLatch(t *testing.T) 
 	}
 	if recs[0].State != "failed" || recs[0].Note != "demoted" {
 		t.Errorf("record = %+v, want state=failed note=demoted", recs[0])
-	}
-}
-
-// A non-terminal transitionState call (e.g. Untriaged -> Dispatchable, the
-// promotion path) latches nothing, so flushSettled emits no record: settle's
-// report stream is only interested in terminal outcomes.
-func TestSettle_TransitionState_NonTerminal_EmitsNoRecord(t *testing.T) {
-	readRecords := testutil.InstallPipeReporter(t)
-
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "9"})
-	s := New(Config{}, fc, fc)
-
-	s.transitionState("9", forge.Untriaged, forge.Dispatchable, "", "failed")
-	s.flushSettled(&dispatch.Fake{}, "9")
-
-	if recs := readRecords(); len(recs) != 0 {
-		t.Fatalf("records: got %+v, want none", recs)
 	}
 }
 
@@ -113,7 +95,7 @@ func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testin
 	s := New(Config{}, fc, fc)
 
 	stderr := testutil.CaptureStderr(t, func() {
-		s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+		s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
 	})
 	s.flushSettled(&dispatch.Fake{}, "9")
 
@@ -256,7 +238,7 @@ func TestSettle_FlushSettled_CarriesLatchedPR(t *testing.T) {
 
 	s.latchPR("9", testPR)
 	// The transition after the latch must not drop the PR.
-	s.transitionState("9", forge.InProgress, forge.Failed, "red", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "red")
 	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
@@ -273,7 +255,7 @@ func TestSettle_FlushSettled_NoPRWhenNoneLatched(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
 	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
@@ -293,7 +275,7 @@ func TestSettle_FlushSettled_UnsettledLatchedPRDoesNotLeak(t *testing.T) {
 
 	s.latchPR("9", testPR)
 	s.flushSettled(&dispatch.Fake{}, "9")
-	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
 	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
@@ -540,7 +522,7 @@ func TestSettle_FlushSettled_SettlesRecordFromPrimaryLog(t *testing.T) {
 	d := &dispatch.Fake{RecordIDResult: "work:9@t"}
 
 	s.latchPR("9", testPR)
-	s.transitionState("9", forge.InProgress, forge.Failed, "red", "ci-red")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "red")
 	s.flushSettled(d, "9")
 	s.flushSettled(d, "9")
 
@@ -569,7 +551,7 @@ func TestSettle_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{LogPath: func(num string) string { return logPath }}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
 	s.flushSettled(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9")
 	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 		t.Errorf("missing log was created (stat err = %v)", err)
@@ -578,7 +560,7 @@ func TestSettle_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "")
 	s.flushSettled(&dispatch.Fake{}, "9")
 	if b, _ := os.ReadFile(logPath); len(b) != 0 {
 		t.Errorf("log = %q, want untouched without a Record ID", b)
@@ -595,7 +577,7 @@ func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *test
 	fc.TransitionStateErr = fmt.Errorf("wrapped: %w", refused)
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Complete, "merged cleanly", dispatchrecord.ReasonMerged)
+	s.transitionState("9", ForReason(dispatchrecord.ReasonMerged), "merged cleanly")
 
 	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "9" {
 		t.Fatalf("comments = %+v, want one on issue 9", fc.CommentCalls)
@@ -607,7 +589,7 @@ func TestSettle_TransitionState_Refused_CommentsAndLatchesDistinctReason(t *test
 		}
 	}
 	got := s.settledLatch["9"]
-	if got.state != forge.Complete.String() || got.reason != dispatchrecord.ReasonTransitionRefused {
+	if got.verdict.State() != forge.Complete || got.verdict.Reason() != dispatchrecord.ReasonTransitionRefused {
 		t.Errorf("latch = %+v, want state=%s reason=%s", got, forge.Complete, dispatchrecord.ReasonTransitionRefused)
 	}
 	if !strings.Contains(got.note, "could not move") || !strings.Contains(got.note, dispatchrecord.ReasonMerged) || !strings.Contains(got.note, "merged cleanly") {
@@ -622,13 +604,13 @@ func TestSettle_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(
 	s := New(Config{}, fc, fc)
 
 	testutil.CaptureStderr(t, func() {
-		s.transitionState("9", forge.InProgress, forge.Failed, "n", dispatchrecord.ReasonCIRed)
+		s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "n")
 	})
 
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("comments = %+v, want none", fc.CommentCalls)
 	}
-	if got := s.settledLatch["9"]; got.reason != dispatchrecord.ReasonCIRed || got.note != "n" {
+	if got := s.settledLatch["9"]; got.verdict.Reason() != dispatchrecord.ReasonCIRed || got.note != "n" {
 		t.Errorf("latch = %+v, want the caller's reason and note", got)
 	}
 }

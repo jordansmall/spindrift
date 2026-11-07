@@ -209,7 +209,7 @@ func (s *Settle) tryMarkRecoverable(d dispatch.Dispatcher, num string, result di
 		reason = "killed by signal"
 	}
 	fmt.Printf("    #%s  status=recoverable  note=%s; bundle present in outbox; run `spindrift recover %s` to land it\n", num, reason, num)
-	s.transitionState(num, forge.InProgress, forge.Recoverable, reason, dispatchrecord.ReasonRecoverable)
+	s.transitionState(num, ForReason(dispatchrecord.ReasonRecoverable), reason)
 	return true
 }
 

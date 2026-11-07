@@ -16,11 +16,7 @@ func TestTally_SettledRecordsOutcome(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
 
-	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{
-		State:  forge.Complete.String(),
-		Reason: dispatchrecord.ReasonMerged,
-		PRURL:  "https://example.test/pr/1",
-	})
+	Settled(dispatchkey.Issue("7"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{PRURL: "https://example.test/pr/1"})
 
 	want := []DispatchOutcome{{
 		Key:    dispatchkey.Issue("7"),
@@ -38,9 +34,9 @@ func TestTally_LastWriteWinsKeepingFirstSettledPosition(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
 
-	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Failed.String(), Reason: dispatchrecord.ReasonCIRed})
-	Settled(dispatchkey.Issue("2"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: dispatchrecord.ReasonMerged})
-	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: dispatchrecord.ReasonMerged})
+	Settled(dispatchkey.Issue("1"), "", ForReason(dispatchrecord.ReasonCIRed), hostop.DispatchSettled{})
+	Settled(dispatchkey.Issue("2"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{})
+	Settled(dispatchkey.Issue("1"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{})
 
 	got := tally.Outcomes()
 	if len(got) != 2 {
@@ -57,7 +53,7 @@ func TestTally_LastWriteWinsKeepingFirstSettledPosition(t *testing.T) {
 func TestTally_OutcomesReturnsCopy(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
-	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String()})
+	Settled(dispatchkey.Issue("1"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{})
 
 	tally.Outcomes()[0].State = "mutated"
 
@@ -69,7 +65,7 @@ func TestTally_OutcomesReturnsCopy(t *testing.T) {
 func TestTally_SettledWithoutInstalledTallyDoesNotPanic(t *testing.T) {
 	t.Cleanup(InstallTally(nil))
 
-	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{State: forge.Complete.String()})
+	Settled(dispatchkey.Issue("7"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{})
 }
 
 func TestTally_InstallRestoresPrevious(t *testing.T) {
@@ -78,7 +74,7 @@ func TestTally_InstallRestoresPrevious(t *testing.T) {
 
 	restore := InstallTally(&Tally{})
 	restore()
-	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String()})
+	Settled(dispatchkey.Issue("1"), "", ForReason(dispatchrecord.ReasonMerged), hostop.DispatchSettled{})
 
 	if len(outer.Outcomes()) != 1 {
 		t.Fatalf("outer tally not restored: %+v", outer.Outcomes())
