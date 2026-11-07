@@ -163,14 +163,6 @@ func TestWriterEmitsOnResultEvent(t *testing.T) {
 	}
 }
 
-// New takes three arguments: the time-based throttle fallback was removed.
-func TestNewNoThrottleArg(t *testing.T) {
-	w := newHeartbeat(t, &bytes.Buffer{}, "1", &bytes.Buffer{}, driverkit.RenderOptions{})
-	if w == nil {
-		t.Fatal("New returned nil")
-	}
-}
-
 func TestWriterBareResultEmitsNothing(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter(t, "42", &status)
@@ -1078,11 +1070,11 @@ func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
 	}
 }
 
-// A Writer built via plain New, with no static topLevelRole, switches its
-// active top-level role mid-stream on a pass_start op whose Role is non-empty:
-// a review pass attributes later top-level turns to reviewer, not the
-// ImplementorRole default, across header, count, and heartbeat lines alike
-// (issue #2382).
+// A Writer built with an empty RenderOptions.TopLevelRole, which leaves it on
+// the ImplementorRole default, switches its active top-level role mid-stream on
+// a pass_start op whose Role is non-empty: a review pass attributes later
+// top-level turns to reviewer instead, across header, count, and heartbeat
+// lines alike (issue #2382).
 func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
