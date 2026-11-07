@@ -43,8 +43,10 @@ func minimalValidConfig() Config {
 }
 
 // minimalDeps returns Deps matching the github/github pairing
-// minimalValidConfig fixes. The validators are nil because github's real
-// registry row carries none either (cmd/launcher/backend.go).
+// minimalValidConfig fixes. Its github row leaves ValidateTracker and
+// ValidateCodeForge nil on purpose, so crossKnobCheck exercises axis
+// membership alone; the real row's ValidateTracker (forge/github/strategy.go)
+// requires REPO_SLUG.
 func minimalDeps() Deps {
 	return Deps{
 		Signals: func(codeForge, issueTracker string) Signals {
