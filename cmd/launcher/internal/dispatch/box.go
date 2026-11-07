@@ -51,7 +51,8 @@ type Dispatch struct {
 
 	// nonce is this Dispatch's per-run nonce (issue #1937), minted by
 	// Factory.New, forwarded into every Box as RUN_NONCE, and kept here so
-	// successResult and retry.go can check a log line against it.
+	// outcomeResult's mid-run signal-line scanners can check a log line
+	// against it.
 	nonce string
 
 	// agentGeneration is the agent-closure generation snapshot taken at
