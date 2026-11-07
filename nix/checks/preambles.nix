@@ -757,9 +757,7 @@ runArtifactsRowChecks allRows
         "FLAKE_LAUNCHER_ATTR"
         "FORGE_BACKEND"
         "FULLY_LOCAL"
-        "GITHUB_OUTPUT"
         "HOST_MEDIATED_REMOTE"
-        "IMAGE"
         "IN_BOX_UNREACHABLE_TRACKER"
         "LAUNCHER_CURRENCY_HASH"
         "OUTBOX_RELAY_CAPABLE"
@@ -776,7 +774,7 @@ runArtifactsRowChecks allRows
       expected = pkgs.lib.unique (builtins.sort builtins.lessThan (sharedKeys ++ rowKeys));
     in
     assert assertMsg (out == expected)
-      "documentArtifactKeys must be the sorted union of runArtifacts output keys (every runner row) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
+      "documentArtifactKeys must be the sorted union of runArtifacts output keys (every runner row), got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
 
   # mkHarness hands runArtifacts the union of every row's inputs, so `...` must

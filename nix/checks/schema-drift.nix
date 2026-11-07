@@ -1199,7 +1199,7 @@ checkedMerge {
           "internal/backend/registry_gen.go"
         ]
       );
-      # Nix-computed plumbing read via getenvArtifact/docArtifact, not
+      # Nix-computed plumbing read via docArtifact, not
       # user-facing knobs (ADR 0020, issue #810).
       documentArtifacts = preambles.documentArtifactKeys;
       schemaEnvNames = map (e: e.env) (attrValues schema);
@@ -1219,6 +1219,7 @@ checkedMerge {
         "PATH"
         "TERM"
         "NO_COLOR"
+        "GITHUB_OUTPUT" # GitHub Actions step-output file (issue #6611)
         "GH_HOST" # gh CLI host override
         "OPENCODE_DB" # lib/drivers/opencode.nix envCommon, read by the opencode resume lookup (issue #5378)
         # Go ecosystem proxy settings forwarded as-is.
@@ -1254,7 +1255,7 @@ checkedMerge {
         )
       );
       # Fragments shared across the passes below so they cannot drift apart.
-      readerPattern = "os\\.Getenv|os\\.LookupEnv|getenv|getenvArtifact|docArtifact";
+      readerPattern = "os\\.Getenv|os\\.LookupEnv|getenv|docArtifact";
       identRe = "[A-Za-z_][A-Za-z0-9_]*";
       envNameRe = "[A-Z_][A-Z0-9_]*";
       matches = re: filter builtins.isList (builtins.split re treeGoSrc);

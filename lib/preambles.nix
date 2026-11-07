@@ -234,8 +234,7 @@ rec {
 
   # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
   # what actually renders instead of a parallel list that can silently drift
-  # (issue #810). IMAGE and GITHUB_OUTPUT (#2324) are env-only escape hatches
-  # runArtifacts does not emit, so they are added by hand.
+  # (issue #810).
   documentArtifactKeysFor =
     rows:
     builtins.sort builtins.lessThan (
@@ -252,10 +251,6 @@ rec {
             )
           )
         ) rows
-        ++ [
-          "IMAGE"
-          "GITHUB_OUTPUT"
-        ]
       )
     );
 
