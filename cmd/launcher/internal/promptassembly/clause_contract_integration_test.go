@@ -4,6 +4,7 @@ package promptassembly_test
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1513,6 +1514,624 @@ var clauseContracts = []clauseContract{
 		clause:   "Carry the machine marker `<!-- spindrift-research -->` in the comment body",
 		reason:   contractBlockReason + " The research outcome contract must reach research-prompt.md.",
 	},
+
+	// PR body issue reference: github closes the issue, a local tracker does not
+	{
+		fragment: "pr-body-closes.md",
+		pattern:  regexp.MustCompile(`Closes #\d+`),
+		reason:   "the PR body carries GitHub's closing keyword so merging closes the issue; without it the issue stays open after landing.",
+	},
+	{
+		fragment: "local/pr-body-issue-ref.md",
+		pattern:  regexp.MustCompile(`Local-issue: \S+`),
+		reason:   "a local-tracker Consumer that opted in gets a plain breadcrumb naming the ticket, so the PR stays traceable to it.",
+	},
+	{
+		fragment: "local/pr-body-issue-ref.md",
+		clause:   "never an auto-closing reference",
+		reason:   "a local ticket's slug can be numeric, so a closing keyword would silently close an unrelated GitHub issue on the Target repo.",
+	},
+	{
+		fragment: "local/pr-body-issue-ref.md",
+		clause:   "Closes #",
+		absent:   true,
+		reason:   "a local ticket's slug can be numeric, so a closing keyword would silently close an unrelated GitHub issue on the Target repo.",
+	},
+	{
+		fragment: "local/pr-body-no-issue-ref.md",
+		clause:   "must NOT reference the local ticket",
+		reason:   "a local ticket is private and local-only, so by default the PR body must not leak it.",
+	},
+	{
+		fragment: "local/pr-body-no-issue-ref.md",
+		clause:   "Closes #",
+		absent:   true,
+		reason:   "a local ticket is not a GitHub issue, so the PR body must carry no closing keyword.",
+	},
+	{
+		fragment: "local/pr-body-no-issue-ref.md",
+		clause:   "Local-issue:",
+		absent:   true,
+		reason:   "the breadcrumb is the Consumer's opt-in; the default local PR body names no ticket at all.",
+	},
+
+	// issue read: the subject issue is injected, so the agent never fetches it
+	{
+		fragment: "issue-prompt.md",
+		clause:   "# ISSUE TEXT section after the template body — read there, do not fetch it from the tracker",
+		reason:   "the subject issue's body and comment snapshot are injected, so the agent must read them there rather than spend a tracker call on text it already holds.",
+	},
+	{
+		fragment: "issue-read.md",
+		clause:   "already in the # ISSUE TEXT section below",
+		reason:   "the subject issue's own text is injected, so only the parent and linked issues are fetched.",
+	},
+	{
+		fragment: "issue-read.md",
+		pattern:  regexp.MustCompile(`via (GitHub|Forgejo)\b`),
+		reason:   "the fragment is shared across trackers and names the active one, so the agent fetches parents and links through the right client.",
+	},
+	{
+		fragment: "issue-read.md",
+		clause:   "gh issue view",
+		absent:   true,
+		reason:   "the subject issue is injected, so the read step must not send the agent to fetch it.",
+	},
+	{
+		fragment: "local/issue-read.md",
+		clause:   "via GitHub",
+		absent:   true,
+		reason:   "a local tracker has no GitHub client, so the read step must not point at one.",
+	},
+	{
+		fragment: "local/issue-read.md",
+		clause:   "gh issue view",
+		absent:   true,
+		reason:   "a local tracker has no GitHub client, so the read step must not send the agent to fetch the issue.",
+	},
+	{
+		fragment: "local/issue-read.md",
+		clause:   "/issues",
+		absent:   true,
+		reason:   "the subject issue is injected, so the read step must not point the agent at a local issue folder.",
+	},
+	{
+		fragment: "issue-read-unreadable.md",
+		clause:   "cannot be read from this Box",
+		reason:   "a tracker with no in-Box client (jira) leaves linked issues unreadable, and the agent must be told so rather than try a client that does not exist.",
+	},
+	{
+		fragment: "research-issue-read-unreadable.md",
+		clause:   "cannot be read from this Box",
+		reason:   "a tracker with no in-Box client (jira) leaves linked issues unreadable, and the agent must be told so rather than try a client that does not exist.",
+	},
+	{
+		fragment: "issue-read-unreadable.md",
+		pattern:  regexp.MustCompile(`via (GitHub|Forgejo)\b`),
+		absent:   true,
+		reason:   "the unreadable arm must not name a client the Box does not have.",
+	},
+	{
+		fragment: "research-issue-read-unreadable.md",
+		pattern:  regexp.MustCompile(`via (GitHub|Forgejo)\b`),
+		absent:   true,
+		reason:   "the unreadable arm must not name a client the Box does not have.",
+	},
+
+	// research verdict: posted directly where the Box may write, relayed otherwise
+	{
+		fragment: "github/research-verdict.md",
+		clause:   "gh issue comment",
+		reason:   "a read-write github Box posts the verdict itself, as exactly one comment.",
+	},
+	{
+		fragment: "github/research-verdict.md",
+		clause:   "SPINDRIFT_COMMENT",
+		absent:   true,
+		reason:   "a Box that posts the verdict itself has no relayed line to print.",
+	},
+	{
+		fragment: "forgejo/research-verdict.md",
+		clause:   "fj issue comment",
+		reason:   "a read-write forgejo Box posts the verdict through fj.",
+	},
+	{
+		fragment: "forgejo/research-verdict.md",
+		clause:   "gh issue comment",
+		absent:   true,
+		reason:   "gh targets GitHub, not a Forgejo instance.",
+	},
+	{
+		fragment: "research-verdict-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_COMMENT \S+ <base64-encoded verdict comment body`),
+		reason:   "the log carrier relays the verdict as one nonce-guarded base64 line the launcher finds by this run's nonce.",
+	},
+	{
+		fragment: "research-verdict-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_COMMENT_(BEGIN|END)`),
+		absent:   true,
+		reason:   "the verdict is one nonce-guarded base64 line; a BEGIN/END block form is not the grammar the launcher reads.",
+	},
+	{
+		fragment: "fragments/local/research-verdict-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_COMMENT \S+ <base64-encoded verdict comment body`),
+		reason:   "the log carrier relays the verdict as one nonce-guarded base64 line the launcher finds by this run's nonce.",
+	},
+	{
+		fragment: "fragments/local/research-verdict-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_COMMENT_(BEGIN|END)`),
+		absent:   true,
+		reason:   "the verdict is one nonce-guarded base64 line; a BEGIN/END block form is not the grammar the launcher reads.",
+	},
+
+	// research outcome landing
+	{
+		fragment: "github/research-outcome-landing.md",
+		clause:   "`landing` is the URL of the comment you just posted",
+		reason:   "a Box that posts the verdict itself reports the comment's URL as the landing.",
+	},
+	{
+		fragment: "github/research-outcome-landing.md",
+		clause:   "`gh issue comment` prints it",
+		reason:   "the URL comes from the comment command's own output.",
+	},
+	{
+		fragment: "github/research-outcome-landing.md",
+		clause:   "landing=none",
+		absent:   true,
+		reason:   "landing=none belongs to the relayed arm, where the Box never learns the comment's URL.",
+	},
+	{
+		fragment: "forgejo/research-outcome-landing.md",
+		clause:   "posted with `fj issue comment`",
+		reason:   "a forgejo Box that posts the verdict itself names fj as the source of the landing URL.",
+	},
+	{
+		fragment: "forgejo/research-outcome-landing.md",
+		clause:   "`landing=none` if it printed no URL",
+		reason:   "fj issue comment may print no URL, and the landing is then none.",
+	},
+	{
+		fragment: "forgejo/research-outcome-landing.md",
+		clause:   "gh issue comment",
+		absent:   true,
+		reason:   "gh targets GitHub, not a Forgejo instance.",
+	},
+	{
+		fragment: "research-outcome-landing-relayed-socket.md",
+		clause:   "`driver-exec signal comment` exits zero",
+		reason:   "the socket carrier acknowledges a relay by the send's zero exit, which is what tells the agent the verdict is delivered.",
+	},
+	{
+		fragment: "research-outcome-landing-relayed-socket.md",
+		clause:   "Nothing acknowledges a relay",
+		absent:   true,
+		reason:   "the socket carrier does acknowledge a relay, unlike the log carrier.",
+	},
+	{
+		fragment: "research-outcome-landing-relayed.md",
+		clause:   "Nothing acknowledges a relay on the `log` carrier",
+		reason:   "the log carrier gives no acknowledgement, so the agent must not wait for one or call a relayed verdict undelivered.",
+	},
+	{
+		fragment: "research-outcome-landing-relayed.md",
+		clause:   "signal comment accepted",
+		absent:   true,
+		reason:   "the log carrier has no acknowledgement line, so the agent must not wait for one.",
+	},
+	{
+		fragment: "research-outcome-landing-relayed.md",
+		clause:   "The relay failed only if the guard kept reporting over budget",
+		reason:   "on the log carrier the only relay failure the agent can see is the guard reporting over budget, so a successful relay never trips the blocked escape hatch.",
+	},
+	{
+		fragment: "research-outcome-landing-relayed.md",
+		clause:   "relay failed as described above",
+		absent:   true,
+		reason:   "the log carrier names its one failure mode in place; an unspecific pointer leaves the agent to guess.",
+	},
+	{
+		fragment: "research-prompt.md",
+		clause:   "or the verdict was never delivered, use",
+		reason:   "the blocked escape hatch fires on a verdict that was never delivered, not on a relayed one, so a successful relay is not reported blocked.",
+	},
+	{
+		fragment: "research-prompt.md",
+		clause:   "or the comment cannot be posted",
+		absent:   true,
+		reason:   "a relayed verdict is never posted by the Box, so the hatch must not key on the Box posting a comment.",
+	},
+
+	// blocked-run issue comment
+	{
+		fragment: "github/issue-blocked-comment.md",
+		clause:   "gh issue comment",
+		reason:   "a read-write github Box comments what is done and what remains itself.",
+	},
+	{
+		fragment: "forgejo/issue-blocked-comment.md",
+		clause:   "fj issue comment",
+		reason:   "a read-write forgejo Box comments what is done and what remains through fj.",
+	},
+	{
+		fragment: "issue-blocked-comment-relay.md",
+		clause:   "the launcher posts it as the issue comment",
+		reason:   "a read-only Box cannot comment, so the SPINDRIFT_OUTCOME note is the comment the launcher posts for it.",
+	},
+	{
+		fragment: "local/issue-blocked-comment-relay.md",
+		clause:   "the launcher posts the SPINDRIFT_OUTCOME",
+		reason:   "a local tracker has no in-Box client, so the SPINDRIFT_OUTCOME note is the comment the launcher posts for the Box.",
+	},
+	{
+		fragment: "issue-blocked-comment-unwritable.md",
+		clause:   "no client that can post a comment to this tracker",
+		reason:   "a tracker with no in-Box client (jira) relays the blocked comment through the host, and the agent must be told why it does nothing here.",
+	},
+	{
+		fragment: "issue-blocked-comment-unwritable.md",
+		clause:   "GitHub token",
+		absent:   true,
+		reason:   "the unwritable arm is not about a read-only GitHub token; it has no client at all.",
+	},
+
+	// push and PR open/blocked arms: a read-write Box acts, a read-only one hands off
+	{
+		fragment: "open-pr-push-git.md",
+		clause:   "git push --force-with-lease --force-if-includes -u origin",
+		reason:   "a read-write Box pushes its branch itself, and --force-if-includes keeps the lease from overwriting a commit someone else pushed.",
+	},
+	{
+		fragment: "open-pr-push-outbox.md",
+		clause:   "the harness relays your committed branch out",
+		reason:   "a read-only Box takes no push action; the harness relays its committed branch and the launcher pushes it host-side.",
+	},
+	{
+		fragment: "open-pr-push-outbox.md",
+		clause:   "git push --force-with-lease",
+		absent:   true,
+		reason:   "a read-only Box holds no push-capable token, so the fragment must not instruct a push.",
+	},
+	{
+		fragment: "commit-push-git.md",
+		clause:   "git push --force-with-lease --force-if-includes -u origin",
+		reason:   "a read-write Box pushes after rebasing, and --force-if-includes keeps the lease from overwriting a commit someone else pushed.",
+	},
+	{
+		fragment: "commit-push-git.md",
+		clause:   "one retry only",
+		reason:   "a rejected push retries once and then follows IF BLOCKED, so the agent does not loop on a push it cannot land.",
+	},
+	{
+		fragment: "commit-push-outbox.md",
+		clause:   "the harness relays your committed branch out",
+		reason:   "a read-only Box takes no push action; the harness relays its committed branch and the launcher pushes it host-side.",
+	},
+	{
+		fragment: "commit-push-outbox.md",
+		clause:   "git rebase origin/",
+		reason:   "a read-only Box still hands off a branch on a fresh base, since the host push does not rebase it.",
+	},
+	{
+		fragment: "commit-push-outbox.md",
+		clause:   "git push --force-with-lease",
+		absent:   true,
+		reason:   "a read-only Box holds no push-capable token, so the fragment must not instruct a push.",
+	},
+	{
+		fragment: "if-blocked-triage-git.md",
+		clause:   "Push failure — check the actual cause before reporting it",
+		reason:   "a read-write Box's rejected push has a real cause to diagnose before it is reported, not a guess.",
+	},
+	{
+		fragment: "if-blocked-triage-git.md",
+		clause:   ".github/workflows/",
+		reason:   "the token lacks workflow scope by design, so a rejected push touching workflows is a human-review case, not a retry.",
+	},
+	{
+		fragment: "if-blocked-triage-outbox.md",
+		clause:   "A denied `git push` here is expected",
+		reason:   "a read-only Box's denied push is the outcome it was always going to get, so it must not be diagnosed as a broken token.",
+	},
+	{
+		fragment: "if-blocked-triage-outbox.md",
+		clause:   "Push failure — check the actual cause before reporting it",
+		absent:   true,
+		reason:   "the push-failure triage belongs to the read-write arm; a read-only Box's denial is expected.",
+	},
+	{
+		fragment: "if-blocked-triage-outbox.md",
+		clause:   "git diff origin/",
+		absent:   true,
+		reason:   "the workflows diff triage belongs to the read-write arm, since a read-only Box pushes nothing to be rejected.",
+	},
+	{
+		fragment: "if-blocked-triage-outbox.md",
+		clause:   "**Genuine `.github/workflows/` change:**",
+		absent:   true,
+		reason:   "the workflow-scope diagnosis belongs to the read-write arm, since a read-only Box pushes nothing to be rejected.",
+	},
+	{
+		fragment: "if-blocked-push-git.md",
+		clause:   "Push what you have (or note if even that is impossible)",
+		reason:   "a blocked read-write Box still pushes its work so none is stranded.",
+	},
+	{
+		fragment: "if-blocked-push-git.md",
+		clause:   "seam.bundle",
+		absent:   true,
+		reason:   "a read-write Box pushes directly; the bundle hand-off belongs to no arm of this fragment.",
+	},
+	{
+		fragment: "if-blocked-push-outbox.md",
+		clause:   "the harness relays your committed branch out",
+		reason:   "a blocked read-only Box leaves its work committed and the harness relays it, so it takes no push or bundle action.",
+	},
+	{
+		fragment: "if-blocked-push-outbox.md",
+		clause:   "Push what you have (or note if even that is impossible)",
+		absent:   true,
+		reason:   "the push-what-you-have step belongs to the read-write arm.",
+	},
+	{
+		fragment: "if-blocked-push-outbox.md",
+		clause:   "/outbox/seam.bundle",
+		absent:   true,
+		reason:   "a read-only Box takes no bundle action; the harness relays the branch.",
+	},
+
+	// open-PR create arms
+	{
+		fragment: "github/open-pr-create.md",
+		clause:   "fj pr create",
+		absent:   true,
+		reason:   "fj targets Forgejo, not GitHub.",
+	},
+	{
+		fragment: "github/open-pr-create.md",
+		clause:   "SPINDRIFT_PR_INTENT",
+		absent:   true,
+		reason:   "a Box that opens the PR itself has no PR-intent line to print.",
+	},
+	{
+		fragment: "forgejo/open-pr-create.md",
+		clause:   "2. `fj pr create",
+		reason:   "a read-write forgejo Box opens its draft through fj as step 2.",
+	},
+	{
+		fragment: "forgejo/open-pr-create.md",
+		clause:   "2. `gh pr create",
+		absent:   true,
+		reason:   "gh targets GitHub, not a Forgejo instance; only the closing reminder may name it.",
+	},
+	{
+		fragment: "open-pr-create-outbox.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT \S+ <base64-encoded title`),
+		reason:   "a read-only Box prints its PR as one nonce-guarded line the launcher finds by this run's nonce (issue #1938).",
+	},
+	{
+		fragment: "open-pr-create-outbox.md",
+		clause:   "gh pr create --draft --base",
+		absent:   true,
+		reason:   "a read-only Box cannot open the PR, so only the read-write fragment may carry the invocation.",
+	},
+	{
+		fragment: "open-pr-create-outbox.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT_(BEGIN|END)`),
+		absent:   true,
+		reason:   "the PR intent is one line; a BEGIN/END block form is not the grammar the launcher reads.",
+	},
+	{
+		fragment: "github/if-blocked-pr.md",
+		clause:   "gh pr view --json url",
+		reason:   "a blocked read-write github Box checks for an existing PR before opening a draft.",
+	},
+	{
+		fragment: "github/if-blocked-pr.md",
+		clause:   "SPINDRIFT_PR_INTENT",
+		absent:   true,
+		reason:   "a Box that opens the PR itself has no PR-intent line to print.",
+	},
+	{
+		fragment: "if-blocked-pr-outbox.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_PR_INTENT \S+ <base64-encoded title`),
+		reason:   "a blocked read-only Box prints its draft PR as one nonce-guarded line the launcher finds by this run's nonce.",
+	},
+	{
+		fragment: "if-blocked-pr-outbox.md",
+		clause:   "gh pr view --json url",
+		absent:   true,
+		reason:   "a read-only Box has no PR client to check with.",
+	},
+	{
+		fragment: "if-blocked-pr-outbox.md",
+		clause:   "gh pr create --draft",
+		absent:   true,
+		reason:   "a read-only Box cannot open the PR, so only the read-write fragment may carry the invocation.",
+	},
+	{
+		fragment: "if-blocked-pr-none.md",
+		clause:   "2. Open no pull request",
+		reason:   "a git Code Forge has no PR, so a blocked run opens none and keeps step 3 numbered after step 2 (issue #5233).",
+	},
+	{
+		fragment: "if-blocked-pr-none.md",
+		clause:   "gh pr view",
+		absent:   true,
+		reason:   "a git Code Forge has no PR to look up (issue #5233).",
+	},
+	{
+		fragment: "if-blocked-pr-none.md",
+		clause:   "--draft",
+		absent:   true,
+		reason:   "a git Code Forge has no PR to open as a draft (issue #5233).",
+	},
+	{
+		fragment: "if-blocked-pr-none.md",
+		clause:   "SPINDRIFT_PR_INTENT",
+		absent:   true,
+		reason:   "a git Code Forge has no PR whose intent could be relayed (issue #5233).",
+	},
+	{
+		fragment: "issue-prompt.md",
+		clause:   "3. Leave the issue in-progress — do NOT close it.",
+		reason:   "the IF BLOCKED arms before this step end at step 2 or 3, so it must stay numbered 3 whichever arm renders.",
+	},
+	{
+		fragment: "if-blocked-outcome-landing-git.md",
+		clause:   "landing=<pr-url> status=blocked",
+		reason:   "a blocked read-write Box has a PR, so its outcome line carries the PR URL placeholder.",
+	},
+	{
+		fragment: "if-blocked-outcome-landing-branch.md",
+		pattern:  regexp.MustCompile(`landing=agent/issue-\d+ status=blocked`),
+		reason:   "a git Code Forge has no PR, so a blocked outcome line reports the branch as the landing (issue #5233).",
+	},
+	{
+		fragment: "if-blocked-outcome-landing-branch.md",
+		clause:   "landing=<pr-url>",
+		absent:   true,
+		reason:   "a git Code Forge has no PR URL to report (issue #5233).",
+	},
+	{
+		fragment: "if-blocked-outcome-landing-outbox.md",
+		pattern:  regexp.MustCompile(`landing=agent/issue-\d+ status=blocked`),
+		reason:   "a read-only Box never learns the PR URL, so a blocked outcome line reports the branch as the landing.",
+	},
+	{
+		fragment: "if-blocked-outcome-landing-outbox.md",
+		clause:   "landing=<pr-url>",
+		absent:   true,
+		reason:   "a read-only Box never learns the PR URL.",
+	},
+
+	// Filer arms
+	{
+		fragment: "file-issues-direct.md",
+		clause:   "use the filer's returned issue URLs",
+		reason:   "a direct Filer returns real issue URLs, which replace the raw findings in the PR body.",
+	},
+	{
+		fragment: "file-issues-relay.md",
+		clause:   "queued for filing",
+		reason:   "a relayed Filer knows no issue URL yet, so the PR body only notes that the findings were queued.",
+	},
+	{
+		fragment: "file-issues-relay.md",
+		clause:   "the filer's returned issue URLs",
+		absent:   true,
+		reason:   "a relayed Filer returns no issue URLs.",
+	},
+	{
+		fragment: "file-issues-relay-socket.md",
+		clause:   "queued for filing",
+		reason:   "a relayed Filer knows no issue URL yet, so the PR body only notes that the findings were queued.",
+	},
+	{
+		fragment: "file-issues-relay-socket.md",
+		clause:   "the filer's returned issue URLs",
+		absent:   true,
+		reason:   "a relayed Filer returns no issue URLs.",
+	},
+	{
+		fragment: "github/filer-direct-file.md",
+		clause:   "gh issue create",
+		reason:   "a direct github Filer files each finding with gh.",
+	},
+	{
+		fragment: "github/filer-direct-file.md",
+		clause:   "SPINDRIFT_ISSUE_INTENT",
+		absent:   true,
+		reason:   "a direct Filer files with its own token, so it prints no relayed intent line.",
+	},
+	{
+		fragment: "github/filer-direct-file.md",
+		clause:   "fj issue create",
+		absent:   true,
+		reason:   "fj targets Forgejo, not GitHub.",
+	},
+	{
+		fragment: "github/filer-direct-label.md",
+		clause:   "gh label create",
+		reason:   "a direct github Filer ensures the provenance label exists with gh.",
+	},
+	{
+		fragment: "forgejo/filer-direct-file.md",
+		clause:   "fj issue create",
+		reason:   "a direct forgejo Filer files each finding with fj.",
+	},
+	{
+		fragment: "forgejo/filer-direct-file.md",
+		clause:   "gh issue create",
+		absent:   true,
+		reason:   "gh targets GitHub, not a Forgejo instance.",
+	},
+	{
+		fragment: "forgejo/filer-direct-label.md",
+		clause:   "gh label create",
+		absent:   true,
+		reason:   "gh targets GitHub, not a Forgejo instance.",
+	},
+	{
+		fragment: "filer-file-relay.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_ISSUE_INTENT \S+ <base64-payload>`),
+		reason:   "a relayed Filer prints one nonce-guarded base64 line per issue, which the launcher files host-side.",
+	},
+	{
+		fragment: "filer-file-relay.md",
+		clause:   "gh issue create",
+		absent:   true,
+		reason:   "a relayed Filer never files issues itself, even where its token could.",
+	},
+	{
+		fragment: "filer-label-relay.md",
+		clause:   "gh label create",
+		absent:   true,
+		reason:   "a relayed Filer cannot create labels; the launcher applies the provenance label host-side.",
+	},
+	{
+		fragment: "github/filer-dedup.md",
+		clause:   "gh issue list --state open --search",
+		reason:   "a github Filer searches open issues before filing, so a finding already tracked is not refiled.",
+	},
+	{
+		fragment: "github/filer-dedup.md",
+		clause:   "run no tracker search at all",
+		absent:   true,
+		reason:   "the no-search arm belongs to trackers with no in-Box client.",
+	},
+	{
+		fragment: "filer-dedup-unwritable.md",
+		clause:   "run no tracker search at all",
+		reason:   "a tracker with no in-Box client has nothing to search, and gh would query the wrong tracker.",
+	},
+	{
+		fragment: "filer-dedup-unwritable.md",
+		clause:   "exact site key and overlapping line range",
+		reason:   "with no in-Box search, the host's dedup by site key and line range is the whole check, and the agent must know it is never by subject.",
+	},
+	{
+		fragment: "filer-dedup-unwritable.md",
+		clause:   "gh issue list",
+		absent:   true,
+		reason:   "gh would query the wrong tracker.",
+	},
+	{
+		fragment: "local/filer-dedup.md",
+		clause:   "run no tracker search at all",
+		reason:   "a local tracker has no in-Box search, and gh would query the wrong tracker.",
+	},
+	{
+		fragment: "local/filer-dedup.md",
+		clause:   "exact site key and overlapping line range",
+		reason:   "with no in-Box search, the host's dedup by site key and line range is the whole check, and the agent must know it is never by subject.",
+	},
+	{
+		fragment: "local/filer-dedup.md",
+		clause:   "gh issue list",
+		absent:   true,
+		reason:   "gh would query the wrong tracker.",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
@@ -1726,6 +2345,44 @@ var sharedClauses = []sharedClause{
 			reason: "an oversize body is refused, never truncated, so the agent must not expect half a verdict to post (issue #3726).",
 		},
 	},
+	{
+		fragments: []string{"research-verdict-relay.md", "research-verdict-relay-socket.md", "local/research-verdict-relay-socket.md", "fragments/local/research-verdict-relay.md", "research-outcome-landing-relayed.md", "research-outcome-landing-relayed-socket.md"},
+		clauseContract: clauseContract{
+			clause: "gh issue comment",
+			absent: true,
+			reason: "a relayed verdict is posted by the launcher host-side, so the Box must not be told to run a tracker client.",
+		},
+	},
+	{
+		fragments: []string{"research-verdict-relay.md", "research-verdict-relay-socket.md", "local/research-verdict-relay-socket.md", "fragments/local/research-verdict-relay.md", "research-outcome-landing-relayed.md", "research-outcome-landing-relayed-socket.md"},
+		clauseContract: clauseContract{
+			clause: "fj issue comment",
+			absent: true,
+			reason: "a relayed verdict is posted by the launcher host-side, so the Box must not be told to run a tracker client.",
+		},
+	},
+	{
+		fragments: []string{"research-outcome-landing-relayed.md", "research-outcome-landing-relayed-socket.md"},
+		clauseContract: clauseContract{
+			clause: "always use `landing=none`",
+			reason: "a relayed verdict is posted host-side, so the Box never learns the comment's URL.",
+		},
+	},
+	{
+		fragments: []string{"research-outcome-landing-relayed.md", "research-outcome-landing-relayed-socket.md"},
+		clauseContract: clauseContract{
+			clause: "a relayed verdict is a delivered verdict",
+			reason: "a relayed verdict is not a failure, so the agent must not report it blocked.",
+		},
+	},
+	{
+		fragments: []string{"research-outcome-landing-relayed.md", "research-outcome-landing-relayed-socket.md"},
+		clauseContract: clauseContract{
+			clause: "comment you just posted",
+			absent: true,
+			reason: "the Box posts no comment on a relayed run, so there is no URL of one to report.",
+		},
+	},
 }
 
 // landPassForbiddenMarkers are the code-out actions the land-pass-order
@@ -1790,8 +2447,9 @@ func generatedContracts() []clauseContract {
 // nixRenderedSources names the pseudo-cell of Nix-rendered source files.
 // The assembler records only fragment spans, so a contract on a base prompt
 // template or a skill body checks the file as the seam fixtures hold it: the
-// templates under prompts/ keyed by file name, plus nix-checks-skill.md.
-// Their step placeholders (${CHECK_HYGIENE_STEP}) are unsubstituted.
+// templates under prompts/ keyed by file name, nix-checks-skill.md, and every
+// fragments/<path> file keyed by its path. Their step placeholders
+// (${CHECK_HYGIENE_STEP}) are unsubstituted.
 const nixRenderedSources = "nix-rendered-sources"
 
 // nixRenderedSourceRenders reads the pseudo-cell's files, failing if a key
@@ -1819,6 +2477,30 @@ func nixRenderedSourceRenders(t *testing.T, renders renderedFragments) map[strin
 		t.Fatalf("read nix-checks skill: %v", err)
 	}
 	sources["nix-checks-skill.md"] = []string{string(skill)}
+	// Raw "fragments/<path>" keys are for a fragment no golden cell renders (it
+	// would fail the vacuity guard), an obligation on the unsubstituted source
+	// (code-review-baked.md's ${REVIEW_FANOUT_AGENT}), or a fragment that
+	// renders only into the agents JSON. Otherwise contract on the golden-cell
+	// name: raw text is unsubstituted.
+	fragDir := filepath.Join(dir, "fragments")
+	err = filepath.WalkDir(fragDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		sources[filepath.ToSlash(rel)] = []string{string(b)}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", fragDir, err)
+	}
 	for name := range sources {
 		for cell, fragments := range renders {
 			if _, clash := fragments[name]; clash {
