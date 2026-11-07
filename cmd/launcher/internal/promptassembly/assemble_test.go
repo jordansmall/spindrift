@@ -108,12 +108,16 @@ func promptsDirExceptSubdir(t *testing.T, omit string) (dir, realDir string) {
 	return dir, realDir
 }
 
-// Pins a fragment substituting its own extraSubstVars entry:
-// skill-preamble.md's ${SKILLS_FOUND} must resolve to Env.SkillsFound's
-// value, not stay literal or empty.
-func TestAssembleSkillPreambleSelfSubstitution(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+// Pins a fragment substituting its own extraSubstVars entry: ${SKILLS_FOUND}
+// inside a fragment body must resolve to Env.SkillsFound's value, not stay
+// literal or empty.
+func TestAssembleFragmentSelfSubstitutesSkillsFound(t *testing.T) {
+	reg, env := syntheticRegistry(t,
+		[]FragmentRow{{Gate: "SKILLS_FOUND", Fragment: "skills-line.md", Var: "SKILLS_LINE", ExtraSubstVars: []string{"SKILLS_FOUND"}}},
+		map[string]string{
+			"issue-prompt.md":          "${SKILLS_LINE}\n",
+			"fragments/skills-line.md": "Skills available: ${SKILLS_FOUND}.\n",
+		})
 	env.SkillsFound = "caveman, tdd"
 
 	result, err := Assemble(env, reg)
@@ -122,26 +126,30 @@ func TestAssembleSkillPreambleSelfSubstitution(t *testing.T) {
 	}
 
 	if !strings.Contains(result.Prompt, "Skills available: caveman, tdd.") {
-		t.Errorf("Prompt missing skill-preamble.md's substituted SKILLS_FOUND:\n%s", result.Prompt)
+		t.Errorf("Prompt missing the fragment's substituted SKILLS_FOUND:\n%s", result.Prompt)
 	}
 }
 
-// The bash-parity trim (issue #2349). bash
-// captured the prompt through $(...), which strips every trailing newline,
-// and nothing downstream re-added one. issue-prompt.md ends with a
-// fragment-loop token whose assignment already appends "\n\n", so an
-// unstripped Result.Prompt would end in several newlines, not zero.
+// The bash-parity trim (issue #2349). bash captured the prompt through
+// $(...), which strips every trailing newline, and nothing downstream re-added
+// one. The template ends in a fragment-loop token whose assignment already
+// appends "\n\n", so an unstripped Result.Prompt would end in newlines, not
+// zero.
 func TestAssemblePromptHasNoTrailingNewline(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
+	reg, env := syntheticRegistry(t,
+		[]FragmentRow{{Fragment: "blank-tail.md", Var: "BLANK_TAIL"}},
+		map[string]string{
+			"issue-prompt.md":         "start ${BLANK_TAIL}",
+			"fragments/blank-tail.md": "fragment end.\n\n\n",
+		})
 
 	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if strings.HasSuffix(result.Prompt, "\n") {
-		t.Errorf("Prompt ends with a trailing newline, want none (bash $(...) strips all of them): %q", result.Prompt[len(result.Prompt)-10:])
+	if want := "start fragment end."; result.Prompt != want {
+		t.Errorf("Prompt = %q, want %q (bash $(...) strips every trailing newline)", result.Prompt, want)
 	}
 }
 
