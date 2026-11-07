@@ -65,8 +65,8 @@ func TestCargoRowRouteDeclaration_RejectsEmptyName(t *testing.T) {
 	}
 }
 
-// cargoBareKeyPattern rejects a name outside [A-Za-z0-9_-] because the name
-// ends up in a CARGO_REGISTRIES_<NAME>_TOKEN shell env var.
+// A name outside cargoBareKeyPattern is rejected; validateCargoRouteDeclaration
+// says why.
 func TestCargoRowRouteDeclaration_RejectsBadCharsetName(t *testing.T) {
 	row := Strategy
 
