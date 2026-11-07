@@ -23,6 +23,296 @@ import (
 // compared in twinContracts, which pins the pair equal where this table pins
 // only what each must say.
 var clauseContracts = []clauseContract{
+	// scout-prompt.md (a base template, raw source in the nix-rendered-sources pseudo-cell)
+	{
+		fragment: "scout-prompt.md",
+		clause:   "cited verbatim excerpt",
+		reason:   "the brief must cite a verbatim excerpt for each load-bearing claim so the coordinator can verify a claim from the cited lines instead of re-exploring the tree (issue #3216).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "load-bearing claim",
+		reason:   "the cited-excerpt rule is scoped to load-bearing claims, so the scout does not quote every line it reads (issue #3216).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "path:line anchor",
+		reason:   "each excerpt sits under a path:line anchor, the sed range the pre-return diff check reproduces (issue #3216).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "/tmp/brief.md",
+		reason:   "the brief is written to disk at a fixed path the coordinator and worker read back, not retyped into the return message (issue #3449).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "write a structured brief to",
+		reason:   "the scout writes the brief file itself rather than returning it for the coordinator to persist (issue #3449).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "Never retype a cited excerpt",
+		reason:   "excerpts are appended straight from source so they are byte-identical to the file; a retyped excerpt can drift from the tree (issue #3449).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "verify every",
+		reason:   "the scout verifies each cited excerpt against its source before returning, so a drifted block is fixed rather than shipped (issue #3449).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "`diff` it against the excerpt block the brief",
+		reason:   "the verification is a block-by-block diff of the anchor's own range, not a per-line grep, which would confirm only that the text exists somewhere (issue #3449).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "caveman",
+		absent:   true,
+		reason:   "the scout is a roster subagent with no Skill tool under the claude Driver, so its template carries no caveman anchor whether or not the skill is baked (issue #4562).",
+	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "${CAVEMAN",
+		absent:   true,
+		reason:   "no caveman fragment may be spliced into the scout template: a CAVEMAN_STEP var there would name a skill the subagent cannot invoke (issue #4562).",
+	},
+	// worker-prompt.md (a base template, raw source in the nix-rendered-sources pseudo-cell)
+	{
+		fragment: "worker-prompt.md",
+		clause:   "caveman",
+		absent:   true,
+		reason:   "the worker's only output is a final report, not narration, so its template carries no caveman anchor whether or not the skill is baked (issue #4562).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "${CAVEMAN",
+		absent:   true,
+		reason:   "no caveman fragment may be spliced into the worker template: its only output is a final report (issue #4562).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		pattern:  regexp.MustCompile(`SPINDRIFT_OUTCOME|VERDICT:`),
+		absent:   true,
+		reason:   "the worker's prompt is its template plus the spliced fragments, and the template may carry no outcome or verdict grammar, so a stray marker from a misbehaving worker can never terminate the run or be read as a review result; the template's own ${...} placeholders are raw source, so the unsubstituted-token check covers only the spliced fragments (issues #2059, #2491, #6182).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "turn budget",
+		reason:   "the worker must know its delegation may state a turn budget, or it cannot stop cleanly at one (issue #3159).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "stop cleanly",
+		reason:   "nearing its budget the worker stops with a checkpoint rather than pushing past it, since a long-running worker replays its whole context each turn (issue #3159).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "remaining-work checkpoint",
+		reason:   "the clean stop reports the work still left and where it stopped, which the coordinator seeds into a fresh worker (issue #3159).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "fresh worker",
+		reason:   "the checkpoint must be detailed enough for a fresh worker to resume without re-deriving anything (issue #3159).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "one patch file",
+		reason:   "a fully determined group of changes is written into one patch file, because every command replays the whole context (issue #3420).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "apply it in a single command",
+		reason:   "the patch lands in one command and is verified once for the group, so eight changes cost about what one costs (issue #3420).",
+	},
+	// worker-scout-brief.md
+	{
+		fragment: "worker-scout-brief.md",
+		clause:   "work from that excerpt first",
+		reason:   "the worker works from the delegation's quoted excerpt first, so the scout's map reaches it without a re-exploration (issues #3157, #3419).",
+	},
+	{
+		fragment: "worker-scout-brief.md",
+		clause:   "Open the full brief at `/tmp/brief.md` only when the excerpt is",
+		reason:   "reading the whole brief is conditional on the excerpt being missing, wrong, or silent, not the worker's first move (issue #3419).",
+	},
+	// tdd-baked.md
+	// tdd-unbaked.md
+	// principle-laziness-protocol-default.md
+	{
+		fragment: "principle-laziness-protocol-default.md",
+		clause:   "`/principle-laziness-protocol`",
+		reason:   "the anchor names the skill the implementer invokes before writing the change; the worker splices it too (issue #6182).",
+	},
+	// principle-redesign-from-first-principles-default.md
+	{
+		fragment: "principle-redesign-from-first-principles-default.md",
+		clause:   "`/principle-redesign-from-first-principles`",
+		reason:   "the anchor names the skill the implementer invokes when integrating a new requirement; the worker splices it too (issue #6182).",
+	},
+	// scout-delegate.md
+	{
+		fragment: "scout-delegate.md",
+		clause:   "/tmp/brief.md",
+		reason:   "the coordinator must be told where the scout's brief lands (issue #3157).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "The scout writes its brief itself, to `/tmp/brief.md`",
+		reason:   "the scout writes the brief; the session reads it back from disk and never persists or appends to it (issue #3449).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "read it back from disk before you start work",
+		reason:   "the brief is read from disk before work starts, not expected in the scout's return message (issue #3163).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "> scout: map the files, seams, and existing tests relevant to this issue.",
+		reason:   "the delegation is the request alone; scout-prompt.md owns the citation, brief-location, pointer and no-implement rules (issue #6183).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		pattern:  regexp.MustCompile(`Write the brief to|pointer to it|cited with a verbatim excerpt|Do not implement`),
+		absent:   true,
+		reason:   "the delegation must not restate the scout persona's rules, which scout-prompt.md owns (issue #6183).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "Persist what it returns",
+		absent:   true,
+		reason:   "the scout writes the brief itself, so the coordinator is no longer told to persist what the scout returns (issue #3449).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "If `/tmp/brief.md` isn't there, explore the repo yourself as usual",
+		reason:   "COORDINATOR_SCOUT_BRIEF needs a worker too, so in a scout-only cell this fragment is the only one that can carry the brief-absent degradation (issue #3449).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "Re-search only when a citation is wrong",
+		reason:   "the coordinator re-searches only when a citation itself is wrong or missing, not on any wrong pointer (issue #3216).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		clause:   "before you delegate any slice",
+		absent:   true,
+		reason:   "SCOUT_PROVISIONED renders without a worker, so the wording must not assert a delegation step a scout-only roster never runs (issue #3163).",
+	},
+	{
+		fragment: "scout-delegate.md",
+		pattern:  regexp.MustCompile(`(?i)worker`),
+		absent:   true,
+		reason:   "SCOUT_PROVISIONED renders without a worker, so the section must not reference one (issue #3163).",
+	},
+	// scout-absent.md
+	{
+		fragment: "scout-absent.md",
+		clause:   "Scout the issue yourself before implementing",
+		reason:   "the section leads with the work, so the lead directive is pinned and not only the trailing absence clause (issue #3168).",
+	},
+	{
+		fragment: "scout-absent.md",
+		clause:   "there is no brief waiting on disk",
+		reason:   "with no scout there is no brief to read, and the fragment must say so (issue #3157).",
+	},
+	{
+		fragment: "scout-absent.md",
+		clause:   "/tmp/brief.md",
+		absent:   true,
+		reason:   "with no scout no brief was written, so the fragment must not point at the brief path (issue #3157).",
+	},
+	// coordinator.md
+	{
+		fragment: "coordinator.md",
+		clause:   "run IMPLEMENT as its **coordinator**",
+		reason:   "a provisioned worker makes the main session the coordinator rather than the implementer (issue #2056).",
+	},
+	{
+		fragment: "coordinator.md",
+		pattern:  regexp.MustCompile(`the brief's relevant pointers|Use the scout brief`),
+		absent:   true,
+		reason:   "coordinator.md is scout-neutral; the slice-from-the-brief instruction lives in coordinator-scout-brief.md (issue #3157).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "stays bounded",
+		reason:   "the coordinator sizes slices so each worker run stays bounded, on every roster with a worker, scout or not (issue #3159).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "worker: implement <one slice, with its relevant pointers>.",
+		reason:   "the delegation template carries inputs only; the test-first rule and report shape are owned by worker-prompt.md (issue #6183).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "Turn budget for this slice: about <N> turns.",
+		reason:   "each delegation states the turn budget, in turns, so the worker can stop cleanly at it (issue #3159).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "**fresh** worker seeded from that checkpoint",
+		reason:   "a worker that stopped at its budget is replaced by a fresh one seeded from its checkpoint; bare \"fresh\" matches unrelated prose (issue #3159).",
+	},
+	{
+		fragment: "coordinator.md",
+		clause:   "Each delegated slice must satisfy the one-slice, test-first discipline below",
+		reason:   "the test-first rule is enforced by the coordinator but performed by the worker, so the delegation points at it instead of restating it (issue #6183).",
+	},
+	{
+		fragment: "coordinator.md",
+		pattern:  regexp.MustCompile(`Work test-first\. (?:> )?Turn|Return (?:> )?a concise report|not (?:> )?the diffs`),
+		absent:   true,
+		reason:   "the delegation template must not restate persona rules (test-first, report shape) that worker-prompt.md owns (issue #6183).",
+	},
+	// coordinator-scout-brief.md
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "break the issue into the ordered set of slices",
+		reason:   "coordinator.md dropped the slice-from-the-brief instruction, so a scout-present run loses it unless this fragment states it (issue #3157).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "verbatim from the brief",
+		reason:   "each delegation quotes the scout's own lines, not a paraphrase, so the worker starts from the map (issue #3158).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "never paste the whole brief into a delegation",
+		reason:   "the quoted excerpt is scoped to the slice (issue #3158).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "read `/tmp/brief.md` first",
+		absent:   true,
+		reason:   "the worker reads the whole brief only conditionally, via worker-scout-brief.md, never as a coordinator-imposed first step (issue #3419).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "spot-check a citation",
+		reason:   "the coordinator verifies claims from the cited excerpts and reads the tree only to spot-check a citation (issue #3216).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "standing sweep",
+		reason:   "reading the tree is never a standing sweep over ground the brief already covers (issue #3216).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "the same evidence your delegations carry",
+		reason:   "the cited excerpts the coordinator verifies from are the same evidence its delegations carry (issue #3216).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "You already persisted",
+		absent:   true,
+		reason:   "the scout writes the brief itself, so the coordinator must not claim to have persisted it (issue #3449).",
+	},
+	{
+		fragment: "coordinator-scout-brief.md",
+		clause:   "The scout wrote its brief to `/tmp/brief.md` itself",
+		reason:   "the coordinator is told the scout wrote the brief and that it reads it back from disk (issue #3449).",
+	},
 	// commit-rework-orchestrator.md
 	{
 		fragment: "commit-rework-orchestrator.md",
@@ -2396,6 +2686,14 @@ type sharedClause struct {
 
 // sharedClauses expands into one contract per fragment (generatedContracts).
 var sharedClauses = []sharedClause{
+	{
+		fragments: []string{"skill-preamble.md", "worker-scout-brief.md", "tdd-baked.md", "tdd-unbaked.md", "principle-laziness-protocol-default.md", "principle-redesign-from-first-principles-default.md"},
+		clauseContract: clauseContract{
+			pattern: regexp.MustCompile(`SPINDRIFT_OUTCOME|VERDICT:|\$\{`),
+			absent:  true,
+			reason:  "the worker's prompt is its template plus these spliced fragments (the template has its own entry), and none may carry outcome or verdict grammar, so a stray marker from a misbehaving worker can never terminate the run or be read as a review result, nor an unsubstituted ${...} token (issues #2059, #2491, #6182).",
+		},
+	},
 	{
 		fragments: []string{"file-issues-relay.md", "file-issues-relay-socket.md"},
 		clauseContract: clauseContract{
