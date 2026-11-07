@@ -23,6 +23,9 @@ let
   registryJson = pkgs.writeText "fragments-registry.json" (
     builtins.toJSON (import ../lib/fragments.nix)
   );
+  gateVocabularyJson = pkgs.writeText "gate-vocabulary.json" (
+    builtins.toJSON (builtins.attrNames (import ../lib/gate-vocabulary.nix).gates)
+  );
   promptContractRegistryJson = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).validateMarkers
   );
@@ -42,6 +45,7 @@ let
     "agent-paths-preamble.sh" = internals.agentPathsPreambleFile;
     "fragments-registry.json" = registryJson;
     "forbidden-markers-registry.json" = forbiddenMarkersRegistryJson;
+    "gate-vocabulary.json" = gateVocabularyJson;
     "prompt-contract-registry.json" = promptContractRegistryJson;
     "prompt-contract-parity-fixtures.json" = promptContractParityFixtures;
     "research-verdicts-parity.json" = researchVerdictsParity;
