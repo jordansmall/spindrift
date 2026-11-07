@@ -586,7 +586,13 @@ func TestAssembleStepRendering(t *testing.T) {
 			name:    "CI FAILURE stays separated from CONTEXT on a fix pass",
 			mutate:  []func(*Env){func(e *Env) { e.FixPass, e.CIFailureSummary = 1, "build failed" }},
 			want:    []string{"build failed", "# CONTEXT"},
-			wantNot: []string{"scratch:build failed", "failed# CONTEXT"},
+			wantNot: []string{"below:build failed", "failed# CONTEXT"},
+		},
+		{
+			name:    "CI FAILURE frames the summary as a pointer, not the failure",
+			mutate:  []func(*Env){func(e *Env) { e.FixPass, e.CIFailureSummary = 1, "build failed" }},
+			want:    []string{"failure itself"},
+			wantNot: []string{"known failure", "skip anything CI FAILURE"},
 		},
 		{
 			name:    "CAVEMAN_STEP stays separated from the COMMS body text",
