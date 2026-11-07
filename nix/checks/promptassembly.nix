@@ -18,7 +18,6 @@ let
   # seam-fixtures.
   # lib/fragments.nix is a bare list of attrsets and needs no pkgs.lib to evaluate.
   registry = import ../../lib/fragments.nix;
-  fragmentsRegistryJsonFile = pkgs.writeText "fragments-registry.json" (builtins.toJSON registry);
   # Shared with nix/checks/schema-drift.nix's regen-app-wiring so the two
   # app-wiring guards cannot fork hand-copied variants (issue #3192).
   mkAppWiringCheck = import ../../lib/app-wiring-check.nix { inherit pkgs; };
@@ -41,7 +40,7 @@ let
   );
 
   # Tests legitimately reference fragment/var literals when they check the
-  # loader against testdata/registry.json, so the guard reads only non-test
+  # loader against registry fixtures, so the guard reads only non-test
   # source (issue #474's fileset shape).
   promptassemblyNonTestSrc = pkgs.lib.fileset.toSource {
     root = ../../cmd/launcher/internal/promptassembly;
@@ -107,17 +106,6 @@ in
         fi
         touch $out
       '';
-
-  # Catches drift between lib/fragments.nix and the testdata/registry.json
-  # fixture registry_test.go loads. The nix-rendered field names already match
-  # registry.go's FragmentRow JSON tags, so no conversion step is needed.
-  promptassembly-registry-drift = mkJsonDriftCheck {
-    name = "promptassembly-registry-drift";
-    nixJson = fragmentsRegistryJsonFile;
-    source = "lib/fragments.nix";
-    fixturePath = "cmd/launcher/internal/promptassembly/testdata/registry.json";
-    remedy = "regenerate the testdata fixture";
-  };
 
   # Catches drift between lib/fragment-paths.nix's axisSignals and the
   # fixture the Go signal-parity test loads (issue #5727).

@@ -60,9 +60,6 @@ func promptassemblyTestdata(name string) string {
 	return filepath.Join(moduleDir(), "internal", "promptassembly", "testdata", name)
 }
 
-// RegistryJSON is internal/promptassembly/testdata/registry.json.
-func RegistryJSON() string { return promptassemblyTestdata("registry.json") }
-
 // ForbiddenMarkersJSON is internal/promptassembly/testdata/forbidden-markers.json.
 func ForbiddenMarkersJSON() string { return promptassemblyTestdata("forbidden-markers.json") }
 
