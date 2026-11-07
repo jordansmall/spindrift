@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -137,7 +138,24 @@ var clauseContracts = []clauseContract{
 		reason:   "reading the whole brief is conditional on the excerpt being missing, wrong, or silent, not the worker's first move (issue #3419).",
 	},
 	// tdd-baked.md
+	{
+		fragment: "tdd-baked.md",
+		pattern:  regexp.MustCompile(`(?i:hard rule)|RED:|GREEN:|REFACTOR|authoritative`),
+		absent:   true,
+		reason:   "the baked arm subtracts the red/green/refactor fallback and its Hard rule, and the retired /tdd deferral note (\"red-green-refactor discipline is authoritative\") stays retired, so no baked prompt cites prose that is not there (issue #3219).",
+	},
 	// tdd-unbaked.md
+	{
+		fragment: "tdd-unbaked.md",
+		clause:   "Hard rule",
+		reason:   "the unbaked arm owns the Hard rule that baking the skill removes; the baked-cell absent entries on coordinator.md and tdd-baked.md, and TestTDDUnbakedVocabularyStaysOutOfBakedCells, would pass vacuously if the rule were renamed (issue #3219).",
+	},
+	{
+		fragment: "tdd-unbaked.md",
+		clause:   "authoritative",
+		absent:   true,
+		reason:   "the /tdd deferral fragment is retired: the pair renders exactly one arm, not a deferral note stacked on inline steps (issue #3219).",
+	},
 	// principle-laziness-protocol-default.md
 	{
 		fragment: "principle-laziness-protocol-default.md",
@@ -265,6 +283,12 @@ var clauseContracts = []clauseContract{
 		absent:   true,
 		reason:   "the delegation template must not restate persona rules (test-first, report shape) that worker-prompt.md owns (issue #6183).",
 	},
+	{
+		fragment: "coordinator.md",
+		pattern:  regexp.MustCompile(`(?i:hard rule)|RED:|GREEN:|REFACTOR`),
+		absent:   true,
+		reason:   "coordinator.md renders in baked cells, where the Hard rule it once pointed at is subtracted with tdd-unbaked.md, so it must not name that rule or the unbaked-only RED/GREEN/REFACTOR steps (issue #3219).",
+	},
 	// coordinator-scout-brief.md
 	{
 		fragment: "coordinator-scout-brief.md",
@@ -343,6 +367,11 @@ var clauseContracts = []clauseContract{
 		fragment: "commit-rework-orchestrator.md",
 		clause:   "small focused commits",
 		reason:   "a first-slice pass keeps the several-small-commits preference (issue #2698).",
+	},
+	{
+		fragment: "commit-rework-orchestrator.md",
+		clause:   "fold each fix into the commit it logically belongs to",
+		reason:   "a rework pass folds each fix into the commit it belongs to rather than tacking on a follow-up (issue #2698).",
 	},
 	{
 		fragment: "commit-rework-orchestrator.md",
@@ -871,6 +900,17 @@ var clauseContracts = []clauseContract{
 		fragment: "land-pass-order-orchestrator.md",
 		clause:   "A prose fold owes no declaration",
 		reason:   "a prose fold needs no gate-discovered-work declaration (issue #3506).",
+	},
+	{
+		fragment: "land-pass-order-orchestrator.md",
+		clause:   "This ordering supersedes the COMMIT section's",
+		reason:   "the land pass's fixed order must say it overrides the general COMMIT and CHECK ordering, or the agent follows both (issue #3214).",
+	},
+	{
+		fragment: "land-pass-order-orchestrator.md",
+		pattern:  regexp.MustCompile(`immediately before finishing|immediately before every push`),
+		absent:   true,
+		reason:   "the fragment is ungated, so it must not quote wording only one gated COMMIT arm renders (issue #5132).",
 	},
 
 	// land-pass-order-gate-default-filer.md and land-pass-order-gate-default-no-filer.md
@@ -3130,6 +3170,39 @@ func TestClauseContracts(t *testing.T) {
 				t.Error(err)
 			}
 		})
+	}
+}
+
+// tddUnbakedOnlyMarkers matches the vocabulary only tdd-unbaked.md's step
+// prose introduces; "hard rule" is case-folded because a cross-reference may
+// name the rule in sentence case.
+var tddUnbakedOnlyMarkers = regexp.MustCompile(`(?i:hard rule)|RED:|GREEN:|REFACTOR`)
+
+// TestTDDUnbakedVocabularyStaysOutOfBakedCells scans the whole prompt of every
+// golden cell, not one fragment, so a future fragment growing the dangling
+// Hard rule reference is caught too (issue #3219). The unbaked cells must
+// still show every marker, so renaming one cannot pass vacuously.
+func TestTDDUnbakedVocabularyStaysOutOfBakedCells(t *testing.T) {
+	unbakedSeen := map[string]bool{}
+	for _, cell := range goldenCells() {
+		c := defaultCell()
+		cell.setup(c)
+		result, _ := assembleCell(t, c, t.TempDir())
+		found := tddUnbakedOnlyMarkers.FindAllString(result.Prompt, -1)
+		if slices.Contains(c.skills, "tdd") {
+			if len(found) > 0 {
+				t.Errorf("%s: baked prompt names tdd-unbaked.md vocabulary %q", cell.name, found)
+			}
+			continue
+		}
+		for _, m := range found {
+			unbakedSeen[strings.ToLower(m)] = true
+		}
+	}
+	for _, m := range []string{"hard rule", "red:", "green:", "refactor"} {
+		if !unbakedSeen[m] {
+			t.Errorf("no tdd-skill-absent cell renders %q: marker renamed, or the unbaked arm lost its prose", m)
+		}
 	}
 }
 
