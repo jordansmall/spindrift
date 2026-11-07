@@ -8,16 +8,15 @@
 // checkout without nix stays green. The package is not build-tagged, so its
 // own unit tests run under plain `go test ./...`.
 //
-// # Launcher smoke set as the deletion gate
+// # Launcher smoke set
 //
 // TestSeamLauncherSmokeMatrix in cmd/launcher/launcher_seam_integration_test.go
-// is the gate for deleting the launcher-side bats files (tests/run-*.bats):
-// it must be green, with a case for every dispatch kind (work, research,
-// butler) and runtime (podman, docker, bwrap) the rendered
-// input document distinguishes, before any of them goes. A new kind or
-// runtime distinction in the document earns a new case there, and
-// TestSeamSmokeCatchesDroppedKnob keeps the matrix honest by asserting a
-// dropped document knob fails a check.
+// replaced the launcher-side bats files (tests/run-*.bats). Its smokeMatrix
+// carries a case for every dispatch kind and runtime the rendered input
+// document distinguishes; recover has none, since it runs no Box and its
+// Box-facing fields mirror work's. A new kind or runtime distinction in the
+// document earns a new case there, and TestSeamSmokeCatchesDroppedKnob keeps
+// the matrix honest by asserting a dropped document knob fails a check.
 package seamtest
 
 import (
