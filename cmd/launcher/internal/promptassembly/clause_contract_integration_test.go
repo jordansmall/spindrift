@@ -2862,6 +2862,79 @@ var clauseContracts = []clauseContract{
 		reason:   "the parent/linked-issue pull names the tracker's forge through FORGE_DISPLAY_NAME, so the agent reads linked issues from the right backend.",
 	},
 
+	// issue-read-unreadable.md
+	{
+		fragment: "issue-read-unreadable.md",
+		clause:   "name it in the SPINDRIFT_OUTCOME `note=` field",
+		reason:   "a linked issue the agent cannot read must reach the human through the outcome note, the one channel left (issue #6344).",
+	},
+
+	// local/issue-read.md
+	{
+		fragment: "local/issue-read.md",
+		clause:   "`git log -n 10 --oneline`",
+		reason:   "the local tracker's issue-read step keeps only the recent-history bullet, as the host-side issue text carries the ticket and its link chain (issues #2352, #3469).",
+	},
+
+	// local/pr-body-no-issue-ref.md
+	{
+		fragment: "local/pr-body-no-issue-ref.md",
+		clause:   "Body must NOT reference the local ticket by slug or number",
+		reason:   "by default a local ticket is private, so the public PR body must not leak its slug or number (issue #2352).",
+	},
+
+	// issue-blocked-comment-unwritable.md
+	{
+		fragment: "issue-blocked-comment-unwritable.md",
+		clause:   "the launcher posts the SPINDRIFT_OUTCOME `note=` field",
+		reason:   "a write-capable Box with no tracker client (jira) must be told the launcher posts the IF BLOCKED comment from the note field, so it does not try to comment itself (issue #5263).",
+	},
+
+	// research-prompt.md, research-self-contained-prompt.md (verdict renderings)
+	{
+		fragment: "research-prompt.md",
+		clause:   "status=<recommend|reject|unclear>",
+		reason:   "the outcome line's status alternation is rendered from the configured verdict set, which defaults to recommend, reject and unclear (issues #2630, #4159).",
+	},
+	{
+		fragment: "research-prompt.md",
+		clause:   "`recommend` / `reject` / `unclear`",
+		reason:   "the verdict enum in the report structure is rendered from the configured verdict set, so the agent names a verdict the launcher accepts (issues #2630, #4159).",
+	},
+	{
+		fragment: "research-prompt.md",
+		clause:   "duplicate is a reason under `reject`, not a separate verdict",
+		reason:   "the default reject verdict absorbs duplicates, so the agent names the duplicate in its rationale rather than inventing a fourth verdict (issue #4159).",
+	},
+	{
+		fragment: "research-self-contained-prompt.md",
+		clause:   "status=<recommend|reject|unclear>",
+		reason:   "the self-contained prompt's outcome status alternation is rendered from the configured verdict set too (issues #2630, #4159).",
+	},
+
+	// research base templates: each names the dispatch it renders for
+	{
+		fragment: "research-prompt.md",
+		clause:   "Research issue #",
+		reason:   "the research prompt opens by naming the issue under research, so the agent knows its subject before reading the clone (ADR 0022).",
+	},
+	{
+		fragment: "research-self-contained-prompt.md",
+		clause:   "Research issue #",
+		reason:   "the self-contained research prompt opens by naming the issue under research, so the agent knows its subject without a repo to read (ADR 0022, issue #2202).",
+	},
+	{
+		fragment: "research-self-contained-prompt.md",
+		clause:   "self-contained research dispatch (ADR 0022, issue #2202)",
+		reason:   "the self-contained prompt must say it has no repo, which tells it apart from research-prompt.md (ADR 0022, issue #2202).",
+	},
+	{
+		fragment: "research-prompt.md",
+		clause:   "self-contained research dispatch",
+		absent:   true,
+		reason:   "the repo-backed research prompt must not claim the self-contained dispatch's no-repo premise, or the agent would skip the clone it has (ADR 0022, issue #2202).",
+	},
+
 	// land-git-stop-read-write.md
 	{
 		fragment: "land-git-stop-read-write.md",
