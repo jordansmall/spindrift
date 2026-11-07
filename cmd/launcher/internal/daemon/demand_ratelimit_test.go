@@ -302,7 +302,7 @@ func TestLoopRateLimitHoldsSiblingWithFreshCount(t *testing.T) {
 	// before work's probe hits the limit.
 	cfg := probedConfig(1, interval, workKind, researchKind)
 	cfg.Trackers = map[Kind]string{workKind: "github", researchKind: "github"}
-	cfg.ResearchReservation = 1
+	cfg.Reservation = 1
 	dir := t.TempDir()
 	cfg.Status = NewStatusWriter(dir, clk.Now)
 	var buf bytes.Buffer
