@@ -1698,6 +1698,16 @@ var clauseContracts = []clauseContract{
 		reason:   "gh targets GitHub, not a Forgejo instance.",
 	},
 	{
+		fragment: "research-outcome-landing-relayed.md",
+		clause:   "the launcher posts your relayed verdict host-side once you exit",
+		reason:   "a relayed verdict (jira research, Filer on or off, included) is posted by the launcher after the Box exits, so the Box never learns its URL (issue #5245).",
+	},
+	{
+		fragment: "research-outcome-landing-relayed-socket.md",
+		clause:   "the launcher posts your relayed verdict host-side once you exit",
+		reason:   "a relayed verdict (jira research, Filer on or off, included) is posted by the launcher after the Box exits, so the Box never learns its URL (issue #5245).",
+	},
+	{
 		fragment: "research-outcome-landing-relayed-socket.md",
 		clause:   "`driver-exec signal comment` exits zero",
 		reason:   "the socket carrier acknowledges a relay by the send's zero exit, which is what tells the agent the verdict is delivered.",
@@ -1767,6 +1777,12 @@ var clauseContracts = []clauseContract{
 		fragment: "issue-blocked-comment-unwritable.md",
 		clause:   "no client that can post a comment to this tracker",
 		reason:   "a tracker with no in-Box client (jira) relays the blocked comment through the host, and the agent must be told why it does nothing here.",
+	},
+	{
+		fragment: "issue-blocked-comment-unwritable.md",
+		clause:   "gh issue comment",
+		absent:   true,
+		reason:   "a jira work Box has no in-Box client, so the IF BLOCKED step relays through the host and never names `gh issue comment` (issue #5263).",
 	},
 	{
 		fragment: "issue-blocked-comment-unwritable.md",
@@ -2101,6 +2117,28 @@ var clauseContracts = []clauseContract{
 		reason:   "the no-search arm belongs to trackers with no in-Box client.",
 	},
 	{
+		fragment: "filer-relay-reason-readonly.md",
+		clause:   "Your token is read-only",
+		reason:   "a read-only Box's relay states its real reason, the token it was given (issue #6354).",
+	},
+	{
+		fragment: "filer-relay-reason-readonly.md",
+		clause:   "no in-Box client",
+		absent:   true,
+		reason:   "the read-only arm is about the Box's token, not the tracker's missing client (issue #6354).",
+	},
+	{
+		fragment: "filer-relay-reason-unwritable.md",
+		clause:   "This issue tracker has no in-Box client",
+		reason:   "a read-write Box on a tracker with no in-Box client relays because of the tracker, since its prompt later tells it to push with a token that is not read-only (issue #6354).",
+	},
+	{
+		fragment: "filer-relay-reason-unwritable.md",
+		clause:   "token is read-only",
+		absent:   true,
+		reason:   "a read-write Box must never be told its token is read-only, which contradicts the push it is later told to make (issue #6354).",
+	},
+	{
 		fragment: "filer-dedup-unwritable.md",
 		clause:   "run no tracker search at all",
 		reason:   "a tracker with no in-Box client has nothing to search, and gh would query the wrong tracker.",
@@ -2213,6 +2251,23 @@ var clauseContracts = []clauseContract{
 		fragment: "code-review-baked.md",
 		clause:   "Run the `/code-review` skill and fold its two-axis (Standards + Spec) findings",
 		reason:   "the baked arm orders the skill's two-axis fan-out and folds its findings back into the hunt (issue #3222).",
+	},
+	{
+		fragment: "fragments/code-review-baked.md",
+		clause:   "agent type `${REVIEW_FANOUT_AGENT}`",
+		reason:   "the anchor must name an agent type the run actually provisions, resolved per run from the roster, so a Consumer pinning the historical four-entry roster or taking reviewModel=\"\" gets the skill's own default instead of an agent type its session never defines (issues #3447, #392); checked as raw source, since the rendered fragment has the name substituted.",
+	},
+	{
+		fragment: "fragments/code-review-baked.md",
+		clause:   "agent type `review-axis`",
+		absent:   true,
+		reason:   "a baked literal is the drift that made a non-provisioned agent type reachable (issue #3447).",
+	},
+	{
+		fragment: "fragments/code-review-baked.md",
+		clause:   "agent type `general-purpose`",
+		absent:   true,
+		reason:   "a baked literal is the drift that made a non-provisioned agent type reachable (issue #3447).",
 	},
 	{
 		fragment: "code-review-unbaked.md",

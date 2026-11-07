@@ -1,8 +1,6 @@
 package promptassembly
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -35,13 +33,13 @@ func TestIssueTextSectionFencesContent(t *testing.T) {
 // In both the base and review body shapes, the rendered template body stays a
 // byte-identical prefix, joined to the appended section by exactly "\n\n".
 func TestAssembleAppendsIssueTextSection(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env0 := syntheticRegistry(t, nil, nil)
 
-	baseEnv := coveredEnv()
+	baseEnv := env0
 	baseEnv.IssueText = "issue body text"
 
 	t.Run("base prompt", func(t *testing.T) {
-		withoutText := coveredEnv()
+		withoutText := env0
 		without, err := Assemble(withoutText, reg)
 		if err != nil {
 			t.Fatalf("Assemble (without IssueText): %v", err)
@@ -85,38 +83,10 @@ func TestAssembleAppendsIssueTextSection(t *testing.T) {
 }
 
 // A direct ${ISSUE_TEXT} reference must resolve to the same rendered section.
-// The fixture copies TestAssembleSharedBlockAlreadyPresentIsNoOp: a temp
-// PromptsDir with a hand-written issue-prompt.md and the real fragments
-// symlinked in, because slice 3 owns the real templates and this test must not
-// edit them.
 func TestAssembleIssueTextVarSubstitution(t *testing.T) {
-	reg := loadTestRegistry(t)
-
-	promptsFixtureDir := t.TempDir()
-	fragmentsDir, err := filepath.Abs(filepath.Join(promptsDir, "fragments"))
-	if err != nil {
-		t.Fatalf("Abs: %v", err)
-	}
-	if err := os.Symlink(fragmentsDir, filepath.Join(promptsFixtureDir, "fragments")); err != nil {
-		t.Fatalf("Symlink: %v", err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(promptsFixtureDir, "issue-prompt.md"),
-		[]byte("# TASK\n\ninline: ${ISSUE_TEXT}\n"),
-		0o644,
-	); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(promptsFixtureDir, "review-prompt.md"),
-		[]byte("# REVIEW\n"),
-		0o644,
-	); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	env := coveredEnv()
-	env.PromptsDir = promptsFixtureDir
+	reg, env := syntheticRegistry(t, nil, map[string]string{
+		"issue-prompt.md": "# TASK\n\ninline: ${ISSUE_TEXT}\n",
+	})
 	env.IssueText = "issue body text"
 
 	bodies, err := assemblePromptBodies(env, reg)

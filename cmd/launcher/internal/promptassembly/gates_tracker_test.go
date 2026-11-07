@@ -1,7 +1,6 @@
 package promptassembly
 
 import (
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -679,49 +678,6 @@ func TestGatesJiraWorkFilerAlwaysRelays(t *testing.T) {
 	}
 }
 
-// TestAssembleJiraResearchRendersRelayedVerdict pins the rendered prompt: a jira
-// research run has no `gh issue comment` guidance, Filer off or on (issue
-// #5245).
-func TestAssembleJiraResearchRendersRelayedVerdict(t *testing.T) {
-	reg := loadTestRegistry(t)
-	for _, selfContained := range []bool{false, true} {
-		for _, filer := range []bool{false, true} {
-			env := coveredEnv()
-			env.IssueTracker = "jira"
-			env.DispatchKind = "research"
-			env.SelfContained = selfContained
-			env.FilerEnabled = filer
-			result, err := Assemble(env, reg)
-			if err != nil {
-				t.Fatalf("selfContained=%v filer=%v: Assemble: %v", selfContained, filer, err)
-			}
-			if strings.Contains(result.Prompt, "gh issue comment") {
-				t.Errorf("selfContained=%v filer=%v: jira research prompt contains `gh issue comment`:\n%s", selfContained, filer, result.Prompt)
-			}
-			const relayed = "the launcher posts your\nrelayed verdict host-side once you exit"
-			if !strings.Contains(result.Prompt, relayed) {
-				t.Errorf("selfContained=%v filer=%v: jira research prompt lacks the relayed landing=none outcome %q", selfContained, filer, relayed)
-			}
-		}
-	}
-}
-
-// TestAssembleJiraWorkHasNoGhIssueComment pins the rendered jira work prompt
-// (issue #5263): the IF BLOCKED step relays through the host, never
-// `gh issue comment`.
-func TestAssembleJiraWorkHasNoGhIssueComment(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.IssueTracker = "jira"
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("work: Assemble: %v", err)
-	}
-	if strings.Contains(result.Prompt, "gh issue comment") {
-		t.Errorf("jira work prompt contains `gh issue comment`:\n%s", result.Prompt)
-	}
-}
-
 // TestGatesUnwritableReadWrite pins ISSUE_TRACKER_UNWRITABLE_READWRITE (issue
 // #5263): true only where the Box has a write token that cannot reach the
 // tracker, and exactly one blocked-comment gate fires per cell. The research
@@ -961,54 +917,5 @@ func TestGatesPRBodyIssueRefKeysOnKnob(t *testing.T) {
 				t.Errorf("tracker %s ref=%v: PR_BODY_ISSUE_REF=%v PR_BODY_NO_ISSUE_REF=%v", tracker, ref, g["PR_BODY_ISSUE_REF"], g["PR_BODY_NO_ISSUE_REF"])
 			}
 		}
-	}
-}
-
-// TestAssembleFilerRelayReason pins the relay's stated reason (issue #6354):
-// a read-write Box on a tracker with no in-Box client never claims a
-// read-only token (its prompt later tells it to push with that token), while
-// a read-only Box still does, on both signal carriers.
-func TestAssembleFilerRelayReason(t *testing.T) {
-	reg := loadTestRegistry(t)
-	const readOnlyClaim = "Your token is read-only"
-	const noClient = "This issue tracker has no in-Box client"
-	const template = `{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read"]}}`
-	cases := []struct {
-		name         string
-		tracker      string
-		carrier      string
-		boxWrite     bool
-		wantReadOnly bool
-	}{
-		{"jira read-write log", "jira", "log", true, false},
-		{"jira read-write socket", "jira", "socket", true, false},
-		{"github read-only log", "github", "log", false, true},
-		{"github read-only socket", "github", "socket", false, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
-			env.IssueTracker = tc.tracker
-			env.SignalCarrier = tc.carrier
-			env.BoxWriteEnabled = tc.boxWrite
-			env.FilerEnabled = true
-			env.AgentsJSONTemplate = template
-			env.AgentsPromptFiles = agentsPromptFilesAll
-			result, err := Assemble(env, reg)
-			if err != nil {
-				t.Fatalf("Assemble: %v", err)
-			}
-			for name, text := range map[string]string{"prompt": result.Prompt, "agents": result.AgentsJSON} {
-				if got := strings.Contains(text, readOnlyClaim); got != tc.wantReadOnly {
-					t.Errorf("%s contains %q = %v, want %v", name, readOnlyClaim, got, tc.wantReadOnly)
-				}
-				if got := strings.Contains(text, noClient); got == tc.wantReadOnly {
-					t.Errorf("%s contains %q = %v, want %v", name, noClient, got, !tc.wantReadOnly)
-				}
-				if strings.Contains(text, "${FILER_RELAY_REASON}") {
-					t.Errorf("%s leaks the literal ${FILER_RELAY_REASON}", name)
-				}
-			}
-		})
 	}
 }
