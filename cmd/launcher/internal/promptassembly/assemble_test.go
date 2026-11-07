@@ -685,18 +685,33 @@ func agentFileBody(t *testing.T, path string) string {
 	return ""
 }
 
+// agentFilesCavemanStub is the body of the gated caveman fragment that
+// agentFilesRegistry stages.
+const agentFilesCavemanStub = "caveman stub"
+
+// agentFilesRegistry is the shared row and files of the opencode agent-file
+// rewrite tests: a stub prompt referencing one gated fragment.
+func agentFilesRegistry(t *testing.T) (Registry, Env) {
+	t.Helper()
+	return syntheticRegistry(t,
+		[]FragmentRow{{Gate: "CAVEMAN_BAKED", Fragment: "caveman.md", Var: "CAVEMAN_STEP"}},
+		map[string]string{
+			"agent-prompt.md":      "agent prompt ${CAVEMAN_STEP}\n",
+			"fragments/caveman.md": agentFilesCavemanStub,
+		})
+}
+
 // The DRIVER_AGENT_FILES_DIR file-rewrite twin (rewriteAgentFiles) of the
 // --agents JSON injection loop: a baked agent file keeps its frontmatter and
 // has its body overwritten with the substituted prompt.
 func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := agentFilesRegistry(t)
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 	frontmatterBefore := agentFileFrontmatter(t, filepath.Join(dir, "scout.md"))
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
+	env.AgentsPromptFiles = `{"scout":"agent-prompt.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Fatalf("Assemble: %v", err)
@@ -706,8 +721,8 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 	if body == "placeholder body for scout\n" || strings.TrimSpace(body) == "" {
 		t.Errorf("scout.md body not rewritten: %q", body)
 	}
-	if !strings.Contains(body, "/tdd") {
-		t.Errorf("scout.md body missing substituted tdd-baked.md content: %q", body)
+	if !strings.Contains(body, agentFilesCavemanStub) {
+		t.Errorf("scout.md body missing the substituted fragment content: %q", body)
 	}
 	if agentFileFrontmatter(t, filepath.Join(dir, "scout.md")) != frontmatterBefore {
 		t.Errorf("scout.md frontmatter changed, want unchanged")
@@ -718,12 +733,11 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 // and the rewrite must give it the real filer prompt rather than leave the
 // placeholder body.
 func TestAssembleDriverAgentFilesRewritesFilerBody(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := syntheticRegistry(t, nil, map[string]string{"filer-prompt.md": "stub filer prompt\n"})
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "filer.md"), "filer")
 	frontmatterBefore := agentFileFrontmatter(t, filepath.Join(dir, "filer.md"))
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
 
@@ -735,7 +749,7 @@ func TestAssembleDriverAgentFilesRewritesFilerBody(t *testing.T) {
 	if strings.Contains(body, "placeholder body") {
 		t.Errorf("filer.md body not rewritten: %q", body)
 	}
-	if !strings.Contains(body, "turn the review findings the work loop escalated") {
+	if !strings.Contains(body, "stub filer prompt") {
 		t.Errorf("filer.md body missing the filer prompt text: %q", body)
 	}
 	if agentFileFrontmatter(t, filepath.Join(dir, "filer.md")) != frontmatterBefore {
@@ -744,153 +758,82 @@ func TestAssembleDriverAgentFilesRewritesFilerBody(t *testing.T) {
 }
 
 // Issue #2706's second, independent render path: rewriteAgentFiles' on-disk
-// worker.md rewrite must reach the same result for worker-prompt.md as
-// TestAgentSkillPreambleFollowsSkillsFound's renderAgentsJSON path.
-func TestAssembleDriverAgentFilesWorkerNoCavemanWithSkillPreamble(t *testing.T) {
-	reg := loadTestRegistry(t)
-
-	t.Run("skills present", func(t *testing.T) {
+// rewrite substitutes the same gated vars as renderAgentsJSON's path. The
+// preamble gates on SkillsFound and the caveman step on CavemanSkillBaked, and
+// a gated-off var must leave no ${...} token behind.
+func TestAssembleDriverAgentFilesGatedVarsFollowSkills(t *testing.T) {
+	// stage assembles with both gates on, or both off, and returns the dir
+	// holding the rewritten agent file and the Env used.
+	stage := func(t *testing.T, agent string, gatesOn bool) (string, Env) {
+		t.Helper()
+		reg, env := syntheticRegistry(t,
+			[]FragmentRow{
+				{Gate: "CAVEMAN_BAKED", Fragment: "caveman.md", Var: "CAVEMAN_STEP"},
+				{Gate: "SKILLS_FOUND", Fragment: "skill-preamble.md", Var: "SKILL_PREAMBLE", ExtraSubstVars: []string{"SKILLS_FOUND"}},
+			},
+			map[string]string{
+				"agent-prompt.md":             "${SKILL_PREAMBLE}\nmiddle ${CAVEMAN_STEP}\nend\n",
+				"fragments/caveman.md":        agentFilesCavemanStub,
+				"fragments/skill-preamble.md": "preamble stub: ${SKILLS_FOUND}",
+			})
 		dir := t.TempDir()
-		writeAgentFile(t, filepath.Join(dir, "worker.md"), "worker")
-
-		env := coveredEnv()
-		env.CodeCommentsSkillBaked = true
+		writeAgentFile(t, filepath.Join(dir, agent+".md"), agent)
+		if !gatesOn {
+			env.SkillsFound = ""
+			env.CavemanSkillBaked = false
+		}
 		env.DriverAgentFilesDir = dir
-		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
-
+		env.AgentsPromptFiles = `{"` + agent + `":"agent-prompt.md"}`
 		if _, err := Assemble(env, reg); err != nil {
 			t.Fatalf("Assemble: %v", err)
 		}
+		return dir, env
+	}
 
-		body := agentFileBody(t, filepath.Join(dir, "worker.md"))
-		// /caveman, not bare "caveman": SKILL_PREAMBLE still lists the caveman skill by name.
-		if strings.Contains(body, "/caveman") {
-			t.Errorf("worker.md body mentions caveman with CAVEMAN_BAKED on, want absent (issue #4562): %q", body)
-		}
-		if !strings.Contains(body, "Skills available:") {
-			t.Errorf("worker.md body missing skill-preamble.md fragment text: %q", body)
-		}
-		if !strings.Contains(body, "A comment earns its place only by carrying something the code cannot state") {
-			t.Errorf("worker.md body missing the inlined code-comments policy (issue #3419): %q", body)
-		}
-		if strings.Contains(body, "/code-comments") {
-			t.Errorf("worker.md body contains the /code-comments skill anchor, want absent (issue #3419: worker inlines the policy instead): %q", body)
-		}
-		for _, marker := range []string{"SPINDRIFT_OUTCOME", "VERDICT: APPROVE", "VERDICT: BLOCK"} {
-			if strings.Contains(body, marker) {
-				t.Errorf("worker.md body contains forbidden marker %q (issue #2059/#2491 quarantine), want absent: %q", marker, body)
+	for _, agent := range []string{"worker", "scout"} {
+		t.Run(agent+" gates on", func(t *testing.T) {
+			dir, env := stage(t, agent, true)
+
+			body := agentFileBody(t, filepath.Join(dir, agent+".md"))
+			if !strings.Contains(body, "preamble stub: "+env.SkillsFound) {
+				t.Errorf("%s.md body missing the preamble with SkillsFound %q: %q", agent, env.SkillsFound, body)
 			}
-		}
-	})
+			if !strings.Contains(body, agentFilesCavemanStub) {
+				t.Errorf("%s.md body missing the caveman step with CAVEMAN_BAKED on: %q", agent, body)
+			}
+		})
 
-	t.Run("skills absent", func(t *testing.T) {
-		dir := t.TempDir()
-		writeAgentFile(t, filepath.Join(dir, "worker.md"), "worker")
+		t.Run(agent+" gates off", func(t *testing.T) {
+			dir, _ := stage(t, agent, false)
 
-		env := coveredEnv()
-		env.SkillsFound = ""
-		env.CavemanSkillBaked = false
-		env.TDDSkillBaked = false
-		env.CommitSkillBaked = false
-		env.CodeReviewSkillBaked = false
-		env.CodeCommentsSkillBaked = false
-		env.DriverAgentFilesDir = dir
-		env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
-
-		if _, err := Assemble(env, reg); err != nil {
-			t.Fatalf("Assemble: %v", err)
-		}
-
-		body := agentFileBody(t, filepath.Join(dir, "worker.md"))
-		if strings.Contains(body, "caveman") {
-			t.Errorf("worker.md body mentions caveman, want absent (issue #4562): %q", body)
-		}
-		if strings.Contains(body, "Skills available:") {
-			t.Errorf("worker.md body contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", body)
-		}
-		if !strings.Contains(body, "A comment earns its place only by carrying something the code cannot state") {
-			t.Errorf("worker.md body missing the inlined code-comments policy, want present regardless of CODE_COMMENTS_BAKED (issue #3419): %q", body)
-		}
-		if strings.Contains(body, "/code-comments") {
-			t.Errorf("worker.md body contains the /code-comments skill anchor, want absent (issue #3419: worker inlines the policy instead): %q", body)
-		}
-		if strings.Contains(body, "${") {
-			t.Errorf("worker.md body still contains an unsubstituted ${...} token: %q", body)
-		}
-	})
-}
-
-// The scout counterpart of
-// TestAssembleDriverAgentFilesWorkerNoCavemanWithSkillPreamble: the on-disk
-// scout.md rewrite must reach the same no-anchor result for scout-prompt.md
-// as TestAgentSkillPreambleFollowsSkillsFound's renderAgentsJSON path.
-func TestAssembleDriverAgentFilesScoutNoCavemanWithSkillPreamble(t *testing.T) {
-	reg := loadTestRegistry(t)
-
-	t.Run("skills present", func(t *testing.T) {
-		dir := t.TempDir()
-		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
-
-		env := coveredEnv()
-		env.DriverAgentFilesDir = dir
-		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
-
-		if _, err := Assemble(env, reg); err != nil {
-			t.Fatalf("Assemble: %v", err)
-		}
-
-		body := agentFileBody(t, filepath.Join(dir, "scout.md"))
-		// /caveman, not bare "caveman": SKILL_PREAMBLE still lists the caveman skill by name.
-		if strings.Contains(body, "/caveman") {
-			t.Errorf("scout.md body mentions caveman with CAVEMAN_BAKED on, want absent (issue #4562): %q", body)
-		}
-		if !strings.Contains(body, "Skills available:") {
-			t.Errorf("scout.md body missing skill-preamble.md fragment text: %q", body)
-		}
-	})
-
-	t.Run("skills absent", func(t *testing.T) {
-		dir := t.TempDir()
-		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
-
-		env := coveredEnv()
-		env.SkillsFound = ""
-		env.CavemanSkillBaked = false
-		env.TDDSkillBaked = false
-		env.CommitSkillBaked = false
-		env.CodeReviewSkillBaked = false
-		env.DriverAgentFilesDir = dir
-		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
-
-		if _, err := Assemble(env, reg); err != nil {
-			t.Fatalf("Assemble: %v", err)
-		}
-
-		body := agentFileBody(t, filepath.Join(dir, "scout.md"))
-		if strings.Contains(body, "caveman") {
-			t.Errorf("scout.md body mentions caveman, want absent (issue #4562): %q", body)
-		}
-		if strings.Contains(body, "Skills available:") {
-			t.Errorf("scout.md body contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", body)
-		}
-		if strings.Contains(body, "${") {
-			t.Errorf("scout.md body still contains an unsubstituted ${...} token: %q", body)
-		}
-	})
+			body := agentFileBody(t, filepath.Join(dir, agent+".md"))
+			if strings.Contains(body, "preamble stub") {
+				t.Errorf("%s.md body contains the preamble, want absent (SKILLS_FOUND gate off): %q", agent, body)
+			}
+			if strings.Contains(body, agentFilesCavemanStub) {
+				t.Errorf("%s.md body contains the caveman step, want absent (CAVEMAN_BAKED gate off): %q", agent, body)
+			}
+			if strings.Contains(body, "${") {
+				t.Errorf("%s.md body still contains an unsubstituted ${...} token: %q", agent, body)
+			}
+			if !strings.Contains(body, "middle") || !strings.Contains(body, "end") {
+				t.Errorf("%s.md body lost the template text around the gated vars: %q", agent, body)
+			}
+		})
+	}
 }
 
 // The file-based reviewer drop: reviewer.md's `model:` scalar populates
 // Handoff.ReviewModel and the file is removed, while a non-reviewer roster file
 // still gets its body rewritten.
 func TestAssembleDriverAgentFilesReviewerDrop(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := agentFilesRegistry(t)
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 	writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md","reviewer":"fragments/tdd-baked.md"}`
+	env.AgentsPromptFiles = `{"scout":"agent-prompt.md","reviewer":"agent-prompt.md"}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -901,8 +844,8 @@ func TestAssembleDriverAgentFilesReviewerDrop(t *testing.T) {
 		t.Errorf("reviewer.md still exists (or unexpected stat error %v), want removed", err)
 	}
 	body := agentFileBody(t, filepath.Join(dir, "scout.md"))
-	if !strings.Contains(body, "/tdd") {
-		t.Errorf("scout.md body missing substituted tdd-baked.md content: %q", body)
+	if !strings.Contains(body, agentFilesCavemanStub) {
+		t.Errorf("scout.md body missing the substituted fragment content: %q", body)
 	}
 	if result.Handoff.ReviewModel != "opus" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "opus")
@@ -914,13 +857,13 @@ func TestAssembleDriverAgentFilesReviewerDrop(t *testing.T) {
 // The file path runs second and overwrites unconditionally, so reviewer.md's
 // frontmatter model wins over whatever AgentsJSONTemplate already set.
 func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, baseEnv := syntheticRegistry(t, nil, nil)
 
 	t.Run("reviewer.md present overwrites the JSON-path value", func(t *testing.T) {
 		dir := t.TempDir()
 		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
-		env := coveredEnv()
+		env := baseEnv
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 
@@ -937,7 +880,7 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 		dir := t.TempDir()
 		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 
-		env := coveredEnv()
+		env := baseEnv
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 
@@ -956,7 +899,7 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 // only have the baked reviewer.md frontmatter (`model:` / `reasoningEffort:`),
 // pi's model carrying its effort as a `:<level>` suffix that is kept verbatim.
 func TestAssembleReviewerModelAndEffortExtraction(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, baseEnv := syntheticRegistry(t, nil, nil)
 
 	tests := []struct {
 		name          string
@@ -997,7 +940,7 @@ func TestAssembleReviewerModelAndEffortExtraction(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			env := coveredEnv()
+			env := baseEnv
 			switch tt.driver {
 			case "claude":
 				env.AgentsJSONTemplate = tt.jsonTemplate
@@ -1035,10 +978,10 @@ func TestAssembleReviewerModelAndEffortExtraction(t *testing.T) {
 // empty-override half of the contract is pinned by every other
 // reviewer-extraction test here, which all leave both fields at zero.
 func TestAssembleReviewOverrides(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, baseEnv := syntheticRegistry(t, nil, nil)
 
 	t.Run("override wins over the baked reviewer entry", func(t *testing.T) {
-		env := coveredEnv()
+		env := baseEnv
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
 		env.ReviewModelOverride = "env-model"
 		env.ReviewEffortOverride = "env-effort"
@@ -1056,7 +999,7 @@ func TestAssembleReviewOverrides(t *testing.T) {
 	})
 
 	t.Run("partial override leaves the other half on the baked value", func(t *testing.T) {
-		env := coveredEnv()
+		env := baseEnv
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
 		env.ReviewModelOverride = "env-model"
 
@@ -1073,7 +1016,7 @@ func TestAssembleReviewOverrides(t *testing.T) {
 	})
 
 	t.Run("override applies with the reviewer opted out of the roster", func(t *testing.T) {
-		env := coveredEnv()
+		env := baseEnv
 		env.AgentsJSONTemplate = `{"scout":{"model":"scout-model-y"}}`
 		env.ReviewModelOverride = "env-model"
 		env.ReviewEffortOverride = "env-effort"
@@ -1094,7 +1037,7 @@ func TestAssembleReviewOverrides(t *testing.T) {
 		dir := t.TempDir()
 		writeAgentFileFrontmatter(t, filepath.Join(dir, "reviewer.md"), "reviewer", "reasoningEffort: \"high\"\n")
 
-		env := coveredEnv()
+		env := baseEnv
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 		env.ReviewModelOverride = "env-model"
@@ -1117,13 +1060,12 @@ func TestAssembleReviewOverrides(t *testing.T) {
 // error: opencode drops the file when the model is empty, and the reviewer
 // drop above removes one mid-run.
 func TestAssembleDriverAgentFilesSkipsMissingBakedFile(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := agentFilesRegistry(t)
 	dir := t.TempDir()
 	// No worker.md on disk at all.
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"worker":"fragments/tdd-baked.md"}`
+	env.AgentsPromptFiles = `{"worker":"agent-prompt.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Fatalf("Assemble: %v, want nil error (missing baked file is a silent skip)", err)
@@ -1133,7 +1075,7 @@ func TestAssembleDriverAgentFilesSkipsMissingBakedFile(t *testing.T) {
 // A roster entry whose prompt file is missing under PromptsDir leaves the
 // on-disk agent file untouched, without error.
 func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := agentFilesRegistry(t)
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 	before, err := os.ReadFile(filepath.Join(dir, "scout.md"))
@@ -1141,7 +1083,6 @@ func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"scout":"fragments/does-not-exist.md"}`
 
@@ -1163,7 +1104,7 @@ func TestAssembleDriverAgentFilesSkipsMissingPromptFile(t *testing.T) {
 // must too. Returning them verbatim makes rewriteAgentFiles' join produce a
 // blank line the bash original never would have.
 func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := agentFilesRegistry(t)
 	dir := t.TempDir()
 
 	const markerLine = "no second fence here"
@@ -1180,9 +1121,8 @@ func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *tes
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
+	env.AgentsPromptFiles = `{"scout":"agent-prompt.md"}`
 
 	if _, err := Assemble(env, reg); err != nil {
 		t.Fatalf("Assemble: %v", err)
@@ -1214,7 +1154,7 @@ func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *tes
 // Handoff.ReviewModel stays empty. The effort key's case lives in
 // TestAssembleReviewerModelAndEffortExtraction.
 func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
-	reg := loadTestRegistry(t)
+	reg, env := agentFilesRegistry(t)
 	dir := t.TempDir()
 
 	fixture := "---\n" +
@@ -1226,9 +1166,8 @@ func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	env := coveredEnv()
 	env.DriverAgentFilesDir = dir
-	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-baked.md"}`
+	env.AgentsPromptFiles = `{"reviewer":"agent-prompt.md"}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
