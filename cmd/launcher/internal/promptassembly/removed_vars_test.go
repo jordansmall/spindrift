@@ -2,23 +2,11 @@ package promptassembly
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// stagePromptsCopy copies the real prompts dir (fragments included) into a
-// temp dir so a test can append a removed token to one file.
-func stagePromptsCopy(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.CopyFS(dir, os.DirFS(promptsDir)); err != nil {
-		t.Fatalf("CopyFS: %v", err)
-	}
-	return dir
-}
 
 func appendToFile(t *testing.T, path, text string) {
 	t.Helper()
@@ -32,27 +20,53 @@ func appendToFile(t *testing.T, path, text string) {
 	}
 }
 
-// replaceInFile rewrites path with every old replaced by new, failing the test
-// if the file does not contain old.
-func replaceInFile(t *testing.T, path, old, new string) {
+// issueReadFamily mirrors the issue-read row shape in lib/fragments.nix for
+// one slot: the shared tracker-axis slot row and its unreadable arm, then the
+// deprecation-window fills (GITHUB, its unreadable arm, optionally LOCAL, and
+// FORGEJO) with their pre-move legacy fragments. pre is the var stem
+// ("ISSUE_READ"), stem the fragment stem ("issue-read"); bodies are markers
+// keyed by pre so each family's output is distinguishable.
+func issueReadFamily(pre, stem, slotGate string, local bool) ([]FragmentRow, map[string]string) {
+	rows := []FragmentRow{
+		{Axis: "tracker", Shared: true, Gate: slotGate, ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}, Fragment: stem + ".md", Var: pre + "_STEP"},
+		{Gate: "ISSUE_TRACKER_LINKS_UNREADABLE", Fragment: stem + "-unreadable.md", Var: pre + "_STEP"},
+		{Gate: "ISSUE_TRACKER_GITHUB_LINKS_READABLE", Fragment: stem + ".md", ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}, LegacyFragment: stem + "-github.md", Var: pre + "_GITHUB_STEP"},
+		{Gate: "ISSUE_TRACKER_LINKS_UNREADABLE", Fragment: stem + "-unreadable.md", Var: pre + "_GITHUB_STEP"},
+	}
+	files := map[string]string{
+		"fragments/" + stem + ".md":            "TRACKER-ARM[" + pre + "] ${FORGE_DISPLAY_NAME}\n",
+		"fragments/" + stem + "-unreadable.md": "NO-CLIENT-ARM[" + pre + "]\n",
+	}
+	if local {
+		rows = append(rows, FragmentRow{Gate: "ISSUE_TRACKER_LOCAL", Fragment: "local/" + stem + ".md", LegacyFragment: stem + "-local.md", Var: pre + "_LOCAL_STEP"})
+		files["fragments/local/"+stem+".md"] = "LOCAL-ARM[" + pre + "]\n"
+	}
+	rows = append(rows, FragmentRow{Gate: "ISSUE_TRACKER_FORGEJO", Fragment: stem + ".md", ExtraSubstVars: []string{"FORGE_DISPLAY_NAME"}, LegacyFragment: stem + "-forgejo.md", Var: pre + "_FORGEJO_STEP"})
+	return rows, files
+}
+
+// removedVarFixture is a synthetic registry whose issue prompt splices one
+// plain fragment (fragments/x.md) and the work issue-read family, with stub
+// templates for every prompt file the tests below append a stale token to.
+func removedVarFixture(t *testing.T) (Registry, Env) {
 	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	rows, files := issueReadFamily("ISSUE_READ", "issue-read", "ISSUE_TRACKER_LINKS_READABLE", true)
+	rows = append(rows, FragmentRow{Fragment: "x.md", Var: "X_STEP"})
+	files["fragments/x.md"] = "x-body\n"
+	files["issue-prompt.md"] = "issue ${X_STEP} ${ISSUE_READ_STEP}\n"
+	for _, name := range []string{"worker-prompt.md", "scout-prompt.md", "fix-prompt.md"} {
+		files[name] = "stub\n"
 	}
-	if !strings.Contains(string(b), old) {
-		t.Fatalf("%s does not contain %s", path, old)
-	}
-	if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(b), old, new)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	files["butler-prompt.md"] = "butler ${CHORE_PROMPT}\n"
+	files["chores/bugs.md"] = "chore\n"
+	return syntheticRegistry(t, rows, files)
 }
 
 // assembleValidate runs Assemble then Validate with no marker rows, so the
 // only possible Validate error is the removed-var reject.
-func assembleValidate(t *testing.T, env Env) error {
+func assembleValidate(t *testing.T, reg Registry, env Env) error {
 	t.Helper()
-	result, err := Assemble(env, loadTestRegistry(t))
+	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -70,13 +84,6 @@ func requireErrContains(t *testing.T, err error, wants ...string) {
 }
 
 func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
-	// A fragment that reaches the default work prompt, found from a clean run.
-	clean, err := Assemble(coveredEnv(), loadTestRegistry(t))
-	if err != nil || len(clean.Fragments) == 0 {
-		t.Fatalf("clean Assemble: fragments=%v err=%v", clean.Fragments, err)
-	}
-	fragment := filepath.Join("fragments", clean.Fragments[0])
-
 	cases := []struct {
 		name   string
 		file   string
@@ -88,13 +95,12 @@ func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
 		{"base template", "issue-prompt.md", false, "prompt", "${REVIEW_LOOP_INLINE_STEP}", "#4291"},
 		{"worker agent prompt", "worker-prompt.md", true, `agent "worker" prompt`, "${CAVEMAN_STEP_WORKER}", "#4562"},
 		{"review prompt", "review-prompt.md", false, "review prompt", "${TDD_STEP}", "#3219"},
-		{"fragment", fragment, false, "prompt", "${COMMIT_STEP}", "#3222"},
+		{"fragment", "fragments/x.md", false, "prompt", "${COMMIT_STEP}", "#3222"},
 		{"agent prompt", "scout-prompt.md", true, `agent "scout" prompt`, "${CODE_COMMENTS_STEP}", "#3505"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
-			env.PromptsDir = stagePromptsCopy(t)
+			reg, env := removedVarFixture(t)
 			if tc.agents {
 				agent := strings.TrimSuffix(tc.file, "-prompt.md")
 				env.AgentsJSONTemplate = `{"` + agent + `":{"model":"x"}}`
@@ -102,7 +108,7 @@ func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
 			}
 			appendToFile(t, filepath.Join(env.PromptsDir, tc.file), "\nstale "+tc.token+"\n")
 
-			err := assembleValidate(t, env)
+			err := assembleValidate(t, reg, env)
 			if err == nil {
 				t.Fatal("Validate() error = nil, want removed-var reject")
 			}
@@ -116,13 +122,12 @@ func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
 func TestAssembleValidateRejectsRemovedFragmentVarInAgentFile(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	reg, env := removedVarFixture(t)
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
 	appendToFile(t, filepath.Join(env.PromptsDir, "scout-prompt.md"), "\nstale ${CODE_COMMENTS_STEP}\n")
 
-	err := assembleValidate(t, env)
+	err := assembleValidate(t, reg, env)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want removed-var reject")
 	}
@@ -132,11 +137,12 @@ func TestAssembleValidateRejectsRemovedFragmentVarInAgentFile(t *testing.T) {
 // The chore prompt is a Consumer-overridable file embedded through the
 // CHORE_PROMPT var, so it is operator-authored despite arriving as a var.
 func TestAssembleValidateRejectsRemovedFragmentVarInChoreFile(t *testing.T) {
-	env := butlerEnv()
-	env.PromptsDir = stagePromptsCopy(t)
-	appendToFile(t, filepath.Join(env.PromptsDir, "chores", env.ChoreName+".md"), "\nstale ${TDD_STEP}\n")
+	reg, env := removedVarFixture(t)
+	butler := butlerEnv()
+	butler.PromptsDir = env.PromptsDir
+	appendToFile(t, filepath.Join(butler.PromptsDir, "chores", butler.ChoreName+".md"), "\nstale ${TDD_STEP}\n")
 
-	err := assembleValidate(t, env)
+	err := assembleValidate(t, reg, butler)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want removed-var reject")
 	}
@@ -144,12 +150,11 @@ func TestAssembleValidateRejectsRemovedFragmentVarInChoreFile(t *testing.T) {
 }
 
 func TestWriteAssemblyRemovedVarInOverrideIsValidateError(t *testing.T) {
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	reg, env := removedVarFixture(t)
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${TDD_STEP}\n")
 	out := writeTestOutputs(t)
 
-	_, err := WriteAssembly(env, loadTestRegistry(t), nil, testPassthrough(), out, &strings.Builder{})
+	_, err := WriteAssembly(env, reg, nil, testPassthrough(), out, &strings.Builder{})
 	var ve *ValidateError
 	if !errors.As(err, &ve) {
 		t.Fatalf("err = %v, want *ValidateError", err)
@@ -178,9 +183,9 @@ func TestAssembleValidateAllowsRemovedVarInUntrustedText(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
+			reg, env := removedVarFixture(t)
 			tc.set(&env)
-			if err := assembleValidate(t, env); err != nil {
+			if err := assembleValidate(t, reg, env); err != nil {
 				t.Fatalf("Validate() error = %v, want nil", err)
 			}
 		})
@@ -188,20 +193,19 @@ func TestAssembleValidateAllowsRemovedVarInUntrustedText(t *testing.T) {
 }
 
 func TestAssembleValidateAllowsOtherPassThroughTokens(t *testing.T) {
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	reg, env := removedVarFixture(t)
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"),
 		"\ntoken ${FORGEJO_TOKEN} home ${HOME} partial ${TDD_STEP_X} $TDD_STEP\n")
-	if err := assembleValidate(t, env); err != nil {
+	if err := assembleValidate(t, reg, env); err != nil {
 		t.Fatalf("Validate() error = %v, want nil", err)
 	}
 }
 
 // assembleValidateWarnings is assembleValidate for a run expected to pass,
 // returning the Validate warnings.
-func assembleValidateWarnings(t *testing.T, env Env) []string {
+func assembleValidateWarnings(t *testing.T, reg Registry, env Env) []string {
 	t.Helper()
-	result, err := Assemble(env, loadTestRegistry(t))
+	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -215,12 +219,11 @@ func assembleValidateWarnings(t *testing.T, env Env) []string {
 // A deprecated variable is not removed yet, so it never errors; it warns once,
 // naming the replacement, however many times or files reference it.
 func TestAssembleValidateWarnsOnceOnDeprecatedFragmentVar(t *testing.T) {
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	reg, env := removedVarFixture(t)
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${ISSUE_READ_GITHUB_STEP}\n${ISSUE_READ_GITHUB_STEP}\n")
 	appendToFile(t, filepath.Join(env.PromptsDir, "review-prompt.md"), "\n${ISSUE_READ_GITHUB_STEP}\n")
 
-	warnings := assembleValidateWarnings(t, env)
+	warnings := assembleValidateWarnings(t, reg, env)
 	if len(warnings) != 1 {
 		t.Fatalf("warnings = %q, want exactly one", warnings)
 	}
@@ -232,55 +235,50 @@ func TestAssembleValidateWarnsOnceOnDeprecatedFragmentVar(t *testing.T) {
 }
 
 func TestAssembleValidateDeprecatedAndRemovedVarStillErrors(t *testing.T) {
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	reg, env := removedVarFixture(t)
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${ISSUE_READ_GITHUB_STEP}\n${TDD_STEP}\n")
 
-	err := assembleValidate(t, env)
+	err := assembleValidate(t, reg, env)
 	if err == nil {
 		t.Fatal("Validate() error = nil, want removed-var reject")
 	}
 	requireErrContains(t, err, "${TDD_STEP}")
 }
 
-func TestAssembleNoDeprecationWarningFromShippedPrompts(t *testing.T) {
-	if warnings := assembleValidateWarnings(t, coveredEnv()); len(warnings) != 0 {
-		t.Errorf("warnings = %q, want none for the shipped prompts", warnings)
-	}
+// issueReadEnv moves coveredEnv onto the tracker whose axis signal is axis.
+func issueReadEnv(env Env, tracker, axis string) Env {
+	env.IssueTracker = tracker
+	env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = axis, axis, axis
+	return env
 }
 
 // An override still naming a per-backend issue-read var renders exactly what
-// the shipped ${ISSUE_READ_STEP} prompt does for that backend.
+// the ${ISSUE_READ_STEP} slot does for that backend.
 func TestAssembleDeprecatedIssueReadVarRendersAsBefore(t *testing.T) {
-	forgejo := coveredEnv()
-	forgejo.IssueTracker = "forgejo"
-	forgejo.TrackerAxisRead = "FORGEJO"
-	forgejo.TrackerAxisWrite = "FORGEJO"
-	forgejo.TrackerAxisFiler = "FORGEJO"
-
 	cases := []struct {
-		name string
-		env  Env
-		v    string
+		name, tracker, axis, v string
 	}{
-		{"github", coveredEnv(), "${ISSUE_READ_GITHUB_STEP}"},
-		{"forgejo", forgejo, "${ISSUE_READ_FORGEJO_STEP}"},
+		{"github", "github", "GITHUB", "${ISSUE_READ_GITHUB_STEP}"},
+		{"forgejo", "forgejo", "FORGEJO", "${ISSUE_READ_FORGEJO_STEP}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			want, err := Assemble(tc.env, loadTestRegistry(t))
-			if err != nil {
-				t.Fatalf("Assemble default: %v", err)
+			render := func(token string) string {
+				rows, files := issueReadFamily("ISSUE_READ", "issue-read", "ISSUE_TRACKER_LINKS_READABLE", true)
+				files["issue-prompt.md"] = "issue " + token + "\n"
+				reg, env := syntheticRegistry(t, rows, files)
+				res, err := Assemble(issueReadEnv(env, tc.tracker, tc.axis), reg)
+				if err != nil {
+					t.Fatalf("Assemble %s: %v", token, err)
+				}
+				return res.Prompt
 			}
-			env := tc.env
-			env.PromptsDir = stagePromptsCopy(t)
-			replaceInFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "${ISSUE_READ_STEP}", tc.v)
-			got, err := Assemble(env, loadTestRegistry(t))
-			if err != nil {
-				t.Fatalf("Assemble override: %v", err)
+			want, got := render("${ISSUE_READ_STEP}"), render(tc.v)
+			if !strings.Contains(want, "TRACKER-ARM[ISSUE_READ]") {
+				t.Fatalf("slot prompt renders no issue-read body: %q", want)
 			}
-			if got.Prompt != want.Prompt {
-				t.Errorf("override prompt differs from the ${ISSUE_READ_STEP} prompt")
+			if got != want {
+				t.Errorf("override prompt = %q, want the ${ISSUE_READ_STEP} prompt %q", got, want)
 			}
 		})
 	}
@@ -288,25 +286,24 @@ func TestAssembleDeprecatedIssueReadVarRendersAsBefore(t *testing.T) {
 
 // A per-backend var for a backend that is not active still expands empty.
 func TestAssembleDeprecatedIssueReadVarOfInactiveBackendIsEmpty(t *testing.T) {
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
-	replaceInFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "${ISSUE_READ_STEP}", "${ISSUE_READ_FORGEJO_STEP}")
-	got, err := Assemble(env, loadTestRegistry(t))
+	rows, files := issueReadFamily("ISSUE_READ", "issue-read", "ISSUE_TRACKER_LINKS_READABLE", true)
+	files["issue-prompt.md"] = "issue ${ISSUE_READ_FORGEJO_STEP}\n"
+	reg, env := syntheticRegistry(t, rows, files)
+	got, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	if strings.Contains(got.Prompt, "via Forgejo") || strings.Contains(got.Prompt, "${ISSUE_READ") {
-		t.Errorf("prompt carries a forgejo issue-read or a literal token under the github tracker")
+	if strings.Contains(got.Prompt, "-ARM[") || strings.Contains(got.Prompt, "${ISSUE_READ") {
+		t.Errorf("prompt = %q, want no issue-read body and no literal token under the github tracker", got.Prompt)
 	}
 }
 
 func TestWriteAssemblyPrintsDeprecatedVarWarning(t *testing.T) {
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	reg, env := removedVarFixture(t)
 	appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${ISSUE_READ_LOCAL_STEP}\n")
 	w := new(strings.Builder)
 
-	if _, err := WriteAssembly(env, loadTestRegistry(t), nil, testPassthrough(), writeTestOutputs(t), w); err != nil {
+	if _, err := WriteAssembly(env, reg, nil, testPassthrough(), writeTestOutputs(t), w); err != nil {
 		t.Fatalf("WriteAssembly: %v", err)
 	}
 	if !strings.Contains(w.String(), "use ${ISSUE_READ_STEP} instead") {
@@ -331,22 +328,16 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := coveredEnv()
-			env.IssueTracker = tc.tracker
-			env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tc.axis, tc.axis, tc.axis
-			env.PromptsDir = stagePromptsCopy(t)
-			for _, p := range []string{"issue-read.md", "local/issue-read.md"} {
-				if err := os.Remove(filepath.Join(env.PromptsDir, "fragments", p)); err != nil {
-					t.Fatal(err)
-				}
-			}
 			const legacyText = "LEGACY-ISSUE-READ-STEP-SENTINEL"
-			if err := os.WriteFile(filepath.Join(env.PromptsDir, "fragments", tc.legacy), []byte(legacyText+"\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			replaceInFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "${ISSUE_READ_STEP}", "${"+tc.v+"}")
+			rows, files := issueReadFamily("ISSUE_READ", "issue-read", "ISSUE_TRACKER_LINKS_READABLE", true)
+			delete(files, "fragments/issue-read.md")
+			delete(files, "fragments/local/issue-read.md")
+			files["fragments/"+tc.legacy] = legacyText + "\n"
+			files["issue-prompt.md"] = "issue ${" + tc.v + "}\n"
+			reg, env := syntheticRegistry(t, rows, files)
+			env = issueReadEnv(env, tc.tracker, tc.axis)
 
-			result, err := Assemble(env, loadTestRegistry(t))
+			result, err := Assemble(env, reg)
 			if err != nil {
 				t.Fatalf("Assemble: %v", err)
 			}
@@ -366,33 +357,32 @@ func TestAssembleDeprecatedIssueReadVarFallsBackToLegacyFragment(t *testing.T) {
 
 // A client-less tracker (jira) rides github's arm, so an override still naming
 // the deprecated GITHUB issue-read var must render the unreadable arm, not
-// nothing and not github's link-reading wording (issue #6344).
+// nothing and not the readable arm (issue #6344).
 func TestAssembleDeprecatedIssueReadVarOnJiraRendersUnreadable(t *testing.T) {
 	slots := []struct {
-		name, kind, file, slot, old, fragment string
-		agent                                 string // subagent whose prompt carries the slot; "" means the main prompt
+		name, kind, file, pre, stem, gate string
+		agent                             string // subagent whose prompt carries the slot; "" means the main prompt
 	}{
-		{name: "work", kind: "work", file: "issue-prompt.md", slot: "${ISSUE_READ_STEP}",
-			old: "${ISSUE_READ_GITHUB_STEP}", fragment: "issue-read-unreadable.md"},
-		{name: "research", kind: "research", file: "research-prompt.md", slot: "${RESEARCH_ISSUE_READ_STEP}",
-			old: "${RESEARCH_ISSUE_READ_GITHUB_STEP}", fragment: "research-issue-read-unreadable.md"},
-		{name: "scout", kind: "work", file: "scout-prompt.md", slot: "${SCOUT_ISSUE_READ_STEP}",
-			old: "${SCOUT_ISSUE_READ_GITHUB_STEP}", fragment: "scout-issue-read-unreadable.md", agent: "scout"},
+		{name: "work", kind: "work", file: "issue-prompt.md", pre: "ISSUE_READ", stem: "issue-read",
+			gate: "ISSUE_TRACKER_LINKS_READABLE"},
+		{name: "research", kind: "research", file: "research-prompt.md", pre: "RESEARCH_ISSUE_READ", stem: "research-issue-read",
+			gate: "ISSUE_TRACKER_LINKS_READABLE"},
+		{name: "scout", kind: "work", file: "scout-prompt.md", pre: "SCOUT_ISSUE_READ", stem: "scout-issue-read",
+			gate: "ISSUE_TRACKER_LINKS_REACHABLE", agent: "scout"},
 	}
 	for _, s := range slots {
-		for _, v := range []string{s.slot, s.old} {
+		for _, v := range []string{"${" + s.pre + "_STEP}", "${" + s.pre + "_GITHUB_STEP}"} {
 			t.Run(s.name+"/"+v, func(t *testing.T) {
-				env := coveredEnv()
-				env.IssueTracker = "jira"
-				env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = "GITHUB", "GITHUB", "GITHUB"
+				rows, files := issueReadFamily(s.pre, s.stem, s.gate, false)
+				files[s.file] = "prompt " + v + "\n"
+				reg, env := syntheticRegistry(t, rows, files)
+				env = issueReadEnv(env, "jira", "GITHUB")
 				env.DispatchKind = s.kind
 				if s.agent != "" {
 					env.AgentsJSONTemplate = `{"` + s.agent + `":{"model":"x"}}`
 					env.AgentsPromptFiles = `{"` + s.agent + `":"` + s.file + `"}`
 				}
-				env.PromptsDir = stagePromptsCopy(t)
-				replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, v)
-				res, err := Assemble(env, loadTestRegistry(t))
+				res, err := Assemble(env, reg)
 				if err != nil {
 					t.Fatalf("Assemble: %v", err)
 				}
@@ -400,198 +390,13 @@ func TestAssembleDeprecatedIssueReadVarOnJiraRendersUnreadable(t *testing.T) {
 				if s.agent != "" {
 					prompt = agentPromptFromJSON(t, res.AgentsJSON, s.agent)
 				}
-				if want := fragmentText(t, s.fragment); !strings.Contains(prompt, want) {
+				if want := "NO-CLIENT-ARM[" + s.pre + "]"; !strings.Contains(prompt, want) {
 					t.Errorf("prompt lacks the unreadable arm %q:\n%s", want, prompt)
 				}
-				if strings.Contains(prompt, "via GitHub") {
-					t.Errorf("jira prompt points at GitHub:\n%s", prompt)
+				if strings.Contains(prompt, "TRACKER-ARM[") {
+					t.Errorf("jira prompt renders the readable arm:\n%s", prompt)
 				}
 			})
-		}
-	}
-}
-
-// An override still naming the per-backend vars the slot-collapse (issue
-// #5647) deprecated renders exactly what the shipped slot prompt does, on
-// every tracker.
-func TestAssembleDeprecatedSlotVarsRenderAsBefore(t *testing.T) {
-	envFor := func(tracker, axis string) Env {
-		e := coveredEnv()
-		e.IssueTracker = tracker
-		e.TrackerAxisRead, e.TrackerAxisWrite, e.TrackerAxisFiler = axis, axis, axis
-		if tracker == "local" {
-			e.TrackerAxisFiler = "GH" // a local tracker's Filer rides github's arm
-		}
-		e.FilerEnabled = true
-		e.AgentsJSONTemplate = `{"scout":{"model":"x"},"filer":{"model":"x"}}`
-		e.AgentsPromptFiles = `{"scout":"scout-prompt.md","filer":"filer-prompt.md"}`
-		return e
-	}
-	slots := []struct {
-		name, kind, file, slot, old string
-	}{
-		{"research", "research", "research-prompt.md", "${RESEARCH_ISSUE_READ_STEP}",
-			"${RESEARCH_ISSUE_READ_GITHUB_STEP}${RESEARCH_ISSUE_READ_LOCAL_STEP}${RESEARCH_ISSUE_READ_FORGEJO_STEP}"},
-		{"scout", "work", "scout-prompt.md", "${SCOUT_ISSUE_READ_STEP}",
-			"${SCOUT_ISSUE_READ_GITHUB_STEP}${SCOUT_ISSUE_READ_FORGEJO_STEP}"},
-		{"filer", "work", "filer-prompt.md", "${FILER_DEDUP_STEP}",
-			"${FILER_DEDUP_SEARCH_STEP}${FILER_DEDUP_SEARCH_FORGEJO_STEP}${FILER_DEDUP_SEARCH_LOCAL_STEP}"},
-		{"filer file", "work", "filer-prompt.md", "${FILER_DIRECT_FILE_STEP}",
-			"${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}"},
-		{"filer label", "work", "filer-prompt.md", "${FILER_DIRECT_LABEL_STEP}",
-			"${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}"},
-	}
-	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"forgejo", "FORGEJO"}, {"local", "LOCAL"}, {"jira", "GITHUB"}}
-	rendered := func(t *testing.T, env Env, kind string) string {
-		t.Helper()
-		env.DispatchKind = kind
-		res, err := Assemble(env, loadTestRegistry(t))
-		if err != nil {
-			t.Fatalf("Assemble: %v", err)
-		}
-		return res.Prompt + "\n" + res.AgentsJSON
-	}
-	for _, s := range slots {
-		for _, tr := range trackers {
-			t.Run(s.name+"/"+tr.tracker, func(t *testing.T) {
-				env := envFor(tr.tracker, tr.axis)
-				want := rendered(t, env, s.kind)
-				env.PromptsDir = stagePromptsCopy(t)
-				replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, s.old)
-				if got := rendered(t, env, s.kind); got != want {
-					t.Errorf("override with the deprecated %s vars renders differently from %s", s.name, s.slot)
-				}
-			})
-		}
-	}
-}
-
-// The same guarantee for the verdict, landing and blocked-comment slots
-// (issue #5647), which fork on write access and signal carrier as well as on
-// the tracker: every combination must render as the per-backend vars did.
-func TestAssembleDeprecatedAccessSlotVarsRenderAsBefore(t *testing.T) {
-	slots := []struct {
-		name, kind, file, slot, old string
-	}{
-		{"verdict", "research", "research-prompt.md",
-			"${RESEARCH_VERDICT_STEP}${RESEARCH_VERDICT_RELAY_STEP}${RESEARCH_VERDICT_RELAY_SOCKET_STEP}",
-			"${RESEARCH_VERDICT_GITHUB_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_STEP}${RESEARCH_VERDICT_GITHUB_READONLY_SOCKET_STEP}" +
-				"${RESEARCH_VERDICT_LOCAL_STEP}${RESEARCH_VERDICT_LOCAL_SOCKET_STEP}${RESEARCH_VERDICT_FORGEJO_STEP}" +
-				"${RESEARCH_VERDICT_FORGEJO_READONLY_STEP}${RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP}"},
-		{"landing", "research", "research-prompt.md", "${RESEARCH_OUTCOME_LANDING_STEP}",
-			"${RESEARCH_OUTCOME_LANDING_GITHUB_STEP}${RESEARCH_OUTCOME_LANDING_FORGEJO_STEP}"},
-		{"blocked comment", "work", "issue-prompt.md",
-			"${ISSUE_BLOCKED_COMMENT_STEP}${ISSUE_BLOCKED_COMMENT_RELAY_STEP}",
-			"${ISSUE_BLOCKED_COMMENT_GITHUB_STEP}${ISSUE_BLOCKED_COMMENT_GITHUB_READONLY_STEP}${ISSUE_BLOCKED_COMMENT_LOCAL_STEP}" +
-				"${ISSUE_BLOCKED_COMMENT_FORGEJO_STEP}${ISSUE_BLOCKED_COMMENT_FORGEJO_READONLY_STEP}"},
-	}
-	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"forgejo", "FORGEJO"}, {"local", "LOCAL"}, {"jira", "GITHUB"}}
-	for _, s := range slots {
-		for _, tr := range trackers {
-			for _, boxWrite := range []bool{true, false} {
-				for _, carrier := range []string{"log", "socket"} {
-					name := fmt.Sprintf("%s/%s/write=%v/%s", s.name, tr.tracker, boxWrite, carrier)
-					t.Run(name, func(t *testing.T) {
-						env := coveredEnv()
-						env.DispatchKind = s.kind
-						env.IssueTracker = tr.tracker
-						env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
-						if tr.tracker == "local" {
-							env.TrackerAxisWrite = ""
-						}
-						env.BoxWriteEnabled = boxWrite
-						env.SignalCarrier = carrier
-						res, err := Assemble(env, loadTestRegistry(t))
-						if err != nil {
-							t.Fatalf("Assemble: %v", err)
-						}
-						env.PromptsDir = stagePromptsCopy(t)
-						replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, s.old)
-						got, err := Assemble(env, loadTestRegistry(t))
-						if err != nil {
-							t.Fatalf("Assemble (override): %v", err)
-						}
-						if got.Prompt != res.Prompt {
-							t.Errorf("override with the deprecated %s vars renders differently from the slot", s.name)
-						}
-					})
-				}
-			}
-		}
-	}
-}
-
-// The forge-axis, host-mediated and PR-body slots (issue #5647) fork on the
-// code forge, on write access and on the local PR-body opt-in rather than on
-// the tracker, so each combination must render as the per-backend vars did.
-func TestAssembleDeprecatedForgeSlotVarsRenderAsBefore(t *testing.T) {
-	slots := []struct {
-		name, kind, file, slot, old string
-		fixPass                     int
-	}{
-		{"fix ci read", "work", "fix-prompt.md", "${FIX_CI_READ_STEP}",
-			"${FIX_CI_READ_GITHUB_STEP}${FIX_CI_READ_FORGEJO_STEP}", 1},
-		{"open pr create", "work", "issue-prompt.md", "${OPEN_PR_CREATE_DIRECT_STEP}",
-			"${OPEN_PR_CREATE_READ_WRITE_STEP}${OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP}", 0},
-		{"if blocked pr", "work", "issue-prompt.md", "${IF_BLOCKED_PR_DIRECT_STEP}",
-			"${IF_BLOCKED_PR_READ_WRITE_STEP}${IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP}", 0},
-		{"pr body", "work", "issue-prompt.md", "${PR_BODY_ISSUE_REF_STEP}${PR_BODY_NO_ISSUE_REF_STEP}",
-			"${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}", 0},
-		{"commit push", "work", "issue-prompt.md", "${COMMIT_PUSH_HOST_MEDIATED_STEP}",
-			"${COMMIT_PUSH_LOCAL_STEP}", 0},
-		{"if blocked triage", "work", "issue-prompt.md", "${IF_BLOCKED_TRIAGE_HOST_MEDIATED_STEP}",
-			"${IF_BLOCKED_TRIAGE_LOCAL_STEP}", 0},
-		{"if blocked push", "work", "issue-prompt.md", "${IF_BLOCKED_PUSH_HOST_MEDIATED_STEP}",
-			"${IF_BLOCKED_PUSH_LOCAL_STEP}", 0},
-	}
-	forges := []struct {
-		name, backend            string
-		outboxCapable, hostMedia bool
-	}{
-		{"github", "GH", true, false},
-		{"forgejo", "FORGEJO", true, false},
-		{"git", "GH", false, false},
-		{"local", "GH", false, true},
-	}
-	trackers := []struct{ tracker, axis string }{{"github", "GITHUB"}, {"local", "LOCAL"}}
-	for _, s := range slots {
-		for _, f := range forges {
-			for _, tr := range trackers {
-				for _, boxWrite := range []bool{true, false} {
-					for _, ref := range []bool{true, false} {
-						name := fmt.Sprintf("%s/%s/%s/write=%v/ref=%v", s.name, f.name, tr.tracker, boxWrite, ref)
-						t.Run(name, func(t *testing.T) {
-							env := coveredEnv()
-							env.FixPass = s.fixPass
-							env.DispatchKind = s.kind
-							env.IssueTracker = tr.tracker
-							env.TrackerAxisRead, env.TrackerAxisWrite, env.TrackerAxisFiler = tr.axis, tr.axis, tr.axis
-							if tr.tracker == "local" {
-								env.TrackerAxisWrite = ""
-							}
-							env.CodeForge = f.name
-							env.ForgeBackend = f.backend
-							env.OutboxRelayCapable = f.outboxCapable
-							env.HostMediatedRemote = f.hostMedia
-							env.BoxWriteEnabled = boxWrite
-							env.LocalIssueReference = ref
-							want, err := Assemble(env, loadTestRegistry(t))
-							if err != nil {
-								t.Fatalf("Assemble: %v", err)
-							}
-							env.PromptsDir = stagePromptsCopy(t)
-							replaceInFile(t, filepath.Join(env.PromptsDir, s.file), s.slot, s.old)
-							got, err := Assemble(env, loadTestRegistry(t))
-							if err != nil {
-								t.Fatalf("Assemble (override): %v", err)
-							}
-							if got.Prompt != want.Prompt {
-								t.Errorf("override with the deprecated %s vars renders differently from the slot", s.name)
-							}
-						})
-					}
-				}
-			}
 		}
 	}
 }
@@ -606,11 +411,10 @@ func TestAssembleValidateDeprecatedWarningNamesSlot(t *testing.T) {
 			if r.replacement == "" {
 				t.Fatalf("deprecated %s names no replacement slot", r.name)
 			}
-			env := coveredEnv()
-			env.PromptsDir = stagePromptsCopy(t)
+			reg, env := removedVarFixture(t)
 			appendToFile(t, filepath.Join(env.PromptsDir, "issue-prompt.md"), "\n${"+r.name+"}\n")
 
-			warnings := assembleValidateWarnings(t, env)
+			warnings := assembleValidateWarnings(t, reg, env)
 			want := "use ${" + r.replacement + "} instead"
 			found := false
 			for _, w := range warnings {

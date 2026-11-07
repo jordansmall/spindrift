@@ -1,8 +1,6 @@
 package promptassembly
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -11,17 +9,11 @@ import (
 // (relative path -> content), so a synthetic row resolves against known bytes.
 func slotFixture(t *testing.T, files map[string]string) Env {
 	t.Helper()
-	env := coveredEnv()
-	env.PromptsDir = stagePromptsCopy(t)
+	staged := map[string]string{}
 	for p, content := range files {
-		full := filepath.Join(env.PromptsDir, "fragments", p)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		staged["fragments/"+p] = content
 	}
+	_, env := syntheticRegistry(t, nil, staged)
 	return env
 }
 
