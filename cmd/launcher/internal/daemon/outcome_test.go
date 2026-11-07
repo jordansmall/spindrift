@@ -1,6 +1,10 @@
 package daemon
 
-import "testing"
+import (
+	"testing"
+
+	"spindrift.dev/launcher/internal/exitcode"
+)
 
 func TestInterpret(t *testing.T) {
 	cases := []struct {
@@ -54,6 +58,22 @@ func TestInterpret_HaltPoolIffHaltClassSet(t *testing.T) {
 			if halts, classed := action == HaltPool, halt != HaltNone; halts != classed {
 				t.Errorf("Interpret(%d, %v): action == HaltPool is %v, but halt != HaltNone is %v (halt=%v)", exit, stopClosed, halts, classed, halt)
 			}
+		}
+	}
+}
+
+// TestHaltClassFor_CoversEveryDispatchHalt pins that adding an exitcode.Halt
+// to a DispatchTable row without a HaltClass mapping fails here rather than
+// silently halting nothing.
+func TestHaltClassFor_CoversEveryDispatchHalt(t *testing.T) {
+	for _, row := range exitcode.DispatchTable {
+		class, ok := haltClassFor[row.Halt]
+		if !ok {
+			t.Errorf("%s: exitcode.Halt %d has no HaltClass mapping", row.Name, row.Halt)
+			continue
+		}
+		if (row.Halt == exitcode.NoHalt) != (class == HaltNone) {
+			t.Errorf("%s: Halt %d maps to %v", row.Name, row.Halt, class)
 		}
 	}
 }

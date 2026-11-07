@@ -30,6 +30,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/stopsignal"
 	"spindrift.dev/launcher/internal/tokenrefresh"
@@ -648,7 +649,7 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 	v := daemon.ClassifyPreflight(exit)
 	// Exit 4 can come from the triage, butler, research or Filer label sets;
 	// doctor's own line is the only place that names which.
-	if v.Outcome == daemon.OutcomeRequiredLabelsMissing && labelsLine != "" {
+	if exit == int(exitcode.DoctorRequiredLabelsMissing) && labelsLine != "" {
 		v.Detail = labelsLine
 	}
 	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Exit: &exit, Outcome: v.Outcome})
