@@ -3003,6 +3003,21 @@ var clauseContracts = []clauseContract{
 		clause:   "turn the review findings the work loop escalated",
 		reason:   "the Filer's job is to file the escalated review findings as issues, and the opencode Filer rewrite relies on it saying so (issue #5330).",
 	},
+	{
+		fragment: "scout-prompt.md",
+		clause:   "Return only the brief's path",
+		reason:   "the scout hands the coordinator a path to its brief rather than the brief's text, so the coordinator's context stays small and the opencode scout rewrite carries the same instruction (issues #264, #2153).",
+	},
+	{
+		fragment: "worker-prompt.md",
+		clause:   "Stay inside the slice you were handed",
+		reason:   "a worker implements only the slice the coordinator delegated, so the opencode worker rewrite must carry the scope boundary (issue #264).",
+	},
+	{
+		fragment: "butler-review-prompt.md",
+		clause:   "one butler finding handed to you",
+		reason:   "the butler's reviewer judges a single butler finding, not a branch diff, and the opencode reviewer.md rewrite must carry that framing (ADR 0056).",
+	},
 }
 
 // sharedClause is a clause contract several fragments must each satisfy
