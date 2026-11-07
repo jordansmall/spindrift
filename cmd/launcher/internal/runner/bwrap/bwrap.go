@@ -1293,8 +1293,10 @@ func (a *bwrapBuildAdapter) EnsureReady() error {
 // generation wastes disk but leaves the one just prepared perfectly usable.
 func (a *bwrapBuildAdapter) reclaimStale() {
 	// An empty nixVarGeneration is the flat/legacy path: nixVarSnapshotDir IS
-	// the root, so there are no sibling generations to sweep, and reclaiming
-	// against the root would sweep unrelated siblings like .spindrift/accum.git.
+	// the root, so there is no generation to keep, and a reclaimStaleSnapshots
+	// sweep of it would delete the flat snapshot's own contents (nix/, db-<V>/,
+	// orphaned lock files). At most stale db-<V> versions and their orphaned
+	// locks are swept (none while a flat nix/ remains).
 	if a.nixVarGeneration == "" {
 		fmt.Println("==> bwrap runner: closure generation is unscoped (none known); skipping stale-generation reclaim")
 		sweepStaleSnapshotVersions(a.nixVarSnapshotDir, currentVersionKeeper()(a.nixVarSnapshotDir))

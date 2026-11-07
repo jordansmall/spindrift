@@ -276,8 +276,8 @@ func TestBwrapRunEnsureReady_ColdKeepsGenerationLockedByInheritedFD(t *testing.T
 	}
 }
 
-// The flat/legacy path has no sibling generations, only unrelated neighbours
-// under .spindrift that a sweep must never touch.
+// On the flat/legacy path (see reclaimStale), a non-db-<V> entry inside the
+// root and an unrelated neighbour under .spindrift both survive EnsureReady.
 func TestBwrapRunEnsureReady_ColdUnscopedSnapshotNeverReclaims(t *testing.T) {
 	runnertest.InstallImageBuildPipe(t)
 	nixOnlyExec(t, "fresh", 0)
