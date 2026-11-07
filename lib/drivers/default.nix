@@ -8,7 +8,7 @@
 { lib }:
 let
   # sessionCacheDirRelative is deliberately absent: a Driver with no resumable
-  # session state omits it (see lib/preambles.nix's renderDriverMountPreamble).
+  # session state omits it (see runArtifacts in lib/preambles.nix).
   # When present, assertShape checks its shape: a non-empty relative path with
   # no empty, "." or ".." segment (so no leading/trailing/doubled slash either).
   # envFiles is a list of { env, pathRelative } entries: the Box writes each
@@ -475,8 +475,8 @@ let
     )
     # Symmetric with DRIVER_AGENT_FILES_DIR above (issue #2843): the var stays
     # unset, not empty, for a Driver with no resumable session state.
-    # lib/preambles.nix's renderDriverMountPreamble renders a same-named var for
-    # the host-side launcher process, a separate consumer.
+    # runArtifacts in lib/preambles.nix carries a same-named var into the
+    # Launcher input document for the host-side launcher, a separate consumer.
     + lib.optionalString (driverEntry ? sessionCacheDirRelative) (
       "DRIVER_SESSION_CACHE_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.sessionCacheDirRelative}"

@@ -275,9 +275,9 @@ in
 
   # Issue #2843: renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the
   # real claude entry's sessionCacheDirRelative so box sees
-  # the session-cache path inside the box. lib/preambles.nix's
-  # renderDriverMountPreamble renders the same-named var for the host-side
-  # launcher, a separate consumer.
+  # the session-cache path inside the box. runArtifacts in lib/preambles.nix
+  # carries the same-named var into the Launcher input document for the
+  # host-side launcher, a separate consumer.
   drivers-render-preamble-session-cache-dir =
     let
       out = driverRegistry.renderPreamble entry;
