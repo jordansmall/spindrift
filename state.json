@@ -1,21 +1,20 @@
 {
   "lastSwept": "e88865fbc39e6a4b4ab909f756b9a5180d18d536",
   "cursor": "cmd/launcher/internal/promptassembly/flags.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6556"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/6556"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-07T05:24:56.728780923-05:00"
+  },
   "usage": {
-    "input_tokens": 56,
-    "output_tokens": 15104,
-    "cache_read_input_tokens": 1992944,
-    "cache_creation_input_tokens": 114337,
-    "total_cost_usd": 1.7449040350000002,
-    "duration_ms": 186784,
-    "duration_api_ms": 184178,
-    "num_turns": 32
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
