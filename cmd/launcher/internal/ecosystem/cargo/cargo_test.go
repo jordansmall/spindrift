@@ -329,10 +329,10 @@ registry = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
-	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+	if len(got) != 1 {
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
-	up := got[0].Upstreams[0]
+	up := got[0].Upstream
 	if up.SourceName != "artifactory-remote" {
 		t.Errorf("SourceName = %q, want reused %q", up.SourceName, "artifactory-remote")
 	}
@@ -412,10 +412,10 @@ registry = "` + tc.sourceRegistry + `"
 			if len(warnings) != 0 {
 				t.Errorf("warnings = %v, want none", warnings)
 			}
-			if len(got) != 1 || len(got[0].Upstreams) != 1 {
-				t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+			if len(got) != 1 {
+				t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 			}
-			up := got[0].Upstreams[0]
+			up := got[0].Upstream
 			if up.SourceName != tc.wantSourceName {
 				t.Errorf("SourceName = %q, want %q", up.SourceName, tc.wantSourceName)
 			}
@@ -477,7 +477,7 @@ index = "sparse+https://cargo.example.test/index/"
 
 	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
+	if len(got) != 1 || got[0].Upstream.SourceName != "spindrift-upstream-othercorp" {
 		t.Fatalf("cargoSourceReplacements() = %+v, want the minted name unchanged", got)
 	}
 }
@@ -504,7 +504,7 @@ registry = "sparse+https://cargo.example.test/index/"
 
 			got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-			if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
+			if len(got) != 1 || got[0].Upstream.SourceName != "spindrift-upstream-othercorp" {
 				t.Fatalf("cargoSourceReplacements() = %+v, want the minted name (guard rejected %q)", got, guarded)
 			}
 		})
@@ -541,9 +541,7 @@ registry = "sparse+https://cargo.example.test/a/"
 	}
 	names := map[string]bool{}
 	for _, rep := range got {
-		for _, up := range rep.Upstreams {
-			names[up.SourceName] = true
-		}
+		names[rep.Upstream.SourceName] = true
 	}
 	if !names["spindrift-upstream-a"] {
 		t.Errorf("cargoSourceReplacements() = %+v, want decl a to keep its minted name spindrift-upstream-a", got)
@@ -590,10 +588,7 @@ index = "sparse+https://cargo.example.test/index/"
 	if rep.LocalIndexURL != "sparse+http://127.0.0.1:27182/r1/index/" {
 		t.Errorf("LocalIndexURL = %q, want %q", rep.LocalIndexURL, "sparse+http://127.0.0.1:27182/r1/index/")
 	}
-	if len(rep.Upstreams) != 1 {
-		t.Fatalf("Upstreams = %+v, want exactly one", rep.Upstreams)
-	}
-	up := rep.Upstreams[0]
+	up := rep.Upstream
 	if up.SourceName != "spindrift-upstream-othercorp" {
 		t.Errorf("SourceName = %q, want %q", up.SourceName, "spindrift-upstream-othercorp")
 	}
@@ -620,7 +615,7 @@ index = "sparse+https://cargo.example.test/undeclared-index/"
 
 	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-declared-registry" {
+	if len(got) != 1 || got[0].Upstream.SourceName != "spindrift-upstream-declared-registry" {
 		t.Fatalf("cargoSourceReplacements() = %+v, want exactly the declared-registry upstream", got)
 	}
 
@@ -677,7 +672,7 @@ index = "sparse+https://cargo.example.test/index/"
 
 	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-present" {
+	if len(got) != 1 || got[0].Upstream.SourceName != "spindrift-upstream-present" {
 		t.Fatalf("cargoSourceReplacements() = %+v, want exactly the present upstream", got)
 	}
 	if len(warnings) != 1 {
@@ -731,8 +726,8 @@ index = "sparse+https://cargo.example.test/index/"
 
 	got, warnings := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
+	if len(got) != 1 {
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none (a deduped name still binds)", warnings)
@@ -803,9 +798,7 @@ index = "sparse+https://cargo.example.test/second-index/"
 			}
 			var names []string
 			for _, rep := range got {
-				for _, up := range rep.Upstreams {
-					names = append(names, up.SourceName)
-				}
+				names = append(names, rep.Upstream.SourceName)
 			}
 			if !slices.Equal(names, want) {
 				t.Errorf("upstream source names = %v, want %v", names, want)
@@ -836,7 +829,7 @@ index = "sparse+https://cargo.example.test/index/"
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none", warnings)
 	}
-	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-othercorp" {
+	if len(got) != 1 || got[0].Upstream.SourceName != "spindrift-upstream-othercorp" {
 		t.Fatalf("cargoSourceReplacements() = %+v, want the host-matching decl bound", got)
 	}
 }
@@ -859,11 +852,11 @@ index = "sparse+https://cargo.example.test/index/"
 
 	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one deduped upstream", got)
+	if len(got) != 1 {
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
-	if got[0].Upstreams[0].SourceName != "spindrift-upstream-first-name" {
-		t.Errorf("SourceName = %q, want first by name %q", got[0].Upstreams[0].SourceName, "spindrift-upstream-first-name")
+	if got[0].Upstream.SourceName != "spindrift-upstream-first-name" {
+		t.Errorf("SourceName = %q, want first by name %q", got[0].Upstream.SourceName, "spindrift-upstream-first-name")
 	}
 }
 
@@ -894,11 +887,11 @@ registry = "sparse+https://cargo.example.test/index/"
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none (both declared names count as bound)", warnings)
 	}
-	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+	if len(got) != 1 {
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
-	if got[0].Upstreams[0].SourceName != "claimed-name" {
-		t.Errorf("SourceName = %q, want the reused claiming name %q", got[0].Upstreams[0].SourceName, "claimed-name")
+	if got[0].Upstream.SourceName != "claimed-name" {
+		t.Errorf("SourceName = %q, want the reused claiming name %q", got[0].Upstream.SourceName, "claimed-name")
 	}
 }
 
@@ -927,10 +920,10 @@ index = "sparse+https://cargo.example.test/index"
 	if len(warnings) != 0 {
 		t.Errorf("warnings = %v, want none (both declared names count as bound)", warnings)
 	}
-	if len(got) != 1 || len(got[0].Upstreams) != 1 {
-		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement with one upstream", got)
+	if len(got) != 1 {
+		t.Fatalf("cargoSourceReplacements() = %+v, want exactly one replacement", got)
 	}
-	up := got[0].Upstreams[0]
+	up := got[0].Upstream
 	if up.SourceName != "spindrift-upstream-first-name" {
 		t.Errorf("SourceName = %q, want the minted name off the first decl %q", up.SourceName, "spindrift-upstream-first-name")
 	}
@@ -1193,7 +1186,7 @@ registry = "sparse+https://CARGO.example.test/index/"
 
 	got, _ := cargoSourceReplacements(port, "r0", routes, repoConfig)
 
-	if len(got) != 1 || len(got[0].Upstreams) != 1 || got[0].Upstreams[0].SourceName != "spindrift-upstream-acme" {
+	if len(got) != 1 || got[0].Upstream.SourceName != "spindrift-upstream-acme" {
 		t.Fatalf("cargoSourceReplacements() = %+v, want the minted name (guard rejected the reserved name)", got)
 	}
 }
@@ -1217,9 +1210,7 @@ func TestCargoConfigTOMLWithReplacements_OneNamedRegistry(t *testing.T) {
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-othercorp", IndexURL: "sparse+https://cargo.example.test/index/"},
-			},
+			Upstream:      cargoUpstreamSource{SourceName: "spindrift-upstream-othercorp", IndexURL: "sparse+https://cargo.example.test/index/"},
 		},
 	}
 
@@ -1258,9 +1249,7 @@ func TestCargoConfigTOMLWithReplacements_ReusedProxySource(t *testing.T) {
 			Prefix:        "r0",
 			ProxySource:   "spindrift-registry-proxy",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r0/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-othercorp", IndexURL: "sparse+https://cargo.example.test/index/"},
-			},
+			Upstream:      cargoUpstreamSource{SourceName: "spindrift-upstream-othercorp", IndexURL: "sparse+https://cargo.example.test/index/"},
 		},
 	}
 
@@ -1300,13 +1289,13 @@ func TestCargoConfigTOMLWithReplacements_SharedUpstreamSourceEmittedOnce(t *test
 			Prefix:        "r0",
 			ProxySource:   "spindrift-registry-proxy-r0-a",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r0/a/",
-			Upstreams:     []cargoUpstreamSource{{SourceName: shared, IndexURL: "sparse+https://cargo.example.test/index/"}},
+			Upstream:      cargoUpstreamSource{SourceName: shared, IndexURL: "sparse+https://cargo.example.test/index/"},
 		},
 		{
 			Prefix:        "r0",
 			ProxySource:   "spindrift-registry-proxy-r0-b",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r0/b/",
-			Upstreams:     []cargoUpstreamSource{{SourceName: shared, IndexURL: "sparse+https://cargo.example.test/index/"}},
+			Upstream:      cargoUpstreamSource{SourceName: shared, IndexURL: "sparse+https://cargo.example.test/index/"},
 		},
 	}
 
@@ -1324,52 +1313,6 @@ func TestCargoConfigTOMLWithReplacements_SharedUpstreamSourceEmittedOnce(t *test
 	}
 }
 
-// With two Upstreams on one route, each gets its own
-// [source.spindrift-upstream-…] stanza, but the [source.…]/[registries.…]
-// proxy pair is emitted once, after both upstreams.
-func TestCargoConfigTOMLWithReplacements_TwoUpstreamsOneProxySource(t *testing.T) {
-	replacements := []cargoSourceReplacement{
-		{
-			Prefix:        "r1",
-			ProxySource:   "spindrift-registry-proxy-r1",
-			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-corp-a", IndexURL: "sparse+https://corp-a.example.test/index/"},
-				{SourceName: "spindrift-upstream-corp-b", IndexURL: "sparse+https://corp-b.example.test/index/"},
-			},
-		},
-	}
-
-	got := cargoConfigTOMLWithReplacements(27182, "r0", replacements)
-
-	want := `[source.crates-io]
-replace-with = "spindrift-registry-proxy"
-
-[source.spindrift-registry-proxy]
-registry = "sparse+http://127.0.0.1:27182/r0/"
-
-[registry]
-global-credential-providers = ["cargo:token"]
-
-[source.spindrift-upstream-corp-a]
-registry = "sparse+https://corp-a.example.test/index/"
-replace-with = "spindrift-registry-proxy-r1"
-
-[source.spindrift-upstream-corp-b]
-registry = "sparse+https://corp-b.example.test/index/"
-replace-with = "spindrift-registry-proxy-r1"
-
-[source.spindrift-registry-proxy-r1]
-registry = "sparse+http://127.0.0.1:27182/r1/"
-
-[registries.spindrift-registry-proxy-r1]
-index = "sparse+http://127.0.0.1:27182/r1/"
-`
-	if got != want {
-		t.Errorf("cargoConfigTOMLWithReplacements() = %q, want %q", got, want)
-	}
-}
-
 // Two named-registry routes each mint their own proxy source, and both blocks
 // appear in the replacements slice's order.
 func TestCargoConfigTOMLWithReplacements_TwoRoutes(t *testing.T) {
@@ -1378,17 +1321,13 @@ func TestCargoConfigTOMLWithReplacements_TwoRoutes(t *testing.T) {
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-corp-a", IndexURL: "sparse+https://corp-a.example.test/index/"},
-			},
+			Upstream:      cargoUpstreamSource{SourceName: "spindrift-upstream-corp-a", IndexURL: "sparse+https://corp-a.example.test/index/"},
 		},
 		{
 			Prefix:        "r2",
 			ProxySource:   "spindrift-registry-proxy-r2",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r2/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-corp-b", IndexURL: "sparse+https://corp-b.example.test/index/"},
-			},
+			Upstream:      cargoUpstreamSource{SourceName: "spindrift-upstream-corp-b", IndexURL: "sparse+https://corp-b.example.test/index/"},
 		},
 	}
 
@@ -1842,11 +1781,11 @@ index = "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"
 		t.Errorf("Prefix = [%q, %q], want both %q", internal.Prefix, remote.Prefix, "r1")
 	}
 
-	if len(internal.Upstreams) != 1 || internal.Upstreams[0].IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/internal" {
-		t.Errorf("internal.Upstreams = %+v, want the real internal index URL byte-for-byte", internal.Upstreams)
+	if internal.Upstream.IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/internal" {
+		t.Errorf("internal.Upstream = %+v, want the real internal index URL byte-for-byte", internal.Upstream)
 	}
-	if len(remote.Upstreams) != 1 || remote.Upstreams[0].IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/remote" {
-		t.Errorf("remote.Upstreams = %+v, want the real remote index URL byte-for-byte", remote.Upstreams)
+	if remote.Upstream.IndexURL != "sparse+https://artifactory.example.test/artifactory/api/cargo/remote" {
+		t.Errorf("remote.Upstream = %+v, want the real remote index URL byte-for-byte", remote.Upstream)
 	}
 }
 
@@ -1908,17 +1847,13 @@ func TestCargoConfigTOMLWithReplacements_TwoRegistries(t *testing.T) {
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1-artifactory-internal",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/internal/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-artifactory-internal", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"},
-			},
+			Upstream:      cargoUpstreamSource{SourceName: "spindrift-upstream-artifactory-internal", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/internal"},
 		},
 		{
 			Prefix:        "r1",
 			ProxySource:   "spindrift-registry-proxy-r1-artifactory-remote",
 			LocalIndexURL: "sparse+http://127.0.0.1:27182/r1/artifactory/api/cargo/remote/",
-			Upstreams: []cargoUpstreamSource{
-				{SourceName: "spindrift-upstream-artifactory-remote", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"},
-			},
+			Upstream:      cargoUpstreamSource{SourceName: "spindrift-upstream-artifactory-remote", IndexURL: "sparse+https://artifactory.example.test/artifactory/api/cargo/remote"},
 		},
 	}
 
