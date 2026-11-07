@@ -52,9 +52,9 @@ type FragmentRow struct {
 	// lib/prompt-contract.nix's buildTimeSignalFragmentViolations.
 	SignalChannel string `json:"signalChannel,omitempty"`
 	// InverseOf names the gate this row's Gate is the exact complement of;
-	// lib/fragment-pairs.nix validates the pair's shape at eval time. The pair
-	// holds only if Gates computes the two as complements, so Go carries the
-	// claim over to check it against the real gate computation.
+	// lib/fragment-pairs.nix validates only the pair's declared shape at eval
+	// time, not that Gates computes the two gates as complements. Go only
+	// decodes the column.
 	InverseOf string `json:"inverseOf,omitempty"`
 	// Inline binds Var without the trailing blank line a step var carries, so
 	// a parent fragment can splice it mid-sentence (issue #6354). Unset for

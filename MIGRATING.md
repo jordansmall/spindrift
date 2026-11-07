@@ -1263,8 +1263,9 @@ the guarantee — that split is not repeated here):
 
 `COMMIT_UNBAKED` and `CODE_REVIEW_UNBAKED` are each declared in the fragment
 registry as `inverseOf` their baked partner, with the same eval-time
-declaration-shape assert and render-time `TestRegistryInverseOfPairsAreExactlyOneOn`
-Go sweep backing the guarantee that TDD_BAKED/TDD_UNBAKED gets.
+declaration-shape assert that TDD_BAKED/TDD_UNBAKED gets. Issue #6591 removed
+the render-time `TestRegistryInverseOfPairsAreExactlyOneOn` Go sweep, so
+nothing now checks that these two pairs render exactly one member.
 
 ### What breaks in an override prompt directory
 
@@ -1404,9 +1405,11 @@ renders and the other is empty:
 "TDD_BAKED"`. An eval-time assert in `lib/fragments.nix` checks only the
 *declaration shape* — the on-gate exists, isn't itself, isn't chained, and
 isn't claimed by another pair — not that the two gates disagree when
-rendered. That render-time guarantee is a Go test,
-`TestRegistryInverseOfPairsAreExactlyOneOn`, which sweeps the gate matrix and
-fails the build if the two ever agree.
+rendered. That render-time guarantee is the Go test
+`TestTDDGatePairRendersExactlyOneMember`, which renders the pair on a
+synthetic registry with the skill baked and unbaked and fails if both or
+neither member renders (issue #6591 replaced the earlier production-registry
+sweep, `TestRegistryInverseOfPairsAreExactlyOneOn`).
 
 ### What breaks in an override prompt directory
 
