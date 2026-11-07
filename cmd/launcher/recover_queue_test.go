@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/runner"
@@ -247,8 +248,8 @@ func TestRecoverQueueOne_StopSignalExitsSevenWithoutParking(t *testing.T) {
 
 	code, _ := x.run(t)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	x.assertUntouched(t)
 	if got := x.labels(t, "42"); !slices.Contains(got, x.c.failedLabel) {
@@ -393,8 +394,8 @@ func TestRecoverQueueOne_StopDuringFailedSettleParksAndExitsSeven(t *testing.T) 
 
 	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
 	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
@@ -440,8 +441,8 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
 	code := exitCodeFor(err)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
 	if !slices.Contains(got, x.c.label) {
@@ -487,8 +488,8 @@ func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testin
 
 	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
 	if slices.Contains(got, x.c.inProgressLabel) {
@@ -520,8 +521,8 @@ func TestRecoverQueueOne_AbortAfterLandingSettleRemovesRecordAndExitsSeven(t *te
 
 	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	if _, err := os.Stat(recoverrecord.Path(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("record stat err = %v, want not-exist", err)
@@ -537,8 +538,8 @@ func TestRecoverQueueOne_StopDuringLandingSettleRemovesRecordAndExitsSeven(t *te
 
 	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	if _, err := os.Stat(recoverrecord.Path(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("record stat err = %v, want not-exist", err)
@@ -555,8 +556,8 @@ func TestRecoverQueueOne_StopDuringEligibilityReadsExitsSeven(t *testing.T) {
 
 	code := x.runOn(t, x.fc, stopOnPRLookup{CodeForge: x.cf, PRForge: x.cf.(forge.PRForge), stop: stop}, caps)
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	x.assertUntouched(t)
 	if x.fc.Merged != "" {
@@ -574,8 +575,8 @@ func TestRecoverQueueOne_StopAfterClaimRestoresAgentFailed(t *testing.T) {
 
 	code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf))
 
-	if code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	if x.fc.Merged != "" {
 		t.Errorf("Merged = %q, want none", x.fc.Merged)
@@ -1386,8 +1387,8 @@ func TestRecoverQueueOne_AbortAfterOwnFailedSettleSpared(t *testing.T) {
 
 	err := recoverQueueOne(x.c, it, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
 
-	if code := exitCodeFor(err); code != exitSignalledStop {
-		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	if code := exitCodeFor(err); code != int(exitcode.SignalledStop) {
+		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := x.labels(t, "42")
 	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.label) {

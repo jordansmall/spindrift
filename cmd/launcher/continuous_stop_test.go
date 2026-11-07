@@ -4,6 +4,7 @@ import (
 	"io"
 	"testing"
 
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
 )
@@ -85,8 +86,8 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverEmptyQueue(t *test
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- must not flatten into exit 2", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- must not flatten into exit 2", got, int(exitcode.SignalledStop))
 	}
 }
 
@@ -118,13 +119,13 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverAllBlocked(t *test
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- must not flatten into exit 3", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- must not flatten into exit 3", got, int(exitcode.SignalledStop))
 	}
 }
 
 // A pre-closed abort channel (the second-signal escalation, #3521) must exit
-// exitSignalledStop the same as a pre-closed stop alone: RunContinuous's
+// exitcode.SignalledStop the same as a pre-closed stop alone: RunContinuous's
 // observeAbort reclaims in-flight issues and returns the same
 // waves.ErrSignalledStop a graceful drain does, so a driving loop like
 // the daemon sees one exit code for "the operator asked to stop" regardless
@@ -147,7 +148,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledAbort_ExitsSameCodeAsStop(t *te
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
-		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- an abort exits the same code as a graceful drain", got, exitSignalledStop)
+	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
+		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- an abort exits the same code as a graceful drain", got, int(exitcode.SignalledStop))
 	}
 }

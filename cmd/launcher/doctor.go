@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -31,7 +32,7 @@ func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
-		return 1
+		return int(exitcode.DoctorUnclassified)
 	}
 	opts.interactive = isStdinTTY()
 	return doctorReport(rc, stdout, stderr, os.Stdin, opts)
@@ -168,25 +169,24 @@ func doctorUnbuildableReport(rc readContext, unregistered error, stderr io.Write
 	return doctorExitCodeFor(configErr, nil)
 }
 
-// doctorExitCodeFor maps cmdDoctor's two failure sources to the doctor
-// exit-code vocabulary (issues #2569, #2942): 0 healthy, 2 configuration
-// invalid, 3 auth or connectivity, 4 required checks failed or declined, 1
-// unclassified. Both errors can be non-nil at once, and configErr wins because
-// an invalid configuration makes runDoctor's findings unreliable.
+// doctorExitCodeFor maps cmdDoctor's two failure sources to an
+// exitcode.Doctor code (issues #2569, #2942). Both errors can be non-nil at
+// once, and configErr wins because an invalid configuration makes runDoctor's
+// findings unreliable.
 func doctorExitCodeFor(configErr, runErr error) int {
 	switch {
 	case configErr != nil:
-		return 2
+		return int(exitcode.DoctorConfigInvalid)
 	case runErr == nil:
-		return 0
+		return int(exitcode.DoctorHealthy)
 	case errors.Is(runErr, errReadOnlyGateMisconfigured), errors.Is(runErr, errLaunchGateConfigInvalid):
-		return 2
+		return int(exitcode.DoctorConfigInvalid)
 	case errors.Is(runErr, doctor.ErrConnectivity):
-		return 3
+		return int(exitcode.DoctorConnectivity)
 	case errors.Is(runErr, doctor.ErrRequiredLabelsMissing):
-		return 4
+		return int(exitcode.DoctorRequiredLabelsMissing)
 	default:
-		return 1
+		return int(exitcode.DoctorUnclassified)
 	}
 }
 

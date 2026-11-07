@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/ledger"
@@ -300,8 +301,8 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs", io.Discard)
-	if code != exitConfigInvalid {
-		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 }
 
@@ -354,8 +355,8 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 	lc := testButlerLaunchContext(t, repo, "bad.name")
 	var stderr bytes.Buffer
 	code := cmdButler(lc, "", &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 	if !strings.Contains(stderr.String(), "invalid name format") {
 		t.Errorf("stderr = %q, want it to name the invalid format", stderr.String())
@@ -372,8 +373,8 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var stderr bytes.Buffer
 	code := cmdButler(lc, "", &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 	if !strings.Contains(stderr.String(), "prompt file missing") {
 		t.Errorf("stderr = %q, want it to name the missing prompt", stderr.String())
@@ -391,8 +392,8 @@ func TestCmdButler_RejectsUnsetDispatchKind(t *testing.T) {
 	lc := testButlerLaunchContext(t, repo, "bugs")
 	var stderr bytes.Buffer
 	code := cmdButler(lc, "", &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 	if !strings.Contains(stderr.String(), "no dispatch kind set") {
 		t.Errorf("stderr = %q, want it to name the missing dispatch kind", stderr.String())
@@ -400,7 +401,7 @@ func TestCmdButler_RejectsUnsetDispatchKind(t *testing.T) {
 	assertNoButlerLedgerClaims(t, repo)
 }
 
-// cmdButler exits exitConfigInvalid, not 1, for a malformed BUTLER_EVERY,
+// cmdButler exits exitcode.ConfigInvalid, not 1, for a malformed BUTLER_EVERY,
 // BUTLER_CLAIM_TIMEOUT, or DAEMON_AWAKE_WINDOW too, even though each fails
 // past butlerPreflight: all three parse inside resolveButlerSettings, the
 // same config-validation prelude, so their errors get the same treatment
@@ -440,8 +441,8 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 			tt.set(&lc.config)
 			var stderr bytes.Buffer
 			code := cmdButler(lc, "", &stderr)
-			if code != exitConfigInvalid {
-				t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+			if code != int(exitcode.ConfigInvalid) {
+				t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 			}
 			if !strings.Contains(stderr.String(), tt.wantSubstr) {
 				t.Errorf("stderr = %q, want it to name %s", stderr.String(), tt.wantSubstr)
@@ -461,8 +462,8 @@ func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	code := cmdButler(lc, "", &stderr)
-	if code != exitConfigInvalid {
-		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 	if !strings.Contains(stderr.String(), `override for chore "bgus"`) {
 		t.Errorf("stderr = %q, want the rejected override named", stderr.String())
@@ -477,8 +478,8 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 		cleanup: func() {},
 	}
 	code := cmdButler(lc, "bugs", io.Discard)
-	if code != exitConfigInvalid {
-		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("cmdButler code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
 }
 
@@ -497,8 +498,8 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 				cleanup: func() {},
 			}
 			code := cmdButler(lc, choreName, io.Discard)
-			if code != exitConfigInvalid {
-				t.Errorf("cmdButler(%q) code = %d, want %d", choreName, code, exitConfigInvalid)
+			if code != int(exitcode.ConfigInvalid) {
+				t.Errorf("cmdButler(%q) code = %d, want %d", choreName, code, int(exitcode.ConfigInvalid))
 			}
 		})
 	}

@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
@@ -95,8 +96,8 @@ func TestMainRun_Recover_DaemonChildArgvReachesQueueMode(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := mainRun(cmd.Argv[i+1:], &stdout, &stderr)
 
-	if code != exitConfigInvalid {
-		t.Errorf("mainRun(%v) code = %d, want %d (queue mode reached bootstrap)", cmd.Argv[i+1:], code, exitConfigInvalid)
+	if code != int(exitcode.ConfigInvalid) {
+		t.Errorf("mainRun(%v) code = %d, want %d (queue mode reached bootstrap)", cmd.Argv[i+1:], code, int(exitcode.ConfigInvalid))
 	}
 	if !strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("stderr = %q, want a REPO_SLUG validation error", stderr.String())
@@ -111,8 +112,8 @@ func TestRecoverQueueOne_ReportsSettledFailedWhenStoppedAfterClaim(t *testing.T)
 
 	code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf))
 
-	if code != exitSignalledStop {
-		t.Fatalf("exit = %d, want %d", code, exitSignalledStop)
+	if code != int(exitcode.SignalledStop) {
+		t.Fatalf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 	got := read()
 	key := dispatchkey.Issue("42")
@@ -161,8 +162,8 @@ func TestRecoverQueueOne_DrainStopDuringFailedSettleReportsOneSettled(t *testing
 	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
 	read := testutil.InstallPipeReporter(t)
 
-	if code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s); code != exitSignalledStop {
-		t.Fatalf("exit = %d, want %d", code, exitSignalledStop)
+	if code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s); code != int(exitcode.SignalledStop) {
+		t.Fatalf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 
 	got := read()

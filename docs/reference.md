@@ -8148,7 +8148,7 @@ make it permanent.
 
 `spindrift dispatch`'s own exit codes are what both continuous dispatch
 (below) and the daemon (see [Daemon](#daemon)) interpret to decide what
-happens next:
+happens next (the table lives in `cmd/launcher/internal/exitcode`):
 
 | exit | meaning |
 |------|---------|
@@ -8157,7 +8157,7 @@ happens next:
 | 3    | open issues exist but none are dispatchable |
 | 4    | `CONTINUOUS_DISPATCH` mode: the freshness probe found the loaded host launcher is stale relative to the flake's launcher-currency attr (or that the loaded image would also be rebuilt against the current base-branch tip: always under the OCI runtime, and under bwrap only when its hot-swap is unconfigured or fails); in-flight Boxes finished, no new ones launched |
 | 5    | the loaded image is stale in a way no rebuild converges (host-tainted: a host-system derivation reached the image graph, so the same base tip stays stale after a rebuild against it) |
-| 6    | bootstrap rejected the config (the launcher's `exitConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine |
+| 6    | bootstrap rejected the config (`exitcode.ConfigInvalid`) — e.g. a missing required setting, or flags that cannot combine |
 | 7    | an operator asked the run to stop — the one-shot dispatch wave, selective dispatch, research, and the `recover` gate all share this same two-stage latch, not just `CONTINUOUS_DISPATCH` mode. On one signal the launcher stopped claiming new issues, let in-flight Boxes finish and settle, ran its normal teardown, and exited; on a second signal it instead reaped every in-flight Box and released their issues back to the dispatchable pool before exiting. Both are the same code deliberately — each means "you asked me to stop" |
 
 Exit 4's own rebuild cost differs by which dimension is stale. When the image
