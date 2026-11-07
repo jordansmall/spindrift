@@ -2020,7 +2020,7 @@ func TestPoolSnapshotState(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotReasonWalkExhausted pins that snapshotLocked surfaces
+// TestPoolSnapshotReasonWalkExhausted pins that projectStatus surfaces
 // Until's walk-exhausted degraded case (awake.go) in Status.Reason regardless
 // of which non-halted State it lands on: the window really is shut (or a
 // child is still running under a since-shut window) and NextCheck only names
@@ -2631,7 +2631,7 @@ func TestPoolPublishReportsWriteFailureDiagnostic(t *testing.T) {
 }
 
 // TestPoolSnapshotNextCheckFloorsOnAwakeWindow pins the review finding on
-// pool.snapshot: with the Awake window shut no slot starts a child until
+// projectStatus: with the Awake window shut no slot starts a child until
 // awaitWindow returns, so every kind's nextCheck must be the later of its
 // own backoff deadline and the window's reopening — never empty, which
 // means "runnable now". Stays on direct construction: this is snapshot's
@@ -3153,4 +3153,12 @@ func TestPoolNoteRecordImageBuildDroppedWhenSlotNotRunning(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Errorf("events = %q, want none", buf.String())
 	}
+}
+
+// snapshot takes p.mu and projects the pool's current state; mutate is the
+// one production path to a fresh snapshot.
+func (p *pool) snapshot() Status {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return projectStatus(&p.st, p.cfg, p.clk.Now())
 }

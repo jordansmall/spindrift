@@ -11,6 +11,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"spindrift.dev/launcher/internal/report"
 )
 
 // statusFileName is the well-known status file name within a checkout's git
@@ -516,4 +518,188 @@ func parseHolderPid(identity string) int {
 // starting children: a build is waiting for, or committed to, a handoff.
 func (su SelfUpdate) handingOff() bool {
 	return su.Phase == SelfUpdateWaiting || su.Phase == SelfUpdateRestarting
+}
+
+// working reports whether any slot's phase is running — projectStatus's
+// StateWorking predicate, one bool derived from the same per-slot phase
+// siblingsEngaged reads, rather than a second occupancy notion tracked
+// alongside it.
+func (s *state) working() bool {
+	for _, ss := range s.slots {
+		if ss.phase == PhaseRunning {
+			return true
+		}
+	}
+	return false
+}
+
+// projectStatus builds the Status a pool publishes from its state and the
+// instant now alone; it reads nothing else and writes nothing. Publish stamps
+// the envelope (Schema, Pid, Host, Started, Time); the projection leaves those
+// zero.
+func projectStatus(st *state, cfg Config, now time.Time) Status {
+	slots := make([]SlotStatus, len(st.slots))
+	for i, ss := range st.slots {
+		slots[i] = SlotStatus{Slot: i, Phase: ss.phase, Busy: ss.phase == PhaseRunning, Since: ss.since.UTC().Format(time.RFC3339)}
+		if ss.phase != PhaseRunning {
+			continue
+		}
+		slots[i].Kind = ss.flight.kind
+		slots[i].Revision = ss.flight.revision
+		slots[i].ChildStart = ss.flight.childStart.time
+		slots[i].ChildStartN = ss.flight.childStart.n
+		_, slots[i].Chore = ss.flight.key.Fields()
+		slots[i].Pass = ss.flight.pass
+		slots[i].Model = ss.flight.model
+		slots[i].ModelRole = ss.flight.modelRole
+		slots[i].CIWait = ss.flight.ciWait.pr != ""
+		slots[i].PRURL = ss.flight.ciWait.pr
+		slots[i].CIRunURL = ss.flight.ciWait.runURL
+		if !ss.flight.imageBuildSince.IsZero() {
+			slots[i].ImageBuildSince = ss.flight.imageBuildSince.UTC().Format(time.RFC3339)
+		}
+		if len(ss.flight.issues) > 0 {
+			// A snapshot handed to a writer must not alias state this slot
+			// keeps appending to.
+			issues := make([]string, len(ss.flight.issues))
+			copy(issues, ss.flight.issues)
+			slots[i].Issues = issues
+		}
+	}
+
+	// A shut Awake window gates every kind whatever its own backoff says:
+	// no slot starts a child until awaitWindow returns. Until is 0 both
+	// while the window is open and for the nil always-awake window, so
+	// this stays the zero Time in the ordinary case.
+	var windowOpensAt time.Time
+	var windowWalkExhausted bool
+	if d, exhausted := cfg.Awake.Until(now); d > 0 {
+		windowOpensAt = now.Add(d)
+		windowWalkExhausted = exhausted
+	}
+	checks := make([]KindCheck, 0, len(cfg.Kinds))
+	var trackers []TrackerCheck
+	seenTracker := make(map[string]bool)
+	allGated := true
+	anyJammed := false
+	for _, k := range cfg.Kinds {
+		v := st.sched.View(k, now)
+		at := v.Until // zero unless Gated, never a stale deadline
+		kc := KindCheck{Kind: k}
+		if v.Probed && !seenTracker[v.Tracker] {
+			seenTracker[v.Tracker] = true
+			tc := TrackerCheck{Tracker: v.Tracker}
+			if !v.RateLimitedUntil.IsZero() {
+				tc.RateLimitedUntil = v.RateLimitedUntil.UTC().Format(time.RFC3339)
+			}
+			trackers = append(trackers, tc)
+		}
+		if v.Gated {
+			// A probed kind's Jammed flag lingers past its gate; only a live
+			// jam gate (JamUntil) counts, not a fresh-empty Demand's wait.
+			if v.Jammed && (!v.Probed || !v.JamUntil.IsZero()) {
+				anyJammed = true
+				kc.Jammed = true
+			}
+		} else {
+			allGated = false
+		}
+		if v.Probed && !v.ProbedAt.IsZero() {
+			// A Continue exit zeroes ProbedAt until the re-probe lands; there
+			// is no count to report in that gap.
+			ready := v.Ready
+			kc.Ready = &ready
+			kc.ProbedAt = v.ProbedAt.UTC().Format(time.RFC3339)
+			next := v.NextProbe
+			if v.RateLimitedUntil.After(next) {
+				next = v.RateLimitedUntil
+			}
+			kc.NextProbe = next.UTC().Format(time.RFC3339)
+		}
+		if !v.NextDue.IsZero() {
+			if v.NextDue.At.IsZero() {
+				kc.NextDue = report.NextDueOnTipMove
+			} else {
+				kc.NextDue = v.NextDue.At.UTC().Format(time.RFC3339)
+				kc.NextDueOnTipMove = v.NextDue.OnTipMove
+			}
+		}
+		if !v.JamUntil.IsZero() {
+			kc.JamUntil = v.JamUntil.UTC().Format(time.RFC3339)
+			if v.Probed && !v.JamBaselinePending {
+				readyAtJam := v.ReadyAtJam
+				kc.ReadyAtJam = &readyAtJam
+			}
+		}
+		if windowOpensAt.After(at) {
+			at = windowOpensAt
+		}
+		if !at.IsZero() {
+			kc.NextCheck = at.UTC().Format(time.RFC3339)
+		}
+		checks = append(checks, kc)
+	}
+
+	// Precedence, most urgent first: halted outranks everything, since the
+	// pool is already on its way out regardless of what else is true.
+	// Working outranks asleep, since a child started before the Awake
+	// window closed is still genuinely running even though the window has
+	// since shut — "working" is the honest state, not "asleep". Jammed vs
+	// waiting only applies once every kind is gated, and only jammedNow (a
+	// none-dispatchable result) tells them apart; checking is the default
+	// when nothing is gated and nothing is running.
+	//
+	// Asleep is keyed off windowOpensAt (the same now-aware Awake.Until
+	// check nextCheck already floors on above), not st.awakeShut:
+	// awakeShut is edge-triggered by whichever slot's awaitWindow observes
+	// the close, so a pool built outside its window and snapshotted before
+	// any slot parks would still read awakeShut false and disagree with a
+	// nextCheck already naming the reopening. st.awakeShut therefore has
+	// no reader left outside the note*Awake* pair itself, which still needs
+	// it to edge-trigger awake_close/awake_open.
+	computedState := StateChecking
+	reason := ""
+	switch {
+	case st.halted:
+		computedState = StateHalted
+		reason = st.reason.String()
+	case st.working():
+		computedState = StateWorking
+	case !windowOpensAt.IsZero():
+		computedState = StateAsleep
+	case allGated && anyJammed:
+		computedState = StateJammed
+	case allGated:
+		computedState = StateWaiting
+	}
+	// Outside the switch so a still-working pool marks its floored
+	// nextCheck as a re-check too, not only an asleep one.
+	if windowWalkExhausted && computedState != StateHalted {
+		reason = walkExhaustedReason
+	}
+
+	// Copied, not aliased, matching the issues copy above: nothing
+	// mutates cfg.Kinds today, but a returned Status must never assume a
+	// future writer keeps that true.
+	kinds := make([]Kind, len(cfg.Kinds))
+	copy(kinds, cfg.Kinds)
+
+	var selfUpdate *SelfUpdate
+	if st.self != (SelfUpdate{}) {
+		su := st.self
+		su.Since = st.selfSince.UTC().Format(time.RFC3339)
+		selfUpdate = &su
+	}
+
+	return Status{
+		Kinds:    kinds,
+		State:    computedState,
+		Reason:   reason,
+		Slots:    slots,
+		Checks:   checks,
+		Trackers: trackers,
+		RepoURL:  cfg.RepoURL,
+
+		SelfUpdate: selfUpdate,
+	}
 }
