@@ -2556,11 +2556,17 @@ func TestSweep_PatchGateMergeGuardHitLeavesUnmerged(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.CommentCalls) != 1 {
-		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	if len(fc.CommentPRCalls) != 1 {
+		t.Fatalf("expected exactly one guard comment on the PR, got %d: %+v", len(fc.CommentPRCalls), fc.CommentPRCalls)
 	}
-	if !strings.Contains(fc.CommentCalls[0].Body, "MERGE_GUARD_PATHS") {
-		t.Errorf("comment body = %q, want a reference to MERGE_GUARD_PATHS", fc.CommentCalls[0].Body)
+	if fc.CommentPRCalls[0].PR != prURL {
+		t.Errorf("guard comment PR = %q, want %q", fc.CommentPRCalls[0].PR, prURL)
+	}
+	if !strings.Contains(fc.CommentPRCalls[0].Body, "MERGE_GUARD_PATHS") {
+		t.Errorf("comment body = %q, want a reference to MERGE_GUARD_PATHS", fc.CommentPRCalls[0].Body)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("guard comment must not land on the issue; got %+v", fc.CommentCalls)
 	}
 	iss, _ := fc.Issue("9520")
 	if !sameLabelSet(iss.Labels, wantLabels) {

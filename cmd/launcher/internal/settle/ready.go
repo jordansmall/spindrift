@@ -591,12 +591,12 @@ func (s *Settle) handOffHold(num, pr string) (reason string, comment func()) {
 	if guardErr != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
 		return ReasonMergeGuardCheckError, func() {
-			s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
+			s.commentHoldPR(num, pr, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
 		}
 	}
 	if len(matched) > 0 {
 		fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
-		return ReasonMergeGuardHit, func() { s.it.Comment(num, mergeGuardComment(matched)) }
+		return ReasonMergeGuardHit, func() { s.commentHoldPR(num, pr, mergeGuardComment(matched)) }
 	}
 	heldRow, isHeld, holdErr := s.mergeByHandHold(num)
 	if holdErr != nil {

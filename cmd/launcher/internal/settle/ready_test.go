@@ -66,15 +66,34 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	if !containsLabel(iss.Labels, "agent-complete") {
 		t.Errorf("issue must carry agent-complete after a guard-downgraded green PR; labels=%v", iss.Labels)
 	}
-	if len(fc.CommentCalls) != 1 {
-		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
-	}
-	body := fc.CommentCalls[0].Body
+	assertHoldPRComment(t, fc, "guard comment")
+	body := fc.CommentPRCalls[0].Body
 	if !strings.Contains(body, ".github/workflows/ci.yml") {
 		t.Errorf("comment must name the matched path; body=%q", body)
 	}
 	if !strings.Contains(body, "MERGE_GUARD_PATHS") {
 		t.Errorf("comment must name the knob that triggered it; body=%q", body)
+	}
+}
+
+// A failed PR comment must not lift the guard's hold.
+func TestSelfHeal_MergeGuardHit_CommentPRErrorStillHolds(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MergeGuardPaths = ".github/**"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
+	fc.CommentPRErr = errors.New("gh pr comment: 502")
+	s := newTestSettle(c, fc, fc)
+
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual", landing)
+	}
+	if fc.Merged != "" {
+		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
 	}
 }
 
@@ -101,10 +120,8 @@ func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
 	if !containsLabel(iss.Labels, "agent-complete") {
 		t.Errorf("issue must carry agent-complete after a guard-downgraded green PR; labels=%v", iss.Labels)
 	}
-	if len(fc.CommentCalls) != 1 {
-		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
-	}
-	body := fc.CommentCalls[0].Body
+	assertHoldPRComment(t, fc, "guard comment")
+	body := fc.CommentPRCalls[0].Body
 	if !strings.Contains(body, ".forgejo/workflows/ci.yml") {
 		t.Errorf("comment must name the matched path; body=%q", body)
 	}
@@ -132,9 +149,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	if len(fc.EnqueueAutoMergeCalls) != 0 {
 		t.Errorf("guard hit must prevent EnqueueAutoMerge; calls=%v", fc.EnqueueAutoMergeCalls)
 	}
-	if len(fc.CommentCalls) != 1 {
-		t.Fatalf("expected exactly one guard comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
-	}
+	assertHoldPRComment(t, fc, "guard comment")
 }
 
 // A green PR touching no guarded path proceeds exactly as it would with no
@@ -156,8 +171,8 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	if fc.Merged != testPR {
 		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.CommentCalls) != 0 {
-		t.Errorf("no guard comment expected on a miss; got %+v", fc.CommentCalls)
+	if len(fc.CommentCalls) != 0 || len(fc.CommentPRCalls) != 0 {
+		t.Errorf("no comment expected on a guard miss; got issue=%+v pr=%+v", fc.CommentCalls, fc.CommentPRCalls)
 	}
 }
 
@@ -189,9 +204,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	if containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must NOT carry agent-failed after a guard-check error; labels=%v", iss.Labels)
 	}
-	if len(fc.CommentCalls) != 1 {
-		t.Fatalf("expected exactly one precautionary comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
-	}
+	assertHoldPRComment(t, fc, "precautionary comment")
 }
 
 // A merge-guard check error still flips the PR out of draft before downgrading
@@ -1012,7 +1025,7 @@ func assertTuningHeld(t *testing.T, s *Settle, fc *forge.Fake, landing landingRe
 	if len(fc.MarkReadyCalls) == 0 {
 		t.Errorf("a held PR must still be flipped out of draft")
 	}
-	assertTuningPRComment(t, fc, "hold comment")
+	assertHoldPRComment(t, fc, "hold comment")
 	body := fc.CommentPRCalls[0].Body
 	for _, want := range []string{"agent-tuning-finding", "Removing"} {
 		if !strings.Contains(body, want) {
@@ -1021,9 +1034,9 @@ func assertTuningHeld(t *testing.T, s *Settle, fc *forge.Fake, landing landingRe
 	}
 }
 
-// assertTuningPRComment pins that the one tuning comment landed on the PR,
+// assertHoldPRComment pins that the one hold comment landed on the PR,
 // where a reviewer looking at the held PR will see it, and not on the issue.
-func assertTuningPRComment(t *testing.T, fc *forge.Fake, what string) {
+func assertHoldPRComment(t *testing.T, fc *forge.Fake, what string) {
 	t.Helper()
 	if len(fc.CommentPRCalls) != 1 {
 		t.Fatalf("expected exactly one %s on the PR, got %d: %+v", what, len(fc.CommentPRCalls), fc.CommentPRCalls)
@@ -1128,7 +1141,7 @@ func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
 	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must be agent-complete, not agent-failed; labels=%v", iss.Labels)
 	}
-	assertTuningPRComment(t, fc, "precautionary comment")
+	assertHoldPRComment(t, fc, "precautionary comment")
 	s.settledMu.Lock()
 	reason := s.settledLatch["1"].reason
 	s.settledMu.Unlock()
@@ -1241,7 +1254,7 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 	if fc.Merged != "" {
 		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
 	}
-	assertTuningPRComment(t, fc, "hold comment")
+	assertHoldPRComment(t, fc, "hold comment")
 	if body := fc.CommentPRCalls[0].Body; !strings.Contains(body, "agent-synthetic-finding") {
 		t.Errorf("hold comment must name the row's label; body=%q", body)
 	}
