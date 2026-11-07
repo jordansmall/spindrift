@@ -216,23 +216,37 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 	}
 }
 
-func TestGetenvArtifact_PrecedenceEnvThenDocThenDefault(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
+// An ambient env var named like an artifact must never swap a nix-built
+// reference (issue #6611): loadConfig reads artifacts from the document only.
+func TestLoadConfig_ArtifactsIgnoreAmbientEnv(t *testing.T) {
+	setArtifact(t, "IMAGE_TAG", "spindrift:from-doc")
+	setArtifact(t, "AGENT_FILES", "/nix/store/from-doc")
+	t.Setenv("IMAGE", "ambient")
+	t.Setenv("IMAGE_TAG", "ambient")
+	t.Setenv("AGENT_FILES", "ambient")
 
-	loadedDoc = &inputdoc.Document{Artifacts: map[string]string{"IMAGE_TAG": "from-doc"}}
-	if got := getenvArtifact("IMAGE_TAG", "from-default"); got != "from-doc" {
-		t.Errorf("getenvArtifact = %q, want from-doc (doc beats default)", got)
+	c := loadConfig()
+	if c.imageTag != "spindrift:from-doc" {
+		t.Errorf("imageTag = %q, want the document's IMAGE_TAG", c.imageTag)
 	}
-
-	t.Setenv("IMAGE_TAG", "from-env")
-	if got := getenvArtifact("IMAGE_TAG", "from-default"); got != "from-env" {
-		t.Errorf("getenvArtifact = %q, want from-env (env beats doc)", got)
+	if c.agentFiles != "/nix/store/from-doc" {
+		t.Errorf("agentFiles = %q, want the document's AGENT_FILES", c.agentFiles)
 	}
+	if got := runnerConfig(c).Image; got != "spindrift:from-doc" {
+		t.Errorf("runner Image = %q, want the document's IMAGE_TAG, not ambient IMAGE", got)
+	}
+}
 
+// With no document entry an artifact is empty: the rows render every default,
+// so Go carries none.
+func TestLoadConfig_AbsentArtifactsAreEmpty(t *testing.T) {
+	prev := loadedDoc
 	loadedDoc = nil
-	os.Unsetenv("IMAGE_TAG")
-	if got := getenvArtifact("IMAGE_TAG", "from-default"); got != "from-default" {
-		t.Errorf("getenvArtifact = %q, want from-default (nothing else set)", got)
+	t.Cleanup(func() { loadedDoc = prev })
+	t.Setenv("IMAGE_TAG", "ambient")
+	c := loadConfig()
+	if c.imageTag != "" {
+		t.Errorf("imageTag = %q, want empty without a document entry", c.imageTag)
 	}
 }
 

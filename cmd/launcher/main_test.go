@@ -876,16 +876,16 @@ func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 	}
 }
 
-// NIX_VOLUME names the container-build fallback's /nix volume: unset it
-// defaults to "spindrift-nix", an override wins, and either reaches
-// runner.Config.
-func TestLoadConfig_NixVolume_DefaultAndOverride(t *testing.T) {
+// NIX_VOLUME names the container-build fallback's /nix volume. It comes from
+// the document only: absent, it is empty (the oci row renders the default).
+func TestLoadConfig_NixVolume_FromDocumentOnly(t *testing.T) {
+	t.Setenv("NIX_VOLUME", "ambient")
 	c := loadConfig()
-	if c.nixVolume != "spindrift-nix" {
-		t.Errorf("loadConfig().nixVolume = %q, want %q when NIX_VOLUME is unset", c.nixVolume, "spindrift-nix")
+	if c.nixVolume != "" {
+		t.Errorf("loadConfig().nixVolume = %q, want empty when the document has no NIX_VOLUME", c.nixVolume)
 	}
-	if got := runnerConfig(c).NixVolume; got != "spindrift-nix" {
-		t.Errorf("runnerConfig().NixVolume = %q, want %q", got, "spindrift-nix")
+	if got := runnerConfig(c).NixVolume; got != "" {
+		t.Errorf("runnerConfig().NixVolume = %q, want empty", got)
 	}
 
 	setArtifact(t, "NIX_VOLUME", "custom-nix-vol")
@@ -1764,8 +1764,8 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 
 // With no loaded document (a direct binary invocation), resolveCapabilitySignals
 // derives the signals fresh from the backend registry rather than trusting a
-// forwarded artifact that was never populated: getenvArtifact("FULLY_LOCAL",
-// "") is always "" with no document (issue #2527 review).
+// forwarded artifact that was never populated: docArtifact("FULLY_LOCAL")
+// is always "" with no document (issue #2527 review).
 func TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
@@ -6657,11 +6657,10 @@ func TestDoctor_ReadOnlyTokenGates_BothBackendsActiveOnDifferentAxes(t *testing.
 // Pins issue #2538 AC1, "the artifact rides the document; the launcher
 // performs no runtime-name comparison to determine kind": RUNTIME=bwrap with
 // RUNNER_KIND genuinely absent must not derive runnerKind from the runtime
-// name, and resolves to "", the empty default every absent getenvArtifact call
+// name, and resolves to "", the empty default every absent docArtifact call
 // gets.
 func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 	setArtifact(t, "RUNTIME", "bwrap")
-	os.Unsetenv("RUNNER_KIND")
 
 	c := loadConfig()
 
@@ -6670,7 +6669,7 @@ func TestLoadConfig_RunnerKind_NoRuntimeFallback_Bwrap(t *testing.T) {
 	}
 }
 
-// RUNNER_KIND is read verbatim from the artifact or env, independent of
+// RUNNER_KIND is read verbatim from the document, independent of
 // RUNTIME, including a RUNTIME=bwrap with RUNNER_KIND=oci pairing that a
 // runtime-name comparison would get wrong.
 func TestLoadConfig_RunnerKind_ReadsArtifactRegardlessOfRuntime(t *testing.T) {
