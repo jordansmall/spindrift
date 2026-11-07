@@ -4022,18 +4022,25 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   post-force-push fix pass owns whatever repair remains.
 - **A relay that exhausts its retries parks the issue.** When a read-only Box
   prints `status=ready` but the Launcher's host-side bundle relay still fails
-  (anything but a missing bundle) after `TRANSIENT_RETRY_MAX` retries, settle
-  swaps `agent-in-progress` → `agent-failed` and comments `bundle relay failed:
-  <err>` with the work preserved in the outbox (issue #4651). This holds on
-  the PR-shaped path and on the push-only `CODE_FORGE=local` path alike; the
-  conflict-resolve relay does not park. Run `spindrift recover <n>` on the host
-  holding the outbox to relay and land the bundle (opening the PR and driving
-  the merge gate on a PR-shaped forge); landing strips the stale
-  `agent-failed`, leaving `agent-complete`. A fix pass's relay parks too, with
-  reason `relay-failed` and a `fix pass <k>'s bundle relay failed: <err>`
-  comment, instead of misreading the unmoved head as `fix-no-op` (issue
-  #6074); its PR is already open, so the daemon's recover kind skips it and
-  `spindrift recover <n>` re-gates it rather than relaying that bundle.
+  (anything but a missing bundle or the Workflows-permission refusal below)
+  after `TRANSIENT_RETRY_MAX` retries, settle swaps `agent-in-progress` →
+  `agent-failed` and comments `bundle relay failed: <err>` with the work
+  preserved in the outbox (issue #4651). This holds on the PR-shaped path and
+  on the push-only `CODE_FORGE=local` path alike; the conflict-resolve relay
+  does not park. Run `spindrift recover <n>` on the host holding the outbox to
+  relay and land the bundle (opening the PR and driving the merge gate on a
+  PR-shaped forge); landing strips the stale `agent-failed`, leaving
+  `agent-complete`. A fix pass's relay parks too, with reason `relay-failed`
+  and a `fix pass <k>'s bundle relay failed: <err>` comment, instead of
+  misreading the unmoved head as `fix-no-op` (issue #6074); its PR is already
+  open, so the daemon's recover kind skips it and `spindrift recover <n>`
+  re-gates it rather than relaying that bundle. A relay refused for lack of
+  the Workflows permission (the change touches `.github/workflows/*`) skips
+  the retry budget: the first refusal parks at once, with no
+  `TRANSIENT_BACKOFF_SECS` wait. Either park is otherwise the same, label swap
+  and comment alike, except that the comment names the Workflows-permission
+  remedy in place of the recover hint (see
+  [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)).
   Under `ISSUE_TRACKER=jira` with a status mapping, a workflow lacking a
   Failed→Complete transition falls back to adding the `agent-complete` label
   while the native status stays Failed (the gap recovering after red CI
