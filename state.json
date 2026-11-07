@@ -1,18 +1,20 @@
 {
   "lastSwept": "e88865fbc39e6a4b4ab909f756b9a5180d18d536",
   "cursor": "cmd/launcher/internal/signalwire/relay_keys_test.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6557"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-07T05:34:14.799191806-05:00"
+  },
   "usage": {
-    "input_tokens": 84,
-    "output_tokens": 14658,
-    "cache_read_input_tokens": 3131850,
-    "cache_creation_input_tokens": 106737,
-    "total_cost_usd": 1.74470414,
-    "duration_ms": 192201,
-    "duration_api_ms": 176738,
-    "num_turns": 48
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
