@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -696,51 +694,44 @@ func TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotOmitsReadyAtJamWhileBaselinePending pins that a jam whose
+// statusOfSchedule projects a state whose only content is a schedule folded
+// from events at now: the pure path a published Status takes, with no pool.
+func statusOfSchedule(kinds []Kind, probe map[Kind]time.Duration, now time.Time, events ...schedEvent) Status {
+	sched := newSchedule(kinds, 0, time.Minute, time.Hour, probe, nil)
+	for _, ev := range events {
+		sched, _ = sched.Observe(now, ev)
+	}
+	return projectStatus(&state{slots: []slotState{{phase: PhaseIdle, since: now}}, sched: sched}, Config{Kinds: kinds}, now)
+}
+
+// TestProjectStatusOmitsReadyAtJamWhileBaselinePending pins that a jam whose
 // baseline awaits its next probe reports no ready_at_jam rather than a
 // count the claim's fold already skewed.
-func TestPoolSnapshotOmitsReadyAtJamWhileBaselinePending(t *testing.T) {
-	clk := &testClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+func TestProjectStatusOmitsReadyAtJamWhileBaselinePending(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	work := KindOf(dispatchkind.Work)
-	cfg := testConfig(1)
-	cfg.Kinds = []Kind{work}
-	cfg.ProbeIntervals = map[Kind]time.Duration{work: time.Minute}
-	var buf bytes.Buffer
-	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
-
-	now := clk.Now()
-	s := p.st.sched
-	s, _ = s.Observe(now, demandProbed{Kind: work, Ready: 2})
-	s, _ = s.Observe(now, claimed{Kind: work})
-	s, _ = s.Observe(now, childDone{Kind: work, Result: childJammed})
-	p.st.sched = s
-
-	w := p.snapshot().Checks[0]
-	if w.JamUntil == "" || w.ReadyAtJam != nil {
+	got := statusOfSchedule([]Kind{work}, map[Kind]time.Duration{work: time.Minute}, now,
+		demandProbed{Kind: work, Ready: 2},
+		claimed{Kind: work},
+		childDone{Kind: work, Result: childJammed},
+	)
+	if w := got.Checks[0]; w.JamUntil == "" || w.ReadyAtJam != nil {
 		t.Errorf("work = %+v, want jam_until set and ready_at_jam omitted", w)
 	}
 }
 
-// TestPoolSnapshotCarriesDemandFieldsPerKind pins which per-kind Demand
-// fields a snapshot carries: a probed kind with a count, an exit-driven kind
-// with none, and a jam-gated probed kind that also carries its jam.
-func TestPoolSnapshotCarriesDemandFieldsPerKind(t *testing.T) {
-	clk := &testClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+// TestProjectStatusCarriesDemandFieldsPerKind pins which per-kind Demand
+// fields a projection carries: a probed kind with a count, an exit-driven
+// kind with none, and a jam-gated probed kind that also carries its jam.
+func TestProjectStatusCarriesDemandFieldsPerKind(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	work, research, butler := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)
-	cfg := testConfig(1)
-	cfg.Kinds = []Kind{work, research, butler}
-	cfg.ProbeIntervals = map[Kind]time.Duration{work: time.Minute, research: time.Minute}
-	var buf bytes.Buffer
-	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
-
-	now := clk.Now()
-	s := p.st.sched
-	s, _ = s.Observe(now, demandProbed{Kind: work, Ready: 0})
-	s, _ = s.Observe(now, demandProbed{Kind: research, Ready: 3})
-	s, _ = s.Observe(now, childDone{Kind: research, Result: childJammed})
-	p.st.sched = s
-
-	checks := p.snapshot().Checks
+	checks := statusOfSchedule([]Kind{work, research, butler},
+		map[Kind]time.Duration{work: time.Minute, research: time.Minute}, now,
+		demandProbed{Kind: work, Ready: 0},
+		demandProbed{Kind: research, Ready: 3},
+		childDone{Kind: research, Result: childJammed},
+	).Checks
 	ts := func(d time.Duration) string { return now.Add(d).UTC().Format(time.RFC3339) }
 
 	w := checks[0]
@@ -772,26 +763,23 @@ func TestPoolSnapshotCarriesDemandFieldsPerKind(t *testing.T) {
 	}
 }
 
-// TestPoolSnapshotCarriesChildReportedNextDue pins the butler's next_due: none
-// before a child has reported, the instant (also as nextCheck) after a timed
-// report, and on_tip_move with no nextCheck after a tip-only report.
-func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
-	clk := &testClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+// TestProjectStatusCarriesChildReportedNextDue pins the butler's next_due:
+// none before a child has reported, the instant (also as nextCheck) after a
+// timed report, and on_tip_move with no nextCheck after a tip-only report.
+func TestProjectStatusCarriesChildReportedNextDue(t *testing.T) {
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	butler := KindOf(dispatchkind.Butler)
-	cfg := testConfig(1)
-	cfg.Kinds = []Kind{butler}
-	var buf bytes.Buffer
-	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
-	now := clk.Now()
+	due := now.Add(time.Hour)
+	want := due.UTC().Format(time.RFC3339)
+	report := func(nd NextDue) KindCheck {
+		return statusOfSchedule([]Kind{butler}, nil, now, childDone{Kind: butler, Result: childEmpty, NextDue: nd}).Checks[0]
+	}
 
-	if got := p.snapshot().Checks[0]; got.NextDue != "" {
+	if got := statusOfSchedule([]Kind{butler}, nil, now).Checks[0]; got.NextDue != "" {
 		t.Errorf("before any report next_due = %q, want empty", got.NextDue)
 	}
 
-	due := now.Add(time.Hour)
-	p.st.sched, _ = p.st.sched.Observe(now, childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{At: due}})
-	want := due.UTC().Format(time.RFC3339)
-	got := p.snapshot().Checks[0]
+	got := report(NextDue{At: due})
 	if got.NextDue != want || got.NextCheck != want {
 		t.Errorf("timed report = next_due %q nextCheck %q, want both %q", got.NextDue, got.NextCheck, want)
 	}
@@ -803,8 +791,7 @@ func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
 		t.Errorf("JSON = %s, want next_due %s", data, want)
 	}
 
-	p.st.sched, _ = p.st.sched.Observe(now, childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{OnTipMove: true}})
-	got = p.snapshot().Checks[0]
+	got = report(NextDue{OnTipMove: true})
 	if got.NextDue != "on_tip_move" || got.NextCheck != "" {
 		t.Errorf("tip-only report = next_due %q nextCheck %q, want on_tip_move and none", got.NextDue, got.NextCheck)
 	}
@@ -812,8 +799,7 @@ func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
 		t.Error("tip-only report set next_due_on_tip_move, want it only alongside an instant")
 	}
 
-	p.st.sched, _ = p.st.sched.Observe(now, childDone{Kind: butler, Result: childEmpty, NextDue: NextDue{At: due, OnTipMove: true}})
-	got = p.snapshot().Checks[0]
+	got = report(NextDue{At: due, OnTipMove: true})
 	if got.NextDue != want || !got.NextDueOnTipMove {
 		t.Errorf("instant plus tip report = next_due %q on_tip_move %v, want %q and true", got.NextDue, got.NextDueOnTipMove, want)
 	}
