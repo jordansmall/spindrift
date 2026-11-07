@@ -22,7 +22,7 @@ func TestAggregateRolesOrdersAndTotals(t *testing.T) {
 		got = append(got, r.Role)
 	}
 	want := []string{"implement", "review", None, "zeta"}
-	if len(got) != len(want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("roles = %v, want %v", got, want)
 	}
 	if passes != 5 || usd != 15 {
