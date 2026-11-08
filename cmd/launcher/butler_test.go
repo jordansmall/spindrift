@@ -331,13 +331,13 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 			CodeForge: "local",
 			RowKnobs: map[string]string{
 				"CODE_FORGE_ACCUMULATION_REPO_DIR": repo,
-				"BUTLER_TUNING_COOLDOWN":           schemaDefault("BUTLER_TUNING_COOLDOWN"),
+				"BUTLER_TUNING_COOLDOWN":           inputdoc.SchemaDefault("BUTLER_TUNING_COOLDOWN"),
 			},
 			ButlerChores:       butlerChores,
-			ButlerEvery:        schemaDefault("BUTLER_EVERY"),
-			ButlerClaimTimeout: schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-			DaemonAwakeWindow:  schemaDefault("DAEMON_AWAKE_WINDOW"),
-			BaseBranch:         schemaDefault("BASE_BRANCH"),
+			ButlerEvery:        inputdoc.SchemaDefault("BUTLER_EVERY"),
+			ButlerClaimTimeout: inputdoc.SchemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			DaemonAwakeWindow:  inputdoc.SchemaDefault("DAEMON_AWAKE_WINDOW"),
+			BaseBranch:         inputdoc.SchemaDefault("BASE_BRANCH"),
 		}},
 		factory:      testFactory(t, t.TempDir(), runner.NewFake()),
 		capabilities: forge.Capabilities{HostPostedIssueFiler: testHostFiler(t)},
@@ -489,13 +489,13 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 // before ever touching lc.factory (left nil here), since a nil factory would
 // panic on NewChore.
 func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
-	if def := schemaDefault("BUTLER_CHORES"); def != "" {
-		t.Fatalf("schemaDefault(BUTLER_CHORES) = %q, want \"\" (test assumes opt-in-only default)", def)
+	if def := inputdoc.SchemaDefault("BUTLER_CHORES"); def != "" {
+		t.Fatalf("inputdoc.SchemaDefault(BUTLER_CHORES) = %q, want \"\" (test assumes opt-in-only default)", def)
 	}
 	for _, choreName := range []string{"bugs", "refactor", "docs-drift"} {
 		t.Run(choreName, func(t *testing.T) {
 			lc := &launchContext{
-				config:  config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: schemaDefault("BUTLER_CHORES")}},
+				config:  config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: inputdoc.SchemaDefault("BUTLER_CHORES")}},
 				cleanup: func() {},
 			}
 			code := cmdButler(lc, choreName, io.Discard)
@@ -570,7 +570,7 @@ func TestButlerPreflight(t *testing.T) {
 		{"classes checked before filer", "local", "bugs", "bugs", 0, 0, "", 0, "bugs", false, nil, false, "BUTLER_CHORE_CLASSES"},
 		{"chore with no classes entry passes", "local", "tidy-deps", "bugs=error-handling", 0, 0, "", 0, "tidy-deps", true, nil, false, ""},
 		{"class-list entry naming an unknown non-built-in chore rejected", "local", "bugs", "notachore=error-handling", 0, 0, "", 0, "bugs", true, nil, false, "is not enabled and not a built-in chore"},
-		{"dogfood-shaped config passes", "local", "bugs docs-drift", schemaDefault("BUTLER_CHORE_CLASSES"), 0, 0, "", 0, "", true, nil, false, ""},
+		{"dogfood-shaped config passes", "local", "bugs docs-drift", inputdoc.SchemaDefault("BUTLER_CHORE_CLASSES"), 0, 0, "", 0, "", true, nil, false, ""},
 		{"no chore: all clear with chores enabled", "local", "bugs", "", 0, 0, "", 0, "", true, nil, false, ""},
 		{"no chore: empty BUTLER_CHORES rejected", "local", "", "", 0, 0, "", 0, "", true, nil, false, "BUTLER_CHORES is empty"},
 		{"no chore: filer checked after empty-chores guard", "local", "", "", 0, 0, "", 0, "", false, nil, false, "BUTLER_CHORES is empty"},
@@ -929,15 +929,15 @@ func promotableRunFunc(class string) func(runner.Box) error {
 // butlerTestSchemaConfig is the schedule, claim, and promotion-budget config
 // the cmdButler tests share; adjust sets the rest per test.
 func butlerTestSchemaConfig(chores, codeForge string, knobs map[string]string, adjust func(*inputdoc.Knobs)) inputdoc.Knobs {
-	knobs["BUTLER_TUNING_COOLDOWN"] = schemaDefault("BUTLER_TUNING_COOLDOWN")
+	knobs["BUTLER_TUNING_COOLDOWN"] = inputdoc.SchemaDefault("BUTLER_TUNING_COOLDOWN")
 	sc := inputdoc.Knobs{
 		CodeForge:                 codeForge,
 		RowKnobs:                  knobs,
 		ButlerChores:              chores,
-		ButlerEvery:               schemaDefault("BUTLER_EVERY"),
-		ButlerClaimTimeout:        schemaDefault("BUTLER_CLAIM_TIMEOUT"),
-		DaemonAwakeWindow:         schemaDefault("DAEMON_AWAKE_WINDOW"),
-		BaseBranch:                schemaDefault("BASE_BRANCH"),
+		ButlerEvery:               inputdoc.SchemaDefault("BUTLER_EVERY"),
+		ButlerClaimTimeout:        inputdoc.SchemaDefault("BUTLER_CLAIM_TIMEOUT"),
+		DaemonAwakeWindow:         inputdoc.SchemaDefault("DAEMON_AWAKE_WINDOW"),
+		BaseBranch:                inputdoc.SchemaDefault("BASE_BRANCH"),
 		ButlerMaxPromotionsPerDay: 1,
 		ButlerPromotionMaxFiles:   3,
 	}
@@ -1096,9 +1096,9 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 			"FORGEJO_TOKEN":    "tok",
 		}, func(sc *inputdoc.Knobs) {
 			sc.RepoSlug = "owner/repo"
-			sc.ButlerChoreClasses = schemaDefault("BUTLER_CHORE_CLASSES")
-			sc.ButlerPatchClasses = schemaDefault("BUTLER_PATCH_CLASSES")
-			sc.ButlerPatchPaths = schemaDefault("BUTLER_PATCH_PATHS")
+			sc.ButlerChoreClasses = inputdoc.SchemaDefault("BUTLER_CHORE_CLASSES")
+			sc.ButlerPatchClasses = inputdoc.SchemaDefault("BUTLER_PATCH_CLASSES")
+			sc.ButlerPatchPaths = inputdoc.SchemaDefault("BUTLER_PATCH_PATHS")
 			sc.ButlerPatchMaxFiles = 3
 			sc.ButlerPatchMaxLines = 20
 			sc.ButlerMaxPatchesPerDay = 1

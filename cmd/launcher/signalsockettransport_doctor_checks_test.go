@@ -243,7 +243,6 @@ func TestDoctorCheckSets_UnsetCarrierIncludesSignalSocketTransportRow(t *testing
 	fake.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
 	withRegistryProxyTransportFake(t, fake)
 
-	unsetEnv(t, "BOX_SIGNAL_CARRIER")
 	c := minimalValidConfig()
 	c.SignalCarrier = loadConfig().SignalCarrier
 

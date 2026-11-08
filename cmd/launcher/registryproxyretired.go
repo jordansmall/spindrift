@@ -37,7 +37,7 @@ func (k *retiredRegistryProxyKnobs) fields() []retiredRegistryProxyKnobField {
 // environment, falling back to the loaded input document: lib/env-schema.nix
 // no longer declares them, so a document written by an older spindrift would
 // otherwise carry a setting that silently does nothing. Not getenvSchema,
-// whose schemaDefault would read as a knob the operator set.
+// whose schema default would read as a knob the operator set.
 func retiredRegistryProxyKnobsFromEnv() retiredRegistryProxyKnobs {
 	var k retiredRegistryProxyKnobs
 	for _, f := range k.fields() {

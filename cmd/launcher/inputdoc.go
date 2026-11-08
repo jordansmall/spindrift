@@ -55,51 +55,76 @@ var gitConfigLookup = func(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: ambient env
-// first (parseFlags lands an explicit flag there via os.Setenv), then the
-// document's settings, then the schema default, because the
-// wrapper no longer pre-populates env with baked defaults (ADR 0020). The
+// launcherInput is the one inputdoc.Resolve result, set by mainRun after the
+// document loads. Its zero value resolves every knob to its schema default,
+// which is what a test or direct caller sees before any Resolve. A global like
+// loadedDoc until #6627 threads both through.
+var launcherInput inputdoc.Resolved
+
+// getenvSchema reads a schema knob through the flag > document > schema
+// default tiers of launcherInput. Despite the name nothing reads the process
+// environment: a knob env var is rejected at startup (ADR 0020).
+func getenvSchema(key string) string { return launcherInput.Source().String(key) }
+
+// resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: a schema knob
+// through launcherInput (flag, then document, then schema default, because the
+// wrapper no longer pre-populates env with baked defaults, ADR 0020), anything
+// else from a non-empty environment value, then the document's settings. The
 // host-derived commit identity is not resolved here: hostGitConfigResolver
 // answers it from the launcher's startup snapshot, not re-read per dispatch,
 // so Box and host commits carry one identity for the process's lifetime
 // (issue #5333).
 // Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
-// An empty value wins over the document and schema default only per
-// ambientSetting, like getenvSchema.
 func resolveBoxEnvVar(name string) string {
-	if v, ok := ambientSetting(name); ok {
+	if _, ok := inputdoc.SchemaFlag(name); ok {
+		return getenvSchema(name)
+	}
+	if v := os.Getenv(name); v != "" {
 		return v
 	}
 	if loadedDoc != nil {
-		if v, ok := loadedDoc.Settings[name]; ok && v != "" {
-			return v
-		}
+		return loadedDoc.Settings[name]
 	}
-	return schemaDefault(name)
+	return ""
 }
 
-// ambientKnobEnvError rejects every non-secret schema knob found in the
-// process environment (ADR 0020). It must run before parseFlags mutates the
-// environment via os.Setenv, or a flag-set value looks like an ambient one.
-func ambientKnobEnvError() error {
+// processEnv is os.Environ as a map, the form inputdoc.Resolve takes.
+func processEnv() map[string]string {
 	env := map[string]string{}
 	for _, kv := range os.Environ() {
 		if k, v, ok := strings.Cut(kv, "="); ok {
 			env[k] = v
 		}
 	}
-	return inputdoc.AmbientKnobError(env)
+	return env
 }
 
-// envKnobSource is the env-backed KnobSource until the launcher switches to
-// inputdoc.Resolve.
-type envKnobSource struct{}
+// ambientKnobEnvError rejects every non-secret schema knob found in the
+// process environment (ADR 0020). mainRun runs it ahead of --help, which exits
+// before Resolve would repeat the check.
+func ambientKnobEnvError() error { return inputdoc.AmbientKnobError(processEnv()) }
 
-func (envKnobSource) String(env string) string        { return getenvSchema(env) }
-func (envKnobSource) PositiveInt(env string) int      { return atoiSchema(env) }
-func (envKnobSource) NonnegInt(env string) int        { return atoiNonnegSchema(env) }
-func (envKnobSource) NonnegFloat(env string) float64  { return floatNonnegSchema(env) }
-func (envKnobSource) Secret(env string) string        { return os.Getenv(env) }
-func (envKnobSource) HostGitConfig(env string) string { return hostGitConfigField(env) }
+// launcherKnobSource layers onto Resolve's tiers the two reads that only
+// exist after it: secrets, which the --secret-cmd fallback exports later, and
+// the host git config behind GIT_USER_NAME/GIT_USER_EMAIL. The wrapper exports
+// no knob env at all (ADR 0020), so that fallback has to run in process; the
+// schema row's hostGitConfigKey is the one place the key lives, so the
+// launcher's startup snapshot (which the Box env reuses) reads the same keys
+// (issues #5329, #5333).
+type launcherKnobSource struct{ inputdoc.KnobSource }
 
-func loadSchemaConfig() inputdoc.Knobs { return inputdoc.LoadKnobs(envKnobSource{}) }
+func (launcherKnobSource) Secret(env string) string { return os.Getenv(env) }
+
+func (s launcherKnobSource) HostGitConfig(env string) string {
+	if v := s.KnobSource.HostGitConfig(env); v != "" {
+		return v
+	}
+	if e, ok := inputdoc.SchemaFlag(env); ok && e.HostGitConfigKey != "" {
+		return gitConfigLookup(e.HostGitConfigKey)
+	}
+	return ""
+}
+
+func loadSchemaConfig() inputdoc.Knobs {
+	return inputdoc.LoadKnobs(launcherKnobSource{launcherInput.Source()})
+}

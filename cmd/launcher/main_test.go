@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -227,14 +226,13 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 // code is exitcode.ConfigInvalid rather than the generic 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 	setKnob(t, "REPO_SLUG", "")
-	setKnob(t, "CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"dispatch", "--continuous"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(dispatch --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
-	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 }
@@ -264,14 +262,13 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 // `--continuous` on `research` also sets CONTINUOUS_DISPATCH (issue #2033).
 func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 	setKnob(t, "REPO_SLUG", "")
-	setKnob(t, "CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"research", "--continuous"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(research --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
-	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 }
@@ -430,7 +427,7 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 func TestMainRun_Preview_WritesReportToInjectedStdout(t *testing.T) {
 	setFullyLocalEnv(t)
 	setArtifact(t, "RUNTIME", "echo")
-	writeLocalReadyIssue(t, os.Getenv("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
+	writeLocalReadyIssue(t, getenvSchema("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"preview", "42"}, &stdout, &stderr)
@@ -496,7 +493,7 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 			setup: func(t *testing.T) string {
 				setFullyLocalEnv(t)
 				setArtifact(t, "RUNTIME", "echo")
-				return os.Getenv("LOCAL_ISSUES_DIR")
+				return getenvSchema("LOCAL_ISSUES_DIR")
 			},
 			wantMsgSuffix: "proof the selective-list preview path was taken with this exact ID",
 		},
@@ -598,15 +595,20 @@ func TestMainRun_AmbientKnobEnv_StopsEveryEarlyPath(t *testing.T) {
 	}
 }
 
-// A flag setting the same knob is the sanctioned route and must not read as
-// ambient, even though parseFlags then lands it in the environment.
-func TestMainRun_FlagSettingKnob_NotAmbient(t *testing.T) {
-	unsetEnv(t, "MAX_JOBS")
-
+// A flag setting a knob is the sanctioned route: it must not read as ambient,
+// and it reaches loadConfig through launcherInput without ever entering the
+// process environment.
+func TestMainRun_FlagSettingKnob_NotAmbientAndLeavesEnvUntouched(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	mainRunT(t, []string{"--max-jobs", "5", "research"}, &stdout, &stderr)
 	if strings.Contains(stderr.String(), "set in environment") {
 		t.Errorf("stderr = %q, want no ambient-knob error for a flag-set knob", stderr.String())
+	}
+	if v, ok := os.LookupEnv("MAX_JOBS"); ok {
+		t.Errorf("MAX_JOBS = %q in the process environment, want a flag never written there", v)
+	}
+	if got := loadConfig().MaxJobs; got != 5 {
+		t.Errorf("loadConfig().MaxJobs = %d, want 5 from --max-jobs", got)
 	}
 }
 
@@ -615,10 +617,8 @@ func TestMainRun_FlagSettingKnob_NotAmbient(t *testing.T) {
 // Both are observed by validate() failing on the next required field
 // (GIT_USER_NAME), proving resolution happened before any gh/network call.
 func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
-	for _, key := range []string{"REPO_SLUG", "GIT_USER_NAME", "GIT_USER_EMAIL", "GH_TOKEN"} {
-		t.Setenv(key, "")
-		os.Unsetenv(key)
-	}
+	t.Setenv("GH_TOKEN", "")
+	os.Unsetenv("GH_TOKEN")
 
 	dir := t.TempDir()
 	docPath := filepath.Join(dir, "input.json")
@@ -1201,8 +1201,6 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	// Force LABEL absent for the test but restore its pre-test value
 	// (including "was unset") on cleanup.
-	t.Setenv("LABEL", "")
-	os.Unsetenv("LABEL")
 
 	patched := append([]inputdoc.FlagEntry(nil), inputdoc.SchemaFlags...)
 	for i := range patched {
@@ -1224,10 +1222,6 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 	// Force each key absent for the test but restore its pre-test value
 	// (including "was unset") on cleanup.
-	t.Setenv("SPINDRIFT_PROMPT_DIR", "")
-	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
-	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
-	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
 	withSchemaFlags(t, []inputdoc.FlagEntry{
 		{Env: "SPINDRIFT_PROMPT_DIR", Dflt: "custom-prompt-default"},
@@ -1268,8 +1262,6 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
 // still lets SPINDRIFT_SKILLS_DIR fall back to its schema default.
 func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 	setKnob(t, "SPINDRIFT_PROMPT_DIR", "from-env-prompt")
-	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
-	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
 	withSchemaFlags(t, []inputdoc.FlagEntry{
 		{Env: "SPINDRIFT_PROMPT_DIR", Dflt: "custom-prompt-default"},
@@ -1320,9 +1312,6 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.setEnv {
 				setKnob(t, tc.env, tc.envVal)
-			} else {
-				t.Setenv(tc.env, "")
-				os.Unsetenv(tc.env)
 			}
 
 			if !tc.useRealTable {
@@ -1336,34 +1325,6 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.env, got, tc.want)
 			}
 		})
-	}
-}
-
-// intSchemaDefault directly: a numeric schema default parses, a non-numeric
-// one falls back to 0, and an absent key falls back to 0 too (issue #672).
-func TestIntSchemaDefault(t *testing.T) {
-	// nil is a placeholder: every case below reassigns inputdoc.SchemaFlags before
-	// reading it, so the initial value here is never observed.
-	withSchemaFlags(t, nil)
-
-	cases := []struct {
-		name string
-		dflt string
-		want int
-	}{
-		{"numeric default", "42", 42},
-		{"non-numeric default", "abc", 0},
-	}
-	for _, tc := range cases {
-		inputdoc.SchemaFlags = []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: tc.dflt}}
-		if got := intSchemaDefault("SOME_KEY"); got != tc.want {
-			t.Errorf("%s: intSchemaDefault(SOME_KEY) = %d, want %d", tc.name, got, tc.want)
-		}
-	}
-
-	inputdoc.SchemaFlags = []inputdoc.FlagEntry{}
-	if got := intSchemaDefault("ABSENT_KEY"); got != 0 {
-		t.Errorf("absent key: intSchemaDefault(ABSENT_KEY) = %d, want 0", got)
 	}
 }
 
@@ -1387,8 +1348,6 @@ func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 			if tc.setEnv {
 				setKnob(t, "PIDS_LIMIT", tc.envVal)
 			} else {
-				t.Setenv("PIDS_LIMIT", "")
-				os.Unsetenv("PIDS_LIMIT")
 			}
 
 			withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "PIDS_LIMIT", Dflt: "2048", EmptyDisables: true}})
@@ -1400,87 +1359,14 @@ func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 	}
 }
 
-// atoiSchema directly: a valid positive env value beats the schema default;
-// zero, negative, non-numeric, and unset all fall back to it (issue #672).
-func TestAtoiSchema(t *testing.T) {
-	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "10"}})
-
-	cases := []struct {
-		env  string
-		want int
-	}{
-		{"5", 5},
-		{"0", 10},
-		{"-1", 10},
-		{"abc", 10},
-		{"", 10},
-	}
-	for _, tc := range cases {
-		t.Setenv("SOME_KEY", tc.env)
-		if got := atoiSchema("SOME_KEY"); got != tc.want {
-			t.Errorf("SOME_KEY=%q: atoiSchema(SOME_KEY) = %d, want %d", tc.env, got, tc.want)
-		}
-	}
-}
-
-// atoiNonnegSchema directly: zero and positive env values beat the schema
-// default; negative, non-numeric, and unset fall back to it (issue #672).
-func TestAtoiNonnegSchema(t *testing.T) {
-	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "0"}})
-
-	cases := []struct {
-		env  string
-		want int
-	}{
-		{"0", 0},
-		{"5", 5},
-		{"-1", 0},
-		{"abc", 0},
-		{"", 0},
-	}
-	for _, tc := range cases {
-		t.Setenv("SOME_KEY", tc.env)
-		if got := atoiNonnegSchema("SOME_KEY"); got != tc.want {
-			t.Errorf("SOME_KEY=%q: atoiNonnegSchema(SOME_KEY) = %d, want %d", tc.env, got, tc.want)
-		}
-	}
-}
-
-// floatNonnegSchema directly: zero and positive env values beat the schema
-// default; negative, non-numeric, infinite, and unset fall back to it.
-func TestFloatNonnegSchema(t *testing.T) {
-	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "7.5"}})
-
-	cases := []struct {
-		env  string
-		want float64
-	}{
-		{"0", 0},
-		{"4.44", 4.44},
-		{"-1", 7.5},
-		{"abc", 7.5},
-		{"", 7.5},
-		{"inf", 7.5},
-		{"+Inf", 7.5},
-		{"Infinity", 7.5},
-	}
-	for _, tc := range cases {
-		t.Setenv("SOME_KEY", tc.env)
-		if got := floatNonnegSchema("SOME_KEY"); got != tc.want {
-			t.Errorf("SOME_KEY=%q: floatNonnegSchema(SOME_KEY) = %v, want %v", tc.env, got, tc.want)
-		}
-	}
-}
-
 // GIT_USER_NAME/GIT_USER_EMAIL fall back to the host git config when the
 // document, flag and env chain supplies nothing: the in-process replacement
 // for the wrapper's retired `${VAR:-$(git config ...)}` fallback (ADR 0020).
 func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
-	unsetEnvForTest(t, "GIT_USER_NAME")
 	fakeHostGitConfig(t, map[string]string{"user.name": "Host Git User"})
 
-	if got := hostGitConfigField("GIT_USER_NAME"); got != "Host Git User" {
-		t.Errorf("hostGitConfigField = %q, want Host Git User", got)
+	if got := hostGitConfig("GIT_USER_NAME"); got != "Host Git User" {
+		t.Errorf("hostGitConfig = %q, want Host Git User", got)
 	}
 }
 
@@ -1488,7 +1374,6 @@ func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
 // config, and HostGitConfigValue answers exactly those members' env names from
 // the loaded fields (issue #5372).
 func TestLoadSchemaConfig_HostGitConfigMembersLoadFromHostGitConfig(t *testing.T) {
-	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
 	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 	sc := loadSchemaConfig()
 
@@ -1500,8 +1385,8 @@ func TestLoadSchemaConfig_HostGitConfigMembersLoadFromHostGitConfig(t *testing.T
 		if ok != (e.HostGitConfigKey != "") {
 			t.Errorf("%s: HostGitConfigValue ok = %v, hostGitConfigKey = %q", e.Env, ok, e.HostGitConfigKey)
 		}
-		if ok && got != hostGitConfigField(e.Env) {
-			t.Errorf("%s: HostGitConfigValue = %q, want %q", e.Env, got, hostGitConfigField(e.Env))
+		if ok && got != hostGitConfig(e.Env) {
+			t.Errorf("%s: HostGitConfigValue = %q, want %q", e.Env, got, hostGitConfig(e.Env))
 		}
 	}
 }
@@ -1512,8 +1397,8 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 	setKnob(t, "GIT_USER_NAME", "Explicit Name")
 	calls := fakeHostGitConfig(t, nil)
 
-	if got := hostGitConfigField("GIT_USER_NAME"); got != "Explicit Name" {
-		t.Errorf("hostGitConfigField = %q, want Explicit Name", got)
+	if got := hostGitConfig("GIT_USER_NAME"); got != "Explicit Name" {
+		t.Errorf("hostGitConfig = %q, want Explicit Name", got)
 	}
 	if len(*calls) != 0 {
 		t.Errorf("gitConfigLookup called %v, want no calls when an explicit value is set", *calls)
@@ -1524,8 +1409,6 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 // generated inputdoc.SchemaFlags table when neither an explicit flag nor ambient env
 // supplies one (ADR 0020).
 func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
-	t.Setenv("BASE_BRANCH", "")
-	os.Unsetenv("BASE_BRANCH")
 
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}})
 
@@ -1573,8 +1456,6 @@ func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
 // TestLoadConfig_DocumentSettingBeatsSchemaDefault: the document's settings
 // value backs spindriftPromptDir ahead of the inputdoc.SchemaFlags table (issue #2200).
 func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
-	t.Setenv("SPINDRIFT_PROMPT_DIR", "")
-	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
 
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}})
 
@@ -3752,7 +3633,6 @@ func TestDispatchConfig_ResolveEnv_GitIdentityIsStartupSnapshot(t *testing.T) {
 func TestDispatchConfig_ResolveEnv_ExplicitGitIdentitySkipsHostGitConfig(t *testing.T) {
 	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 	setKnob(t, "GIT_USER_NAME", "Env Name")
-	unsetEnvForTest(t, "GIT_USER_EMAIL")
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}})
 	snap := loadConfig()
 	c := minimalValidConfig()
@@ -3809,7 +3689,7 @@ func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testin
 		if got == "" {
 			t.Errorf("%s: ResolveEnv is empty, want the host-resolved value", e.Env)
 		}
-		if want := hostGitConfigField(e.Env); got != want {
+		if want := hostGitConfig(e.Env); got != want {
 			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.Env, got, want)
 		}
 	}
@@ -3824,7 +3704,6 @@ func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testin
 func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[]string) {
 	t.Helper()
 	useDoc(t, nil)
-	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
 	calls := fakeHostGitConfig(t, vals)
 	snap := loadConfig()
 	*calls = nil
@@ -6709,21 +6588,10 @@ func TestValidateConfigChecks_DegradedRequiredRowIsNotAConfigError(t *testing.T)
 	}
 }
 
-// unsetEnv clears key for the test and restores it afterward (t.Setenv
-// registers the restore; the Unsetenv then makes the knob genuinely unset).
-func unsetEnv(t *testing.T, key string) {
-	t.Helper()
-	t.Setenv(key, "")
-	if err := os.Unsetenv(key); err != nil {
-		t.Fatalf("os.Unsetenv(%s) = %v", key, err)
-	}
-}
-
 // Issue #4376: an unset BOX_SIGNAL_CARRIER resolves to the schema default
 // "socket" in loadConfig, which feeds dispatch.Config.SignalCarrier and the
 // doctor/choice registries.
 func TestLoadConfig_SignalCarrierDefaultsToSocket(t *testing.T) {
-	unsetEnv(t, "BOX_SIGNAL_CARRIER")
 	c := loadConfig()
 	if c.SignalCarrier != "socket" {
 		t.Fatalf("loadConfig().signalCarrier with knob unset = %q, want %q", c.SignalCarrier, "socket")
@@ -6755,9 +6623,7 @@ func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
 		{name: "explicit log", set: "log", want: "log"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.set == "" {
-				unsetEnv(t, "BOX_SIGNAL_CARRIER")
-			} else {
+			if tc.set != "" {
 				setKnob(t, "BOX_SIGNAL_CARRIER", tc.set)
 			}
 			it := forge.NewFake()
@@ -6784,12 +6650,11 @@ func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
 func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 	docOn := &inputdoc.Document{Settings: map[string]string{"AUTO_FORMAT": "1"}}
 	useDoc(t, docOn)
-	unsetEnv(t, "AUTO_FORMAT")
 	if got := resolveBoxEnvVar("AUTO_FORMAT"); got != "1" {
 		t.Fatalf("resolveBoxEnvVar without a flag = %q, want 1 (document value)", got)
 	}
-	if _, err := parseFlagsT(t, []string{"--auto-format=false"}); err != nil {
-		t.Fatalf("parseFlags: %v", err)
+	if _, err := parseResolved(t, []string{"--auto-format=false"}); err != nil {
+		t.Fatalf("parseResolved: %v", err)
 	}
 	if got := resolveBoxEnvVar("AUTO_FORMAT"); got != "" {
 		t.Errorf("resolveBoxEnvVar = %q, want empty (explicit off forwarded)", got)
@@ -6858,65 +6723,4 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 			t.Errorf("runnerKind %q: artifact() = %q, want %q", tc.runnerKind, got.Name, tc.want.Name)
 		}
 	}
-}
-
-// restoreKnobEnvAfter undoes the os.Setenv calls parseFlags makes for flags,
-// which would otherwise persist across tests and trip mainRun's ambient-knob
-// check (ADR 0020) in whichever test runs next.
-func restoreKnobEnvAfter(t *testing.T) {
-	t.Helper()
-	type saved struct {
-		val string
-		set bool
-	}
-	snap := make(map[string]saved, len(inputdoc.SchemaFlags))
-	for _, e := range inputdoc.SchemaFlags {
-		v, ok := os.LookupEnv(e.Env)
-		snap[e.Env] = saved{v, ok}
-	}
-	t.Cleanup(func() {
-		for env, s := range snap {
-			if s.set {
-				os.Setenv(env, s.val)
-			} else {
-				os.Unsetenv(env)
-			}
-		}
-	})
-}
-
-// mainRunT is mainRun with the flags' env writes rolled back at test end.
-func mainRunT(t *testing.T, argv []string, stdout, stderr io.Writer) int {
-	t.Helper()
-	restoreKnobEnvAfter(t)
-	return mainRun(argv, stdout, stderr)
-}
-
-// parseFlagsT is parseFlags with the flags' env writes rolled back at test end.
-func parseFlagsT(t *testing.T, argv []string) ([]string, error) {
-	t.Helper()
-	restoreKnobEnvAfter(t)
-	return parseFlags(argv)
-}
-
-// mainRunKnobsAsFlags is mainRunT for tests whose setup helpers t.Setenv knobs:
-// mainRun refuses ambient knobs (ADR 0020), so it lifts each one out of the
-// environment into the equivalent flag ahead of argv, where parseFlags puts it
-// back, as a real invocation would.
-func mainRunKnobsAsFlags(t *testing.T, argv []string, stdout, stderr io.Writer) int {
-	t.Helper()
-	var flags []string
-	for _, e := range inputdoc.SchemaFlags {
-		v, ok := ambientSetting(e.Env)
-		if !ok {
-			continue
-		}
-		if e.Kind == "bool" {
-			flags = append(flags, "--"+e.Flag+"="+v)
-		} else {
-			flags = append(flags, "--"+e.Flag, v)
-		}
-		unsetEnv(t, e.Env)
-	}
-	return mainRunT(t, append(flags, argv...), stdout, stderr)
 }

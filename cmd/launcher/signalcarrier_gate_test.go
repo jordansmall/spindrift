@@ -78,7 +78,6 @@ func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *test
 // Issue #4376: the default is socket, so an operator who never set the knob
 // and runs NETWORK_MODE=none gets the startup error naming the remedy.
 func TestSignalCarrierNetworkModeGate_UnsetKnobUnderNoneFailsNamingLogRemedy(t *testing.T) {
-	unsetEnv(t, "BOX_SIGNAL_CARRIER")
 	c := minimalValidConfig()
 	c.SignalCarrier = loadConfig().SignalCarrier
 	c.NetworkMode = "none"

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/term"
@@ -261,34 +260,16 @@ func lookupCliFlag(arg string, remaining []string) *cliFlag {
 	return nil
 }
 
-// parseFlags injects matching --flag value pairs into the process environment
-// via os.Setenv so loadConfig picks them up. A flag lands in the same env
-// channel the knobs are read from, which is how it wins the
-// flag > document > schema default precedence (ADR 0020). An unrecognised
+// parseFlags splits args into the verb arguments and the schema-flag tokens.
+// Schema flags are never written to the environment: they are returned in
+// order (a value flag's token and its value, a bool's single token) for
+// inputdoc.Resolve, which ranks them over the document and schema default
+// (ADR 0020). Only tokens classified here reach Resolve, so a verb flag's
+// value or anything after "--" is never mistaken for a knob (#6707). The
+// secret --*-file/--*-cmd flags are the exception: secrets are read from the
+// process environment by design, so those still land there. An unrecognised
 // --flag is an error; non-flag args and everything after "--" pass through.
-func parseFlags(args []string) ([]string, error) {
-	byFlag := make(map[string]*inputdoc.FlagEntry, len(inputdoc.SchemaFlags)*2)
-	byBool := make(map[string]*inputdoc.FlagEntry, 2)
-	for i := range inputdoc.SchemaFlags {
-		if inputdoc.SchemaFlags[i].Kind == "bool" {
-			byBool["--"+inputdoc.SchemaFlags[i].Flag] = &inputdoc.SchemaFlags[i]
-			if inputdoc.SchemaFlags[i].Alias != "" {
-				byBool["--"+inputdoc.SchemaFlags[i].Alias] = &inputdoc.SchemaFlags[i]
-			}
-			if inputdoc.SchemaFlags[i].DeprecatedAlias != "" {
-				byBool["--"+inputdoc.SchemaFlags[i].DeprecatedAlias] = &inputdoc.SchemaFlags[i]
-			}
-			continue
-		}
-		byFlag["--"+inputdoc.SchemaFlags[i].Flag] = &inputdoc.SchemaFlags[i]
-		if inputdoc.SchemaFlags[i].Alias != "" {
-			byFlag["--"+inputdoc.SchemaFlags[i].Alias] = &inputdoc.SchemaFlags[i]
-		}
-		if inputdoc.SchemaFlags[i].DeprecatedAlias != "" {
-			byFlag["--"+inputdoc.SchemaFlags[i].DeprecatedAlias] = &inputdoc.SchemaFlags[i]
-		}
-	}
-
+func parseFlags(args []string) (remaining, schemaArgs []string, err error) {
 	byFileFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
 	byCmdFlag := make(map[string]*inputdoc.SecretKnob, len(inputdoc.SecretKnobs))
 	for i := range inputdoc.SecretKnobs {
@@ -309,7 +290,7 @@ func parseFlags(args []string) ([]string, error) {
 	// Reset so repeated calls in one process (tests) see no stale value.
 	globalSecretCmdTemplate = ""
 
-	remaining := make([]string, 0, len(args))
+	remaining = make([]string, 0, len(args))
 	i := 0
 	for i < len(args) {
 		arg := args[i]
@@ -330,7 +311,7 @@ func parseFlags(args []string) ([]string, error) {
 			i++
 			if f.flag == "secret-cmd" {
 				if i >= len(args) {
-					return nil, fmt.Errorf("flag --secret-cmd requires a command")
+					return nil, nil, fmt.Errorf("flag --secret-cmd requires a command")
 				}
 				globalSecretCmdTemplate = args[i]
 				i++
@@ -344,45 +325,26 @@ func parseFlags(args []string) ([]string, error) {
 			}
 			continue
 		}
-		name, value, hasEquals := strings.Cut(arg, "=")
-		if entry, ok := byBool[name]; ok {
-			var on bool
-			if hasEquals {
-				if value != "" {
-					b, err := strconv.ParseBool(value)
-					if err != nil {
-						return nil, fmt.Errorf("flag %s: invalid boolean value %q", name, value)
-					}
-					on = b
-				}
-			} else {
-				on = true
-			}
-			setTo := ""
-			if on {
-				setTo = "1"
-			}
-			if err := os.Setenv(entry.Env, setTo); err != nil {
-				return nil, err
-			}
+		name, _, _ := strings.Cut(arg, "=")
+		if entry, ok := inputdoc.LookupSchemaFlag(name); ok && entry.Kind == "bool" {
+			schemaArgs = append(schemaArgs, arg)
 			i++
 			continue
 		}
-		if entry, ok := byFlag[arg]; ok {
+		if _, ok := inputdoc.LookupSchemaFlag(arg); ok {
 			i++
-			if i >= len(args) {
-				return nil, fmt.Errorf("flag %s requires a value", arg)
+			schemaArgs = append(schemaArgs, arg)
+			// A missing value is reported by CheckSchemaFlags below.
+			if i < len(args) {
+				schemaArgs = append(schemaArgs, args[i])
+				i++
 			}
-			if err := os.Setenv(entry.Env, args[i]); err != nil {
-				return nil, err
-			}
-			i++
 			continue
 		}
 		if knob, ok := byFileFlag[arg]; ok {
 			i++
 			if i >= len(args) {
-				return nil, fmt.Errorf("flag %s requires a path", arg)
+				return nil, nil, fmt.Errorf("flag %s requires a path", arg)
 			}
 			filePaths[knob.Env] = args[i]
 			i++
@@ -391,13 +353,17 @@ func parseFlags(args []string) ([]string, error) {
 		if knob, ok := byCmdFlag[arg]; ok {
 			i++
 			if i >= len(args) {
-				return nil, fmt.Errorf("flag %s requires a command", arg)
+				return nil, nil, fmt.Errorf("flag %s requires a command", arg)
 			}
 			cmdStrings[knob.Env] = args[i]
 			i++
 			continue
 		}
-		return nil, fmt.Errorf("unknown flag: %s", arg)
+		return nil, nil, fmt.Errorf("unknown flag: %s", arg)
+	}
+	// Before any --*-cmd runs, so a malformed flag never executes a secret command.
+	if err := inputdoc.CheckSchemaFlags(schemaArgs); err != nil {
+		return nil, nil, err
 	}
 
 	for i := range inputdoc.SecretKnobs {
@@ -405,7 +371,7 @@ func parseFlags(args []string) ([]string, error) {
 		_, hasFileFlag := filePaths[knob.Env]
 		_, hasCmdFlag := cmdStrings[knob.Env]
 		if hasFileFlag && hasCmdFlag {
-			return nil, fmt.Errorf("--%s and --%s are mutually exclusive", knob.CmdFlag, knob.FileFlag)
+			return nil, nil, fmt.Errorf("--%s and --%s are mutually exclusive", knob.CmdFlag, knob.FileFlag)
 		}
 
 		var value string
@@ -419,17 +385,17 @@ func parseFlags(args []string) ([]string, error) {
 			var data []byte
 			data, err = os.ReadFile(filePaths[knob.Env])
 			if err != nil {
-				return nil, fmt.Errorf("--%s: cannot read file %s: %w", knob.FileFlag, filePaths[knob.Env], err)
+				return nil, nil, fmt.Errorf("--%s: cannot read file %s: %w", knob.FileFlag, filePaths[knob.Env], err)
 			}
 			value = strings.TrimRight(string(data), "\r\n")
 		default:
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := os.Setenv(knob.Env, value); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -438,7 +404,7 @@ func parseFlags(args []string) ([]string, error) {
 		globalSecretCmdTemplate = os.Getenv("SECRET_CMD")
 	}
 
-	return remaining, nil
+	return remaining, schemaArgs, nil
 }
 
 // globalSecretCmdTemplate is the --secret-cmd/SECRET_CMD fallback captured by
@@ -449,9 +415,9 @@ var globalSecretCmdTemplate string
 
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting
 // {name} with the kebab-case env name, for every secret knob this run needs
-// that still has no value. main() must call it after inputdoc.Load, not
-// from parseFlags: secretRequiredThisRun reads loadedDoc through
-// getenvSchema, and loadedDoc is still nil while parseFlags runs (ADR 0020).
+// that still has no value. mainRun must call it after inputdoc.Resolve, not
+// from parseFlags: secretRequiredThisRun reads the knobs through getenvSchema
+// (launcherInput), which is unresolved while parseFlags runs (ADR 0020).
 func applySecretCmdFallback() error {
 	if globalSecretCmdTemplate == "" {
 		return nil

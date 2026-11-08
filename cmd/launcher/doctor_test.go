@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // The full configErr/runErr to exit-code mapping for `spindrift doctor`
@@ -322,7 +323,7 @@ func TestDoctorReport_Butler_TrackerCannotFileExitsConfigInvalid(t *testing.T) {
 	c.CodeForge = "github"
 	c.ButlerChores = "bugs"
 	c.ButlerClaimTimeout = "15m"
-	c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
+	c.setRowKnob("BUTLER_TUNING_COOLDOWN", inputdoc.SchemaDefault("BUTLER_TUNING_COOLDOWN"))
 
 	rc := doctorReadContext(c, f)
 	rc.capabilities = forge.ResolveCapabilities(f, f, backend.Descriptor{}, backend.Descriptor{})
@@ -353,7 +354,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		c.CodeForge = "github" // ledger-capable (the Strategy's NewLedger != nil)
 		c.ButlerChores = "bugs"
 		c.ButlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
-		c.setRowKnob("BUTLER_TUNING_COOLDOWN", schemaDefault("BUTLER_TUNING_COOLDOWN"))
+		c.setRowKnob("BUTLER_TUNING_COOLDOWN", inputdoc.SchemaDefault("BUTLER_TUNING_COOLDOWN"))
 		return c
 	}
 

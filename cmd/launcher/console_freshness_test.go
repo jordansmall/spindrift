@@ -2,13 +2,11 @@ package main
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/freshness"
-	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -382,53 +380,5 @@ func TestNewConsoleFreshness_UnknownBoxArtifactIsAnError(t *testing.T) {
 	_, _, err := newConsoleFreshness(c, t.TempDir(), &freshness.Fake{}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "bogus") {
 		t.Fatalf("newConsoleFreshness err = %v, want an error naming the unknown artifact", err)
-	}
-}
-
-// A Console started with knob flags has them Setenv'd into its own process by
-// parseFlags; the rebuild's child launcher exits config-invalid on any knob env
-// var, so knobsAsFlags must move them onto argv without losing an explicit
-// off bool or a launcherIgnores knob's absence.
-func TestKnobsAsFlags_PostParseFlagsEnvLeavesNoKnobAndRestatesFlags(t *testing.T) {
-	t.Setenv("PATH_SENTINEL", "keep")
-	if _, err := parseFlagsT(t, []string{"--max-parallel", "2", "--auto-format", "--auto-lint=", "--daemon-app", ".#x"}); err != nil {
-		t.Fatalf("parseFlags: %v", err)
-	}
-
-	flags, rest := knobsAsFlags(os.Environ())
-
-	var sentinel bool
-	for _, kv := range rest {
-		name, _, _ := strings.Cut(kv, "=")
-		if _, isKnob := inputdoc.SchemaFlag(name); isKnob {
-			t.Errorf("child env still carries knob %s", kv)
-		}
-		sentinel = sentinel || kv == "PATH_SENTINEL=keep"
-	}
-	if !sentinel {
-		t.Error("non-knob env entries must pass through")
-	}
-
-	got := strings.Join(flags, " ")
-	for _, want := range []string{"--max-parallel 2", "--auto-format=1", "--auto-lint="} {
-		if !strings.Contains(got+" ", want+" ") {
-			t.Errorf("flags %q missing %q", got, want)
-		}
-	}
-	if strings.Contains(got, "daemon-app") {
-		t.Errorf("flags %q restate a launcherIgnores knob", got)
-	}
-
-	for _, e := range inputdoc.SchemaFlags {
-		unsetEnv(t, e.Env)
-	}
-	if _, err := parseFlags(flags); err != nil {
-		t.Fatalf("child parseFlags(%v): %v", flags, err)
-	}
-	if v := os.Getenv("MAX_PARALLEL"); v != "2" {
-		t.Errorf("round-tripped MAX_PARALLEL = %q, want 2", v)
-	}
-	if v := os.Getenv("AUTO_FORMAT"); v != "1" {
-		t.Errorf("round-tripped AUTO_FORMAT = %q, want 1", v)
 	}
 }
