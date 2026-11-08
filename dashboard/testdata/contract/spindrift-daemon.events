@@ -1,0 +1,27 @@
+{"v":1,"time":"2026-03-14T09:28:37Z","event":"image_build","kind":"dispatch","revision":"0a1b2c3d4e5f","slot":0,"state":"finished"}
+{"v":1,"time":"2026-03-14T09:28:38Z","event":"settled","kind":"dispatch","revision":"0a1b2c3d4e5f","record_id":"rec-1234-2","slot":0,"state":"complete","note":"landed green","pr_url":"https://github.com/acme/widgets/pull/77","issue":"1234"}
+{"v":1,"time":"2026-03-14T09:28:39Z","event":"child_finish","kind":"dispatch","revision":"0a1b2c3d4e5f","slot":0,"exit":0,"outcome":"dispatched","issue":"1234"}
+{"v":1,"time":"2026-03-14T09:28:39Z","event":"child_start","kind":"butler","revision":"0a1b2c3d4e5f","child_log":".git/spindrift/child-1.log","slot":1}
+{"v":1,"time":"2026-03-14T09:28:40Z","event":"box","kind":"butler","phase":"initial","revision":"0a1b2c3d4e5f","pass_log":".git/spindrift/pass-docs-drift.log","record_id":"rec-chore-1","slot":1,"chore":"docs-drift"}
+{"v":1,"time":"2026-03-14T09:28:41Z","event":"child_inherited","kind":"butler","revision":"0a1b2c3d4e5f","child_log":".git/spindrift/child-1.log","slot":1,"chore":"docs-drift"}
+{"v":1,"time":"2026-03-14T09:28:42Z","event":"awake_close","slot":0,"reason":"the Awake window closed","wait":"6h0m0s"}
+{"v":1,"time":"2026-03-14T09:28:43Z","event":"awake_open","slot":0,"reason":"the Awake window reopened"}
+{"v":1,"time":"2026-03-14T09:28:44Z","event":"backoff","kind":"dispatch","revision":"0a1b2c3d4e5f","slot":0,"reason":"child exited 1","wait":"5m0s"}
+{"v":1,"time":"2026-03-14T09:28:45Z","event":"baton_hold","slot":1,"reason":"waiting for the discovery baton: another slot's child is still discovering"}
+{"v":1,"time":"2026-03-14T09:28:46Z","event":"baton_pass","slot":0,"reason":"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"}
+{"v":1,"time":"2026-03-14T09:28:47Z","event":"breaker_trip","kind":"dispatch","slot":0,"wait":"1h0m0s","failures":3}
+{"v":1,"time":"2026-03-14T09:28:48Z","event":"demand_appeared","kind":"research","slot":0,"ready":5}
+{"v":1,"time":"2026-03-14T09:28:49Z","event":"demand_drained","kind":"research","slot":0,"ready":0}
+{"v":1,"time":"2026-03-14T09:28:50Z","event":"demand_rose","kind":"research","slot":0,"ready":3}
+{"v":1,"time":"2026-03-14T09:28:51Z","event":"demand_source_missing","kind":"research","reason":"no demand source configured"}
+{"v":1,"time":"2026-03-14T09:28:52Z","event":"idle","kind":"dispatch","slot":0,"wait":"15m0s"}
+{"v":1,"time":"2026-03-14T09:28:53Z","event":"jam","kind":"dispatch","revision":"0a1b2c3d4e5f","slot":0,"reason":"no work is dispatchable and no sibling slot is doing anything that could unblock it","wait":"30m0s"}
+{"v":1,"time":"2026-03-14T09:28:54Z","event":"preflight","revision":"0a1b2c3d4e5f","exit":0,"outcome":"doctor-ok"}
+{"v":1,"time":"2026-03-14T09:28:55Z","event":"probe_failed","kind":"research","slot":0,"reason":"demand: probe exited 1"}
+{"v":1,"time":"2026-03-14T09:28:56Z","event":"probe_rate_limited","kind":"research","slot":0,"reason":"demand: rate limited","tracker":"github","until":"2026-03-14T09:41:53Z"}
+{"v":1,"time":"2026-03-14T09:28:57Z","event":"probe_resumed","kind":"research","slot":0,"tracker":"github"}
+{"v":1,"time":"2026-03-14T09:28:58Z","event":"self_update","phase":"built","revision":"0a1b2c3d4e5f"}
+{"v":1,"time":"2026-03-14T09:28:59Z","event":"self_update","phase":"handoff","revision":"0a1b2c3d4e5f","from_path":"/nix/store/aaaa-spindrift-daemon","to_path":"/nix/store/bbbb-spindrift-daemon","slots":[0,1]}
+{"v":1,"time":"2026-03-14T09:29:00Z","event":"tip_moved","kinds":["dispatch","butler"],"revision":"0a1b2c3d4e5f","slot":0,"reason":"a merge can unblock a jammed queue or end a reported kind's on_tip_move wait"}
+{"v":1,"time":"2026-03-14T09:29:01Z","event":"shutdown","reason":"signalled stop: forwarding a drain request to every running child"}
+{"v":1,"time":"2026-03-14T09:29:02Z","event":"halt","kind":"dispatch","revision":"0a1b2c3d4e5f","reason":"self-changed: daemon build /nix/store/aaaa-spindrift-daemon changed at tip 0a1b2c3d4e5f"}
