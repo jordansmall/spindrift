@@ -1324,10 +1324,7 @@ func TestRecoverQueueOne_AbortAfterOwnFailedSettleSpared(t *testing.T) {
 	rf := newKillHook(runner.NewFake())
 	it := &issueReadCounter{IssueTracker: x.fc}
 	s := settle.NewFake()
-	// The fake must report the eligible situation addFailed seeds; the real
-	// settle would have derived it from the bundle and self-report.
-	s.SituationForReturn = settle.Situation{BundlePresent: true, SelfReportSuccess: true}
-	s.On("SettleRelayedBranch", func(int) { failThenAbort(it, "42", abort) })
+	s.On("Recover", func(int) { failThenAbort(it, "42", abort) })
 
 	err := recoverQueueOne(x.c, it, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
 

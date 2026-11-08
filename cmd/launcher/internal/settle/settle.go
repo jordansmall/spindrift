@@ -128,29 +128,11 @@ type Settler interface {
 	Fail(num string, gen uint64, result dispatch.Result)
 }
 
-// WorkSettler is the work-only adopt/relay interface, used only by recover's
-// adopt path. Research never touches the Code Forge, so it never needs this.
+// WorkSettler is the work-only recover interface. Research never touches the
+// Code Forge, so it never needs this.
 type WorkSettler interface {
-	// SettleAdopted runs the same merge gate as Settle for an already-open PR
-	// (draft or not) with no outcome line, the recover entry point.
-	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) Settlement
-
-	// SettleRelayedBranch adopts a relayed branch (issue #2225). It returns the
-	// Settlement of the drive (zero when it settled nothing) and whether the
-	// branch was relayed. relayed is false when sit.OpenPRFound is true, since
-	// that shape is SettleAdopted's job, and when result carries no relayable
-	// success evidence, leaving the caller's own "no open PR" handling
-	// unchanged. Otherwise it relays the branch, opens a PR, and runs the same
-	// merge gate. The error is non-nil only when relaying the branch or creating
-	// its draft PR failed (wrapping that failure); every other relayed=false
-	// return, including a Code Forge that cannot relay, carries nil.
-	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (Settlement, bool, error)
-
-	// SituationFor computes num's adoption-evidence Situation (issue #2501) so
-	// main.go's recoverIssue (shared by `recover <n>` and queue mode) can
-	// thread the same value into SettleRelayedBranch. openPRFound is the
-	// caller's own resolved fact.
-	SituationFor(num string, openPRFound bool, result dispatch.Result) Situation
+	// Recover is spindrift recover's single entry; see Settle.Recover.
+	Recover(in RecoverInput) (Settlement, error)
 }
 
 // Settle is the prod adapter, constructed once per top-level dispatch entry

@@ -6,6 +6,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/fakehook"
+	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 )
 
 // SettleCall records one Settle invocation.
@@ -13,12 +15,6 @@ type SettleCall struct {
 	Num    string
 	Gen    uint64
 	Result dispatch.Result
-}
-
-// SettleAdoptedCall records one SettleAdopted invocation.
-type SettleAdoptedCall struct {
-	Num, PRURL string
-	Gen        uint64
 }
 
 // SettlePatchCall records one SettlePatch invocation.
@@ -34,41 +30,37 @@ type FailCall struct {
 	Result dispatch.Result
 }
 
-// SettleRelayedBranchCall records one SettleRelayedBranch invocation.
-type SettleRelayedBranchCall struct {
-	Num    string
-	Gen    uint64
-	Sit    Situation
-	Result dispatch.Result
-}
-
-// SituationForCall records one SituationFor invocation.
-type SituationForCall struct {
-	Num         string
-	OpenPRFound bool
-	Result      dispatch.Result
+// RecoverCall records one Recover invocation that passed its pre-Begin
+// declines and whose Begin succeeded.
+type RecoverCall struct {
+	Num, OpenPR string
+	Strict      bool
+	Resolved    outcome.Resolved
+	Passes      []passmanifest.Entry
 }
 
 // Fake is an in-memory Settler for tests that assert call wiring rather than
 // merge-gate behavior. All methods are safe for concurrent use.
 type Fake struct {
-	// Hooks lets a test run a callback inside SettleAdopted or
-	// SettleRelayedBranch, before the call is recorded; see fakehook.
+	// Hooks lets a test run a callback inside Recover, before the call is
+	// recorded; see fakehook.
 	fakehook.Hooks
 
 	mu sync.Mutex
 
-	SettleCalls        []SettleCall
-	SettleAdoptedCalls []SettleAdoptedCall
-	SettlePatchCalls   []SettlePatchCall
-	FailCalls          []FailCall
-	// Settlement is what Settle, SettleAdopted, SettlePatch and SettleRelayedBranch return.
-	Settlement                 Settlement
-	SettleRelayedBranchCalls   []SettleRelayedBranchCall
-	SettleRelayedBranchRelayed bool
-	SettleRelayedBranchErr     error
-	SituationForCalls          []SituationForCall
-	SituationForReturn         Situation
+	SettleCalls      []SettleCall
+	SettlePatchCalls []SettlePatchCall
+	FailCalls        []FailCall
+	// Settlement is what Settle, SettlePatch and Recover return.
+	Settlement   Settlement
+	RecoverCalls []RecoverCall
+	// RecoverDecline, when non-zero, is returned by Recover before Begin, as
+	// the real Recover's unreviewed decline is.
+	RecoverDecline Settlement
+	// RecoverNothing makes Recover return ErrNothingToRecover before Begin.
+	RecoverNothing bool
+	// RecoverErr is returned by Recover after a successful Begin.
+	RecoverErr error
 }
 
 var _ Settler = (*Fake)(nil)
@@ -87,15 +79,6 @@ func (f *Fake) Settle(d dispatch.Dispatcher, num string, gen uint64, result disp
 	return f.Settlement
 }
 
-// SettleAdopted records the call.
-func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) Settlement {
-	f.Fire("SettleAdopted")
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.SettleAdoptedCalls = append(f.SettleAdoptedCalls, SettleAdoptedCall{Num: num, PRURL: prURL, Gen: gen})
-	return f.Settlement
-}
-
 // SettlePatch records the call.
 func (f *Fake) SettlePatch(owner dispatchkey.Key, num, prURL string) Settlement {
 	f.mu.Lock()
@@ -111,20 +94,23 @@ func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Gen: gen, Result: result})
 }
 
-// SettleRelayedBranch records the call and returns Settlement,
-// SettleRelayedBranchRelayed and SettleRelayedBranchErr.
-func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (Settlement, bool, error) {
-	f.Fire("SettleRelayedBranch")
+// Recover returns RecoverDecline or ErrNothingToRecover without calling Begin
+// when set. Otherwise it calls Begin and returns its error unchanged, so a
+// declined Begin records nothing and RecoverCalls proves a landing was tried;
+// then it returns Settlement and RecoverErr.
+func (f *Fake) Recover(in RecoverInput) (Settlement, error) {
+	if f.RecoverDecline != (Settlement{}) {
+		return f.RecoverDecline, nil
+	}
+	if f.RecoverNothing {
+		return Settlement{}, ErrNothingToRecover
+	}
+	if _, err := in.Begin(); err != nil {
+		return Settlement{}, err
+	}
+	f.Fire("Recover")
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Sit: sit, Result: result})
-	return f.Settlement, f.SettleRelayedBranchRelayed, f.SettleRelayedBranchErr
-}
-
-// SituationFor records the call and returns SituationForReturn.
-func (f *Fake) SituationFor(num string, openPRFound bool, result dispatch.Result) Situation {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.SituationForCalls = append(f.SituationForCalls, SituationForCall{Num: num, OpenPRFound: openPRFound, Result: result})
-	return f.SituationForReturn
+	f.RecoverCalls = append(f.RecoverCalls, RecoverCall{Num: in.Num, OpenPR: in.OpenPR, Strict: in.Strict, Resolved: in.Resolved, Passes: in.Passes})
+	return f.Settlement, f.RecoverErr
 }

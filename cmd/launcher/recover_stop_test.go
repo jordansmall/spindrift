@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
@@ -116,15 +117,15 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 	}
 }
 
-// abortDuringSettle makes s close abortCh from inside SettleAdopted: unlike
+// abortDuringSettle makes s close abortCh from inside Recover: unlike
 // selective dispatch's Run, recoverByNumber has no Box goroutine to
 // synchronize an external abort against, so the settle stub is the one seam
 // standing in for "CI is being watched" when the operator's second signal
 // lands. It then waits on killSignal so the watcher's whole reclaimInFlight
 // call -- not just the Kill inside it -- has provably started before
-// SettleAdopted returns.
+// Recover returns.
 func abortDuringSettle(s *settle.Fake, abortCh chan struct{}, killSignal chan string) {
-	s.On("SettleAdopted", func(int) {
+	s.On("Recover", func(int) {
 		close(abortCh)
 		select {
 		case <-killSignal:
@@ -167,8 +168,8 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
 	}
-	if len(s.SettleAdoptedCalls) != 1 {
-		t.Fatalf("SettleAdoptedCalls = %d, want 1 (settle ran before the abort landed)", len(s.SettleAdoptedCalls))
+	if len(s.RecoverCalls) != 1 {
+		t.Fatalf("RecoverCalls = %d, want 1 (settle ran before the abort landed)", len(s.RecoverCalls))
 	}
 
 	iss, ierr := fc.Issue("42")
@@ -215,8 +216,8 @@ func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
 	}
-	if len(s.SettleAdoptedCalls) != 1 {
-		t.Fatalf("SettleAdoptedCalls = %d, want 1", len(s.SettleAdoptedCalls))
+	if len(s.RecoverCalls) != 1 {
+		t.Fatalf("RecoverCalls = %d, want 1", len(s.RecoverCalls))
 	}
 	var reclaimed bool
 	for _, call := range fc.TransitionStateCalls {
@@ -290,7 +291,7 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 
 // completeThenAbort stands in for a second operator signal landing the instant
 // after the settle labelled the issue agent-complete -- the blocking finding's
-// own scenario (issue #3522, recoverByNumber's SettleAdopted arm). The hook runs
+// own scenario (issue #3522, recoverByNumber's adopt arm). The hook runs
 // before the fake records its call, which changes nothing the fake reads. It
 // flips #42 to Complete first, mirroring what a real settle does on that path,
 // so a wrongly-triggered reclaim is visible as a Complete->Dispatchable
@@ -302,18 +303,17 @@ func completeThenAbort(s *settle.Fake, fc *forge.Fake, abortCh chan struct{}) {
 		}
 		close(abortCh)
 	}
-	s.On("SettleAdopted", hook)
-	s.On("SettleRelayedBranch", hook)
+	s.On("Recover", hook)
 }
 
-// TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim pins the blocking
-// finding: an abort that closes after SettleAdopted has already finished
+// TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim pins the blocking
+// finding: an abort that closes after the adopt settle has already finished
 // (PR merged, issue labelled agent-complete) must not drag the issue back
 // to Dispatchable. Before the fix, `defer gate.Leave(iss.number)` ran only
 // after the inline `gate.Settle()` below it, so Settle's final abort check
 // still found #42 in-flight and reclaimed a finished issue (issue #3522,
-// in both recoverByNumber's SettleRelayedBranch and SettleAdopted arms).
-func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
+// in both recoverByNumber's relay and adopt arms).
+func TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim(t *testing.T) {
 	orig := installStopSignal
 	stopCh := make(chan struct{})
 	abortCh := make(chan struct{})
@@ -338,8 +338,8 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
 	}
-	if len(s.SettleAdoptedCalls) != 1 {
-		t.Fatalf("SettleAdoptedCalls = %d, want 1", len(s.SettleAdoptedCalls))
+	if len(s.RecoverCalls) != 1 {
+		t.Fatalf("RecoverCalls = %d, want 1", len(s.RecoverCalls))
 	}
 
 	iss, ierr := fc.Issue("42")
@@ -379,7 +379,7 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 
 	dir := tempLogDir(t)
 	s := settle.NewFake()
-	s.SettleRelayedBranchErr = errors.New("relay: boom")
+	s.RecoverErr = errors.New("relay: boom")
 	completeThenAbort(s, fc, abortCh)
 
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
@@ -387,8 +387,8 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
 	}
-	if len(s.SettleRelayedBranchCalls) != 1 {
-		t.Fatalf("SettleRelayedBranchCalls = %d, want 1", len(s.SettleRelayedBranchCalls))
+	if len(s.RecoverCalls) != 1 {
+		t.Fatalf("RecoverCalls = %d, want 1", len(s.RecoverCalls))
 	}
 	iss, ierr := fc.Issue("42")
 	if ierr != nil {
@@ -438,11 +438,8 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "run settling") {
 		t.Errorf("stdout = %q, want a skip line while the owner's Dispatch is unclosed", out)
 	}
-	if len(s.SettleAdoptedCalls) != 0 {
-		t.Errorf("SettleAdoptedCalls = %d, want 0 (owner is still settling)", len(s.SettleAdoptedCalls))
-	}
-	if len(s.SettleRelayedBranchCalls) != 0 {
-		t.Errorf("SettleRelayedBranchCalls = %d, want 0", len(s.SettleRelayedBranchCalls))
+	if len(s.RecoverCalls) != 0 {
+		t.Errorf("RecoverCalls = %d, want 0", len(s.RecoverCalls))
 	}
 }
 
@@ -484,11 +481,8 @@ func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "another launcher process still owns this issue") {
 		t.Errorf("stdout = %q, want a skip line naming the live claim", out)
 	}
-	if len(s.SettleAdoptedCalls) != 0 {
-		t.Errorf("SettleAdoptedCalls = %d, want 0 (a live claim must not be settled)", len(s.SettleAdoptedCalls))
-	}
-	if len(s.SettleRelayedBranchCalls) != 0 {
-		t.Errorf("SettleRelayedBranchCalls = %d, want 0", len(s.SettleRelayedBranchCalls))
+	if len(s.RecoverCalls) != 0 {
+		t.Errorf("RecoverCalls = %d, want 0", len(s.RecoverCalls))
 	}
 
 	markerPath := dispatch.HostLogDirFor(dir) + "/issue-42.run-lineage"
@@ -561,7 +555,7 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 	rf := newKillHook(runner.NewFake())
 	it := &issueReadCounter{IssueTracker: fc}
 	s := settle.NewFake()
-	s.On("SettleAdopted", func(int) { failThenAbort(it, "42", abort) })
+	s.On("Recover", func(int) { failThenAbort(it, "42", abort) })
 
 	err := recoverByNumber(c, it, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
 
@@ -579,5 +573,41 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 	case name := <-rf.killed:
 		t.Errorf("reaper killed %q, want the settled issue spared", name)
 	default:
+	}
+}
+
+// TestRecoverByNumber_StopAfterFirstCheckpoint_UnreviewedDeclineIsNotFailed
+// pins that a stop landing between the first checkpoint and the unreviewed
+// decline (here, during the open-PR lookup) exits as a signalled stop: the
+// decline would otherwise park the issue on agent-failed and print a skip
+// line for a run the operator merely interrupted.
+func TestRecoverByNumber_StopAfterFirstCheckpoint_UnreviewedDeclineIsNotFailed(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "")
+	x.seedManifest(t, "42", passmanifest.Entry{Pass: 1, Kind: "implement"})
+
+	orig := installStopSignal
+	stopCh := make(chan struct{})
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		return stopCh, make(chan struct{}), func() {}
+	}
+	t.Cleanup(func() { installStopSignal = orig })
+	x.fc.On("OpenPRForBranch", func(int) { close(stopCh) })
+
+	var out strings.Builder
+	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf), "42", &out, io.Discard)
+
+	if !errors.Is(err, waves.ErrSignalledStop) {
+		t.Errorf("recoverByNumber = %v, want ErrSignalledStop", err)
+	}
+	if strings.Contains(out.String(), "status=skipped") {
+		t.Errorf("stdout = %q, want no skip line for a requested stop", out.String())
+	}
+	// The issue is seeded on agent-failed, so assert the decline posted no
+	// recover-failure comment rather than on the label.
+	for _, call := range x.fc.CommentCalls {
+		if call.Num == "42" {
+			t.Errorf("CommentCalls = %+v, want none for a requested stop", x.fc.CommentCalls)
+		}
 	}
 }

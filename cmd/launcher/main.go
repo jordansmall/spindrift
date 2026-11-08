@@ -1420,42 +1420,31 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
 	}
-	// Passes feeds only the Situation: SettleRelayedBranch gets a result
-	// without them so a recover landing still clears the recorded
-	// landing pass rather than inheriting the run's.
 	passes, passesErr := dispatch.ReadPasses(pwd, iss.number)
 	if passesErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: pass-manifest scan: %v\n", issueNum, passesErr)
 	}
-	sit := s.SituationFor(iss.number, res.Found, dispatch.Result{Resolved: resolved, Passes: passes})
 	declineUnreviewed := func() error {
 		note := dispatchrecord.UnreviewedNote + "; needs human triage"
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=%s\n", issueNum, note)
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %s", issueNum, note), stdout, stderr)
 	}
-	// An open PR does not vouch for the run: a Box that opens its draft PR
-	// in-box can still have crashed before its land pass, and the adopt path
-	// below would mark that PR ready and merge it (issue #5973). Only a success
-	// self-report carries a stale ready; a run without one is left to the
-	// adopt path's merge gate.
-	if res.Found && sit.SelfReportSuccess && sit.Unreviewed {
-		return declineUnreviewed()
-	}
-	if !res.Found {
-		// Attempted even with no self-report at all, since for the local
-		// push-only shape a bundle sitting in the outbox is evidence enough
-		// (issue #2378).
-		result := dispatch.Result{Resolved: resolved}
-		var rec recoverrecord.Record
+	var (
+		d   *dispatch.Dispatch
+		rec recoverrecord.Record
+	)
+	defer func() {
+		if d != nil {
+			d.Close()
+		}
+	}()
+	// begin runs only once Recover commits to landing, so its claim and Launch
+	// precede the landing and its Leave-before-Settle ordering below (#3522).
+	begin := func() (dispatch.Dispatcher, error) {
 		if queue {
-			// Unreviewed is silent too: settle already commented on the issue,
-			// and a skip line here would repeat on every daemon sweep.
-			if !sit.BundlePresent || !sit.SelfReportSuccess || sit.Unreviewed {
-				return errRecoverIneligible
-			}
 			bundleID, err := recoverrecord.BundleID(pwd, iss.number)
 			if err != nil {
-				return fmt.Errorf("recover: identify bundle for #%s: %w", issueNum, err)
+				return nil, fmt.Errorf("recover: identify bundle for #%s: %w", issueNum, err)
 			}
 			rec = recoverrecord.Load(pwd, iss.number, bundleID)
 			now := time.Now()
@@ -1463,7 +1452,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				if !rec.GaveUp {
 					fmt.Fprintf(stdout, "    #%s  status=skipped  note=backing off after %d failed attempts\n", issueNum, rec.Count)
 				}
-				return errRecoverIneligible
+				return nil, errRecoverIneligible
 			}
 			if rec.Exhausted(c.MaxRecoverAttempts) {
 				// Count reaches here unposted when the bound was lowered
@@ -1471,16 +1460,16 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				giveUpRecover(&rec, it, issueNum, stderr)
 				if rec.GaveUp {
 					if err := rec.Save(); err != nil {
-						return err
+						return nil, err
 					}
 				}
-				return errRecoverIneligible
+				return nil, errRecoverIneligible
 			}
 			// Re-checked here, not only at the first checkpoint: a stop sent
 			// during the eligibility reads above must win before the issue's
 			// label is touched.
 			if !gate.Allowed(iss.number) {
-				return waves.ErrSignalledStop
+				return nil, waves.ErrSignalledStop
 			}
 			// The list is a snapshot, and the claim below cannot refuse an
 			// issue a human moved to another non-in-progress state, so
@@ -1489,25 +1478,24 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			// window rather than closing it.
 			fresh, err := it.ListIssues(forge.Failed)
 			if err != nil {
-				return fmt.Errorf("recover: re-list %s issues for #%s: %w", c.FailedLabel, issueNum, err)
+				return nil, fmt.Errorf("recover: re-list %s issues for #%s: %w", c.FailedLabel, issueNum, err)
 			}
 			if !slices.ContainsFunc(fresh, func(f forge.Issue) bool { return f.Number == iss.number }) {
 				fmt.Fprintf(stdout, "    #%s  status=skipped  note=no longer wears %s\n", issueNum, c.FailedLabel)
-				return errRecoverIneligible
+				return nil, errRecoverIneligible
 			}
 			if err := it.TransitionState(iss.number, forge.Failed, forge.InProgress); err != nil {
 				if errors.Is(err, forge.ErrAlreadyClaimed) {
 					fmt.Fprintf(stdout, "    #%s  status=skipped  note=another actor already moved this issue off %s\n", issueNum, c.FailedLabel)
-					return errRecoverIneligible
+					return nil, errRecoverIneligible
 				}
-				return fmt.Errorf("recover: claim #%s: %w", issueNum, err)
+				return nil, fmt.Errorf("recover: claim #%s: %w", issueNum, err)
 			}
 			report.Box(dispatchkey.Issue(iss.number), report.PhaseRecover, "", "")
 		}
 		// New arms this issue's kill latch, so it must run under Gate's own
 		// lock and before the in-flight registration, or a concurrent abort
 		// could snapshot the in-flight set without it (#3522).
-		var d *dispatch.Dispatch
 		if !gate.Launch(iss.number, func() { d = f.New(iss.number, iss.title) }) {
 			if queue {
 				// A stop arrived after the claim above: put the label back so
@@ -1516,85 +1504,92 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// Reported even if the restore failed, as transitionState does.
 				recoverSettled(iss.number, v, note)
 				if restoreErr != nil {
-					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.FailedLabel, restoreErr)
+					return nil, fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.FailedLabel, restoreErr)
 				}
-				return waves.ErrSignalledStop
+				return nil, waves.ErrSignalledStop
 			}
 			// A signal arrived between Allowed and here. Recover never calls
 			// gate.Hold -- the agent-recover workflow holds this issue's claim
 			// and its PR may still be open -- so Launch's decline releases
 			// nothing, leaving the issue in-progress for a later recover.
-			return waves.ErrSignalledStop
+			return nil, waves.ErrSignalledStop
 		}
-		defer d.Close()
-		// Same reason as the SettleAdopted arm below: this Dispatch never calls
-		// Run, so it needs the lineage guarantee stated explicitly (#2575).
+		// This Dispatch never calls Run (it adopts an open PR or relays a
+		// bundle), so it does not get Run's quarantine-prior-run-logs
+		// guarantee for free; EnsureRunLineage establishes it once (issue
+		// #2575). The pass logs and manifest were already read above, before
+		// this Dispatch existed; that can only make the Unreviewed check
+		// decline wrongly, never land a PR.
 		if err := d.EnsureRunLineage(); err != nil {
 			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
-		const gen = 0 // recover settles at generation 0; the abort check below must match
-		_, relayed, settleErr := s.SettleRelayedBranch(d, iss.number, gen, sit, result)
-		// Leave must run before Settle's final abort re-check, or a signal
-		// landing the instant after settling finishes would still find this
-		// issue in-flight and reclaim it right back to Dispatchable (#3522).
-		gate.Leave(iss.number)
-		gate.Settle()
-		// Second checkpoint. An abort that reclaimed this issue (the watcher
-		// marked it in the registry) abandoned the settle and wins over its
-		// verdict, recoverFailed included, as run()'s signalledOr does for a
-		// wave (#3522). An abort that found the issue no longer in flight, or
-		// skipped it as already complete, reclaimed nothing: it is handled like
-		// a drain stop, the verdict recorded first.
-		if gate.Aborted() && terminated.Marked(iss.number, gen) {
-			return waves.ErrSignalledStop
-		}
-		if queue {
-			if err := finishQueueSettle(c, it, pwd, issueNum, rec, relayed, settleErr, stdout, stderr); err != nil {
-				return err
+		return d, nil
+	}
+	// Attempted even with no self-report at all, since for the local push-only
+	// shape a bundle sitting in the outbox is evidence enough (issue #2378).
+	in := settle.RecoverInput{Num: iss.number, Resolved: resolved, Passes: passes, Strict: queue, Begin: begin}
+	if res.Found {
+		in.OpenPR = res.URL
+	}
+	st, err := s.Recover(in)
+	if d == nil {
+		// Begin never produced a Dispatch: Recover declined, or Begin refused.
+		switch {
+		case st.Reason() == dispatchrecord.ReasonUnreviewed:
+			// Allowed, not Signalled: only it latches a stop that closed since
+			// the first checkpoint.
+			if !gate.Allowed(iss.number) {
+				return waves.ErrSignalledStop
 			}
-		}
-		if gate.Signalled() {
-			return waves.ErrSignalledStop
-		}
-		if queue || relayed {
-			return nil
-		}
-		if settleErr != nil {
-			note := settleErr.Error()
-			if errors.Is(settleErr, forge.ErrWorkflowPermissionDenied) {
-				note += "; " + forge.WorkflowPermissionRemedy(issueNum)
-			}
-			fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", issueNum, note)
-			return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, settleErr), stdout, stderr)
-		}
-		if sit.Unreviewed {
 			return declineUnreviewed()
+		case errors.Is(err, settle.ErrNothingToRecover):
+			// Queue mode skips silently: an ineligible issue would otherwise
+			// repeat a skip line on every daemon sweep.
+			return errRecoverIneligible
 		}
-		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
+		return err
 	}
-	var d *dispatch.Dispatch
-	if !gate.Launch(iss.number, func() { d = f.New(iss.number, iss.title) }) {
-		return waves.ErrSignalledStop
-	}
-	defer d.Close()
-	// This Dispatch adopts an already-open PR and never calls Run, so it does
-	// not get Run's quarantine-prior-run-logs guarantee for free.
-	// EnsureRunLineage establishes it once (issue #2575). The pass logs and
-	// manifest were already read above, before this Dispatch existed; that can
-	// only make the Unreviewed check decline wrongly, never land a PR.
-	if err := d.EnsureRunLineage(); err != nil {
-		fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
-	}
-	s.SettleAdopted(d, iss.number, 0, res.URL)
-	// Same reordering as the SettleRelayedBranch arm above, and for the same
-	// reason (#3522): Leave before Settle, not after.
+	// Leave must run before Settle's final abort re-check, or a signal
+	// landing the instant after settling finishes would still find this
+	// issue in-flight and reclaim it right back to Dispatchable (#3522).
 	gate.Leave(iss.number)
 	gate.Settle()
+	// Second checkpoint. An abort that reclaimed this issue (the watcher
+	// marked it in the registry) abandoned the settle and wins over its
+	// verdict, recoverFailed included, as run()'s signalledOr does for a
+	// wave (#3522). An abort that found the issue no longer in flight, or
+	// skipped it as already complete, reclaimed nothing: it is handled like
+	// a drain stop, the verdict recorded first.
+	if gate.Aborted() && terminated.Marked(iss.number, settle.RecoverGen) {
+		return waves.ErrSignalledStop
+	}
+	relayed := err == nil
+	// Nothing relayed is not a failure cause: parkQueueFailure records none.
+	relayErr := err
+	if errors.Is(err, settle.ErrNothingToRecover) {
+		relayErr = nil
+	}
+	if queue {
+		if err := finishQueueSettle(c, it, pwd, issueNum, rec, relayed, relayErr, stdout, stderr); err != nil {
+			return err
+		}
+	}
 	if gate.Signalled() {
 		return waves.ErrSignalledStop
 	}
-	return nil
+	if queue || relayed {
+		return nil
+	}
+	if relayErr != nil {
+		note := relayErr.Error()
+		if errors.Is(relayErr, forge.ErrWorkflowPermissionDenied) {
+			note += "; " + forge.WorkflowPermissionRemedy(issueNum)
+		}
+		fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", issueNum, note)
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, relayErr), stdout, stderr)
+	}
+	fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
+	return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
 }
 
 // recoverFailed is recoverIssue's single terminal-failure exit, so a recover

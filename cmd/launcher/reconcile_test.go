@@ -121,7 +121,7 @@ func TestRecoverByNumber_RetryMaxOneStillRetriesOnce(t *testing.T) {
 
 // The adopt-and-gate path always issues an idempotent MarkReady before
 // merging, never gated on draft detection, because a stranded PR may be draft
-// or not and the shared SettleAdopted path treats both identically (#2408).
+// or not and the shared adopt path treats both identically (#2408).
 func TestRecoverByNumber_AdoptedPRAlwaysCallsMarkReadyThenMergesAndCompletes(t *testing.T) {
 	c := reconcileConfig()
 	fc := forge.NewFake(dispatchLabels(c))
