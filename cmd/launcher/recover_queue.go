@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -31,7 +32,7 @@ var errRecoverIneligible = errors.New("recover: issue not eligible for queue rec
 // outage during the scan is returned as an error rather than read as "nothing
 // eligible", as is a failed restore or park that would leave the issue on
 // agent-in-progress.
-func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, stdout, stderr io.Writer) error {
+func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, terminated *terminate.Registry, stdout, stderr io.Writer) error {
 	if caps.PRForge == nil {
 		return errors.New("recover: queue mode needs a PR-shaped Code Forge (github or forgejo); a CODE_FORGE=local Recoverable issue stays manual, run `spindrift recover <n>` (ADR 0039)")
 	}
@@ -51,7 +52,7 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		if waves.SignalledStopAlready(stopCh, abortCh) {
 			return waves.ErrSignalledStop
 		}
-		err := recoverIssue(stopCh, abortCh, true, c, it, cf, caps, pwd, f, s, fi.Number, stdout, stderr)
+		err := recoverIssue(stopCh, abortCh, true, c, it, cf, caps, pwd, f, s, terminated, fi.Number, stdout, stderr)
 		if errors.Is(err, errRecoverIneligible) {
 			continue
 		}

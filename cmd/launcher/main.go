@@ -963,7 +963,7 @@ func localloopConfig(c config) localloop.Config {
 // The butler kind falls through to the merge gate too, configured via
 // settleConfig's Unclaimed (issue #4076): cmdButler drives it as the PatchGate
 // a landed patch PR settles through, fix-pass-free.
-func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) settle.Settler {
+func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities, terminated *terminate.Registry) settle.Settler {
 	switch c.kind().Settle {
 	case dispatchkind.SettleVerdict:
 		vl := researchVerdictLabels(c)
@@ -973,7 +973,9 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 		}
 		return settle.NewResearchSettle(it, vl, verdictRelayed, c.kind().FindingLabel)
 	}
-	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
+	cfg := settleConfig(c, lw, cf, caps)
+	cfg.Terminated = terminated
+	return settle.New(cfg, it, cf)
 }
 
 // wavesConfig builds the subset of config the wave engine (internal/waves)
@@ -1300,36 +1302,19 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 	}
 }
 
-// registryFor returns s's own termination registry, or a fresh one when s owns
-// none (settle.Fake, ResearchSettle). Getting one rather than installing one is
-// the point: RunContinuous, both waves.Dispatch call sites, and recoverIssue
-// each reach the same registry as their settler, so a Console recover gesture
-// cannot replace the session's registry and strand the operator's later marks
-// where no settle goroutine looks (#3522). An abort (second signal) and a
-// settle goroutine already polling CI therefore agree on an issue's fate:
-// observeAbort's Reclaim marks it here and the settler checks that same mark at
-// its next checkpoint, abandoning rather than driving the reclaimed issue to a
-// terminal state out from under the abort (#3521).
-func registryFor(s any) *terminate.Registry {
-	if r, ok := s.(settle.Registrar); ok {
-		return r.Registry()
-	}
-	return terminate.NewRegistry()
-}
-
 // recoverByNumber resolves the open PR for issueNum, draft or not, and drives
 // it through the adopt-and-gate path: the sole way an agent-in-progress issue
 // is adopted, gated on the operator's explicit agent-recover label rather than
 // any automatic sweep (#600). With no open PR it falls back to adopting a
 // relayed finished branch out of the outbox (issue #2225).
-func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string, stdout, stderr io.Writer) error {
+func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, terminated *terminate.Registry, issueNum string, stdout, stderr io.Writer) error {
 	// Installed once, ahead of it.Issue, exactly as run() places its own
 	// install ahead of discoverIssues (#3522): a signal that fired before this
 	// call must win over recoverFailed below, not just over an adopt already
 	// in flight.
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
-	return recoverIssue(stopCh, abortCh, false, c, it, cf, caps, pwd, f, s, issueNum, stdout, stderr)
+	return recoverIssue(stopCh, abortCh, false, c, it, cf, caps, pwd, f, s, terminated, issueNum, stdout, stderr)
 }
 
 // recoverIssue is recover's one path for a single issue, shared by
@@ -1338,8 +1323,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 // eligibility reads, still wins. Queue mode additionally refuses with
 // errRecoverIneligible when the issue is not landable, and takes the label
 // off agent-failed itself, since no workflow has claimed it first.
-func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string, stdout, stderr io.Writer) error {
-	terminated := registryFor(s)
+func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, terminated *terminate.Registry, issueNum string, stdout, stderr io.Writer) error {
 	reaper := f.AsReaper()
 	// Read before the gate is built, but a fetch failure is only acted on after
 	// the first checkpoint below, so a pending stop still wins over it.
@@ -1634,7 +1618,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 // drain/wave dispatch. bootstrap wires lc in production; tests use fakes.
 func run(lc *launchContext, stdout, stderr io.Writer) error {
 	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
-	caps := lc.capabilities
+	caps, terminated := lc.capabilities, lc.terminated
 	lp := reconcile.NewFSProbe(pwd, lc.runner)
 
 	fmt.Fprintln(stdout, repoBanner(c))
@@ -1648,7 +1632,7 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 	// committing to right now (#600). The only adopt path is the explicit
 	// `spindrift recover <n>`.
 	if resolveOrigin(c) == waves.OriginDiscovered && c.ContinuousDispatch {
-		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, runner.NixRealizer{}, lp, stdout, stderr)
+		return runContinuousDispatch(c, it, cf, pwd, f, s, terminated, runner.NixEvaluator{}, runner.NixRealizer{}, lp, stdout, stderr)
 	}
 
 	// Installed once, ahead of discoverIssues, mirroring
@@ -1690,7 +1674,6 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 	cfg.Stop = stopCh
 	cfg.Abort = abortCh
 	claimer := waves.NewLabelClaimer(it, c.Label, c.InProgressLabel)
-	terminated := registryFor(s)
 	tally := &settle.Tally{}
 	if err := waves.Dispatch(cfg, &waves.Session{Terminated: terminated, Tally: tally}, it, cf, pwd, f, s, in, claimer); err != nil {
 		return err
@@ -1743,7 +1726,7 @@ func continuousDispatchErr(err, firstQueryErr error) error {
 // closure's first call is the only query a continuous run makes before its
 // first dispatch (#1645). eval and realize are injected so tests substitute
 // fakes rather than shelling out to nix (#2679).
-func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe, stdout, stderr io.Writer) error {
+func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, terminated *terminate.Registry, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe, stdout, stderr io.Writer) error {
 	// Resolved fresh rather than threaded in (issue #2946): unlike run's
 	// lc.capabilities, this argument list carries no aggregate context.
 	forgeDesc, _ := backend.ByName(c.CodeForge)
@@ -1916,7 +1899,6 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		return waves.CountReady(cfg, it, cf, batch, claimed), nil
 	}
 	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.Label, c.InProgressLabel), pending, pwd)
-	terminated := registryFor(s)
 	tally := &settle.Tally{}
 	if err := waves.RunContinuous(cfg, &waves.Session{Terminated: terminated, Tally: tally}, it, cf, f, s, queue, fresh); err != nil {
 		// No reachable path leaves both err and firstQueryErr non-nil: #2780
@@ -2016,6 +1998,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 		CodeForge:       lc.codeForge,
 		Factory:         lc.factory,
 		Settle:          lc.settle,
+		Terminated:      lc.terminated,
 		ResearchTracker: researchTracker,
 		ResearchFactory: researchFactory,
 		ResearchSettle:  researchSettle,
@@ -2056,7 +2039,7 @@ func writeGithubOutput(key, value string) error {
 // runRecover runs recoverByNumber against the launch context's wiring; the
 // recover verb and console's recover action share it.
 func (lc *launchContext) runRecover(issueNum string, stdout, stderr io.Writer) error {
-	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum, stdout, stderr)
+	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), lc.terminated, issueNum, stdout, stderr)
 }
 
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open PR
@@ -2088,7 +2071,7 @@ func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) in
 // not failures, so neither prints to stderr.
 func cmdRecoverQueue(lc *launchContext, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	err := recoverQueueOne(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), stdout, stderr)
+	err := recoverQueueOne(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), lc.terminated, stdout, stderr)
 	code := exitCodeFor(err)
 	if code == int(exitcode.Failed) && err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -2114,7 +2097,7 @@ func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
 // issue, just as a queue drain can. Split out so it is testable without
 // bootstrap.
 func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool, stdout, stderr io.Writer) int {
-	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, isStdinTTY(), os.Stdin, stdout)
+	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, lc.terminated, nums, forceYes, isStdinTTY(), os.Stdin, stdout)
 	if err == nil {
 		return int(exitcode.Dispatched)
 	}

@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // sequencedEval varies its outPath across successive Eval calls against the
@@ -87,7 +88,7 @@ func TestRunContinuousDispatch_StoreClosureImageOnlyStale_HotSwapsAndKeepsRefill
 	realizeFake := freshness.NewRealizerFake()
 
 	var stdout bytes.Buffer
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, &stdout, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, &stdout, io.Discard)
 	if err != nil {
 		t.Fatalf("runContinuousDispatch = %v, want nil -- a bwrap image-only-stale verdict must hot-swap and keep refilling, never drain-exit", err)
 	}
@@ -168,7 +169,7 @@ func TestRunContinuousDispatch_StoreClosureBothStale_DrainsAsLauncherStale(t *te
 	}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a both-stale bwrap verdict must drain like the pre-#2682 path, not swap", got)
 	}
@@ -216,7 +217,7 @@ func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-img"}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the OCI path must keep draining, never swap", got)
 	}
@@ -262,7 +263,7 @@ func TestRunContinuousDispatch_BwrapRunnerOCIArtifact_StillDrains(t *testing.T) 
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the runner family must not enable the swap", got)
 	}
@@ -319,7 +320,7 @@ func TestRunContinuousDispatch_StoreClosureRealizeFails_FallsBackToDrain(t *test
 	realizeFake.Err = errors.New("boom: nix build failed")
 
 	var stderr bytes.Buffer
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, &stderr)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, io.Discard, &stderr)
 	if want := "==> store-closure hot-swap: realize failed, draining instead"; !strings.Contains(stderr.String(), want) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
 	}
@@ -384,7 +385,7 @@ func TestRunContinuousDispatch_StoreClosureNonConvergingSwap_HaltsHostTainted(t 
 	}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, eval, realizeFake, lp, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), eval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 5 {
 		t.Fatalf("exitCodeFor(err) = %d, want 5 (errImageHostTainted) -- an in-process bwrap swap that keeps re-diverging at the same rev must halt via the shared guard.Classify mechanism", got)
 	}
@@ -472,7 +473,7 @@ func runNixInBoxSwapTo(t *testing.T, nixInBox bool, lookup func(string) (runner.
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runContinuousDispatch(c, it, it, dir, f, settle.NewFake(), staleEval, freshness.NewRealizerFake(), fakeLiveness{}, &stdout, &stderr)
+	err := runContinuousDispatch(c, it, it, dir, f, settle.NewFake(), terminate.NewRegistry(), staleEval, freshness.NewRealizerFake(), fakeLiveness{}, &stdout, &stderr)
 	return nixInBoxSwapResult{err: err, f: f, fr: fr, stdout: stdout.String(), stderr: stderr.String(), stale: staleOutPath, dir: dir}
 }
 
@@ -669,7 +670,7 @@ func TestRunContinuousDispatch_StoreClosureLauncherUnconfigured_FallsBackToDrain
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- an unconfigured launcher dimension must never hot-swap, since Probe can't tell whether the launcher itself has moved", got)
 	}
@@ -721,7 +722,7 @@ func TestRunContinuousDispatch_StoreClosureEmptyTipTag_FallsBackToDrain(t *testi
 	}}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, terminate.NewRegistry(), staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- an empty realized tip tag must fall back to the ordinary drain, not bind a generation with no store path", got)
 	}
@@ -751,7 +752,7 @@ func TestRunContinuousDispatch_UnknownBoxArtifactIsAnError(t *testing.T) {
 	fr := runner.NewFake()
 	f := testFactory(t, dir, fr)
 
-	err := runContinuousDispatch(c, it, it, dir, f, settle.NewFake(), &freshness.Fake{}, freshness.NewRealizerFake(), fakeLiveness{}, io.Discard, io.Discard)
+	err := runContinuousDispatch(c, it, it, dir, f, settle.NewFake(), terminate.NewRegistry(), &freshness.Fake{}, freshness.NewRealizerFake(), fakeLiveness{}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "bogus") {
 		t.Fatalf("runContinuousDispatch err = %v, want an error naming the unknown artifact", err)
 	}

@@ -4176,7 +4176,7 @@ func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
 
 	lw := localloop.Wire(localloopConfig(c), fc)
 	caps := forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{})
-	s := newSettle(c, fc, lw, fc, caps)
+	s := newSettle(c, fc, lw, fc, caps, nil)
 	pg, ok := s.(butler.PatchGate)
 	if !ok {
 		t.Fatalf("newSettle(butler kind) = %T, does not implement butler.PatchGate", s)
@@ -4266,7 +4266,7 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 	ghLike := fc.AsNoLandingRecorder()
 
-	s := newSettle(c, ghLike, nil, nil, forge.Capabilities{})
+	s := newSettle(c, ghLike, nil, nil, forge.Capabilities{}, nil)
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
@@ -4326,7 +4326,7 @@ func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
 			fc.PostIssueURL = "https://example.com/issues/501"
 			fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 
-			s := newSettle(c, fc.AsIssueFiler(), nil, nil, forge.Capabilities{})
+			s := newSettle(c, fc.AsIssueFiler(), nil, nil, forge.Capabilities{}, nil)
 			result := dispatch.Result{
 				Resolved: outcome.Resolved{
 					Found:   true,
@@ -4362,7 +4362,7 @@ func TestNewSettle_ResearchJiraFilerOff_MissingCommentFails(t *testing.T) {
 	fc.VerdictLabels = forge.ResearchVerdictLabels()
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 
-	s := newSettle(c, fc.AsNoLandingRecorder(), nil, nil, forge.Capabilities{})
+	s := newSettle(c, fc.AsNoLandingRecorder(), nil, nil, forge.Capabilities{}, nil)
 	s.Settle(dispatch.NewFake(), "42", 0, dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,

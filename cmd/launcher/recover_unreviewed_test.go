@@ -63,13 +63,15 @@ func TestCmdRecover_UnreviewedReadyReportsSkipNotNoOpenPR(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	x.seedManifest(t, "42", passmanifest.Entry{Pass: 1, Kind: "implement", OutcomeFound: true})
+	st := testNewSettle(x.c, x.fc, testWired(x.fc), x.cf)
 	lc := &launchContext{
 		config:       x.c,
 		pwd:          x.dir,
 		issueTracker: x.fc,
 		codeForge:    x.cf,
 		factory:      testFactory(t, x.dir, nil),
-		settle:       testNewSettle(x.c, x.fc, testWired(x.fc), x.cf),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
 
@@ -90,7 +92,8 @@ func (x *queueRecoverFixture) openPRRecover(t *testing.T) (string, error) {
 	t.Helper()
 	x.fc.SetPR(x.fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
 	var out strings.Builder
-	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.fc, testWired(x.fc), x.fc), "42", &out, io.Discard)
+	ws := newWorkSettle(x.c, x.fc, testWired(x.fc), x.fc)
+	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 	return out.String(), err
 }
 
@@ -126,13 +129,15 @@ func TestCmdRecover_NoReportStoppedBeforeLandIsSkipped(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "")
 	x.seedManifest(t, "42", passmanifest.Entry{Pass: 1, Kind: "implement"})
+	st := testNewSettle(x.c, x.fc, testWired(x.fc), x.cf)
 	lc := &launchContext{
 		config:       x.c,
 		pwd:          x.dir,
 		issueTracker: x.fc,
 		codeForge:    x.cf,
 		factory:      testFactory(t, x.dir, nil),
-		settle:       testNewSettle(x.c, x.fc, testWired(x.fc), x.cf),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
 
@@ -187,7 +192,8 @@ func TestCmdRecover_NoReportStoppedBeforeLandNoOpenPRNamesUnreviewed(t *testing.
 			x.seedManifest(t, "42", tc.entries...)
 
 			var out strings.Builder
-			err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf), "42", &out, io.Discard)
+			ws := newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf)
+			err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 
 			if err == nil || !strings.Contains(err.Error(), dispatchrecord.UnreviewedNote) {
 				t.Errorf("err = %v, want the unreviewed decline", err)

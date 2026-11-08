@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // withStubbedSignals overrides the installStopSignal seam so
@@ -84,6 +85,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverEmptyQueue(t *test
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -117,6 +119,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverAllBlocked(t *test
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -146,6 +149,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledAbort_ExitsSameCodeAsStop(t *te
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {

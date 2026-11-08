@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 func TestWriteGithubOutput_AppendsKeyValueLine(t *testing.T) {
@@ -70,13 +71,15 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 	// No PR is registered for the branch, so recoverByNumber returns an error.
 	dir := tempLogDir(t)
 	called := false
+	st := testNewSettle(c, fc, testWired(fc), fc)
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       testNewSettle(c, fc, testWired(fc), fc),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() { called = true },
 	}
 
@@ -106,13 +109,15 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 	// No PR is registered for the branch, so recoverByNumber returns an error.
 	dir := tempLogDir(t)
+	st := testNewSettle(c, fc, testWired(fc), fc)
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       testNewSettle(c, fc, testWired(fc), fc),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
 
@@ -151,13 +156,15 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 	fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 
 	dir := tempLogDir(t)
+	st := testNewSettle(c, fc, testWired(fc), fc)
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       testNewSettle(c, fc, testWired(fc), fc),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
 
@@ -187,6 +194,7 @@ func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { called = true },
 	}
 
@@ -213,6 +221,7 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { called = true },
 	}
 
@@ -244,9 +253,10 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 		// runner.NewFake(), not nil like the sibling tests: Init's
 		// orphanDetectCmd calls Factory.OrphanedIssues, which calls
 		// f.runner.ListRunning on startup and panics on a nil runner.
-		factory: testFactory(t, dir, runner.NewFake()),
-		settle:  settle.NewFake(),
-		cleanup: func() { called = true },
+		factory:    testFactory(t, dir, runner.NewFake()),
+		settle:     settle.NewFake(),
+		terminated: terminate.NewRegistry(),
+		cleanup:    func() { called = true },
 	}
 
 	stdin := strings.NewReader("q")
@@ -285,6 +295,7 @@ func TestCmdConsole_HoldsStopSignalRegistrationThroughCleanup(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		// lc.cleanup is the last teardown to run before stopCleanup, so a hold
 		// seen here also covers launch.Wait and researchFactory.Cleanup.
 		cleanup: func() { heldAtCleanup = installs == 1 && releases == 0 },
@@ -319,6 +330,7 @@ func TestCmdConsole_SetsHeartbeatOutToDiscard(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		cleanup:      func() {},
 	}
 

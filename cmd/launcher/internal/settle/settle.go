@@ -15,6 +15,14 @@ import (
 
 // Config carries the subset of launcher config a Settle needs.
 type Config struct {
+	// Terminated is the registry every settle checkpoint reads. Every caller
+	// that marks a termination -- the Console's Terminate, the shutdown gate's
+	// abort -- must share it: a mark written into a registry the settler does
+	// not read lets an already-reclaimed issue settle on to agent-complete,
+	// merging its PR out from under the reclaim (issues #649, #743, #3522).
+	// New mints a fresh one when nil.
+	Terminated *terminate.Registry
+
 	// MergeMode is "immediate" (merge the PR), "manual" (leave it open), or
 	// "auto" (enqueue the forge's native auto-merge).
 	MergeMode string
@@ -187,20 +195,8 @@ type Settle struct {
 	reportKey map[string]dispatchkey.Key
 }
 
-// Registrar is the "settler that owns a termination registry" seam: a caller
-// holding a Settler or WorkSettler asks for the registry it must mark through
-// without asserting a concrete type. Settler and WorkSettler stay narrower on
-// purpose, since settle.Fake and ResearchSettle own no registry.
-type Registrar interface {
-	Registry() *terminate.Registry
-}
-
-// Registry returns this Settle's own termination registry. Every caller that
-// marks a termination -- the Console's Terminate, the shutdown gate's abort --
-// and every settle checkpoint that reads one must reach this registry and no
-// other: a mark written into a registry the settler does not read lets an
-// already-reclaimed issue settle on to agent-complete anyway, merging its PR
-// out from under the reclaim (issues #649, #743, #3522).
+// Registry returns the termination registry this Settle's checkpoints read:
+// Config.Terminated, or the one New minted.
 func (s *Settle) Registry() *terminate.Registry { return s.term }
 
 // terminated reports whether num was marked terminated at generation gen
@@ -211,7 +207,6 @@ func (s *Settle) terminated(num string, gen uint64) bool {
 
 var _ Settler = (*Settle)(nil)
 var _ WorkSettler = (*Settle)(nil)
-var _ Registrar = (*Settle)(nil)
 
 // New constructs a Settle, reading pr and landing from cfg.Capabilities rather
 // than re-deriving them here (issue #2945).
@@ -234,7 +229,11 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
+	term := cfg.Terminated
+	if term == nil {
+		term = terminate.NewRegistry()
+	}
+	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: term}
 	if pr != nil {
 		s.lander = prLander{s}
 	} else {

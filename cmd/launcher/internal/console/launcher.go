@@ -52,6 +52,12 @@ type Launcher struct {
 	// recoverByNumber (issue #651). Wired by cmdConsole in main.go, since
 	// console cannot import the main package. Nil skips orphan detection.
 	RecoverFn func(issueNum string) error
+	// Terminated is the registry Terminate marks and RunContinuous / Settle
+	// check at their loop checkpoints (ADR 0024, issue #649). It must be the
+	// work settler's own, or a mark never reaches the settle goroutine (issue
+	// #3522). A nil value is only safe in tests: when nil, registry() mints
+	// one on first use, which no production settler shares.
+	Terminated *terminate.Registry
 
 	mu        sync.Mutex
 	launching bool
@@ -93,10 +99,6 @@ type Launcher struct {
 	// pollInterval overrides Run's default poll cadence; only same-package tests
 	// set it.
 	pollInterval time.Duration
-	// terminated is the shared registry Terminate marks and RunContinuous /
-	// Settle check at their loop checkpoints (ADR 0024, issue #649). Lazily
-	// resolved by registry().
-	terminated *terminate.Registry
 	// terminatingNums tracks issue numbers with a TerminateAsync goroutine still
 	// in flight, so a second confirm cannot fire a duplicate Terminate (issue
 	// #745): the queue pick stays PickRunning, and isLive keeps reporting it
@@ -278,24 +280,18 @@ func (l *Launcher) Resize(delta int) {
 	l.limiter().ResizeDelta(delta)
 }
 
-// registry returns the registry Terminate marks: the settler's own, so no
-// wiring order can leave the marker and the settle checkpoints reading
-// different registries (issue #3522). A settle.Fake owns none -- it has no loop
-// to check -- so the fallback mints one. Termination keys on a per-number
+// registry returns the registry Terminate marks: Terminated, minted here when
+// nil (a settle.Fake has no loop to check). Termination keys on a per-number
 // generation, not a bool (issue #743): a re-pick's Begin must not clear a mark
 // an in-flight settle from the terminated incarnation has yet to see, or its
 // stale setState lands on the re-pick's row.
 func (l *Launcher) registry() *terminate.Registry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.terminated == nil {
-		if r, ok := l.Settle.(settle.Registrar); ok {
-			l.terminated = r.Registry()
-		} else {
-			l.terminated = terminate.NewRegistry()
-		}
+	if l.Terminated == nil {
+		l.Terminated = terminate.NewRegistry()
 	}
-	return l.terminated
+	return l.Terminated
 }
 
 // Terminate ends num's live Dispatch by hand (ADR 0024, issue #649), delegating

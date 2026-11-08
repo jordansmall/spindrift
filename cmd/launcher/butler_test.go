@@ -26,6 +26,7 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/tuning"
 )
 
@@ -971,8 +972,9 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		// This test never runs the patch rung (no PatchForge is wired), so
 		// the Fake's SettlePatch is never called; it only needs to satisfy
 		// butler.PatchGate for lc.patchGate() (issue #4076).
-		settle:  settle.NewFake(),
-		cleanup: func() {},
+		settle:     settle.NewFake(),
+		terminated: terminate.NewRegistry(),
+		cleanup:    func() {},
 	}
 
 	code := cmdButler(lc, "bugs", io.Discard)
@@ -1108,6 +1110,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 		codeForge:    cf,
 		capabilities: caps,
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		cleanup:      func() {},
 	}
 

@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -39,6 +40,7 @@ func TestRunExitCode_SignalledStop_NoBoxLaunched(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -66,6 +68,7 @@ func TestRunExitCode_SignalledStop_WinsOverEmptyQueue(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -97,6 +100,7 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -127,6 +131,7 @@ func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var buf bytes.Buffer
@@ -157,6 +162,7 @@ func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -180,6 +186,7 @@ func TestRunExitCode_AbortOnly_WinsOverEmptyQueue(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -208,6 +215,7 @@ func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -241,6 +249,7 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var stderr bytes.Buffer
@@ -272,6 +281,7 @@ func TestSelectiveDispatchExitCode_SignalledStop_BeatsNonTTYUnlabeledAbort(t *te
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var stderr bytes.Buffer
@@ -303,6 +313,7 @@ func TestSelectiveDispatchExitCode_SignalledAbort(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := selectiveDispatchExitCode(lc, []string{"1"}, true, io.Discard, io.Discard); got != int(exitcode.SignalledStop) {
@@ -328,6 +339,7 @@ func TestCmdDispatch_SignalledStop_StillRunsCleanup(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { cleaned = true },
 	}
 
@@ -357,6 +369,7 @@ func TestCmdDispatchSelective_SignalledStop_StillRunsCleanup(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { cleaned = true },
 	}
 
@@ -444,7 +457,7 @@ func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testi
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"1"}, true, true, strings.NewReader(""), io.Discard)
+		resultCh <- selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, terminate.NewRegistry(), []string{"1"}, true, true, strings.NewReader(""), io.Discard)
 	}()
 
 	waitOn(t, started, "issue #1 was never dispatched")
