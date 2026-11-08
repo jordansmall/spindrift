@@ -17,7 +17,7 @@ var removedKnobs = []struct{ env, reason string }{
 
 // removedKnobsCheck fails when any removed knob is still set, in the
 // environment (set-but-empty counts) or a loaded input document's settings.
-// It reads both directly rather than through getenvSchema: the knob is no
+// It reads both directly rather than through resolvedKnob: the knob is no
 // longer in the schema, and a silent default would hide the stale setting.
 func removedKnobsCheck() doctor.Check {
 	return doctor.Check{

@@ -359,9 +359,9 @@ type agentPresence struct {
 // all three (issue #2527, #2533): the gates differ in override semantics.
 func resolveAgentPresenceSignals(driverName string) agentPresence {
 	var filerEnabled, workerProvisioned, scoutProvisioned bool
-	filerModel := getenvSchema("FILER_MODEL")
-	workerModel := getenvSchema("WORKER_MODEL")
-	scoutModel := getenvSchema("SCOUT_MODEL")
+	filerModel := resolvedKnob("FILER_MODEL")
+	workerModel := resolvedKnob("WORKER_MODEL")
+	scoutModel := resolvedKnob("SCOUT_MODEL")
 
 	filerEnabled = filerModel != ""
 
@@ -750,7 +750,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
 		ResolveEnv: boxTokenResolver(hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
-		// The explicit flag only, not getenvSchema (issue #3171): these two carry only
+		// The explicit flag only, not resolvedKnob (issue #3171): these two carry only
 		// what the operator set at dispatch time. The document/schema-default
 		// chain must stay out, since those values already reached the baked
 		// roster at eval time and re-forwarding them would override it.

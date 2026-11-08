@@ -108,7 +108,7 @@ func TestParseNonnegBudgetTokens(t *testing.T) {
 }
 
 // The -max-budget-usd counterpart, which the host launcher's
-// floatNonnegSchema shares. Unlike the tokens case, a fractional value
+// inputdoc NonnegFloat shares. Unlike the tokens case, a fractional value
 // parses normally here.
 func TestParseNonnegBudgetUSD(t *testing.T) {
 	tests := []struct {

@@ -61,10 +61,10 @@ var gitConfigLookup = func(key string) string {
 // loadedDoc until #6627 threads both through.
 var launcherInput inputdoc.Resolved
 
-// getenvSchema reads a schema knob through the flag > document > schema
-// default tiers of launcherInput. Despite the name nothing reads the process
-// environment: a knob env var is rejected at startup (ADR 0020).
-func getenvSchema(key string) string { return launcherInput.Source().String(key) }
+// resolvedKnob reads a schema knob through the flag > document > schema
+// default tiers of launcherInput; a knob env var is rejected at startup
+// (ADR 0020).
+func resolvedKnob(key string) string { return launcherInput.Source().String(key) }
 
 // resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: a schema knob
 // through launcherInput (flag, then document, then schema default, because the
@@ -77,7 +77,7 @@ func getenvSchema(key string) string { return launcherInput.Source().String(key)
 // Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
 func resolveBoxEnvVar(name string) string {
 	if _, ok := inputdoc.SchemaFlag(name); ok {
-		return getenvSchema(name)
+		return resolvedKnob(name)
 	}
 	if v := os.Getenv(name); v != "" {
 		return v

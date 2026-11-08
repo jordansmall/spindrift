@@ -82,8 +82,8 @@ func parseIssuePositionals(args []string) issueArgs {
 }
 
 // extractInputFlag pulls "--input <path>", the Launcher input document's
-// store path, out of args (ADR 0020). It is not a schema knob, so it bypasses
-// inputdoc.SchemaFlags and os.Setenv. An invocation with no document leaves args alone.
+// store path, out of args (ADR 0020). It is not a schema knob, so it never reaches
+// inputdoc.Resolve's flag tier. An invocation with no document leaves args alone.
 func extractInputFlag(args []string) (path string, remaining []string, err error) {
 	for i := 0; i < len(args); i++ {
 		if args[i] != "--input" {
@@ -416,7 +416,7 @@ var globalSecretCmdTemplate string
 // applySecretCmdFallback resolves globalSecretCmdTemplate, substituting
 // {name} with the kebab-case env name, for every secret knob this run needs
 // that still has no value. mainRun must call it after inputdoc.Resolve, not
-// from parseFlags: secretRequiredThisRun reads the knobs through getenvSchema
+// from parseFlags: secretRequiredThisRun reads the knobs through resolvedKnob
 // (launcherInput), which is unresolved while parseFlags runs (ADR 0020).
 func applySecretCmdFallback() error {
 	if globalSecretCmdTemplate == "" {
@@ -465,12 +465,12 @@ func applySecretCmdFallback() error {
 
 // activeCredentialRules is the active Driver's credential rules and every
 // visible model tier. DRIVER and the tiers go through resolveDriver/
-// getenvSchema so a document- or flake-only value is seen (ADR 0020). An
+// resolvedKnob so a document- or flake-only value is seen (ADR 0020). An
 // unrecognised Driver has no rules; main emits the warning.
 func activeCredentialRules() ([]driver.CredentialRule, []string) {
 	name, _ := resolveDriver()
 	rules, _ := driver.CredentialRules(name)
-	return rules, modelTiers(getenvSchema)
+	return rules, modelTiers(resolvedKnob)
 }
 
 // modelTiers is every model tier a run can use, read through lookup by env
@@ -499,7 +499,7 @@ func credentialRuleFor(rules []driver.CredentialRule, env string) (driver.Creden
 // variables are tried whenever none has a value, even when no visible tier
 // applies the rule (a tier baked into the image can select github-copilot
 // invisibly to the launcher); applySecretCmdFallback tolerates that miss.
-// Reads CODE_FORGE and ISSUE_TRACKER through getenvSchema, not os.Getenv, so a
+// Reads CODE_FORGE and ISSUE_TRACKER through resolvedKnob, not os.Getenv, so a
 // value set only in the Consumer flake is seen (ADR 0020).
 func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 	// Any one of a rule's variables satisfies validate(), so try the template
@@ -507,7 +507,7 @@ func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
 	if rule, ok := credentialRuleFor(rules, env); ok {
 		return !rule.Satisfied(os.Getenv)
 	}
-	codeForge, issueTracker := getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER")
+	codeForge, issueTracker := resolvedKnob("CODE_FORGE"), resolvedKnob("ISSUE_TRACKER")
 	forgeRow, _ := backendkit.ByName(codeForge)
 	trackerRow, _ := backendkit.ByName(issueTracker)
 	switch env {

@@ -172,8 +172,8 @@ func TestEnvFromEnviron(t *testing.T) {
 
 // TestEnvFromEnviron_FixPassMalformed covers FixPass's degrade-on-error rule:
 // a non-numeric FIX_PASS must degrade to 0, not propagate a strconv error or
-// panic. It mirrors cmd/launcher/main.go's atoiSchema, which the generated
-// file cannot call because that helper is private to package main.
+// panic. It mirrors inputdoc's knobResolver.PositiveInt, which the generated
+// file cannot call because that method is on an unexported type.
 func TestEnvFromEnviron_FixPassMalformed(t *testing.T) {
 	t.Setenv("FIX_PASS", "not-a-number")
 

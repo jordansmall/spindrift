@@ -33,16 +33,16 @@ type FlagEntry struct {
 	BoxHostDerived bool
 	// HostGitConfigKey is the host git config key (git config --get) a
 	// BoxHostDerived knob falls back to; read by cmd/launcher's
-	// hostGitConfigField.
+	// launcherKnobSource.HostGitConfig.
 	HostGitConfigKey string
 }
 
 // EmptyIsSetting is the one rule for whether an empty env value is a real
 // setting rather than "unset" (which falls back to the default): true iff the
-// knob is bool kind (cmd/launcher's parseFlags encodes a bool's explicit off
-// as set-but-empty) or EmptyDisables. cmd/launcher reads env through its
-// ambientSetting and Document.Setting applies the same rule to a document
-// value; never re-derive this.
+// knob is bool kind (scanSchemaFlags encodes a bool's explicit off as
+// set-but-empty) or EmptyDisables. The knob resolver applies it to explicit
+// flags, AmbientKnobError to env, and Document.Setting to a document value;
+// never re-derive this.
 func (e FlagEntry) EmptyIsSetting() bool {
 	return e.Kind == "bool" || e.EmptyDisables
 }

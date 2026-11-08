@@ -122,8 +122,8 @@ var BoxEnvVarNames = []string{
 }
 
 // boxenvAtoi parses an int-kind Box env var, degrading to 0 on empty or
-// malformed input. Unlike cmd/launcher/main.go's atoiSchema, which falls
-// back to a per-key schema default (intSchemaDefault), these 46 rows are
+// malformed input. Unlike inputdoc's knobResolver.PositiveInt, which falls
+// back to a per-key schema default, these 46 rows are
 // deliberately outside lib/env-schema.nix (see
 // lib/promptassembly-boxenv.nix's header) and so have no schema default
 // to degrade to.
