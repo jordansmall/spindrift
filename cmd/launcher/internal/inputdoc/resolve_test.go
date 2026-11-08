@@ -217,7 +217,7 @@ func TestResolve_BoxEnvFollowsTheSameTiers(t *testing.T) {
 		"BRANCH_PREFIX": "p/",
 		"MEMORY_LIMIT":  "5g",
 	} {
-		if got := r.BoxEnv(name); got != want {
+		if got := BoxEnv(r.Source(), name); got != want {
 			t.Errorf("BoxEnv(%s) = %q, want %q", name, got, want)
 		}
 	}
@@ -237,29 +237,59 @@ func TestResolve_AmbientKnobIsConfigInvalid(t *testing.T) {
 	}
 }
 
-func TestResolve_SecretsAndPlumbingPassThrough(t *testing.T) {
+func TestResolve_SecretsPassThrough(t *testing.T) {
 	env := map[string]string{"GH_TOKEN": "tok", "PATH": "/bin", "DRIVER": "claude"}
 	r := mustResolve(t, nil, nil, env)
 	if r.Knobs.GhToken != "tok" {
 		t.Errorf("Knobs.GhToken = %q, want tok", r.Knobs.GhToken)
 	}
 	for name, want := range env {
-		if got := r.BoxEnv(name); got != want {
+		if got := BoxEnv(r.Source(), name); got != want {
 			t.Errorf("BoxEnv(%s) = %q, want %q", name, got, want)
 		}
 	}
-	if got := r.BoxEnv("UNSET_PLUMBING"); got != "" {
+	if got := BoxEnv(r.Source(), "UNSET_SECRET"); got != "" {
 		t.Errorf("BoxEnv(unset) = %q, want empty", got)
 	}
 }
 
-func TestResolve_BoxEnvNonKnobFallsBackToDocument(t *testing.T) {
+func TestBoxEnv_NonKnobNameIgnoresDocument(t *testing.T) {
 	doc := docWith(map[string]string{"EXTRA": "doc", "SHADOWED": "doc"})
-	r := mustResolve(t, nil, doc, map[string]string{"EXTRA": "", "SHADOWED": "env"})
-	for name, want := range map[string]string{"EXTRA": "doc", "SHADOWED": "env"} {
-		if got := r.BoxEnv(name); got != want {
+	r := mustResolve(t, nil, doc, map[string]string{"SHADOWED": "env"})
+	for name, want := range map[string]string{"EXTRA": "", "SHADOWED": "env"} {
+		if got := BoxEnv(r.Source(), name); got != want {
 			t.Errorf("BoxEnv(%s) = %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestBoxEnv_SecretAnswersTheSourceLive(t *testing.T) {
+	r := mustResolve(t, nil, nil, nil)
+	src := liveSecretSource{KnobSource: r.Source(), secrets: map[string]string{"GH_TOKEN": "late"}}
+	if got := BoxEnv(src, "GH_TOKEN"); got != "late" {
+		t.Errorf("BoxEnv(GH_TOKEN) = %q, want late", got)
+	}
+}
+
+type liveSecretSource struct {
+	KnobSource
+	secrets map[string]string
+}
+
+func (s liveSecretSource) Secret(key string) string { return s.secrets[key] }
+
+func TestResolved_Setting(t *testing.T) {
+	r := mustResolve(t, nil, docWith(map[string]string{"A": "x", "EMPTY": ""}), nil)
+	for _, tc := range []struct {
+		key, want string
+		ok        bool
+	}{{"A", "x", true}, {"EMPTY", "", true}, {"MISSING", "", false}} {
+		if got, ok := r.Setting(tc.key); got != tc.want || ok != tc.ok {
+			t.Errorf("Setting(%s) = %q, %v; want %q, %v", tc.key, got, ok, tc.want, tc.ok)
+		}
+	}
+	if got, ok := mustResolve(t, nil, nil, nil).Setting("A"); got != "" || ok {
+		t.Errorf("Setting on nil document = %q, %v; want empty, false", got, ok)
 	}
 }
 
