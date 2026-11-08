@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -101,7 +102,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.tryMarkRecoverable(d, num, result) {
 			return
 		}
-		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
+		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "!! " + o.Note})
 		s.transitionState(num, ForReason(dispatchrecord.ReasonBlocked), o.Note)
 		// A read-only Box never pushes or opens a PR in-box (issue #1933), so a
 		// bundle it wrote to the outbox and a PR-intent line it printed would
@@ -165,7 +166,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				s.verifyMerged(num, pr)
 			}
 		case landingFailed:
-			fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
 		case landingAbandoned:
 			// See landingAbandoned: another actor owns the issue, so a usage
 			// comment here would be noise.
@@ -183,7 +184,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			pr, ok, err := s.pr.PRForBranch(branch)
 			if err != nil || !ok {
 				const reason = "no PR found on branch to verify merge"
-				fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
+				s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
 				s.transitionState(num, ForReason(dispatchrecord.ReasonNoPR), reason)
 			} else {
 				s.verifyMerged(num, pr)
@@ -192,7 +193,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			// A push-only Code Forge has no PR state to verify. Print the
 			// host-derived branch, never the Agent-controlled o.Landing, so
 			// landing= carries the same provenance across both arms.
-			fmt.Printf("    #%s  landing=%s  status=%s\n", num, branch, o.Status)
+			s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: Status(o.Status)})
 		}
 		s.postUsageComment(num, d)
 	case outcome.StatusAmbiguous:
@@ -207,7 +208,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post ambiguous-spec comment: %v\n", num, err)
 			}
 		}
-		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "note=" + o.Note})
 		s.transitionState(num, ForReason(dispatchrecord.ReasonAmbiguous), o.Note)
 		s.postUsageComment(num, d)
 	case outcome.StatusAlreadyResolved:
@@ -221,12 +222,12 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		if err := s.it.Comment(num, msg); err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved comment: %v\n", num, err)
 		}
-		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "note=" + o.Note})
 		s.transitionState(num, ForReason(dispatchrecord.ReasonAlreadyResolved), o.Note)
 		s.closeResolvedIssue(num)
 		s.postUsageComment(num, d)
 	default:
-		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
+		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status)})
 		// Never transitions, so Settled never sees this Dispatch. Reason stays
 		// empty: o.Status is Box-controlled and the banner prints only
 		// host-derived values.
@@ -287,11 +288,11 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 
 	res, prErr := forge.ResolveOpenPR(s.cf, num)
 	if prErr != nil {
-		fmt.Printf("    #%s  status=missing%s  note=PR lookup failed: %v\n", num, clsNote, prErr)
+		s.cfg.Progress.Step(Step{Key: num, Status: StatusMissing, Detail: strings.TrimPrefix(clsNote+fmt.Sprintf("  note=PR lookup failed: %v", prErr), "  ")})
 		return
 	}
 	if !res.Found {
-		fmt.Printf("    #%s  status=missing%s  note=%s\n", num, clsNote, missingNote)
+		s.cfg.Progress.Step(Step{Key: num, Status: StatusMissing, Detail: strings.TrimPrefix(clsNote+"  note="+missingNote, "  ")})
 		// Same detail the log line above prints, folded into one note (issue
 		// #3627) so a settled record is diagnosable on disk without the
 		// daemon's terminal.
@@ -304,7 +305,7 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 	// 0012 reserves agent-failed for "never produced a green PR". A non-draft
 	// PR only got that way via this launcher's own MarkReady at green (issue
 	// #1651).
-	fmt.Printf("    #%s  landing=%s  status=blocked  note=no outcome line; PR on %s left for manual adopt\n", num, res.URL, branch)
+	s.cfg.Progress.Step(Step{Key: num, Landing: res.URL, Status: StatusBlocked, Detail: fmt.Sprintf("note=no outcome line; PR on %s left for manual adopt", branch)})
 }
 
 // Transition moves num from one dispatch state to v's state and is the one
@@ -610,7 +611,7 @@ func (s *Settle) unreviewedLanding(num string, result dispatch.Result) string {
 // signal-killed run stopped before land (issue #5984). Nothing is landed and
 // selfHeal never runs.
 func (s *Settle) failUnreviewed(d dispatch.Dispatcher, num, landing string) {
-	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, landing, dispatchrecord.UnreviewedNote)
+	s.cfg.Progress.Step(Step{Key: num, Landing: landing, Status: StatusFailed, Detail: "!! " + dispatchrecord.UnreviewedNote})
 	s.transitionState(num, ForReason(dispatchrecord.ReasonUnreviewed), dispatchrecord.UnreviewedNote)
 	retry := "re-apply the dispatch label"
 	if s.cfg.DispatchLabel != "" {

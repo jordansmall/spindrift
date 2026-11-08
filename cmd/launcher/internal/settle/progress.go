@@ -62,6 +62,23 @@ const (
 	StatusAutoMergeEnqueued      Status = "auto-merge-enqueued"
 	StatusAutoMergeEnqueueFailed Status = "auto-merge-enqueue-failed"
 	StatusAgentComplete          Status = "agent-complete"
+
+	StatusFailed                   Status = "failed"
+	StatusMissing                  Status = "missing"
+	StatusBlocked                  Status = "blocked"
+	StatusAdopted                  Status = "adopted"
+	StatusVerifiedMerged           Status = "verified-merged"
+	StatusMergeUnverifiedReadError Status = "merge-unverified-read-error"
+	StatusMergeUnverifiedReadRetry Status = "merge-unverified-read-retry"
+	StatusRecoverable              Status = "recoverable"
+	StatusBundleRemoveFailed       Status = "bundle-remove-failed"
+	StatusReconstructed            Status = "reconstructed"
+	StatusDraftPRFailed            Status = "draft-pr-failed"
+	StatusDraftPRRetry             Status = "draft-pr-retry"
+	StatusDraftPRFinalLookup       Status = "draft-pr-final-lookup"
+	StatusDraftPRLookupFailed      Status = "draft-pr-lookup-failed"
+	StatusDraftPRAdopted           Status = "draft-pr-adopted"
+	StatusRelayRetry               Status = "relay-retry"
 )
 
 // Step is one settle progress event. Key is the issue key without its "#".

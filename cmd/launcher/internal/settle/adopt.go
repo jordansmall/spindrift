@@ -26,7 +26,7 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	if s.cfg.Unclaimed {
 		note = "host-opened patch PR"
 	}
-	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, prURL, note)
+	s.cfg.Progress.Step(Step{Key: num, Landing: prURL, Status: StatusAdopted, Detail: "note=" + note})
 	landing, reason := s.selfHealAdopted(d, num, gen, prURL)
 	switch landing {
 	case landingMerged:
@@ -35,7 +35,7 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 			s.verifyMerged(num, prURL)
 		}
 	case landingFailed:
-		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, prURL, reason)
+		s.cfg.Progress.Step(Step{Key: num, Landing: prURL, Status: StatusFailed, Detail: "!! " + reason})
 	case landingAbandoned:
 		// See landingAbandoned: another actor owns the issue's comment and state.
 	}
@@ -78,11 +78,11 @@ func (s *Settle) verifyMerged(num, pr string) {
 		})
 	}
 	if err != nil {
-		fmt.Printf("    #%s  landing=%s  status=merge-unverified-read-error  !! %v\n", num, pr, err)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeUnverifiedReadError, Detail: fmt.Sprintf("!! %v", err)})
 		return
 	}
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
-		fmt.Printf("    #%s  landing=%s  status=verified-merged\n", num, pr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusVerifiedMerged})
 		s.removeLandedBundle(num)
 		s.closeIssue(num)
 		return
@@ -93,7 +93,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 	} else {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
-	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
 	s.transitionState(num, ForReason(dispatchrecord.ReasonMergeUnverified), reason)
 }
 
@@ -110,8 +110,8 @@ func (s *Settle) retryVerifyRead(num, pr string, read func() error) error {
 			return err
 		}
 		attempts++
-		fmt.Printf("    #%s  landing=%s  status=merge-unverified-read-retry  attempt=%d/%d  !! %v\n",
-			num, pr, attempts, s.cfg.Policy.Max, err)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeUnverifiedReadRetry,
+			Detail: fmt.Sprintf("attempt=%d/%d  !! %v", attempts, s.cfg.Policy.Max, err)})
 		s.transientBackoff().Do(attempts)
 	}
 }
