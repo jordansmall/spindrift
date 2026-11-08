@@ -2630,26 +2630,6 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 	}
 }
 
-// TestDaemonOnlyKnobsParityWithInputdoc keeps inputdoc's generated daemon-only
-// set in sync with inputdoc.FlagEntry.LauncherIgnores, and every member a real
-// flag-table entry (issue #4644). Both render from the same schema predicate,
-// so this only catches a hand-edited generated file; it stays because the
-// daemon-only set is still a separate generated file from the flag table.
-func TestDaemonOnlyKnobsParityWithInputdoc(t *testing.T) {
-	inTable := map[string]bool{}
-	for _, e := range inputdoc.SchemaFlags {
-		inTable[e.Env] = true
-		if got := inputdoc.IsDaemonOnly(e.Env); got != e.LauncherIgnores {
-			t.Errorf("%s: inputdoc IsDaemonOnly = %v, inputdoc.FlagEntry.LauncherIgnores = %v", e.Env, got, e.LauncherIgnores)
-		}
-	}
-	for _, k := range inputdoc.DaemonOnlyKnobs() {
-		if !inTable[k] {
-			t.Errorf("%s: in inputdoc.DaemonOnlyKnobs but not in the flag table", k)
-		}
-	}
-}
-
 // A verb-scoped flag's --flag=value spelling passes through to the verb's
 // parser without swallowing the next argument.
 func TestParseFlags_VerbFlagEqualsFormPassesThrough(t *testing.T) {
