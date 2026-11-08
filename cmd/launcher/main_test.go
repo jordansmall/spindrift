@@ -79,7 +79,7 @@ func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
 // Pass-through booleans parseFlags leaves ahead of the verb must not be read
 // as the verb (issue #3784): each case reaches the verb's own handler.
 func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	cases := []struct {
 		args []string
@@ -155,8 +155,8 @@ func TestMainRun_LeadingForceBeforeRegistry_PassesDiscoverGate(t *testing.T) {
 // comparison only confirms both buffers stay empty and the stdout comparison
 // is what catches a leading flag knocking it into mainRun's help branch.
 func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
-	t.Setenv("ISSUE_TRACKER", "")
+	setKnob(t, "REPO_SLUG", "")
+	setKnob(t, "ISSUE_TRACKER", "")
 
 	cases := []struct{ leading, verbFirst []string }{
 		{[]string{"--no-build", "dispatch", "42"}, []string{"dispatch", "42", "--no-build"}},
@@ -200,7 +200,7 @@ func TestMainRun_LeadingSchemaFlagBeforeDoctor_ReachesDoctor(t *testing.T) {
 // `research` parses like `dispatch` and reaches the same bootstrap/validate
 // prologue. A missing REPO_SLUG proves it without a real runner or gh.
 func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	cases := [][]string{
 		{"research"},
@@ -226,8 +226,8 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 // config-invalid bootstrap error through bootstrapExitCode, so the expected
 // code is exitcode.ConfigInvalid rather than the generic 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
-	t.Setenv("CONTINUOUS_DISPATCH", "")
+	setKnob(t, "REPO_SLUG", "")
+	setKnob(t, "CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"dispatch", "--continuous"}, &stdout, &stderr)
@@ -244,9 +244,9 @@ func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 // axes local, so REPO_SLUG stays required. `dispatch` surfaces that as
 // exitcode.ConfigInvalid rather than a bare 1 (issue #2568 slice 2).
 func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *testing.T) {
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "ISSUE_TRACKER", "github")
+	setKnob(t, "REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"dispatch"}, &stdout, &stderr)
@@ -263,8 +263,8 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 
 // `--continuous` on `research` also sets CONTINUOUS_DISPATCH (issue #2033).
 func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
-	t.Setenv("CONTINUOUS_DISPATCH", "")
+	setKnob(t, "REPO_SLUG", "")
+	setKnob(t, "CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"research", "--continuous"}, &stdout, &stderr)
@@ -363,7 +363,7 @@ func TestRecover_RejectsSelfContained(t *testing.T) {
 // fix "--yes" itself was taken as the issue ID. "recover --yes 42" is the
 // mirror case.
 func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunT(t, []string{"recover", "--yes"}, &stdout, &stderr)
@@ -389,7 +389,7 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 // #3054): a non-numeric ID must reach bootstrap like a numeric one. See
 // parseIssuePositionals's doc comment (flags.go) for why.
 func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunT(t, []string{"recover", "SPIN-42"}, &stdout, &stderr)
@@ -405,7 +405,7 @@ func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
 // wherever "--no-build" sits (issue #3055); flags_test.go's
 // TestParseIssuePositionals_* tests cover the strip mechanism itself.
 func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	cases := [][]string{
 		{"preview", "42"},
@@ -454,18 +454,18 @@ func setBootstrapReadyLocalEnv(t *testing.T) (issuesDir string) {
 	checkout := mustSeedableCheckout(t)
 	issuesDir = t.TempDir()
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 	return issuesDir
 }
@@ -539,7 +539,7 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 // `console` reaches the same bootstrap/validate prologue as the other
 // subcommands, proven by a missing REPO_SLUG (issue #694).
 func TestMainRun_Console_RoutesThroughBootstrap(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunT(t, []string{"console"}, &stdout, &stderr)
@@ -626,7 +626,7 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	if err := os.WriteFile(docPath, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { loadedDoc = nil })
+	useDoc(t, nil)
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
@@ -727,9 +727,9 @@ func TestRunnerConfig_DriverMountTargets(t *testing.T) {
 // runner.Config, so the adapters render the operator's values rather than the
 // schema defaults.
 func TestRunnerConfig_LimitsSkillsOverrides(t *testing.T) {
-	t.Setenv("PIDS_LIMIT", "256")
-	t.Setenv("MEMORY_LIMIT", "2g")
-	t.Setenv("SPINDRIFT_SKILLS_DIR", "/host/skills")
+	setKnob(t, "PIDS_LIMIT", "256")
+	setKnob(t, "MEMORY_LIMIT", "2g")
+	setKnob(t, "SPINDRIFT_SKILLS_DIR", "/host/skills")
 
 	rc := runnerConfig(loadConfig())
 
@@ -829,7 +829,7 @@ func TestRunnerConfig_DriverSessionCacheDirUnset(t *testing.T) {
 // runner.Config fields are gone, but the signal still drives fully-local and
 // the preambles, so it must survive untouched.
 func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
+	setKnob(t, "ISSUE_TRACKER", "local")
 
 	c := loadConfig()
 	sig := resolveCapabilitySignals(c.CodeForge, c.IssueTracker)
@@ -846,8 +846,8 @@ func TestResolveCapabilitySignals_LocalTracker_InBoxUnreachable(t *testing.T) {
 // failed.
 func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", dir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", dir)
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -861,8 +861,8 @@ func TestRunnerConfig_LocalIssuesDirNeverReachesRunnerConfig(t *testing.T) {
 // newCodeForge's host-side landing forge and runnerConfig's /repo mount source
 // agree on one resolved absolute path (issue #1726).
 func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
 	c := loadConfig()
 
@@ -879,8 +879,8 @@ func TestLoadConfig_CodeForgeLocal_DefaultsAccumulationRepoDir(t *testing.T) {
 // An operator-supplied relative override beats the default and resolves
 // absolute, in every consumer of the path.
 func TestLoadConfig_CodeForgeLocal_RelativeAccumulationRepoDirResolvedAbsolute(t *testing.T) {
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "custom-accum-dir")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "custom-accum-dir")
 
 	c := loadConfig()
 
@@ -904,8 +904,8 @@ func TestLoadConfig_CodeForgeLocal_RelativeAccumulationRepoDirResolvedAbsolute(t
 // default, so the field stays empty (issue #1726).
 func TestLoadConfig_NonLocalForge_AccumulationRepoDirStaysEmpty(t *testing.T) {
 	for _, cf := range []string{"github", "git", "forgejo"} {
-		t.Setenv("CODE_FORGE", cf)
-		t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+		setKnob(t, "CODE_FORGE", cf)
+		setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
 		c := loadConfig()
 
@@ -925,8 +925,8 @@ func TestLoadConfig_NonLocalForge_AccumulationRepoDirStaysEmpty(t *testing.T) {
 // (newCodeForge) resolve to the same absolute Accumulation repo path when
 // CODE_FORGE=local and the knob is left to default (issue #1726).
 func TestRunnerConfig_CodeForgeLocal_MatchesNewCodeForgeAccumulationRepoDir(t *testing.T) {
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", "")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", "")
 
 	c := loadConfig()
 	rc := runnerConfig(c)
@@ -1061,7 +1061,7 @@ func TestApplyDispatchKind_ValueEmbed_DoesNotAliasOriginal(t *testing.T) {
 // workLabel survives the butler swap, so no caller depends on reading LABEL
 // before applyDispatchKind runs (issue #4054).
 func TestApplyDispatchKind_Butler_PreservesConfiguredWorkLabel(t *testing.T) {
-	t.Setenv("LABEL", "agent-go")
+	setKnob(t, "LABEL", "agent-go")
 
 	c := applyDispatchKind(loadConfig(), dispatchkind.Butler)
 
@@ -1165,7 +1165,7 @@ func TestMaxParallelEdgeCases(t *testing.T) {
 		{"10", 10},
 	}
 	for _, tc := range cases {
-		t.Setenv("MAX_PARALLEL", tc.env)
+		setKnob(t, "MAX_PARALLEL", tc.env)
 		c := loadConfig()
 		if c.MaxParallel != tc.want {
 			t.Errorf("MAX_PARALLEL=%q: got %d, want %d", tc.env, c.MaxParallel, tc.want)
@@ -1187,7 +1187,7 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 		{"5", 5},
 	}
 	for _, tc := range cases {
-		t.Setenv("MAX_JOBS", tc.env)
+		setKnob(t, "MAX_JOBS", tc.env)
 		c := loadConfig()
 		if c.MaxJobs != tc.want {
 			t.Errorf("MAX_JOBS=%q: got %d, want %d", tc.env, c.MaxJobs, tc.want)
@@ -1247,8 +1247,8 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 // inputdoc.SchemaFlags table default, the precedence half the default-only test above
 // leaves unexercised (issue #1180).
 func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
-	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
-	t.Setenv("SPINDRIFT_SKILLS_DIR", "from-env-skills")
+	setKnob(t, "SPINDRIFT_PROMPT_DIR", "from-env-prompt")
+	setKnob(t, "SPINDRIFT_SKILLS_DIR", "from-env-skills")
 
 	withSchemaFlags(t, []inputdoc.FlagEntry{
 		{Env: "SPINDRIFT_PROMPT_DIR", Dflt: "custom-prompt-default"},
@@ -1267,7 +1267,7 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
 // The two knobs resolve independently: setting only SPINDRIFT_PROMPT_DIR
 // still lets SPINDRIFT_SKILLS_DIR fall back to its schema default.
 func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
-	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
+	setKnob(t, "SPINDRIFT_PROMPT_DIR", "from-env-prompt")
 	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
 	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
@@ -1319,7 +1319,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.setEnv {
-				t.Setenv(tc.env, tc.envVal)
+				setKnob(t, tc.env, tc.envVal)
 			} else {
 				t.Setenv(tc.env, "")
 				os.Unsetenv(tc.env)
@@ -1385,7 +1385,7 @@ func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.setEnv {
-				t.Setenv("PIDS_LIMIT", tc.envVal)
+				setKnob(t, "PIDS_LIMIT", tc.envVal)
 			} else {
 				t.Setenv("PIDS_LIMIT", "")
 				os.Unsetenv("PIDS_LIMIT")
@@ -1509,7 +1509,7 @@ func TestLoadSchemaConfig_HostGitConfigMembersLoadFromHostGitConfig(t *testing.T
 // An explicit value from the document, a flag or env beats the host git
 // config fallback.
 func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
-	t.Setenv("GIT_USER_NAME", "Explicit Name")
+	setKnob(t, "GIT_USER_NAME", "Explicit Name")
 	calls := fakeHostGitConfig(t, nil)
 
 	if got := hostGitConfigField("GIT_USER_NAME"); got != "Explicit Name" {
@@ -1526,9 +1526,8 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 	t.Setenv("BASE_BRANCH", "")
 	os.Unsetenv("BASE_BRANCH")
-	t.Cleanup(func() { loadedDoc = nil })
 
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}})
 
 	c := loadConfig()
 	if c.BaseBranch != "from-document" {
@@ -1540,10 +1539,9 @@ func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 // overrides the document's settings value; an ambient knob env var never
 // reaches this layer, since mainRun exits 6 on it first (ADR 0020).
 func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}}
-	t.Setenv("BASE_BRANCH", "from-env")
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "from-document"}})
+	setKnob(t, "BASE_BRANCH", "from-env")
 
 	c := loadConfig()
 	if c.BaseBranch != "from-env" {
@@ -1554,14 +1552,13 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 // IN_PROGRESS_LABEL and FAILED_LABEL env vars reach the dispatch label
 // mapping, beating the document's settings (issue #4284).
 func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"IN_PROGRESS_LABEL": "doc-wip",
 		"FAILED_LABEL":      "doc-broken",
-	}}
-	t.Setenv("IN_PROGRESS_LABEL", "wip")
-	t.Setenv("FAILED_LABEL", "broken")
+	}})
+	setKnob(t, "IN_PROGRESS_LABEL", "wip")
+	setKnob(t, "FAILED_LABEL", "broken")
 
 	l := dispatchLabels(loadConfig())
 	if l.InProgress != "wip" {
@@ -1578,9 +1575,8 @@ func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
 func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
 	t.Setenv("SPINDRIFT_PROMPT_DIR", "")
 	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
-	t.Cleanup(func() { loadedDoc = nil })
 
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}}
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}})
 
 	c := loadConfig()
 	if c.SpindriftPromptDir != "from-document-prompt" {
@@ -1591,10 +1587,9 @@ func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
 // The prompt-dir specialization of TestLoadConfig_EnvBeatsDocument: an
 // ambient SPINDRIFT_PROMPT_DIR still overrides the document (issue #2200).
 func TestLoadConfig_PromptDirEnvBeatsDocument(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}}
-	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"SPINDRIFT_PROMPT_DIR": "from-document-prompt"}})
+	setKnob(t, "SPINDRIFT_PROMPT_DIR", "from-env-prompt")
 
 	c := loadConfig()
 	if c.SpindriftPromptDir != "from-env-prompt" {
@@ -1606,7 +1601,6 @@ func TestLoadConfig_PromptDirEnvBeatsDocument(t *testing.T) {
 // artifacts section when no env var supplies them: the replacement for the
 // retired goRunPreamble/goBuildPreamble env exports (ADR 0020).
 func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 	// Force each key absent for the test but restore its pre-test value
 	// (including "was unset") on cleanup.
 	for _, k := range []string{"IMAGE_ARCHIVE", "RUNTIME", "DRIVER", "BOX_ENV_VARS"} {
@@ -1614,13 +1608,13 @@ func TestLoadConfig_ArtifactsFromDocument(t *testing.T) {
 		os.Unsetenv(k)
 	}
 
-	loadedDoc = &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{
+	useDoc(t, &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{
 		"RUNNER_KIND":   "oci",
 		"IMAGE_ARCHIVE": "/nix/store/doc-image",
 		"RUNTIME":       "podman",
 		"DRIVER":        "claude",
 		"BOX_ENV_VARS":  "MODEL BASE_BRANCH",
-	})}
+	})})
 
 	c := loadConfig()
 	if o := c.artifacts.OCI; o == nil || o.ImageArchive.String() != "/nix/store/doc-image" {
@@ -1657,8 +1651,7 @@ func TestValidate_RepoSlugRequired(t *testing.T) {
 // forwarded artifact that was never populated: Shared.FullyLocal
 // is always "" with no document (issue #2527 review).
 func TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 
 	sig := resolveCapabilitySignals("local", "local")
 	if !sig.fullyLocal {
@@ -1676,8 +1669,7 @@ func TestResolveCapabilitySignals_NoDocumentFallsBackToRegistry(t *testing.T) {
 // document's settings section baked in, resolveCapabilitySignals trusts the
 // nix-forwarded artifact bools instead of re-deriving them.
 func TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "false",
@@ -1685,7 +1677,7 @@ func TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact(t *tes
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
 		}),
-	}
+	})
 
 	sig := resolveCapabilitySignals("github", "github")
 	if sig.hostMediatedRemote {
@@ -1707,11 +1699,10 @@ func TestResolveCapabilitySignals_MatchingDocumentTrustsForwardedArtifact(t *tes
 // github-baked document run with --forge-backend local --tracker local must
 // not keep reading the baked FULLY_LOCAL=false (issue #2527 review).
 func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{"FULLY_LOCAL": "false"}),
-	}
+	})
 
 	sig := resolveCapabilitySignals("local", "local")
 	if !sig.fullyLocal {
@@ -1724,8 +1715,7 @@ func TestResolveCapabilitySignals_OverrideAwayFromBakedDocumentFallsBack(t *test
 // are nix-resolved policy, not operator knobs, so a stray ambient
 // FULLY_LOCAL=true must not override what nix baked (issue #2527 review).
 func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "false",
@@ -1733,7 +1723,7 @@ func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *t
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
 		}),
-	}
+	})
 	t.Setenv("HOST_MEDIATED_REMOTE", "true")
 	t.Setenv("OUTBOX_RELAY_CAPABLE", "true")
 	t.Setenv("IN_BOX_UNREACHABLE_TRACKER", "true")
@@ -1759,11 +1749,10 @@ func TestResolveCapabilitySignals_MatchingDocumentIgnoresAmbientEnvOverride(t *t
 // answer: it falls through to the registry-derived fallback, so a local/local
 // document still resolves fullyLocal=true (issue #2527 review).
 func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings:  map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
 		Artifacts: mustArtifacts(map[string]string{"RUNTIME": "podman"}),
-	}
+	})
 
 	sig := resolveCapabilitySignals("local", "local")
 	if !sig.fullyLocal {
@@ -1782,8 +1771,7 @@ func TestResolveCapabilitySignals_MatchingDocumentMissingArtifactKeysFallsBack(t
 // OR: an OR lets a document missing one key into the trust branch, where
 // the missing key's typed field reads as false (issue #2527 review).
 func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
 		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "false",
@@ -1791,7 +1779,7 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 			"FULLY_LOCAL":                "false",
 			// OUTBOX_RELAY_CAPABLE deliberately absent: 3 of 4 keys present.
 		}),
-	}
+	})
 
 	sig := resolveCapabilitySignals("local", "local")
 	// All three are true in the local/local registry derivation, deliberately
@@ -1819,8 +1807,7 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 // lib/mkHarness.nix's computation rather than reading an unpopulated
 // typed artifact as "" (issue #2533 review).
 func TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
 	if read != "FORGEJO" || write != "FORGEJO" || filer != "FORGEJO" || forge != "FORGEJO" {
@@ -1843,8 +1830,7 @@ func TestResolveTrackerAndForgeSignals_NoDocumentFallsBackToComputation(t *testi
 // values are ones a fresh github/github computation would never produce, so
 // the test cannot pass by coincidence.
 func TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{
 			"TRACKER_AXIS_READ":  "WEIRD_READ",
@@ -1852,7 +1838,7 @@ func TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact(t
 			"TRACKER_AXIS_FILER": "WEIRD_FILER",
 			"FORGE_BACKEND":      "WEIRD_FORGE",
 		}),
-	}
+	})
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("github", "github")
 	if read != "WEIRD_READ" || write != "WEIRD_WRITE" || filer != "WEIRD_FILER" || forge != "WEIRD_FORGE" {
@@ -1865,8 +1851,7 @@ func TestResolveTrackerAndForgeSignals_MatchingDocumentTrustsForwardedArtifact(t
 // trusted: a github-baked document overridden to forgejo must not keep
 // reading the baked BOX_TRACKER_AXIS_READ=GITHUB (issue #2533 review).
 func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{
 			"TRACKER_AXIS_READ":  "GITHUB",
@@ -1874,7 +1859,7 @@ func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t 
 			"TRACKER_AXIS_FILER": "GH",
 			"FORGE_BACKEND":      "GH",
 		}),
-	}
+	})
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
 	if read != "FORGEJO" || write != "FORGEJO" || filer != "FORGEJO" || forge != "FORGEJO" {
@@ -1886,8 +1871,7 @@ func TestResolveTrackerAndForgeSignals_OverrideAwayFromBakedDocumentFallsBack(t 
 // back to the fresh computation for all four, mirroring the
 // capability-signals partial-key guard (issue #2533 review).
 func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "forgejo", "ISSUE_TRACKER": "forgejo"},
 		Artifacts: mustArtifacts(map[string]string{
 			"TRACKER_AXIS_READ":  "GITHUB",
@@ -1895,7 +1879,7 @@ func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T
 			"TRACKER_AXIS_FILER": "GH",
 			// FORGE_BACKEND deliberately absent: 3 of 4 keys present.
 		}),
-	}
+	})
 
 	read, write, filer, forge := resolveTrackerAndForgeSignals("forgejo", "forgejo")
 	if read != "FORGEJO" || write != "FORGEJO" || filer != "FORGEJO" || forge != "FORGEJO" {
@@ -1908,13 +1892,12 @@ func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T
 // WORKER_MODEL's default is non-empty, so workerProvisioned defaults true
 // (issue #2533 review).
 func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 	// Isolate from this test process's own ambient environment (a dispatched
 	// Box carries its own FILER_MODEL/WORKER_MODEL), so the schema-default
 	// fallback is deterministic regardless of host.
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "")
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "")
 
 	presence := resolveAgentPresenceSignals("")
 	if presence.filerEnabled {
@@ -1930,8 +1913,7 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 // into its Settings section, the forwarded values are trusted. The wanted
 // values are ones the schema-default fallback would never produce.
 func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
@@ -1940,11 +1922,11 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 			"FILER_ENABLED":      "true",
 			"WORKER_PROVISIONED": "false",
 		}),
-	}
+	})
 	// Live values must equal what the document baked in for the trust branch
 	// to activate, so pin them rather than inherit the ambient environment.
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 
 	presence := resolveAgentPresenceSignals("")
 	if !presence.filerEnabled {
@@ -1961,8 +1943,7 @@ func TestResolveAgentPresenceSignals_MatchingDocumentTrustsForwardedArtifact(t *
 // AGENTS_JSON_TEMPLATE at build time and lib/mkHarness.nix computes the flags
 // from that template, so a live override cannot change the real roster.
 func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTrusted(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
@@ -1971,12 +1952,12 @@ func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTru
 			"FILER_ENABLED":      "false",
 			"WORKER_PROVISIONED": "true",
 		}),
-	}
+	})
 	// FILER_MODEL is overridden away from the document's baked "", the
 	// scenario that tripped the old all-three-must-match trust gate. The
 	// other two stay matched, isolating the divergence to FILER_MODEL.
-	t.Setenv("FILER_MODEL", "haiku")
-	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+	setKnob(t, "FILER_MODEL", "haiku")
+	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 
 	presence := resolveAgentPresenceSignals("")
 	if presence.filerEnabled {
@@ -1992,8 +1973,7 @@ func TestResolveAgentPresenceSignals_FilerModelOverride_DocumentArtifactStillTru
 // when the live value is overridden away to empty, where the fallback
 // computation would say false and diverge from the baked --agents roster.
 func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTrusted(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
@@ -2002,11 +1982,11 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 			"FILER_ENABLED":      "false",
 			"WORKER_PROVISIONED": "true",
 		}),
-	}
+	})
 	// WORKER_MODEL is overridden away from the document's baked value; the
 	// other two stay matched, isolating the divergence to WORKER_MODEL.
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "")
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "")
 
 	presence := resolveAgentPresenceSignals("")
 	if presence.filerEnabled {
@@ -2033,10 +2013,9 @@ func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(func() { loadedDoc = nil })
-			loadedDoc = nil
-			t.Setenv("FILER_MODEL", "haiku")
-			t.Setenv("WORKER_MODEL", tc.workerModel)
+			useDoc(t, nil)
+			setKnob(t, "FILER_MODEL", "haiku")
+			setKnob(t, "WORKER_MODEL", tc.workerModel)
 
 			presence := resolveAgentPresenceSignals("opencode")
 			if !presence.filerEnabled {
@@ -2054,9 +2033,8 @@ func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing
 func TestResolveAgentPresenceSignals_NoDocumentNonNamespacedDriverKeepsBareWorker(t *testing.T) {
 	for _, name := range []string{"claude", ""} {
 		t.Run("driver="+name, func(t *testing.T) {
-			t.Cleanup(func() { loadedDoc = nil })
-			loadedDoc = nil
-			t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+			useDoc(t, nil)
+			setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
 
 			if !resolveAgentPresenceSignals(name).workerProvisioned {
 				t.Errorf("workerProvisioned = false, want true (bare WORKER_MODEL is provisioned without provider-namespaced ids)")
@@ -2070,11 +2048,10 @@ func TestResolveAgentPresenceSignals_NoDocumentNonNamespacedDriverKeepsBareWorke
 // treats a KEY="" override as unset, so this path cannot drive it false; the
 // false case is covered by the SCOUT_PROVISIONED artifact test below.
 func TestResolveAgentPresenceSignals_ScoutNoDocumentFallsBackToSchemaDefault(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "")
-	t.Setenv("SCOUT_MODEL", "")
+	useDoc(t, nil)
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "")
+	setKnob(t, "SCOUT_MODEL", "")
 
 	presence := resolveAgentPresenceSignals("")
 	if !presence.scoutProvisioned {
@@ -2087,8 +2064,7 @@ func TestResolveAgentPresenceSignals_ScoutNoDocumentFallsBackToSchemaDefault(t *
 // whether or not the live SCOUT_MODEL matches, because AGENTS_JSON_TEMPLATE
 // is a fixed, non-overridable bake (issue #3157).
 func TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiveOverride(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
@@ -2098,12 +2074,12 @@ func TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiv
 			"WORKER_PROVISIONED": "true",
 			"SCOUT_PROVISIONED":  "false",
 		}),
-	}
+	})
 	// Live SCOUT_MODEL deliberately non-empty, away from what a scoutModel=""
 	// bake produced: the baked SCOUT_PROVISIONED=false must still win.
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
-	t.Setenv("SCOUT_MODEL", "claude-haiku-4-5-20251001")
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
+	setKnob(t, "SCOUT_MODEL", "claude-haiku-4-5-20251001")
 
 	presence := resolveAgentPresenceSignals("")
 	if presence.scoutProvisioned {
@@ -2116,8 +2092,7 @@ func TestResolveAgentPresenceSignals_ScoutDocumentArtifactTrustedRegardlessOfLiv
 // SCOUT_PROVISIONED key, so scoutProvisioned alone falls back to the live
 // SCOUT_MODEL value while the roster pair stays trusted from the document.
 func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependently(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{
 			"FILER_MODEL":  "",
 			"WORKER_MODEL": "claude-sonnet-5",
@@ -2127,10 +2102,10 @@ func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependent
 			"WORKER_PROVISIONED": "false",
 			// SCOUT_PROVISIONED deliberately absent: a pre-#3157 document.
 		}),
-	}
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
-	t.Setenv("SCOUT_MODEL", "claude-haiku-4-5-20251001")
+	})
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
+	setKnob(t, "SCOUT_MODEL", "claude-haiku-4-5-20251001")
 
 	presence := resolveAgentPresenceSignals("")
 	if !presence.filerEnabled {
@@ -2149,11 +2124,10 @@ func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependent
 // SCOUT_MODEL like every other driver even while workerProvisioned stays
 // false.
 func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToScoutModel(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	t.Setenv("FILER_MODEL", "haiku")
-	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
-	t.Setenv("SCOUT_MODEL", "claude-haiku-4-5-20251001")
+	useDoc(t, nil)
+	setKnob(t, "FILER_MODEL", "haiku")
+	setKnob(t, "WORKER_MODEL", "claude-sonnet-5")
+	setKnob(t, "SCOUT_MODEL", "claude-haiku-4-5-20251001")
 
 	presence := resolveAgentPresenceSignals("opencode")
 	if !presence.scoutProvisioned {
@@ -2184,15 +2158,14 @@ func TestValidate_FullyLocalExemptsRepoSlugAndGhToken(t *testing.T) {
 // REPO_SLUG/GH_TOKEN, not keep trusting the stale FULLY_LOCAL=false baked for
 // the pre-override pairing.
 func TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "true",
 			"IN_BOX_UNREACHABLE_TRACKER": "false",
 			"FULLY_LOCAL":                "false",
 		}),
-	}
+	})
 
 	c := minimalValidLocalConfig()
 	c.IssueTracker = "local"
@@ -2207,15 +2180,14 @@ func TestValidate_OverrideAwayFromBakedGithubDocumentExemptsRepoSlugAndGhToken(t
 // overridden back to github on both axes at runtime must require
 // REPO_SLUG/GH_TOKEN again, not keep trusting the stale FULLY_LOCAL=true.
 func TestValidate_OverrideBackToGithubFromFullyLocalDocumentRequiresRepoSlugAndGhToken(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "local", "ISSUE_TRACKER": "local"},
 		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "true",
 			"IN_BOX_UNREACHABLE_TRACKER": "true",
 			"FULLY_LOCAL":                "true",
 		}),
-	}
+	})
 
 	c := minimalValidConfig()
 	c.RepoSlug = ""
@@ -3259,13 +3231,12 @@ func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T)
 // forge-backend strings come back the fresh github computation, not the old
 // bug's unconditional false and empty (issue #2533 review).
 func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 	// Isolate from this test process's own ambient environment (a dispatched
 	// Box carries its own FILER_MODEL/WORKER_MODEL), so the schema-default
 	// fallback is deterministic regardless of host.
-	t.Setenv("FILER_MODEL", "")
-	t.Setenv("WORKER_MODEL", "")
+	setKnob(t, "FILER_MODEL", "")
+	setKnob(t, "WORKER_MODEL", "")
 
 	cf := forge.NewFake()
 	it := forge.NewFake()
@@ -3285,8 +3256,7 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 // The Box's registry proxy takes its response-rewrite rows from this Config;
 // a zero value would run the proxy with no rewrites and no failing signal.
 func TestDispatchConfig_RegistryProxyRewriteRowsFromRegisteredStrategies(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 	it := forge.NewFake()
 	cfg := dispatchConfig(minimalValidConfig(), it, testWired(it), forge.NewFake(), forge.Capabilities{})
 
@@ -3333,13 +3303,12 @@ func TestDispatchConfig_IssueTextForResolvesFresh(t *testing.T) {
 // schema defaults must never leak in, because those values already reached
 // the baked roster at eval time and would beat it on every dispatch.
 func TestDispatchConfig_ReviewOverridesExplicitEnvOnly(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"REVIEW_MODEL":  "doc-model",
 		"REVIEW_EFFORT": "doc-effort",
-	}}
-	t.Setenv("REVIEW_MODEL", "")
-	t.Setenv("REVIEW_EFFORT", "")
+	}})
+	setKnob(t, "REVIEW_MODEL", "")
+	setKnob(t, "REVIEW_EFFORT", "")
 
 	cf := forge.NewFake()
 	it := forge.NewFake()
@@ -3348,8 +3317,8 @@ func TestDispatchConfig_ReviewOverridesExplicitEnvOnly(t *testing.T) {
 		t.Errorf("overrides = (%q,%q), want empty when the operator set nothing at dispatch time", cfg.ReviewModelOverride, cfg.ReviewEffortOverride)
 	}
 
-	t.Setenv("REVIEW_MODEL", "env-model")
-	t.Setenv("REVIEW_EFFORT", "env-effort")
+	setKnob(t, "REVIEW_MODEL", "env-model")
+	setKnob(t, "REVIEW_EFFORT", "env-effort")
 	cfg = dispatchConfig(minimalValidConfig(), it, testWired(it), cf, forge.Capabilities{})
 	if cfg.ReviewModelOverride != "env-model" || cfg.ReviewEffortOverride != "env-effort" {
 		t.Errorf("overrides = (%q,%q), want (env-model,env-effort) from the ambient env", cfg.ReviewModelOverride, cfg.ReviewEffortOverride)
@@ -3492,8 +3461,7 @@ func TestDispatchConfig_BoxForgeAndIssueAccess_ButlerForcedReadOnly(t *testing.T
 // document; dispatchConfig passes caps through unchanged. See dispatchConfig's
 // doc comment (main.go) for why the two paths differ.
 func TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"CODE_FORGE": "github", "ISSUE_TRACKER": "github"},
 		Artifacts: mustArtifacts(map[string]string{
 			"HOST_MEDIATED_REMOTE":       "true",
@@ -3501,7 +3469,7 @@ func TestDispatchConfig_DivergentDocumentArtifactsDoNotReachCapabilities(t *test
 			"IN_BOX_UNREACHABLE_TRACKER": "true",
 			"FULLY_LOCAL":                "true",
 		}),
-	}
+	})
 
 	sig := resolveCapabilitySignals("github", "github")
 	// Fixture sanity check: it confirms the document really fires the fast
@@ -3744,7 +3712,7 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	c.CodeForge = "github"
 	cf := forge.NewFake()
 
-	t.Setenv("BASE_BRANCH", "release")
+	setKnob(t, "BASE_BRANCH", "release")
 	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "release" {
@@ -3782,11 +3750,10 @@ func TestDispatchConfig_ResolveEnv_GitIdentityIsStartupSnapshot(t *testing.T) {
 // An explicit env or document identity wins over the host git config, which is
 // then never consulted.
 func TestDispatchConfig_ResolveEnv_ExplicitGitIdentitySkipsHostGitConfig(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
 	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
-	t.Setenv("GIT_USER_NAME", "Env Name")
+	setKnob(t, "GIT_USER_NAME", "Env Name")
 	unsetEnvForTest(t, "GIT_USER_EMAIL")
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}}
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}})
 	snap := loadConfig()
 	c := minimalValidConfig()
 	c.CodeForge = "github"
@@ -3856,8 +3823,7 @@ func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testin
 // calls made since that snapshot.
 func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[]string) {
 	t.Helper()
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
 	calls := fakeHostGitConfig(t, vals)
 	snap := loadConfig()
@@ -4285,7 +4251,7 @@ func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
 // cannot write the tracker, issue #5245), so newSettlers must build a settle
 // that fails a run whose relayed comment never arrived.
 func TestNewSettle_ResearchJiraFilerOff_MissingCommentFails(t *testing.T) {
-	t.Setenv("FILER_MODEL", "")
+	setKnob(t, "FILER_MODEL", "")
 	c := minimalValidConfig()
 	c.dispatchKind = dispatchkind.Research
 	c.IssueTracker = "jira"
@@ -6624,7 +6590,7 @@ func TestBootstrapExitCode(t *testing.T) {
 // code (issue #3617): a missing REPO_SLUG is config-invalid regardless of
 // which verb hits it first.
 func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	var dispatchOut, dispatchErr bytes.Buffer
 	dispatchCode := mainRunT(t, []string{"dispatch"}, &dispatchOut, &dispatchErr)
@@ -6781,9 +6747,7 @@ func TestLoadConfig_SignalCarrierDefaultsToSocket(t *testing.T) {
 // unset knob must reach the Box as "socket", not empty (which the Box reads
 // as log).
 func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
-	prevDoc := loadedDoc
-	t.Cleanup(func() { loadedDoc = prevDoc })
-	loadedDoc = nil
+	useDoc(t, nil)
 	for _, tc := range []struct {
 		name, set, want string
 	}{
@@ -6794,7 +6758,7 @@ func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
 			if tc.set == "" {
 				unsetEnv(t, "BOX_SIGNAL_CARRIER")
 			} else {
-				t.Setenv("BOX_SIGNAL_CARRIER", tc.set)
+				setKnob(t, "BOX_SIGNAL_CARRIER", tc.set)
 			}
 			it := forge.NewFake()
 			cfg := dispatchConfig(loadConfig(), it, testWired(it), forge.NewFake(), forge.Capabilities{})
@@ -6809,7 +6773,7 @@ func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
 }
 
 func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
-	t.Setenv("BOX_SIGNAL_CARRIER", "log")
+	setKnob(t, "BOX_SIGNAL_CARRIER", "log")
 	if got := loadConfig().SignalCarrier; got != "log" {
 		t.Errorf("loadConfig().signalCarrier with BOX_SIGNAL_CARRIER=log = %q, want %q", got, "log")
 	}
@@ -6819,8 +6783,7 @@ func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
 // must survive the document fallback.
 func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 	docOn := &inputdoc.Document{Settings: map[string]string{"AUTO_FORMAT": "1"}}
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = docOn
+	useDoc(t, docOn)
 	unsetEnv(t, "AUTO_FORMAT")
 	if got := resolveBoxEnvVar("AUTO_FORMAT"); got != "1" {
 		t.Fatalf("resolveBoxEnvVar without a flag = %q, want 1 (document value)", got)
@@ -6837,9 +6800,8 @@ func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 // so (bool kind or emptyDisables); any other string knob's empty env still
 // falls back to its default.
 func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	t.Setenv("LABEL", "")
+	useDoc(t, nil)
+	setKnob(t, "LABEL", "")
 	if got := getenvSchema("LABEL"); got != "ready-for-agent" {
 		t.Errorf("getenvSchema(LABEL) = %q, want ready-for-agent", got)
 	}
