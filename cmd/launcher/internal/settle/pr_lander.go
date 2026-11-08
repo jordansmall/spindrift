@@ -931,3 +931,89 @@ func (s prLander) retryVerifyRead(num, pr string, read func() error) error {
 		s.transientBackoff().Do(attempts)
 	}
 }
+
+// salvage adopts a read-only Box's relayed branch into a PR when its evidence
+// says the work finished: the driver's last genuine success self-report
+// contradicts either the ADR 0036 synthetic status=blocked backstop (issues
+// #2223, #2224) or a missing outcome line (issue #2253), where no backstop is
+// stitched in. The self-report is unauthenticated input, so this trusts it only
+// for a read-only Box and returns false on any doubt, leaving the caller's
+// handling to run. True means the issue is settled: adopted, abandoned, or
+// failed unreviewed.
+func (s prLander) salvage(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
+	if !s.readOnly {
+		return false
+	}
+	// situationFor stats the outbox, so it runs only after the cheap check
+	// above. openPRFound is false: this function never looks for an open PR.
+	sit := s.situationFor(num, false, result)
+	if !sit.SelfReportSuccess {
+		return false
+	}
+	if sit.Unreviewed {
+		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
+		return true
+	}
+
+	note := "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch"
+	if !result.Resolved.Found {
+		note = "no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch"
+	}
+	adopted, err := s.adoptAndGate(d, num, gen, result, note)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: adopt relayed branch: %v\n", num, err)
+	}
+	return adopted
+}
+
+// landRelayed opens a PR on num's relayed branch once a genuine success
+// self-report vouches for it (#2225).
+func (s prLander) landRelayed(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
+	if !sit.SelfReportSuccess {
+		return false, nil
+	}
+	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
+}
+
+// adoptAndGate is the shared adopt+gate tail behind salvage (#2224) and
+// landRelayed (#2225): open a PR on num's relayed branch, print the
+// status=adopted line, then drive the same merge gate the "ready" path uses.
+// Returns false, with no side effect, when no PR could be opened (the cause is
+// non-nil only for a relay or draft-PR-create failure, nil for a wiring or
+// missing-PR-intent failure), and true, also with no side effect, when a stop
+// abandoned the relay.
+func (s prLander) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) (bool, error) {
+	pr, opened, err := s.adoptRelayedBranch(num, gen, result)
+	if errors.Is(err, errAbandoned) {
+		// Handled: false would send the caller's blocked handling to comment on
+		// and transition an issue the stop already released (issue #3523).
+		return true, nil
+	}
+	if !opened {
+		return false, err
+	}
+
+	s.gateAdopted(d, num, gen, pr, note, result.Passes)
+	return true, nil
+}
+
+// adoptRelayedBranch relays num's finished branch out of the outbox and opens
+// a PR on it. branch comes from cf.AgentBranch(num), never the outcome line's
+// landing= field (#1949): a prompt-injected read-only Box controls that field.
+// FallbackDefault means a missing PR-intent line falls back to an issue-derived
+// default instead of blocking, since this Box was cut short before that step.
+// opened is false when no PR is open. The error is then non-nil only for a
+// relay or draft-PR-create failure, or errAbandoned when a stop landed during
+// the relay's backoff; other Open failures (wiring, missing PR intent) leave a
+// nil error so recover's own "no open PR" handling runs.
+func (s prLander) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (url string, opened bool, err error) {
+	branch, m := s.mediationFor(num, gen)
+	url, _, _, err = m.Open(num, branch, result, FallbackDefault)
+	if err != nil {
+		if errors.Is(err, errAbandoned) || errors.Is(err, errRelayBundle) || errors.Is(err, errCreateDraftPR) {
+			return "", false, err
+		}
+		return "", false, nil
+	}
+	return url, true, nil
+}

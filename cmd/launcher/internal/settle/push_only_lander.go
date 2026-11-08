@@ -140,3 +140,58 @@ func (s pushOnlyLander) latchOpenPR(string) {}
 func (s pushOnlyLander) settleReportedMerge(num string) {
 	s.cfg.Progress.Step(Step{Key: num, Landing: s.cfForNum(num).AgentBranch(num), Status: Status("merged")})
 }
+
+// landRelayed lands a relayed branch from a bundle alone (ADR 0039, #2254,
+// #2378). A forge without forge.BundleRelay has no relayed branch to land.
+func (s pushOnlyLander) landRelayed(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
+	if _, ok := s.cfForNum(num).(forge.BundleRelay); !ok {
+		return false, nil
+	}
+	if sit.SelfReportSuccess {
+		s.landRelayedBranch(d, num, gen, "genuine success self-report; relayed branch landed", result.Passes)
+		return true, nil
+	}
+	if sit.BundlePresent {
+		s.landRelayedBranch(d, num, gen, "bundle present in outbox; relayed branch landed", result.Passes)
+		return true, nil
+	}
+	return false, nil
+}
+
+// landRelayedBranch lands num's relayed branch directly, the counterpart to
+// the PR Lander's adoptAndGate. The branch comes from the issue's own
+// derived agent branch, never an outcome-line field (issue #1949): there may
+// be no parsed outcome line at all on this path. note is printed verbatim.
+func (s pushOnlyLander) landRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, note string, passes []passmanifest.Entry) {
+	s.gateAdopted(d, num, gen, s.cfForNum(num).AgentBranch(num), note, passes)
+}
+
+// salvage promotes a local push-only issue to Recoverable (ADR 0039) when
+// either a genuine success self-report or a signal kill (#2378)
+// coincides with a bundle in the outbox, leaving the land itself to `spindrift
+// recover`. It only stats the outbox, so no local issue is ever
+// fast-forwarded on unauthenticated evidence alone. A success self-report
+// that is unreviewed, or a signal-killed run whose loop stopped before its
+// land pass, fails the issue instead, since recover would decline that bundle
+// (issues #5973, #5984). True means the issue is settled, Recoverable or
+// Failed.
+func (s pushOnlyLander) salvage(d dispatch.Dispatcher, num string, _ uint64, result dispatch.Result) bool {
+	cf := s.cfForNum(num)
+	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
+	if _, ok := cf.(forge.BundleRelay); !ok ||
+		(!selfReportOK && !result.KilledBySignal) ||
+		!s.bundlePresent(num) {
+		return false
+	}
+	if s.situationFor(num, false, result).Unreviewed {
+		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
+		return true
+	}
+	reason := "genuine success self-report"
+	if !selfReportOK {
+		reason = "killed by signal"
+	}
+	s.cfg.Progress.Step(Step{Key: num, Status: StatusRecoverable, Detail: fmt.Sprintf("note=%s; bundle present in outbox; run `spindrift recover %s` to land it", reason, num)})
+	s.transitionState(num, ForReason(dispatchrecord.ReasonRecoverable), reason)
+	return true
+}

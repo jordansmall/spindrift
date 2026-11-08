@@ -653,10 +653,10 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 	assertNoTransitionOrComment(t, fc)
 }
 
-// The merge-guard-hit exit is its own Complete commit site (pr_lander.go's second
-// of four), so a mark landing while mergeGuardHit's own ListPRFiles round-trip
-// is in flight must still abandon rather than commit agent-complete. The mark
-// lands ahead of the branch's own Comment call, which still fires (no
+// The merge-guard-hit exit is its own Complete commit site (pr_lander.go's
+// second of four), so a mark landing while mergeGuardHit's own ListPRFiles
+// round-trip is in flight must still abandon rather than commit agent-complete.
+// The mark lands ahead of the branch's own Comment call, which still fires (no
 // checkpoint sits between the guard-hit detection and it) — the finding's
 // hole is the state commit, not this comment. Control:
 // TestSelfHeal_MergeGuardHit_DowngradesToManual runs the identical guard-hit

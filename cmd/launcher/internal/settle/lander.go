@@ -18,4 +18,9 @@ type lander interface {
 	latchOpenPR(num string)
 	// settleReportedMerge settles an off-script status=merged outcome.
 	settleReportedMerge(num string)
+	// salvage settles a run cut short whose evidence says its work finished;
+	// true means the run is settled.
+	salvage(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool
+	// landRelayed lands a branch the Box relayed; false means nothing landed.
+	landRelayed(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (relayed bool, err error)
 }

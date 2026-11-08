@@ -621,9 +621,9 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 
 // ADR 0039's local push-only recovery path (issue #2254): a Box that emitted
 // no parseable outcome line but left a success self-report and a real bundle
-// must not park agent-failed. tryMarkRecoverable promotes it to Recoverable,
-// and only SettleRelayedBranch, the method recoverByNumber drives, actually
-// lands the bundle.
+// must not park agent-failed. The push-only Lander's salvage promotes it to
+// Recoverable, and only SettleRelayedBranch, the method recoverByNumber
+// drives, actually lands the bundle.
 func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) {
 	setGitIdentityEnv(t)
 	operatorDir := newOperatorCheckout(t)

@@ -8,109 +8,18 @@ import (
 	"path/filepath"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/seambundle"
 )
-
-// tryAdoptRelayedBranch adopts a read-only Box's relayed branch into a PR when
-// the ADR 0036 synthetic status=blocked backstop contradicts the driver's own
-// last genuine success self-report (issues #2223, #2224). The self-report is
-// unauthenticated input, so this trusts it only for a PR-shaped read-only forge
-// and returns false on any doubt, leaving the caller's blocked handling to run.
-// True means the issue is settled: adopted, abandoned, or failed unreviewed.
-func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if result.Resolved.Provenance != outcome.ProvenanceSynthetic || !s.readOnly || s.pr == nil {
-		return false
-	}
-	// situationFor stats the outbox, so it runs only after the cheap checks
-	// above. openPRFound is false: this function never looks for an open PR.
-	sit := s.situationFor(num, false, result)
-	if !sit.SelfReportSuccess {
-		return false
-	}
-	if sit.Unreviewed {
-		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
-		return true
-	}
-
-	return s.adoptAndGateLogged(d, num, gen, result, "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch")
-}
-
-// tryAdoptRelayedBranchNoOutcome is tryAdoptRelayedBranch for a Box that died
-// before emitting any parseable outcome line (issue #2253): Resolved.Found is
-// false, so no ADR 0036 backstop is stitched in and the Provenance gate there
-// never fires. gate.go's sole caller already sits inside the
-// !result.Resolved.Found branch, so no explicit guard for it is needed here.
-// True means the issue is settled, as in tryAdoptRelayedBranch.
-func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) bool {
-	if !s.readOnly || s.pr == nil {
-		return false
-	}
-	// situationFor stats the outbox, so it runs only after the cheap checks
-	// above. openPRFound is false: this function never looks for an open PR.
-	sit := s.situationFor(num, false, result)
-	if !sit.SelfReportSuccess {
-		return false
-	}
-	if sit.Unreviewed {
-		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
-		return true
-	}
-
-	return s.adoptAndGateLogged(d, num, gen, result, "no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch")
-}
-
-// adoptAndGateLogged runs adoptAndGate for a caller that can only return a
-// bool, logging the cause to stderr.
-func (s *Settle) adoptAndGateLogged(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) bool {
-	adopted, err := s.adoptAndGate(d, num, gen, result, note)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: adopt relayed branch: %v\n", num, err)
-	}
-	return adopted
-}
-
-// adoptAndGate is the shared adopt+gate tail behind tryAdoptRelayedBranch
-// (#2224) and SettleRelayedBranch (#2225): open a PR on num's relayed branch,
-// print the status=adopted line, then drive the same merge gate the "ready"
-// path uses. Returns false, with no side effect, when no PR could be opened (the
-// cause is non-nil only for a relay or draft-PR-create failure, nil for a
-// wiring or missing-PR-intent failure), and true, also with no side effect, when a stop abandoned the
-// relay.
-func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) (bool, error) {
-	pr, opened, err := s.adoptRelayedBranch(num, gen, result)
-	if errors.Is(err, errAbandoned) {
-		// Handled: false would send the caller's blocked handling to comment on
-		// and transition an issue the stop already released (issue #3523).
-		return true, nil
-	}
-	if !opened {
-		return false, err
-	}
-
-	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAdopted, Detail: "note=" + note})
-	s.recordLanding(num, pr, result.Passes)
-	landing, reason, err := s.selfHeal(d, num, gen, pr, result.Passes)
-	if errors.Is(err, errAbandoned) {
-		// Another actor owns the issue, so a usage comment here would be noise.
-		return true, nil
-	}
-	if landing == landingFailed {
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
-	}
-	s.postUsageComment(num, d)
-	return true, nil
-}
 
 // SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
 // (#2225); sit comes from the caller (#2501). Recover is read-write, so it
 // needs neither synthetic provenance nor a read-only Box. An open PR is
 // SettleAdopted's job, so sit.OpenPRFound returns false; every production
 // caller passes false today, so this guard only protects a future caller.
-// Local push-only has no PR to open (ADR 0039, #2254), where a bundle alone
+// The Lander lands the relayed branch: a PR forge opens a PR on it, while
+// local push-only has no PR to open (ADR 0039, #2254), where a bundle alone
 // is evidence (#2378). The error is non-nil only when relaying the branch or
 // opening its draft PR failed.
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (st Settlement, relayed bool, err error) {
@@ -119,92 +28,8 @@ func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint
 	if sit.OpenPRFound || sit.Unreviewed {
 		return Settlement{}, false, nil
 	}
-	cf := s.cfForNum(num)
-	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
-		if sit.SelfReportSuccess {
-			return Settlement{}, s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed", result.Passes), nil
-		}
-		if sit.BundlePresent {
-			return Settlement{}, s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed", result.Passes), nil
-		}
-		return Settlement{}, false, nil
-	}
-	if !sit.SelfReportSuccess {
-		return Settlement{}, false, nil
-	}
-	relayed, err = s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
+	relayed, err = s.lander.landRelayed(d, num, gen, sit, result)
 	return Settlement{}, relayed, err
-}
-
-// landRelayedBranchPushOnly lands num's relayed branch directly, the local
-// push-only counterpart to adoptAndGate. The branch comes from the issue's own
-// derived agent branch, never an outcome-line field (issue #1949): there may
-// be no parsed outcome line at all on this path. note is printed verbatim.
-func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64, note string, passes []passmanifest.Entry) bool {
-	branch := s.cfForNum(num).AgentBranch(num)
-	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusAdopted, Detail: "note=" + note})
-	s.recordLanding(num, branch, passes)
-	landing, reason, err := s.selfHeal(d, num, gen, branch, passes)
-	if errors.Is(err, errAbandoned) {
-		// Another actor owns the issue, so a usage comment here would be noise.
-		return true
-	}
-	switch landing {
-	case landingFailed:
-		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
-	}
-	s.postUsageComment(num, d)
-	return true
-}
-
-// adoptRelayedBranch relays num's finished branch out of the outbox and opens
-// a PR on it. branch comes from cf.AgentBranch(num), never the outcome line's
-// landing= field (#1949): a prompt-injected read-only Box controls that field.
-// FallbackDefault means a missing PR-intent line falls back to an issue-derived
-// default instead of blocking, since this Box was cut short before that step.
-// opened is false when no PR is open. The error is then non-nil only for a
-// relay or draft-PR-create failure, or errAbandoned when a stop landed during
-// the relay's backoff; other Open failures (wiring, missing PR intent) leave a
-// nil error so recover's own "no open PR" handling runs.
-func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (url string, opened bool, err error) {
-	branch, m := s.mediationFor(num, gen)
-	url, _, _, err = m.Open(num, branch, result, FallbackDefault)
-	if err != nil {
-		if errors.Is(err, errAbandoned) || errors.Is(err, errRelayBundle) || errors.Is(err, errCreateDraftPR) {
-			return "", false, err
-		}
-		return "", false, nil
-	}
-	return url, true, nil
-}
-
-// tryMarkRecoverable promotes a local push-only issue to Recoverable (ADR
-// 0039) when either a genuine success self-report or a signal kill (#2378)
-// coincides with a bundle in the outbox, leaving the land itself to `spindrift
-// recover`. It only stats the outbox, so no local issue is ever
-// fast-forwarded on unauthenticated evidence alone. A success self-report
-// that is unreviewed, or a signal-killed run whose loop stopped before its
-// land pass, fails the issue instead, since recover would decline that bundle
-// (issues #5973, #5984). True means the issue is settled, Recoverable or Failed.
-func (s *Settle) tryMarkRecoverable(d dispatch.Dispatcher, num string, result dispatch.Result) bool {
-	cf := s.cfForNum(num)
-	selfReportOK := result.Resolved.SelfReportFound && isSuccessSelfReport(result.Resolved.SelfReport.Status)
-	if _, ok := cf.(forge.BundleRelay); !ok || s.pr != nil ||
-		(!selfReportOK && !result.KilledBySignal) ||
-		!s.bundlePresent(num) {
-		return false
-	}
-	if s.situationFor(num, false, result).Unreviewed {
-		s.failUnreviewed(d, num, s.unreviewedLanding(num, result))
-		return true
-	}
-	reason := "genuine success self-report"
-	if !selfReportOK {
-		reason = "killed by signal"
-	}
-	s.cfg.Progress.Step(Step{Key: num, Status: StatusRecoverable, Detail: fmt.Sprintf("note=%s; bundle present in outbox; run `spindrift recover %s` to land it", reason, num)})
-	s.transitionState(num, ForReason(dispatchrecord.ReasonRecoverable), reason)
-	return true
 }
 
 // bundlePresent reports whether num's outbox holds a relayable bundle file. It
@@ -248,4 +73,21 @@ func (s *Settle) removeLandedBundle(num string) {
 // deliberately narrowing the self-report side of #2223's adoption path.
 func isSuccessSelfReport(status string) bool {
 	return status == outcome.StatusReady
+}
+
+// gateAdopted is the tail shared by both Landers' relayed-branch landings:
+// print status=adopted for landing, record it with the run's passes, drive the
+// merge gate, and post the usage comment.
+func (s *Settle) gateAdopted(d dispatch.Dispatcher, num string, gen uint64, landing, note string, passes []passmanifest.Entry) {
+	s.cfg.Progress.Step(Step{Key: num, Landing: landing, Status: StatusAdopted, Detail: "note=" + note})
+	s.recordLanding(num, landing, passes)
+	result, reason, err := s.selfHeal(d, num, gen, landing, passes)
+	if errors.Is(err, errAbandoned) {
+		// Another actor owns the issue, so a usage comment here would be noise.
+		return
+	}
+	if result == landingFailed {
+		s.cfg.Progress.Step(Step{Key: num, Landing: landing, Status: StatusFailed, Detail: "!! " + reason})
+	}
+	s.postUsageComment(num, d)
 }
