@@ -162,7 +162,7 @@ func TestResolveChoreCatalog_AbsentVersusEmpty(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			withLoadedDoc(t, tc.doc)
+			useDoc(t, tc.doc)
 			got := resolveChoreCatalog()
 			if got.known != tc.want.known || !slices.Equal(got.names, tc.want.names) {
 				t.Errorf("resolveChoreCatalog() = %+v, want %+v", got, tc.want)

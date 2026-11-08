@@ -34,13 +34,13 @@ var testDispatchLabels = forge.DispatchLabels{
 // newReadContext fixture needs (issue #2945).
 func setFullyLocalEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 }
 
@@ -216,4 +216,22 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 	testutil.WriteFixture(t, dir, "base.txt", "base")
 	testutil.GitRun(t, dir, "add", "base.txt")
 	testutil.GitRun(t, dir, "commit", "-m", "base")
+}
+
+// The one seam tests configure a non-secret schema knob through.
+func setKnob(t *testing.T, env, value string) {
+	t.Helper()
+	if _, ok := inputdoc.SchemaFlag(env); !ok {
+		t.Fatalf("setKnob(%q): not a schema knob; use t.Setenv for secrets and plumbing", env)
+	}
+	t.Setenv(env, value)
+}
+
+// Points the package-level loadedDoc at doc for the calling test only, so no
+// test's document leaks into the next.
+func useDoc(t *testing.T, doc *inputdoc.Document) {
+	t.Helper()
+	prev := loadedDoc
+	loadedDoc = doc
+	t.Cleanup(func() { loadedDoc = prev })
 }
