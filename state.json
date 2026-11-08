@@ -1,18 +1,20 @@
 {
   "lastSwept": "58744e82b786f131dc3014b652bd2def6dc66c7f",
   "cursor": "cmd/launcher/testdata/golden/stats-by-revision-events.txt",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/6682"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-11-08T02:17:43.825795314-05:00"
+  },
   "usage": {
-    "input_tokens": 94,
-    "output_tokens": 13510,
-    "cache_read_input_tokens": 3601459,
-    "cache_creation_input_tokens": 114116,
-    "total_cost_usd": 1.8832422200000005,
-    "duration_ms": 135792,
-    "duration_api_ms": 131175,
-    "num_turns": 49
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
