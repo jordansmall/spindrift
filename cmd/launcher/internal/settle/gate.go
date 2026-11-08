@@ -113,7 +113,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			return
 		}
 		// A read-write Box may have opened its draft PR before stopping.
-		s.latchBranchPR(num)
+		s.lander.latchOpenPR(num)
 		if demotedResolved {
 			// postBlockedNoteComment skips a writable tracker's read-write run
 			// on the assumption the Box commented itself, but an agent that
@@ -132,29 +132,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			s.failUnreviewed(d, num, o.Landing)
 			return
 		}
-		pr := o.Landing
-		// A read-only PR-shaped Code Forge never opens its own PR in-box (issue
-		// #1919), so o.Landing carries the branch name, not a PR URL, and
-		// selfHeal cannot watch CI on it. Push-only forges (s.pr == nil) need
-		// no such step: the push-only Lander's own RelayBundle call covers them.
-		if s.readOnly && s.pr != nil {
-			var handoffErr error
-			pr, handoffErr = s.hostMediateDraftPR(num, gen, result)
-			if errors.Is(handoffErr, errAbandoned) {
-				return
-			}
-			if handoffErr != nil {
-				s.postUsageComment(num, d)
-				return
-			}
-			// Record the host-opened PR URL. A no-op for every tracker but
-			// local's; only the local Code Forge never reaches this branch (s.pr
-			// is nil for its push-only forge), not ISSUE_TRACKER=local paired
-			// with a read-only PR forge.
-			s.recordLanding(num, pr, result.Passes)
+		pr, ok := s.lander.landingRef(d, num, gen, result)
+		if !ok {
+			return
 		}
-		// A read-write Box opened its PR before printing ready.
-		s.latchBranchPR(num)
 		landing, reason, err := s.selfHeal(d, num, gen, pr, result.Passes)
 		if errors.Is(err, errAbandoned) {
 			// Another actor owns the issue, so a usage comment here would be
@@ -169,24 +150,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// status=merged is off-script: no prompt fragment instructs a Box to
 		// print it, so o.Landing is Agent-controlled with no legitimate
 		// provenance. It is absent from lib/prompt-contract.nix's
-		// outcomeStatusSets (issue #2504), hence a bare string literal. Resolve
-		// the ref host-side (issue #1955); PRForBranch gives a full PR URL.
-		branch := s.cf.AgentBranch(num)
-		if s.pr != nil {
-			pr, ok, err := s.pr.PRForBranch(branch)
-			if err != nil || !ok {
-				const reason = "no PR found on branch to verify merge"
-				s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
-				s.transitionState(num, ForReason(dispatchrecord.ReasonNoPR), reason)
-			} else {
-				prLander{s}.verifyMerged(num, pr)
-			}
-		} else {
-			// A push-only Code Forge has no PR state to verify. Print the
-			// host-derived branch, never the Agent-controlled o.Landing, so
-			// landing= carries the same provenance across both arms.
-			s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: Status(o.Status)})
-		}
+		// outcomeStatusSets (issue #2504), hence a bare string literal.
+		s.lander.settleReportedMerge(num)
 		s.postUsageComment(num, d)
 	case outcome.StatusAmbiguous:
 		// The Box detected an internally-contradictory issue and halted before
@@ -498,25 +463,6 @@ func (s *Settle) keyFor(num string) dispatchkey.Key {
 		return k
 	}
 	return dispatchkey.Issue(num)
-}
-
-// latchBranchPR latches the open PR on num's agent branch. The branch is
-// reused across retries, so only an open PR counts: an earlier run's closed PR
-// must not be named on this run's record (ResolveOpenPR, unlike PRForBranch,
-// ignores it). A no-op for read-only and push-only forges; read-only latches at
-// Open's source.
-func (s *Settle) latchBranchPR(num string) {
-	if s.readOnly || s.pr == nil {
-		return
-	}
-	res, err := forge.ResolveOpenPR(s.cf, num)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not resolve PR for settled record: %v\n", num, err)
-		return
-	}
-	if res.Found {
-		s.latchPR(num, res.URL)
-	}
 }
 
 // postBlockedNoteComment posts note when the Box had no way to post it in-box:
