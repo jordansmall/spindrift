@@ -306,7 +306,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	}
 	// The stamp names the Driver whose grammar the rest of the log is in; an
 	// unstamped log predates Driver choice and reads as claude.
-	pre, _ := ReadStamp(path)
+	pre, stamped := ReadStamp(path)
 	d, err := driver.New(pre.Driver)
 	if err != nil {
 		return Record{}, false, time.Time{}, fmt.Errorf("dispatch_start: %w", err)
@@ -332,7 +332,11 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		announced string
 	)
 
-	tallies, err := d.ReadPasses(path, passmachine.DispositionsPath, func(l driverkit.PassLine) {
+	seed, err := sessionSeed(path, pre, stamped, d)
+	if err != nil {
+		return Record{}, false, time.Time{}, err
+	}
+	tallies, err := d.ReadPasses(path, passmachine.DispositionsPath, seed, func(l driverkit.PassLine) {
 		sawLine = true
 		// The agent's outcome line and the Box's announce line are plain text,
 		// not events, so they must be read before the event check below.
@@ -553,4 +557,52 @@ func nonNil(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// sessionSeed is the session baselines a log starts from. A work Dispatch's
+// logs after its first resume the session its earlier logs ran (a fix or
+// conflict-resolve log, or a hold/backoff retry of the primary), and the CLI
+// reports that session's cumulative totals, so its first result must be
+// rebased against the last of them (issue #6706). Research and butler retries
+// re-pin the same session id instead; seeding them is still right, since the
+// transcript is cached within a Run so the counters continue, and a genuine
+// restart is caught by the counter-decrease rule. The earlier logs are those
+// of the same stamped Dispatch (by record_id, since quarantine suffixes are
+// numbered per file) that started before this one. Keep in step with
+// dispatch.attemptReports.
+func sessionSeed(path string, stamp hostop.DispatchStart, stamped bool, d driver.Driver) (driverkit.SessionBaselines, error) {
+	dir, name := filepath.Split(path)
+	key, _ := logKey(name)
+	if !stamped {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	type prior struct {
+		path    string
+		started time.Time
+	}
+	var priors []prior
+	for _, e := range entries {
+		other := e.Name()
+		if other == name || !PassLogName(other) {
+			continue
+		}
+		if otherKey, _ := logKey(other); otherKey != key {
+			continue
+		}
+		if s, ok := ReadStamp(filepath.Join(dir, other)); ok && s.RecordID == stamp.RecordID && s.Started.Before(stamp.Started) {
+			priors = append(priors, prior{filepath.Join(dir, other), s.Started})
+		}
+	}
+	slices.SortFunc(priors, func(a, b prior) int { return a.started.Compare(b.started) })
+	var base driverkit.SessionBaselines
+	for _, p := range priors {
+		if base, err = d.SessionBaselinesAfter(p.path, base); err != nil {
+			return nil, err
+		}
+	}
+	return base, nil
 }

@@ -260,7 +260,7 @@ func TestReadPasses_TracksWriteModelsAndTotals(t *testing.T) {
 		toolEnd("w1", "write", "wrote", false),
 		textEnd(2000, "Done."),
 	)
-	passes, err := newDriver().ReadPasses(path, "OUT.md", nil)
+	passes, err := newDriver().ReadPasses(path, "OUT.md", nil, nil)
 	if err != nil || len(passes) != 1 {
 		t.Fatalf("ReadPasses: %v, %d passes", err, len(passes))
 	}

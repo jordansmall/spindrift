@@ -434,7 +434,7 @@ func TestStrategyDriverReadPasses(t *testing.T) {
 	)
 
 	var seen int
-	tallies, err := New(s).ReadPasses(log, "out.txt", func(PassLine) { seen++ })
+	tallies, err := New(s).ReadPasses(log, "out.txt", nil, func(PassLine) { seen++ })
 	if err != nil {
 		t.Fatalf("ReadPasses: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestStrategyDriverReadPasses(t *testing.T) {
 	}
 
 	s.WriteTool = ""
-	tallies, err = New(s).ReadPasses(log, "out.txt", nil)
+	tallies, err = New(s).ReadPasses(log, "out.txt", nil, nil)
 	if err != nil || tallies[0].Wrote {
 		t.Errorf("empty WriteTool: tallies %+v, err %v; want no write tracked", tallies, err)
 	}

@@ -80,7 +80,9 @@ func (d Driver) ExtractUsageAfter(logPath string, base SessionBaselines) (usage.
 	if err != nil {
 		return usage.Report{}, nil, err
 	}
-	after, err := SessionBaselinesAfter(logPath, d.s.NewDecoder, base)
+	// A second scan: each report reader builds its own rebasing decoder from
+	// base, so none of them ends holding the log's final baselines.
+	after, err := d.SessionBaselinesAfter(logPath, base)
 	if err != nil {
 		return usage.Report{}, nil, err
 	}
@@ -106,8 +108,12 @@ func (d Driver) ResultEvent(text string) ([]byte, error) {
 	return d.s.ResultEvent(text)
 }
 
-func (d Driver) ReadPasses(logPath, trackWrite string, visit func(PassLine)) ([]PassTally, error) {
-	return ReadPasses(logPath, PassOptions{NewDecoder: RebaseResults(d.s.NewDecoder, nil), Totals: d.s.Totals, WriteTool: d.s.WriteTool}, trackWrite, visit)
+func (d Driver) ReadPasses(logPath, trackWrite string, base SessionBaselines, visit func(PassLine)) ([]PassTally, error) {
+	return ReadPasses(logPath, PassOptions{NewDecoder: RebaseResults(d.s.NewDecoder, base), Totals: d.s.Totals, WriteTool: d.s.WriteTool}, trackWrite, visit)
+}
+
+func (d Driver) SessionBaselinesAfter(logPath string, base SessionBaselines) (SessionBaselines, error) {
+	return SessionBaselinesAfter(logPath, d.s.NewDecoder, base)
 }
 
 func (d Driver) SessionFlags(mode, repoSlug, issue, home string) string {

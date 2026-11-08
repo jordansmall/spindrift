@@ -19,7 +19,7 @@ func TestOpencodeDriverReadPassesModelsAndWrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := d.ReadPasses(path, "/tmp/verdict.md", nil)
+	got, err := d.ReadPasses(path, "/tmp/verdict.md", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
