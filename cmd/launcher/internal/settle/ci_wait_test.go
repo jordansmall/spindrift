@@ -59,7 +59,7 @@ func TestSettle_CIWait_EmitsOneRecordPerWaitEntered(t *testing.T) {
 			s := newTestSettle(c, fc, fc)
 
 			if tc.viaMerge {
-				_ = s.mergeImmediate("1", 0, testPR, nil)
+				_ = prLander{s}.mergeImmediate("1", 0, testPR, nil)
 			} else {
 				s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 			}

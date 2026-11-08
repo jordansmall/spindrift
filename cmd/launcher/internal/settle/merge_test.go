@@ -234,7 +234,7 @@ func TestMergeImmediate(t *testing.T) {
 			}
 
 			s := newTestSettle(c, fc, fc)
-			err := s.mergeImmediate("1", 0, testPR, d)
+			err := prLander{s}.mergeImmediate("1", 0, testPR, d)
 
 			if (err != nil) != tc.wantErr {
 				t.Errorf("mergeImmediate err=%v, wantErr=%v", err, tc.wantErr)
@@ -271,7 +271,7 @@ func TestMergeImmediate_ConflictDemotesToDraftAndRestoresOnGreen(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -300,7 +300,7 @@ func TestMergeImmediate_ConflictResolveRelaysBundleWhenReadOnly(t *testing.T) {
 	cf := fc.AsGithubReadOnly()
 	s := newTestSettle(c, fc, cf)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -335,7 +335,7 @@ func TestMergeImmediate_MarkDraftFailureIsBestEffort(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = s.mergeImmediate("1", 0, testPR, nil)
+		err = prLander{s}.mergeImmediate("1", 0, testPR, nil)
 	})
 
 	if err != nil {
@@ -363,7 +363,7 @@ func TestMergeImmediate_MarkReadyRestoreFailureIsBestEffort(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = s.mergeImmediate("1", 0, testPR, nil)
+		err = prLander{s}.mergeImmediate("1", 0, testPR, nil)
 	})
 
 	if err != nil {
@@ -394,7 +394,7 @@ func TestMergeImmediate_StaleConflictRetryDoesNotRedemoteAfterRestore(t *testing
 	df := dispatch.NewFake()
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -438,7 +438,7 @@ func TestMergeImmediate_RewaitsAfterForcePush(t *testing.T) {
 	c.Progress = rec
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when CI never reaches green after force-push, got nil")
@@ -466,7 +466,7 @@ func TestMergeImmediate_RewaitGreenMergesWithoutFurtherRebase(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -491,7 +491,7 @@ func TestMergeImmediate_RewaitGenuineRedNotTreatedAsConflict(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when re-wait confirms genuine CI red, got nil")
@@ -526,7 +526,7 @@ func TestMergeImmediate_BlockedByChecks(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = s.mergeImmediate("1", 0, testPR, df)
+		err = prLander{s}.mergeImmediate("1", 0, testPR, df)
 	})
 
 	if err != nil {
@@ -572,7 +572,7 @@ func TestMergeImmediate_BlockedByChecksExhausted(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 
 	s := newTestSettle(c, fc, fc)
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, forge.ErrMergeBlockedByChecks) {
 		t.Fatalf("want ErrMergeBlockedByChecks, got: %v", err)
@@ -598,7 +598,7 @@ func TestMergeImmediate_StaleBaseTriggersProactiveRebase(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -626,7 +626,7 @@ func TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when the rebased combined tree fails CI, got nil")
@@ -652,7 +652,7 @@ func TestMergeImmediate_StaleBaseCheckErrorFallsThroughToMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -687,7 +687,7 @@ func TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when the stale-base rebase never recovers, got nil")
@@ -712,7 +712,7 @@ func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when the stale-base rebase fails non-transiently, got nil")
@@ -742,7 +742,7 @@ func TestMergeImmediate_StaleBasePermanentPushFailureIsNotRetried(t *testing.T) 
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error for a permanent push failure, got nil")
@@ -772,7 +772,7 @@ func TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher(t *testing.T) {
 	df := dispatch.NewFake()
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -803,7 +803,7 @@ func TestMergeImmediate_StaleBaseConflictAlreadyRunning_Abandons(t *testing.T) {
 	df.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -835,7 +835,7 @@ func TestMergeImmediate_StaleBaseConflictDemotesToDraftAndRestoresOnGreen(t *tes
 	df := dispatch.NewFake()
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -861,7 +861,7 @@ func TestMergeImmediate_StaleBaseTransientPushFailureDoesNotDemote(t *testing.T)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -893,7 +893,7 @@ func TestMergeImmediate_StaleBaseMarkDraftFailureIsBestEffort(t *testing.T) {
 
 	var err error
 	out := testutil.CaptureStdout(t, func() {
-		err = s.mergeImmediate("1", 0, testPR, df)
+		err = prLander{s}.mergeImmediate("1", 0, testPR, df)
 	})
 
 	if err != nil {
@@ -923,7 +923,7 @@ func TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge(t *testing.T)
 	df.ResolveConflictErr = errors.New("agent could not resolve conflict")
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when preflight conflict-resolve fails, got nil")
@@ -955,7 +955,7 @@ func TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge(t *testin
 	df := dispatch.NewFake()
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, df)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, df)
 
 	if err == nil {
 		t.Fatal("mergeImmediate: want error when the post-resolve re-wait never goes green, got nil")
@@ -984,7 +984,7 @@ func TestMergeImmediate_StaleBaseSkippedWhenRebaseDisabled(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -1012,7 +1012,7 @@ func TestMergeImmediate_StaleBaseSkippedWhenPreflightOff(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if err != nil {
 		t.Fatalf("mergeImmediate: unexpected error: %v", err)
@@ -1033,7 +1033,7 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	reason, err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := prLander{s}.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode immediate: unexpected error: %v", err)
 	}
@@ -1055,7 +1055,7 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	reason, err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := prLander{s}.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode manual: unexpected error: %v", err)
 	}
@@ -1077,7 +1077,7 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	reason, err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := prLander{s}.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode auto: unexpected error: %v", err)
 	}
@@ -1105,7 +1105,7 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	fc.EnqueueAutoMergeErr = fmt.Errorf("gh pr merge --auto: permission denied")
 	s := newTestSettle(c, fc, fc)
 
-	reason, err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := prLander{s}.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("auto mode enqueue failure must not propagate error; got: %v", err)
 	}

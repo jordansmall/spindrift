@@ -7,8 +7,6 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/forge"
 )
 
 // SettleAdopted runs the merge gate on an already-discovered open PR for num,
@@ -52,66 +50,6 @@ func (s *Settle) SettlePatch(owner dispatchkey.Key, num, prURL string) Settlemen
 	s.reportKey[num] = owner
 	s.settledMu.Unlock()
 	return s.SettleAdopted(nil, num, 0, prURL)
-}
-
-// verifyMerged confirms a PR reported merged carries both a MERGED state and
-// the CompleteLabel, and demotes the issue to Failed otherwise, since a gap
-// there means something merged outside the gate. A read that still fails after
-// its retries proves nothing, so it leaves the issue as it stands rather than
-// demote it. A verified merge also drops the landed bundle; a demoted settle
-// keeps it.
-func (s *Settle) verifyMerged(num, pr string) {
-	var prState forge.PRState
-	var iss forge.Issue
-	err := s.retryVerifyRead(num, pr, func() error {
-		var err error
-		prState, err = s.pr.PRState(pr)
-		return err
-	})
-	if err == nil {
-		err = s.retryVerifyRead(num, pr, func() error {
-			var err error
-			iss, err = s.it.Issue(num)
-			return err
-		})
-	}
-	if err != nil {
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeUnverifiedReadError, Detail: fmt.Sprintf("!! %v", err)})
-		return
-	}
-	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusVerifiedMerged})
-		s.removeLandedBundle(num)
-		s.closeIssue(num)
-		return
-	}
-	var reason string
-	if prState != forge.PRMerged {
-		reason = fmt.Sprintf("PR state is '%s', expected MERGED", prState)
-	} else {
-		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
-	}
-	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
-	s.transitionState(num, ForReason(dispatchrecord.ReasonMergeUnverified), reason)
-}
-
-// retryVerifyRead runs read, retrying a failure up to Policy.Max times with
-// backoff.
-func (s *Settle) retryVerifyRead(num, pr string, read func() error) error {
-	attempts := 0
-	for {
-		err := read()
-		if err == nil {
-			return nil
-		}
-		if attempts >= s.cfg.Policy.Max {
-			return err
-		}
-		attempts++
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeUnverifiedReadRetry,
-			Detail: fmt.Sprintf("attempt=%d/%d  !! %v", attempts, s.cfg.Policy.Max, err)})
-		s.transientBackoff().Do(attempts)
-	}
 }
 
 // postUsageComment posts d's aggregate usage-statistics comment to the issue.

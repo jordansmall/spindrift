@@ -71,7 +71,7 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 	reg := s.Registry()
 	reg.Mark("1")
 
-	got, _ := s.gateToGreen("1", 0, testPR, false)
+	got, _ := prLander{s}.gateToGreen("1", 0, testPR, false)
 
 	if !errors.Is(got.err, errAbandoned) {
 		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)
@@ -92,7 +92,7 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterStaleBasePreflight(t *testing
 	s := newTestSettle(c, fc, fc)
 	fc.On("Rebase", func(int) { s.Registry().Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -121,7 +121,7 @@ func TestMergeImmediate_TerminatedStopsRebaseRetry(t *testing.T) {
 	reg := s.Registry()
 	reg.Mark("1")
 
-	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
+	err := prLander{s}.mergeImmediate("1", 0, testPR, dispatch.NewFake())
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -150,7 +150,7 @@ func TestMergeImmediate_TerminatedBeforeStaleBasePreflightSkipsRebase(t *testing
 	reg := s.Registry()
 	reg.Mark("1")
 
-	err := s.mergeImmediate("1", 0, testPR, nil)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, nil)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -187,7 +187,7 @@ func TestGateToGreen_TerminatedMidPollAbandonsPromptly(t *testing.T) {
 		}
 	})
 
-	got, _ := s.gateToGreen("1", 0, testPR, false)
+	got, _ := prLander{s}.gateToGreen("1", 0, testPR, false)
 
 	if !errors.Is(got.err, errAbandoned) {
 		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)
@@ -210,7 +210,7 @@ func TestGateToGreen_NeverTerminatedRunsFullDeadline(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	s := newTestSettle(c, fc, fc)
 
-	got, _ := s.gateToGreen("1", 0, testPR, false)
+	got, _ := prLander{s}.gateToGreen("1", 0, testPR, false)
 
 	if got.outcome != gateTerminal {
 		t.Errorf("gateToGreen = %v, want gateTerminal", got.outcome)
@@ -234,7 +234,7 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 	fc.On("Rebase", func(int) { s.Registry().Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, dispatch.NewFake())
+	err := prLander{s}.mergeImmediate("1", 0, testPR, dispatch.NewFake())
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -262,7 +262,7 @@ func TestMergeImmediate_TerminatedDuringRewaitAfterConflictResolve(t *testing.T)
 	d := dispatch.NewFake()
 	d.On("ResolveConflict", func(int) { reg.Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, d)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, d)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -461,7 +461,7 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	reg.Mark("1")
 	newGen := reg.Begin("1") // a re-pick's discover claims a fresh incarnation, mid-race
 
-	if got, _ := s.gateToGreen("1", oldGen, testPR, false); !errors.Is(got.err, errAbandoned) {
+	if got, _ := (prLander{s}).gateToGreen("1", oldGen, testPR, false); !errors.Is(got.err, errAbandoned) {
 		t.Errorf("gateToGreen(oldGen) = %v (err %v), want errAbandoned — a re-pick must not erase an in-flight settle's own mark", got.outcome, got.err)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
@@ -536,7 +536,7 @@ func TestMergeImmediate_ConflictResolveBoxReaped_ReportsAbandonedNotNeverGreen(t
 	reg := s.Registry()
 	fk.On("ResolveConflict", func(int) { reg.Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, fk)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, fk)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -590,7 +590,7 @@ func TestMergeImmediate_ConflictResolveBoxReapedDuringStaleBasePreflight_Reports
 	reg := s.Registry()
 	fk.On("ResolveConflict", func(int) { reg.Mark("1") })
 
-	err := s.mergeImmediate("1", 0, testPR, fk)
+	err := prLander{s}.mergeImmediate("1", 0, testPR, fk)
 
 	if !errors.Is(err, errAbandoned) {
 		t.Errorf("mergeImmediate err = %v, want errAbandoned", err)
@@ -653,7 +653,7 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 	assertNoTransitionOrComment(t, fc)
 }
 
-// The merge-guard-hit exit is its own Complete commit site (ready.go's second
+// The merge-guard-hit exit is its own Complete commit site (pr_lander.go's second
 // of four), so a mark landing while mergeGuardHit's own ListPRFiles round-trip
 // is in flight must still abandon rather than commit agent-complete. The mark
 // lands ahead of the branch's own Comment call, which still fires (no
@@ -698,7 +698,7 @@ func TestRegistry_StableHandleIsWhatCheckpointsRead(t *testing.T) {
 	}
 	s.Registry().Mark("1")
 
-	got, _ := s.gateToGreen("1", 0, testPR, false)
+	got, _ := prLander{s}.gateToGreen("1", 0, testPR, false)
 
 	if !errors.Is(got.err, errAbandoned) {
 		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)

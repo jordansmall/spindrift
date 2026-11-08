@@ -110,7 +110,7 @@ func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testin
 
 // The blocking review finding at gate.go:227 (issue #3627): a green self-heal
 // that lands Complete (completeLanding) and is then demoted by verifyMerged's
-// PR-state re-check (adopt.go) must reach the daemon as exactly one settled
+// PR-state re-check (pr_lander.go) must reach the daemon as exactly one settled
 // record carrying the tracker's final decision, state=failed — never two
 // contradicting records.
 func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *testing.T) {

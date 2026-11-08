@@ -530,7 +530,7 @@ func (r *issueReadCounter) Issue(num string) (forge.Issue, error) {
 }
 
 // failThenAbort stands in for a settle that writes InProgress->Failed itself
-// (settle/ready.go: red CI after the fix passes), then aborts before
+// (settle/pr_lander.go: red CI after the fix passes), then aborts before
 // gate.Leave and waits until the watcher's abort pass has read the issue.
 func failThenAbort(it *issueReadCounter, num string, abort func()) {
 	before := it.reads.Load()

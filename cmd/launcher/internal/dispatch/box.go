@@ -58,7 +58,7 @@ type Dispatch struct {
 	// agentGeneration is the agent-closure generation snapshot taken at
 	// New()-time (issue #2682), forwarded into every Box as ClosureGeneration;
 	// nil means runner.Box's own default. Snapshotted once rather than read
-	// live so a Fix() launched minutes later (settle/ready.go, after a Box
+	// live so a Fix() launched minutes later (settle/pr_lander.go, after a Box
 	// idles awaiting CI) stays on the generation this Dispatch started on.
 	agentGeneration *runner.AgentGeneration
 
