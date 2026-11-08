@@ -272,6 +272,7 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, fixCases()...)
 	cases = append(cases, mergeCases()...)
 	cases = append(cases, verifyCases()...)
+	cases = append(cases, terminateCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
