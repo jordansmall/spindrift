@@ -45,9 +45,13 @@ func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 	return fc, fc
 }
 
-// prCase is one PR landing of a green PR observed through Settle's public
-// entry point: the Settlement, the progress steps, the tracker's labels and
-// the side effects the Lander owns on the forge fake.
+// checkFn is a row's check hook: an assertion on the fakes after Settle returns.
+type checkFn = func(*testing.T, *forge.Fake, *dispatch.Fake)
+
+// prCase is one PR-path row observed through Settle's public entry points: a
+// landing whatever its CI state, a no-PR hand-off, or a declined Recover. It pins
+// the Settlement, the progress steps, the tracker's labels and the side effects
+// the Lander owns on the forge fake.
 type prCase struct {
 	name      string
 	entry     pushOnlyEntry    // which public entry reaches the landing; default Settle
@@ -62,32 +66,31 @@ type prCase struct {
 	files     []string           // the PR's changed files; default src/main.go
 	setup     func(*testing.T, *forge.Fake, *Config)
 
-	maxRebase  int                               // MAX_REBASE_ATTEMPTS
-	maxFix     int                               // MAX_FIX_ATTEMPTS
-	checks     []forge.RollupState               // successive CI rollups; default green twice
-	mergeErrs  []error                           // successive Merge results, consumed before it succeeds
-	rebaseErr  error                             // what Rebase returns
-	mergeable  forge.MergeableState              // what the forge reports for the PR's mergeability
-	resolveErr error                             // what the conflict-resolve Box returns
-	dsetup     func(*dispatch.Fake, *forge.Fake) // scripts the dispatcher beyond resolveErr
-	afterMerge func(*forge.Fake)                 // runs on the fake right after a successful Merge
-	check      func(*testing.T, *forge.Fake, *dispatch.Fake)
-	wire       func(fc *forge.Fake, d *dispatch.Fake, mark func()) // runs once Settle exists; mark is the operator's Terminate landing mid-call
+	maxRebase        int                               // MAX_REBASE_ATTEMPTS
+	maxFix           int                               // MAX_FIX_ATTEMPTS
+	checks           []forge.RollupState               // successive CI rollups; default green twice
+	mergeErrs        []error                           // successive Merge results, consumed before it succeeds
+	rebaseErr        error                             // what Rebase returns
+	mergeable        forge.MergeableState              // what the forge reports for the PR's mergeability
+	resolveErr       error                             // what the conflict-resolve Box returns
+	scriptDispatcher func(*dispatch.Fake, *forge.Fake) // scripts the dispatcher beyond resolveErr
+	afterMerge       func(*forge.Fake)                 // runs on the fake right after a successful Merge
+	check            checkFn
+	midCall          func(fc *forge.Fake, d *dispatch.Fake, mark func()) // runs once Settle exists; mark is the operator's Terminate landing mid-call
 
 	want           Settlement
-	wantSteps      []Step
-	wantNoSteps    []Step   // steps Settle must not have recorded
-	wantNoStatus   []Status // statuses Settle must not have recorded, whatever their detail
-	wantLabels     []string
-	wantNoLabels   []string
+	wantStatuses   []Status // the Status of every step the recorder saw, in order; nil means none were recorded
+	wantSteps      []Step   // steps that must appear, in any order; none required when nil
+	wantLabels     []string // labels the issue must hold; none required when nil
+	wantNoLabels   []string // labels the issue must not hold; none barred when nil
 	wantMerged     string   // the PR Merge was called on
-	wantCalls      []string // forge.Fake.LandingCallLog: MarkReady/EnqueueAutoMerge/Merge in order
-	wantComments   []string // substring of each issue comment, in order; none when nil
+	wantCalls      []string // forge.Fake.LandingCallLog: MarkReady/EnqueueAutoMerge/Merge in order; nil means none were made
+	wantComments   []string // substring of each issue comment, in order; nil means none were posted
 	wantPRComments []string // substring of each PR comment, in order; unchecked when nil
 	wantPRExact    string   // the sole PR comment, byte for byte
-	abandoned      bool     // a stop or a decline left the issue untouched
-	declined       bool     // Recover returns its Settlement before Begin claims the issue
-	prClosed       bool     // the settled reason leaves no open PR although nothing merged
+	wantAbandoned  bool     // a stop or a decline left the issue untouched
+	wantDeclined   bool     // Recover returns its Settlement before Begin claims the issue
+	wantPRClosed   bool     // the settled reason leaves no open PR although nothing merged
 	wantFixes      int      // fix passes dispatched
 	wantResolves   int      // conflict-resolve Boxes dispatched
 	wantRebases    int      // Rebase calls on the forge
@@ -101,6 +104,10 @@ type prCase struct {
 	wantCIWaits    []string // RunURL of each ci_wait record, in order; the records are unobserved when nil
 }
 
+// detailOnly is the Status of a step that carries only a detail: the
+// issue-intent filing tally and the fix-pass=n/m announcement.
+const detailOnly Status = ""
+
 // prSettlement is the Settlement a PR landing of testPR settles with.
 func prSettlement(reason string) Settlement {
 	return Settlement{Verdict: ForReason(reason), PRURL: testPR}
@@ -111,14 +118,12 @@ func guardWording(path string) string {
 }
 
 func TestSettle_PRLander(t *testing.T) {
-	forReason := func(r string) Settlement { return Settlement{Verdict: ForReason(r), PRURL: testPR} }
-	merged := forReason(dispatchrecord.ReasonMerged)
-	manual := forReason(dispatchrecord.ReasonManual)
-	autoEnqueued := forReason(dispatchrecord.ReasonAutoMergeEnqueued)
-	mergeBlocked := forReason(dispatchrecord.ReasonMergeBlocked)
-	guardHit := forReason(dispatchrecord.ReasonMergeGuardHit)
-	checkError := forReason(dispatchrecord.ReasonMergeGuardCheckError)
-	byHand := forReason(dispatchrecord.ReasonMergeByHand)
+	manual := prSettlement(dispatchrecord.ReasonManual)
+	autoEnqueued := prSettlement(dispatchrecord.ReasonAutoMergeEnqueued)
+	mergeBlocked := prSettlement(dispatchrecord.ReasonMergeBlocked)
+	guardHit := prSettlement(dispatchrecord.ReasonMergeGuardHit)
+	checkError := prSettlement(dispatchrecord.ReasonMergeGuardCheckError)
+	byHand := prSettlement(dispatchrecord.ReasonMergeByHand)
 	complete := []string{"agent-complete"}
 	noFailed := []string{"agent-failed"}
 	tuningLabels := []string{"agent-in-progress", "agent-tuning-finding"}
@@ -132,7 +137,8 @@ func TestSettle_PRLander(t *testing.T) {
 
 	cases := []prCase{
 		{
-			name: "merge failure after green keeps the issue complete",
+			name:         "merge failure after green keeps the issue complete",
+			wantStatuses: []Status{detailOnly, StatusMergeBlocked},
 			setup: func(_ *testing.T, fc *forge.Fake, c *Config) {
 				c.MaxRebaseAttempts = 0
 				fc.MergeErr = errors.New("required review missing")
@@ -142,11 +148,13 @@ func TestSettle_PRLander(t *testing.T) {
 			wantSteps:    []Step{{Key: "1", Landing: testPR, Status: StatusMergeBlocked, Detail: "!! required review missing"}},
 		},
 		{
-			name: "green PR is marked ready before it merges",
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge,
+			name:         "green PR is marked ready before it merges",
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge,
 		},
 		{
-			name: "mark-ready failure does not block the merge",
+			name:         "mark-ready failure does not block the merge",
+			wantStatuses: []Status{detailOnly, StatusMarkReadyFailed, StatusVerifiedMerged},
 			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) {
 				fc.MarkReadyErr = errors.New("HTTP 403: Resource not accessible by integration")
 			},
@@ -154,95 +162,113 @@ func TestSettle_PRLander(t *testing.T) {
 		},
 		{
 			name: "auto mode marks ready before enqueueing the auto-merge", mergeMode: "auto",
-			want: autoEnqueued, wantLabels: complete, wantCalls: []string{"MarkReady:" + testPR, "EnqueueAutoMerge:" + testPR},
+			wantStatuses: []Status{detailOnly, StatusAutoMergeEnqueued},
+			want:         autoEnqueued, wantLabels: complete, wantCalls: []string{"MarkReady:" + testPR, "EnqueueAutoMerge:" + testPR},
 		},
 		{
 			name: "manual mode still flips the PR ready and leaves it unmerged", mergeMode: "manual",
-			want: manual, wantLabels: complete, wantCalls: flipOnly,
+			wantStatuses: []Status{detailOnly, StatusAgentComplete},
+			want:         manual, wantLabels: complete, wantCalls: flipOnly,
 		},
 		{
 			name: "merge guard hit downgrades to manual", guard: ".github/**,**/CLAUDE.md",
-			files: []string{"src/main.go", ".github/workflows/ci.yml"},
-			want:  guardHit, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly,
+			wantStatuses: []Status{detailOnly, StatusMergeGuardHit, StatusMergeableUnknown},
+			files:        []string{"src/main.go", ".github/workflows/ci.yml"},
+			want:         guardHit, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly,
 			wantPRExact: guardWording(".github/workflows/ci.yml"),
 		},
 		{
 			name: "merge guard hit on a forgejo workflow path", shape: shapeForgejo, tracker: backend.Forgejo,
-			guard: ".github/**,.forgejo/**", files: []string{"src/main.go", ".forgejo/workflows/ci.yml"},
+			wantStatuses: []Status{detailOnly, StatusMergeGuardHit, StatusMergeableUnknown},
+			guard:        ".github/**,.forgejo/**", files: []string{"src/main.go", ".forgejo/workflows/ci.yml"},
 			want: guardHit, wantLabels: complete, wantCalls: flipOnly,
 			wantPRExact: guardWording(".forgejo/workflows/ci.yml"),
 		},
 		{
 			name: "merge guard hit under auto mode never enqueues", mergeMode: "auto", guard: ".github/**",
-			files: []string{".github/workflows/ci.yml"},
-			want:  guardHit, wantLabels: complete, wantCalls: flipOnly,
+			wantStatuses: []Status{detailOnly, StatusMergeGuardHit},
+			files:        []string{".github/workflows/ci.yml"},
+			want:         guardHit, wantLabels: complete, wantCalls: flipOnly,
 			wantPRExact: guardWording(".github/workflows/ci.yml"),
 		},
 		{
 			name: "a failed PR comment does not lift the merge guard", guard: ".github/**",
-			files: []string{".github/workflows/ci.yml"},
-			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.CommentPRErr = errCommentPR },
-			want:  guardHit, wantLabels: complete, wantCalls: flipOnly,
+			wantStatuses: []Status{detailOnly, StatusMergeGuardHit, StatusMergeableUnknown},
+			files:        []string{".github/workflows/ci.yml"},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.CommentPRErr = errCommentPR },
+			want:         guardHit, wantLabels: complete, wantCalls: flipOnly,
 		},
 		{
 			name: "merge guard miss merges normally", guard: ".github/**,**/CLAUDE.md",
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
 		},
 		{
 			name: "merge guard check error fails safe", guard: ".github/**",
-			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.PRFilesErr = errGuardList },
-			want:  checkError, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly,
+			wantStatuses: []Status{detailOnly, StatusMergeGuardCheckError, StatusMergeableUnknown},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.PRFilesErr = errGuardList },
+			want:         checkError, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly,
 			wantPRComments: []string{"precaution"},
 		},
 		{
 			name: "tuning label holds the immediate merge", tracker: backend.GitHub, labels: tuningLabels,
-			want: byHand, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: holdWording,
+			wantStatuses: []Status{detailOnly, StatusMergeByHand, StatusMergeableUnknown},
+			want:         byHand, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: holdWording,
 		},
 		{
 			name: "tuning label also holds on local", shape: shapeLocalPR, tracker: backend.Local, labels: tuningLabels,
-			want: byHand, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: holdWording,
+			wantStatuses: []Status{detailOnly, StatusMergeByHand, StatusMergeableUnknown},
+			want:         byHand, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: holdWording,
 		},
 		{
 			name: "tuning label holds despite a merge guard miss", tracker: backend.GitHub, labels: tuningLabels, guard: ".github/**",
-			want: byHand, wantLabels: complete, wantCalls: flipOnly, wantPRExact: holdWording,
+			wantStatuses: []Status{detailOnly, StatusMergeByHand, StatusMergeableUnknown},
+			want:         byHand, wantLabels: complete, wantCalls: flipOnly, wantPRExact: holdWording,
 		},
 		{
 			name: "a failed PR comment does not lift the tuning hold", tracker: backend.GitHub, labels: tuningLabels,
-			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.CommentPRErr = errCommentPR },
-			want:  byHand, wantLabels: complete, wantCalls: flipOnly,
+			wantStatuses: []Status{detailOnly, StatusMergeByHand, StatusMergeableUnknown},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.CommentPRErr = errCommentPR },
+			want:         byHand, wantLabels: complete, wantCalls: flipOnly,
 		},
 		{
 			name: "an unreadable closing issue fails safe", tracker: backend.GitHub,
-			setup: func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.IssueErr = errors.New("boom") },
-			want:  checkError, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: errWording,
+			wantStatuses: []Status{detailOnly, StatusMergeGuardCheckError, StatusMergeableUnknown},
+			setup:        func(_ *testing.T, fc *forge.Fake, _ *Config) { fc.IssueErr = errors.New("boom") },
+			want:         checkError, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: errWording,
 		},
 		{
 			name: "tuning marker without its label does not hold on local", shape: shapeLocalPR, tracker: backend.Local,
-			body: "plain body\n<!-- spindrift-dedup: foo, chore=docs -->",
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			body:         "plain body\n<!-- spindrift-dedup: foo, chore=docs -->",
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
 		},
 		{
 			name: "synthetic merge-by-hand row holds by its label", tracker: backend.GitHub,
-			labels: []string{"agent-in-progress", "agent-synthetic-finding"},
-			setup:  func(t *testing.T, _ *forge.Fake, _ *Config) { withCatalogRows(t, syntheticHold, syntheticFree) },
-			want:   byHand, wantLabels: complete, wantCalls: flipOnly, wantPRComments: []string{"agent-synthetic-finding"},
+			wantStatuses: []Status{detailOnly, StatusMergeByHand, StatusMergeableUnknown},
+			labels:       []string{"agent-in-progress", "agent-synthetic-finding"},
+			setup:        func(t *testing.T, _ *forge.Fake, _ *Config) { withCatalogRows(t, syntheticHold, syntheticFree) },
+			want:         byHand, wantLabels: complete, wantCalls: flipOnly, wantPRComments: []string{"agent-synthetic-finding"},
 		},
 		{
 			name: "synthetic merge-by-hand row holds by its marker on local", shape: shapeLocalPR, tracker: backend.Local,
-			body:  "finding\n<!-- spindrift-dedup: foo, chore=synthetic -->",
-			setup: func(t *testing.T, _ *forge.Fake, _ *Config) { withCatalogRows(t, syntheticHold) },
-			want:  byHand, wantLabels: complete, wantCalls: flipOnly, wantPRComments: []string{"agent-synthetic-finding"},
+			wantStatuses: []Status{detailOnly, StatusMergeByHand, StatusMergeableUnknown},
+			body:         "finding\n<!-- spindrift-dedup: foo, chore=synthetic -->",
+			setup:        func(t *testing.T, _ *forge.Fake, _ *Config) { withCatalogRows(t, syntheticHold) },
+			want:         byHand, wantLabels: complete, wantCalls: flipOnly, wantPRComments: []string{"agent-synthetic-finding"},
 		},
 		{
 			name: "the tuning marker is no hold once tuning is off the catalog", shape: shapeLocalPR, tracker: backend.Local,
-			body:  tuningBody,
-			setup: func(t *testing.T, _ *forge.Fake, _ *Config) { withCatalogRows(t, syntheticHold) },
-			want:  merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			body:         tuningBody,
+			setup:        func(t *testing.T, _ *forge.Fake, _ *Config) { withCatalogRows(t, syntheticHold) },
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
 		},
 		{
 			// Without a merge-by-hand row the closing issue is never even read.
 			name: "a non-merge-by-hand row never reads the closing issue", tracker: backend.GitHub,
-			labels: []string{"agent-in-progress", "agent-freebie-finding"},
+			wantStatuses: []Status{detailOnly, StatusMergeUnverifiedReadError},
+			labels:       []string{"agent-in-progress", "agent-freebie-finding"},
 			setup: func(t *testing.T, fc *forge.Fake, _ *Config) {
 				withCatalogRows(t, syntheticFree)
 				fc.IssueErr = errIssueRead
@@ -259,7 +285,8 @@ func TestSettle_PRLander(t *testing.T) {
 	}{{shapeGithub, backend.GitHub}, {shapeForgejo, backend.Forgejo}, {shapeGithub, backend.Jira}} {
 		cases = append(cases, prCase{
 			name: "tuning marker alone does not hold on " + tc.tracker.Name, shape: tc.shape, tracker: tc.tracker, body: tuningBody,
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			want:         merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, wantPRComments: []string{},
 		})
 	}
 
@@ -267,6 +294,10 @@ func TestSettle_PRLander(t *testing.T) {
 	// label registry and by the chore=tuning marker where it has none: the
 	// issue ends agent-complete and the PR is flipped ready, never merged.
 	for _, mode := range []string{"immediate", "auto", "manual"} {
+		statuses := []Status{detailOnly, StatusMergeByHand}
+		if mode == "immediate" { // the hand-off first polls whether the PR still merges into its base
+			statuses = append(statuses, StatusMergeableUnknown)
+		}
 		for _, tc := range []struct {
 			name    string
 			shape   prShape
@@ -280,7 +311,7 @@ func TestSettle_PRLander(t *testing.T) {
 		} {
 			cases = append(cases, prCase{
 				name: "tuning hold under " + mode + " mode: " + tc.name, shape: tc.shape, tracker: tc.tracker,
-				mergeMode: mode, labels: tc.labels, body: tc.body,
+				mergeMode: mode, labels: tc.labels, body: tc.body, wantStatuses: statuses,
 				want: byHand, wantLabels: complete, wantNoLabels: noFailed, wantCalls: flipOnly, wantPRExact: holdWording,
 			})
 		}
@@ -293,11 +324,13 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, verifyCases()...)
 	cases = append(cases, terminateCases()...)
 	cases = append(cases, relayCases()...)
+	cases = append(cases, blockedHandoffCases()...)
 	cases = append(cases, draftPRCases()...)
 	cases = append(cases, bundleCases()...)
 	cases = append(cases, adoptCases()...)
 	cases = append(cases, closeCases()...)
 	cases = append(cases, entryCases()...)
+	cases = append(cases, shapeMatrixCases()...)
 	cases = append(cases, unreviewedCases()...)
 	cases = append(cases, ciWaitCases()...)
 	cases = append(cases, ciStateCases()...)
@@ -349,8 +382,8 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 			d := dispatch.NewFake()
 			d.ResolveConflictErr = tc.resolveErr
-			if tc.dsetup != nil {
-				tc.dsetup(d, fc)
+			if tc.scriptDispatcher != nil {
+				tc.scriptDispatcher(d, fc)
 			}
 			if tc.setup != nil {
 				tc.setup(t, fc, &c)
@@ -372,8 +405,8 @@ func TestSettle_PRLander(t *testing.T) {
 			begins := 0
 			begin := func() (dispatch.Dispatcher, error) { begins++; return d, nil }
 
-			if tc.wire != nil {
-				tc.wire(fc, d, func() { s.term.Mark("1") })
+			if tc.midCall != nil {
+				tc.midCall(fc, d, func() { s.term.Mark("1") })
 			}
 			var got Settlement
 			result := settleReadyResult("1", testPR)
@@ -420,16 +453,16 @@ func TestSettle_PRLander(t *testing.T) {
 
 			fc.IssueErr = nil
 			iss, _ := fc.Issue("1")
-			if tc.entry != entrySettle && (begins == 0) != tc.declined {
-				t.Errorf("Begin called %d times; want it skipped exactly when declined (%v)", begins, tc.declined)
+			if tc.entry != entrySettle && (begins == 0) != tc.wantDeclined {
+				t.Errorf("Begin called %d times; want it skipped exactly when declined (%v)", begins, tc.wantDeclined)
 			}
 			if got != tc.want {
 				t.Errorf("Settle = %+v, want %+v", got, tc.want)
 			}
-			if tc.abandoned {
+			if tc.wantAbandoned {
 				assertNoTransitionOrComment(t, fc)
 				assertClaimUntouched(t, fc)
-			} else if open := dispatchrecord.ReasonLeavesPROpen(got.Reason()); open != (tc.wantMerged == "" && !tc.prClosed) {
+			} else if open := dispatchrecord.ReasonLeavesPROpen(got.Reason()); open != (tc.wantMerged == "" && !tc.wantPRClosed) {
 				t.Errorf("reason %q leaves the PR open = %v, want %v", got.Reason(), open, !open)
 			}
 			if len(d.FixCalls) != tc.wantFixes {
@@ -472,6 +505,13 @@ func TestSettle_PRLander(t *testing.T) {
 					t.Errorf("ci_wait run URLs = %q, want %q", waits, tc.wantCIWaits)
 				}
 			}
+			var statuses []Status
+			for _, g := range rec.Steps() {
+				statuses = append(statuses, g.Status)
+			}
+			if !slices.Equal(statuses, tc.wantStatuses) {
+				t.Errorf("progress statuses = %q, want %q; steps = %+v", statuses, tc.wantStatuses, rec.Steps())
+			}
 			if missing := containsSteps(rec.Steps(), tc.wantSteps); len(missing) > 0 {
 				t.Errorf("progress steps = %+v, missing %+v", rec.Steps(), missing)
 			}
@@ -480,16 +520,6 @@ func TestSettle_PRLander(t *testing.T) {
 					return g.Key == w.Key && g.Landing == w.Landing && g.Status == w.Status && strings.Contains(g.Detail, w.Detail)
 				}) {
 					t.Errorf("progress steps = %+v, missing one like %+v", rec.Steps(), w)
-				}
-			}
-			for _, st := range tc.wantNoStatus {
-				if slices.ContainsFunc(rec.Steps(), func(g Step) bool { return g.Status == st }) {
-					t.Errorf("progress steps = %+v, want none with status %q", rec.Steps(), st)
-				}
-			}
-			for _, st := range tc.wantNoSteps {
-				if slices.Contains(rec.Steps(), st) {
-					t.Errorf("progress steps = %+v, want no %+v", rec.Steps(), st)
 				}
 			}
 			for _, l := range tc.wantLabels {

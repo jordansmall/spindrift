@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 )
@@ -32,8 +31,6 @@ func (r readErrAfterMerge) Merge(url string) error {
 // the PR and the issue back: a read that recovers verifies the merge, one that
 // keeps failing proves nothing and leaves the issue as it stands.
 func verifyCases() []prCase {
-	merged := prSettlement(dispatchrecord.ReasonMerged)
-	complete := []string{"agent-complete"}
 	failed := []string{"agent-failed"}
 
 	var outbox string
@@ -45,7 +42,7 @@ func verifyCases() []prCase {
 	}
 	// The leading Pending proves the checks registered, which Recover's open-PR arm waits for.
 	registered := []forge.RollupState{forge.StatePending, green, green}
-	bundle := func(kept bool) func(*testing.T, *forge.Fake, *dispatch.Fake) {
+	bundle := func(kept bool) checkFn {
 		return func(t *testing.T, fc *forge.Fake, _ *dispatch.Fake) {
 			t.Helper()
 			if got := bundleExists(t, outbox); got != kept {
@@ -62,7 +59,7 @@ func verifyCases() []prCase {
 		}
 	}
 	retry := func(n int, err string) Step {
-		return prStep(StatusMergeUnverifiedReadRetry, fmt.Sprintf("attempt=%d/2  !! %s", n, err))
+		return stepAt(testPR, StatusMergeUnverifiedReadRetry, fmt.Sprintf("attempt=%d/2  !! %s", n, err))
 	}
 	blip := errors.New("blip")
 	down := errors.New("api down")
@@ -87,7 +84,8 @@ func verifyCases() []prCase {
 				name:  "adopted: a transient " + r.name + " read error after the merge retries, then verifies",
 				entry: entryAdopted, checks: registered, setup: bundled, afterMerge: r.transient,
 				want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR},
-				wantSteps: []Step{retry(1, "blip"), prStep(StatusVerifiedMerged, "")}, check: bundle(false),
+				wantStatuses: []Status{StatusAdopted, StatusMergeUnverifiedReadRetry, StatusVerifiedMerged},
+				wantSteps:    []Step{retry(1, "blip"), stepAt(testPR, StatusVerifiedMerged, "")}, check: bundle(false),
 			},
 			// The issue keeps the Complete that completeLanding latched and the
 			// bundle stays, rather than be demoted or closed.
@@ -95,8 +93,9 @@ func verifyCases() []prCase {
 				name:  "adopted: a persistent " + r.name + " read error after the merge keeps the issue complete",
 				entry: entryAdopted, checks: registered, setup: bundled, afterMerge: r.persistent,
 				want: merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR},
-				wantSteps:   []Step{retry(1, "api down"), retry(2, "api down"), prStep(StatusMergeUnverifiedReadError, "!! api down")},
-				wantNoSteps: []Step{prStep(StatusVerifiedMerged, "")}, check: bundle(true),
+				wantStatuses: []Status{StatusAdopted, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadError},
+				wantSteps:    []Step{retry(1, "api down"), retry(2, "api down"), stepAt(testPR, StatusMergeUnverifiedReadError, "!! api down")},
+				check:        bundle(true),
 			},
 			// The off-script status=merged arm verifies a PR whose completeLanding
 			// never ran, so the issue is still agent-in-progress: a read that keeps
@@ -114,8 +113,9 @@ func verifyCases() []prCase {
 					fc.SetPRState(testPR, forge.PRMerged)
 					r.persistent(fc)
 				},
-				wantLabels: []string{"agent-in-progress"}, wantNoLabels: failed, wantCalls: []string{}, prClosed: true, // the self-report names a merged PR; there is no settlement to leave it open
-				wantSteps: []Step{retry(1, "api down"), retry(2, "api down"), prStep(StatusMergeUnverifiedReadError, "!! api down")},
+				wantLabels: []string{"agent-in-progress"}, wantNoLabels: failed, wantCalls: []string{}, wantPRClosed: true, // the self-report names a merged PR; there is no settlement to leave it open
+				wantStatuses: []Status{detailOnly, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadRetry, StatusMergeUnverifiedReadError},
+				wantSteps:    []Step{retry(1, "api down"), retry(2, "api down"), stepAt(testPR, StatusMergeUnverifiedReadError, "!! api down")},
 				check: func(t *testing.T, fc *forge.Fake, d *dispatch.Fake) {
 					t.Helper()
 					if len(fc.CloseMergedIssueCalls) != 0 {

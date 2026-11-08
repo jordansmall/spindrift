@@ -1,7 +1,6 @@
 package settle
 
 import (
-	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 )
@@ -12,8 +11,6 @@ import (
 // dashboard can show "waiting on CI".
 func ciWaitCases() []prCase {
 	const runA, runB = "https://example.test/actions/runs/1", "https://example.test/actions/runs/2"
-	merged := prSettlement(dispatchrecord.ReasonMerged)
-	complete := []string{"agent-complete"}
 	flipThenMerge := []string{"MarkReady:" + testPR, "Merge:" + testPR}
 	rebased := []string{"MarkReady:" + testPR, "Merge:" + testPR, "MarkDraft:" + testPR, "MarkReady:" + testPR, "Merge:" + testPR}
 	three := []forge.RollupState{forge.StatePending, forge.StatePending, forge.StatePending, forge.StateSuccess, forge.StateSuccess}
@@ -29,27 +26,33 @@ func ciWaitCases() []prCase {
 	return []prCase{
 		waits(prCase{
 			name: "an initial green wait announces itself once", checks: []forge.RollupState{green, green}, wantCIWaits: []string{""},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
 		}),
 		waits(prCase{
 			name: "the wait after a fix pass announces itself again", checks: []forge.RollupState{red, green, green},
-			wantCIWaits: []string{"", ""}, wantFixes: 1,
+			wantStatuses: []Status{detailOnly, detailOnly, StatusVerifiedMerged},
+			wantCIWaits:  []string{"", ""}, wantFixes: 1,
 		}),
 		waits(prCase{
 			name: "the re-wait after a force-push announces itself again", checks: []forge.RollupState{green, green, green, green},
-			maxRebase: 1, mergeErrs: []error{forge.ErrMergeConflict, nil}, wantCalls: rebased, wantRebases: 1, wantCIWaits: []string{"", ""},
+			wantStatuses: []Status{detailOnly, StatusRebaseRetry, StatusPostForcePushWait, StatusVerifiedMerged},
+			maxRebase:    1, mergeErrs: []error{forge.ErrMergeConflict, nil}, wantCalls: rebased, wantRebases: 1, wantCIWaits: []string{"", ""},
 		}),
 		waits(prCase{
 			name: "a run URL that appears and then changes re-announces the wait", checks: three,
-			runURLs: []string{"", runA, runA, runB, runB}, wantCIWaits: []string{"", runA, runB},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			runURLs:      []string{"", runA, runA, runB, runB}, wantCIWaits: []string{"", runA, runB},
 		}),
 		waits(prCase{
 			name: "a run URL that appears and then disappears re-announces the wait", checks: three,
-			runURLs: []string{"", runA, "", "", ""}, wantCIWaits: []string{"", runA, ""},
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			runURLs:      []string{"", runA, "", "", ""}, wantCIWaits: []string{"", runA, ""},
 		}),
 		waits(prCase{
-			name:    "a run URL that never appears announces the wait once",
-			checks:  []forge.RollupState{forge.StatePending, forge.StatePending, green, green},
-			runURLs: []string{"", "", "", ""}, wantCIWaits: []string{""},
+			name:         "a run URL that never appears announces the wait once",
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			checks:       []forge.RollupState{forge.StatePending, forge.StatePending, green, green},
+			runURLs:      []string{"", "", "", ""}, wantCIWaits: []string{""},
 		}),
 	}
 }
