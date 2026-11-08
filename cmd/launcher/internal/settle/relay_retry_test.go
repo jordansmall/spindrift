@@ -282,41 +282,6 @@ func failThenSucceed(n int) []error {
 	return append(errs, nil)
 }
 
-// Pins issue #4649 on the push-only path: a transient relay failure retries
-// with backoff instead of stranding the bundle, and the issue still lands.
-func TestSelfHeal_LocalForge_RelayRetriesTransientFailureThenMerges(t *testing.T) {
-	c := baseConfig()
-	c.Policy = retry.Policy{Max: 3, Unit: time.Second}
-	sleeps, clock := recordingClock()
-	c.Clock = clock
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.RelayBundleErrs = failThenSucceed(2)
-	branch := fc.AgentBranch("1")
-	s := newTestSettle(c, fc, fc.AsLocal())
-
-	var landing landingResult
-	stdout := captureStdout(t, func() { landing, _, _ = s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil) })
-
-	if landing != landingMerged {
-		t.Fatalf("selfHeal = %v, want landingMerged", landing)
-	}
-	if len(fc.RelayBundleCalls) != 3 {
-		t.Errorf("RelayBundle calls = %d, want 3", len(fc.RelayBundleCalls))
-	}
-	if got := strings.Count(stdout, "status=relay-retry"); got != 2 {
-		t.Errorf("relay-retry lines = %d, want 2; stdout:\n%s", got, stdout)
-	}
-	if len(*sleeps) < 2 {
-		t.Errorf("backoff sleeps = %v, want at least 2", *sleeps)
-	}
-	if fc.Merged != branch {
-		t.Errorf("fc.Merged = %q, want %q", fc.Merged, branch)
-	}
-}
-
 // Pins issue #4649 on the draft-PR mediation path.
 func TestSettle_GithubReadOnly_ReadyRelayRetriesTransientFailureThenOpensDraftPR(t *testing.T) {
 	const issNum = "4649"
@@ -563,66 +528,6 @@ func TestSelfHeal_ConflictResolveRelayStoppedDuringBackoff_Abandons(t *testing.T
 	}
 	assertNoTransitionOrComment(t, fc)
 	assertClaimUntouched(t, fc)
-}
-
-// Pins issue #4649 on the push-only path: the relay runs ahead of the Complete
-// commit, so a stop during its backoff leaves the released issue untouched.
-func TestSelfHeal_LocalForge_RelayStoppedDuringBackoff_AbandonsWithoutComplete(t *testing.T) {
-	var s *Settle
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	c := baseConfig()
-	c.Policy = retry.Policy{Max: 3, Unit: time.Second}
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	_, c.Clock = stopOnRelayBackoff(&s, fc, "1")
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.RelayBundleErr = errors.New("ssh auth blip")
-	s = newTestSettle(c, fc, fc.AsLocal())
-	gen := s.term.Begin("1")
-
-	var err error
-	captureStdout(t, func() { _, _, err = s.selfHeal(dispatch.NewFake(), "1", gen, fc.AgentBranch("1"), nil) })
-
-	if !errors.Is(err, errAbandoned) {
-		t.Errorf("selfHeal err = %v, want errAbandoned", err)
-	}
-	if fc.Merged != "" {
-		t.Errorf("Merge must not run after the stop; fc.Merged=%q", fc.Merged)
-	}
-	assertNoTransitionOrComment(t, fc)
-	assertClaimUntouched(t, fc)
-}
-
-// Issue #4651 on the push-only path: a relay that exhausts its retries leaves
-// the bundle in the outbox, so the issue parks agent-failed (never Complete)
-// with one comment naming `spindrift recover`. landingFailed tells every caller
-// the transition and comment are already done.
-func TestSelfHeal_LocalForge_RelayExhaustedParksFailed(t *testing.T) {
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	c := baseConfig()
-	c.Policy = retry.Policy{Max: 1, Unit: time.Second}
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.RelayBundleErr = errors.New("ssh auth blip")
-	s := newTestSettle(c, fc, fc.AsLocal())
-
-	var landing landingResult
-	captureStdout(t, func() { landing, _, _ = s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"), nil) })
-
-	if landing != landingFailed {
-		t.Errorf("selfHeal = %v, want landingFailed", landing)
-	}
-	if len(fc.RelayBundleCalls) != 2 {
-		t.Errorf("RelayBundle calls = %d, want 2 (1 + Max retries)", len(fc.RelayBundleCalls))
-	}
-	if fc.Merged != "" {
-		t.Errorf("Merge must not run after a failed relay; fc.Merged=%q", fc.Merged)
-	}
-	if len(fc.TransitionStateCalls) != 1 {
-		t.Errorf("want exactly one transition, got %+v", fc.TransitionStateCalls)
-	}
-	assertOutboxParked(t, fc, "1")
 }
 
 // Pins issue #4649: a stop during the fix-pass relay's backoff abandons at

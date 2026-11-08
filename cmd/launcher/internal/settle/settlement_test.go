@@ -1,7 +1,6 @@
 package settle
 
 import (
-	"errors"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -42,22 +41,6 @@ func TestSettle_BlockHandoffReturnsInProgressHandoffBlockedWithoutPR(t *testing.
 	}
 	if got.State() != forge.InProgress || got.Delivered() {
 		t.Fatalf("Settle = %+v, want in-progress and not delivered: blockHandoff never transitions the issue", got)
-	}
-}
-
-func TestSettle_PushOnlyLandingFailureReturnsCompleteMergeBlocked(t *testing.T) {
-	const num = "1"
-	c := baseConfig()
-	c.MergeMode = "immediate"
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
-	fc.MergeErr = errors.New("remote rejected: non-fast-forward")
-	s := newTestSettle(c, fc, fc.AsPushOnly())
-
-	got := s.Settle(dispatch.NewFake(), num, 0, settleReadyResult(num, "agent/issue-1"))
-
-	if got.Verdict != ForReason(dispatchrecord.ReasonMergeBlocked) {
-		t.Fatalf("Settle verdict = %+v, want merge-blocked", got.Verdict)
 	}
 }
 

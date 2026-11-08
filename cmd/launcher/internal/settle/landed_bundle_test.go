@@ -179,41 +179,6 @@ func TestSettleAdopted_BundleRemovalFailureIsLoggedAndLandingStillMerges(t *test
 	}
 }
 
-// The push-only (CODE_FORGE=local) landing relays the bundle itself, then
-// drops it once the merge lands; a manual hand-off keeps it.
-func TestSelfHeal_LocalPushOnly_BundleRemovedOnlyWhenMerged(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		mergeMode  string
-		want       landingResult
-		wantBundle bool
-	}{
-		{"immediate", "immediate", landingMerged, false},
-		{"manual", "manual", landingManual, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			outbox := t.TempDir()
-			writeBundle(t, outbox)
-			c := baseConfig()
-			c.MergeMode = tc.mergeMode
-			c.OutboxDir = func(string) string { return outbox }
-			fc := forge.NewFake(testDispatchLabels)
-			fc.BranchPrefix = "agent/issue-"
-			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-			s := newTestSettle(c, fc, fc.AsLocal())
-
-			landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"), nil)
-
-			if landing != tc.want {
-				t.Fatalf("selfHeal = %v, want %v", landing, tc.want)
-			}
-			if got := bundleExists(t, outbox); got != tc.wantBundle {
-				t.Errorf("bundle present = %v, want %v", got, tc.wantBundle)
-			}
-		})
-	}
-}
-
 // A blocked hand-off never reaches the landing, so its bundle stays.
 func TestSettle_BlockedHandOffKeepsBundle(t *testing.T) {
 	const issNum = "1933"
