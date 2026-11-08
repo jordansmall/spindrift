@@ -87,6 +87,9 @@ type fakeDriver struct {
 	// KindUsage, for tests asserting a session summary's API time, turns or wall
 	// time, which per-call totals cannot express.
 	SessionTotals bool
+	// ExtractUsageAfterFn, when set, replaces ExtractUsageAfter, so a test can
+	// observe the baselines the chain hands each log.
+	ExtractUsageAfterFn func(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error)
 }
 
 func (d fakeDriver) base() driverkit.Driver {
@@ -122,6 +125,9 @@ func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 }
 
 func (d fakeDriver) ExtractUsageAfter(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error) {
+	if d.ExtractUsageAfterFn != nil {
+		return d.ExtractUsageAfterFn(logPath, base)
+	}
 	return d.base().ExtractUsageAfter(logPath, base)
 }
 

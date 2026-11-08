@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -12,7 +13,8 @@ import (
 // run. It aggregates every attempt log: each pass, and each rotated-aside retry
 // within a pass (issues #561, #2575). A caller that never called Run() must call
 // EnsureRunLineage first. When no attempt log produced a result event, the body
-// says usage is unavailable rather than erroring.
+// says usage is unavailable rather than erroring. A resumed session's cumulative
+// result figures are rebased across logs, so each log books only its increment.
 func (d *Dispatch) UsageReport() string {
 	resolve := d.cfg.ResolveEnv
 	if resolve == nil {
@@ -23,14 +25,7 @@ func (d *Dispatch) UsageReport() string {
 		model = "unknown"
 	}
 
-	var found []usage.Report
-	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
-		r, err := d.driver.ExtractUsage(pl.Path)
-		if err != nil || !r.Found {
-			continue
-		}
-		found = append(found, r)
-	}
+	found := d.attemptReports()
 	if len(found) == 0 {
 		return fmt.Sprintf("## Run usage\n\nModel: `%s`\n\nUsage data unavailable (no result event in log).", model)
 	}
@@ -60,17 +55,39 @@ func (d *Dispatch) UsageReport() string {
 // so turns and durations are summed too, not just tokens and cost. A caller
 // that never called Run() must call EnsureRunLineage first. An attempt log that
 // fails to parse, or has no result event, contributes nothing rather than
-// aborting the sum.
+// aborting the sum. A resumed session's cumulative result figures are rebased
+// across logs, so each log books only its increment.
 func (d *Dispatch) CumulativeUsage() usage.Usage {
 	var total usage.Usage
-	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
-		r, err := d.driver.ExtractUsage(pl.Path)
-		if err != nil || !r.Found {
-			continue
-		}
+	for _, r := range d.attemptReports() {
 		total = total.Add(r.Totals)
 	}
 	return total
+}
+
+// attemptReports returns the Found report of every attempt log, chronologically.
+// The session baselines thread from log to log, so a session resumed in a later
+// log (the implement -> fix resume) books only its own increment there. Work
+// retries resume the session (--resume); research and butler retries re-pin the
+// same --session-id in initial mode. Threading is still right there: within a Run
+// the transcript is cached so the counters continue, and a genuine restart is
+// caught by the counter-decrease rule. So the chain never resets within a Run
+// (prior-Run logs are quarantined and never listed). A log that errors keeps the
+// chain's previous baselines. Keep in step with dispatchrecord.sessionSeed.
+func (d *Dispatch) attemptReports() []usage.Report {
+	var found []usage.Report
+	var base driverkit.SessionBaselines
+	for _, pl := range AllAttemptLogPaths(d.pwd, d.number) {
+		r, after, err := d.driver.ExtractUsageAfter(pl.Path, base)
+		if err != nil {
+			continue
+		}
+		base = after
+		if r.Found {
+			found = append(found, r)
+		}
+	}
+	return found
 }
 
 // aggregatedReport merges a run's per-attempt reports, each of which must have Found
