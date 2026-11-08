@@ -23,10 +23,11 @@ func writeBundle(t *testing.T, dir string) {
 }
 
 // Slice B's positive case for ADR 0039's CODE_FORGE=local push-only
-// counterpart to tryAdoptRelayedBranchNoOutcome: a local run with no parseable
-// outcome line, a genuine success self-report, and a relayable bundle in the
-// outbox must not be parked agent-failed. Local has no PR-shaped adopt path
-// (s.pr is always nil), so it promotes the issue to Recoverable instead.
+// counterpart to the PR Lander's salvage (no outcome line): a local run with
+// no parseable outcome line, a genuine success self-report, and a relayable
+// bundle in the outbox must not be parked agent-failed. Local has no PR-shaped
+// adopt path (s.pr is always nil), so it promotes the issue to Recoverable
+// instead.
 func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.T) {
 	const issNum = "1"
 	outbox := t.TempDir()
@@ -65,7 +66,7 @@ func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.
 }
 
 // The same promotion from gate.go's "blocked" arm, the local counterpart to
-// tryAdoptRelayedBranch's synthetic-blocked override: when the authoritative
+// the PR Lander's salvage's synthetic-blocked override: when the authoritative
 // outcome degraded to the ADR 0036 synthetic status=blocked backstop but the
 // driver self-reported success and the bundle is in the outbox, settle
 // promotes the issue to Recoverable rather than parking it agent-failed.
@@ -424,8 +425,9 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFals
 
 // The fallback for a Box that self-reported blocked rather than success:
 // isSuccessSelfReport must reject it the same way it does for
-// tryAdoptRelayedBranchNoOutcome, so the bundle's presence alone is not enough
-// and the issue still falls through to settleUnresolved's agent-failed park.
+// the PR Lander's salvage (no outcome line), so the bundle's presence alone is
+// not enough and the issue still falls through to settleUnresolved's
+// agent-failed park.
 func TestSettle_LocalPushOnly_SelfReportBlockedFallsBackToFailed(t *testing.T) {
 	const issNum = "1"
 	outbox := t.TempDir()

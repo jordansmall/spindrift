@@ -23,7 +23,12 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 	const issNum = "2224"
 	const prURL = "https://github.com/owner/repo/pull/2224"
 
-	fc, branch := newAdoptBackstopFixture(t, issNum, prURL, "feat: add widget\n\nAdds a widget.")
+	fc, branch, rec := newAdoptBackstopFixture(t, issNum, prURL, "feat: add widget\n\nAdds a widget.")
+
+	const wantNote = "note=backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch"
+	if got := adoptedDetail(t, rec); got != wantNote {
+		t.Errorf("adopted Detail = %q, want %q", got, wantNote)
+	}
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/2224", Ref: branch}) {
 		t.Fatalf("RelayBundleCalls = %+v, want one call with outbox=/outbox/2224 ref=%s", fc.RelayBundleCalls, branch)
@@ -49,8 +54,8 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess(t *testing.T) {
 
 // newAdoptBackstopFixture runs Settle over a synthetic-backstop result with a
 // self-reported success, using prIntent as the box's own PR-intent body. It
-// returns the fake forge and the relayed branch.
-func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*forge.Fake, string) {
+// returns the fake forge, the relayed branch, and the recorded progress.
+func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*forge.Fake, string, *ProgressRecorder) {
 	t.Helper()
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
@@ -82,9 +87,26 @@ func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*for
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
+	rec := &ProgressRecorder{}
+	c.Progress = rec
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
-	return fc, branch
+	return fc, branch, rec
+}
+
+// adoptedDetail returns the Detail of the single status=adopted step in rec.
+func adoptedDetail(t *testing.T, rec *ProgressRecorder) string {
+	t.Helper()
+	var details []string
+	for _, st := range rec.Steps() {
+		if st.Status == StatusAdopted {
+			details = append(details, st.Detail)
+		}
+	}
+	if len(details) != 1 {
+		t.Fatalf("adopted steps = %q, want exactly 1", details)
+	}
+	return details[0]
 }
 
 // Issue #2345: adoptRelayedBranch's ensureClosesReference call must not
@@ -95,7 +117,7 @@ func TestSettle_GithubReadOnly_AdoptsBackstopSyntheticSuccess_DedupsExistingClos
 	const issNum = "2345"
 	const prURL = "https://github.com/owner/repo/pull/2345"
 
-	fc, branch := newAdoptBackstopFixture(t, issNum, prURL, "feat: add widget\n\nCloses #"+issNum)
+	fc, branch, _ := newAdoptBackstopFixture(t, issNum, prURL, "feat: add widget\n\nCloses #"+issNum)
 
 	if len(fc.CreateDraftPRCalls) != 1 {
 		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
@@ -137,8 +159,15 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
+	rec := &ProgressRecorder{}
+	c.Progress = rec
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(d, issNum, 0, result)
+
+	const wantNote = "note=no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch"
+	if got := adoptedDetail(t, rec); got != wantNote {
+		t.Errorf("adopted Detail = %q, want %q", got, wantNote)
+	}
 
 	if len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != (forge.RelayBundleCall{OutboxDir: "/outbox/2253", Ref: branch}) {
 		t.Fatalf("RelayBundleCalls = %+v, want one call with outbox=/outbox/2253 ref=%s", fc.RelayBundleCalls, branch)
@@ -460,7 +489,7 @@ func TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt(t *
 
 // Fingerprint condition (c): a full success fingerprint (synthetic blocked
 // plus success self-report) can still fail to adopt if RelayBundle errors. No
-// bundle means no finished branch to open a PR on, so tryAdoptRelayedBranch
+// bundle means no finished branch to open a PR on, so the PR Lander's salvage
 // must bail there and let the normal blocked handling run.
 func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlocked(t *testing.T) {
 	const issNum = "2224"
@@ -562,9 +591,9 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 	}
 }
 
-// tryAdoptRelayedBranchNoOutcome's own fingerprint (issue #2253) in the
-// !result.Resolved.Found arm: a Box that crashed and never self-reported has
-// no evidence the run succeeded, so adoption must not fire and settle falls
+// the PR Lander's salvage (no outcome line)'s own fingerprint (issue #2253) in
+// the !result.Resolved.Found arm: a Box that crashed and never self-reported
+// has no evidence the run succeeded, so adoption must not fire and settle falls
 // back to settleUnresolved, which parks the issue agent-failed because no PR
 // was ever opened for ResolveOpenPR to find.
 func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
@@ -652,8 +681,9 @@ func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing
 
 // Fingerprint condition (c) in the !result.Resolved.Found arm (issue #2253): a
 // full success fingerprint (no outcome line plus success self-report) can
-// still fail to adopt if RelayBundle errors, so tryAdoptRelayedBranchNoOutcome
-// must bail there and let settleUnresolved's normal no-outcome handling run.
+// still fail to adopt if RelayBundle errors, so the PR Lander's salvage (no
+// outcome line) must bail there and let settleUnresolved's normal no-outcome
+// handling run.
 func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testing.T) {
 	const issNum = "2253"
 	const prURL = "https://github.com/owner/repo/pull/2253"

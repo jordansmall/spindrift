@@ -45,16 +45,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// A read-only run's !Resolved.Found may just mean the Box was cut short
 		// before it printed any parseable outcome line, leaving no ADR 0036
 		// synthetic backstop line to key off (issue #2253), unlike the
-		// "blocked" arm below.
-		if s.tryAdoptRelayedBranchNoOutcome(d, num, gen, result) {
-			return
-		}
-		// CODE_FORGE=local push-only counterpart to the adopt call above (ADR
-		// 0039): local has no PR-shaped adopt path (s.pr is always nil), so the
-		// call above always returns false here. tryMarkRecoverable checks the
-		// same fingerprint but promotes to Recoverable, leaving the land itself
-		// to `spindrift recover` (or settling Failed/unreviewed instead).
-		if s.tryMarkRecoverable(d, num, result) {
+		// "blocked" arm below. The Lander settles it from the run's own
+		// evidence: a PR forge adopts the relayed branch, while local push-only
+		// (ADR 0039) promotes to Recoverable and leaves the land itself to
+		// `spindrift recover` (or settles Failed/unreviewed instead).
+		if s.lander.salvage(d, num, gen, result) {
 			return
 		}
 		s.settleUnresolved(num, clsNote, "no outcome in log")
@@ -88,18 +83,14 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	case outcome.StatusBlocked:
 		// A read-only run's status=blocked may be the ADR 0036 synthetic
 		// backstop over a Box cut short before its final print, not a genuine
-		// "never finished" (issue #2224). tryAdoptRelayedBranch checks the
-		// driver's last genuine self-report (issue #2223) and, if that holds
-		// and a branch was relayable, opens a PR and merges it instead.
-		if s.tryAdoptRelayedBranch(d, num, gen, result) {
-			return
-		}
-		// CODE_FORGE=local push-only counterpart to the adopt call above (ADR
-		// 0039). The ProvenanceSynthetic guard is repeated here rather than
-		// left to tryMarkRecoverable because a genuine status=blocked is the
-		// driver's own authoritative outcome line, not the backstop this
-		// override exists to second-guess, so it must still park Failed below.
-		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.tryMarkRecoverable(d, num, result) {
+		// "never finished" (issue #2224). The Lander checks the driver's last
+		// genuine self-report (issue #2223) and settles the run from it: a PR
+		// forge opens a PR and merges it, local push-only (ADR 0039) promotes
+		// to Recoverable. The ProvenanceSynthetic guard sits here because a
+		// genuine status=blocked is the driver's own authoritative outcome
+		// line, not the backstop this override exists to second-guess, so it
+		// must still park Failed below.
+		if result.Resolved.Provenance == outcome.ProvenanceSynthetic && s.lander.salvage(d, num, gen, result) {
 			return
 		}
 		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "!! " + o.Note})

@@ -126,7 +126,7 @@ value, because `CODE_FORGE=local`'s per-issue `CodeForge` instances share a
 concrete type but differ in receiver state, so a value cached at
 construction time would answer against the wrong issue. Settle also keeps a
 handful of its own direct assertions where a caller other than
-`ResolveCapabilities` needs a capability check (`adopt_relayed.go`,
+`ResolveCapabilities` needs a capability check (`push_only_lander.go`,
 `gate.go`, `pr_intent.go`, `issue_intent.go`, `ready.go`, `research.go`).
 Consumers other than settle (reconcile, the prompt-assembly gates, and the
 rest) still assert directly; migrating them is separate, follow-on work, not

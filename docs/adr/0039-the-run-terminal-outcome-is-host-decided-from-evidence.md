@@ -43,7 +43,7 @@ in the outbox settles wrong. Two windows are load-bearing:
   `publish_rebased_branch`, then the box dies with no parseable outcome. The
   launcher's settle keys on `OutcomeFound`, not the exit code, so it parks the
   issue `Failed` via `settleUnresolved` and **never inspects the outbox**. The
-  `tryAdoptRelayedBranch` self-report rescue (#2224) covers only a read-only
+  PR Lander's `salvage` self-report rescue (#2224) covers only a read-only
   PR-shaped `github` forge (`s.pr != nil`), never `CODE_FORGE=local`
   push-only.
 
@@ -193,8 +193,9 @@ recover`'s later, separate invocation has no way to re-derive it the way it
 re-derives self-report from `dispatch.ResolveFromLogs`. Rather than invent a
 new on-disk artifact just to carry a boolean forward, `recover`'s local
 push-only landing arm (`SettleRelayedBranch`) instead trusts the same bundle
-presence check `tryMarkRecoverable` already required as a hard precondition:
-once an issue reaches `Recoverable`, recovering it needs no independent proof
+presence check the push-only Lander's `salvage` already required as a hard
+precondition: once an issue reaches `Recoverable`, recovering it needs no
+independent proof
 of *why* it got there, only confirmation the bundle is still sitting in the
 outbox. This leniency is scoped to the local push-only shape alone; every
 other shape (PR-shaped adopt) keeps requiring a self-report exactly as
@@ -210,8 +211,8 @@ from a land pass, which had already cleared review, so it still
 qualifies. A bundle from a run killed before review approved is the
 same unreviewed work #5973 refuses to land behind a stale ready, and a
 missing self-report makes it no more trustworthy. `SettleRelayedBranch`
-declines such a run, so a hand-run `spindrift recover` lands nothing;
-`tryMarkRecoverable` reads the same `Situation.Unreviewed` and fails it
+declines such a run, so a hand-run `spindrift recover` lands nothing; the
+push-only Lander's `salvage` reads the same `Situation.Unreviewed` and fails it
 `unreviewed` rather than marking it `Recoverable`.
 
 ## Amendment (issue #2380): `outcomebackstop.Run` derives `ready` from its own already-verified evidence
@@ -220,10 +221,10 @@ The Context section above named the defect directly — "`outcomebackstop.Run`
 holds the commit count and forge but discards them to emit an
 always-`status=blocked` synthetic line" — but the original Decision left it
 in place, routing the fix instead through the host-side self-report/bundle
-consume-gate above. That gate only covers a **read-only PR-shaped** forge
-(`tryAdoptRelayedBranch`/`tryAdoptRelayedBranchNoOutcome`, gated on
-`s.readOnly`) and the **local push-only** `Recoverable` arm
-(`tryMarkRecoverable`); a write-enabled push-only run (`CODE_FORGE=git`) that
+consume-gate above. That gate only covers a **read-only PR-shaped** forge (the
+PR Lander's `salvage`, gated on `s.readOnly`) and the **local push-only**
+`Recoverable` arm (the push-only Lander's `salvage`); a write-enabled push-only
+run (`CODE_FORGE=git`) that
 finishes clean, commits, and pushes, but mangles its own final self-report
 into an unparseable near-miss (issue #2349's motivating shape), has no
 consume-gate arm to fall into at all and parks `agent-failed` with real,
