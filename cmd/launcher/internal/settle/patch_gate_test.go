@@ -197,6 +197,7 @@ func equalLabels(got, want []string) bool {
 func TestSettlePatch_ReportsUnderOwnerAndEmitsNoSettled(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	c := baseConfig()
+	c.Progress = &ProgressRecorder{}
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
 	c.Unclaimed = true
@@ -206,7 +207,7 @@ func TestSettlePatch_ReportsUnderOwnerAndEmitsNoSettled(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 	owner := dispatchkey.Chore("dead-code")
 
-	testutil.CaptureStdout(t, func() { s.SettlePatch(owner, "5", testPR) })
+	s.SettlePatch(owner, "5", testPR)
 
 	if fc.Merged != testPR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
@@ -233,17 +234,19 @@ func TestSettlePatch_ReportsUnderOwnerAndEmitsNoSettled(t *testing.T) {
 
 // A nil-Dispatcher settle that no Chore owns (no SettlePatch) still reports its
 // terminal record under the issue key: only an owned issue suppresses it.
-// Internal-seam test: every public entry that settles without a Dispatcher is
-// owned, so only settleAdopted reaches the unowned shape.
-func Test_settleAdopted_NilDispatcherUnownedEmitsIssueKeyedSettled(t *testing.T) {
+// Internal-seam test: SettlePatch, the only public entry that settles without a
+// Dispatcher, always latches an owner, and Recover passes one, so Settle cannot
+// reach the unowned shape; only a direct settleAdopted call does.
+func TestInternalSeam_SettleAdoptedNilDispatcherUnownedEmitsIssueKeyedSettled(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	c := baseConfig()
+	c.Progress = &ProgressRecorder{}
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := newTestSettle(c, fc, fc)
 
-	testutil.CaptureStdout(t, func() { s.settleAdopted(nil, "1", 0, testPR) })
+	s.settleAdopted(nil, "1", 0, testPR)
 
 	want := dispatchkey.Issue("1")
 	for _, r := range readRecords() {

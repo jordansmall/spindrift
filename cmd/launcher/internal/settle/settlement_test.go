@@ -65,13 +65,13 @@ func TestRecoverOpenPR_CompleteThenDemotedReturnsFailed(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
+	c.Progress = &ProgressRecorder{}
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, openAfterMerge{fc})
 
-	var got Settlement
-	testutil.CaptureStdout(t, func() { got = recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR) })
+	got := recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR)
 
 	if got.Verdict != ForReason(dispatchrecord.ReasonMergeUnverified) || got.PRURL != testPR {
 		t.Fatalf("Recover = %+v, want merge-unverified (failed) naming %s", got, testPR)
@@ -102,13 +102,13 @@ func TestSettlePatch_ReturnsGateSettlementAndRecordsNothingIssueKeyed(t *testing
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
 	c.Unclaimed = true
+	c.Progress = &ProgressRecorder{}
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "5", Labels: append([]string{}, butlerPatchLabels...)})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	var got Settlement
-	testutil.CaptureStdout(t, func() { got = s.SettlePatch(dispatchkey.Chore("dead-code"), "5", testPR) })
+	got := s.SettlePatch(dispatchkey.Chore("dead-code"), "5", testPR)
 
 	if got.State() != forge.Complete || got.PRURL != testPR {
 		t.Fatalf("SettlePatch = %+v, want complete naming %s", got, testPR)
