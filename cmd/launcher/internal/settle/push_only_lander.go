@@ -124,3 +124,19 @@ func (s pushOnlyLander) merge(num string, gen uint64, branch string) error {
 		return err
 	})
 }
+
+// landingRef returns the outcome's landing as is: land re-derives the branch
+// itself, and a read-only Box's bundle is relayed there (ADR 0033).
+func (s pushOnlyLander) landingRef(_ dispatch.Dispatcher, _ string, _ uint64, result dispatch.Result) (string, bool) {
+	return result.Resolved.Outcome.Landing, true
+}
+
+// latchOpenPR is a no-op: a push-only forge has no PR to latch.
+func (s pushOnlyLander) latchOpenPR(string) {}
+
+// settleReportedMerge has no PR state to verify. It prints the host-derived
+// branch, never the Agent-controlled o.Landing, so landing= carries the same
+// provenance as the PR arm.
+func (s pushOnlyLander) settleReportedMerge(num string) {
+	s.cfg.Progress.Step(Step{Key: num, Landing: s.cfForNum(num).AgentBranch(num), Status: Status("merged")})
+}

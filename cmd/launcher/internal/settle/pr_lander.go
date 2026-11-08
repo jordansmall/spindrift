@@ -31,6 +31,62 @@ func (s prLander) land(d dispatch.Dispatcher, num string, gen uint64, pr string,
 	return landing, reason, err
 }
 
+// landingRef returns the PR to land. A read-only Box never opens its own PR
+// in-box (issue #1919), so the outcome's landing= carries the branch name, not
+// a PR URL, and selfHeal cannot watch CI on it; the host opens the draft PR.
+func (s prLander) landingRef(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) (string, bool) {
+	pr := result.Resolved.Outcome.Landing
+	if s.readOnly {
+		var handoffErr error
+		pr, handoffErr = s.hostMediateDraftPR(num, gen, result)
+		if errors.Is(handoffErr, errAbandoned) {
+			return "", false
+		}
+		if handoffErr != nil {
+			s.postUsageComment(num, d)
+			return "", false
+		}
+		// Record the host-opened PR URL. A no-op for every tracker but
+		// local's, which may pair ISSUE_TRACKER=local with a read-only PR forge.
+		s.recordLanding(num, pr, result.Passes)
+	}
+	// A read-write Box opened its PR before printing ready.
+	s.latchOpenPR(num)
+	return pr, true
+}
+
+// latchOpenPR latches the open PR on num's agent branch. The branch is reused
+// across retries, so only an open PR counts: an earlier run's closed PR must
+// not be named on this run's record (ResolveOpenPR, unlike PRForBranch,
+// ignores it). A no-op for read-only; read-only latches at Open's source.
+func (s prLander) latchOpenPR(num string) {
+	if s.readOnly {
+		return
+	}
+	res, err := forge.ResolveOpenPR(s.cf, num)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not resolve PR for settled record: %v\n", num, err)
+		return
+	}
+	if res.Found {
+		s.latchPR(num, res.URL)
+	}
+}
+
+// settleReportedMerge verifies the merge against the PR on the agent branch,
+// resolved host-side (issue #1955); PRForBranch gives a full PR URL.
+func (s prLander) settleReportedMerge(num string) {
+	branch := s.cfForNum(num).AgentBranch(num)
+	pr, ok, err := s.pr.PRForBranch(branch)
+	if err != nil || !ok {
+		const reason = "no PR found on branch to verify merge"
+		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
+		s.transitionState(num, ForReason(dispatchrecord.ReasonNoPR), reason)
+		return
+	}
+	s.verifyMerged(num, pr)
+}
+
 // errLandingNeverGreen marks a force-pushed head that never reached green. A
 // merge failure on an already-green PR leaves the issue agent-complete (ADR
 // 0012); here no green PR exists at the current head, so selfHeal demotes to
