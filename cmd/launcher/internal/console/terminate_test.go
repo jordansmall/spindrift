@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // blockComments holds every tracker Comment until the returned channel closes,
@@ -40,12 +41,14 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 
 	factory, fr, dir := newTermFactory(t)
 
+	reg := terminate.NewRegistry()
 	s := settle.New(settle.Config{
+		Terminated:    reg,
 		MergeMode:     "manual",
 		CompleteLabel: "agent-complete",
 		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
-	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
+	launch = &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: reg, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 	return launch, fc, fr, dir
 }
@@ -124,12 +127,14 @@ func TestLauncher_Terminate_DuringMergeGate_ClearsCompleteLabel(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
+	reg := terminate.NewRegistry()
 	s := settle.New(settle.Config{
+		Terminated:    reg,
 		MergeMode:     "manual",
 		CompleteLabel: "agent-complete",
 		Capabilities:  forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: reg, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	if err := launch.Terminate(fc, "42"); err != nil {
@@ -255,7 +260,9 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 		t.Fatalf("dispatch.NewFactory: %v", err)
 	}
 	t.Cleanup(factory.Cleanup)
+	reg := terminate.NewRegistry()
 	s := settle.New(settle.Config{
+		Terminated:        reg,
 		MergeMode:         "immediate",
 		CompleteLabel:     "agent-complete",
 		MergePollInterval: 0,
@@ -263,7 +270,7 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 		Capabilities:      forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{}),
 	}, fc, fc)
 
-	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, queue: NewQueue()}
+	launch := &Launcher{CodeForge: fc, Factory: factory, Settle: s, Terminated: reg, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
 
 	if err := launch.Terminate(fc, "42"); err != nil {
@@ -398,7 +405,7 @@ func TestLauncher_TerminateAsync_SettledRow_IsNoOp(t *testing.T) {
 
 // TestLauncher_Terminate_MarksRegistry pins the mark in the shared
 // termination registry, which is how an in-flight settle loop (via
-// the settle.Registrar seam, reading the same registry) notices the terminate
+// the shared Terminated registry) notices the terminate
 // on its next checkpoint.
 func TestLauncher_Terminate_MarksRegistry(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
@@ -428,29 +435,31 @@ func TestLauncher_terminating_LazilyConstructsMap(t *testing.T) {
 	}
 }
 
-// TestLauncher_registry_UsesSettlersOwnRegistry pins that the Console's handle
-// and its settler's are one registry. main.go's recover path acquires the
-// settler's registry independently of the session; when that acquisition
-// installed a registry instead of reading one, a later operator Terminate
-// marked a registry no in-flight settle goroutine ever checked, and the settle
-// drove the reclaimed issue to agent-complete out from under it (#3522).
-func TestLauncher_registry_UsesSettlersOwnRegistry(t *testing.T) {
-	launch, _, _, _ := newTermTestLauncher(t)
-	st, ok := launch.Settle.(*settle.Settle)
-	if !ok {
-		t.Fatalf("Settle = %T, want *settle.Settle", launch.Settle)
-	}
+// TestLauncher_registry_IsTerminated pins that Terminate marks the registry the
+// caller supplied, which main.go shares with the work settler: a mark written
+// anywhere else never reaches an in-flight settle, and it drives the reclaimed
+// issue to agent-complete out from under the reclaim (#3522).
+func TestLauncher_registry_IsTerminated(t *testing.T) {
+	reg := terminate.NewRegistry()
+	st := settle.New(settle.Config{Terminated: reg}, forge.NewFake(), forge.NewFake())
+	launch := &Launcher{Settle: st, Terminated: reg}
 
+	if launch.registry() != launch.Terminated || launch.Terminated != st.Registry() {
+		t.Fatal("registry() must return Terminated, the settler's own registry")
+	}
 	gen := launch.registry().Begin("42")
 	launch.registry().Mark("42")
 	if !st.Registry().Marked("42", gen) {
 		t.Error("settler registry: want #42 marked through the Console's handle")
 	}
+}
 
-	gen43 := st.Registry().Begin("43")
-	st.Registry().Mark("43")
-	if !launch.registry().Marked("43", gen43) {
-		t.Error("Console registry: want #43 marked through the settler's handle")
+// TestLauncher_registry_NilTerminatedIsMintedOnce pins the fallback for a
+// settler with no registry of its own: one registry per Launcher, not one per call.
+func TestLauncher_registry_NilTerminatedIsMintedOnce(t *testing.T) {
+	launch := &Launcher{}
+	if launch.registry() == nil || launch.registry() != launch.registry() {
+		t.Error("registry() must mint one non-nil registry and return it every time")
 	}
 }
 

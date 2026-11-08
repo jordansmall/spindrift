@@ -23,10 +23,10 @@ type Session struct {
 	// after a Box exits, that the operator terminated the issue, so it is
 	// neither failed nor settled; Terminate already reclaimed it (ADR 0024,
 	// issue #649). Every production caller passes a non-nil one (main's
-	// registryFor, the Console's Launcher.registry), so nil is tests-only:
-	// dispatchWave and RunContinuous then substitute a fresh registry, which
-	// a signalled abort's Reclaim can still mark, so an issue can still come
-	// back terminated.
+	// launchContext.terminated, the Console's Launcher.registry), so nil is
+	// tests-only: dispatchWave and RunContinuous then substitute a fresh
+	// registry, which a signalled abort's Reclaim can still mark, so an issue
+	// can still come back terminated.
 	Terminated *terminate.Registry
 
 	// Tally folds the Settlement each of this session's settles returns,

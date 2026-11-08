@@ -41,13 +41,15 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 
 	dir := tempLogDir(t)
 	var cleaned bool
+	st := testNewSettle(c, fc, testWired(fc), fc)
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       testNewSettle(c, fc, testWired(fc), fc),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() { cleaned = true },
 	}
 
@@ -87,13 +89,15 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 
 	dir := tempLogDir(t)
 	var cleaned bool
+	st := testNewSettle(c, fc, testWired(fc), fc)
 	lc := &launchContext{
 		config:       c,
 		pwd:          dir,
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       testNewSettle(c, fc, testWired(fc), fc),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() { cleaned = true },
 	}
 
@@ -163,7 +167,7 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 	s := settle.NewFake()
 	abortDuringSettle(s, abortCh, killSignal)
 
-	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, terminate.NewRegistry(), "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -211,7 +215,7 @@ func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.
 	s := settle.NewFake()
 	abortDuringSettle(s, abortCh, killSignal)
 
-	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, terminate.NewRegistry(), "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -279,7 +283,7 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 	runtime.GC()
 	baseline := runtime.NumGoroutine()
 
-	if err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), settle.NewFake(), "42", io.Discard, io.Discard); err == nil {
+	if err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), settle.NewFake(), terminate.NewRegistry(), "42", io.Discard, io.Discard); err == nil {
 		t.Fatal("recoverByNumber: want error for a missing issue, got nil")
 	}
 
@@ -333,7 +337,7 @@ func TestRecoverByNumber_AbortAfterAdoptSettled_NoReclaim(t *testing.T) {
 	s := settle.NewFake()
 	completeThenAbort(s, fc, abortCh)
 
-	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, terminate.NewRegistry(), "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -382,7 +386,7 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 	s.RecoverErr = errors.New("relay: boom")
 	completeThenAbort(s, fc, abortCh)
 
-	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, terminate.NewRegistry(), "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -429,7 +433,7 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 
 	s := settle.NewFake()
 	var stdout bytes.Buffer
-	recErr := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42", &stdout, io.Discard)
+	recErr := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, terminate.NewRegistry(), "42", &stdout, io.Discard)
 	out := stdout.String()
 
 	if recErr != nil {
@@ -472,7 +476,7 @@ func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 
 	s := settle.NewFake()
 	var stdout bytes.Buffer
-	recErr := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42", &stdout, io.Discard)
+	recErr := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, terminate.NewRegistry(), "42", &stdout, io.Discard)
 	out := stdout.String()
 
 	if recErr != nil {
@@ -557,7 +561,7 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 	s := settle.NewFake()
 	s.On("Recover", func(int) { failThenAbort(it, "42", abort) })
 
-	err := recoverByNumber(c, it, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
+	err := recoverByNumber(c, it, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, terminate.NewRegistry(), "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -595,7 +599,8 @@ func TestRecoverByNumber_StopAfterFirstCheckpoint_UnreviewedDeclineIsNotFailed(t
 	x.fc.On("OpenPRForBranch", func(int) { close(stopCh) })
 
 	var out strings.Builder
-	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf), "42", &out, io.Discard)
+	ws := newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf)
+	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Errorf("recoverByNumber = %v, want ErrSignalledStop", err)

@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -21,7 +22,7 @@ import (
 // safe to reuse because cf is fixed for this whole call.
 // interactive reports whether stdin is a terminal; without one, unlabeled
 // issues need forceYes.
-func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
+func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, terminated *terminate.Registry, nums []string, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
 	// Installed once, ahead of the first fetch, the same placement run uses
 	// (#3522): every pre-wave early return below checks
 	// waves.SignalledStopAlready so a signal that already fired wins over any
@@ -71,7 +72,6 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	cfg.Stop = stopCh
 	cfg.Abort = abortCh
 	claimer := waves.NewLabelClaimer(it, c.Label, c.InProgressLabel)
-	terminated := registryFor(s)
 	return waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer)
 }
 

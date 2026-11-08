@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/seambundle"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 )
 
 // queueRecoverFixture is a github-shaped tracker plus a working dir whose
@@ -82,7 +83,8 @@ func (x *queueRecoverFixture) run(t *testing.T) (int, string) {
 func (x *queueRecoverFixture) runWith(t *testing.T, caps forge.Capabilities) (int, string) {
 	t.Helper()
 	var out strings.Builder
-	err := recoverQueueOne(x.c, x.tracker, x.cf, caps, x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), &out, io.Discard)
+	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	err := recoverQueueOne(x.c, x.tracker, x.cf, caps, x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), &out, io.Discard)
 	return exitCodeFor(err), out.String()
 }
 
@@ -343,7 +345,7 @@ func (x *queueRecoverFixture) runOn(t *testing.T, it forge.IssueTracker, cf forg
 	// A real runner, not nil: an abort whose watcher wins the race reaps
 	// through the factory's runner.Kill.
 	s := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
-	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, runner.NewFake()), s, io.Discard, io.Discard)
+	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, runner.NewFake()), s, s.Registry(), io.Discard, io.Discard)
 	return exitCodeFor(err)
 }
 
@@ -397,7 +399,8 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 		}
 	})
 
-	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), io.Discard, io.Discard)
+	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), ws, ws.Registry(), io.Discard, io.Discard)
 	code := exitCodeFor(err)
 
 	if code != int(exitcode.SignalledStop) {
@@ -761,6 +764,7 @@ func TestRecoverQueueOne_PreClaimErrorFailsWithoutTransition(t *testing.T) {
 
 func queueLaunchContext(t *testing.T, x *queueRecoverFixture, cleaned *bool) *launchContext {
 	t.Helper()
+	st := testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	return &launchContext{
 		config:       x.c,
 		pwd:          x.dir,
@@ -768,7 +772,8 @@ func queueLaunchContext(t *testing.T, x *queueRecoverFixture, cleaned *bool) *la
 		codeForge:    x.cf,
 		capabilities: capsFor(x.tracker, x.cf),
 		factory:      testFactory(t, x.dir, nil),
-		settle:       testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() { *cleaned = true },
 	}
 }
@@ -949,7 +954,8 @@ func TestRecoverIssue_HandRunWorkflowPermissionNoteCarriesRemedy(t *testing.T) {
 	stopCh, abortCh := make(chan struct{}), make(chan struct{})
 	var out strings.Builder
 
-	err := recoverIssue(stopCh, abortCh, false, x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), "42", &out, io.Discard)
+	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	err := recoverIssue(stopCh, abortCh, false, x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 
 	if err == nil {
 		t.Fatal("recoverIssue succeeded, want a failure")
@@ -1121,13 +1127,15 @@ func TestCmdRecover_RelayFailureReportsCauseNotNoOpenPR(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
+	st := testNewSettle(x.c, x.fc, testWired(x.fc), x.cf)
 	lc := &launchContext{
 		config:       x.c,
 		pwd:          x.dir,
 		issueTracker: x.fc,
 		codeForge:    x.cf,
 		factory:      testFactory(t, x.dir, nil),
-		settle:       testNewSettle(x.c, x.fc, testWired(x.fc), x.cf),
+		settle:       st,
+		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
 
@@ -1252,7 +1260,8 @@ func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 	}
 	x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.InProgressLabel}})
 
-	err = recoverByNumber(x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), "42", io.Discard, io.Discard)
+	ws := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
+	err = recoverByNumber(x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", io.Discard, io.Discard)
 
 	if err != nil {
 		t.Fatalf("recoverByNumber: %v", err)
@@ -1326,7 +1335,7 @@ func TestRecoverQueueOne_AbortAfterOwnFailedSettleSpared(t *testing.T) {
 	s := settle.NewFake()
 	s.On("Recover", func(int) { failThenAbort(it, "42", abort) })
 
-	err := recoverQueueOne(x.c, it, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
+	err := recoverQueueOne(x.c, it, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, terminate.NewRegistry(), io.Discard, io.Discard)
 
 	if code := exitCodeFor(err); code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))

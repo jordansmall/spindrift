@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
@@ -40,7 +41,13 @@ type launchContext struct {
 	capabilities forge.Capabilities
 	factory      *dispatch.Factory
 	settle       settle.Settler
-	cleanup      func()
+	// terminated is the one registry the work settler checks at its checkpoints
+	// and every marker writes: the Console's Terminate, the waves, and an abort's
+	// Reclaim. An abort and a settle goroutine already polling CI then agree on
+	// an issue's fate (#3521), and a Console recover gesture cannot replace it
+	// and strand later marks where no settle looks (#3522).
+	terminated *terminate.Registry
+	cleanup    func()
 }
 
 // bootstrap wires the prologue shared by console, recover, dispatch, research,
@@ -136,7 +143,8 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 
 	lw := localloop.Wire(localloopConfig(c), it)
 	f := newDispatchFactory(c, pwd, r, it, lw, cf, gc.capabilities)
-	s := newSettle(c, it, lw, cf, gc.capabilities)
+	terminated := terminate.NewRegistry()
+	s := newSettle(c, it, lw, cf, gc.capabilities, terminated)
 
 	return &launchContext{
 		config:       c,
@@ -147,6 +155,7 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 		capabilities: gc.capabilities,
 		factory:      f,
 		settle:       s,
+		terminated:   terminated,
 		cleanup: func() {
 			f.Cleanup()
 			// Held for the whole run rather than only the seed, so a
@@ -222,6 +231,6 @@ func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Facto
 
 	// newSettle takes the dispatchkind.SettleVerdict branch here, and that branch
 	// never reads its caps argument, so there is nothing worth resolving.
-	s := newSettle(rc, it, lw, lc.codeForge, forge.Capabilities{})
+	s := newSettle(rc, it, lw, lc.codeForge, forge.Capabilities{}, nil)
 	return it, f, s
 }

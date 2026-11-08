@@ -14,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -32,6 +33,7 @@ func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	err := run(lc, io.Discard, io.Discard)
@@ -55,6 +57,7 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 2 {
@@ -76,6 +79,7 @@ func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var buf bytes.Buffer
@@ -102,6 +106,7 @@ func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var err error
@@ -138,6 +143,7 @@ func TestRun_OneShot_NamesHeldIssueWhenRestBlocked(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var err error
@@ -170,6 +176,7 @@ func TestRun_OneShot_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var buf bytes.Buffer
@@ -202,6 +209,7 @@ func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testi
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 3 {
@@ -239,6 +247,7 @@ func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := selectiveDispatchExitCode(lc, []string{"10"}, true, io.Discard, io.Discard); got != 3 {
@@ -264,6 +273,7 @@ func TestSelectiveDispatchExitCode_NonTTYUnlabeled_AbortsWithoutDispatch(t *test
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	var stderr bytes.Buffer
@@ -294,6 +304,7 @@ func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 2 {
@@ -321,6 +332,7 @@ func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	err := run(lc, io.Discard, io.Discard)
@@ -356,6 +368,7 @@ func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 3 {
@@ -385,6 +398,7 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 0 {
@@ -418,6 +432,7 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	out := captureRunStdout(t, lc, 0)
@@ -462,6 +477,7 @@ func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	out := captureRunStdout(t, lc, 0)
@@ -502,6 +518,7 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
 		settle:       sf,
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if err := run(lc, io.Discard, io.Discard); !errors.Is(err, errQueueEmpty) {
@@ -549,6 +566,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 4 {
@@ -591,6 +609,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	out := captureRunStdout(t, lc, 4) // 4: waves.ErrImageStale
@@ -639,6 +658,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	out := captureRunStdout(t, lc, 4) // 4: waves.ErrImageStale
@@ -743,6 +763,7 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if err := run(lc, io.Discard, io.Discard); err != nil {
@@ -786,6 +807,7 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	if got := runExitCode(lc, io.Discard, io.Discard); got != 0 {
@@ -825,6 +847,7 @@ func TestRunExitCode_ContinuousDispatch_AllHeld_NamesHeldIssue(t *testing.T) {
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 	var buf bytes.Buffer
 	err := run(lc, &buf, io.Discard)
@@ -868,6 +891,7 @@ func TestRunExitCode_ContinuousDispatch_RefillDoesNotRepeatHeldAnnouncement(t *t
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
+		terminated:   terminate.NewRegistry(),
 	}
 
 	out := captureRunStdout(t, lc, 0)

@@ -36,7 +36,7 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15", "18"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"12", "15", "18"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"12", "15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	stdin := strings.NewReader("n\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"15"}, false, true, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected error on abort, got nil")
 	}
@@ -127,7 +127,7 @@ func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
 			stdin := &bytes.Buffer{} // No input, so the test would hang if the prompt fired.
 			stdout := &bytes.Buffer{}
 
-			err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, true, interactive, stdin, stdout)
+			err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"15"}, true, interactive, stdin, stdout)
 			if err != nil {
 				t.Fatalf("selectiveListDispatch with --yes: %v", err)
 			}
@@ -155,7 +155,7 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"15"}, false, false, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected non-interactive abort error, got nil")
 	}
@@ -188,7 +188,7 @@ func TestSelectiveListDispatch_InteractiveEOFAborts(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, true, &bytes.Buffer{}, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"15"}, false, true, &bytes.Buffer{}, stdout)
 	if err == nil {
 		t.Fatal("expected abort on EOF, got nil")
 	}
@@ -219,7 +219,7 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15", "99"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"15", "99"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"12", "15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -610,7 +610,7 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 	stdout := &bytes.Buffer{}
 
 	it := failDepsOf{Fake: fc, num: "12"}
-	err := selectiveListDispatch(c, it, fc, capsFor(it, fc), dir, f, s, []string{"12", "15"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, it, fc, capsFor(it, fc), dir, f, s, s.Registry(), []string{"12", "15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -683,7 +683,7 @@ func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testi
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, it, cf, capsFor(it, cf), dir, f, s, []string{"feature-x"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, it, cf, capsFor(it, cf), dir, f, s, s.Registry(), []string{"feature-x"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -723,7 +723,7 @@ func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "SPIN-99"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"12", "SPIN-99"}, false, true, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected error for unresolvable ID, got nil")
 	}
@@ -843,7 +843,7 @@ func TestSelectiveListDispatch_RepeatedNumberRunsOnce(t *testing.T) {
 
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "12"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"12", "12"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -870,7 +870,7 @@ func TestSelectiveListDispatch_RepeatedUnlabeledPromptsOnce(t *testing.T) {
 
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "12"}, false, true, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, s.Registry(), []string{"12", "12"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
