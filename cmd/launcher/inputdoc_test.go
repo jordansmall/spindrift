@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/promptassembly"
 )
 
 func setRunner(t *testing.T, runtime, kind string) {
@@ -288,5 +289,25 @@ func TestAmbientKnobEnvError_ReadsProcessEnv(t *testing.T) {
 	err := ambientKnobEnvError()
 	if err == nil || !strings.Contains(err.Error(), "BASE_BRANCH") {
 		t.Errorf("error = %v, want it to name BASE_BRANCH", err)
+	}
+}
+
+// inputdoc cannot import promptassembly, so its flag-tier MAX_BUDGET_USD rule
+// is a copy of ParseNonnegBudgetUSD; this pins the two together.
+func TestResolveMaxBudgetUSDMatchesParseNonnegBudgetUSD(t *testing.T) {
+	// A non-zero document value makes a rejected flag (fallback to 7) distinguishable from an accepted "0".
+	doc := &inputdoc.Document{Settings: map[string]string{"MAX_BUDGET_USD": "7"}}
+	for _, s := range []string{"1.5", "0", "-1", "inf", "+Inf", "NaN", "x", ""} {
+		want := 7.0 // the document value, which a rejected flag falls back to
+		if v, ok := promptassembly.ParseNonnegBudgetUSD(s); ok {
+			want = v
+		}
+		r, err := inputdoc.Resolve([]string{"--max-budget-usd", s}, doc, map[string]string{})
+		if err != nil {
+			t.Fatalf("%q: %v", s, err)
+		}
+		if r.Knobs.MaxBudgetUSD != want {
+			t.Errorf("--max-budget-usd %q: got %v, want %v", s, r.Knobs.MaxBudgetUSD, want)
+		}
 	}
 }
