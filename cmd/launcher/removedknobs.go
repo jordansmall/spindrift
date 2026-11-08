@@ -28,10 +28,7 @@ func removedKnobsCheck() doctor.Check {
 			var errs []string
 			for _, k := range removedKnobs {
 				_, inEnv := os.LookupEnv(k.env)
-				inDoc := false
-				if loadedDoc != nil {
-					_, inDoc = loadedDoc.Settings[k.env]
-				}
+				_, inDoc := launcherInput.Setting(k.env)
 				if inEnv || inDoc {
 					errs = append(errs, fmt.Sprintf("%s was removed: %s; delete the setting", k.env, k.reason))
 				}

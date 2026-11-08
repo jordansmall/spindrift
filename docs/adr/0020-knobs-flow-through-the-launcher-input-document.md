@@ -28,8 +28,10 @@ The Go struct mirroring the document (`inputdoc.Document`,
 `map[string]string` fields, `Settings` and `Artifacts`, keyed by env var
 name — matching the existing `schemaDefaults`/`schemaFlags`
 table-not-struct pattern rather than a per-knob struct.
-`cmd/launcher/inputdoc.go` holds the Launcher's adapter (`loadedDoc`, its
-lookup helpers, and the ambient-env warning).
+`cmd/launcher/inputdoc.go` holds the Launcher's adapter (its
+lookup helpers and the ambient-env warning).
+(Amended by issue #6627: the `loadedDoc` global is gone; readers go through
+the resolved `launcherInput`.)
 (Amended by issue #813: this ADR originally claimed the
 struct was nix-generated from the schema under the same golden-diff guard as
 `flagtable_gen.go`; that never shipped. Drift protection here is narrower

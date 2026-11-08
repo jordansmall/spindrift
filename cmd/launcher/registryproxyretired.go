@@ -42,8 +42,8 @@ func retiredRegistryProxyKnobsFromEnv() retiredRegistryProxyKnobs {
 	var k retiredRegistryProxyKnobs
 	for _, f := range k.fields() {
 		v := os.Getenv(f.envName)
-		if v == "" && loadedDoc != nil {
-			v = loadedDoc.Settings[f.envName]
+		if v == "" {
+			v, _ = launcherInput.Setting(f.envName)
 		}
 		*f.value = v
 	}
