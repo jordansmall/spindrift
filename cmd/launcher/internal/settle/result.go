@@ -26,7 +26,9 @@ type gateResult int
 
 const (
 	// gateTerminal is the zero value: a poll timeout or a CheckState API
-	// error. No label swap here; the caller swaps to failedLabel.
+	// error. No label swap here; the caller swaps to failedLabel, except when
+	// the observation's err is errAbandoned (a stop landed): another actor owns
+	// the issue, so the caller swaps nothing.
 	gateTerminal gateResult = iota
 	// gateRedRetry is a genuine CI failure (FAILURE or ERROR); the caller
 	// decides whether to dispatch a fix box.
@@ -34,10 +36,6 @@ const (
 	// gateGreen is confirmed green CI. The caller (selfHeal) swaps
 	// agent-complete once the landing path settles.
 	gateGreen
-	// gateAbandoned is the operator's Terminate (ADR 0024, issue #649)
-	// landing mid-poll. No label swap: Terminate already transitioned the
-	// issue to Dispatchable.
-	gateAbandoned
 )
 
 func (g gateResult) String() string {
@@ -48,8 +46,6 @@ func (g gateResult) String() string {
 		return "red-retry"
 	case gateTerminal:
 		return "terminal"
-	case gateAbandoned:
-		return "abandoned"
 	default:
 		return "unknown"
 	}

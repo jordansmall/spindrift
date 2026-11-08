@@ -648,7 +648,6 @@ func TestRewaitGateResultErr_ExplicitCases(t *testing.T) {
 		notRed  bool // must not wrap errForcePushRed: only genuine red earns a fix pass
 	}{
 		{name: "green", g: gateGreen, wantNil: true},
-		{name: "abandoned", g: gateAbandoned, wantErr: errAbandoned},
 		{name: "terminal", g: gateTerminal, wantErr: errLandingNeverGreen, notRed: true},
 		{name: "red-retry", g: gateRedRetry, wantErr: errLandingNeverGreen},
 		{name: "red-retry marks the red cause", g: gateRedRetry, wantErr: errForcePushRed},

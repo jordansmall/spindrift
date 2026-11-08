@@ -77,9 +77,10 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 		// Dispatchable by the time any check below sees it, so no arm past
 		// that point may commit tracker state or dispatch further work for
 		// num (issue #3523).
-		switch obs.outcome {
-		case gateAbandoned:
+		if errors.Is(obs.err, errAbandoned) {
 			return landingAbandoned, ""
+		}
+		switch obs.outcome {
 		case gateGreen:
 			// Catches a mark landing during the gate's own confirm sleep,
 			// before MarkReady's idempotent ready flip below.
@@ -489,7 +490,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 	)
 
 	switch obs.outcome {
-	case gateGreen, gateRedRetry, gateAbandoned:
+	case gateGreen, gateRedRetry:
 		return obs, ""
 	case gateTerminal:
 		// fall through to reason formatting below.
@@ -499,6 +500,9 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 
 	// poll() does no I/O of its own, so this block prints the check-state-error
 	// status line as well as formatting the operator-facing reason.
+	if errors.Is(obs.err, errAbandoned) {
+		return obs, ""
+	}
 	if obs.err != nil {
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusCheckStateError, Detail: fmt.Sprintf("!! %v", obs.err)})
 		return obs, gateTerminalReason(obs.err, deadline)
@@ -979,6 +983,9 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	}
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushWait})
 	obs, gReason := s.gateToGreen(num, gen, pr, false)
+	if errors.Is(obs.err, errAbandoned) {
+		return errAbandoned
+	}
 	if obs.outcome == gateGreen {
 		// Restore ready (issue #1863). MarkReady is idempotent, so calling it
 		// unconditionally beats threading a was-it-ever-demoted flag through
@@ -1003,8 +1010,6 @@ func rewaitGateResultErr(g gateResult, reason, pr string) error {
 	switch g {
 	case gateGreen:
 		return nil
-	case gateAbandoned:
-		return errAbandoned
 	case gateRedRetry:
 		return forcePushRedErr(pr)
 	case gateTerminal:

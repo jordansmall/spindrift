@@ -81,13 +81,13 @@ func (s *Settle) adoptAndGateLogged(d dispatch.Dispatcher, num string, gen uint6
 // wiring or missing-PR-intent failure), and true, also with no side effect, when a stop abandoned the
 // relay.
 func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) (bool, error) {
-	pr, handoff, err := s.adoptRelayedBranch(num, gen, result)
-	switch handoff {
-	case handoffAbandoned:
+	pr, opened, err := s.adoptRelayedBranch(num, gen, result)
+	if errors.Is(err, errAbandoned) {
 		// Handled: false would send the caller's blocked handling to comment on
 		// and transition an issue the stop already released (issue #3523).
 		return true, nil
-	case handoffBlocked:
+	}
+	if !opened {
 		return false, err
 	}
 
@@ -167,22 +167,20 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 // landing= field (#1949): a prompt-injected read-only Box controls that field.
 // FallbackDefault means a missing PR-intent line falls back to an issue-derived
 // default instead of blocking, since this Box was cut short before that step.
-// The error is non-nil only with handoffBlocked, and only for a relay or
-// draft-PR-create failure; other Open failures (wiring, missing PR intent)
-// block with a nil error so recover's own "no open PR" handling runs.
-func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (string, handoffResult, error) {
+// opened is false when no PR is open. The error is then non-nil only for a
+// relay or draft-PR-create failure, or errAbandoned when a stop landed during
+// the relay's backoff; other Open failures (wiring, missing PR intent) leave a
+// nil error so recover's own "no open PR" handling runs.
+func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (url string, opened bool, err error) {
 	branch, m := s.mediationFor(num, gen)
-	url, _, _, err := m.Open(num, branch, result, FallbackDefault)
-	if errors.Is(err, errAbandoned) {
-		return "", handoffAbandoned, nil
-	}
+	url, _, _, err = m.Open(num, branch, result, FallbackDefault)
 	if err != nil {
-		if errors.Is(err, errRelayBundle) || errors.Is(err, errCreateDraftPR) {
-			return "", handoffBlocked, err
+		if errors.Is(err, errAbandoned) || errors.Is(err, errRelayBundle) || errors.Is(err, errCreateDraftPR) {
+			return "", false, err
 		}
-		return "", handoffBlocked, nil
+		return "", false, nil
 	}
-	return url, handoffOpened, nil
+	return url, true, nil
 }
 
 // tryMarkRecoverable promotes a local push-only issue to Recoverable (ADR

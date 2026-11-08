@@ -74,8 +74,8 @@ func TestGateToGreen_TerminatedAbandonsWithoutTransition(t *testing.T) {
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
-	if got.outcome != gateAbandoned {
-		t.Errorf("gateToGreen = %v, want gateAbandoned", got.outcome)
+	if !errors.Is(got.err, errAbandoned) {
+		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)
 	}
 	assertNoTransitionOrComment(t, fc)
 }
@@ -208,8 +208,8 @@ func TestGateToGreen_TerminatedMidPollAbandonsPromptly(t *testing.T) {
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
-	if got.outcome != gateAbandoned {
-		t.Errorf("gateToGreen = %v, want gateAbandoned", got.outcome)
+	if !errors.Is(got.err, errAbandoned) {
+		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)
 	}
 	wantElapsed := markAfterCall * c.MergePollInterval
 	if got.elapsed != wantElapsed {
@@ -257,7 +257,7 @@ func (f terminatingForge) Rebase(url string) error {
 // A termination landing between a successful rebase force-push and
 // rewaitAfterForcePush's CI poll must be reported as errAbandoned, not wrapped
 // into errLandingNeverGreen, the gap issue #805 closes. Without the fix,
-// gateToGreen's own gateAbandoned result collapses into a generic "never went
+// gateToGreen's own errAbandoned result collapses into a generic "never went
 // green" error, which selfHeal mis-routes to landingFailed, not landingAbandoned.
 func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	c := baseConfig()
@@ -443,7 +443,7 @@ func TestSelfHeal_TerminatedDuringFixNoOpConfirmSleep_ReportsAbandoned(t *testin
 
 // A gate-terminal outcome observed after termination must abandon, not
 // fail (issue #3523). MergePollTimeout=0 makes the first CheckState call
-// also hit the deadline, so the outcome is gateTerminal, not gateAbandoned.
+// also hit the deadline, so the outcome is gateTerminal, not an errAbandoned observation.
 func TestSelfHeal_TerminatedGateTerminal_ReportsAbandonedNotFailed(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 0
@@ -528,8 +528,8 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 	reg.Mark("1")
 	newGen := reg.Begin("1") // a re-pick's discover claims a fresh incarnation, mid-race
 
-	if got, _ := s.gateToGreen("1", oldGen, testPR, false); got.outcome != gateAbandoned {
-		t.Errorf("gateToGreen(oldGen) = %v, want gateAbandoned — a re-pick must not erase an in-flight settle's own mark", got.outcome)
+	if got, _ := s.gateToGreen("1", oldGen, testPR, false); !errors.Is(got.err, errAbandoned) {
+		t.Errorf("gateToGreen(oldGen) = %v (err %v), want errAbandoned — a re-pick must not erase an in-flight settle's own mark", got.outcome, got.err)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called for the abandoned generation; got %+v", fc.TransitionStateCalls)
@@ -801,8 +801,8 @@ func TestRegistry_StableHandleIsWhatCheckpointsRead(t *testing.T) {
 
 	got, _ := s.gateToGreen("1", 0, testPR, false)
 
-	if got.outcome != gateAbandoned {
-		t.Errorf("gateToGreen = %v, want gateAbandoned", got.outcome)
+	if !errors.Is(got.err, errAbandoned) {
+		t.Errorf("gateToGreen = %v (err %v), want errAbandoned", got.outcome, got.err)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)

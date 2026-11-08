@@ -109,7 +109,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// be stranded once the container exits. Applies to PR-shaped and
 		// push-only forges alike (issue #1946). Best-effort and additive:
 		// failure never changes the blocked outcome recorded above.
-		if s.readOnly && s.relayBlockedWork(num, gen, result) {
+		if s.readOnly && errors.Is(s.relayBlockedWork(num, gen, result), errAbandoned) {
 			return
 		}
 		// A read-write Box may have opened its draft PR before stopping.
@@ -138,12 +138,12 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// selfHeal cannot watch CI on it. Push-only forges (s.pr == nil) need
 		// no such step: landPushOnly's own RelayBundle call covers them.
 		if s.readOnly && s.pr != nil {
-			var handoff handoffResult
-			pr, handoff = s.hostMediateDraftPR(num, gen, result)
-			switch handoff {
-			case handoffAbandoned:
+			var handoffErr error
+			pr, handoffErr = s.hostMediateDraftPR(num, gen, result)
+			if errors.Is(handoffErr, errAbandoned) {
 				return
-			case handoffBlocked:
+			}
+			if handoffErr != nil {
 				s.postUsageComment(num, d)
 				return
 			}

@@ -11,7 +11,10 @@ import (
 // to pick a gateResult and name the failing guard on gateTerminal.
 type watchObservation struct {
 	outcome gateResult
-	// err is non-nil only when outcome is gateTerminal because CheckState errored.
+	// err is non-nil only when outcome is gateTerminal: a CheckState error, or
+	// errAbandoned when a stop (Terminate, ADR 0024, issue #649) landed
+	// mid-poll. Check errAbandoned first: the mark already released the issue,
+	// so there is no label swap or progress line.
 	err error
 	// sawNonTerminal is true only when a real poll observed PENDING/EXPECTED/NONE,
 	// never from the window-elapsed fallback.
@@ -104,7 +107,7 @@ func (w watch) poll(terminated func() bool, checkState func() (forge.RollupState
 
 	for {
 		if terminated() {
-			return st.observation(gateAbandoned, nil)
+			return st.observation(gateTerminal, errAbandoned)
 		}
 		state, stateErr := checkState()
 		if stateErr != nil {

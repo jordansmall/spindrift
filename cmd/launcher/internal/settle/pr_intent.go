@@ -12,26 +12,13 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 )
 
-// handoffResult names the outcome of relaying a Box's branch and opening its PR
-// host-side.
-type handoffResult int
-
-const (
-	// handoffBlocked is the zero value: the hand-off failed, so the caller
-	// skips the CI watch.
-	handoffBlocked handoffResult = iota
-	// handoffOpened means a PR is open on the relayed branch.
-	handoffOpened
-	// handoffAbandoned means a stop landed during the relay's backoff: the mark
-	// owns the issue, so the caller must post nothing (issue #3523).
-	handoffAbandoned
-)
-
 // hostMediateDraftPR relays a read-only Box's finished branch and opens its
 // draft PR host-side (issue #1919). The relay runs even when the Box printed no
 // PR-intent line (issue #2447). branch comes from cf.AgentBranch, never the
-// Box-controlled landing= (issue #1949).
-func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Result) (string, handoffResult) {
+// Box-controlled landing= (issue #1949). A non-nil error means no PR is open
+// and the caller skips the CI watch; errAbandoned also means a stop landed
+// during the relay's backoff, so the caller must post nothing (issue #3523).
+func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Result) (string, error) {
 	branch, m := s.mediationFor(num, gen)
 
 	// The startup capability gate (main.go, issue #1916) guarantees a
@@ -41,7 +28,7 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 	url, created, source, err := m.Open(num, branch, result, FallbackReconstruct)
 	if err != nil {
 		if errors.Is(err, errAbandoned) {
-			return "", handoffAbandoned
+			return "", err
 		}
 		switch {
 		case relayFailureParkable(err):
@@ -51,7 +38,7 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 		default:
 			s.blockHandoff(num, branch, err)
 		}
-		return "", handoffBlocked
+		return "", err
 	}
 	// created is false when Open adopted a pre-existing box-authored PR (issue
 	// #2407), which never received the reconstructed title and body, so
@@ -72,7 +59,7 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post reconstructed-hand-off comment: %v\n", num, commentErr)
 		}
 	}
-	return url, handoffOpened
+	return url, nil
 }
 
 // relayBlockedWork relays a blocked Box's branch so the work is not lost, then
@@ -80,29 +67,30 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 // only log: the caller's blocked transition already recorded the outcome.
 // branch comes from cf.AgentBranch, never o.Landing (issue #1949). A push-only
 // forge cannot use Open, which requires DraftPRCreator, so it relays directly.
-// abandoned is true when a stop landed during the relay's backoff, so the
-// caller must post nothing on the issue the operator stopped (issue #3523).
-func (s *Settle) relayBlockedWork(num string, gen uint64, result dispatch.Result) (abandoned bool) {
+// It returns errAbandoned when a stop landed during the relay's backoff, so the
+// caller must post nothing on the issue the operator stopped (issue #3523);
+// every other failure is logged and returns nil.
+func (s *Settle) relayBlockedWork(num string, gen uint64, result dispatch.Result) error {
 	branch, m := s.mediationFor(num, gen)
 	if m.br == nil || s.cfg.OutboxDir == nil {
-		return false
+		return nil
 	}
 
 	if m.dpc == nil {
 		if err := m.br.RelayBundle(s.cfg.OutboxDir(num), branch); err != nil {
 			if errors.Is(err, errAbandoned) {
 				logBlockedHandoffRelayAbandoned(num)
-				return true
+				return errAbandoned
 			}
 			if errors.Is(err, forge.ErrBundleNotFound) {
 				// An empty branch range leaves no bundle, so there is no work
 				// to preserve and no branch to open a PR against (issue #2096).
 				logNoBlockedHandoffBundle(num)
-				return false
+				return nil
 			}
 			logBlockedHandoffRelayFailure(num, err)
 		}
-		return false
+		return nil
 	}
 
 	if _, _, _, err := m.Open(num, branch, result, FallbackNone); err != nil {
@@ -110,7 +98,7 @@ func (s *Settle) relayBlockedWork(num string, gen uint64, result dispatch.Result
 		// around the same error.
 		if errors.Is(err, errAbandoned) {
 			logBlockedHandoffRelayAbandoned(num)
-			return true
+			return errAbandoned
 		}
 		switch {
 		case errors.Is(err, ErrNoPRIntent):
@@ -124,7 +112,7 @@ func (s *Settle) relayBlockedWork(num string, gen uint64, result dispatch.Result
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not create draft PR for blocked hand-off: %v\n", num, err)
 		}
 	}
-	return false
+	return nil
 }
 
 // logNoBlockedHandoffBundle reports a blocked run whose outbox held nothing to
