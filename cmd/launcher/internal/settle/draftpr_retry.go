@@ -45,7 +45,7 @@ func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (
 	var url string
 	var created bool
 	attempts := 0
-	err := r.run(StatusDraftPRRetry, StatusDraftPRFinalLookup, head,
+	err := r.fresh().run(StatusDraftPRRetry, StatusDraftPRFinalLookup, head,
 		func() error {
 			attempts++
 			var err error
