@@ -63,7 +63,7 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 	// authored, or a prior dispatch's) is misread as the host's own; an
 	// OpenPRForBranch before every first attempt isn't worth that.
 	if source == TextSourceReconstructed && (created || m.adoptedOwn) {
-		fmt.Printf("    #%s  landing=%s  status=reconstructed  note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits\n", num, branch)
+		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusReconstructed, Detail: "note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits"})
 		// An operator reading only the issue, never the launcher's stdout,
 		// must still see that the box's hand-off was incomplete (issue #2447,
 		// AC5). Best-effort, like postUsageComment: a failure here must not
@@ -150,7 +150,7 @@ func logBlockedHandoffRelayFailure(num string, err error) {
 // would send the operator to `spindrift recover`, which has no bundle to land
 // here (unlike parkRelayFailure and parkDraftPRFailure).
 func (s *Settle) blockHandoff(num, branch string, err error) {
-	fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
+	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
 	// Never transitions, so Settled never sees this Dispatch, yet the
 	// all-finished banner must not count it delivered (issue #5145).
@@ -163,7 +163,7 @@ func (s *Settle) blockHandoff(num, branch string, err error) {
 // there. A missing bundle (forge.ErrBundleNotFound) preserves nothing and never
 // reaches here.
 func (s *Settle) parkRelayFailure(num, branch string, err error) {
-	fmt.Printf("    #%s  landing=%s  status=relay-failed  !! %v\n", num, branch, err)
+	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusRelayFailed, Detail: fmt.Sprintf("!! %v", err)})
 	next := relayFailureNext(num, err, fmt.Sprintf("run `spindrift recover %s` to retry relaying and landing it.", num))
 	s.it.Comment(num, fmt.Sprintf("bundle relay failed: %v. The Box's bundle is preserved in the outbox; %s", err, next))
 	s.transitionState(num, ForReason(dispatchrecord.ReasonRelayFailed), "bundle relay failed; work preserved in outbox")
@@ -183,7 +183,7 @@ func relayFailureNext(num string, err error, fallback string) string {
 // draft-PR create then failed (issue #5144). The bundle is still in the outbox
 // and the branch already pushed, so `spindrift recover` can open the PR.
 func (s *Settle) parkDraftPRFailure(num, branch string, err error) {
-	fmt.Printf("    #%s  landing=%s  status=draft-pr-failed  !! %v\n", num, branch, err)
+	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusDraftPRFailed, Detail: fmt.Sprintf("!! %v", err)})
 	s.it.Comment(num, fmt.Sprintf("%v. The branch was relayed and the Box's bundle is preserved in the outbox; run `spindrift recover %s` to retry opening and landing the PR.", err, num))
 	s.transitionState(num, ForReason(dispatchrecord.ReasonDraftPRFailed), "draft PR create failed; work preserved in outbox")
 }

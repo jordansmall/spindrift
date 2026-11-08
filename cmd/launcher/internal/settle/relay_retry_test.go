@@ -52,6 +52,7 @@ func newRelay(inner forge.BundleRelay, clock dispatch.Clock, maxRetries int) *re
 			maxRetries: maxRetries,
 			stopped:    func() bool { return false },
 			num:        "7",
+			progress:   StdoutProgress{},
 		},
 		inner: inner,
 	}

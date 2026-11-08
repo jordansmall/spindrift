@@ -91,7 +91,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 		return false, err
 	}
 
-	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, pr, note)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAdopted, Detail: "note=" + note})
 	s.recordLanding(num, pr, result.Passes)
 	landing, reason := s.selfHeal(d, num, gen, pr, result.Passes)
 	switch landing {
@@ -102,7 +102,7 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 			s.verifyMerged(num, pr)
 		}
 	case landingFailed:
-		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
 	case landingAbandoned:
 		// See landingAbandoned: another actor owns the issue, so a usage
 		// comment here would be noise.
@@ -148,12 +148,12 @@ func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint
 // be no parsed outcome line at all on this path. note is printed verbatim.
 func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64, note string, passes []passmanifest.Entry) bool {
 	branch := s.cfForNum(num).AgentBranch(num)
-	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, branch, note)
+	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusAdopted, Detail: "note=" + note})
 	s.recordLanding(num, branch, passes)
 	landing, reason := s.selfHeal(d, num, gen, branch, passes)
 	switch landing {
 	case landingFailed:
-		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
+		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
 	case landingAbandoned:
 		return true
 	}
@@ -208,7 +208,7 @@ func (s *Settle) tryMarkRecoverable(d dispatch.Dispatcher, num string, result di
 	if !selfReportOK {
 		reason = "killed by signal"
 	}
-	fmt.Printf("    #%s  status=recoverable  note=%s; bundle present in outbox; run `spindrift recover %s` to land it\n", num, reason, num)
+	s.cfg.Progress.Step(Step{Key: num, Status: StatusRecoverable, Detail: fmt.Sprintf("note=%s; bundle present in outbox; run `spindrift recover %s` to land it", reason, num)})
 	s.transitionState(num, ForReason(dispatchrecord.ReasonRecoverable), reason)
 	return true
 }
@@ -244,7 +244,7 @@ func (s *Settle) removeLandedBundle(num string) {
 		return
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		fmt.Printf("    #%s  status=bundle-remove-failed  !! %v\n", num, err)
+		s.cfg.Progress.Step(Step{Key: num, Status: StatusBundleRemoveFailed, Detail: fmt.Sprintf("!! %v", err)})
 	}
 }
 

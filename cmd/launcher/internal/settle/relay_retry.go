@@ -31,7 +31,7 @@ type retryingBundleRelay struct {
 // ErrBundleNotFound (the Box wrote no bundle) and ErrWorkflowPermissionDenied
 // (the credential lacks Workflows permission, so every repeat is refused).
 func (r *retryingBundleRelay) RelayBundle(outboxDir, ref string) error {
-	return r.run("relay-retry", "", ref, // "": exhaustion returns at once
+	return r.run(StatusRelayRetry, "", ref, // "": exhaustion returns at once
 		func() error { return r.inner.RelayBundle(outboxDir, ref) },
 		func(err error) bool {
 			return errors.Is(err, forge.ErrBundleNotFound) || errors.Is(err, forge.ErrWorkflowPermissionDenied)

@@ -14,6 +14,7 @@ type retryLoop struct {
 	maxRetries int
 	stopped    func() bool
 	num        string // log lines only
+	progress   Progress
 }
 
 // newRetryLoop builds issue num's loop; an operator stop of generation gen ends it.
@@ -23,6 +24,7 @@ func (s *Settle) newRetryLoop(num string, gen uint64) retryLoop {
 		maxRetries: s.cfg.Policy.Max,
 		stopped:    func() bool { return s.terminated(num, gen) },
 		num:        num,
+		progress:   s.cfg.Progress,
 	}
 }
 
@@ -33,7 +35,7 @@ func (s *Settle) newRetryLoop(num string, gen uint64) retryLoop {
 // attempt one more logged backoff and afterBackoff call before its error is
 // returned, so Policy.Max=0 still waits once. An operator stop during a
 // backoff returns errAbandoned wrapping the last error.
-func (l retryLoop) run(status, finalStatus, landing string, attempt func() error, final func(error) bool, afterBackoff func() bool) error {
+func (l retryLoop) run(status, finalStatus Status, landing string, attempt func() error, final func(error) bool, afterBackoff func() bool) error {
 	for n := 1; ; n++ {
 		err := attempt()
 		if err == nil || (final != nil && final(err)) {
@@ -47,8 +49,8 @@ func (l retryLoop) run(status, finalStatus, landing string, attempt func() error
 		if exhausted {
 			st, of = finalStatus, l.maxRetries+1
 		}
-		fmt.Printf("    #%s  landing=%s  status=%s  attempt=%d/%d  !! %v\n",
-			l.num, landing, st, n, of, err)
+		l.progress.Step(Step{Key: l.num, Landing: landing, Status: st,
+			Detail: fmt.Sprintf("attempt=%d/%d  !! %v", n, of, err)})
 		if l.backoff.DoUnless(n, l.stopped) {
 			return fmt.Errorf("%w: %w", errAbandoned, err)
 		}

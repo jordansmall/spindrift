@@ -45,7 +45,7 @@ func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (
 	var url string
 	var created bool
 	attempts := 0
-	err := r.run("draft-pr-retry", "draft-pr-final-lookup", head,
+	err := r.run(StatusDraftPRRetry, StatusDraftPRFinalLookup, head,
 		func() error {
 			attempts++
 			var err error
@@ -59,9 +59,9 @@ func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (
 		func() bool {
 			pr, ok, lerr := r.prs.OpenPRForBranch(head)
 			if lerr != nil {
-				fmt.Printf("    #%s  landing=%s  status=draft-pr-lookup-failed  !! %v\n", r.num, head, lerr)
+				r.progress.Step(Step{Key: r.num, Landing: head, Status: StatusDraftPRLookupFailed, Detail: fmt.Sprintf("!! %v", lerr)})
 			} else if ok {
-				fmt.Printf("    #%s  landing=%s  status=draft-pr-adopted  %s\n", r.num, head, pr.URL)
+				r.progress.Step(Step{Key: r.num, Landing: head, Status: StatusDraftPRAdopted, Detail: pr.URL})
 				r.fireOnAdoptOwn()
 				url, created = pr.URL, false
 				return true
