@@ -73,15 +73,15 @@
 # field, and an env name or key a row shares with another declaration fails
 # eval (ADR 0068).
 
-# quickstart (optional) opts the backend into `spindrift quickstart`'s
+# quickstart (optional) opts the backend into Quickstart's
 # remote-host detection and wizard (ADR 0068 decision 8): `hosts` lists the
 # git remote hosts that identify it, `axes` the axes it sets, a non-empty
-# subset of "tracker" and "forge" that must include "tracker" (quickstart's
+# subset of "tracker" and "forge" that must include "tracker" (Quickstart's
 # answer is the issue tracker). "tracker" requires validAsTracker and "forge"
 # requires validAsCodeForge; renderBackendRegistryGo throws otherwise. Quickstart
 # renders the values the Strategy derives from the remote for the flakeOption
 # knobs in the row's `knobs`. An omitted block
-# means hand-edit only: quickstart never offers the backend.
+# means hand-edit only: Quickstart never offers the backend.
 
 # cliPackage is the nixpkgs attribute name of a CLI only this backend needs
 # inside the Box (forgejo: forgejo-cli, issue #1963). lib/mkHarness.nix unions

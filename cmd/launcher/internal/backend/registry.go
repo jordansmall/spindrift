@@ -130,7 +130,7 @@ type Descriptor struct {
 	// empty means "GH".
 	ForgeBackend string
 
-	// Quickstart is the backend's opt-in to `spindrift quickstart` (ADR 0068
+	// Quickstart is the backend's opt-in to the Quickstart wizard (ADR 0068
 	// decision 8); nil means hand-edit only, never offered by the wizard.
 	Quickstart *QuickstartBlock
 }
