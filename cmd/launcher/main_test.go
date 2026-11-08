@@ -232,7 +232,7 @@ func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(dispatch --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
-	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := resolvedKnob("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 }
@@ -268,7 +268,7 @@ func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(research --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
-	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := resolvedKnob("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 }
@@ -427,7 +427,7 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 func TestMainRun_Preview_WritesReportToInjectedStdout(t *testing.T) {
 	setFullyLocalEnv(t)
 	setArtifact(t, "RUNTIME", "echo")
-	writeLocalReadyIssue(t, getenvSchema("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
+	writeLocalReadyIssue(t, resolvedKnob("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRunKnobsAsFlags(t, []string{"preview", "42"}, &stdout, &stderr)
@@ -493,7 +493,7 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 			setup: func(t *testing.T) string {
 				setFullyLocalEnv(t)
 				setArtifact(t, "RUNTIME", "echo")
-				return getenvSchema("LOCAL_ISSUES_DIR")
+				return resolvedKnob("LOCAL_ISSUES_DIR")
 			},
 			wantMsgSuffix: "proof the selective-list preview path was taken with this exact ID",
 		},
@@ -1328,7 +1328,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 	}
 }
 
-// getenvSchema on an emptyDisables knob: an unset env var falls back to the
+// resolvedKnob on an emptyDisables knob: an unset env var falls back to the
 // schema default, one set to "" returns "" verbatim, and a non-empty value
 // passes through (issue #3048).
 func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
@@ -1352,8 +1352,8 @@ func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 
 			withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "PIDS_LIMIT", Dflt: "2048", EmptyDisables: true}})
 
-			if got := getenvSchema("PIDS_LIMIT"); got != tc.want {
-				t.Errorf("getenvSchema(PIDS_LIMIT) = %q, want %q", got, tc.want)
+			if got := resolvedKnob("PIDS_LIMIT"); got != tc.want {
+				t.Errorf("resolvedKnob(PIDS_LIMIT) = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -6667,8 +6667,8 @@ func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {
 	useDoc(t, nil)
 	setKnob(t, "LABEL", "")
-	if got := getenvSchema("LABEL"); got != "ready-for-agent" {
-		t.Errorf("getenvSchema(LABEL) = %q, want ready-for-agent", got)
+	if got := resolvedKnob("LABEL"); got != "ready-for-agent" {
+		t.Errorf("resolvedKnob(LABEL) = %q, want ready-for-agent", got)
 	}
 	if got := resolveBoxEnvVar("LABEL"); got != "ready-for-agent" {
 		t.Errorf("resolveBoxEnvVar(LABEL) = %q, want ready-for-agent", got)

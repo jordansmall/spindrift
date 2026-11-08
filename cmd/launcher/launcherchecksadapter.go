@@ -24,14 +24,14 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		GHToken:      c.GhToken,
 
 		Driver: c.driver,
-		// The per-tier models are read from getenvSchema, as the --secret-cmd
+		// The per-tier models are read from resolvedKnob, as the --secret-cmd
 		// fallback reads them, so the probe and the fallback agree on which
 		// tiers can select a credential-gated Provider.
 		Models: modelTiers(func(env string) string {
 			if env == "MODEL" {
 				return c.Model
 			}
-			return getenvSchema(env)
+			return resolvedKnob(env)
 		}),
 		Credentials: launcherCredentials(c),
 

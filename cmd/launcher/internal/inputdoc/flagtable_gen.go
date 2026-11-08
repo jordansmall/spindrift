@@ -6,7 +6,7 @@ package inputdoc
 // Run `nix run .#regen` after editing lib/env-schema.nix to regenerate.
 //
 // SchemaFlags[].Dflt is also the schema-level runtime defaults source,
-// consumed as a fallback by schemaDefault() in cmd/launcher/main.go and
+// consumed as a fallback by inputdoc's knobResolver and
 // inputdoc.SchemaDefault (ADR 0020 lets a loaded input document override
 // it); the separate defaults table was consolidated away in issue #670.
 var SchemaFlags = []FlagEntry{

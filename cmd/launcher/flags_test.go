@@ -187,7 +187,7 @@ func TestParseFlags_SetEnv(t *testing.T) {
 	if len(remaining) != 0 {
 		t.Errorf("expected no remaining args, got %v", remaining)
 	}
-	if got := getenvSchema("ISSUE_NUMBER"); got != "215" {
+	if got := resolvedKnob("ISSUE_NUMBER"); got != "215" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q", got, "215")
 	}
 }
@@ -198,7 +198,7 @@ func TestParseFlags_FlagWinsOverDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := getenvSchema("ISSUE_NUMBER"); got != "999" {
+	if got := resolvedKnob("ISSUE_NUMBER"); got != "999" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q (flag must win over the document)", got, "999")
 	}
 }
@@ -221,7 +221,7 @@ func TestParseFlags_RepoSlugFlagWinsOverDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := getenvSchema("REPO_SLUG"); got != "flag-org/flag-repo" {
+	if got := resolvedKnob("REPO_SLUG"); got != "flag-org/flag-repo" {
 		t.Errorf("REPO_SLUG = %q, want %q (flag must win over the document)", got, "flag-org/flag-repo")
 	}
 }
@@ -420,10 +420,10 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := getenvSchema("ISSUE_NUMBER"); got != "215" {
+	if got := resolvedKnob("ISSUE_NUMBER"); got != "215" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q", got, "215")
 	}
-	if got := getenvSchema("MAX_JOBS"); got != "1" {
+	if got := resolvedKnob("MAX_JOBS"); got != "1" {
 		t.Errorf("MAX_JOBS = %q, want %q", got, "1")
 	}
 }
@@ -435,7 +435,7 @@ func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := getenvSchema("BWRAP_UNSHARE_NET"); got != "1" {
+	if got := resolvedKnob("BWRAP_UNSHARE_NET"); got != "1" {
 		t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, "1")
 	}
 	if len(remaining) != 1 || remaining[0] != "dispatch" {
@@ -465,7 +465,7 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got := getenvSchema("BWRAP_UNSHARE_NET"); got != c.want {
+			if got := resolvedKnob("BWRAP_UNSHARE_NET"); got != c.want {
 				t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, c.want)
 			}
 		})
@@ -486,7 +486,7 @@ func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
 			if err == nil || err.Error() != c.wantErr {
 				t.Fatalf("err = %v, want %q", err, c.wantErr)
 			}
-			if got := getenvSchema(c.env); got != "" {
+			if got := resolvedKnob(c.env); got != "" {
 				t.Errorf("%s = %q, want it unset", c.env, got)
 			}
 		})
@@ -500,7 +500,7 @@ func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := getenvSchema("BWRAP_UNSHARE_NET"); got != "1" {
+	if got := resolvedKnob("BWRAP_UNSHARE_NET"); got != "1" {
 		t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, "1")
 	}
 	found := false
@@ -609,7 +609,7 @@ func TestParseFlags_ContinuousAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous: unexpected error: %v", err)
 	}
-	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := resolvedKnob("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 	if len(remaining) != 1 || remaining[0] != "dispatch" {
@@ -622,7 +622,7 @@ func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous-dispatch: unexpected error: %v", err)
 	}
-	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := resolvedKnob("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 	if len(remaining) != 1 || remaining[0] != "dispatch" {
@@ -781,7 +781,7 @@ func TestParseFlags_AliasSetEnv(t *testing.T) {
 	if len(remaining) != 0 {
 		t.Errorf("expected no remaining args, got %v", remaining)
 	}
-	if got := getenvSchema("ISSUE_NUMBER"); got != "42" {
+	if got := resolvedKnob("ISSUE_NUMBER"); got != "42" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q (alias must set same env var)", got, "42")
 	}
 }
@@ -794,14 +794,14 @@ func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	if _, err := parseResolved(t, []string{"--merge-mode", "auto"}); err != nil {
 		t.Fatalf("parseFlags --merge-mode: %v", err)
 	}
-	if got := getenvSchema("MERGE_MODE"); got != "auto" {
+	if got := resolvedKnob("MERGE_MODE"); got != "auto" {
 		t.Errorf("MERGE_MODE = %q, want %q (deprecated alias must set same env var)", got, "auto")
 	}
 	// --local-issue-reference is the deprecated name of --local-reference.
 	if _, err := parseResolved(t, []string{"--local-issue-reference"}); err != nil {
 		t.Fatalf("parseFlags --local-issue-reference: %v", err)
 	}
-	if got := getenvSchema("LOCAL_ISSUE_REFERENCE"); got != "1" {
+	if got := resolvedKnob("LOCAL_ISSUE_REFERENCE"); got != "1" {
 		t.Errorf("LOCAL_ISSUE_REFERENCE = %q, want %q", got, "1")
 	}
 }
@@ -810,7 +810,7 @@ func TestParseFlags_NewCanonicalFlagResolves(t *testing.T) {
 	if _, err := parseResolved(t, []string{"--merge-policy", "immediate"}); err != nil {
 		t.Fatalf("parseFlags --merge-policy: %v", err)
 	}
-	if got := getenvSchema("MERGE_MODE"); got != "immediate" {
+	if got := resolvedKnob("MERGE_MODE"); got != "immediate" {
 		t.Errorf("MERGE_MODE = %q, want %q", got, "immediate")
 	}
 }
@@ -2675,7 +2675,7 @@ func TestParseFlags_VerbFlagValueSpellingSchemaFlagIsNotAKnob(t *testing.T) {
 	if _, err := parseResolved(t, []string{"butler", "--chore", "--model", "x"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := getenvSchema("MODEL"), inputdoc.SchemaDefault("MODEL"); got != want {
+	if got, want := resolvedKnob("MODEL"), inputdoc.SchemaDefault("MODEL"); got != want {
 		t.Errorf("MODEL = %q, want the default %q", got, want)
 	}
 }

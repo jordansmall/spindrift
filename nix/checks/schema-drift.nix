@@ -146,8 +146,8 @@ let
     in
     {
       # Every int-typed, non-secret, non-boxEnvOnly (host-config) member must
-      # declare intKind so loadConfig() knows which parser (atoiSchema vs
-      # atoiNonnegSchema) it takes.
+      # declare intKind so loadConfig() knows which parser (PositiveInt vs
+      # NonnegInt) it takes.
       missingIntKind = filter (e: isIntMember e && !(e ? intKind)) entries;
       intKindOnNonInt = filter (e: (e ? intKind) && !(isIntTyped e)) entries;
       # An explicit kind types a knob with no default (e.g. a Box-only int knob

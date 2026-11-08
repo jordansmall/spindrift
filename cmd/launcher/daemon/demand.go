@@ -207,13 +207,13 @@ func (o *outboxDemand) CountReady(bool) (int, error) {
 
 func (o *outboxDemand) ProbeInterval() time.Duration { return outboxDemandInterval }
 
-// launcherInt resolves key as the launcher's atoiSchema does for a child: a
+// launcherInt resolves key as inputdoc's knobResolver.PositiveInt does for a child: a
 // positive integer, else the default, which is the document's own value for
 // key parsed with strconv.Atoi (so a document "0" or an unparseable value is
 // 0, not the schema default) or, absent from the document, the schema default.
 // A document value that counts as a setting strips the ambient env from the
-// child, so it never competes with ambient. Keep in step with atoi,
-// atoiSchema and schemaDefault in cmd/launcher/main.go.
+// child, so it never competes with ambient. Keep in step with
+// knobResolver.PositiveInt in cmd/launcher/internal/inputdoc/resolve.go.
 func launcherInt(doc *inputdoc.Document, key, ambient string) int {
 	def := inputdoc.SchemaDefault(key)
 	if doc != nil {
@@ -327,7 +327,7 @@ func probeIntervals(src demandSources, override time.Duration) map[daemon.Kind]t
 // child inherits the daemon's ambient value. The caller passes ambient as a
 // literal os.Getenv so knob_env_guard_test.go still sees which keys the daemon
 // reads. A key unset in both the document and the environment falls back to
-// its schema default, as the child's schemaDefault does.
+// its schema default, as the child's knobResolver does.
 func childKnob(doc *inputdoc.Document, key, ambient string) string {
 	if v, ok := childValue(doc, key, ambient); ok {
 		return v

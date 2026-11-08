@@ -24,7 +24,7 @@ func dispatchStamp(reviewModel string) hostop.DispatchStart {
 	knobs := make(map[string]string, len(inputdoc.SchemaFlags))
 	for _, e := range inputdoc.SchemaFlags {
 		if !secret[e.Env] {
-			knobs[e.Env] = redactUserinfo(getenvSchema(e.Env))
+			knobs[e.Env] = redactUserinfo(resolvedKnob(e.Env))
 		}
 	}
 	return hostop.DispatchStart{
@@ -61,7 +61,7 @@ func stampRoleModels(reviewModel string) map[string]string {
 			models = map[string]string{}
 		}
 	}
-	if m := getenvSchema("MODEL"); m != "" {
+	if m := resolvedKnob("MODEL"); m != "" {
 		models["main"] = m
 	}
 	if reviewModel != "" {

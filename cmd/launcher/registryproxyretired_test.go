@@ -368,7 +368,7 @@ func TestRetiredRegistryProxyKnobsFromEnv_EachEnvVarFillsItsOwnField(t *testing.
 
 // A retired knob supplied only through the ADR 0020 input document's settings
 // section, never exported as ambient env by the wrapper, must still trip the
-// gate. That mirrors the document fallback getenvSchema gives every other
+// gate. That mirrors the document fallback resolvedKnob gives every other
 // schema knob, so the retired-knob gate is not a silent exception to it.
 func TestRetiredRegistryProxyKnobsFromEnv_ReadsInputDocumentSettings(t *testing.T) {
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{
@@ -389,7 +389,7 @@ func TestRetiredRegistryProxyKnobsFromEnv_ReadsInputDocumentSettings(t *testing.
 
 // An ambient env value for a retired knob overrides the input document's
 // settings value for the same knob. That is the same env-over-document
-// precedence getenvSchema applies to every other knob.
+// precedence resolvedKnob applies to every other knob.
 func TestRetiredRegistryProxyKnobsFromEnv_AmbientEnvWinsOverInputDocument(t *testing.T) {
 	useDoc(t, &inputdoc.Document{Settings: map[string]string{
 		"REGISTRY_PROXY_CREDENTIAL_ENV": "FROM_DOCUMENT",
