@@ -11,7 +11,7 @@ import (
 
 func TestClaudeDriverReadPassesAgentsSumToUsageBreakdown(t *testing.T) {
 	dir := filepath.Join("testdata", "corpus", "real-fix-pass-subagents")
-	got, err := newDriver().ReadPasses(filepath.Join(dir, "pass.jsonl"), "", nil)
+	got, err := newDriver().ReadPasses(filepath.Join(dir, "pass.jsonl"), "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

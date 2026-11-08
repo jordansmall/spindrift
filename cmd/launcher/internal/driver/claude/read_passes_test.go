@@ -27,7 +27,7 @@ func TestClaudeDriverReadPasses(t *testing.T) {
 	}
 
 	var lines int
-	got, err := d.ReadPasses(path, "/tmp/verdict.md", func(driverkit.PassLine) { lines++ })
+	got, err := d.ReadPasses(path, "/tmp/verdict.md", nil, func(driverkit.PassLine) { lines++ })
 	if err != nil {
 		t.Fatal(err)
 	}

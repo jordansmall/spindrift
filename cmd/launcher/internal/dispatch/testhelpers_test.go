@@ -147,8 +147,12 @@ func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
 	return d.base().ResultEvent(text)
 }
 
-func (d fakeDriver) ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
-	return d.base().ReadPasses(logPath, trackWrite, visit)
+func (d fakeDriver) ReadPasses(logPath, trackWrite string, base driverkit.SessionBaselines, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
+	return d.base().ReadPasses(logPath, trackWrite, base, visit)
+}
+
+func (d fakeDriver) SessionBaselinesAfter(logPath string, base driverkit.SessionBaselines) (driverkit.SessionBaselines, error) {
+	return d.base().SessionBaselinesAfter(logPath, base)
 }
 
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {

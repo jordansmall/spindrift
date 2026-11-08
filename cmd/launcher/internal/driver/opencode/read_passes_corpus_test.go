@@ -7,7 +7,7 @@ import (
 
 func TestOpencodeDriverReadPassesCorpus(t *testing.T) {
 	d := newDriver()
-	got, err := d.ReadPasses(filepath.Join("testdata", "corpus", "real-normal", "pass.jsonl"), "", nil)
+	got, err := d.ReadPasses(filepath.Join("testdata", "corpus", "real-normal", "pass.jsonl"), "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestOpencodeDriverReadPassesCorpus(t *testing.T) {
 func TestOpencodeDriverReadPassesLastResultMatchesResultText(t *testing.T) {
 	d := newDriver()
 	path := filepath.Join("testdata", "corpus", "real-normal", "pass.jsonl")
-	got, err := d.ReadPasses(path, "", nil)
+	got, err := d.ReadPasses(path, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

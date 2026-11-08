@@ -44,7 +44,7 @@ func TestExtractUsage_CumulativeSessionResultsCountOnce(t *testing.T) {
 }
 
 func TestReadPasses_CumulativeSessionResultsHaveNoPhantomResidual(t *testing.T) {
-	got, err := newDriver().ReadPasses(cumulativeFixture, "", nil)
+	got, err := newDriver().ReadPasses(cumulativeFixture, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

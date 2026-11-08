@@ -9,7 +9,7 @@ import (
 
 func TestOpencodeDriverReadPassesAgentsAreMainLoopOnly(t *testing.T) {
 	d := newDriver()
-	got, err := d.ReadPasses(filepath.Join("testdata", "corpus", "subagent-task-fixture", "pass.jsonl"), "", nil)
+	got, err := d.ReadPasses(filepath.Join("testdata", "corpus", "subagent-task-fixture", "pass.jsonl"), "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -65,7 +65,7 @@ func TestUsage_SameModelSubagentAtOtherEffortKeepsOneModelRow(t *testing.T) {
 // A mid-Pass level change on one model is one model and both efforts.
 func TestReadPasses_MidPassLevelChangeKeepsOneModelBothEfforts(t *testing.T) {
 	path := pi.WriteLog(t, textEnd(1000, "a"), atLevel(textEnd(2000, "b"), "low"))
-	passes, err := newDriver().ReadPasses(path, "", nil)
+	passes, err := newDriver().ReadPasses(path, "", nil, nil)
 	if err != nil || len(passes) != 1 {
 		t.Fatalf("ReadPasses: %v, %d passes", err, len(passes))
 	}
@@ -85,7 +85,7 @@ func TestReadPasses_SameModelSubagentAtOtherEffortAddsEffort(t *testing.T) {
 		subagentEnd("single", subagentResult("scout", child)),
 		textEnd(2000, "done"),
 	)
-	passes, err := newDriver().ReadPasses(path, "", nil)
+	passes, err := newDriver().ReadPasses(path, "", nil, nil)
 	if err != nil || len(passes) != 1 {
 		t.Fatalf("ReadPasses: %v, %d passes", err, len(passes))
 	}
