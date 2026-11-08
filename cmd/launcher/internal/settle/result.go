@@ -52,7 +52,8 @@ func (g gateResult) String() string {
 }
 
 // landingResult names the outcome of a landing attempt (selfHeal or
-// landPushOnly).
+// landPushOnly), meaningful only when the attempt's error is nil: errAbandoned
+// means no landing took place.
 type landingResult int
 
 const (
@@ -66,12 +67,6 @@ const (
 	// landingMerged is CI green and the PR or push-only branch merged. The
 	// issue stays at agent-complete.
 	landingMerged
-	// landingAbandoned is either the operator's Terminate (ADR 0024, issue
-	// #649) landing inside selfHeal, which already did the transition, comment,
-	// and log line; or a fix pass or conflict-resolve Box skipped because the
-	// issue's own Box is already in flight (issue #3655), where the live run
-	// owns the issue's state. Callers must take no further action.
-	landingAbandoned
 )
 
 func (l landingResult) String() string {
@@ -82,8 +77,6 @@ func (l landingResult) String() string {
 		return "manual"
 	case landingFailed:
 		return "failed"
-	case landingAbandoned:
-		return "abandoned"
 	default:
 		return "unknown"
 	}

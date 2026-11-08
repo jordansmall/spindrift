@@ -63,7 +63,7 @@ func TestSelfHeal_LocalForge_MergeConflictThenRebaseSucceedsRetriesWithoutPanic(
 	branch := fc.AgentBranch("1")
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged after the rebase-then-retry succeeds", landing)
@@ -90,7 +90,7 @@ func TestSelfHeal_LocalForge_MergeConflictAfterRelayBlocksNotFails(t *testing.T)
 	branch := "agent/issue-1"
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual on a merge conflict", landing)
@@ -122,7 +122,7 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	branch := fc.AgentBranch("1")
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -159,7 +159,7 @@ func TestSelfHeal_LocalForge_LandingRefUpgradeCarriesPass(t *testing.T) {
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
 	passes := implementThenLandPasses()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -196,7 +196,7 @@ func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
 	branch := ownFC.AgentBranch("10")
 	s := newTestSettle(c, sharedFC, sharedFC.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "10", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "10", 0, branch, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -231,7 +231,7 @@ func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testi
 	branch := fc.AgentBranch("1")
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged despite the LandingRef failure", landing)
@@ -259,7 +259,7 @@ func TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly(t *testing.T) {
 	branch := "agent/issue-1"
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual when OutboxDir is unset", landing)
@@ -286,7 +286,7 @@ func TestSelfHeal_LocalForge_MissingBundleBlocksNotFails(t *testing.T) {
 	branch := "agent/issue-1"
 	s := newTestSettle(c, fc, fc.AsLocal())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual when the bundle is missing", landing)

@@ -298,7 +298,7 @@ func TestSelfHeal_LocalForge_RelayRetriesTransientFailureThenMerges(t *testing.T
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	var landing landingResult
-	stdout := captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil) })
+	stdout := captureStdout(t, func() { landing, _, _ = s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil) })
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -532,7 +532,7 @@ func stopOnRelayBackoff(sp **Settle, fc *forge.Fake, num string) (*[]time.Durati
 }
 
 // Pins issue #4649 against issue #3523: a stop during the relay that follows
-// conflict-resolve must surface as landingAbandoned, not be wrapped into
+// conflict-resolve must surface as errAbandoned, not be wrapped into
 // errLandingNeverGreen and demote the already-released issue to Failed.
 func TestSelfHeal_ConflictResolveRelayStoppedDuringBackoff_Abandons(t *testing.T) {
 	var s *Settle
@@ -551,12 +551,12 @@ func TestSelfHeal_ConflictResolveRelayStoppedDuringBackoff_Abandons(t *testing.T
 	s = newTestSettle(c, fc, fc.AsGithubReadOnly())
 	gen := s.term.Begin("1")
 
-	var landing landingResult
+	var err error
 	var reason string
-	captureStdout(t, func() { landing, reason = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil) })
+	captureStdout(t, func() { _, reason, err = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil) })
 
-	if landing != landingAbandoned || reason != "" {
-		t.Errorf("selfHeal = (%v, %q), want (landingAbandoned, \"\")", landing, reason)
+	if !errors.Is(err, errAbandoned) || reason != "" {
+		t.Errorf("selfHeal = (%v, %q), want (errAbandoned, \"\")", err, reason)
 	}
 	if len(fc.RelayBundleCalls) != 1 {
 		t.Errorf("RelayBundle calls = %d, want 1 (no relay after the stop)", len(fc.RelayBundleCalls))
@@ -580,11 +580,11 @@ func TestSelfHeal_LocalForge_RelayStoppedDuringBackoff_AbandonsWithoutComplete(t
 	s = newTestSettle(c, fc, fc.AsLocal())
 	gen := s.term.Begin("1")
 
-	var landing landingResult
-	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", gen, fc.AgentBranch("1"), nil) })
+	var err error
+	captureStdout(t, func() { _, _, err = s.selfHeal(dispatch.NewFake(), "1", gen, fc.AgentBranch("1"), nil) })
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	if fc.Merged != "" {
 		t.Errorf("Merge must not run after the stop; fc.Merged=%q", fc.Merged)
@@ -608,7 +608,7 @@ func TestSelfHeal_LocalForge_RelayExhaustedParksFailed(t *testing.T) {
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	var landing landingResult
-	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"), nil) })
+	captureStdout(t, func() { landing, _, _ = s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"), nil) })
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed", landing)
@@ -643,11 +643,11 @@ func TestSelfHeal_FixPassRelayStoppedDuringBackoff_AbandonsWithoutConfirmSleep(t
 	s = newTestSettle(c, fc, fc.AsGithubReadOnly())
 	gen := s.term.Begin("1")
 
-	var landing landingResult
-	out := captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil) })
+	var err error
+	out := captureStdout(t, func() { _, _, err = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil) })
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	if strings.Contains(out, "fix-relay-failed") {
 		t.Errorf("a stop must not log fix-relay-failed; stdout:\n%s", out)

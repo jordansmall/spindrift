@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -27,7 +28,11 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 		note = "host-opened patch PR"
 	}
 	s.cfg.Progress.Step(Step{Key: num, Landing: prURL, Status: StatusAdopted, Detail: "note=" + note})
-	landing, reason := s.selfHealAdopted(d, num, gen, prURL)
+	landing, reason, err := s.selfHealAdopted(d, num, gen, prURL)
+	if errors.Is(err, errAbandoned) {
+		// Another actor owns the issue's comment and state.
+		return
+	}
 	switch landing {
 	case landingMerged:
 		// A push-only Code Forge has no PR state for verifyMerged to read.
@@ -36,8 +41,6 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 		}
 	case landingFailed:
 		s.cfg.Progress.Step(Step{Key: num, Landing: prURL, Status: StatusFailed, Detail: "!! " + reason})
-	case landingAbandoned:
-		// See landingAbandoned: another actor owns the issue's comment and state.
 	}
 	return
 }

@@ -18,10 +18,12 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// errAbandoned marks a Terminate (ADR 0024, issue #649) that landed mid-retry,
-// or a conflict-resolve Box skipped because the issue's own Box is already in
-// flight (issue #3655), so the caller skips the merge-blocked print and comment
-// on an issue whose state another actor owns.
+// errAbandoned marks a settle that stopped because another actor now owns the
+// issue: the operator's Terminate (ADR 0024, issue #649), which already did the
+// transition, comment, and log line, or a fix-pass or conflict-resolve Box
+// skipped because the issue's own Box is already in flight (issue #3655), where
+// the live run owns the issue's state. The caller must take no further action:
+// no merge-blocked print or comment, no usage comment, no tracker commit.
 var errAbandoned = errors.New("settle: abandoned (terminated, or a live run owns the issue)")
 
 // errLandingNeverGreen marks a force-pushed head that never reached green. A
@@ -43,7 +45,7 @@ var errForcePushRed = fmt.Errorf("%w: CI went red", errLandingNeverGreen)
 // still-green PR stays agent-complete (ADR 0012). A force-pushed head that goes
 // red gets a fix pass from the same MaxFixAttempts budget (issue #5095); one that
 // never re-confirms green demotes to agent-failed instead (issue #758).
-func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string, passes []passmanifest.Entry) (landingResult, string) {
+func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string, passes []passmanifest.Entry) (landingResult, string, error) {
 	return s.selfHealGate(d, num, gen, pr, false, passes)
 }
 
@@ -52,7 +54,7 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr stri
 // the head SHA is one this process just pushed, so its first gate poll requires
 // evidence this run's checks registered before trusting a SUCCESS rollup,
 // within a bounded window (issues #1652, #2475).
-func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string) {
+func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string, error) {
 	return s.selfHealGate(d, num, gen, pr, true, nil)
 }
 
@@ -61,9 +63,10 @@ func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, 
 // retry always follows a push d.Fix just made in this process. passes is the
 // run's pass manifest, which landPushOnly records alongside its landing; nil
 // (selfHealAdopted has no pass evidence) clears the recorded pass.
-func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool, passes []passmanifest.Entry) (landingResult, string) {
+func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool, passes []passmanifest.Entry) (landingResult, string, error) {
 	if s.pr == nil {
-		return s.landPushOnly(num, gen, pr, passes), ""
+		landing, err := s.landPushOnly(num, gen, pr, passes)
+		return landing, "", err
 	}
 	// forcePushFixes counts the fix passes run on the current force-pushed
 	// head, so the failure comment can name what that head consumed. It is
@@ -78,14 +81,14 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 		// that point may commit tracker state or dispatch further work for
 		// num (issue #3523).
 		if errors.Is(obs.err, errAbandoned) {
-			return landingAbandoned, ""
+			return landingFailed, "", errAbandoned
 		}
 		switch obs.outcome {
 		case gateGreen:
 			// Catches a mark landing during the gate's own confirm sleep,
 			// before MarkReady's idempotent ready flip below.
 			if s.terminated(num, gen) {
-				return landingAbandoned, ""
+				return landingFailed, "", errAbandoned
 			}
 			// The launcher, never the Driver, owns the draft to ready flip at
 			// green, inverting the old draft-until-ready invariant (issues
@@ -113,7 +116,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			if err != nil {
 				if errors.Is(err, errAbandoned) {
-					return landingAbandoned, ""
+					return landingFailed, "", errAbandoned
 				}
 				// The force-push reset the head's checks and they came back red:
 				// the same fix pass as a pre-merge red, drawing the same budget.
@@ -124,11 +127,11 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						return s.failForcePushedHead(num, pr, err, s.fixBudgetNote(attempt, forcePushFixes))
 					}
 					if s.terminated(num, gen) {
-						return landingAbandoned, ""
+						return landingFailed, "", errAbandoned
 					}
 					s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushRed})
-					if landing, note, stop := s.fixPass(d, num, gen, pr, attempt); stop {
-						return landing, note
+					if fs := s.fixPass(d, num, gen, pr, attempt); fs.stop {
+						return fs.landing, fs.note, fs.err
 					}
 					forcePushFixes++
 					continue
@@ -139,28 +142,31 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				postHoldComment()
-				return s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked), ""
+				landing, err := s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked)
+				return landing, "", err
 			}
 			if held {
 				postHoldComment()
-				return s.completeLanding(num, gen, landingManual, holdReason), ""
+				landing, err := s.completeLanding(num, gen, landingManual, holdReason)
+				return landing, "", err
 			}
-			return s.completeLanding(num, gen, mergedLanding(mergeReason), mergeReason), ""
+			landing, err := s.completeLanding(num, gen, mergedLanding(mergeReason), mergeReason)
+			return landing, "", err
 		case gateTerminal:
 			// Catches a mark landing mid-poll, before the Failed commit and
 			// comment below.
 			if s.terminated(num, gen) {
-				return landingAbandoned, ""
+				return landingFailed, "", errAbandoned
 			}
 			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusGateTerminal, Detail: "!! " + gateReason})
 			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
 			s.transitionState(num, ForReason(dispatchrecord.ReasonGateTerminal), gateReason)
-			return landingFailed, gateReason
+			return landingFailed, gateReason, nil
 		case gateRedRetry:
 			// Catches a mark landing mid-poll, before the fix-exhausted and
 			// budget-exhausted Failed commits below.
 			if s.terminated(num, gen) {
-				return landingAbandoned, ""
+				return landingFailed, "", errAbandoned
 			}
 			// The fix pass that followed a red force-pushed head left it red:
 			// a landing failure, not the generic fix-exhausted class.
@@ -187,10 +193,10 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					}
 				}
 				s.transitionState(num, ForReason(exhaustedReason), reason)
-				return landingFailed, reason
+				return landingFailed, reason, nil
 			}
-			if landing, note, stop := s.fixPass(d, num, gen, pr, attempt); stop {
-				return landing, note
+			if fs := s.fixPass(d, num, gen, pr, attempt); fs.stop {
+				return fs.landing, fs.note, fs.err
 			}
 			if forcePushFixes > 0 {
 				forcePushFixes++
@@ -204,11 +210,11 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 // the current head. budgetNote is fixBudgetNote's text for a red head, empty
 // for a timeout or a conflict-resolve or relay failure, which no fix pass
 // answers.
-func (s *Settle) failForcePushedHead(num, pr string, err error, budgetNote string) (landingResult, string) {
+func (s *Settle) failForcePushedHead(num, pr string, err error, budgetNote string) (landingResult, string, error) {
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusLandingFailed, Detail: fmt.Sprintf("!! %v", err)})
 	s.it.Comment(num, fmt.Sprintf("landing failed: %v%s — no green PR exists at the current head", err, budgetNote))
 	s.transitionState(num, ForReason(dispatchrecord.ReasonLandingFailed), err.Error())
-	return landingFailed, err.Error()
+	return landingFailed, err.Error(), nil
 }
 
 // fixBudgetNote names the fix passes a red force-pushed head left spent, in
@@ -221,11 +227,20 @@ func (s *Settle) fixBudgetNote(attempt, forcePushFixes int) string {
 		attempt, s.cfg.MaxFixAttempts, forcePushFixes)
 }
 
-// fixPass runs one red-CI fix pass for attempt (zero-based) and reports whether
-// selfHealGate must return the given landing and note instead of re-polling.
+// fixStop is fixPass's verdict: when stop is set, selfHealGate must return the
+// given landing, note and err (errAbandoned when a stop landed) instead of
+// re-polling.
+type fixStop struct {
+	landing landingResult
+	note    string
+	err     error
+	stop    bool
+}
+
+// fixPass runs one red-CI fix pass for attempt (zero-based).
 // Both genuine red before a merge and genuine red after an immediate-mode
 // force-push (issue #5095) come through here, so they share one attempt counter.
-func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr string, attempt int) (landingResult, string, bool) {
+func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr string, attempt int) fixStop {
 	// The budget caps (issue #2001) stop a runaway token or cost run
 	// even while MaxFixAttempts would still allow more passes. Both
 	// knobs unset skips the check, so the no-cap path never pays
@@ -237,7 +252,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
 			note := fmt.Sprintf("budget-exhausted: %s", reason)
 			s.transitionState(num, ForReason(dispatchrecord.ReasonBudgetExhausted), note)
-			return landingFailed, note, true
+			return fixStop{landing: landingFailed, note: note, stop: true}
 		}
 	}
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Detail: fmt.Sprintf("fix-pass=%d/%d", attempt+1, s.cfg.MaxFixAttempts)})
@@ -258,19 +273,14 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 	// Catches d.Fix's own exit — a non-zero result can be Reclaim's
 	// SIGKILL — before the Failed commit or bundle relay below.
 	if s.terminated(num, gen) {
-		return landingAbandoned, "", true
-	}
-	type fixStop struct {
-		landing landingResult
-		note    string
-		stop    bool
+		return fixStop{landing: landingFailed, err: errAbandoned, stop: true}
 	}
 	stopped := dispatch.Route(disp,
 		func() fixStop {
 			// No Box started: a live run owns this issue's in-progress claim,
 			// so leave its state alone and do not retry (issue #3655).
 			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAlreadyInFlight, Detail: fmt.Sprintf("~~ fix pass %d skipped; live run continues", attempt+1)})
-			return fixStop{landing: landingAbandoned, stop: true}
+			return fixStop{landing: landingFailed, err: errAbandoned, stop: true}
 		},
 		func(result dispatch.Result) fixStop {
 			RecordSettleWarnings(d, num, fmt.Sprintf("fix pass %d: ", attempt+1), result)
@@ -286,7 +296,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			return fixStop{}
 		})
 	if stopped.stop {
-		return stopped.landing, stopped.note, true
+		return stopped
 	}
 	// A read-only Box holds no push-capable token (issue #1979): its fix
 	// agent bundled its work to the outbox, so HeadCommitSHA reflects no
@@ -298,7 +308,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 		// A stop mid-backoff already released num (issue #3523); falling
 		// through would log a failure and sleep the no-op confirm poll.
 		if errors.Is(err, errAbandoned) {
-			return landingAbandoned, "", true
+			return fixStop{landing: landingFailed, err: errAbandoned, stop: true}
 		}
 		// The bundle is intact in the outbox but unrelayed, so head never
 		// moved: falling through would misreport it as fix-no-op.
@@ -306,7 +316,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			// The final relay attempt is not a backoff, so a mark landing
 			// there yields an exhausted error, not errAbandoned.
 			if s.terminated(num, gen) {
-				return landingAbandoned, "", true
+				return fixStop{landing: landingFailed, err: errAbandoned, stop: true}
 			}
 			// Not parkRelayFailure: the PR is already open, so `recover`
 			// re-gates it rather than relaying this bundle.
@@ -315,7 +325,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			s.it.Comment(num, fmt.Sprintf("fix pass %d's bundle relay failed: %v. Its commits never reached the PR; %s", attempt+1, err, next))
 			note := fmt.Sprintf("relay-failed: fix pass %d's bundle relay failed; its commits never reached the PR", attempt+1)
 			s.transitionState(num, ForReason(dispatchrecord.ReasonRelayFailed), note)
-			return landingFailed, note, true
+			return fixStop{landing: landingFailed, note: note, stop: true}
 		}
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixRelayFailed, Detail: fmt.Sprintf("!! %v", err)})
 	}
@@ -332,17 +342,17 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 				// Catches a mark landing during the confirm sleep,
 				// before the fix-no-op Failed commit below.
 				if s.terminated(num, gen) {
-					return landingAbandoned, "", true
+					return fixStop{landing: landingFailed, err: errAbandoned, stop: true}
 				}
 				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixNoOp, Detail: fmt.Sprintf("!! fix pass %d produced no new commit — aborting self-heal", attempt+1)})
 				s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
 				note := fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
 				s.transitionState(num, ForReason(dispatchrecord.ReasonFixNoOp), note)
-				return landingFailed, note, true
+				return fixStop{landing: landingFailed, note: note, stop: true}
 			}
 		}
 	}
-	return landingAbandoned, "", false
+	return fixStop{}
 }
 
 // completeLanding is the single Complete-commit gate for the gateGreen arm and
@@ -353,18 +363,18 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 // by then, and a Complete commit here would leave the issue wearing
 // agent-complete on top, which Reconcile's InProgress-only sweep never clears
 // (issue #3523).
-func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, reason string) landingResult {
+func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, reason string) (landingResult, error) {
 	if s.terminated(num, gen) {
-		return landingAbandoned
+		return landingFailed, errAbandoned
 	}
 	// An unclaimed issue (issue #4076) only ever reaches Complete on an actual
 	// merge; manual/auto/guard-hit/merge-blocked leave it untouched since
 	// there was never an InProgress state to move out of.
 	if s.cfg.Unclaimed && landed != landingMerged {
-		return landed
+		return landed, nil
 	}
 	s.transitionState(num, ForReason(reason), "")
-	return landed
+	return landed, nil
 }
 
 // mergedLanding classifies an applyMergeMode reason: only a reason the
@@ -387,11 +397,11 @@ func mergedLanding(reason string) landingResult {
 // and returns landingFailed, the transition and comment already done. An
 // immediate merge drops the landed bundle here, since verifyMerged never runs
 // without a PR.
-func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []passmanifest.Entry) landingResult {
+func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []passmanifest.Entry) (landingResult, error) {
 	// No CI watch here, so this is the only checkpoint before landing —
 	// an aborted run must not merge or commit Complete (issue #3523).
 	if s.terminated(num, gen) {
-		return landingAbandoned
+		return landingFailed, errAbandoned
 	}
 	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
 	// instead of pushing, so relay it in first (ADR 0033). It runs ahead of the
@@ -407,11 +417,11 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []pa
 		s.recordLanding(num, relayedRef, passes)
 	}
 	if errors.Is(relayErr, errAbandoned) {
-		return landingAbandoned
+		return landingFailed, errAbandoned
 	}
 	if relayFailureParkable(relayErr) {
 		s.parkRelayFailure(num, branch, relayErr)
-		return landingFailed
+		return landingFailed, nil
 	}
 	err := relayErr
 	mergeReason := dispatchrecord.ReasonMergeBlocked
@@ -419,15 +429,15 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []pa
 		mergeReason, err = s.applyMergeMode(num, gen, branch, nil)
 	}
 	if errors.Is(err, errAbandoned) {
-		return landingAbandoned
+		return landingFailed, errAbandoned
 	}
 	if err != nil {
-		if s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked) == landingAbandoned {
-			return landingAbandoned
+		if _, cerr := s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked); cerr != nil {
+			return landingFailed, cerr
 		}
 		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
-		return landingManual
+		return landingManual, nil
 	}
 	landed := mergedLanding(mergeReason)
 	if landed != landingMerged {
@@ -436,8 +446,8 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []pa
 	// Ahead of the re-check: the merge happened and the outbox bundle is
 	// not tracker state, so an abandoned landing must still drop it.
 	s.removeLandedBundle(num)
-	if s.completeLanding(num, gen, landed, mergeReason) == landingAbandoned {
-		return landingAbandoned
+	if _, cerr := s.completeLanding(num, gen, landed, mergeReason); cerr != nil {
+		return landingFailed, cerr
 	}
 	// CODE_FORGE=local needs the resolved Integration ref and commit sha
 	// (ADR 0029/0033), not the placeholder agent branch recorded above, so
@@ -452,7 +462,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []pa
 			s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusLandingRefUnresolved, Detail: fmt.Sprintf("!! %v", err)})
 		}
 	}
-	return landed
+	return landed, nil
 }
 
 // gateToGreen polls CheckState until confirmed SUCCESS, terminal failure, or
