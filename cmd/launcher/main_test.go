@@ -3270,7 +3270,8 @@ func settledOutcome(key, reason, prURL string) settle.DispatchOutcome {
 // Complete merge-blocked record with no PR (a read-only github draft-PR create
 // failure, blockHandoff, or a push-only landing failure, landPushOnly),
 // relay-failed, a Failed ci-red that still has its PR open, already-resolved,
-// blocked, ambiguous, and a Chore key.
+// blocked, ambiguous, a Chore key, and the off-script InProgress with no
+// reason (the state stands in).
 func mixedOutcomes() []settle.DispatchOutcome {
 	return []settle.DispatchOutcome{
 		settledOutcome("11", dispatchrecord.ReasonMerged, "https://github.com/owner/repo/pull/11"),
@@ -3282,29 +3283,7 @@ func mixedOutcomes() []settle.DispatchOutcome {
 		settledOutcome("17", dispatchrecord.ReasonBlocked, ""),
 		settledOutcome("18", dispatchrecord.ReasonAmbiguous, ""),
 		{Key: dispatchkey.Chore("docs-drift"), Settlement: settle.Settlement{Verdict: settle.ForReason(dispatchrecord.ReasonMergeBlocked)}},
-	}
-}
-
-func TestDelivered(t *testing.T) {
-	tests := []struct {
-		name string
-		o    settle.DispatchOutcome
-		want bool
-	}{
-		{"merged with PR", settledOutcome("1", dispatchrecord.ReasonMerged, "u"), true},
-		{"merge-blocked without PR", settledOutcome("1", dispatchrecord.ReasonMergeBlocked, ""), false},
-		{"merge-blocked with PR", settledOutcome("1", dispatchrecord.ReasonMergeBlocked, "u"), true},
-		{"already-resolved", settledOutcome("1", dispatchrecord.ReasonAlreadyResolved, ""), false},
-		{"relay-failed", settledOutcome("1", dispatchrecord.ReasonRelayFailed, ""), false},
-		{"ci-red with PR", settledOutcome("1", dispatchrecord.ReasonCIRed, "u"), false},
-		{"push-only manual without PR", settledOutcome("1", dispatchrecord.ReasonManual, ""), true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := delivered(tc.o); got != tc.want {
-				t.Errorf("delivered(%+v) = %v, want %v", tc.o, got, tc.want)
-			}
-		})
+		{Key: dispatchkey.Issue("19"), Settlement: settle.Settlement{Verdict: settle.InProgress}},
 	}
 }
 
@@ -3314,10 +3293,10 @@ func TestDelivered(t *testing.T) {
 // failure, a forgejo draft-create failure), so "pushed no branch" could be
 // false (issue #5145).
 func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T) {
-	want := "==> all agents finished — 8 of 9 dispatches did not deliver: " +
+	want := "==> all agents finished — 9 of 10 dispatches did not deliver: " +
 		"#12 (merge-blocked), #13 (merge-blocked), #14 (relay-failed), #15 (ci-red), " +
 		"#16 (already-resolved), #17 (blocked), #18 (ambiguous), " +
-		"butler-docs-drift (merge-blocked).\n"
+		"butler-docs-drift (merge-blocked), #19 (in-progress).\n"
 	for _, codeForge := range []string{"github", "git", "forgejo", "local"} {
 		t.Run(codeForge, func(t *testing.T) {
 			c := minimalValidConfig()

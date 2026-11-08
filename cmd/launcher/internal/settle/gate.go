@@ -231,7 +231,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// Never transitions, so Settled never sees this Dispatch. Reason stays
 		// empty: o.Status is Box-controlled and the banner prints only
 		// host-derived values.
-		s.latchUnrecorded(num, Verdict{state: forge.InProgress}, "")
+		s.latchUnrecorded(num, InProgress, "")
 		s.postUsageComment(num, d)
 	}
 	return

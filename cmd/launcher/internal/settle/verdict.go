@@ -17,6 +17,10 @@ type Verdict struct {
 	reason string
 }
 
+// InProgress is the off-script Verdict: a settle that left its Dispatch in
+// progress with no reason, the Box's status being untrusted.
+var InProgress = Verdict{state: forge.InProgress}
+
 // ForReason returns the Verdict for reason, a dispatchrecord.Reason* const. It
 // panics when reason has no fixed state (an unknown name, or
 // transition-refused): that is a programmer error, not a runtime condition.
