@@ -118,7 +118,9 @@ const (
 	// SessionTotals sums the KindResult events: the CLI reports a summary per
 	// session, which is the only ground truth for output tokens, cost, turns
 	// and durations (claude). Per-call KindUsage events then feed the
-	// breakdowns only.
+	// breakdowns only. A result's cost, API time and per-model output are
+	// cumulative per session, so the readers must be fed through RebaseResults,
+	// which turns them into per-query increments before they are summed.
 	SessionTotals
 )
 

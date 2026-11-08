@@ -225,6 +225,14 @@ func (d *decoder) decodeLine(line string, top *topLevel) []driverkit.Event {
 			result.ModelOutput[model] = u.OutputTokens
 		}
 	}
+	// Lenient: a mistyped session_id leaves the result unrebased rather than
+	// costing it its totals.
+	var sess struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal([]byte(line), &sess) == nil {
+		result.SessionID = sess.SessionID
+	}
 	out := []driverkit.Event{result}
 	// An is_error result is a genuine failure, never an echo of preceding content.
 	if d.echoPending && textOK && notError {

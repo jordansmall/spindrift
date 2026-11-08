@@ -61,13 +61,30 @@ func (d Driver) NewStreamFilter(w io.Writer) StreamFilter {
 }
 
 func (d Driver) ExtractUsage(logPath string) (usage.Report, error) {
+	r, _, err := d.ExtractUsageAfter(logPath, nil)
+	return r, err
+}
+
+// ExtractUsageAfter is ExtractUsage with each session's previous cumulative
+// result seeded from base (earlier logs of a resumed session). It also returns
+// the baselines after this log, to seed the next one.
+func (d Driver) ExtractUsageAfter(logPath string, base SessionBaselines) (usage.Report, SessionBaselines, error) {
+	rebased := RebaseResults(d.s.NewDecoder, base)
 	byModel := func(p string) ([]usage.ModelUsage, error) {
-		return usageByModel(p, d.s.NewDecoder, d.s.Heartbeat.Family, d.s.Totals)
+		return usageByModel(p, rebased, d.s.Heartbeat.Family, d.s.Totals)
 	}
 	byAgent := func(p string) ([]usage.AgentUsage, error) {
-		return usageByAgent(p, d.s.NewDecoder, d.s.Totals)
+		return usageByAgent(p, rebased, d.s.Totals)
 	}
-	return ExtractUsage(logPath, d.s.NewDecoder, d.s.Totals, byModel, byAgent)
+	report, err := ExtractUsage(logPath, rebased, d.s.Totals, byModel, byAgent)
+	if err != nil {
+		return usage.Report{}, nil, err
+	}
+	after, err := SessionBaselinesAfter(logPath, d.s.NewDecoder, base)
+	if err != nil {
+		return usage.Report{}, nil, err
+	}
+	return report, after, nil
 }
 
 func (d Driver) RenderTranscript(logPath string, opts RenderOptions) (string, error) {
@@ -90,7 +107,7 @@ func (d Driver) ResultEvent(text string) ([]byte, error) {
 }
 
 func (d Driver) ReadPasses(logPath, trackWrite string, visit func(PassLine)) ([]PassTally, error) {
-	return ReadPasses(logPath, PassOptions{NewDecoder: d.s.NewDecoder, Totals: d.s.Totals, WriteTool: d.s.WriteTool}, trackWrite, visit)
+	return ReadPasses(logPath, PassOptions{NewDecoder: RebaseResults(d.s.NewDecoder, nil), Totals: d.s.Totals, WriteTool: d.s.WriteTool}, trackWrite, visit)
 }
 
 func (d Driver) SessionFlags(mode, repoSlug, issue, home string) string {
