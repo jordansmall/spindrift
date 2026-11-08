@@ -725,108 +725,55 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 	}
 }
 
-// Recover's adopt-a-relayed-branch arm (issue #2225): with no open PR and a
-// genuine success self-report on record, SettleRelayedBranch adopts the
-// relayed branch into a real PR and drives it through the normal merge gate.
-// It needs neither Resolved.Provenance == outcome.ProvenanceSynthetic nor a
-// read-only Code Forge, since recover is operator-driven and runs read-write.
-func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
-	const issNum = "2225"
-	const prURL = "https://github.com/owner/repo/pull/2225"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	branch := fc.AgentBranch(issNum)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.CreateDraftPRURL = prURL
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	result := dispatch.Result{Resolved: outcome.Resolved{
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-	},
-	}
-
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-
-	sit := s.situationFor(issNum, false, result)
-	st, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+// Recover's relay arm (issue #2225): with no open PR and a genuine success
+// self-report on record, it relays the branch into a real PR and drives it
+// through the normal merge gate. It needs neither Resolved.Provenance ==
+// outcome.ProvenanceSynthetic nor a read-only Code Forge, since recover is
+// operator-driven and runs read-write.
+func TestRecover_RelaysSuccessSelfReportIntoMergedPR(t *testing.T) {
+	e := newRecoverEnv(t, false)
+	st, err := e.s.Recover(e.in("", readyReport(), nil, false))
 	if err != nil {
-		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
+		t.Fatalf("Recover err = %v, want nil", err)
 	}
-	if !got {
-		t.Fatalf("SettleRelayedBranch = false, want true")
+	if st.State() != forge.Complete || st.PRURL != recoverPR {
+		t.Errorf("Settlement = %+v, want complete naming %s", st, recoverPR)
 	}
-
-	if st.State() != forge.Complete || st.PRURL != prURL {
-		t.Errorf("Settlement = %+v, want complete naming %s", st, prURL)
+	if len(e.fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", e.fc.CreateDraftPRCalls)
 	}
-
-	if len(fc.CreateDraftPRCalls) != 1 {
-		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	call := e.fc.CreateDraftPRCalls[0]
+	if call.Head != e.fc.AgentBranch(recoverNum) || call.Base != "main" {
+		t.Errorf("draft PR head/base = %q/%q, want %q/main", call.Head, call.Base, e.fc.AgentBranch(recoverNum))
 	}
-	call := fc.CreateDraftPRCalls[0]
-	if call.Head != branch {
-		t.Errorf("CreateDraftPRCalls[0].Head = %q, want %q", call.Head, branch)
+	if !strings.Contains(call.Body, "Closes #"+recoverNum) {
+		t.Errorf("draft PR body = %q, want it to contain %q", call.Body, "Closes #"+recoverNum)
 	}
-	if call.Base != "main" {
-		t.Errorf("CreateDraftPRCalls[0].Base = %q, want %q", call.Base, "main")
+	if e.fc.Merged != recoverPR {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", recoverPR, e.fc.Merged)
 	}
-	if !strings.Contains(call.Body, "Closes #"+issNum) {
-		t.Errorf("CreateDraftPRCalls[0].Body = %q, want it to contain %q", call.Body, "Closes #"+issNum)
-	}
-	if fc.Merged != prURL {
-		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after an adopted-and-merged landing; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not carry agent-failed after an adopted-and-merged landing; labels=%v", iss.Labels)
+	iss, _ := e.fc.Issue(recoverNum)
+	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("want agent-complete and not agent-failed after a relayed-and-merged landing; labels=%v", iss.Labels)
 	}
 }
 
-// adoptAndGate persists the adopted PR and the run's pass together (issue
-// #5189), over a tracker that records both.
-func TestSettle_SettleRelayedBranch_AdoptRecordsPassWithAdoptedPR(t *testing.T) {
-	const issNum = "5189"
-	const prURL = "https://github.com/owner/repo/pull/5189"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.CreateDraftPRURL = prURL
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-		},
-		Passes: implementThenLandPasses(),
+// A recover landing persists the PR but not the run's pass (issue #5189):
+// Recover's Result carries no Passes, so the recorded pass is cleared.
+func TestRecover_RelayRecordsLandingAndClearsPass(t *testing.T) {
+	e := newRecoverEnv(t, false)
+	e.s = newTestSettle(e.c, e.fc.AsLocalShaped(), e.fc.AsGithubReadOnly())
+	if _, err := e.s.Recover(e.in("", readyReport(), implementThenLandPasses(), false)); err != nil {
+		t.Fatalf("Recover err = %v, want nil", err)
 	}
 
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
-
-	sit := s.situationFor(issNum, false, result)
-	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
-		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+	wantLanding := []forge.RecordLandingCall{{Num: recoverNum, Landing: recoverPR}}
+	if !reflect.DeepEqual(e.fc.RecordLandingCalls, wantLanding) {
+		t.Errorf("RecordLanding calls = %+v, want %+v", e.fc.RecordLandingCalls, wantLanding)
 	}
-
-	wantLanding := []forge.RecordLandingCall{{Num: issNum, Landing: prURL}}
-	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
-		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
-	}
-	wantPass := []forge.RecordLandingPassCall{{Num: issNum, Pass: 2, Kind: "land"}}
-	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
-		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
+	wantPass := []forge.RecordLandingPassCall{{Num: recoverNum, Pass: 0, Kind: ""}}
+	if !reflect.DeepEqual(e.fc.RecordLandingPassCalls, wantPass) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", e.fc.RecordLandingPassCalls, wantPass)
 	}
 }
 
@@ -834,19 +781,13 @@ func TestSettle_SettleRelayedBranch_AdoptRecordsPassWithAdoptedPR(t *testing.T) 
 // agent-failed (settle parked an exhausted bundle relay) and a local
 // `spindrift recover` never re-claims it, so landing the preserved bundle
 // must leave agent-complete without the stale agent-failed.
-func TestSettle_SettleRelayedBranch_LandsFromParkedFailedIssue(t *testing.T) {
-	const issNum = "4651"
-	const prURL = "https://github.com/owner/repo/pull/4651"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-failed"}})
-	fc.CreateDraftPRURL = prURL
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+func TestRecover_LandsFromParkedFailedIssue(t *testing.T) {
+	e := newRecoverEnv(t, true)
+	e.fc.SetIssue(forge.Issue{Number: recoverNum, Labels: []string{"agent-failed"}})
 
 	// The parked run's own outcome line, resolved the way recover does.
-	logPath := filepath.Join(t.TempDir(), "issue-4651.log")
-	line := "SPINDRIFT_OUTCOME issue=4651 landing=" + fc.AgentBranch(issNum) + " status=ready note=ok\n"
+	logPath := filepath.Join(t.TempDir(), "issue.log")
+	line := "SPINDRIFT_OUTCOME issue=" + recoverNum + " landing=" + e.fc.AgentBranch(recoverNum) + " status=ready note=ok\n"
 	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -854,165 +795,35 @@ func TestSettle_SettleRelayedBranch_LandsFromParkedFailedIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outcome.Resolve: %v", err)
 	}
-	result := dispatch.Result{Resolved: resolved}
 
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-
-	sit := s.SituationFor(issNum, false, result)
-	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
-		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+	if _, err := e.s.Recover(e.in("", resolved, nil, false)); err != nil {
+		t.Fatalf("Recover err = %v, want nil", err)
 	}
-	if want := (forge.RelayBundleCall{OutboxDir: "/outbox/4651", Ref: fc.AgentBranch(issNum)}); len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != want {
-		t.Fatalf("RelayBundleCalls = %+v, want exactly [%+v]", fc.RelayBundleCalls, want)
+	if want := (forge.RelayBundleCall{OutboxDir: e.outbox, Ref: e.fc.AgentBranch(recoverNum)}); len(e.fc.RelayBundleCalls) != 1 || e.fc.RelayBundleCalls[0] != want {
+		t.Fatalf("RelayBundleCalls = %+v, want exactly [%+v]", e.fc.RelayBundleCalls, want)
 	}
-	if len(fc.CreateDraftPRCalls) != 1 {
-		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	if e.fc.Merged != recoverPR {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", recoverPR, e.fc.Merged)
 	}
-	if fc.Merged != prURL {
-		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not keep the parked agent-failed; labels=%v", iss.Labels)
+	iss, _ := e.fc.Issue(recoverNum)
+	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("want agent-complete without the parked agent-failed; labels=%v", iss.Labels)
 	}
 }
 
-// A self-report that isn't a genuine success must not adopt, and unlike
+// A self-report that isn't a genuine success must not relay, and unlike
 // Settle's own failure path it must leave the issue's labels completely
-// untouched: recover's "no open PR" fallback, not this method, owns the
-// operator-park decision.
-func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.T) {
-	const issNum = "2225"
-	const prURL = "https://github.com/owner/repo/pull/2225"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.CreateDraftPRURL = prURL
-
-	result := dispatch.Result{Resolved: outcome.Resolved{
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: "blocked"},
-	},
+// untouched: main's recover failure handling owns the operator-park decision.
+func TestRecover_NonSuccessSelfReportRelaysNothing(t *testing.T) {
+	e := newRecoverEnv(t, false)
+	blocked := outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: "blocked"}}
+	_, err := e.s.Recover(e.in("", blocked, nil, false))
+	if !errors.Is(err, ErrNothingToRecover) {
+		t.Fatalf("Recover err = %v, want ErrNothingToRecover", err)
 	}
-
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
-	if err != nil {
-		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
-	}
-	if got {
-		t.Fatalf("SettleRelayedBranch = true, want false")
-	}
-	if len(fc.CreateDraftPRCalls) != 0 {
-		t.Errorf("expected no CreateDraftPR calls; got %+v", fc.CreateDraftPRCalls)
-	}
-	if fc.Merged != "" {
-		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-in-progress") {
-		t.Errorf("issue must keep agent-in-progress untouched; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not carry agent-failed; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must not carry agent-complete; labels=%v", iss.Labels)
-	}
-}
-
-// The self-report says success but the relay bundle is missing, so there is no
-// finished branch to adopt: SettleRelayedBranch must bail without touching
-// labels, leaving recover's own "no open PR" handling to decide what happens
-// to the issue.
-func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
-	const issNum = "2225"
-	const prURL = "https://github.com/owner/repo/pull/2225"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.CreateDraftPRURL = prURL
-	fc.RelayBundleErr = errors.New("bundle missing")
-
-	result := dispatch.Result{Resolved: outcome.Resolved{
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-	},
-	}
-
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
-	if !errors.Is(err, errRelayBundle) || !errors.Is(err, fc.RelayBundleErr) {
-		t.Fatalf("SettleRelayedBranch err = %v, want errRelayBundle wrapping %v", err, fc.RelayBundleErr)
-	}
-	if got {
-		t.Fatalf("SettleRelayedBranch = true, want false")
-	}
-	if len(fc.CreateDraftPRCalls) != 0 {
-		t.Errorf("expected no CreateDraftPR calls when the bundle relay fails; got %+v", fc.CreateDraftPRCalls)
-	}
-	if fc.Merged != "" {
-		t.Errorf("expected no merge to have run; fc.Merged=%q", fc.Merged)
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-in-progress") {
-		t.Errorf("issue must keep agent-in-progress untouched; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must not carry agent-failed; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must not carry agent-complete; labels=%v", iss.Labels)
-	}
-}
-
-// A draft-PR create failure on the relayed branch must surface as an error
-// naming that stage, not the relay's, so recover can tell the two apart.
-func TestSettle_SettleRelayedBranch_DraftPRCreateFailureSurfacesError(t *testing.T) {
-	const issNum = "4680"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.CreateDraftPRErr = errors.New("create draft PR: 500")
-
-	result := dispatch.Result{Resolved: outcome.Resolved{
-		SelfReportFound: true,
-		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-	}}
-
-	c := baseConfig()
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
-	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-
-	sit := s.situationFor(issNum, false, result)
-	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
-	if !errors.Is(err, errCreateDraftPR) || !errors.Is(err, fc.CreateDraftPRErr) {
-		t.Fatalf("SettleRelayedBranch err = %v, want errCreateDraftPR wrapping %v", err, fc.CreateDraftPRErr)
-	}
-	if errors.Is(err, errRelayBundle) {
-		t.Errorf("err = %v must not name the relay stage", err)
-	}
-	if got {
-		t.Fatalf("SettleRelayedBranch = true, want false")
+	e.assertSettledNothing(t)
+	iss, _ := e.fc.Issue(recoverNum)
+	if !containsLabel(iss.Labels, "agent-in-progress") || containsLabel(iss.Labels, "agent-failed") || containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue labels must stay untouched; labels=%v", iss.Labels)
 	}
 }

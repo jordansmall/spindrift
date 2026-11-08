@@ -23,6 +23,8 @@ var errRecoverBegin = errors.New("claim lost")
 type recoverEnv struct {
 	fc     *forge.Fake
 	s      *Settle
+	c      Config
+	outbox string
 	begins int
 	beginE error
 	steps  *ProgressRecorder
@@ -44,7 +46,7 @@ func newRecoverEnv(t *testing.T, bundle bool) *recoverEnv {
 	c.BaseBranch = "main"
 	steps := &ProgressRecorder{}
 	c.Progress = steps
-	return &recoverEnv{fc: fc, steps: steps, s: newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())}
+	return &recoverEnv{fc: fc, c: c, outbox: outbox, steps: steps, s: newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())}
 }
 
 func (e *recoverEnv) in(openPR string, resolved outcome.Resolved, passes []passmanifest.Entry, strict bool) RecoverInput {
@@ -146,6 +148,9 @@ func TestRecover_StrictDeclinesIneligibleBeforeBegin(t *testing.T) {
 	}{
 		{"no-bundle", false, readyReport(), nil},
 		{"no-success-report", true, outcome.Resolved{}, nil},
+		// Issue #2981: only status=ready is a success; the bare word never was.
+		{"bare-success-word", true, outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: "success"}}, nil},
+		{"blocked-report", true, outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusBlocked}}, nil},
 		{"unreviewed", true, readyReport(), implementReadyPasses()},
 	}
 	for _, tc := range cases {
@@ -229,7 +234,7 @@ func TestRecover_NothingRelayedAfterBeginIsErrNothingToRecover(t *testing.T) {
 }
 
 // Both relay stages' errors survive for main's workflow-permission note and
-// recoverFailed to read.
+// recoverFailed to read, with the issue's labels left alone.
 func TestRecover_RelayFailureErrorsSurvive(t *testing.T) {
 	t.Run("relay", func(t *testing.T) {
 		e := newRecoverEnv(t, false)
@@ -238,6 +243,7 @@ func TestRecover_RelayFailureErrorsSurvive(t *testing.T) {
 		if !errors.Is(err, errRelayBundle) || !errors.Is(err, e.fc.RelayBundleErr) {
 			t.Fatalf("Recover err = %v, want errRelayBundle wrapping %v", err, e.fc.RelayBundleErr)
 		}
+		assertRecoverFailureLeftIssueAlone(t, e)
 	})
 	t.Run("draft PR", func(t *testing.T) {
 		e := newRecoverEnv(t, false)
@@ -246,5 +252,21 @@ func TestRecover_RelayFailureErrorsSurvive(t *testing.T) {
 		if !errors.Is(err, errCreateDraftPR) || !errors.Is(err, e.fc.CreateDraftPRErr) {
 			t.Fatalf("Recover err = %v, want errCreateDraftPR wrapping %v", err, e.fc.CreateDraftPRErr)
 		}
+		if errors.Is(err, errRelayBundle) {
+			t.Errorf("err = %v must not name the relay stage", err)
+		}
+		assertRecoverFailureLeftIssueAlone(t, e)
 	})
+}
+
+func assertRecoverFailureLeftIssueAlone(t *testing.T, e *recoverEnv) {
+	t.Helper()
+	assertNoTransitionOrComment(t, e.fc)
+	if e.fc.Merged != "" {
+		t.Errorf("nothing may merge; fc.Merged=%q", e.fc.Merged)
+	}
+	iss, _ := e.fc.Issue(recoverNum)
+	if !containsLabel(iss.Labels, "agent-in-progress") || containsLabel(iss.Labels, "agent-failed") || containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue labels must stay untouched; labels=%v", iss.Labels)
+	}
 }

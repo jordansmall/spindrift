@@ -6,10 +6,10 @@ import (
 )
 
 // Situation is the shared read of relayed-branch adoption evidence that
-// recover's adopt policy and settle's decline policy both consult.
+// Recover's decline policy and the landers' landRelayed both consult.
 type Situation struct {
 	// OpenPRFound is the caller's fact to supply, not one this package
-	// resolves; SettleRelayedBranch documents that precondition.
+	// resolves; Recover takes it from RecoverInput.OpenPR.
 	OpenPRFound       bool
 	BundlePresent     bool
 	SelfReportSuccess bool
@@ -41,9 +41,4 @@ func (s *Settle) situationFor(num string, openPRFound bool, result dispatch.Resu
 		SelfReportSuccess: success,
 		Unreviewed:        unreviewed,
 	}
-}
-
-// SituationFor is situationFor's exported form for callers outside this package.
-func (s *Settle) SituationFor(num string, openPRFound bool, result dispatch.Result) Situation {
-	return s.situationFor(num, openPRFound, result)
 }

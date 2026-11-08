@@ -811,27 +811,12 @@ func TestSettle_RecordLandingPass_NoOpWhenNoHostLanding(t *testing.T) {
 }
 
 // Regression for issue #5189: a later blocked run that prints landing=x at an
-// earlier pass must not overwrite the pass provenance of the push-only
-// placeholder an earlier run landed.
+// earlier pass must not overwrite the pass provenance of the landing an
+// earlier run recorded.
 func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *testing.T) {
-	c := baseConfig()
-	c.MergeMode = "manual"
-	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake(testDispatchLabels)
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: hostLandedIssue, Labels: []string{"agent-in-progress"}})
-	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
-	landed := dispatch.Result{
-		Resolved: outcome.Resolved{
-			SelfReportFound: true,
-			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
-		},
-		Passes: []passmanifest.Entry{{Pass: 2, Kind: "land", OutcomeFound: true}},
-	}
-	sit := s.SituationFor(hostLandedIssue, false, landed)
-	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), hostLandedIssue, 0, sit, landed); !got || err != nil {
-		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
-	}
+	s, landed := hostLandedPassFixture(t, fc, implementThenLandPasses())
+	captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, landed) })
 	landings, passWrites := len(fc.RecordLandingCalls), len(fc.RecordLandingPassCalls)
 	if landings == 0 {
 		t.Fatal("fixture must record the push-only placeholder landing")
