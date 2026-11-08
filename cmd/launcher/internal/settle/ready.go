@@ -94,7 +94,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			// unmergeable; a PR that does conflict is demoted again by the
 			// conflict response, as an immediate merge's conflict is.
 			if mrErr := s.pr.MarkReady(pr); mrErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, mrErr)
+				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkReadyFailed, Detail: fmt.Sprintf("!! %v", mrErr)})
 			}
 			// A hold takes the PR away from the merge below, so a human gets it
 			// instead; under immediate that PR must still merge into its base
@@ -124,7 +124,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					if s.terminated(num, gen) {
 						return landingAbandoned, ""
 					}
-					fmt.Printf("    #%s  landing=%s  status=post-force-push-red\n", num, pr)
+					s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushRed})
 					if landing, note, stop := s.fixPass(d, num, gen, pr, attempt); stop {
 						return landing, note
 					}
@@ -989,14 +989,14 @@ func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
 	if s.pr == nil {
 		return nil
 	}
-	fmt.Printf("    #%s  landing=%s  status=post-force-push-wait\n", num, pr)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushWait})
 	obs, gReason := s.gateToGreen(num, gen, pr, false)
 	if obs.outcome == gateGreen {
 		// Restore ready (issue #1863). MarkReady is idempotent, so calling it
 		// unconditionally beats threading a was-it-ever-demoted flag through
 		// for the stale-base path that never demoted. Best-effort.
 		if mrErr := s.pr.MarkReady(pr); mrErr != nil {
-			fmt.Printf("    #%s  landing=%s  status=mark-ready-failed  !! %v\n", num, pr, mrErr)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkReadyFailed, Detail: fmt.Sprintf("!! %v", mrErr)})
 		}
 	}
 	return rewaitGateResultErr(obs.outcome, gReason, pr)

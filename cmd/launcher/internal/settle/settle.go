@@ -105,6 +105,10 @@ type Config struct {
 	// whenever this is true, since there is no Dispatcher to run a fix pass
 	// with.
 	Unclaimed bool
+
+	// Progress receives the per-issue progress steps; New defaults nil to
+	// StdoutProgress.
+	Progress Progress
 }
 
 // Settler is the "settle a dispatch result" interface every generic caller
@@ -244,6 +248,9 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	cfForNum := cfg.CodeForgeForIssue
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }
+	}
+	if cfg.Progress == nil {
+		cfg.Progress = StdoutProgress{}
 	}
 	clock := cfg.Clock
 	if clock.Sleep == nil {
