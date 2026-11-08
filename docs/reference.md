@@ -3517,7 +3517,12 @@ result's main-loop `usage.output_tokens`, each named subagent row
 shows `0` since no per-role figure exists, and a `(subagents)` row
 carries the rest of the session output the result's per-model summary
 (`modelUsage`) reports, so `output` covers the whole pass. A result
-with no per-model summary contributes only its main-loop figure.
+with no per-model summary contributes only its main-loop figure. The
+result's `modelUsage`, cost and API time are cumulative per session
+and carry through `--resume`, so the orchestrator's `--usage-baseline-file`
+(the Box keeps it beside the Driver's session cache; an `initial` session
+clears it) holds each session's last cumulative result and a resumed
+pass books only its increment (issue #6706).
 opencode's stream carries real per-call output, so its `out` column
 is summed per call like the other columns. That driver's payload is built from
 its decoded usage events by the shared reader, deduplicated by message

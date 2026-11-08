@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -575,6 +577,16 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 		return 0, phaseErr("driver", err)
 	}
 
+	// "initial" pins a fresh session under the issue's fixed id, so the last
+	// run's cumulative figures for that id are void (issue #6706).
+	if sessionMode == "initial" {
+		if p := r.usageBaselineFile(); p != "" {
+			if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				r.warn("usage baselines", err)
+			}
+		}
+	}
+
 	rc := r.d.Orchestrate(r.orchestratorArgv(handoff, promptFile, sessionFile, streamLog))
 
 	text, err := d.ResultText(streamLog)
@@ -695,8 +707,25 @@ func (r *boxRun) orchestratorArgv(handoff, prompt, session, streamLog string) []
 		"--log-path", streamLog,
 		"--state-file", r.in.RunStateFile,
 	}
+	if p := r.usageBaselineFile(); p != "" {
+		argv = append(argv, "--usage-baseline-file", p)
+	}
 	if r.needsBox {
 		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/"+passmanifest.FileName)
 	}
 	return argv
+}
+
+// usageBaselineFileName is the basename of the file below.
+const usageBaselineFileName = ".spindrift-usage-baselines.json"
+
+// usageBaselineFile is where the orchestrator keeps each session's last
+// cumulative result (issue #6706). It lives beside the Driver's transcripts
+// because those carry the cumulative figures it rebases against, and share
+// their lifetime across Boxes. Empty when the Driver has no session cache.
+func (r *boxRun) usageBaselineFile() string {
+	if r.in.DriverSessionCacheDir == "" {
+		return ""
+	}
+	return filepath.Join(r.in.DriverSessionCacheDir, usageBaselineFileName)
 }

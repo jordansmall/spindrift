@@ -2409,3 +2409,46 @@ func probeAssembly(t *testing.T, skills ...string) assemblyInputs {
 	in.PromptsDir = dir
 	return in
 }
+
+func TestFirstRun_UsageBaselineFileFollowsTheSessionCacheDir(t *testing.T) {
+	t.Run("set", func(t *testing.T) {
+		f := newFixture(t)
+		f.in.DriverSessionCacheDir = t.TempDir()
+		f.run()
+		want := filepath.Join(f.in.DriverSessionCacheDir, usageBaselineFileName)
+		if got := f.firstCall.argv["--usage-baseline-file"]; got != want {
+			t.Errorf("--usage-baseline-file = %q, want %q", got, want)
+		}
+	})
+	t.Run("unset", func(t *testing.T) {
+		f := newFixture(t)
+		f.in.DriverSessionCacheDir = ""
+		f.run()
+		if got, ok := f.firstCall.argv["--usage-baseline-file"]; ok {
+			t.Errorf("--usage-baseline-file = %q, want absent", got)
+		}
+	})
+}
+
+// An "initial" pass pins a fresh session under the issue's fixed id, so the
+// previous run's cumulative figures for that id are void (issue #6706); a
+// "resume" continues the session and keeps them.
+func TestFirstRun_UsageBaselineFileClearedOnlyByAnInitialSession(t *testing.T) {
+	for _, c := range []struct {
+		mode     string
+		wantKept bool
+	}{{"initial", false}, {"resume", true}} {
+		t.Run(c.mode, func(t *testing.T) {
+			f := newFixture(t)
+			f.write(f.handoffFile, `{"Driver":"claude","SessionMode":"`+c.mode+`","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
+			f.in.DriverSessionCacheDir = t.TempDir()
+			stale := filepath.Join(f.in.DriverSessionCacheDir, usageBaselineFileName)
+			f.write(stale, "{}")
+			f.run()
+			_, err := os.Stat(stale)
+			if kept := err == nil; kept != c.wantKept {
+				t.Errorf("baseline file kept = %v (stat err %v), want %v", kept, err, c.wantKept)
+			}
+		})
+	}
+}
