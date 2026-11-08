@@ -171,7 +171,9 @@ func TestRunNixBuild_CapsOutputSize(t *testing.T) {
 func TestRunNixBuild_PassesArgsAndEnvVerbatim(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "fake-nix")
-	body := "#!/bin/sh\nprintf '%s\\n' \"$*\"\nexport -p\n"
+	// export -p's format varies by /bin/sh (bash vs dash), so print the two
+	// variables directly.
+	body := "#!/bin/sh\nprintf '%s\\n' \"$*\"\nprintf 'KEEP=%s MAX_PARALLEL=%s\\n' \"${KEEP-unset}\" \"${MAX_PARALLEL-unset}\"\n"
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +191,7 @@ func TestRunNixBuild_PassesArgsAndEnvVerbatim(t *testing.T) {
 	if first, _, _ := strings.Cut(out, "\n"); first != "run .# -- build --max-parallel 2" {
 		t.Errorf("argv = %q", first)
 	}
-	if !strings.Contains(out, `KEEP="1"`) || strings.Contains(out, "MAX_PARALLEL") {
+	if !strings.Contains(out, "KEEP=1 MAX_PARALLEL=unset") {
 		t.Errorf("child env = %q, want only the passed env", out)
 	}
 }
