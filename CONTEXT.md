@@ -1495,7 +1495,9 @@ _Avoid_: result (the Box's dispatch Result), outcome (the Box's
 The class of a terminal Settle decision, recorded on the
 [[Dispatch Record]]: `merged`, `ci-red`, `already-resolved` and the rest. Each reason
 belongs to exactly one lifecycle state, so naming the reason names the
-state.
+state. `off-script` and `handoff-blocked` are in-progress reasons: a
+Settlement carries them but no op records them, and the issue stays in
+progress.
 _Avoid_: cause, status (that is the Box's self-report).
 
 **Lander**:

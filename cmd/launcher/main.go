@@ -684,11 +684,7 @@ func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) strin
 		if !o.Key.IsChore() {
 			label = "#" + label
 		}
-		status := o.Reason()
-		if status == "" {
-			status = o.State().String()
-		}
-		missed = append(missed, fmt.Sprintf("%s (%s)", label, status))
+		missed = append(missed, fmt.Sprintf("%s (%s)", label, dispatchrecord.ReasonBanner(o.Reason())))
 	}
 	if len(missed) == 0 {
 		return allLandedLine

@@ -22,7 +22,7 @@ func TestSettled_ReturnsSettlement(t *testing.T) {
 	}
 }
 
-func TestSettle_BlockHandoffReturnsCompleteMergeBlockedWithoutPR(t *testing.T) {
+func TestSettle_BlockHandoffReturnsInProgressHandoffBlockedWithoutPR(t *testing.T) {
 	const num = "1919"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
@@ -36,9 +36,12 @@ func TestSettle_BlockHandoffReturnsCompleteMergeBlockedWithoutPR(t *testing.T) {
 
 	got := s.Settle(dispatch.NewFake(), num, 0, settleReadyResult(num, "agent/issue-1919"))
 
-	want := Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeBlocked)}
+	want := Settlement{Verdict: ForReason(dispatchrecord.ReasonHandoffBlocked)}
 	if got != want {
 		t.Fatalf("Settle = %+v, want %+v", got, want)
+	}
+	if got.State() != forge.InProgress || got.Delivered() {
+		t.Fatalf("Settle = %+v, want in-progress and not delivered: blockHandoff never transitions the issue", got)
 	}
 }
 
@@ -58,7 +61,7 @@ func TestSettle_PushOnlyLandingFailureReturnsCompleteMergeBlocked(t *testing.T) 
 	}
 }
 
-func TestSettle_OffScriptStatusReturnsInProgressWithoutReason(t *testing.T) {
+func TestSettle_OffScriptStatusReturnsInProgressOffScript(t *testing.T) {
 	const num = "2020"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
@@ -70,8 +73,8 @@ func TestSettle_OffScriptStatusReturnsInProgressWithoutReason(t *testing.T) {
 
 	got := s.Settle(dispatch.NewFake(), num, 0, res)
 
-	if got.State() != forge.InProgress || got.Reason() != "" || got.PRURL != "" {
-		t.Fatalf("Settle = %+v, want in-progress, no reason, no PR", got)
+	if got.State() != forge.InProgress || got.Reason() != dispatchrecord.ReasonOffScript || got.PRURL != "" || got.Delivered() {
+		t.Fatalf("Settle = %+v, want in-progress off-script, no PR, not delivered", got)
 	}
 }
 
@@ -201,7 +204,8 @@ func TestSettlement_Delivered(t *testing.T) {
 		{"ci-red with PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonCIRed), PRURL: "u"}, false},
 		{"push-only manual without PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonManual)}, true},
 		{"transition-refused complete", Settlement{Verdict: refused(ForReason(dispatchrecord.ReasonMerged))}, true},
-		{"in-progress off-script", Settlement{Verdict: InProgress}, false},
+		{"off-script", Settlement{Verdict: ForReason(dispatchrecord.ReasonOffScript)}, false},
+		{"handoff-blocked with PR", Settlement{Verdict: ForReason(dispatchrecord.ReasonHandoffBlocked), PRURL: "u"}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
