@@ -144,7 +144,7 @@ After editing `lib/env-schema.nix` (or a registry row's `knobs`), regenerate
 the artifacts it drives — `templates/default/harness.env.example`,
 `cmd/launcher/internal/inputdoc/flagtable_gen.go`,
 `cmd/launcher/internal/inputdoc/knobs_gen.go`,
-`cmd/launcher/schemaconfig_gen.go`, `docs/flake-options.md`,
+`cmd/launcher/internal/inputdoc/loadknobs_gen.go`, `docs/flake-options.md`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`,
 each knob-declaring row's `knobs_gen.go` reader
 (`lib/row-knob-readers.nix`), and the generated section of
