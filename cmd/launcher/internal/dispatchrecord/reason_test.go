@@ -14,7 +14,7 @@ import (
 )
 
 func TestReasonTable(t *testing.T) {
-	realStates := map[string]bool{StateComplete: true, StateFailed: true, StateAmbiguous: true, StateRecoverable: true}
+	realStates := map[string]bool{StateComplete: true, StateFailed: true, StateAmbiguous: true, StateRecoverable: true, StateInProgress: true}
 	seen := map[string]bool{}
 	for _, r := range reasons {
 		if seen[r.Name] {
@@ -122,7 +122,7 @@ func docsReasons(t *testing.T) map[string]string {
 			t.Fatalf("docs bullet has no backticked token: %q", bl)
 		}
 		switch toks[0] {
-		case StateComplete, StateFailed:
+		case StateComplete, StateFailed, StateInProgress:
 			for _, n := range toks[1:] {
 				got[n] = toks[0]
 				perBullet[toks[0]]++

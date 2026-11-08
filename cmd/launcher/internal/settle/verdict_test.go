@@ -52,3 +52,16 @@ func TestRefusedKeepsDisplacedState(t *testing.T) {
 		t.Errorf("refused = (%s, %q), want (complete, transition-refused)", v.State(), v.Reason())
 	}
 }
+
+func TestSettledPanicsOnInProgressVerdict(t *testing.T) {
+	for _, reason := range []string{dispatchrecord.ReasonOffScript, dispatchrecord.ReasonHandoffBlocked} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("Settled with the in-progress %q Verdict did not panic", reason)
+				}
+			}()
+			Settled(dispatchkey.Issue("7"), "", ForReason(reason), hostop.DispatchSettled{})
+		}()
+	}
+}

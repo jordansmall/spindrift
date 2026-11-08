@@ -10,23 +10,19 @@ import (
 // Verdict is a terminal transition's Settle reason and the state it records.
 // The state comes from the reason table, never from the caller, so a reason
 // cannot be written with the wrong state; only Transition's refusal keeps a
-// displaced state (issue #6609), and the off-script-status arm leaves the
-// Dispatch in progress with no reason.
+// displaced state (issue #6609). The in-progress reasons are Settlement-only:
+// no transition backs them and no op records them.
 type Verdict struct {
 	state  forge.DispatchState
 	reason string
 }
-
-// InProgress is the off-script Verdict: a settle that left its Dispatch in
-// progress with no reason, the Box's status being untrusted.
-var InProgress = Verdict{state: forge.InProgress}
 
 // ForReason returns the Verdict for reason, a dispatchrecord.Reason* const. It
 // panics when reason has no fixed state (an unknown name, or
 // transition-refused): that is a programmer error, not a runtime condition.
 func ForReason(reason string) Verdict {
 	state := dispatchrecord.ReasonState(reason)
-	for _, s := range []forge.DispatchState{forge.Complete, forge.Failed, forge.Recoverable, forge.Ambiguous} {
+	for _, s := range []forge.DispatchState{forge.Complete, forge.Failed, forge.Recoverable, forge.Ambiguous, forge.InProgress} {
 		if s.String() == state {
 			return Verdict{s, reason}
 		}

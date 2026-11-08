@@ -228,10 +228,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		s.postUsageComment(num, d)
 	default:
 		s.cfg.Progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status)})
-		// Never transitions, so Settled never sees this Dispatch. Reason stays
-		// empty: o.Status is Box-controlled and the banner prints only
-		// host-derived values.
-		s.latchUnrecorded(num, InProgress, "")
+		// Never transitions, so Settled never sees this Dispatch. o.Status is
+		// Box-controlled, so the banner prints the in-progress state, never
+		// the status itself.
+		s.latchUnrecorded(num, ForReason(dispatchrecord.ReasonOffScript), "")
 		s.postUsageComment(num, d)
 	}
 	return
@@ -336,8 +336,8 @@ func Transition(it forge.IssueTracker, num string, from forge.DispatchState, v V
 	return refused(v), fmt.Sprintf("%s (settle reason was %s)", refusal.Error(), displaced), err
 }
 
-// settledLatch is one issue's most recently latched terminal decision,
-// awaiting flushSettled (issue #3627).
+// settledLatch is one issue's most recently latched decision (terminal, or an
+// unrecorded in-progress one), awaiting flushSettled (issue #3627).
 type settledLatch struct {
 	// verdict's reason is the status= class of the path that latched, the
 	// vocabulary the path already prints (fix-exhausted, ci-red,
@@ -382,25 +382,28 @@ func (s *Settle) transitionState(num string, v Verdict, note string) {
 	s.settledMu.Unlock()
 }
 
-// latchUnrecorded latches a decision no transition backs, for flushSettled to
-// return as the Settlement without recording it. It names no PR on purpose: the
-// all-finished banner must not count it delivered (issue #5145).
+// latchUnrecorded latches an in-progress decision no transition backs, for
+// flushSettled to return as the Settlement without recording it. It never
+// displaces a terminal latch, so that latch's dispatch_settled op still lands.
 func (s *Settle) latchUnrecorded(num string, v Verdict, note string) {
 	s.settledMu.Lock()
 	defer s.settledMu.Unlock()
 	if s.settledLatch == nil {
 		s.settledLatch = make(map[string]settledLatch)
 	}
+	if prev, ok := s.settledLatch[num]; ok && !prev.unrecorded {
+		return
+	}
 	s.settledLatch[num] = settledLatch{verdict: v, note: note, unrecorded: true}
 }
 
-// flushSettled emits num's latched terminal decision, if any, exactly once
-// (issue #3627). Call it via defer at every entry point that can drive one
-// issue to a terminal transitionState call, so an issue that never reaches a
-// terminal state still produces no record, as before this latch existed.
-// Emitting here, not in transitionState, means a path that latches twice
-// (Complete demoted to Failed) still appends one dispatch_settled op. The
-// returned Settlement is that same latched decision, zero when nothing latched.
+// flushSettled settles num's latched decision, if any, exactly once
+// (issue #3627). Call it via defer at every settle entry point. A terminal
+// latch is emitted as one dispatch_settled op; an unrecorded one is only
+// returned, so an issue that never reaches a terminal state still produces no
+// record. Emitting here, not in transitionState, means a path that latches
+// twice (Complete demoted to Failed) still appends one op. The returned
+// Settlement is that same latched decision, zero when nothing latched.
 func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 	s.settledMu.Lock()
 	rec, ok := s.settledLatch[num]
@@ -451,6 +454,9 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) Settlement {
 	if v.reason == "" {
 		panic("settle: Settled needs a Verdict from ForReason, not the zero value")
+	}
+	if v.State() == forge.InProgress {
+		panic("settle: Settled got an in-progress Verdict; those reasons are never recorded")
 	}
 	ds.State, ds.Reason = v.State().String(), v.Reason()
 	dispatchrecord.RecordSettled(os.Stderr, key.String(), logPath, ds)

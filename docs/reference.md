@@ -7460,6 +7460,12 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   success self-report and a bundle in the outbox whose loop stopped in
   implement or fix);
 - `ambiguous` and `recoverable` each name their own state;
+- `in-progress`: `off-script` (the Box printed a status outside the outcome
+  grammar) and `handoff-blocked` (relaying the blocked hand-off or opening its
+  draft PR failed with nothing for `spindrift recover` to land). Never
+  recorded: no op is appended and the issue stays in progress; the
+  run's caller reads them, and the all-finished banner prints each as its
+  row's banner word (`in-progress` and `merge-blocked`);
 - `transition-refused` can accompany any terminal state, and replaces the
   path's own reason: with `JIRA_LIFECYCLE=status`, the tracker's workflow
   offered no transition to the mapped status, so the card stayed put. The issue

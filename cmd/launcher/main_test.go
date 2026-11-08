@@ -3267,23 +3267,22 @@ func settledOutcome(key, reason, prURL string) settle.DispatchOutcome {
 
 // mixedOutcomes is one delivered dispatch plus a representative mix of ways a
 // dispatch can fail to deliver, each shaped as settle really records it: a
-// Complete merge-blocked record with no PR (a read-only github draft-PR create
-// failure, blockHandoff, or a push-only landing failure, landPushOnly),
-// relay-failed, a Failed ci-red that still has its PR open, already-resolved,
-// blocked, ambiguous, a Chore key, and the off-script InProgress with no
-// reason (the state stands in).
+// Complete merge-blocked record with no PR (a push-only landing failure,
+// landPushOnly), an InProgress handoff-blocked (blockHandoff), relay-failed, a
+// Failed ci-red that still has its PR open, already-resolved, blocked,
+// ambiguous, a Chore key, and the off-script InProgress.
 func mixedOutcomes() []settle.DispatchOutcome {
 	return []settle.DispatchOutcome{
 		settledOutcome("11", dispatchrecord.ReasonMerged, "https://github.com/owner/repo/pull/11"),
 		settledOutcome("12", dispatchrecord.ReasonMergeBlocked, ""),
-		settledOutcome("13", dispatchrecord.ReasonMergeBlocked, ""),
+		settledOutcome("13", dispatchrecord.ReasonHandoffBlocked, ""),
 		settledOutcome("14", dispatchrecord.ReasonRelayFailed, ""),
 		settledOutcome("15", dispatchrecord.ReasonCIRed, "https://github.com/owner/repo/pull/15"),
 		settledOutcome("16", dispatchrecord.ReasonAlreadyResolved, ""),
 		settledOutcome("17", dispatchrecord.ReasonBlocked, ""),
 		settledOutcome("18", dispatchrecord.ReasonAmbiguous, ""),
 		{Key: dispatchkey.Chore("docs-drift"), Settlement: settle.Settlement{Verdict: settle.ForReason(dispatchrecord.ReasonMergeBlocked)}},
-		{Key: dispatchkey.Issue("19"), Settlement: settle.Settlement{Verdict: settle.InProgress}},
+		settledOutcome("19", dispatchrecord.ReasonOffScript, ""),
 	}
 }
 

@@ -614,3 +614,16 @@ func TestSettle_TransitionState_GenericError_KeepsCallerReasonAndPostsNoComment(
 		t.Errorf("latch = %+v, want the caller's reason and note", got)
 	}
 }
+
+func TestSettle_LatchUnrecorded_KeepsTerminalLatch(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "9"})
+	s := New(Config{}, fc, fc)
+
+	s.transitionState("9", ForReason(dispatchrecord.ReasonCIRed), "n")
+	s.latchUnrecorded("9", ForReason(dispatchrecord.ReasonOffScript), "")
+
+	if got := s.settledLatch["9"]; got.unrecorded || got.verdict.Reason() != dispatchrecord.ReasonCIRed {
+		t.Errorf("latch = %+v, want the terminal ci-red latch kept", got)
+	}
+}

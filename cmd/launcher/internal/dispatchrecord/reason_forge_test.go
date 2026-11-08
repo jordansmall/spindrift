@@ -17,6 +17,7 @@ func TestStateConstsMatchForge(t *testing.T) {
 		{dispatchrecord.StateFailed, forge.Failed},
 		{dispatchrecord.StateAmbiguous, forge.Ambiguous},
 		{dispatchrecord.StateRecoverable, forge.Recoverable},
+		{dispatchrecord.StateInProgress, forge.InProgress},
 	} {
 		if c.got != c.want.String() {
 			t.Errorf("state const %q != forge %s", c.got, c.want)

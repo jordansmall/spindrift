@@ -154,7 +154,7 @@ func (s *Settle) blockHandoff(num, branch string, err error) {
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
 	// Never transitions, so Settled never sees this Dispatch, yet the
 	// all-finished banner must not count it delivered (issue #5145).
-	s.latchUnrecorded(num, ForReason(dispatchrecord.ReasonMergeBlocked), "")
+	s.latchUnrecorded(num, ForReason(dispatchrecord.ReasonHandoffBlocked), "")
 }
 
 // parkRelayFailure fails an issue whose bundle relay failed (issue #4651).

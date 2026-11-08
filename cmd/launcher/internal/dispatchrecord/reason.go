@@ -3,7 +3,8 @@ package dispatchrecord
 import "slices"
 
 // The reason classes a terminal settle records on its dispatch_settled op,
-// across every dispatch kind. Values are the on-disk vocabulary; the
+// across every dispatch kind, plus the in-progress classes a Settlement
+// carries but no op records. Values are the on-disk vocabulary; the
 // per-state lists are in docs/reference.md under "The settled outcome", and
 // reasons is the table the docs test pins them against.
 const (
@@ -47,6 +48,10 @@ const (
 
 	// Any terminal state.
 	ReasonTransitionRefused = "transition-refused"
+
+	// In progress: never recorded; the Dispatch did not settle.
+	ReasonOffScript      = "off-script"
+	ReasonHandoffBlocked = "handoff-blocked"
 )
 
 // UnreviewedNote is why a run is not trusted (ReasonUnreviewed): its review
@@ -63,6 +68,7 @@ const (
 	StateFailed      = "failed"
 	StateAmbiguous   = "ambiguous"
 	StateRecoverable = "recoverable"
+	StateInProgress  = "in-progress"
 )
 
 // AnyState is the State of a reason that can accompany any terminal state.
@@ -86,7 +92,7 @@ const (
 type ReasonRow struct {
 	Name string
 	// State is the lifecycle state the reason settles into (a State* const),
-	// or AnyState.
+	// or AnyState. StateInProgress marks a reason no op records.
 	State string
 	// LeavesPROpen marks a Complete that left its PR open: nothing re-settles
 	// it when it merges later, so LateMerges watches for it.
@@ -97,7 +103,10 @@ type ReasonRow struct {
 	// Delivery is how a Complete reason counts toward delivered work; left
 	// zero outside Complete, where it means nothing.
 	Delivery Delivery
-	Gloss    string
+	// Banner is the word the all-finished banner prints for an undelivered
+	// Dispatch in place of Name; empty prints Name.
+	Banner string
+	Gloss  string
 }
 
 // reasons lists every reason class, in the order of the const block.
@@ -142,6 +151,9 @@ var reasons = []ReasonRow{
 	// It replaces the path's own reason; the state is still the host's
 	// decision.
 	{Name: ReasonTransitionRefused, State: AnyState, Gloss: "the tracker's workflow offered no transition to the mapped status"},
+
+	{Name: ReasonOffScript, State: StateInProgress, Banner: StateInProgress, Gloss: "the Box printed a status outside the outcome grammar; the issue stays in progress"},
+	{Name: ReasonHandoffBlocked, State: StateInProgress, Banner: ReasonMergeBlocked, Gloss: "relaying the blocked hand-off or opening its draft PR failed with nothing for recover to land; the issue stays in progress"},
 }
 
 func reasonRow(name string) (ReasonRow, bool) {
@@ -179,6 +191,15 @@ func ReasonDelivery(name string) Delivery {
 func ReasonState(name string) string {
 	r, _ := reasonRow(name)
 	return r.State
+}
+
+// ReasonBanner returns the word the all-finished banner prints for name: its
+// row's Banner, else name itself.
+func ReasonBanner(name string) string {
+	if r, _ := reasonRow(name); r.Banner != "" {
+		return r.Banner
+	}
+	return name
 }
 
 // Reasons returns a copy of the reason table.
