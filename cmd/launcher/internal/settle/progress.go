@@ -20,6 +20,48 @@ const (
 	StatusPostForcePushWait Status = "post-force-push-wait"
 	StatusPostForcePushRed  Status = "post-force-push-red"
 	StatusMarkReadyFailed   Status = "mark-ready-failed"
+
+	StatusGateTerminal         Status = "gate-terminal"
+	StatusBudgetExhausted      Status = "budget-exhausted"
+	StatusCheckStateError      Status = "check-state-error"
+	StatusLandingFailed        Status = "landing-failed"
+	StatusLandingRefUnresolved Status = "landing-ref-unresolved"
+
+	StatusFailureDetailUnavailable Status = "failure-detail-unavailable"
+	StatusHeadShaUnavailable       Status = "head-sha-unavailable"
+	StatusAlreadyInFlight          Status = "already-in-flight"
+	StatusFixFailed                Status = "fix-failed"
+	StatusFixNoOp                  Status = "fix-no-op"
+	StatusRelayFailed              Status = "relay-failed"
+	StatusFixRelayFailed           Status = "fix-relay-failed"
+	StatusFixExhausted             Status = "fix-exhausted"
+
+	StatusMergeGuardCheckError Status = "merge-guard-check-error"
+	StatusMergeGuardHit        Status = "merge-guard-hit"
+	StatusMergeableCheckError  Status = "mergeable-check-error"
+	StatusMergeableUnknown     Status = "mergeable-unknown"
+	StatusMergeBlocked         Status = "merge-blocked"
+	StatusMergeBlockedByChecks Status = "merge-blocked-by-checks"
+	StatusMergeTransientRetry  Status = "merge-transient-retry"
+	StatusMergeRetrySettle     Status = "merge-retry-settle"
+
+	StatusConflictUnconfirmed   Status = "conflict-unconfirmed"
+	StatusHandoffConflict       Status = "handoff-conflict"
+	StatusConflictResolve       Status = "conflict-resolve"
+	StatusConflictResolveFailed Status = "conflict-resolve-failed"
+	StatusMarkDraftFailed       Status = "mark-draft-failed"
+
+	StatusRebaseRetry                Status = "rebase-retry"
+	StatusRebasePushRetry            Status = "rebase-push-retry"
+	StatusRebasePushRetriesExhausted Status = "rebase-push-retries-exhausted"
+	StatusRebaseFailed               Status = "rebase-failed"
+	StatusNeedsUpdateCheckError      Status = "needs-update-check-error"
+	StatusStaleBaseRebase            Status = "stale-base-rebase"
+	StatusStaleBaseRebaseFailed      Status = "stale-base-rebase-failed"
+
+	StatusAutoMergeEnqueued      Status = "auto-merge-enqueued"
+	StatusAutoMergeEnqueueFailed Status = "auto-merge-enqueue-failed"
+	StatusAgentComplete          Status = "agent-complete"
 )
 
 // Step is one settle progress event. Key is the issue key without its "#".
