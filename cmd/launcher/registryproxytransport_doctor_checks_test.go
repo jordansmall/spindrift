@@ -238,7 +238,7 @@ func TestRegistryProxyTransportCheck_RemedySharesRuntimeReachableClauseWithSigna
 		{
 			name:   signalSocketTransportCheckName,
 			remedy: signalSocketTransportCheck(c).Remedy,
-			want:   "set BOX_SIGNAL_CARRIER=log, or use a NETWORK_MODE that permits loopback (not no-host-loopback or none); on an indeterminate probe instead, confirm the configured container runtime is running and reachable, then re-run `spindrift doctor`",
+			want:   "pass --box-signal-carrier log, or use a NETWORK_MODE that permits loopback (not no-host-loopback or none); on an indeterminate probe instead, confirm the configured container runtime is running and reachable, then re-run `spindrift doctor`",
 		},
 		{
 			name:   registryProxyTransportCheckName,

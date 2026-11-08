@@ -41,7 +41,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 	// is a backstop. Either way it fails capability-style, never falling
 	// back to the log carrier silently.
 	if transport.IsTCP() && d.cfg.NetworkMode.DeniesHostLoopback() {
-		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- "+tcpFallbackBlockedReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode, "Signal socket")
+		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- "+tcpFallbackBlockedReason+"; use --box-signal-carrier log or a different NETWORK_MODE", d.cfg.NetworkMode, "Signal socket")
 	}
 
 	buf := signalsocket.New(d.signalSocketConfig())

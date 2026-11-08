@@ -2209,7 +2209,7 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	}
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: []string{"PATH=/bin"}})
 	if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
@@ -2252,7 +2252,7 @@ func TestRunDoctor_ButlerAppendsFlag(t *testing.T) {
 	}
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), doctorFlags: []string{"--butler"}})
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: []string{"PATH=/bin"}, doctorFlags: []string{"--butler"}})
 	if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}

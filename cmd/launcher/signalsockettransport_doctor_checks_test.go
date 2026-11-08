@@ -211,7 +211,7 @@ func TestSignalSocketTransportCheck_RemedyNamesBothTheKnobAndTheRuntimeFix(t *te
 	c.SignalCarrier = "socket"
 
 	remedy := signalSocketTransportCheck(c).Remedy
-	for _, want := range []string{"BOX_SIGNAL_CARRIER=log", "NETWORK_MODE", "indeterminate"} {
+	for _, want := range []string{"--box-signal-carrier log", "NETWORK_MODE", "indeterminate"} {
 		if !strings.Contains(remedy, want) {
 			t.Errorf("Remedy = %q, want it to mention %q", remedy, want)
 		}
