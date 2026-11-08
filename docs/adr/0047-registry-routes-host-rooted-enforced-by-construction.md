@@ -1,5 +1,10 @@
 # Registry routes are host-rooted and enforced by construction, not base-path-scoped and advisory
 
+> **Amended by [ADR 0048](0048-ecosystem-knowledge-is-one-row-and-a-route-credential-is-per-host.md):**
+> the flat per-ecosystem route keys (`cargo-registries` among them) are
+> retired in favour of one `[routes.ecosystems.<name>]` block per
+> ecosystem. The host-rooted route table below is unchanged.
+
 Supersedes [ADR 0045](0045-registry-routes-declared-table-protocol-aware-mirror.md).
 The containment model it established — credential in the launcher, Box
 holds none, read-only mirror, binding by configuration, routes created at
@@ -310,10 +315,12 @@ client-side placeholder or stale token could ever reach a real upstream.
   table: the host-side derivation enumerates every registry the Target
   repo's committed configuration declares on the matched host, each
   contributing its own derived index base and its own same-host-pinned
-  `dl` subtree — the optional `cargo-registries` key only narrows that
-  enumeration when a route names it, per the #3201 amendment — so one
-  host serving two registries is one route with two index bases, not
-  two routes.
+  `dl` subtree — the optional `registries` key of a route's
+  `[routes.ecosystems.cargo]` block only narrows that enumeration when
+  a route names it, per the #3201 amendment — so one host serving two
+  registries is one route with two index bases, not two routes. The
+  flat `cargo-registries` key that first carried that narrowing is
+  retired by ADR 0048 (#3405).
 - The credential resolver, discovery, the manifest handoff, and the
   ecosystem package are all unchanged in kind; the route table fields
   they read simply gain a host-rooted shape in place of a base-path one.
