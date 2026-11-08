@@ -2,25 +2,16 @@ package settle
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/testutil"
 )
-
-// stalePRLabel matches a genuine stale pr= field (issue #892) without
-// tripping on a benign substring like expr= or repr= inside free-text
-// note/error interpolations.
-var stalePRLabel = regexp.MustCompile(`\bpr=`)
 
 // The tracker is github-shaped (AsNoLandingRecorder) because a local
 // tracker's blocked path posts an extra note comment
@@ -80,37 +71,6 @@ func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 	}
 	if containsLabel(iss.Labels, "agent-in-progress") {
 		t.Errorf("blocked outcome must remove agent-in-progress; got labels=%v", iss.Labels)
-	}
-}
-
-// The operator report prints landing=, matching the wire grammar's o.Landing
-// field name, not the stale pr= label: the value may not be a PR at all
-// (issue #655).
-func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
-
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-
-	d := dispatch.NewFake()
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing; expr=1 mismatch"},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc, fc)
-	out := testutil.CaptureStdout(t, func() {
-		s.Settle(d, issNum, 0, result)
-	})
-
-	if !strings.Contains(out, "landing="+prURL) {
-		t.Errorf("console output must print landing=%s; got: %q", prURL, out)
-	}
-	if stalePRLabel.MatchString(out) {
-		t.Errorf("console output must not use the stale pr= label; got: %q", out)
 	}
 }
 
@@ -175,181 +135,6 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	}
 }
 
-// A confirmed immediate merge closes the issue through the optional
-// forge.MergeCloser, a deterministic backstop to GitHub's own merged-PR
-// auto-close for agent PRs whose body omitted or reworded Closes #<N>
-// (issue #1892).
-func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
-	const issNum = "55"
-	const prURL = "https://github.com/owner/repo/pull/55"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
-		t.Errorf("CloseMergedIssueCalls = %v, want [%s]", fc.CloseMergedIssueCalls, issNum)
-	}
-}
-
-// The forgejo adapter's shape (MergeCloser, no IssueCloser) ends the issue
-// closed through the same post-merge backstop, with the usage comment posted
-// once (issue #2259).
-func TestSettle_ImmediateMergeClosesForgejoShapedIssue(t *testing.T) {
-	const issNum = "55"
-	const prURL = "https://github.com/owner/repo/pull/55"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc.AsForgejoShaped(), fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if iss, _ := fc.Issue(issNum); iss.State != forge.IssueClosed {
-		t.Errorf("issue state = %q, want %q (settle's post-merge backstop must close it)", iss.State, forge.IssueClosed)
-	}
-	if len(fc.CloseMergedIssueCalls) != 1 || fc.CloseMergedIssueCalls[0] != issNum {
-		t.Errorf("CloseMergedIssueCalls = %v, want [%s]", fc.CloseMergedIssueCalls, issNum)
-	}
-	if len(fc.CommentCalls) != 1 {
-		t.Errorf("usage comment posts = %d, want 1", len(fc.CommentCalls))
-	}
-	iss, _ := fc.Issue(issNum)
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("merged outcome must add agent-complete; got labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-in-progress") {
-		t.Errorf("merged outcome must remove agent-in-progress; got labels=%v", iss.Labels)
-	}
-}
-
-// ISSUE_TRACKER=local paired with a PRForge Code Forge is a valid
-// combination, and settle's post-merge backstop is scoped to
-// forge.MergeCloser, which the local adapter (AsLocalShaped) does not
-// implement even though it does implement IssueCloser. Only reconcile's
-// sweep may close a landed local issue (ADR 0029).
-func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
-	const issNum = "58"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc.AsLocalShaped(), fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if len(fc.CloseIssueCalls) != 0 {
-		t.Errorf("CloseIssueCalls = %v, want none", fc.CloseIssueCalls)
-	}
-	if len(fc.CloseMergedIssueCalls) != 0 {
-		t.Errorf("CloseMergedIssueCalls = %v, want none", fc.CloseMergedIssueCalls)
-	}
-}
-
-// A green CI outcome under manual/auto MergeMode leaves the PR open
-// (landingManual, never landingMerged), so issue #1892's backstop must not
-// close the issue. Only a confirmed merge may.
-func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
-	for _, mode := range []string{"manual", "auto"} {
-		t.Run(mode, func(t *testing.T) {
-			const issNum = "56"
-
-			fc := forge.NewFake(testDispatchLabels)
-			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-			fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
-
-			c := baseConfig()
-			c.MergeMode = mode
-			result := dispatch.Result{
-				Resolved: outcome.Resolved{
-					Found:   true,
-					Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
-				},
-			}
-
-			s := newTestSettle(c, fc, fc)
-			s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-			if len(fc.CloseMergedIssueCalls) != 0 {
-				t.Errorf("mode=%s: CloseMergedIssueCalls = %v, want none", mode, fc.CloseMergedIssueCalls)
-			}
-		})
-	}
-}
-
-// An outcome that never reaches green CI (landingFailed) must not close the
-// issue. The "ready" case's landingFailed print must also carry selfHeal's
-// own classified reason rather than the old hardcoded "CI or merge failed"
-// literal (issue #2328).
-func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
-	const issNum = "57"
-
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
-
-	c := baseConfig()
-	c.MaxFixAttempts = 0
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
-		},
-	}
-
-	s := newTestSettle(c, fc, fc)
-
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	os.Stdout = w
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-	w.Close()
-	os.Stdout = old
-	captured, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read captured stdout: %v", err)
-	}
-	stdout := string(captured)
-
-	if len(fc.CloseMergedIssueCalls) != 0 {
-		t.Errorf("CloseMergedIssueCalls = %v, want none", fc.CloseMergedIssueCalls)
-	}
-	if strings.Contains(stdout, "CI or merge failed") {
-		t.Errorf("stdout must not contain the old hardcoded literal, got: %s", stdout)
-	}
-	if !strings.Contains(stdout, "ci-red: still red after exhausting 0 fix pass(es)") {
-		t.Errorf("stdout must contain selfHeal's classified reason, got: %s", stdout)
-	}
-}
-
 // A ParseErr result with no adoptable PR runs the same no-PR demotion as the
 // no-outcome-found path (issue #1898): a box that mangled its outcome line
 // and never opened a PR produced nothing landable, so it demotes to
@@ -368,37 +153,6 @@ func TestSettle_MalformedOutcome_NoPRDemotesToFailed(t *testing.T) {
 	iss, _ := fc.Issue("9")
 	if !containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("malformed outcome with no PR must demote to agent-failed; got labels=%v", iss.Labels)
-	}
-}
-
-// A ParseErr result, a box that exited zero but emitted an unparseable
-// outcome line, still runs the PR-adoption check: an open PR is reported
-// status=blocked, not dropped under status=malformed with no further trace
-// (issue #1898, seen on #1895 / PR #1897, where a clean, green, mergeable PR
-// was left un-adopted).
-func TestSettle_MalformedOutcome_NonDraftPRBlocked(t *testing.T) {
-	fc := forge.NewFake()
-	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
-	branch := fc.AgentBranch("9")
-	fc.SetPR(branch, forge.PR{URL: testPR})
-
-	c := baseConfig()
-	s := newTestSettle(c, fc, fc)
-	result := dispatch.Result{ParseErr: errFake}
-
-	out := testutil.CaptureStdout(t, func() {
-		s.Settle(dispatch.NewFake(), "9", 0, result)
-	})
-
-	if !strings.Contains(out, "status=blocked") {
-		t.Errorf("malformed outcome with an open PR must report status=blocked; got: %q", out)
-	}
-	if strings.Contains(out, "status=malformed") {
-		t.Errorf("malformed outcome with an open PR must not be silently dropped as status=malformed; got: %q", out)
-	}
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("open PR must not trigger label churn; got %v", fc.TransitionStateCalls)
 	}
 }
 
@@ -469,46 +223,6 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 0 {
 		t.Errorf("no-PR case must not post a usage comment; got %v", fc.CommentCalls)
-	}
-}
-
-// A transient forge lookup failure leaves genuine doubt about whether a
-// live, mergeable PR exists, unlike a confirmed absence, so settle reports
-// it without demoting the issue and burying a possibly-fine run under
-// agent-failed (issue #1605 review follow-up).
-func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
-	fc.OpenPRForBranchErr = errFake
-
-	c := baseConfig()
-	s := newTestSettle(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "6", 0, dispatch.Result{})
-
-	if len(fc.TransitionStateCalls) != 0 {
-		t.Errorf("PR lookup error must not trigger label churn; got %v", fc.TransitionStateCalls)
-	}
-}
-
-// The lookup-error console line still carries the log's class=/reason= note,
-// matching the confirmed-no-PR branch: a lookup failure must not drop detail
-// a human triaging agent-failed relies on.
-func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "6", Labels: []string{"agent-in-progress"}})
-	fc.OpenPRForBranchErr = errFake
-
-	c := baseConfig()
-	s := newTestSettle(c, fc, fc)
-	result := dispatch.Result{
-		Classification: driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed},
-	}
-	out := testutil.CaptureStdout(t, func() {
-		s.Settle(dispatch.NewFake(), "6", 0, result)
-	})
-
-	if !strings.Contains(out, "class=terminal") || !strings.Contains(out, "reason=taskFailed") {
-		t.Errorf("console output must carry classification on a lookup error; got: %q", out)
 	}
 }
 
@@ -638,6 +352,7 @@ func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.Issue
 	c.OutboxDir = func(string) string { return t.TempDir() }
 	c.BaseBranch = "main"
 	_, c.Clock = recordingClock()
+	c.Progress = &ProgressRecorder{}
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
@@ -656,7 +371,7 @@ func settleHostLanded(t *testing.T, passes []passmanifest.Entry) *forge.Fake {
 	t.Helper()
 	fc := forge.NewFake(testDispatchLabels)
 	s, result := hostLandedPassFixture(t, fc, passes)
-	captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
+	s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result)
 	if len(fc.RecordLandingCalls) == 0 {
 		t.Fatal("fixture must record a host-derived landing")
 	}
@@ -732,7 +447,7 @@ func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
 	})
 
 	stderr := captureStderr(t, func() {
-		captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
+		s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result)
 	})
 
 	if len(fc.RecordLandingPassCalls) != 1 {
@@ -758,7 +473,7 @@ func TestSettle_RecordLandingPass_SkippedWhenRecordLandingFails(t *testing.T) {
 	})
 
 	stderr := captureStderr(t, func() {
-		captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
+		s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result)
 	})
 
 	if len(fc.RecordLandingCalls) == 0 {
@@ -864,7 +579,7 @@ func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T
 		{Pass: 1, Kind: "land", OutcomeFound: true},
 	})
 
-	captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
+	s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result)
 
 	if len(fc.RecordLandingCalls) == 0 {
 		t.Error("want the host-derived landing recorded")

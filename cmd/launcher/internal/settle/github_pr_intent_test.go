@@ -2,13 +2,13 @@ package settle
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/testutil"
 )
 
 // The title/body split consumes only the first "\n" and the blank line right
@@ -911,10 +911,10 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 
 	c := baseConfig()
 	c.ReadOnly = true
+	rec := &ProgressRecorder{}
+	c.Progress = rec
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-	out := testutil.CaptureStdout(t, func() {
-		s.Settle(d, issNum, 0, result)
-	})
+	s.Settle(d, issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
 	if containsLabel(iss.Labels, "agent-failed") {
@@ -926,11 +926,11 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	// Positive proof verifyMerged ran: without it a refactor that skipped
 	// verifyMerged entirely would still satisfy the negative label assertions
 	// above, a vacuous pass.
-	if want := "landing=" + prURL + "  status=verified-merged"; !strings.Contains(out, want) {
-		t.Fatalf("verifyMerged must confirm the host-derived PR merged; want %q in output; got: %q", want, out)
+	if want := (Step{Key: issNum, Landing: prURL, Status: StatusVerifiedMerged}); !slices.Contains(rec.Steps(), want) {
+		t.Fatalf("verifyMerged must confirm the host-derived PR merged; want %+v in steps; got: %+v", want, rec.Steps())
 	}
-	if bad := "landing=" + hostileLanding + "  status=verified-merged"; strings.Contains(out, bad) {
-		t.Fatalf("verifyMerged must never verify against the hostile landing=%s; got: %q", hostileLanding, out)
+	if bad := (Step{Key: issNum, Landing: hostileLanding, Status: StatusVerifiedMerged}); slices.Contains(rec.Steps(), bad) {
+		t.Fatalf("verifyMerged must never verify against the hostile landing=%s; got: %+v", hostileLanding, rec.Steps())
 	}
 }
 
@@ -967,8 +967,9 @@ func TestSettle_GithubReadOnly_OpenWiringErrorBlocksNotFails(t *testing.T) {
 	c.ReadOnly = true
 	c.OutboxDir = nil
 	c.BaseBranch = "main"
+	c.Progress = &ProgressRecorder{}
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
-	captureStdout(t, func() { s.Settle(dispatch.NewFake(), issNum, 0, result) })
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
 	iss, _ := fc.Issue(issNum)
 	if !containsLabel(iss.Labels, "agent-in-progress") {

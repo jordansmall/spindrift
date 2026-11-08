@@ -22,6 +22,9 @@ const (
 	shapeForgejo                 // forgejo's tracker (no LandingRecorder) over a PR forge
 	shapeLocalPR                 // local's tracker (LandingRecorder) paired with a PR forge
 	shapeReadOnly                // the bare tracker over a read-only Box's PR forge, which relays a bundle in
+
+	shapeGithubReadOnly // github's tracker (no LandingRecorder) over a read-only Box's PR forge, so its PRs carry a Closes reference
+	shapeLocalReadOnly  // local's tracker over a read-only Box's PR forge
 )
 
 func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
@@ -30,6 +33,10 @@ func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 		return fc.AsForgejoShaped(), fc
 	case shapeLocalPR:
 		return fc.AsLocalShaped(), fc
+	case shapeGithubReadOnly:
+		return fc.AsNoLandingRecorder(), fc.AsGithubReadOnly()
+	case shapeLocalReadOnly:
+		return fc.AsLocalShaped(), fc.AsGithubReadOnly()
 	case shapeReadOnly:
 		return fc, fc.AsGithubReadOnly()
 	}
@@ -83,7 +90,9 @@ type prCase struct {
 	wantRebases    int      // Rebase calls on the forge
 	wantStderr     []string // substring each of stderr must hold; non-nil empty means silent; stderr uncaptured when nil
 	wantNoStderr   []string // substring stderr must not hold
-	wantErr        error    // the error an entryRelayed Recover returns, matched by errors.Is; nil means none
+	wantErr        []error  // an entryRelayed Recover's error must wrap each of these; nil error otherwise
+	wantNoErr      []error  // an entryRelayed Recover's error must wrap none of these
+	wantClosed     []string // MergeCloser's CloseMergedIssueCalls; unchecked when nil, non-nil empty means none
 	wantStepsLike  []Step   // steps by Key, Landing, Status and a Detail substring
 }
 
@@ -281,6 +290,9 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, relayCases()...)
 	cases = append(cases, draftPRCases()...)
 	cases = append(cases, bundleCases()...)
+	cases = append(cases, adoptCases()...)
+	cases = append(cases, closeCases()...)
+	cases = append(cases, entryCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -360,8 +372,18 @@ func TestSettle_PRLander(t *testing.T) {
 				case entryRelayed:
 					st, err := s.Recover(RecoverInput{Num: "1", Resolved: result.Resolved, Passes: result.Passes, Begin: begin})
 					got = st
-					if !errors.Is(err, tc.wantErr) {
-						t.Errorf("Recover err = %v, want %v", err, tc.wantErr)
+					if (err != nil) != (len(tc.wantErr) > 0) {
+						t.Errorf("Recover err = %v; want wrapping %v", err, tc.wantErr)
+					}
+					for _, w := range tc.wantErr {
+						if !errors.Is(err, w) {
+							t.Errorf("Recover err = %v, want it to wrap %v", err, w)
+						}
+					}
+					for _, w := range tc.wantNoErr {
+						if errors.Is(err, w) {
+							t.Errorf("Recover err = %v, want it free of %v", err, w)
+						}
 					}
 				default:
 					got = s.Settle(d, "1", gen, result)
@@ -440,6 +462,9 @@ func TestSettle_PRLander(t *testing.T) {
 					t.Errorf("issue must not carry %s; labels=%v", l, iss.Labels)
 				}
 			}
+			if tc.wantClosed != nil && !slices.Equal(fc.CloseMergedIssueCalls, tc.wantClosed) {
+				t.Errorf("CloseMergedIssueCalls = %v, want %v", fc.CloseMergedIssueCalls, tc.wantClosed)
+			}
 			if fc.Merged != tc.wantMerged {
 				t.Errorf("fc.Merged = %q, want %q", fc.Merged, tc.wantMerged)
 			}
@@ -482,4 +507,18 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recoverOpenPR settles num's already-discovered open PR through Recover with
+// d as the claimed Dispatch, the way spindrift recover reaches the adopt gate.
+func recoverOpenPR(t *testing.T, s *Settle, d dispatch.Dispatcher, num, prURL string) Settlement {
+	t.Helper()
+	st, err := s.Recover(RecoverInput{
+		Num: num, OpenPR: prURL,
+		Begin: func() (dispatch.Dispatcher, error) { return d, nil },
+	})
+	if err != nil {
+		t.Fatalf("Recover err = %v, want nil", err)
+	}
+	return st
 }
