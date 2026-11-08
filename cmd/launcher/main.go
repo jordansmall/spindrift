@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +33,6 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -241,110 +239,6 @@ type issue struct {
 // fields (issue #2925).
 func newIssue(fi forge.Issue) issue {
 	return issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
-}
-
-// atoi parses a positive integer; zero and negatives fall back to def.
-// Use this for values where zero would cause a bug (e.g. semaphore capacity).
-func atoi(s string, def int) int {
-	if n, err := strconv.Atoi(s); err == nil && n > 0 {
-		return n
-	}
-	return def
-}
-
-// atoiNonneg parses a non-negative integer; negatives fall back to def.
-// Use this for values where zero is valid (e.g. timeouts, poll intervals).
-func atoiNonneg(s string, def int) int {
-	if n, err := strconv.Atoi(s); err == nil && n >= 0 {
-		return n
-	}
-	return def
-}
-
-// schemaDefault returns key's resolved default: the loaded Launcher input
-// document's settings value (ADR 0020) when --input loaded one carrying key,
-// else the generated inputdoc.SchemaFlags table, or "" when the knob has none. Every
-// getenvSchema/atoiSchema/atoiNonnegSchema call resolves through this, so
-// document precedence applies to all of them (issue #625).
-func schemaDefault(key string) string {
-	if loadedDoc != nil {
-		if v, ok := loadedDoc.Settings[key]; ok {
-			return v
-		}
-	}
-	return inputdoc.SchemaDefault(key)
-}
-
-// intSchemaDefault parses key's schema default as an int; a non-numeric or
-// absent default parses to 0.
-func intSchemaDefault(key string) int {
-	n, _ := strconv.Atoi(schemaDefault(key))
-	return n
-}
-
-// ambientSetting reports key's ambient env value and whether it counts as
-// set: non-empty, or set-but-empty when inputdoc.FlagEntry.EmptyIsSetting says so.
-func ambientSetting(key string) (string, bool) {
-	v, ok := os.LookupEnv(key)
-	e, _ := inputdoc.SchemaFlag(key)
-	return v, ok && (v != "" || e.EmptyIsSetting())
-}
-
-// getenvSchema reads key from the environment, falling back to its schema
-// default instead of a hand-written literal. An empty value counts as set only
-// per ambientSetting.
-func getenvSchema(key string) string {
-	if v, ok := ambientSetting(key); ok {
-		return v
-	}
-	return schemaDefault(key)
-}
-
-// atoiSchema parses key's env value as a positive integer (see atoi),
-// falling back to its schema default instead of a literal.
-func atoiSchema(key string) int {
-	return atoi(os.Getenv(key), intSchemaDefault(key))
-}
-
-// atoiNonnegSchema parses key's env value as a non-negative integer (see
-// atoiNonneg), falling back to its schema default instead of a literal.
-func atoiNonnegSchema(key string) int {
-	return atoiNonneg(os.Getenv(key), intSchemaDefault(key))
-}
-
-// floatSchemaDefault parses key's schema default as a float64; a
-// non-numeric or absent default parses to 0.
-func floatSchemaDefault(key string) float64 {
-	n, _ := strconv.ParseFloat(schemaDefault(key), 64)
-	return n
-}
-
-// floatNonnegSchema parses key's env value as a non-negative finite float64
-// (the USD-budget counterpart to atoiNonnegSchema), falling back to its schema
-// default; a negative, infinite, or unparseable value also falls back to the
-// default. It shares the Box's parser so host and Box agree on what is valid.
-func floatNonnegSchema(key string) float64 {
-	if n, ok := promptassembly.ParseNonnegBudgetUSD(os.Getenv(key)); ok {
-		return n
-	}
-	return floatSchemaDefault(key)
-}
-
-// hostGitConfigField resolves a schema member carrying a hostGitConfigKey via
-// the normal document/flag/env chain, falling back to the host git config when
-// none of those supply a value. The wrapper exports no knob env at all (ADR
-// 0020), so this fallback has to live in process. The schema row's
-// hostGitConfigKey is the one place the key lives, so the launcher's startup
-// snapshot (which the Box env reuses) reads the same keys (issues #5329,
-// #5333).
-func hostGitConfigField(env string) string {
-	if v := getenvSchema(env); v != "" {
-		return v
-	}
-	if e, ok := inputdoc.SchemaFlag(env); ok && e.HostGitConfigKey != "" {
-		return gitConfigLookup(e.HostGitConfigKey)
-	}
-	return ""
 }
 
 func loadConfig() config {
@@ -851,16 +745,17 @@ func retryPolicy(c config) retry.Policy {
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.CodeForge, c.IssueTracker)
 	presence := resolveAgentPresenceSignals(c.driver)
-	reviewModel := os.Getenv("REVIEW_MODEL")
+	reviewModel, _ := launcherInput.Flag("REVIEW_MODEL")
+	reviewEffort, _ := launcherInput.Flag("REVIEW_EFFORT")
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
 		ResolveEnv: boxTokenResolver(hostGitConfigResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
-		// Raw os.Getenv, not getenvSchema (issue #3171): these two carry only
+		// The explicit flag only, not getenvSchema (issue #3171): these two carry only
 		// what the operator set at dispatch time. The document/schema-default
 		// chain must stay out, since those values already reached the baked
 		// roster at eval time and re-forwarding them would override it.
 		ReviewModelOverride:      reviewModel,
-		ReviewEffortOverride:     os.Getenv("REVIEW_EFFORT"),
+		ReviewEffortOverride:     reviewEffort,
 		Kind:                     c.kind().Name,
 		SelfContained:            c.selfContained,
 		ForgeDescriptor:          caps.ForgeDescriptor,
@@ -2338,8 +2233,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
-	// Before parseFlags, which Setenv's every flag: a flag-set value must not
-	// look ambient. Ahead of help so a stray knob stops --help too (ADR 0020).
+	// Ahead of help so a stray knob stops --help too (ADR 0020); Resolve
+	// repeats the check for the verbs.
 	if err := ambientKnobEnvError(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return int(exitcode.ConfigInvalid)
@@ -2357,7 +2252,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	args, err := parseFlags(argv)
+	args, schemaArgs, err := parseFlags(argv)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
@@ -2376,8 +2271,17 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 		loadedDoc = doc
 	}
-	// Runs after loadedDoc is in place: CODE_FORGE and ISSUE_TRACKER may be set
-	// through the document alone.
+	resolved, err := inputdoc.Resolve(schemaArgs, loadedDoc, processEnv())
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		if errors.Is(err, inputdoc.ErrConfigInvalid) {
+			return int(exitcode.ConfigInvalid)
+		}
+		return 1
+	}
+	launcherInput = resolved
+	// Runs after launcherInput is in place: CODE_FORGE and ISSUE_TRACKER may be
+	// set through the document alone.
 	if err := applySecretCmdFallback(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1

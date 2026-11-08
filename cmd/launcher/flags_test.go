@@ -180,35 +180,34 @@ func TestExtractInputFlag_MissingValue(t *testing.T) {
 }
 
 func TestParseFlags_SetEnv(t *testing.T) {
-	t.Setenv("ISSUE_NUMBER", "")
-	remaining, err := parseFlagsT(t, []string{"--issue-number", "215"})
+	remaining, err := parseResolved(t, []string{"--issue-number", "215"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(remaining) != 0 {
 		t.Errorf("expected no remaining args, got %v", remaining)
 	}
-	if got := os.Getenv("ISSUE_NUMBER"); got != "215" {
+	if got := getenvSchema("ISSUE_NUMBER"); got != "215" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q", got, "215")
 	}
 }
 
-func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
-	t.Setenv("ISSUE_NUMBER", "1")
-	_, err := parseFlagsT(t, []string{"--issue-number", "999"})
+func TestParseFlags_FlagWinsOverDocument(t *testing.T) {
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"ISSUE_NUMBER": "1"}})
+	_, err := parseResolved(t, []string{"--issue-number", "999"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := os.Getenv("ISSUE_NUMBER"); got != "999" {
-		t.Errorf("ISSUE_NUMBER = %q, want %q (flag must win over env)", got, "999")
+	if got := getenvSchema("ISSUE_NUMBER"); got != "999" {
+		t.Errorf("ISSUE_NUMBER = %q, want %q (flag must win over the document)", got, "999")
 	}
 }
 
 // An explicit empty --merge-guard-paths disables the guard (#5077): it must
 // resolve to "" through the real schema table, not collapse into the default.
 func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
-	t.Setenv("MERGE_GUARD_PATHS", "foo/**")
-	if _, err := parseFlagsT(t, []string{"--merge-guard-paths", ""}); err != nil {
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"MERGE_GUARD_PATHS": "foo/**"}})
+	if _, err := parseResolved(t, []string{"--merge-guard-paths", ""}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := loadConfig().MergeGuardPaths; got != "" {
@@ -216,37 +215,26 @@ func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
 	}
 }
 
-func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
-	t.Setenv("REPO_SLUG", "env-org/env-repo")
-	_, err := parseFlagsT(t, []string{"--repo-slug", "flag-org/flag-repo"})
+func TestParseFlags_RepoSlugFlagWinsOverDocument(t *testing.T) {
+	useDoc(t, &inputdoc.Document{Settings: map[string]string{"REPO_SLUG": "doc-org/doc-repo"}})
+	_, err := parseResolved(t, []string{"--repo-slug", "flag-org/flag-repo"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := os.Getenv("REPO_SLUG"); got != "flag-org/flag-repo" {
-		t.Errorf("REPO_SLUG = %q, want %q (flag must win over env)", got, "flag-org/flag-repo")
-	}
-}
-
-func TestParseFlags_EnvFallback(t *testing.T) {
-	t.Setenv("MAX_JOBS", "7")
-	_, err := parseFlagsT(t, []string{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := os.Getenv("MAX_JOBS"); got != "7" {
-		t.Errorf("MAX_JOBS = %q, want %q (env must survive when no flag given)", got, "7")
+	if got := getenvSchema("REPO_SLUG"); got != "flag-org/flag-repo" {
+		t.Errorf("REPO_SLUG = %q, want %q (flag must win over the document)", got, "flag-org/flag-repo")
 	}
 }
 
 func TestParseFlags_UnknownFlag(t *testing.T) {
-	_, err := parseFlagsT(t, []string{"--not-a-schema-flag", "value"})
+	_, err := parseResolved(t, []string{"--not-a-schema-flag", "value"})
 	if err == nil {
 		t.Fatal("expected error for unknown flag, got nil")
 	}
 }
 
 func TestParseFlags_PassthroughPositional(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"build", "--max-jobs", "2", "extra"})
+	remaining, err := parseResolved(t, []string{"build", "--max-jobs", "2", "extra"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -256,7 +244,7 @@ func TestParseFlags_PassthroughPositional(t *testing.T) {
 }
 
 func TestParseFlags_DoubleDash(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"--", "--not-parsed"})
+	remaining, err := parseResolved(t, []string{"--", "--not-parsed"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,7 +254,7 @@ func TestParseFlags_DoubleDash(t *testing.T) {
 }
 
 func TestParseFlags_MissingValue(t *testing.T) {
-	_, err := parseFlagsT(t, []string{"--issue-number"})
+	_, err := parseResolved(t, []string{"--issue-number"})
 	if err == nil {
 		t.Fatal("expected error when flag value is missing, got nil")
 	}
@@ -276,7 +264,7 @@ func TestParseFlags_MissingValue(t *testing.T) {
 // (issue #3777); without a passthrough entry parseFlags would reject it as
 // an unknown flag before the doctor verb handler ever sees it.
 func TestParseFlags_VerbosePassesThrough(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"doctor", "--verbose"})
+	remaining, err := parseResolved(t, []string{"doctor", "--verbose"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,7 +278,7 @@ func TestParseFlags_VerbosePassesThrough(t *testing.T) {
 // parseFlags would reject it as an unknown flag before the doctor verb
 // handler ever sees it.
 func TestParseFlags_ButlerPassesThrough(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"doctor", "--butler"})
+	remaining, err := parseResolved(t, []string{"doctor", "--butler"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +290,7 @@ func TestParseFlags_ButlerPassesThrough(t *testing.T) {
 // --verbose and --butler are independent doctor flags, so both must survive
 // the global flag pass together, in either order.
 func TestParseFlags_VerboseAndButlerPassThrough(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"doctor", "--verbose", "--butler"})
+	remaining, err := parseResolved(t, []string{"doctor", "--verbose", "--butler"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -326,9 +314,9 @@ func TestParseFlags_ButlerRejectedUnlessAfterDoctor(t *testing.T) {
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			_, err := parseFlagsT(t, args)
+			_, err := parseResolved(t, args)
 			if err == nil || !strings.Contains(err.Error(), "unknown flag: --butler") {
-				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --butler", args, err)
+				t.Errorf("parseResolved(t, %v) err = %v, want unknown flag: --butler", args, err)
 			}
 		})
 	}
@@ -349,9 +337,9 @@ func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			_, err := parseFlagsT(t, args)
+			_, err := parseResolved(t, args)
 			if err == nil || !strings.Contains(err.Error(), "unknown flag: --verbose") {
-				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --verbose", args, err)
+				t.Errorf("parseResolved(t, %v) err = %v, want unknown flag: --verbose", args, err)
 			}
 		})
 	}
@@ -361,7 +349,7 @@ func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
 // confuse the --verbose verb guard into reading remaining[0] as the verb
 // (issue #3777).
 func TestParseFlags_VerboseAfterLeadingDispatchFlag(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"--no-build", "doctor", "--verbose"})
+	remaining, err := parseResolved(t, []string{"--no-build", "doctor", "--verbose"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -428,16 +416,14 @@ func TestParseFlags_SecretsExcluded(t *testing.T) {
 }
 
 func TestParseFlags_MultipleFlags(t *testing.T) {
-	t.Setenv("ISSUE_NUMBER", "")
-	t.Setenv("MAX_JOBS", "")
-	_, err := parseFlagsT(t, []string{"--issue-number", "215", "--max-jobs", "1"})
+	_, err := parseResolved(t, []string{"--issue-number", "215", "--max-jobs", "1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := os.Getenv("ISSUE_NUMBER"); got != "215" {
+	if got := getenvSchema("ISSUE_NUMBER"); got != "215" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q", got, "215")
 	}
-	if got := os.Getenv("MAX_JOBS"); got != "1" {
+	if got := getenvSchema("MAX_JOBS"); got != "1" {
 		t.Errorf("MAX_JOBS = %q, want %q", got, "1")
 	}
 }
@@ -445,12 +431,11 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 // A bare bool-kind flag sets its env var to "1" and does not consume the
 // next arg (issue #2145 slice B).
 func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
-	t.Setenv("BWRAP_UNSHARE_NET", "")
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--bwrap-unshare-net"})
+	remaining, err := parseResolved(t, []string{"dispatch", "--bwrap-unshare-net"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := os.Getenv("BWRAP_UNSHARE_NET"); got != "1" {
+	if got := getenvSchema("BWRAP_UNSHARE_NET"); got != "1" {
 		t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, "1")
 	}
 	if len(remaining) != 1 || remaining[0] != "dispatch" {
@@ -476,12 +461,11 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.arg, func(t *testing.T) {
-			t.Setenv("BWRAP_UNSHARE_NET", "")
-			_, err := parseFlagsT(t, []string{c.arg})
+			_, err := parseResolved(t, []string{c.arg})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got := os.Getenv("BWRAP_UNSHARE_NET"); got != c.want {
+			if got := getenvSchema("BWRAP_UNSHARE_NET"); got != c.want {
 				t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, c.want)
 			}
 		})
@@ -489,7 +473,7 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 }
 
 // A value ParseBool rejects is an error naming the typed flag, not a silent
-// "on"; the env var is left untouched.
+// "on"; the knob stays unset.
 func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
 	cases := []struct{ arg, env, wantErr string }{
 		{"--bwrap-unshare-net=no", "BWRAP_UNSHARE_NET", `flag --bwrap-unshare-net: invalid boolean value "no"`},
@@ -498,13 +482,12 @@ func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.arg, func(t *testing.T) {
-			t.Setenv(c.env, "keep")
-			_, err := parseFlagsT(t, []string{c.arg})
+			_, err := parseResolved(t, []string{c.arg})
 			if err == nil || err.Error() != c.wantErr {
 				t.Fatalf("err = %v, want %q", err, c.wantErr)
 			}
-			if got := os.Getenv(c.env); got != "keep" {
-				t.Errorf("%s = %q, want it unchanged", c.env, got)
+			if got := getenvSchema(c.env); got != "" {
+				t.Errorf("%s = %q, want it unset", c.env, got)
 			}
 		})
 	}
@@ -513,12 +496,11 @@ func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
 // A token following a bare bool-kind flag is never swallowed as its value.
 // It survives as a normal positional arg (issue #2145 slice B).
 func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
-	t.Setenv("BWRAP_UNSHARE_NET", "")
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--bwrap-unshare-net", "1"})
+	remaining, err := parseResolved(t, []string{"dispatch", "--bwrap-unshare-net", "1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := os.Getenv("BWRAP_UNSHARE_NET"); got != "1" {
+	if got := getenvSchema("BWRAP_UNSHARE_NET"); got != "1" {
 		t.Errorf("BWRAP_UNSHARE_NET = %q, want %q", got, "1")
 	}
 	found := false
@@ -529,24 +511,6 @@ func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("remaining = %v, want it to contain %q (must not be swallowed as flag value)", remaining, "1")
-	}
-}
-
-// An explicit off form clears an already-set env var rather than leaving the
-// ambient "1" in place, because flag-over-env precedence applies to the off
-// case too (ADR 0020; issue #2145 slice B).
-func TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient(t *testing.T) {
-	for _, arg := range []string{"--bwrap-unshare-net=0", "--bwrap-unshare-net=false", "--bwrap-unshare-net="} {
-		t.Run(arg, func(t *testing.T) {
-			t.Setenv("BWRAP_UNSHARE_NET", "1")
-			_, err := parseFlagsT(t, []string{arg})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got := os.Getenv("BWRAP_UNSHARE_NET"); got != "" {
-				t.Errorf("BWRAP_UNSHARE_NET = %q, want empty (explicit off must override ambient env)", got)
-			}
-		})
 	}
 }
 
@@ -641,12 +605,11 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 // sets CONTINUOUS_DISPATCH directly instead of passing it through to the
 // verb handler for hand-rolled extraction (issues #2033 and #2147).
 func TestParseFlags_ContinuousAlias(t *testing.T) {
-	t.Setenv("CONTINUOUS_DISPATCH", "")
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--continuous"})
+	remaining, err := parseResolved(t, []string{"dispatch", "--continuous"})
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous: unexpected error: %v", err)
 	}
-	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 	if len(remaining) != 1 || remaining[0] != "dispatch" {
@@ -655,12 +618,11 @@ func TestParseFlags_ContinuousAlias(t *testing.T) {
 }
 
 func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
-	t.Setenv("CONTINUOUS_DISPATCH", "")
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--continuous-dispatch"})
+	remaining, err := parseResolved(t, []string{"dispatch", "--continuous-dispatch"})
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous-dispatch: unexpected error: %v", err)
 	}
-	if got := os.Getenv("CONTINUOUS_DISPATCH"); got != "1" {
+	if got := getenvSchema("CONTINUOUS_DISPATCH"); got != "1" {
 		t.Errorf("CONTINUOUS_DISPATCH = %q, want %q", got, "1")
 	}
 	if len(remaining) != 1 || remaining[0] != "dispatch" {
@@ -812,15 +774,14 @@ func TestGroupOrder_CoversEverySchemaGroup(t *testing.T) {
 }
 
 func TestParseFlags_AliasSetEnv(t *testing.T) {
-	t.Setenv("ISSUE_NUMBER", "")
-	remaining, err := parseFlagsT(t, []string{"--issue", "42"})
+	remaining, err := parseResolved(t, []string{"--issue", "42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(remaining) != 0 {
 		t.Errorf("expected no remaining args, got %v", remaining)
 	}
-	if got := os.Getenv("ISSUE_NUMBER"); got != "42" {
+	if got := getenvSchema("ISSUE_NUMBER"); got != "42" {
 		t.Errorf("ISSUE_NUMBER = %q, want %q (alias must set same env var)", got, "42")
 	}
 }
@@ -830,29 +791,26 @@ func TestParseFlags_AliasSetEnv(t *testing.T) {
 // presence-style bool knob.
 func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	// --merge-mode is the deprecated name of the canonical --merge-policy.
-	t.Setenv("MERGE_MODE", "")
-	if _, err := parseFlagsT(t, []string{"--merge-mode", "auto"}); err != nil {
+	if _, err := parseResolved(t, []string{"--merge-mode", "auto"}); err != nil {
 		t.Fatalf("parseFlags --merge-mode: %v", err)
 	}
-	if got := os.Getenv("MERGE_MODE"); got != "auto" {
+	if got := getenvSchema("MERGE_MODE"); got != "auto" {
 		t.Errorf("MERGE_MODE = %q, want %q (deprecated alias must set same env var)", got, "auto")
 	}
 	// --local-issue-reference is the deprecated name of --local-reference.
-	t.Setenv("LOCAL_ISSUE_REFERENCE", "")
-	if _, err := parseFlagsT(t, []string{"--local-issue-reference"}); err != nil {
+	if _, err := parseResolved(t, []string{"--local-issue-reference"}); err != nil {
 		t.Fatalf("parseFlags --local-issue-reference: %v", err)
 	}
-	if got := os.Getenv("LOCAL_ISSUE_REFERENCE"); got != "1" {
+	if got := getenvSchema("LOCAL_ISSUE_REFERENCE"); got != "1" {
 		t.Errorf("LOCAL_ISSUE_REFERENCE = %q, want %q", got, "1")
 	}
 }
 
 func TestParseFlags_NewCanonicalFlagResolves(t *testing.T) {
-	t.Setenv("MERGE_MODE", "")
-	if _, err := parseFlagsT(t, []string{"--merge-policy", "immediate"}); err != nil {
+	if _, err := parseResolved(t, []string{"--merge-policy", "immediate"}); err != nil {
 		t.Fatalf("parseFlags --merge-policy: %v", err)
 	}
-	if got := os.Getenv("MERGE_MODE"); got != "immediate" {
+	if got := getenvSchema("MERGE_MODE"); got != "immediate" {
 		t.Errorf("MERGE_MODE = %q, want %q", got, "immediate")
 	}
 }
@@ -881,7 +839,7 @@ func TestParseFlags_FileFlag_ReadsToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
+	_, _, err := parseFlags([]string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -896,7 +854,7 @@ func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "env-value")
-	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
+	_, _, err := parseFlags([]string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -906,7 +864,7 @@ func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
 }
 
 func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
-	_, err := parseFlagsT(t, []string{"--gh-token-file", "/nonexistent/path/token.txt"})
+	_, _, err := parseFlags([]string{"--gh-token-file", "/nonexistent/path/token.txt"})
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -916,7 +874,7 @@ func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
 }
 
 func TestParseFlags_FileFlag_MissingValue(t *testing.T) {
-	_, err := parseFlagsT(t, []string{"--gh-token-file"})
+	_, _, err := parseFlags([]string{"--gh-token-file"})
 	if err == nil {
 		t.Fatal("expected error when file flag has no path argument, got nil")
 	}
@@ -940,7 +898,7 @@ func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
+	_, _, err := parseFlags([]string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -959,7 +917,7 @@ func TestParseFlags_CmdFlag_RunsCommand(t *testing.T) {
 		return "cmd-value\n", nil
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "rbw get spindrift-pat"})
+	_, _, err := parseFlags([]string{"--gh-token-cmd", "rbw get spindrift-pat"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -979,7 +937,7 @@ func TestParseFlags_CmdEnv_RunsCommand(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "rbw get spindrift-pat")
-	_, err := parseFlagsT(t, nil)
+	_, _, err := parseFlags(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1003,7 +961,7 @@ func TestParseFlags_CmdFlag_WinsOverCmdEnv(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "env-cmd")
-	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "flag-cmd"})
+	_, _, err := parseFlags([]string{"--gh-token-cmd", "flag-cmd"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1024,7 +982,7 @@ func TestParseFlags_CmdEnv_WinsOverFileFlag(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "env-cmd")
-	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
+	_, _, err := parseFlags([]string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1045,7 +1003,7 @@ func TestParseFlags_CmdFlagAndFileFlag_IsConfigError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "some-cmd", "--gh-token-file", tokenFile})
+	_, _, err := parseFlags([]string{"--gh-token-cmd", "some-cmd", "--gh-token-file", tokenFile})
 	if err == nil {
 		t.Fatal("expected error when both --gh-token-cmd and --gh-token-file are supplied, got nil")
 	}
@@ -1061,7 +1019,7 @@ func TestParseFlags_CmdFlag_EmptyOutputIsError(t *testing.T) {
 		return "", nil
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "some-cmd"})
+	_, _, err := parseFlags([]string{"--gh-token-cmd", "some-cmd"})
 	if err == nil {
 		t.Fatal("expected error for empty command output, got nil")
 	}
@@ -1077,7 +1035,7 @@ func TestParseFlags_CmdFlag_NonZeroExitIsError(t *testing.T) {
 		return "partial-secret-leak", errors.New("exit status 1")
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "some-cmd"})
+	_, _, err := parseFlags([]string{"--gh-token-cmd", "some-cmd"})
 	if err == nil {
 		t.Fatal("expected error for a failing command, got nil")
 	}
@@ -1189,7 +1147,7 @@ func TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode(t *testing.T) {
 }
 
 func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
-	_, err := parseFlagsT(t, []string{"--gh-token-cmd"})
+	_, _, err := parseFlags([]string{"--gh-token-cmd"})
 	if err == nil {
 		t.Fatal("expected error when cmd flag has no command argument, got nil")
 	}
@@ -1212,11 +1170,10 @@ func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
 
 // resolveGlobalSecretCmd runs the same two-step sequence main() runs.
 // applySecretCmdFallback must run after loadedDoc is in place, so it is not
-// folded into parseFlags. Callers that need a document must set loadedDoc,
-// and t.Cleanup it back to nil, before calling this.
+// folded into parseFlags. Callers that need a document must useDoc it first.
 func resolveGlobalSecretCmd(t *testing.T, args []string) error {
 	t.Helper()
-	if _, err := parseFlagsT(t, args); err != nil {
+	if _, err := parseResolved(t, args); err != nil {
 		return err
 	}
 	return applySecretCmdFallback()
@@ -1241,8 +1198,6 @@ func TestParseFlags_GlobalSecretCmd_RunsTemplate(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "existing-value")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("JIRA_TOKEN", "")
-	t.Setenv("ISSUE_TRACKER", "")
-	t.Setenv("CODE_FORGE", "")
 	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1391,7 +1346,7 @@ func TestParseFlags_GlobalSecretCmd_SkipsJiraWhenTrackerNotJira(t *testing.T) {
 		return "value", nil
 	}
 	t.Setenv("JIRA_TOKEN", "")
-	t.Setenv("ISSUE_TRACKER", "github")
+	setKnob(t, "ISSUE_TRACKER", "github")
 	t.Setenv("GH_TOKEN", "already-set")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
 	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
@@ -1412,7 +1367,7 @@ func TestParseFlags_GlobalSecretCmd_AppliesToJiraWhenTrackerIsJira(t *testing.T)
 		return "value", nil
 	}
 	t.Setenv("JIRA_TOKEN", "")
-	t.Setenv("ISSUE_TRACKER", "jira")
+	setKnob(t, "ISSUE_TRACKER", "jira")
 	t.Setenv("GH_TOKEN", "already-set")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
 	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
@@ -1489,11 +1444,10 @@ func TestParseFlags_GlobalSecretCmd_RequirednessKeysOffTokenEnvVar(t *testing.T)
 				return "value", nil
 			}
 			t.Setenv(tc.secretEnv, "")
-			t.Setenv("CODE_FORGE", "")
 			t.Setenv("GH_TOKEN", "already-set")
 			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
 			for k, v := range tc.env {
-				t.Setenv(k, v)
+				setKnob(t, k, v)
 			}
 			if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -1522,7 +1476,6 @@ func TestApplySecretCmdFallback_UsesDocumentSettings(t *testing.T) {
 		return "value", nil
 	}
 	t.Setenv("JIRA_TOKEN", "")
-	t.Setenv("ISSUE_TRACKER", "")
 	t.Setenv("GH_TOKEN", "already-set")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
 	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
@@ -1554,8 +1507,6 @@ func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.
 		return "value", nil
 	}
 	t.Setenv("GH_TOKEN", "")
-	t.Setenv("CODE_FORGE", "")
-	t.Setenv("ISSUE_TRACKER", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "already-set")
 	if err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1583,8 +1534,8 @@ func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
 		{"local forge, github tracker", "local", "github", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("CODE_FORGE", tc.forge)
-			t.Setenv("ISSUE_TRACKER", tc.tracker)
+			setKnob(t, "CODE_FORGE", tc.forge)
+			setKnob(t, "ISSUE_TRACKER", tc.tracker)
 			if got := secretRequiredThisRun("GH_TOKEN", nil); got != tc.want {
 				t.Errorf("secretRequiredThisRun(GH_TOKEN) with %s/%s = %v, want %v", tc.forge, tc.tracker, got, tc.want)
 			}
@@ -1610,8 +1561,8 @@ func TestSecretRequiredThisRun_NovelRowTokenFollowsSelection(t *testing.T) {
 		{"not selected", "github", "github", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("CODE_FORGE", tc.forge)
-			t.Setenv("ISSUE_TRACKER", tc.tracker)
+			setKnob(t, "CODE_FORGE", tc.forge)
+			setKnob(t, "ISSUE_TRACKER", tc.tracker)
 			if got := secretRequiredThisRun("NOVEL_FORGE_TOKEN", nil); got != tc.want {
 				t.Errorf("secretRequiredThisRun(NOVEL_FORGE_TOKEN) with %s/%s = %v, want %v", tc.forge, tc.tracker, got, tc.want)
 			}
@@ -1839,14 +1790,14 @@ func TestApplySecretCmdFallback_DriverCredentials(t *testing.T) {
 			t.Setenv("OPENCODE_AUTH_CONTENT", "")
 			t.Setenv("GH_TOKEN", "already-set")
 			t.Setenv("DRIVER", tc.driver)
-			t.Setenv("MODEL", tc.model)
+			setKnob(t, "MODEL", tc.model)
 			// Pin every tier so schema defaults never decide the verdict.
 			for _, tier := range []string{"REVIEW_MODEL", "WORKER_MODEL", "SCOUT_MODEL", "FILER_MODEL"} {
 				v, ok := tc.tiers[tier]
 				if !ok {
 					v = "anthropic/claude-sonnet-5"
 				}
-				t.Setenv(tier, v)
+				setKnob(t, tier, v)
 			}
 			if tc.docDriver != "" {
 				setArtifact(t, "DRIVER", tc.docDriver)
@@ -1943,14 +1894,14 @@ func TestApplySecretCmdFallback_PiProviderKeys(t *testing.T) {
 			}
 			t.Setenv("GH_TOKEN", "already-set")
 			t.Setenv("DRIVER", "pi")
-			t.Setenv("MODEL", tc.model)
+			setKnob(t, "MODEL", tc.model)
 			review := tc.reviewModel
 			if review == "" {
 				review = tc.model
 			}
-			t.Setenv("REVIEW_MODEL", review)
+			setKnob(t, "REVIEW_MODEL", review)
 			for _, tier := range []string{"WORKER_MODEL", "SCOUT_MODEL", "FILER_MODEL"} {
-				t.Setenv(tier, tc.model)
+				setKnob(t, tier, tc.model)
 			}
 			err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", "rbw get spindrift-{name}"})
 			if (err != nil) != (len(tc.wantErrNaming) > 0) {
@@ -1997,7 +1948,7 @@ func TestParseFlags_GlobalSecretCmd_FailureIsError(t *testing.T) {
 }
 
 func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
-	_, err := parseFlagsT(t, []string{"--secret-cmd"})
+	_, _, err := parseFlags([]string{"--secret-cmd"})
 	if err == nil {
 		t.Fatal("expected error when --secret-cmd has no command argument, got nil")
 	}
@@ -2006,7 +1957,7 @@ func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
 func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
 	t.Setenv("GH_TOKEN", "direct-value")
 	t.Setenv("GH_TOKEN_CMD", "")
-	_, err := parseFlagsT(t, nil)
+	_, _, err := parseFlags(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2192,7 +2143,7 @@ func TestPrintHelpFull_ShowsGlobalSecretCmd(t *testing.T) {
 }
 
 func TestParseFlags_NoBuildPassthrough(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--no-build"})
+	remaining, _, err := parseFlags([]string{"dispatch", "--no-build"})
 	if err != nil {
 		t.Fatalf("parseFlags with --no-build: unexpected error: %v", err)
 	}
@@ -2202,7 +2153,7 @@ func TestParseFlags_NoBuildPassthrough(t *testing.T) {
 }
 
 func TestParseFlags_NoBuildWithIssue(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--no-build", "42"})
+	remaining, _, err := parseFlags([]string{"dispatch", "--no-build", "42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2302,7 +2253,7 @@ func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
 }
 
 func TestParseFlags_YesPassthrough(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--yes", "42"})
+	remaining, _, err := parseFlags([]string{"dispatch", "--yes", "42"})
 	if err != nil {
 		t.Fatalf("parseFlags with --yes: unexpected error: %v", err)
 	}
@@ -2312,7 +2263,7 @@ func TestParseFlags_YesPassthrough(t *testing.T) {
 }
 
 func TestParseFlags_ForcePassthrough(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"dispatch", "--force"})
+	remaining, _, err := parseFlags([]string{"dispatch", "--force"})
 	if err != nil {
 		t.Fatalf("parseFlags with --force: unexpected error: %v", err)
 	}
@@ -2458,7 +2409,7 @@ func TestSplitVerb(t *testing.T) {
 // parseButlerArgs sees it (issue #3795); without a cliFlags entry parseFlags
 // rejected it as an unknown flag.
 func TestParseFlags_ButlerChorePassesThroughWithValue(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"butler", "--chore", "bugs"})
+	remaining, _, err := parseFlags([]string{"butler", "--chore", "bugs"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2476,7 +2427,7 @@ func TestParseFlags_ChoreRejectedUnlessAfterButler(t *testing.T) {
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			_, err := parseFlagsT(t, args)
+			_, _, err := parseFlags(args)
 			if err == nil || !strings.Contains(err.Error(), "unknown flag: --chore") {
 				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --chore", args, err)
 			}
@@ -2500,7 +2451,7 @@ func TestParseFlags_HonoursEveryCliFlag(t *testing.T) {
 			if f.arg != "" {
 				args = append(args, "value")
 			}
-			remaining, err := parseFlagsT(t, args)
+			remaining, _, err := parseFlags(args)
 			if f.intercepted {
 				if err == nil || !strings.Contains(err.Error(), "unknown flag: --"+f.flag) {
 					t.Fatalf("parseFlags(%v) err = %v, want unknown flag", args, err)
@@ -2527,7 +2478,7 @@ func TestParseFlags_HonoursEveryCliFlag(t *testing.T) {
 // swallow it as a parsed flag.
 func TestParseFlags_RejectsHelpModifierAll(t *testing.T) {
 	for _, args := range [][]string{{"dispatch", "--all"}, {"--all"}} {
-		_, err := parseFlagsT(t, args)
+		_, _, err := parseFlags(args)
 		if err == nil || !strings.Contains(err.Error(), "unknown flag: --all") {
 			t.Errorf("parseFlags(%v) err = %v, want unknown flag: --all", args, err)
 		}
@@ -2617,7 +2568,7 @@ func TestMainRunIntercepts_MatchCliFlags(t *testing.T) {
 // --research reaches doctorFlagArgs through the global flag pass like
 // --butler (issue #4400).
 func TestDoctorFlagArgs_Research(t *testing.T) {
-	remaining, err := parseFlagsT(t, []string{"doctor", "--research"})
+	remaining, _, err := parseFlags([]string{"doctor", "--research"})
 	if err != nil {
 		t.Fatalf("parseFlags: %v", err)
 	}
@@ -2625,7 +2576,7 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 	if !ok || bad != "" || !opts.research || opts.butler {
 		t.Fatalf("doctorFlagArgs(--research) = (%+v, %q, %v), want research only", opts, bad, ok)
 	}
-	if _, err := parseFlagsT(t, []string{"dispatch", "--research"}); err == nil {
+	if _, _, err := parseFlags([]string{"dispatch", "--research"}); err == nil {
 		t.Errorf("parseFlags(dispatch --research) = nil error, want unknown flag")
 	}
 }
@@ -2634,14 +2585,14 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 // parser without swallowing the next argument.
 func TestParseFlags_VerbFlagEqualsFormPassesThrough(t *testing.T) {
 	args := []string{"stats", "--root=/a", "--include-inferred=false", "--since", "2026-10-07", "--json"}
-	remaining, err := parseFlagsT(t, args)
+	remaining, _, err := parseFlags(args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !slices.Equal(remaining, args) {
 		t.Errorf("remaining = %v, want %v", remaining, args)
 	}
-	if _, err := parseFlagsT(t, []string{"dispatch", "--root=/a"}); err == nil {
+	if _, _, err := parseFlags([]string{"dispatch", "--root=/a"}); err == nil {
 		t.Error("--root=/a after dispatch: want unknown flag error")
 	}
 }
@@ -2676,4 +2627,90 @@ func TestSubcommandUsage_UnknownNamePanics(t *testing.T) {
 		}
 	}()
 	subcommandUsage("no-such-verb")
+}
+
+// Schema flags are returned for Resolve, never written to the process
+// environment, and reach loadConfig and the Box env through launcherInput.
+func TestParseFlags_SchemaFlagReachesConfigWithoutTouchingEnv(t *testing.T) {
+	rest, schemaArgs, err := parseFlags([]string{"dispatch", "--max-jobs", "2", "--model", "flag-model", "--auto-format"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if want := []string{"dispatch"}; !slices.Equal(rest, want) {
+		t.Errorf("rest = %v, want %v", rest, want)
+	}
+	if want := []string{"--max-jobs", "2", "--model", "flag-model", "--auto-format"}; !slices.Equal(schemaArgs, want) {
+		t.Errorf("schemaArgs = %v, want %v", schemaArgs, want)
+	}
+	for _, name := range []string{"MAX_JOBS", "MODEL", "AUTO_FORMAT"} {
+		if v, ok := os.LookupEnv(name); ok {
+			t.Errorf("%s = %q in the process environment, want parseFlags to leave it alone", name, v)
+		}
+	}
+
+	if _, err := parseResolved(t, []string{"--max-jobs", "2", "--model", "flag-model"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadConfig().MaxJobs; got != 2 {
+		t.Errorf("loadConfig().MaxJobs = %d, want 2", got)
+	}
+	if got := resolveBoxEnvVar("MODEL"); got != "flag-model" {
+		t.Errorf("resolveBoxEnvVar(MODEL) = %q, want flag-model", got)
+	}
+}
+
+// A verb flag's value that spells a schema flag is that verb's argument: only
+// tokens parseFlags classified as schema flags reach Resolve (#6707).
+func TestParseFlags_VerbFlagValueSpellingSchemaFlagIsNotAKnob(t *testing.T) {
+	rest, schemaArgs, err := parseFlags([]string{"butler", "--chore", "--model", "x"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if want := []string{"butler", "--chore", "--model", "x"}; !slices.Equal(rest, want) {
+		t.Errorf("rest = %v, want %v (--model is --chore's value)", rest, want)
+	}
+	if len(schemaArgs) != 0 {
+		t.Errorf("schemaArgs = %v, want none", schemaArgs)
+	}
+	if _, err := parseResolved(t, []string{"butler", "--chore", "--model", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := getenvSchema("MODEL"), inputdoc.SchemaDefault("MODEL"); got != want {
+		t.Errorf("MODEL = %q, want the default %q", got, want)
+	}
+}
+
+// Tokens after "--" are verb arguments and never resolve as knobs (#6707).
+func TestParseFlags_TokensAfterDoubleDashNeverResolveAsKnobs(t *testing.T) {
+	rest, schemaArgs, err := parseFlags([]string{"dispatch", "--", "--model", "x"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if want := []string{"dispatch", "--model", "x"}; !slices.Equal(rest, want) {
+		t.Errorf("rest = %v, want %v", rest, want)
+	}
+	if len(schemaArgs) != 0 {
+		t.Errorf("schemaArgs = %v, want none", schemaArgs)
+	}
+}
+
+// A value flag with no following token is reported by the shared
+// inputdoc.CheckSchemaFlags scan; the error text is unchanged.
+func TestParseFlags_ValueFlag_MissingValueErrors(t *testing.T) {
+	_, err := parseResolved(t, []string{"dispatch", "--base-branch"})
+	if want := "flag --base-branch requires a value"; err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+// A malformed schema flag fails before the bare-invocation help path, so
+// `spindrift --continuous=no` exits 1 rather than printing help.
+func TestMainRun_BareInvalidBoolFlag_ErrorsBeforeHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := mainRunT(t, []string{"--continuous=no"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1; stdout=%q", code, stdout.String())
+	}
+	if want := `invalid boolean value "no"`; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr.String(), want)
+	}
 }

@@ -93,9 +93,6 @@ func setArtifact(t *testing.T, key, value string) {
 // MODEL reaches the Box with its baked value only through these fallbacks: the
 // document's settings first, then the schema default table.
 func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
-	t.Cleanup(func() { os.Unsetenv("MODEL") })
-	os.Unsetenv("MODEL")
-
 	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"MODEL": "from-settings"},
 	})
@@ -103,13 +100,12 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 		t.Errorf("MODEL = %q, want from-settings", got)
 	}
 
-	os.Setenv("MODEL", "from-env")
-	if got := resolveBoxEnvVar("MODEL"); got != "from-env" {
-		t.Errorf("MODEL = %q, want from-env (env beats document)", got)
+	setKnob(t, "MODEL", "from-flag")
+	if got := resolveBoxEnvVar("MODEL"); got != "from-flag" {
+		t.Errorf("MODEL = %q, want from-flag (flag beats document)", got)
 	}
 
 	useDoc(t, nil)
-	os.Unsetenv("MODEL")
 	if got := resolveBoxEnvVar("LABEL"); got != "ready-for-agent" {
 		t.Errorf("LABEL = %q, want ready-for-agent (schema default, no doc loaded)", got)
 	}
@@ -261,7 +257,7 @@ func unsetEnvForTest(t *testing.T, names ...string) {
 // per-dispatch resolver never reads it, whatever the name.
 func TestResolveBoxEnvVar_NeverReadsGitConfig(t *testing.T) {
 	useDoc(t, nil)
-	unsetEnvForTest(t, "GH_TOKEN", "BASE_BRANCH", "GIT_USER_NAME", "GIT_USER_EMAIL")
+	unsetEnvForTest(t, "GH_TOKEN")
 	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 
 	for _, name := range []string{"GH_TOKEN", "BASE_BRANCH", "GIT_USER_NAME", "GIT_USER_EMAIL"} {

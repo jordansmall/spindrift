@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/freshness"
-	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -159,34 +158,9 @@ func gitOutput(pwd string, args ...string) (string, error) {
 // streaming it (issue #765): a Bubble Tea alt-screen program owns stdout and
 // stderr during a background rebuild, and a direct writer corrupts its renders.
 //
-// parseFlags has Setenv'd every knob flag into this process, and a child
-// launcher exits config-invalid on any knob env var, so the knobs travel as
-// the equivalent flags instead.
+// A child launcher exits config-invalid on any knob env var, and knob flags
+// no longer live in this process's environment, so the knobs travel as the
+// equivalent flags.
 func consoleNixBuild(pwd string) (string, error) {
-	flags, env := knobsAsFlags(os.Environ())
-	return runner.RunNixBuild(pwd, flags, env)
-}
-
-// knobsAsFlags splits env into the entries that are not schema knobs and the
-// flags that restate the ones that are, so a child launcher sees the same
-// configuration without tripping ambientKnobEnvError. A launcherIgnores knob
-// is dropped: its flag is inert.
-func knobsAsFlags(env []string) (flags, rest []string) {
-	for _, kv := range env {
-		name, value, _ := strings.Cut(kv, "=")
-		e, ok := inputdoc.SchemaFlag(name)
-		if !ok {
-			rest = append(rest, kv)
-			continue
-		}
-		if e.LauncherIgnores || (value == "" && !e.EmptyIsSetting()) {
-			continue
-		}
-		if e.Kind == "bool" {
-			flags = append(flags, "--"+e.Flag+"="+value)
-		} else {
-			flags = append(flags, "--"+e.Flag, value)
-		}
-	}
-	return flags, rest
+	return runner.RunNixBuild(pwd, launcherInput.FlagArgs(), os.Environ())
 }

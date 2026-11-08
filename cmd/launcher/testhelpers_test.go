@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -218,20 +219,83 @@ func mustInitCheckout(t *testing.T, dir, branch string) {
 	testutil.GitRun(t, dir, "commit", "-m", "base")
 }
 
+// testFlagArgs is the explicit-flag tier a test built with setKnob: what a
+// command line would have carried. Resolve ranks it over the document and the
+// schema default, the tier the knob env vars used to occupy.
+var testFlagArgs []string
+
+// Re-resolves launcherInput from testFlagArgs and loadedDoc; every helper that
+// changes either goes through it so the two never drift.
+func resolveTestInput(t *testing.T) {
+	t.Helper()
+	r, err := inputdoc.Resolve(testFlagArgs, loadedDoc, nil)
+	if err != nil {
+		t.Fatalf("inputdoc.Resolve(%v): %v", testFlagArgs, err)
+	}
+	launcherInput = r
+}
+
+// Restores the package-level Launcher input state when the calling test ends.
+func restoreLauncherInput(t *testing.T) {
+	t.Helper()
+	prevArgs, prevDoc, prevInput := testFlagArgs, loadedDoc, launcherInput
+	t.Cleanup(func() { testFlagArgs, loadedDoc, launcherInput = prevArgs, prevDoc, prevInput })
+}
+
 // The one seam tests configure a non-secret schema knob through.
 func setKnob(t *testing.T, env, value string) {
 	t.Helper()
-	if _, ok := inputdoc.SchemaFlag(env); !ok {
+	e, ok := inputdoc.SchemaFlag(env)
+	if !ok {
 		t.Fatalf("setKnob(%q): not a schema knob; use t.Setenv for secrets and plumbing", env)
 	}
-	t.Setenv(env, value)
+	restoreLauncherInput(t)
+	testFlagArgs = append(slices.Clone(testFlagArgs), e.Argv(value)...)
+	resolveTestInput(t)
 }
 
 // Points the package-level loadedDoc at doc for the calling test only, so no
 // test's document leaks into the next.
 func useDoc(t *testing.T, doc *inputdoc.Document) {
 	t.Helper()
-	prev := loadedDoc
+	restoreLauncherInput(t)
 	loadedDoc = doc
-	t.Cleanup(func() { loadedDoc = prev })
+	resolveTestInput(t)
+}
+
+// mainRunT is mainRun with the Launcher input state it sets rolled back at
+// test end.
+func mainRunT(t *testing.T, argv []string, stdout, stderr io.Writer) int {
+	t.Helper()
+	restoreLauncherInput(t)
+	return mainRun(argv, stdout, stderr)
+}
+
+// mainRunKnobsAsFlags is mainRunT for tests whose setup helpers call setKnob:
+// mainRun resolves only its own argv, so the knobs ride ahead of it as the
+// flags a real invocation would carry.
+func mainRunKnobsAsFlags(t *testing.T, argv []string, stdout, stderr io.Writer) int {
+	t.Helper()
+	return mainRunT(t, append(slices.Clone(testFlagArgs), argv...), stdout, stderr)
+}
+
+// The host-git-config-aware read loadSchemaConfig uses for the members
+// carrying a hostGitConfigKey.
+func hostGitConfig(env string) string {
+	return launcherKnobSource{launcherInput.Source()}.HostGitConfig(env)
+}
+
+// parseResolved is mainRun's argv front half: parseFlags, then Resolve of the
+// schema tokens it classified over the loaded document, left in launcherInput
+// until the test ends.
+func parseResolved(t *testing.T, argv []string) ([]string, error) {
+	t.Helper()
+	restoreLauncherInput(t)
+	rest, schemaArgs, err := parseFlags(argv)
+	if err != nil {
+		return nil, err
+	}
+	testFlagArgs = append(slices.Clone(testFlagArgs), schemaArgs...)
+	resolveTestInput(t)
+	return rest, nil
 }

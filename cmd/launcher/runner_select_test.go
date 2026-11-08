@@ -78,10 +78,10 @@ func TestRunnerForKind_And_BuildRunnerForKind(t *testing.T) {
 	}
 }
 
-// TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter pins "non-empty
-// BWRAP_UNSHARE_NET means on" end to end: NETWORK_MODE=host alone leaves the
-// bwrap Box on the host network, so only the knob can isolate it, whatever its
-// non-empty value.
+// TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter pins "the flag turns the
+// knob on" end to end: NETWORK_MODE=host alone leaves the
+// bwrap Box on the host network, so only the knob can isolate it, and an
+// explicit off (0, false) leaves it off.
 func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -90,9 +90,9 @@ func TestRunnerForKind_BwrapUnshareNetKnobReachesAdapter(t *testing.T) {
 	}{
 		{name: "unset", unshareNet: "", wantIsolate: false},
 		{name: "1", unshareNet: "1", wantIsolate: true},
-		{name: "yes", unshareNet: "yes", wantIsolate: true},
-		{name: "0", unshareNet: "0", wantIsolate: true},
-		{name: "false", unshareNet: "false", wantIsolate: true},
+		{name: "true", unshareNet: "true", wantIsolate: true},
+		{name: "0", unshareNet: "0", wantIsolate: false},
+		{name: "false", unshareNet: "false", wantIsolate: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
