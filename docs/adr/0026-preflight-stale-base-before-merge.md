@@ -110,10 +110,10 @@ combined tree) instead of just relocating it to a human.
   `PRForge`) has no equivalent concept and `preflightStaleBase` is a no-op
   there, matching every other PR-only guard in this package.
 - The `#670`/`#672` collision itself is reproduced as a test
-  (`TestMergeImmediate_StaleBaseCombinedBreakBlocksMerge` in
-  `internal/settle/merge_test.go`): a `NeedsUpdate`-true PR whose rebased
-  tree then fails CI is blocked from merging, rather than landing on the
-  strength of its stale green result.
+  (the `TestSettle_PRLander` row "a stale base whose combined tree fails CI is
+  never merged" in `internal/settle/pr_lander_merge_test.go`): a
+  `NeedsUpdate`-true PR whose rebased tree then fails CI is blocked from
+  merging, rather than landing on the strength of its stale green result.
 - Two distinct preflight failures are handled differently, and deliberately
   so (issue #940). A `NeedsUpdate` *query* error leaves staleness merely
   unknown, so it is logged and swallowed — the normal `Merge` attempt
@@ -125,10 +125,12 @@ combined tree) instead of just relocating it to a human.
   (issue #1319); any other `Rebase` error, or a conflict with no
   `Dispatcher` available, blocks the merge outright rather than falling
   through to `Merge` on a base known to be stale and never re-validated
-  (`TestMergeImmediate_StaleBaseRebaseFailureBlocksMerge`,
-  `TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher`,
-  `TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge`,
-  `TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge`).
+  (the `TestSettle_PRLander` rows in `internal/settle/pr_lander_merge_test.go`:
+  "a stale-base rebase whose transient push failures never recover blocks the
+  merge", "a stale-base rebase that conflicts is resolved by a Box, demoted to
+  draft meanwhile", "a failed conflict-resolve at the stale-base conflict blocks
+  the merge", "a stale-base conflict-resolve whose re-wait never confirms green
+  blocks the merge").
 
 ## Amendment (issue #5095): a red post-force-push head gets a fix pass
 

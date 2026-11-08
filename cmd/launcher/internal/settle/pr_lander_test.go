@@ -41,6 +41,8 @@ func (sh prShape) build(fc *forge.Fake) (forge.IssueTracker, forge.CodeForge) {
 // the side effects the Lander owns on the forge fake.
 type prCase struct {
 	name      string
+	entry     pushOnlyEntry    // which public entry reaches the landing; default Settle
+	result    *dispatch.Result // the Box outcome Settle is handed; default a ready outcome on testPR
 	shape     prShape
 	tracker   backend.Descriptor // the tracker row Settle reasons about; zero when the row doesn't care
 	mergeMode string             // default immediate
@@ -58,11 +60,13 @@ type prCase struct {
 	mergeable  forge.MergeableState              // what the forge reports for the PR's mergeability
 	resolveErr error                             // what the conflict-resolve Box returns
 	dsetup     func(*dispatch.Fake, *forge.Fake) // scripts the dispatcher beyond resolveErr
+	afterMerge func(*forge.Fake)                 // runs on the fake right after a successful Merge
 	check      func(*testing.T, *forge.Fake, *dispatch.Fake)
 	wire       func(fc *forge.Fake, d *dispatch.Fake, mark func()) // runs once Settle exists; mark is the operator's Terminate landing mid-call
 
 	want           Settlement
 	wantSteps      []Step
+	wantNoSteps    []Step // steps Settle must not have recorded
 	wantLabels     []string
 	wantNoLabels   []string
 	wantMerged     string   // the PR Merge was called on
@@ -266,6 +270,8 @@ func TestSettle_PRLander(t *testing.T) {
 	cases = append(cases, healCases()...)
 	cases = append(cases, handOffCases()...)
 	cases = append(cases, fixCases()...)
+	cases = append(cases, mergeCases()...)
+	cases = append(cases, verifyCases()...)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -309,15 +315,39 @@ func TestSettle_PRLander(t *testing.T) {
 				tc.setup(t, fc, &c)
 			}
 			tracker, cf := tc.shape.build(fc)
+			if tc.afterMerge != nil {
+				cf = readErrAfterMerge{fc, tc.afterMerge}
+			}
 			s := newTestSettle(c, tracker, cf)
 			s.cfg.Capabilities.TrackerDescriptor = tc.tracker
-			gen := s.term.Begin("1")
+			// Recover settles at RecoverGen and takes no Begin, so a stop marks that generation.
+			gen := RecoverGen
+			if tc.entry != entryAdopted {
+				gen = s.term.Begin("1")
+			}
 
 			if tc.wire != nil {
 				tc.wire(fc, d, func() { s.term.Mark("1") })
 			}
 			var got Settlement
-			settle := func() { got = s.Settle(d, "1", gen, settleReadyResult("1", testPR)) }
+			result := settleReadyResult("1", testPR)
+			if tc.result != nil {
+				result = *tc.result
+			}
+			settle := func() {
+				if tc.entry == entryAdopted {
+					st, err := s.Recover(RecoverInput{
+						Num: "1", OpenPR: testPR,
+						Begin: func() (dispatch.Dispatcher, error) { return d, nil },
+					})
+					got = st
+					if err != nil {
+						t.Errorf("Recover err = %v, want nil", err)
+					}
+					return
+				}
+				got = s.Settle(d, "1", gen, result)
+			}
 			var stderr string
 			if tc.wantStderr != nil {
 				stderr = testutil.CaptureStderr(t, settle)
@@ -358,6 +388,11 @@ func TestSettle_PRLander(t *testing.T) {
 			}
 			if missing := containsSteps(rec.Steps(), tc.wantSteps); len(missing) > 0 {
 				t.Errorf("progress steps = %+v, missing %+v", rec.Steps(), missing)
+			}
+			for _, st := range tc.wantNoSteps {
+				if slices.Contains(rec.Steps(), st) {
+					t.Errorf("progress steps = %+v, want no %+v", rec.Steps(), st)
+				}
 			}
 			for _, l := range tc.wantLabels {
 				if !containsLabel(iss.Labels, l) {
