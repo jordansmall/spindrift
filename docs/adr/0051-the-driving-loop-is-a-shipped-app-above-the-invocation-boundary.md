@@ -119,13 +119,14 @@ empty, and no new query surface is needed to decide what to run. (Superseded
 by [ADR 0059](0059-the-daemon-schedules-from-tracker-demand-not-child-exits.md);
 see the amendment below.)
 
-**Research capacity is a floor, not a ceiling.** `RESEARCH_SLOTS` guarantees
-research at least that many slots *while research has queued work*; work may
-occupy at most `MAX_PARALLEL − RESEARCH_SLOTS` during that time. When either
-kind has nothing queued the other bursts into the whole pool. The reservation
-binds only while both kinds have work, which is the only moment a policy is
-needed. The knob spans the spectrum rather than being a special case: `0` is
-work-first with research taking leftovers, `MAX_PARALLEL` is research-first.
+**Research capacity is a floor, not a ceiling.** `RESEARCH_RESERVATION`
+guarantees research at least that many slots *while research has queued work*;
+work may occupy at most `MAX_PARALLEL − RESEARCH_RESERVATION` during that
+time. When either kind has nothing queued the other bursts into the whole
+pool. The reservation binds only while both kinds have work, which is the only
+moment a policy is needed. The knob spans the spectrum rather than being a
+special case: `0` is work-first with research taking leftovers, `MAX_PARALLEL`
+is research-first.
 
 Research starving is the failure worth guarding against, because research is
 the pipeline stage *ahead* of work: starve it and workers receive exactly the
