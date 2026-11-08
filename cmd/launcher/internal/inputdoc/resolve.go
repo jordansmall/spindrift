@@ -92,6 +92,13 @@ func Resolve(args []string, doc *Document, env map[string]string) (Resolved, err
 // it to override a tier (Secret, HostGitConfig) with state read after Resolve.
 func (r Resolved) Source() KnobSource { return r.src }
 
+// Setting returns the loaded document's settings value for key and whether the
+// document carries it.
+func (r Resolved) Setting(key string) (string, bool) {
+	v, ok := r.src.settings[key]
+	return v, ok
+}
+
 // Flag returns the value an explicit flag gave the knob, never the document or
 // default tier, for knobs that must carry only what the operator set at
 // dispatch time (issue #3171). ok follows EmptyIsSetting.
@@ -130,17 +137,14 @@ func LookupSchemaFlag(arg string) (FlagEntry, bool) {
 	return FlagEntry{}, false
 }
 
-// BoxEnv resolves one BOX_ENV_VARS forwarding name: a schema knob through the
-// same tiers as Knobs, anything else (secrets, plumbing) from a non-empty env
-// value, else the document.
-func (r Resolved) BoxEnv(name string) string {
+// BoxEnv resolves one BOX_ENV_VARS forwarding name: a schema knob through
+// src.String, any other name as a secret through src.Secret so a caller can
+// answer it live.
+func BoxEnv(src KnobSource, name string) string {
 	if _, ok := SchemaFlag(name); ok {
-		return r.src.String(name)
+		return src.String(name)
 	}
-	if v := r.src.env[name]; v != "" {
-		return v
-	}
-	return r.src.settings[name]
+	return src.Secret(name)
 }
 
 // CheckSchemaFlags reports the first malformed schema flag; parseFlags calls it
@@ -205,7 +209,7 @@ func scanSchemaFlags(args []string) (explicit map[string]string, rest []string, 
 }
 
 // knobResolver is the KnobSource over the flag, document and schema-default
-// tiers; env serves secrets, and plumbing names via Resolved.BoxEnv.
+// tiers; env serves secrets.
 type knobResolver struct {
 	explicit map[string]string
 	settings map[string]string
