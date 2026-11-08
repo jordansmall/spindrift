@@ -1,0 +1,1 @@
+{"schema":1,"pid":4242,"host":"daemon-host","started":"2026-03-14T09:26:53Z","time":"2026-03-14T09:30:13Z","kinds":["dispatch"],"state":"working","slots":[{"slot":0,"phase":"idle","busy":false,"since":"2026-03-14T09:28:23Z"}],"checks":[],"self_update":{"phase":"blocked","revision":"9f8e7d6c5b4a","reason":"smoke test failed: daemon build exited 1","since":"2026-03-14T09:29:23Z"}}

@@ -49,9 +49,9 @@ pkgs.writeShellApplication {
 
     # The vendor tree has to sit inside the module, and the invoking checkout
     # has none, so run the test from a copy of the module. The tests read
-    # ../../tests, ../../templates, and ../../docs relative to the module, so
-    # those three are symlinks back into the checkout. So are the module's own
-    # testdata/golden, each Driver's corpus
+    # ../../tests, ../../templates, ../../docs, and ../../dashboard relative to
+    # the module, so those four are symlinks back into the checkout. So are the
+    # module's own testdata/golden, each Driver's corpus
     # (internal/driver/<driver>/testdata/corpus), each Digest corpus
     # (internal/*/testdata/digest, plus the digestkit's own testdata/corpus),
     # every Ecosystem corpus (internal/ecosystem{/*,test}/testdata/corpus),
@@ -64,6 +64,9 @@ pkgs.writeShellApplication {
     ln -s "$root/tests" "$scratch/src/tests"
     ln -s "$root/templates" "$scratch/src/templates"
     ln -s "$root/docs" "$scratch/src/docs"
+    # The whole dashboard dir, not its contract fixture: TestContractFixture
+    # RemoveAlls that fixture, which would delete a symlink to it, not the files.
+    ln -s "$root/dashboard" "$scratch/src/dashboard"
     rm -rf "$scratch/src/cmd/launcher/testdata/golden"
     ln -s "$root/cmd/launcher/testdata/golden" "$scratch/src/cmd/launcher/testdata/golden"
     # The Driver list is whatever carries a corpus, so a new Driver is picked
@@ -145,6 +148,7 @@ pkgs.writeShellApplication {
     go test -count=1 -run '^TestRunReplaysCorpusIntoGoldens$' ./internal/digestkit
     go test -count=1 -run '^TestCorpus$' "''${eco_pkgs[@]}"
     go test -count=1 -run '^TestToWikiMarkup_Goldens$' ./internal/forge/jira
+    go test -count=1 -run '^TestContractFixture$' ./internal/daemon
     # Rewrites the generated spans in docs/reference.md (the docs link above).
     go test -count=1 -run '^TestReferenceDocs_GeneratedSpans$' ./internal/driver/bundle
   '';
