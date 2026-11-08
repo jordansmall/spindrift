@@ -15,9 +15,9 @@ rec {
   # Shell-escapes each baked default via escapeShellArg so a value containing
   # quotes (e.g. a builtins.toJSON default) neither trips SC2140 nor corrupts
   # at runtime (issue #2234). A matching env var (or harness.env, sourced by
-  # the wrapper) still wins at runtime. Bool knobs use the colon-less `-`:
-  # set-but-empty is their explicit-off encoding (as in the launcher), and
-  # `:-` would re-default it to on (issue #4290).
+  # the wrapper) makes the launcher exit 6 config-invalid. Bool knobs use the
+  # colon-less `-`: set-but-empty is their explicit-off encoding (as in the
+  # launcher), and `:-` would re-default it to on (issue #4290).
   renderDefaultsPreamble =
     {
       export ? false,

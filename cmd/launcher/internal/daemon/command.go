@@ -53,9 +53,8 @@ func appendFeatureBranch(argv []string, featureBranch string) []string {
 }
 
 // signalCarrierEnv is the env-only BOX_SIGNAL_CARRIER knob (flag
-// --box-signal-carrier). internal/daemon cannot import the launcher main's
-// generated schemaFlags, so the name is spelled out here; lib/env-schema.nix's
-// signalCarrier row is the source.
+// --box-signal-carrier), spelled out here; nix/checks/schema-drift.nix pins
+// both literals to lib/env-schema.nix's signalCarrier row.
 const signalCarrierEnv = "BOX_SIGNAL_CARRIER"
 
 // liftSignalCarrier strips signalCarrierEnv from env and, when its value is

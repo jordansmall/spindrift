@@ -907,7 +907,7 @@ func TestMainRun_DispatchNoBuild_ImageAbsentFailsFastNamingBuild(t *testing.T) {
 	t.Chdir(checkout)
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"dispatch", "--no-build"}, &stdout, &stderr)
+	code := mainRunKnobsAsFlags(t, []string{"dispatch", "--no-build"}, &stdout, &stderr)
 	if code == 0 {
 		t.Errorf("exit code = 0, want non-zero")
 	}

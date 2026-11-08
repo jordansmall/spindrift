@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/runner"
 )
@@ -44,6 +45,14 @@ func TestMain(m *testing.M) {
 	for _, k := range removedKnobs {
 		if err := os.Unsetenv(k.env); err != nil {
 			fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(%s): %v\n", k.env, err)
+			os.Exit(1)
+		}
+	}
+	// A dev shell or Box exports knob env vars, and mainRun now refuses to start
+	// with any of them set (ADR 0020).
+	for _, e := range inputdoc.SchemaFlags {
+		if err := os.Unsetenv(e.Env); err != nil {
+			fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(%s): %v\n", e.Env, err)
 			os.Exit(1)
 		}
 	}

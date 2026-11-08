@@ -181,7 +181,7 @@ func TestExtractInputFlag_MissingValue(t *testing.T) {
 
 func TestParseFlags_SetEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
-	remaining, err := parseFlags([]string{"--issue-number", "215"})
+	remaining, err := parseFlagsT(t, []string{"--issue-number", "215"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestParseFlags_SetEnv(t *testing.T) {
 
 func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "1")
-	_, err := parseFlags([]string{"--issue-number", "999"})
+	_, err := parseFlagsT(t, []string{"--issue-number", "999"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
 // resolve to "" through the real schema table, not collapse into the default.
 func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
 	t.Setenv("MERGE_GUARD_PATHS", "foo/**")
-	if _, err := parseFlags([]string{"--merge-guard-paths", ""}); err != nil {
+	if _, err := parseFlagsT(t, []string{"--merge-guard-paths", ""}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := loadConfig().MergeGuardPaths; got != "" {
@@ -218,7 +218,7 @@ func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
 
 func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
 	t.Setenv("REPO_SLUG", "env-org/env-repo")
-	_, err := parseFlags([]string{"--repo-slug", "flag-org/flag-repo"})
+	_, err := parseFlagsT(t, []string{"--repo-slug", "flag-org/flag-repo"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
 
 func TestParseFlags_EnvFallback(t *testing.T) {
 	t.Setenv("MAX_JOBS", "7")
-	_, err := parseFlags([]string{})
+	_, err := parseFlagsT(t, []string{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -239,14 +239,14 @@ func TestParseFlags_EnvFallback(t *testing.T) {
 }
 
 func TestParseFlags_UnknownFlag(t *testing.T) {
-	_, err := parseFlags([]string{"--not-a-schema-flag", "value"})
+	_, err := parseFlagsT(t, []string{"--not-a-schema-flag", "value"})
 	if err == nil {
 		t.Fatal("expected error for unknown flag, got nil")
 	}
 }
 
 func TestParseFlags_PassthroughPositional(t *testing.T) {
-	remaining, err := parseFlags([]string{"build", "--max-jobs", "2", "extra"})
+	remaining, err := parseFlagsT(t, []string{"build", "--max-jobs", "2", "extra"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestParseFlags_PassthroughPositional(t *testing.T) {
 }
 
 func TestParseFlags_DoubleDash(t *testing.T) {
-	remaining, err := parseFlags([]string{"--", "--not-parsed"})
+	remaining, err := parseFlagsT(t, []string{"--", "--not-parsed"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestParseFlags_DoubleDash(t *testing.T) {
 }
 
 func TestParseFlags_MissingValue(t *testing.T) {
-	_, err := parseFlags([]string{"--issue-number"})
+	_, err := parseFlagsT(t, []string{"--issue-number"})
 	if err == nil {
 		t.Fatal("expected error when flag value is missing, got nil")
 	}
@@ -276,7 +276,7 @@ func TestParseFlags_MissingValue(t *testing.T) {
 // (issue #3777); without a passthrough entry parseFlags would reject it as
 // an unknown flag before the doctor verb handler ever sees it.
 func TestParseFlags_VerbosePassesThrough(t *testing.T) {
-	remaining, err := parseFlags([]string{"doctor", "--verbose"})
+	remaining, err := parseFlagsT(t, []string{"doctor", "--verbose"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestParseFlags_VerbosePassesThrough(t *testing.T) {
 // parseFlags would reject it as an unknown flag before the doctor verb
 // handler ever sees it.
 func TestParseFlags_ButlerPassesThrough(t *testing.T) {
-	remaining, err := parseFlags([]string{"doctor", "--butler"})
+	remaining, err := parseFlagsT(t, []string{"doctor", "--butler"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestParseFlags_ButlerPassesThrough(t *testing.T) {
 // --verbose and --butler are independent doctor flags, so both must survive
 // the global flag pass together, in either order.
 func TestParseFlags_VerboseAndButlerPassThrough(t *testing.T) {
-	remaining, err := parseFlags([]string{"doctor", "--verbose", "--butler"})
+	remaining, err := parseFlagsT(t, []string{"doctor", "--verbose", "--butler"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestParseFlags_ButlerRejectedUnlessAfterDoctor(t *testing.T) {
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			_, err := parseFlags(args)
+			_, err := parseFlagsT(t, args)
 			if err == nil || !strings.Contains(err.Error(), "unknown flag: --butler") {
 				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --butler", args, err)
 			}
@@ -349,7 +349,7 @@ func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			_, err := parseFlags(args)
+			_, err := parseFlagsT(t, args)
 			if err == nil || !strings.Contains(err.Error(), "unknown flag: --verbose") {
 				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --verbose", args, err)
 			}
@@ -361,7 +361,7 @@ func TestParseFlags_VerboseRejectedUnlessAfterDoctor(t *testing.T) {
 // confuse the --verbose verb guard into reading remaining[0] as the verb
 // (issue #3777).
 func TestParseFlags_VerboseAfterLeadingDispatchFlag(t *testing.T) {
-	remaining, err := parseFlags([]string{"--no-build", "doctor", "--verbose"})
+	remaining, err := parseFlagsT(t, []string{"--no-build", "doctor", "--verbose"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -430,7 +430,7 @@ func TestParseFlags_SecretsExcluded(t *testing.T) {
 func TestParseFlags_MultipleFlags(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
 	t.Setenv("MAX_JOBS", "")
-	_, err := parseFlags([]string{"--issue-number", "215", "--max-jobs", "1"})
+	_, err := parseFlagsT(t, []string{"--issue-number", "215", "--max-jobs", "1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestParseFlags_MultipleFlags(t *testing.T) {
 // next arg (issue #2145 slice B).
 func TestParseFlags_BoolFlag_BarePresence(t *testing.T) {
 	t.Setenv("BWRAP_UNSHARE_NET", "")
-	remaining, err := parseFlags([]string{"dispatch", "--bwrap-unshare-net"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--bwrap-unshare-net"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestParseFlags_BoolFlag_EqualsForms(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.arg, func(t *testing.T) {
 			t.Setenv("BWRAP_UNSHARE_NET", "")
-			_, err := parseFlags([]string{c.arg})
+			_, err := parseFlagsT(t, []string{c.arg})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -499,7 +499,7 @@ func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.arg, func(t *testing.T) {
 			t.Setenv(c.env, "keep")
-			_, err := parseFlags([]string{c.arg})
+			_, err := parseFlagsT(t, []string{c.arg})
 			if err == nil || err.Error() != c.wantErr {
 				t.Fatalf("err = %v, want %q", err, c.wantErr)
 			}
@@ -514,7 +514,7 @@ func TestParseFlags_BoolFlag_InvalidValueErrors(t *testing.T) {
 // It survives as a normal positional arg (issue #2145 slice B).
 func TestParseFlags_BoolFlag_SpaceSeparatedIsPositional(t *testing.T) {
 	t.Setenv("BWRAP_UNSHARE_NET", "")
-	remaining, err := parseFlags([]string{"dispatch", "--bwrap-unshare-net", "1"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--bwrap-unshare-net", "1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestParseFlags_BoolFlag_ExplicitOffOverridesAmbient(t *testing.T) {
 	for _, arg := range []string{"--bwrap-unshare-net=0", "--bwrap-unshare-net=false", "--bwrap-unshare-net="} {
 		t.Run(arg, func(t *testing.T) {
 			t.Setenv("BWRAP_UNSHARE_NET", "1")
-			_, err := parseFlags([]string{arg})
+			_, err := parseFlagsT(t, []string{arg})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -642,7 +642,7 @@ func TestPrintSubcommands_ConsoleFirst(t *testing.T) {
 // verb handler for hand-rolled extraction (issues #2033 and #2147).
 func TestParseFlags_ContinuousAlias(t *testing.T) {
 	t.Setenv("CONTINUOUS_DISPATCH", "")
-	remaining, err := parseFlags([]string{"dispatch", "--continuous"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--continuous"})
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous: unexpected error: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestParseFlags_ContinuousAlias(t *testing.T) {
 
 func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 	t.Setenv("CONTINUOUS_DISPATCH", "")
-	remaining, err := parseFlags([]string{"dispatch", "--continuous-dispatch"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--continuous-dispatch"})
 	if err != nil {
 		t.Fatalf("parseFlags with --continuous-dispatch: unexpected error: %v", err)
 	}
@@ -813,7 +813,7 @@ func TestGroupOrder_CoversEverySchemaGroup(t *testing.T) {
 
 func TestParseFlags_AliasSetEnv(t *testing.T) {
 	t.Setenv("ISSUE_NUMBER", "")
-	remaining, err := parseFlags([]string{"--issue", "42"})
+	remaining, err := parseFlagsT(t, []string{"--issue", "42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -831,7 +831,7 @@ func TestParseFlags_AliasSetEnv(t *testing.T) {
 func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	// --merge-mode is the deprecated name of the canonical --merge-policy.
 	t.Setenv("MERGE_MODE", "")
-	if _, err := parseFlags([]string{"--merge-mode", "auto"}); err != nil {
+	if _, err := parseFlagsT(t, []string{"--merge-mode", "auto"}); err != nil {
 		t.Fatalf("parseFlags --merge-mode: %v", err)
 	}
 	if got := os.Getenv("MERGE_MODE"); got != "auto" {
@@ -839,7 +839,7 @@ func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	}
 	// --local-issue-reference is the deprecated name of --local-reference.
 	t.Setenv("LOCAL_ISSUE_REFERENCE", "")
-	if _, err := parseFlags([]string{"--local-issue-reference"}); err != nil {
+	if _, err := parseFlagsT(t, []string{"--local-issue-reference"}); err != nil {
 		t.Fatalf("parseFlags --local-issue-reference: %v", err)
 	}
 	if got := os.Getenv("LOCAL_ISSUE_REFERENCE"); got != "1" {
@@ -849,7 +849,7 @@ func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 
 func TestParseFlags_NewCanonicalFlagResolves(t *testing.T) {
 	t.Setenv("MERGE_MODE", "")
-	if _, err := parseFlags([]string{"--merge-policy", "immediate"}); err != nil {
+	if _, err := parseFlagsT(t, []string{"--merge-policy", "immediate"}); err != nil {
 		t.Fatalf("parseFlags --merge-policy: %v", err)
 	}
 	if got := os.Getenv("MERGE_MODE"); got != "immediate" {
@@ -881,7 +881,7 @@ func TestParseFlags_FileFlag_ReadsToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -896,7 +896,7 @@ func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "env-value")
-	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -906,7 +906,7 @@ func TestParseFlags_FileFlag_WinsOverEnv(t *testing.T) {
 }
 
 func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
-	_, err := parseFlags([]string{"--gh-token-file", "/nonexistent/path/token.txt"})
+	_, err := parseFlagsT(t, []string{"--gh-token-file", "/nonexistent/path/token.txt"})
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -916,7 +916,7 @@ func TestParseFlags_FileFlag_MissingFile(t *testing.T) {
 }
 
 func TestParseFlags_FileFlag_MissingValue(t *testing.T) {
-	_, err := parseFlags([]string{"--gh-token-file"})
+	_, err := parseFlagsT(t, []string{"--gh-token-file"})
 	if err == nil {
 		t.Fatal("expected error when file flag has no path argument, got nil")
 	}
@@ -940,7 +940,7 @@ func TestParseFlags_FileFlag_StripsNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -959,7 +959,7 @@ func TestParseFlags_CmdFlag_RunsCommand(t *testing.T) {
 		return "cmd-value\n", nil
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlags([]string{"--gh-token-cmd", "rbw get spindrift-pat"})
+	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "rbw get spindrift-pat"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -979,7 +979,7 @@ func TestParseFlags_CmdEnv_RunsCommand(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "rbw get spindrift-pat")
-	_, err := parseFlags(nil)
+	_, err := parseFlagsT(t, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1003,7 +1003,7 @@ func TestParseFlags_CmdFlag_WinsOverCmdEnv(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "env-cmd")
-	_, err := parseFlags([]string{"--gh-token-cmd", "flag-cmd"})
+	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "flag-cmd"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1024,7 +1024,7 @@ func TestParseFlags_CmdEnv_WinsOverFileFlag(t *testing.T) {
 	}
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GH_TOKEN_CMD", "env-cmd")
-	_, err := parseFlags([]string{"--gh-token-file", tokenFile})
+	_, err := parseFlagsT(t, []string{"--gh-token-file", tokenFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1045,7 +1045,7 @@ func TestParseFlags_CmdFlagAndFileFlag_IsConfigError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlags([]string{"--gh-token-cmd", "some-cmd", "--gh-token-file", tokenFile})
+	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "some-cmd", "--gh-token-file", tokenFile})
 	if err == nil {
 		t.Fatal("expected error when both --gh-token-cmd and --gh-token-file are supplied, got nil")
 	}
@@ -1061,7 +1061,7 @@ func TestParseFlags_CmdFlag_EmptyOutputIsError(t *testing.T) {
 		return "", nil
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlags([]string{"--gh-token-cmd", "some-cmd"})
+	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "some-cmd"})
 	if err == nil {
 		t.Fatal("expected error for empty command output, got nil")
 	}
@@ -1077,7 +1077,7 @@ func TestParseFlags_CmdFlag_NonZeroExitIsError(t *testing.T) {
 		return "partial-secret-leak", errors.New("exit status 1")
 	}
 	t.Setenv("GH_TOKEN", "")
-	_, err := parseFlags([]string{"--gh-token-cmd", "some-cmd"})
+	_, err := parseFlagsT(t, []string{"--gh-token-cmd", "some-cmd"})
 	if err == nil {
 		t.Fatal("expected error for a failing command, got nil")
 	}
@@ -1189,7 +1189,7 @@ func TestResolveSecretCmd_SignalKilled_OmitsFabricatedExitCode(t *testing.T) {
 }
 
 func TestParseFlags_CmdFlag_MissingValue(t *testing.T) {
-	_, err := parseFlags([]string{"--gh-token-cmd"})
+	_, err := parseFlagsT(t, []string{"--gh-token-cmd"})
 	if err == nil {
 		t.Fatal("expected error when cmd flag has no command argument, got nil")
 	}
@@ -1216,7 +1216,7 @@ func TestToKebab_ReplacesUnderscoresAndLowercases(t *testing.T) {
 // and t.Cleanup it back to nil, before calling this.
 func resolveGlobalSecretCmd(t *testing.T, args []string) error {
 	t.Helper()
-	if _, err := parseFlags(args); err != nil {
+	if _, err := parseFlagsT(t, args); err != nil {
 		return err
 	}
 	return applySecretCmdFallback()
@@ -1997,7 +1997,7 @@ func TestParseFlags_GlobalSecretCmd_FailureIsError(t *testing.T) {
 }
 
 func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
-	_, err := parseFlags([]string{"--secret-cmd"})
+	_, err := parseFlagsT(t, []string{"--secret-cmd"})
 	if err == nil {
 		t.Fatal("expected error when --secret-cmd has no command argument, got nil")
 	}
@@ -2006,7 +2006,7 @@ func TestParseFlags_GlobalSecretCmd_MissingValue(t *testing.T) {
 func TestParseFlags_NoCmdOrFile_LeavesDirectEnv(t *testing.T) {
 	t.Setenv("GH_TOKEN", "direct-value")
 	t.Setenv("GH_TOKEN_CMD", "")
-	_, err := parseFlags(nil)
+	_, err := parseFlagsT(t, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2192,7 +2192,7 @@ func TestPrintHelpFull_ShowsGlobalSecretCmd(t *testing.T) {
 }
 
 func TestParseFlags_NoBuildPassthrough(t *testing.T) {
-	remaining, err := parseFlags([]string{"dispatch", "--no-build"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--no-build"})
 	if err != nil {
 		t.Fatalf("parseFlags with --no-build: unexpected error: %v", err)
 	}
@@ -2202,7 +2202,7 @@ func TestParseFlags_NoBuildPassthrough(t *testing.T) {
 }
 
 func TestParseFlags_NoBuildWithIssue(t *testing.T) {
-	remaining, err := parseFlags([]string{"dispatch", "--no-build", "42"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--no-build", "42"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2302,7 +2302,7 @@ func TestParseIssuePositionals_NonNumericPassedThrough(t *testing.T) {
 }
 
 func TestParseFlags_YesPassthrough(t *testing.T) {
-	remaining, err := parseFlags([]string{"dispatch", "--yes", "42"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--yes", "42"})
 	if err != nil {
 		t.Fatalf("parseFlags with --yes: unexpected error: %v", err)
 	}
@@ -2312,7 +2312,7 @@ func TestParseFlags_YesPassthrough(t *testing.T) {
 }
 
 func TestParseFlags_ForcePassthrough(t *testing.T) {
-	remaining, err := parseFlags([]string{"dispatch", "--force"})
+	remaining, err := parseFlagsT(t, []string{"dispatch", "--force"})
 	if err != nil {
 		t.Fatalf("parseFlags with --force: unexpected error: %v", err)
 	}
@@ -2458,7 +2458,7 @@ func TestSplitVerb(t *testing.T) {
 // parseButlerArgs sees it (issue #3795); without a cliFlags entry parseFlags
 // rejected it as an unknown flag.
 func TestParseFlags_ButlerChorePassesThroughWithValue(t *testing.T) {
-	remaining, err := parseFlags([]string{"butler", "--chore", "bugs"})
+	remaining, err := parseFlagsT(t, []string{"butler", "--chore", "bugs"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2476,7 +2476,7 @@ func TestParseFlags_ChoreRejectedUnlessAfterButler(t *testing.T) {
 	}
 	for _, args := range cases {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			_, err := parseFlags(args)
+			_, err := parseFlagsT(t, args)
 			if err == nil || !strings.Contains(err.Error(), "unknown flag: --chore") {
 				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --chore", args, err)
 			}
@@ -2500,7 +2500,7 @@ func TestParseFlags_HonoursEveryCliFlag(t *testing.T) {
 			if f.arg != "" {
 				args = append(args, "value")
 			}
-			remaining, err := parseFlags(args)
+			remaining, err := parseFlagsT(t, args)
 			if f.intercepted {
 				if err == nil || !strings.Contains(err.Error(), "unknown flag: --"+f.flag) {
 					t.Fatalf("parseFlags(%v) err = %v, want unknown flag", args, err)
@@ -2527,7 +2527,7 @@ func TestParseFlags_HonoursEveryCliFlag(t *testing.T) {
 // swallow it as a parsed flag.
 func TestParseFlags_RejectsHelpModifierAll(t *testing.T) {
 	for _, args := range [][]string{{"dispatch", "--all"}, {"--all"}} {
-		_, err := parseFlags(args)
+		_, err := parseFlagsT(t, args)
 		if err == nil || !strings.Contains(err.Error(), "unknown flag: --all") {
 			t.Errorf("parseFlags(%v) err = %v, want unknown flag: --all", args, err)
 		}
@@ -2538,7 +2538,7 @@ func TestParseFlags_RejectsHelpModifierAll(t *testing.T) {
 // help modifier alongside --help.
 func TestMainRun_AllWithoutHelpIsUnknownFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"dispatch", "--all"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"dispatch", "--all"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun code = %d, want 1", code)
 	}
@@ -2617,7 +2617,7 @@ func TestMainRunIntercepts_MatchCliFlags(t *testing.T) {
 // --research reaches doctorFlagArgs through the global flag pass like
 // --butler (issue #4400).
 func TestDoctorFlagArgs_Research(t *testing.T) {
-	remaining, err := parseFlags([]string{"doctor", "--research"})
+	remaining, err := parseFlagsT(t, []string{"doctor", "--research"})
 	if err != nil {
 		t.Fatalf("parseFlags: %v", err)
 	}
@@ -2625,7 +2625,7 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 	if !ok || bad != "" || !opts.research || opts.butler {
 		t.Fatalf("doctorFlagArgs(--research) = (%+v, %q, %v), want research only", opts, bad, ok)
 	}
-	if _, err := parseFlags([]string{"dispatch", "--research"}); err == nil {
+	if _, err := parseFlagsT(t, []string{"dispatch", "--research"}); err == nil {
 		t.Errorf("parseFlags(dispatch --research) = nil error, want unknown flag")
 	}
 }
@@ -2634,14 +2634,14 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 // parser without swallowing the next argument.
 func TestParseFlags_VerbFlagEqualsFormPassesThrough(t *testing.T) {
 	args := []string{"stats", "--root=/a", "--include-inferred=false", "--since", "2026-10-07", "--json"}
-	remaining, err := parseFlags(args)
+	remaining, err := parseFlagsT(t, args)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !slices.Equal(remaining, args) {
 		t.Errorf("remaining = %v, want %v", remaining, args)
 	}
-	if _, err := parseFlags([]string{"dispatch", "--root=/a"}); err == nil {
+	if _, err := parseFlagsT(t, []string{"dispatch", "--root=/a"}); err == nil {
 		t.Error("--root=/a after dispatch: want unknown flag error")
 	}
 }

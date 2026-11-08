@@ -263,7 +263,7 @@ func lookupCliFlag(arg string, remaining []string) *cliFlag {
 
 // parseFlags injects matching --flag value pairs into the process environment
 // via os.Setenv so loadConfig picks them up. A flag lands in the same env
-// channel as a deprecated ambient knob env var, which is how it wins the
+// channel the knobs are read from, which is how it wins the
 // flag > document > schema default precedence (ADR 0020). An unrecognised
 // --flag is an error; non-flag args and everything after "--" pass through.
 func parseFlags(args []string) ([]string, error) {
@@ -658,8 +658,8 @@ func printHelpFull(w io.Writer) {
 	fmt.Fprintln(w)
 	printCliFlags(w)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Flags (flag > flake setting > default precedence; a knob env var still")
-	fmt.Fprintln(w, "wins this release but is deprecated and warns — ADR 0020):")
+	fmt.Fprintln(w, "Flags (flag > flake setting > default precedence; a knob env var is")
+	fmt.Fprintln(w, "rejected with exit 6 — ADR 0020):")
 
 	byGroup := make(map[string][]inputdoc.FlagEntry, len(inputdoc.GroupOrder))
 	for _, e := range inputdoc.SchemaFlags {

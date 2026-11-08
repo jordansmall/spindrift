@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,7 +48,7 @@ func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
 	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "10"}})
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun(nil, &stdout, &stderr)
+	code := mainRunT(t, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)
 	}
@@ -63,7 +64,7 @@ func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
 // falling through to the dispatch default (issue #555).
 func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"frobnicate"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"frobnicate"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -92,7 +93,7 @@ func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var stdout, stderr bytes.Buffer
-		code := mainRun(tc.args, &stdout, &stderr)
+		code := mainRunT(t, tc.args, &stdout, &stderr)
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", tc.args, code)
 		}
@@ -111,7 +112,7 @@ func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
 // Flags with no verb at all print help to stderr and exit 1 (issue #3784).
 func TestMainRun_FlagsOnly_MissingSubcommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--no-build"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"--no-build"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1", code)
 	}
@@ -135,7 +136,7 @@ func TestMainRun_LeadingForceBeforeRegistry_PassesDiscoverGate(t *testing.T) {
 	repoDir, routesFile := t.TempDir(), filepath.Join(t.TempDir(), "routes.json")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--force", "registry", "discover", repoDir, routesFile}, &stdout, &stderr)
+	code := mainRunT(t, []string{"--force", "registry", "discover", repoDir, routesFile}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("code = %d, want 1 (no registry declarations in the empty repo)", code)
 	}
@@ -165,8 +166,8 @@ func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		var lOut, vOut, lErr, vErr bytes.Buffer
-		lCode := mainRun(tc.leading, &lOut, &lErr)
-		vCode := mainRun(tc.verbFirst, &vOut, &vErr)
+		lCode := mainRunT(t, tc.leading, &lOut, &lErr)
+		vCode := mainRunT(t, tc.verbFirst, &vOut, &vErr)
 		if lCode != vCode {
 			t.Errorf("mainRun(%v) code = %d, want %d as for %v", tc.leading, lCode, vCode, tc.verbFirst)
 		}
@@ -186,9 +187,8 @@ func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
 // doctor's own handler to reject the stray positional. (A "--"-prefixed bogus
 // token would instead be rejected upstream by parseFlags as an unknown flag.)
 func TestMainRun_LeadingSchemaFlagBeforeDoctor_ReachesDoctor(t *testing.T) {
-	t.Setenv("MODEL", "") // restores the MODEL that parseFlags os.Setenvs
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--model", "opus", "doctor", "extra"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"--model", "opus", "doctor", "extra"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
 	}
@@ -211,7 +211,7 @@ func TestMainRun_Research_RoutesThroughBootstrap(t *testing.T) {
 	}
 	for _, argv := range cases {
 		var stdout, stderr bytes.Buffer
-		code := mainRun(argv, &stdout, &stderr)
+		code := mainRunT(t, argv, &stdout, &stderr)
 		if code != int(exitcode.ConfigInvalid) {
 			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, int(exitcode.ConfigInvalid))
 		}
@@ -230,7 +230,7 @@ func TestMainRun_Dispatch_ContinuousSetsEnv(t *testing.T) {
 	t.Setenv("CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"dispatch", "--continuous"}, &stdout, &stderr)
+	code := mainRunKnobsAsFlags(t, []string{"dispatch", "--continuous"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(dispatch --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
@@ -249,7 +249,7 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 	t.Setenv("REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"dispatch"}, &stdout, &stderr)
+	code := mainRunKnobsAsFlags(t, []string{"dispatch"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(dispatch) code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
@@ -267,7 +267,7 @@ func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 	t.Setenv("CONTINUOUS_DISPATCH", "")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"research", "--continuous"}, &stdout, &stderr)
+	code := mainRunKnobsAsFlags(t, []string{"research", "--continuous"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(research --continuous) code = %d, want %d", code, int(exitcode.ConfigInvalid))
 	}
@@ -281,7 +281,7 @@ func TestMainRun_Research_ContinuousSetsEnv(t *testing.T) {
 // REPO_SLUG validation error proves the guard fires first.
 func TestDispatch_RejectsSelfContained(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"dispatch", "--self-contained"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"dispatch", "--self-contained"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(dispatch --self-contained) code = %d, want 1", code)
 	}
@@ -299,7 +299,7 @@ func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
 		{"registry", "bogus"},
 	} {
 		var stdout, stderr bytes.Buffer
-		code := mainRun(args, &stdout, &stderr)
+		code := mainRunT(t, args, &stdout, &stderr)
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", args, code)
 		}
@@ -318,7 +318,7 @@ func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
 // leaves untouched — pinned below so a regression there is still caught.
 func TestDoctor_UnrecognizedArg_UsageError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"doctor", "extra"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"doctor", "extra"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(doctor extra) code = %d, want 1", code)
 	}
@@ -332,7 +332,7 @@ func TestDoctor_UnrecognizedArg_UsageError(t *testing.T) {
 
 func TestDoctor_UnrecognizedFlag_RejectedUpstreamOfVerbHandler(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"doctor", "--bogus"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"doctor", "--bogus"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(doctor --bogus) code = %d, want 1", code)
 	}
@@ -348,7 +348,7 @@ func TestDoctor_UnrecognizedFlag_RejectedUpstreamOfVerbHandler(t *testing.T) {
 // does (issue #2202).
 func TestRecover_RejectsSelfContained(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"recover", "--self-contained", "42"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"recover", "--self-contained", "42"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(recover --self-contained 42) code = %d, want 1", code)
 	}
@@ -366,7 +366,7 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"recover", "--yes"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"recover", "--yes"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(recover --yes) code = %d, want %d (queue-mode bootstrap exit code)", code, int(exitcode.ConfigInvalid))
 	}
@@ -376,7 +376,7 @@ func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = mainRun([]string{"recover", "--yes", "42"}, &stdout, &stderr)
+	code = mainRunT(t, []string{"recover", "--yes", "42"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(recover --yes 42) code = %d, want 1", code)
 	}
@@ -392,7 +392,7 @@ func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"recover", "SPIN-42"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"recover", "SPIN-42"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(recover SPIN-42) code = %d, want 1", code)
 	}
@@ -414,7 +414,7 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 	}
 	for _, argv := range cases {
 		var stdout, stderr bytes.Buffer
-		code := mainRun(argv, &stdout, &stderr)
+		code := mainRunT(t, argv, &stdout, &stderr)
 
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", argv, code)
@@ -433,7 +433,7 @@ func TestMainRun_Preview_WritesReportToInjectedStdout(t *testing.T) {
 	writeLocalReadyIssue(t, os.Getenv("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"preview", "42"}, &stdout, &stderr)
+	code := mainRunKnobsAsFlags(t, []string{"preview", "42"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("mainRun(preview 42) code = %d, want 0; stderr = %q", code, stderr.String())
@@ -522,7 +522,7 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 					argv := append([]string{v.verb}, tc.ids...)
 
 					var stdout, stderr bytes.Buffer
-					code := mainRun(argv, &stdout, &stderr)
+					code := mainRunKnobsAsFlags(t, argv, &stdout, &stderr)
 
 					if code != 1 {
 						t.Errorf("mainRun(%v) code = %d, want 1 (SPIN-99 unknown)", argv, code)
@@ -542,7 +542,7 @@ func TestMainRun_Console_RoutesThroughBootstrap(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"console"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"console"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun([console]) code = %d, want 1", code)
 	}
@@ -551,126 +551,62 @@ func TestMainRun_Console_RoutesThroughBootstrap(t *testing.T) {
 	}
 }
 
-// The verb-level proof of ADR 0020's staged deprecation: a real subcommand
-// both prints the provenance warning for an ambient knob env var and still
-// resolves it into config, exercising the wiring (snapshot before parseFlags,
-// flush after the bare-invocation check) rather than warnAmbientKnobEnv alone.
-func TestMainRun_AmbientKnobEnv_WarnsAndStillHonored(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+// The verb-level proof of ADR 0020's final stage: a non-secret schema knob in
+// the environment stops the launcher with exit 6 before any verb work, and the
+// error names both migration targets.
+func TestMainRun_AmbientKnobEnv_ExitsConfigInvalid(t *testing.T) {
 	t.Setenv("MAX_JOBS", "5")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"research"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"research"}, &stdout, &stderr)
 
 	if code != int(exitcode.ConfigInvalid) {
 		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
 	out := stderr.String()
 	if !strings.Contains(out, "MAX_JOBS=5 set in environment") {
-		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", out)
+		t.Errorf("stderr = %q, want a MAX_JOBS error", out)
 	}
 	if !strings.Contains(out, "--max-jobs") || !strings.Contains(out, "dispatch.maxJobs") {
 		t.Errorf("stderr = %q, want both the flag and domain-path migration targets named", out)
 	}
-
-	// Still honored this release: loadConfig() resolves MAX_JOBS=5 from the
-	// same ambient env the warning just reported on.
-	c := loadConfig()
-	if c.MaxJobs != 5 {
-		t.Errorf("maxJobs = %d, want 5 (ambient env still honored)", c.MaxJobs)
-	}
 }
 
-// A bare `spindrift` still surfaces the ADR 0020 provenance warning: the
-// len(args)==0 branch (issue #555) must not return before the flush (#814).
-func TestMainRun_NoArgs_AmbientKnobEnv_WarnsBeforeHelp(t *testing.T) {
+// The check sits ahead of every other early return, so a bare invocation,
+// --help, and a parse error all stop on a stray knob; only --version, which
+// answers first, still succeeds.
+func TestMainRun_AmbientKnobEnv_StopsEveryEarlyPath(t *testing.T) {
 	t.Setenv("MAX_JOBS", "5")
 
-	var stdout, stderr bytes.Buffer
-	code := mainRun(nil, &stdout, &stderr)
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0", code)
-	}
-	if !strings.Contains(stdout.String(), "Usage: spindrift [flags] <subcommand>") {
-		t.Errorf("stdout missing help usage line, got:\n%s", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
-		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
-	}
-}
-
-// `--help` still surfaces the ADR 0020 provenance warning: the help branch's
-// early return, ahead of warnAmbientKnobEnv, used to drop it (issue #814).
-func TestMainRun_HelpFlag_AmbientKnobEnv_WarnsBeforeHelp(t *testing.T) {
-	t.Setenv("MAX_JOBS", "5")
-
-	cases := [][]string{
-		{"--help"},
-		{"--help", "--all"},
-	}
-	for _, argv := range cases {
+	for _, argv := range [][]string{nil, {"--help"}, {"--help", "--all"}, {"--not-a-real-flag"}, {"--input"}} {
 		var stdout, stderr bytes.Buffer
-		code := mainRun(argv, &stdout, &stderr)
-		if code != 0 {
-			t.Errorf("mainRun(%v) code = %d, want 0", argv, code)
+		code := mainRunT(t, argv, &stdout, &stderr)
+		if code != int(exitcode.ConfigInvalid) {
+			t.Errorf("mainRun(%v) code = %d, want %d", argv, code, int(exitcode.ConfigInvalid))
 		}
-		if !strings.Contains(stdout.String(), "Usage: spindrift [flags] <subcommand>") {
-			t.Errorf("mainRun(%v) stdout missing help usage line, got:\n%s", argv, stdout.String())
+		if stdout.Len() != 0 {
+			t.Errorf("mainRun(%v) stdout = %q, want empty (no help past a stray knob)", argv, stdout.String())
 		}
 		if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
-			t.Errorf("mainRun(%v) stderr = %q, want a MAX_JOBS provenance warning", argv, stderr.String())
+			t.Errorf("mainRun(%v) stderr = %q, want a MAX_JOBS error", argv, stderr.String())
 		}
 	}
-}
-
-// A malformed --input flag still surfaces the ADR 0020 provenance warning;
-// extractInputFlag's error return used to drop it (issue #1191).
-func TestMainRun_ExtractInputFlagError_AmbientKnobEnv_StillWarns(t *testing.T) {
-	t.Setenv("MAX_JOBS", "5")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--input"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "flag --input requires a value") {
-		t.Errorf("stderr = %q, want the extractInputFlag error", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
-		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
+	if code := mainRunT(t, []string{"--version"}, &stdout, &stderr); code != 0 {
+		t.Errorf("mainRun(--version) code = %d, want 0", code)
 	}
 }
 
-// An unrecognized flag still surfaces the ADR 0020 provenance warning;
-// parseFlags's error return used to drop it (issue #1191).
-func TestMainRun_ParseFlagsError_AmbientKnobEnv_StillWarns(t *testing.T) {
-	t.Setenv("MAX_JOBS", "5")
+// A flag setting the same knob is the sanctioned route and must not read as
+// ambient, even though parseFlags then lands it in the environment.
+func TestMainRun_FlagSettingKnob_NotAmbient(t *testing.T) {
+	unsetEnv(t, "MAX_JOBS")
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--not-a-real-flag"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "--not-a-real-flag") {
-		t.Errorf("stderr = %q, want the parseFlags error", stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
-		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
-	}
-}
-
-// A --input path that fails to load still surfaces the ADR 0020 provenance
-// warning; inputdoc.Load's error return used to drop it (issue #1191).
-func TestMainRun_LoadInputDocumentError_AmbientKnobEnv_StillWarns(t *testing.T) {
-	t.Setenv("MAX_JOBS", "5")
-
-	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--input", filepath.Join(t.TempDir(), "missing.json"), "dispatch"}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("mainRun code = %d, want 1; stderr=%s", code, stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "MAX_JOBS=5 set in environment") {
-		t.Errorf("stderr = %q, want a MAX_JOBS provenance warning", stderr.String())
+	mainRunT(t, []string{"--max-jobs", "5", "research"}, &stdout, &stderr)
+	if strings.Contains(stderr.String(), "set in environment") {
+		t.Errorf("stderr = %q, want no ambient-knob error for a flag-set knob", stderr.String())
 	}
 }
 
@@ -693,7 +629,7 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"--input", docPath, "research"}, &stdout, &stderr)
+	code := mainRunT(t, []string{"--input", docPath, "research"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
@@ -706,7 +642,7 @@ func TestMainRun_InputDocument_SeedsConfig_FlagOverridesDocument(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	code = mainRun([]string{"--input", docPath, "--repo-slug", "flag-org/flag-repo", "research"}, &stdout, &stderr)
+	code = mainRunT(t, []string{"--input", docPath, "--repo-slug", "flag-org/flag-repo", "research"}, &stdout, &stderr)
 	if code != int(exitcode.ConfigInvalid) {
 		t.Fatalf("mainRun code = %d, want %d; stderr=%s", code, int(exitcode.ConfigInvalid), stderr.String())
 	}
@@ -1601,9 +1537,8 @@ func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 }
 
 // Env, ambient or flag-set (indistinguishable at loadConfig()'s layer), still
-// overrides the document's settings value. ADR 0020 stage 1 keeps an ambient
-// knob env var winning this release, with a deprecation warning printed
-// elsewhere.
+// overrides the document's settings value; an ambient knob env var never
+// reaches this layer, since mainRun exits 6 on it first (ADR 0020).
 func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 
@@ -6692,10 +6627,10 @@ func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testin
 	t.Setenv("REPO_SLUG", "")
 
 	var dispatchOut, dispatchErr bytes.Buffer
-	dispatchCode := mainRun([]string{"dispatch"}, &dispatchOut, &dispatchErr)
+	dispatchCode := mainRunT(t, []string{"dispatch"}, &dispatchOut, &dispatchErr)
 
 	var researchOut, researchErr bytes.Buffer
-	researchCode := mainRun([]string{"research"}, &researchOut, &researchErr)
+	researchCode := mainRunT(t, []string{"research"}, &researchOut, &researchErr)
 
 	if dispatchOut.Len() != 0 || researchOut.Len() != 0 {
 		t.Errorf("stdout dispatch=%q research=%q, want both empty", dispatchOut.String(), researchOut.String())
@@ -6890,7 +6825,7 @@ func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 	if got := resolveBoxEnvVar("AUTO_FORMAT"); got != "1" {
 		t.Fatalf("resolveBoxEnvVar without a flag = %q, want 1 (document value)", got)
 	}
-	if _, err := parseFlags([]string{"--auto-format=false"}); err != nil {
+	if _, err := parseFlagsT(t, []string{"--auto-format=false"}); err != nil {
 		t.Fatalf("parseFlags: %v", err)
 	}
 	if got := resolveBoxEnvVar("AUTO_FORMAT"); got != "" {
@@ -6961,4 +6896,65 @@ func TestConfigArtifact_EmptyBoxArtifactFollowsRunnerFamily(t *testing.T) {
 			t.Errorf("runnerKind %q: artifact() = %q, want %q", tc.runnerKind, got.Name, tc.want.Name)
 		}
 	}
+}
+
+// restoreKnobEnvAfter undoes the os.Setenv calls parseFlags makes for flags,
+// which would otherwise persist across tests and trip mainRun's ambient-knob
+// check (ADR 0020) in whichever test runs next.
+func restoreKnobEnvAfter(t *testing.T) {
+	t.Helper()
+	type saved struct {
+		val string
+		set bool
+	}
+	snap := make(map[string]saved, len(inputdoc.SchemaFlags))
+	for _, e := range inputdoc.SchemaFlags {
+		v, ok := os.LookupEnv(e.Env)
+		snap[e.Env] = saved{v, ok}
+	}
+	t.Cleanup(func() {
+		for env, s := range snap {
+			if s.set {
+				os.Setenv(env, s.val)
+			} else {
+				os.Unsetenv(env)
+			}
+		}
+	})
+}
+
+// mainRunT is mainRun with the flags' env writes rolled back at test end.
+func mainRunT(t *testing.T, argv []string, stdout, stderr io.Writer) int {
+	t.Helper()
+	restoreKnobEnvAfter(t)
+	return mainRun(argv, stdout, stderr)
+}
+
+// parseFlagsT is parseFlags with the flags' env writes rolled back at test end.
+func parseFlagsT(t *testing.T, argv []string) ([]string, error) {
+	t.Helper()
+	restoreKnobEnvAfter(t)
+	return parseFlags(argv)
+}
+
+// mainRunKnobsAsFlags is mainRunT for tests whose setup helpers t.Setenv knobs:
+// mainRun refuses ambient knobs (ADR 0020), so it lifts each one out of the
+// environment into the equivalent flag ahead of argv, where parseFlags puts it
+// back, as a real invocation would.
+func mainRunKnobsAsFlags(t *testing.T, argv []string, stdout, stderr io.Writer) int {
+	t.Helper()
+	var flags []string
+	for _, e := range inputdoc.SchemaFlags {
+		v, ok := ambientSetting(e.Env)
+		if !ok {
+			continue
+		}
+		if e.Kind == "bool" {
+			flags = append(flags, "--"+e.Flag+"="+v)
+		} else {
+			flags = append(flags, "--"+e.Flag, v)
+		}
+		unsetEnv(t, e.Env)
+	}
+	return mainRunT(t, append(flags, argv...), stdout, stderr)
 }

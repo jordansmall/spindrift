@@ -83,8 +83,8 @@ runs:
     # $GITHUB_ENV persists across the rest of the job. Only RUNTIME (a nix
     # plumbing artifact, not a knob) and the secrets live here — knob values
     # (repo, base branch, bot identity) are surfaced as outputs below and
-    # passed as --flags, since ambient knob env now draws a deprecation
-    # warning (ADR 0020). Exported before the build step below: spindrift's
+    # passed as --flags, since ambient knob env now exits 6
+    # (ADR 0020). Exported before the build step below: spindrift's
     # build() reads RUNTIME directly and fails if it's unset.
     - name: Export shared env
       shell: bash

@@ -37,7 +37,7 @@
             infra.image.prefetch = "go mod download || true";
 
             # The prompt is baked into the image; changing it requires an image
-            # rebuild (spindrift build). Set SPINDRIFT_PROMPT_DIR at runtime to
+            # rebuild (spindrift build). Pass --prompt-dir at runtime to
             # point at a local directory for zero-rebuild iteration.
             agents.prompt = builtins.readFile ./prompts/issue-prompt.md;
 

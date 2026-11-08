@@ -58,7 +58,7 @@ func TestRemovedKnob_FailsDispatchAndDoctorValidation(t *testing.T) {
 func TestParseFlags_StaleOrchestratorFlagIsUnknown(t *testing.T) {
 	for _, arg := range []string{"--orchestrator", "--orchestrator=false", "--orchestrator-enabled"} {
 		t.Run(arg, func(t *testing.T) {
-			_, err := parseFlags([]string{arg})
+			_, err := parseFlagsT(t, []string{arg})
 			want := "unknown flag: " + arg
 			if err == nil || err.Error() != want {
 				t.Errorf("parseFlags(%q) err = %v, want %q", arg, err, want)

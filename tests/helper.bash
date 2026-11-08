@@ -43,26 +43,33 @@ setup_dispatch_env() {
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   : >"$PODMAN_LOG"
   : >"$GH_LOG"
+  : >"$GH_LOG.token"
   set_dispatch_env
   cd "$BATS_TEST_TMPDIR" || exit
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
-  # Bound the merge gate's poll loop (issue #2424): a test that reaches it
-  # without its own values would inherit the production defaults (3600s
-  # timeout, 30s interval) and really sleep, as CI did on PR #2410. Interval 0
-  # keeps iterations instant; a small nonzero timeout still lets it iterate once.
-  export MERGE_POLL_INTERVAL=0
-  export MERGE_POLL_TIMEOUT=2
 }
 
-# Minimal env so `dispatch`'s required-var guards pass.
+# Secrets only in the environment so `dispatch`'s required-var guards pass; the
+# launcher exits 6 on a non-secret knob there (ADR 0020), so DISPATCH_FLAGS
+# carries the rest as flags.
 set_dispatch_env() {
-  export REPO_SLUG="owner/repo"
+  export FAKE_PODMAN_IMAGE_PRESENT=1
   export GH_TOKEN="fake-token"
   export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"
-  export GIT_USER_NAME="Test Bot"
-  export GIT_USER_EMAIL="bot@example.com"
   # The fake runtime cannot answer the socket carrier's transport probe, so
   # launcher-level suites pin the log carrier rather than take the schema
-  # default.
-  export BOX_SIGNAL_CARRIER=log
+  # default. Bound the merge gate's poll loop (issue #2424): a test that
+  # reaches it without its own values would inherit the production defaults
+  # (3600s timeout, 30s interval) and really sleep, as CI did on PR #2410.
+  # Interval 0 keeps iterations instant; a small nonzero timeout still lets it
+  # iterate once.
+  # shellcheck disable=SC2034 # read by the sourcing suites
+  DISPATCH_FLAGS=(
+    --repo-slug owner/repo
+    --user-name "Test Bot"
+    --user-email bot@example.com
+    --box-signal-carrier log
+    --merge-poll-interval 0
+    --merge-poll-timeout 2
+  )
 }

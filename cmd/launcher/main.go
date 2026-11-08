@@ -1,12 +1,10 @@
 // Package main is the spindrift launcher: it orchestrates open issues into
 // disposable containers. Nix-computed config reaches the binary as one
 // Launcher input document via --input (ADR 0020); a CLI flag overrides the
-// document, and an ambient knob env var still wins this release but draws a
-// deprecation warning. Secrets and BOX_ENV_VARS plumbing stay env-only.
+// document, and an ambient knob env var exits config-invalid (6). Secrets and BOX_ENV_VARS plumbing stay env-only.
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -2194,12 +2192,6 @@ func cmdDispatch(lc *launchContext, stdout, stderr io.Writer) int {
 	return runExitCode(lc, stdout, stderr)
 }
 
-// flushAmbientWarnings writes snapshotted ambient-env deprecation warnings to
-// stderr. Every mainRun early return must call it (ADR 0020, issue #814).
-func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
-	stderr.Write(warnings.Bytes())
-}
-
 // verbHandler is the uniform shape every verbHandlers entry implements. args
 // is the subcommand's args with the verb stripped: post-verb args first, then
 // any leading pass-through flags (see splitVerb). Output injection is partial.
@@ -2346,14 +2338,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
-	// Snapshot ambient-env deprecation warnings before parseFlags mutates the
-	// environment, so a flag setting the same var never masks the ambient value
-	// the warning reports on (ADR 0020). Taken ahead of every early return
-	// below so each of them can still surface it (issues #814, #1191).
-	var ambientWarnings bytes.Buffer
-	warnAmbientKnobEnv(&ambientWarnings)
+	// Before parseFlags, which Setenv's every flag: a flag-set value must not
+	// look ambient. Ahead of help so a stray knob stops --help too (ADR 0020).
+	if err := ambientKnobEnvError(); err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return int(exitcode.ConfigInvalid)
+	}
 	if help {
-		flushAmbientWarnings(stderr, &ambientWarnings)
 		if helpAll {
 			printHelpFull(stdout)
 		} else {
@@ -2363,27 +2354,23 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	inputPath, argv, err := extractInputFlag(argv)
 	if err != nil {
-		stderr.Write(ambientWarnings.Bytes())
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	args, err := parseFlags(argv)
 	if err != nil {
-		stderr.Write(ambientWarnings.Bytes())
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	if len(args) == 0 {
 		// Bare `spindrift` prints help rather than silently dispatching (issue
 		// #555); `dispatch` is the sole way to drain the queue.
-		flushAmbientWarnings(stderr, &ambientWarnings)
 		printHelp(stdout)
 		return 0
 	}
 	if inputPath != "" {
 		doc, err := inputdoc.Load(inputPath)
 		if err != nil {
-			stderr.Write(ambientWarnings.Bytes())
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
@@ -2392,13 +2379,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// Runs after loadedDoc is in place: CODE_FORGE and ISSUE_TRACKER may be set
 	// through the document alone.
 	if err := applySecretCmdFallback(); err != nil {
-		stderr.Write(ambientWarnings.Bytes())
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	_, driverWarning := resolveDriver()
-	ambientWarnings.WriteString(driverWarning)
-	flushAmbientWarnings(stderr, &ambientWarnings)
+	fmt.Fprint(stderr, driverWarning)
 	// Pass-through booleans such as --no-build may precede the verb (issue
 	// #3784), so args[0] is not necessarily it.
 	verb, rest := splitVerb(args)

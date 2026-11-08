@@ -124,7 +124,7 @@ Doctor renders the ordered launch-gate registry (issue #2942) as five
 `ok: <name>` / `MISSING: <name>: <error>` pass/fail rows —
 `read-only-capability`, `network-mode-runtime`,
 `signal-carrier-network-mode` (the gate that refuses
-`BOX_SIGNAL_CARRIER=socket` — or the knob left unset, which now means
+`--box-signal-carrier socket` — or the flag left unset, which now means
 `socket` — under `NETWORK_MODE=none`, the one pairing the socket carrier
 can never work under; see [Signal
 socket](#signal-socket-box_signal_carriersocket)),
@@ -294,17 +294,20 @@ patch rung is on: the tracker and `CODE_FORGE` must be a matching
 Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 > baked default** (ADR 0020): nix renders the resolved `settings` values (plus
 image/agent-file artifacts) into one Launcher input document, passed to the
-binary via `--input`; an explicit flag overrides it. A knob env var still
-wins over the flake setting this release — deprecated, and the launcher warns
-with the flag/settings equivalent when it finds one — but env's role shrinks
-to secrets and internal launcher→Box plumbing from here on; see
+binary via `--input`; an explicit flag overrides it. A knob env var is no
+longer read: the launcher (every verb, `--help` included; only `--version`
+still answers) exits 6 (`config-invalid`) before doing any work when a
+non-secret knob is set in its environment, one line per knob naming the flag
+and settings path to use instead (issue #6623, finishing the staging ADR 0020
+began with a warning). Env carries only secrets and internal launcher→Box
+plumbing (`DRIVER`, the `SPINDRIFT_*` internals); see
 [`MIGRATING.md`](../MIGRATING.md).
-A set-but-empty bool knob (e.g. `--auto-format=false`, or `AUTO_FORMAT=` in the
-env) is an explicit off that beats a document value of on. One rule decides it:
-a knob's empty value counts as set when its kind is bool or its schema entry
-declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`, `MERGE_GUARD_PATHS`); for
-every other knob an empty env value still means unset (issues #4290, #4398,
-#5077).
+A set-but-empty bool knob (e.g. `--auto-format=false`) is an explicit off that
+beats a document value of on. One rule decides it, and it also decides which
+empty env values trip the exit-6 check above: a knob's empty value counts as
+set when its kind is bool or its schema entry declares `emptyDisables`
+(`MEMORY_LIMIT`, `PIDS_LIMIT`, `MERGE_GUARD_PATHS`); for every other knob an
+empty env value still means unset and is ignored (issues #4290, #4398, #5077).
 `spindrift --help` stays scannable; the full generated table lives in
 `man spindrift` (and `spindrift --help --all` for the same thing in the
 terminal). Bare `spindrift` with no subcommand — or an unrecognized
@@ -369,7 +372,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `packages`  | `perSystem.spindrift.infra.image.packages` | shared         | `pkgs -> [pkg]`             | `[]`               | project build/test tools baked into the image (the toolchain surface)|
 | `prefetch`  | `perSystem.spindrift.infra.image.prefetch` | shared         | shell snippet               | `""`               | runs in the work tree after the clone, to warm dependency caches; failures are non-fatal |
 | `prompt`    | `perSystem.spindrift.agents.prompt` | shared         | string                      | bundled starter    | agent prompt template baked into the image; changing it requires a rebuild (`spindrift build`). The SPINDRIFT_OUTCOME contract is harness-owned: `spindrift build` appends it automatically if a custom `prompt` omits it (idempotent — a prompt that already has it is untouched) |
-| `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `SPINDRIFT_PROMPT_DIR` regardless of which caller baked the image |
+| `scoutPrompt` / `reviewPrompt` / `filerPrompt` | — | **`mkHarness` only** | string | bundled starters | system prompts for the read-only scout and reviewer subagents and the opt-in filer subagent (see [Filer](#filer)); not settable on `perSystem.spindrift.*` — override at runtime via `--prompt-dir` regardless of which caller baked the image |
 | `skills`    | `perSystem.spindrift.agents.skills` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body; the name must match `[A-Za-z0-9._-]+` and not be `.` or `..`, else evaluation fails, issue #5022) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | `perSystem.spindrift.infra.runtime` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`rancher` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
@@ -580,7 +583,7 @@ the `promptFile`.
 This promptFile check runs at eval time against the checked-in
 `templates/default/prompts/` directory only, so it cannot see a file that's
 only ever supplied via a *runtime* prompt-dir override
-(`SPINDRIFT_PROMPT_DIR` env var / `--prompt-dir` flag /
+(`--prompt-dir` flag /
 `perSystem.spindrift.agents.promptDir` flake option — see the
 `SPINDRIFT_PROMPT_DIR` row further down and the
 `scoutPrompt`/`reviewPrompt`/`filerPrompt` row above): that directory
@@ -787,7 +790,7 @@ same way it already does for the model (issue #2427) — one mechanism instead
 of two.
 
 The **prompt is baked into the image**: changing `prompts/issue-prompt.md`
-requires an image rebuild (`spindrift build`). Point `SPINDRIFT_PROMPT_DIR` at
+requires an image rebuild (`spindrift build`). Point `--prompt-dir` at
 any directory to override it at runtime for zero-rebuild iteration. The
 template an override directory replaces is internal — see
 [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out for what that
@@ -1156,22 +1159,21 @@ file wins. Precedence against your shell env and dispatch-time flags is
 unchanged: the Driver file sits in the same tier as `harness.env`, after it,
 so it overrides the shell env, and flags still win over both. Another
 Driver's file is never read, so `harness.opencode.env` does not reach the
-`claude` app. Put the Driver-valued knobs (the `driverValued` rows in
-`lib/env-schema.nix`, such as `MODEL` and `EFFORT`) in the Driver's own file,
-and keep shared knobs (forge tokens, git identity, `*_CMD` credential
-commands) in `harness.env`. If `harness.env` assigns a Driver-valued knob
-anyway, the wrapper prints one line per knob to stderr before sourcing (it
-recognizes `MODEL=`, `MODEL+=`, and the `export`, `readonly`, and `declare`
-forms), and the knob still applies to every Driver:
-
-```
-spindrift: warning: harness.env sets MODEL, a Driver-valued knob, so it applies to every Driver; set it in harness.claude.env instead
-```
+`claude` app. Both files hold secrets only (and `DRIVER`): put credentials
+only one Driver needs (its provider key, `OPENCODE_AUTH_CONTENT`) in the
+Driver's own file, and keep shared secrets (forge tokens, `*_CMD` credential
+commands) in `harness.env`. The wrapper exports whatever the files assign, so
+a non-secret knob in either one, such as `MODEL` or `EFFORT`, makes the
+launcher exit 6 (`config-invalid`) before it does any work; the Driver-valued
+knobs (the `driverValued` rows in `lib/env-schema.nix`) belong in each
+Driver's own `agents.drivers.<name>` settings, or on the command line as
+`--model` / `--effort`.
 
 With a single Driver (the `agents.driver` shorthand or a one-entry
-`agents.drivers`) no Driver file is read, even if present, and nothing warns.
-A Daemon's child dispatches re-run the Daemon's `DAEMON_APP`, which re-sources both files,
-so a child of a multi-Driver Daemon prints the warning too.
+`agents.drivers`) no Driver file is read, even if present.
+A Daemon's child dispatches re-run the Daemon's `DAEMON_APP`, which re-sources
+both files, so a knob assigned in either file halts a multi-Driver Daemon's
+children the same way.
 
 #### The pi Driver
 
@@ -2308,9 +2310,9 @@ The target, secrets, and commit identity are set at **dispatch time** — never
 baked as Nix options — so one image drives any Target repo without a rebuild
 (ADR 0001). Secrets stay **runtime env** (`harness.env` or your shell, never
 the flake); every other knob below is a flake `settings.*` value or a
-`--flag` (ADR 0020) — the env var column still works this release (deprecated,
-warns) but is no longer the primary channel. When you build several Drivers
-from one flake, each Driver's apps also read an optional
+`--flag` (ADR 0020) — the env var column only names the knob: setting one in
+the launcher's environment exits 6 (`config-invalid`; issue #6623). When you
+build several Drivers from one flake, each Driver's apps also read an optional
 `harness.<driver>.env` after `harness.env`; see [Several Drivers side by
 side](#several-drivers-side-by-side).
 
@@ -2417,7 +2419,7 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` satisfy both sides of the check today, and the `jira` tracker satisfies the tracker side (paired with a `github` or `forgejo` Code Forge, issue #6355); a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
-| `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; set `log` there |
+| `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; pass `--box-signal-carrier log` there (the daemon reads `BOX_SIGNAL_CARRIER` from its own environment and forwards it to each child as that flag) |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -2436,22 +2438,21 @@ When a vault's naming isn't uniform, fall back to the per-secret
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector), on `pi` it becomes `--thinking <level>` (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`); unset emits no flag either way, so the Driver's own default effort applies |
 | `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; on `opencode`, `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` (issue #5351), which sets opencode's default, and spindrift's opencode guard plugin caps a longer model-set per-call `timeout` at that same value (issue #5381), and, like Claude Code's maximum, leaves a shorter per-call `timeout` alone; unlike that maximum, the cap holds only while opencode loads the plugin, which it skips with a logged error if the import fails. A Driver declaring none (pi) ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: a 10-minute maximum; opencode: a 2-minute default); a value that is not a positive integer is skipped with a warning in the Box log |
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`); image-time only — a change needs a rebuild, and a dispatch-time value neither retiers nor drops the baked scout. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty at image time drops the reviewer entry from `--agents`; empty at dispatch sets no override and leaves the baked roster unchanged); the `--agents` reviewer entry is image-time only — a change needs a rebuild, and a dispatch-time value neither retiers, adds, nor drops the `--agents` reviewer entry itself. **Deprecated as an image-time knob** — superseded by the [`roster`](#subagent-roster) option; the dispatch-time override below is not deprecated. The code-owned review pass, not an inline reviewer subagent, consumes the roster reviewer entry: it binds its model from this value (falling back to the coordinator model when unset); only a kind with its own reviewer prompt (the butler) keeps the entry as an inline reviewer subagent. An explicit dispatch-time `REVIEW_MODEL=...`/`--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback. Under the `pi` Driver a dispatch-time value ending in a `:<level>` suffix also sets the review pass's effort to that level unless `REVIEW_EFFORT` is set (see [The pi Driver](#the-pi-driver)) |
-| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Like `REVIEW_MODEL`, an explicit dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged. Under the `pi` Driver an explicit value also wins over a `:<level>` suffix on a dispatch-time `REVIEW_MODEL` |
+| `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty at image time drops the reviewer entry from `--agents`; empty at dispatch sets no override and leaves the baked roster unchanged); the `--agents` reviewer entry is image-time only — a change needs a rebuild, and a dispatch-time value neither retiers, adds, nor drops the `--agents` reviewer entry itself. **Deprecated as an image-time knob** — superseded by the [`roster`](#subagent-roster) option; the dispatch-time override below is not deprecated. The code-owned review pass, not an inline reviewer subagent, consumes the roster reviewer entry: it binds its model from this value (falling back to the coordinator model when unset); only a kind with its own reviewer prompt (the butler) keeps the entry as an inline reviewer subagent. An explicit dispatch-time `--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time flag > baked roster reviewer entry > coordinator-model fallback. Under the `pi` Driver a dispatch-time value ending in a `:<level>` suffix also sets the review pass's effort to that level unless `REVIEW_EFFORT` is set (see [The pi Driver](#the-pi-driver)) |
+| `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Like `REVIEW_MODEL`, an explicit dispatch-time `--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time flag > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged. Under the `pi` Driver an explicit value also wins over a `:<level>` suffix on a dispatch-time `REVIEW_MODEL` |
 | `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked filer. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked worker. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var. The knob itself is a versioned surface; the template an override directory replaces is not — see [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out |
-| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time: mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
+| `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` (the env var exits 6 like any knob env var). The knob itself is a versioned surface; the template an override directory replaces is not — see [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out |
+| `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time with `--skills-dir` (the env var exits 6): mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
 
 Every `settings`-baked knob above can be re-pointed at dispatch time with its
 `--flag` (see `spindrift --help --all` / `man spindrift`) — except
 `SCOUT_MODEL`/`FILER_MODEL`/`WORKER_MODEL`, whose models are baked into the
 image's subagent roster and need a rebuild (on an image with no loaded input
 document, a dispatch-time value still steers which subagent prompt fragments
-render, so they can disagree with the baked roster); a knob env var
-still wins over the flake setting this release, but is deprecated and warns
-(ADR 0020) — see [`MIGRATING.md`](../MIGRATING.md) for the flag/settings
-equivalents. `(baked)` marks knobs whose defaults are baked into the Launcher
+render, so they can disagree with the baked roster); a knob env var is not
+read and exits 6 (ADR 0020, issue #6623) — see
+[`MIGRATING.md`](../MIGRATING.md) for the flag/settings equivalents. `(baked)` marks knobs whose defaults are baked into the Launcher
 input document via `settings`; `(not bakeable)` marks knobs deliberately kept
 off the flake surface (secrets, per-run overrides, and dev-iteration host-path
 mounts, though the latter are still flags — see the full reference). Commit
@@ -2473,7 +2474,7 @@ exits rather than committing under an arbitrary identity.
 > Consumer's `nixpkgs` input so `pkgs.claude-code` is current, or blank the
 > subagent model knobs (`models.scout`/`models.review`, etc., or the `roster`)
 > in the Consumer config and rebuild (`spindrift build`) to drop the roster and
-> stop emitting `--agents`. Blanking `SCOUT_MODEL=`/`REVIEW_MODEL=` at dispatch
+> stop emitting `--agents`. Blanking the subagent models at dispatch
 > time does not: the roster is baked into the image.
 
 ### opencode Driver: github-copilot Provider credential
@@ -2512,7 +2513,7 @@ environment under bwrap and passes it as a bare `-e`/`--env` under the OCI
 runners).
 
 Point `MODEL` (and any per-tier `*_MODEL`) at a Provider-namespaced model id
-to select `github-copilot`, e.g. `MODEL=github-copilot/<model>`. Copilot
+to select `github-copilot`, e.g. `--model github-copilot/<model>`. Copilot
 serves its own drifting catalog (`claude-sonnet-4`, `claude-opus-4`,
 `gpt-4o`, …) that is disjoint from the Anthropic-API model ids and shifts
 over time, so obtain a currently-served `<model>` from Copilot's live
@@ -2691,8 +2692,7 @@ takes four things:
   the daemon's own host is not. Reaching that one takes `host` mode, which
   gives up the Box's network isolation. Bake it as `infra.network.mode`
   (`defaults.networkMode` in `mkHarness`); a `NETWORK_MODE` line in
-  `harness.env` is only the deprecated ambient override, which prints a
-  warning. See [Network mode](#network-mode-network_mode) and [Reaching a
+  `harness.env` exits 6 (`config-invalid`). See [Network mode](#network-mode-network_mode) and [Reaching a
   local/self-hosted model server under egress
   restriction](#reaching-a-localself-hosted-model-server-under-egress-restriction).
 
@@ -2702,8 +2702,8 @@ These knobs are rarely changed. All except `SPINDRIFT_SKILLS_DIR` and
 `ISSUE_NUMBER` can be baked via `settings` (see
 [Option surface](#option-surface)); all except the daemon-only knobs below —
 every row whose meaning says the launcher itself ignores it — can
-additionally be overridden at dispatch time via `--flag` (env still works
-this release too, deprecated — ADR 0020). The launcher does generate a
+additionally be overridden at dispatch time via `--flag` (a knob env var
+exits 6 — ADR 0020, issue #6623). The launcher does generate a
 `--flag` for those daemon-only knobs as well, to hold the 1:1
 flake-option/flag parity (issue #3567), but never reads the value — passing
 one is accepted and silently inert. Set them through `settings` /
@@ -4160,7 +4160,7 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
 
 Rename any of these with the `inProgress` / `failed` / `complete`
 knobs under `issues.labels` (baked) or the
-`IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` env vars (runtime).
+`IN_PROGRESS_LABEL` / `FAILED_LABEL` / `COMPLETE_LABEL` knobs (runtime flags).
 
 #### Issue Tracker backends
 
@@ -4758,11 +4758,12 @@ differs is authentication: Forgejo has no GitHub App model, so there is no
 worker-App mint and no `gh-token-refresher` on this backend ([ADR
 0038](adr/0038-the-forgejo-backend-decision-set.md)) — each workflow
 authenticates with a single, non-expiring `FORGEJO_TOKEN` **repository
-secret**, read directly rather than minted per run. A job-level `env:`
-block selects the forgejo backend on both axes (`ISSUE_TRACKER: forgejo`,
-`CODE_FORGE: forgejo`), and sets `FORGEJO_BASE_URL` (falls back to
+secret**, read directly rather than minted per run. Each launcher invocation
+selects the forgejo backend on both axes with flags (`--tracker forgejo
+--forge-backend forgejo`) and passes `--forgejo-base-url` (falls back to
 `https://codeberg.org` via `vars.FORGEJO_BASE_URL || 'https://codeberg.org'`
-when the repo variable is unset) and `FORGEJO_TOKEN` from the secret.
+when the repo variable is unset), since a knob env var exits 6; a job-level
+`env:` block sets only `FORGEJO_TOKEN` from the secret.
 
 **Setup steps:**
 
@@ -5196,7 +5197,7 @@ presence.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or
-`SPINDRIFT_PROMPT_DIR` at runtime (zero-rebuild, works regardless of which
+`--prompt-dir` at runtime (zero-rebuild, works regardless of which
 caller baked the image).
 
 #### Create the labels on the Target repo
@@ -6007,7 +6008,7 @@ the Box seam over a per-Dispatch Signal socket by default, for every
 Dispatch kind (work, research, butler), under `spindrift dispatch`,
 `spindrift research` and the daemon alike ([ADR
 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md)).
-`BOX_SIGNAL_CARRIER=log` is the opt-out: it restores the older carrier,
+`--box-signal-carrier log` is the opt-out: it restores the older carrier,
 nonce-guarded marker lines in the Box's stdout log, exactly as it behaved
 before, and stays selectable for the whole 0.22 minor (removing it is a
 separate, later decision). The socket closes the defect the log carrier
@@ -6057,7 +6058,7 @@ Box container, because the per-Dispatch transport probe refuses the TCP
 fallback under that mode (the Signal-socket gate on a TCP verdict is a
 backstop kept for defence in depth, which neither a live probe nor the
 probe cache reaches, issue #3775). Both errors name the mode, and the `none`
-startup gate's message names the remedy, `BOX_SIGNAL_CARRIER=log`; the probe
+startup gate's message names the remedy, `--box-signal-carrier log`; the probe
 error under `no-host-loopback` does not, so set it there yourself.
 A Consumer that runs under one of these modes and has not set the knob
 therefore sees the error after upgrading to 0.22 and must set `log`
@@ -6074,8 +6075,10 @@ Dispatch error, never a quiet fall back to `log`.
 default, when unset, is `socket` — see the knob's
 own row in [Runtime configuration](#runtime-configuration). This is a
 runtime-only knob — no `spindrift.*` setting and no flake option — so the
-daemon passes it through its child environment like any other env-only
-knob. There is no live toggle: `BOX_SIGNAL_CARRIER=log nix run
+launcher takes it as `--box-signal-carrier log|socket` (a launcher with
+`BOX_SIGNAL_CARRIER` in its environment exits 6), while the daemon reads it
+from its own environment and forwards it to each child as that flag.
+There is no live toggle: `BOX_SIGNAL_CARRIER=log nix run
 .#daemon` opts every child the daemon starts from that point forward back
 onto the log carrier, and a restart is the only way to change it again —
 see [Daemon](#daemon). The in-Box front for `socket` mode is the `driver-exec
@@ -6303,7 +6306,7 @@ composite action (`.github/actions/gh-token-refresher`): it re-mints a fresh
 installation token every 45 minutes for the rest of the job — directly against
 the App's installation-token endpoint, signing its own short-lived JWT with the
 App private key — and writes it to a file in `$RUNNER_TEMP`, exported as
-`GH_TOKEN_REFRESH_FILE`. The private key stays in that backgrounded loop's
+`GH_APP_TOKEN_FILE`. The private key stays in that backgrounded loop's
 memory and a runner-temp file removed when the job ends; only the resulting
 ~1h tokens ever touch disk, and neither the key nor the launcher's own
 `GH_TOKEN` reaches the Box.
@@ -6320,7 +6323,7 @@ deployment that doesn't wire up a refresher, are unaffected). Only the
 launcher polls the file: `agent-setup` freezes the initial token into
 `GH_TOKEN` for every later step, so the workflows' own shell `gh` steps after
 the launcher (the dispatch blocked-release, the recover park) re-read
-`$GH_TOKEN_REFRESH_FILE` before calling `gh` (issue #5259).
+`$GH_APP_TOKEN_FILE` before calling `gh` (issue #5259).
 
 **Interval registry.** Two intervals drive the refresher loop, and both are
 picked against the ~1h installation-token lifetime it exists to stay ahead of.
@@ -6745,7 +6748,7 @@ The Box is driven by a distinct baked prompt,
 `research-self-contained-prompt.md`, rather than the ordinary
 `research-prompt.md` — it drops the EXPLORE-the-repo step and judges
 relevance from the issue content alone. Like the ordinary research prompt,
-it's overridable at runtime via the same `SPINDRIFT_PROMPT_DIR` /
+it's overridable at runtime via the same
 `--prompt-dir` prompt-directory override (issue #2200) for zero-rebuild
 iteration — a custom prompt directory ships
 `research-self-contained-prompt.md` alongside `research-prompt.md` to
@@ -8100,7 +8103,7 @@ The remembered decision lives in one file,
 `<working-dir>/.spindrift/registry-probe-cache.json`, written whenever an
 OCI-runtime (docker/podman) dispatch needs the transport probe — registry
 proxy routes are configured (`REGISTRY_PROXY_ROUTES_FILE`), or
-`BOX_SIGNAL_CARRIER=socket` (the default). `spindrift doctor`'s
+`--box-signal-carrier socket` (the default). `spindrift doctor`'s
 `registry-proxy-transport` and `signal-socket-transport` rows mirror the
 same gates; a dispatch with neither leaves no trace. It
 remembers the whole transport decision, not just the socket-vs-TCP
@@ -8378,7 +8381,8 @@ Consumers leave it unset and keep each Driver's own limit — see the
 `nix/dogfood-defaults.nix`'s `maxParallel`, a four-slot Daemon pool. It has
 to be baked: the Daemon resolves `MAX_PARALLEL` from the input document
 before the environment, so a `MAX_PARALLEL` line in `harness.env` never
-reaches the pool (issue #4623).
+reaches the pool (issue #4623) and, since issue #6623, exits the child
+launcher 6.
 
 For one-shot bwrap runs, `nix develop .#bwrap` (Linux-only, same guard as
 `apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on PATH together
@@ -8613,7 +8617,7 @@ research --feature-branch feature-x`. Research children get the same
 campaign's research advises against the branch its work merges into. It
 is a CLI flag only, with no env-schema entry, flake option,
 or settings key, so it isn't subject to the child-env knob strip or the
-ambient-env deprecation path, and the override lasts one invocation, so a
+ambient-env check, and the override lasts one invocation, so a
 temporary branch name never has to be committed to the Consumer's flake
 config on the base branch.
 
@@ -8898,18 +8902,23 @@ its own resolution picks anyway, and the daemon's Demand sources read that
 same value (issue #4617). Everything else — secrets, `PATH`, `HOME`, `NIX_*`,
 `XDG_*`, and any variable the document does not name — passes through
 untouched, which is why the `EnvironmentFile` recipe under **Service unit**
-below still reaches a child's forge credentials unmolested.
-[`BOX_SIGNAL_CARRIER`](#signal-socket-box_signal_carriersocket) is one of the
-values that passes through this way, and it has to: the knob is deliberately
+below still reaches a child's forge credentials unmolested. The pass-through
+has one sharp edge since issue #6623: a non-secret knob the document does not
+name reaches the child like any other variable, and the child launcher exits 6
+(`config-invalid`) on it, which halts the pool, so a stray knob export on the
+daemon surfaces as a config-invalid halt rather than a silent override.
+[`BOX_SIGNAL_CARRIER`](#signal-socket-box_signal_carriersocket) is the one
+knob the daemon still reads from its own environment: it is deliberately
 not a `flakeOption`, so it never enters the input document's `settings` map
 (`signalCarrier`, `lib/env-schema.nix`, whose own doc string spells out the
-same rationale) and the daemon's environment is its only route to a child.
+same rationale) and the daemon's environment is its only source. It cannot
+ride to a child as env, though, because the child launcher would exit 6 on
+it, so the daemon lifts it out of the child's environment and passes it as
+`--box-signal-carrier <value>` on the child's argv and on the doctor
+preflight's (`liftSignalCarrier`, `cmd/launcher/internal/daemon/command.go`).
 `BOX_SIGNAL_CARRIER=log nix run .#daemon` therefore opts every child the
-daemon starts back onto the log carrier — set on the daemon, the knob is
-present in each child; unset, it is absent and the child takes the schema
-default `socket` — as it does for an empty export, which rides through as
-a present-but-empty entry the child's own `getenvSchema` read
-(`cmd/launcher/main.go`) collapses.
+daemon starts back onto the log carrier. Unset or empty, no flag is added
+and the child takes the schema default `socket`.
 There is no live toggle: a restart is the change. A value outside the schema's
 choices refuses the daemon's start — exit 1, with a stderr line naming the
 knob (`validateSignalCarrier`, `cmd/launcher/daemon/main.go`) — before any
@@ -8943,7 +8952,8 @@ DAEMON_IDLE_FLOOR=5s set in environment — not forwarded to children; use the -
 
 Anything a child's own wrapper re-sources from `harness.env` (or, with
 several Drivers, `harness.<driver>.env`) in its working directory is outside
-the daemon's control and stays so.
+the daemon's control and stays so; those files hold secrets only, and a
+non-secret knob assigned there exits the child 6 like any other knob env var.
 
 Every child's stdin is `/dev/null`: it runs in its own process group (see
 **Halting** below), and a background process group that reads the tty is

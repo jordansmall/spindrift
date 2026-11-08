@@ -317,7 +317,7 @@ A few invariants worth calling out:
   contract is harness-owned: `lib/mkHarness.nix` appends it to any baked
   `prompt` that omits it, and `box` appends the same
   canonical contract at run time to a rendered issue prompt that omits it —
-  covering a runtime `SPINDRIFT_PROMPT_DIR` override too — so a Consumer
+  covering a runtime `--prompt-dir` override too — so a Consumer
   can't accidentally ship an agent that never emits the line (see
   `docs/reference.md`).
 - **Do task work in a dedicated git worktree**, one per task/branch — don't edit

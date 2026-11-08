@@ -179,7 +179,7 @@ func runStats(t *testing.T, root string, args ...string) (string, string) {
 	t.Helper()
 	t.Chdir(root)
 	var stdout, stderr bytes.Buffer
-	if code := mainRun(append([]string{"stats"}, args...), &stdout, &stderr); code != 0 {
+	if code := mainRunT(t, append([]string{"stats"}, args...), &stdout, &stderr); code != 0 {
 		t.Fatalf("mainRun(stats %v) code = %d, stderr:\n%s", args, code, stderr.String())
 	}
 	return stdout.String(), stderr.String()
@@ -295,7 +295,7 @@ func TestStats_EmptyRoot(t *testing.T) {
 func TestStats_RejectsUnknownArgument(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var stdout, stderr bytes.Buffer
-	if code := mainRun([]string{"stats", "--bogus"}, &stdout, &stderr); code == 0 {
+	if code := mainRunT(t, []string{"stats", "--bogus"}, &stdout, &stderr); code == 0 {
 		t.Errorf("exit = 0, want non-zero; stderr=%q", stderr.String())
 	}
 }
@@ -487,7 +487,7 @@ func TestStats_RejectsBadArguments(t *testing.T) {
 		{"--json=1"},
 	} {
 		var stdout, stderr bytes.Buffer
-		if code := mainRun(append([]string{"stats"}, args...), &stdout, &stderr); code != 1 {
+		if code := mainRunT(t, append([]string{"stats"}, args...), &stdout, &stderr); code != 1 {
 			t.Errorf("stats %v exit = %d, want 1; stderr=%q", args, code, stderr.String())
 		}
 		if !strings.Contains(stderr.String(), "usage: spindrift stats") {
@@ -500,7 +500,7 @@ func TestStats_RejectsMissingRoot(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-checkout")
 	t.Chdir(t.TempDir())
 	var stdout, stderr bytes.Buffer
-	if code := mainRun([]string{"stats", "--root", missing}, &stdout, &stderr); code != 1 {
+	if code := mainRunT(t, []string{"stats", "--root", missing}, &stdout, &stderr); code != 1 {
 		t.Errorf("exit = %d, want 1; stderr=%q", code, stderr.String())
 	}
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
@@ -517,7 +517,7 @@ func TestStats_RejectsNonDirectoryRootWithRealError(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for root, want := range map[string]string{file: "not a directory", missing: "no such file"} {
 		var stdout, stderr bytes.Buffer
-		if code := mainRun([]string{"stats", "--root", root}, &stdout, &stderr); code != 1 {
+		if code := mainRunT(t, []string{"stats", "--root", root}, &stdout, &stderr); code != 1 {
 			t.Errorf("root %s exit = %d, want 1", root, code)
 		}
 		if !strings.Contains(stderr.String(), want) {
@@ -565,7 +565,7 @@ func TestStats_UnreadableLogWarnsAndExitsZero(t *testing.T) {
 
 	t.Chdir(root)
 	var stdout, stderr bytes.Buffer
-	if code := mainRun([]string{"stats"}, &stdout, &stderr); code != 0 {
+	if code := mainRunT(t, []string{"stats"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("stats code = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "Records: 1 ") {

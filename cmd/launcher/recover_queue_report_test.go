@@ -94,7 +94,7 @@ func TestMainRun_Recover_DaemonChildArgvReachesQueueMode(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := mainRun(cmd.Argv[i+1:], &stdout, &stderr)
+	code := mainRunT(t, cmd.Argv[i+1:], &stdout, &stderr)
 
 	if code != int(exitcode.ConfigInvalid) {
 		t.Errorf("mainRun(%v) code = %d, want %d (queue mode reached bootstrap)", cmd.Argv[i+1:], code, int(exitcode.ConfigInvalid))

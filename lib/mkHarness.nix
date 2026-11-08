@@ -103,7 +103,7 @@
   # operator skill wins a name clash without erasing the baked set.
   skills ? [ ],
   # Non-secret run config baked into the `run` command as its built-in defaults;
-  # a matching env var still wins at runtime, so one build can be re-pointed.
+  # the knob's flag still wins at runtime, so one build can be re-pointed.
   defaults ? { },
   # Container runtime the launcher commands drive; the accepted values are the
   # runtimes the rows in lib/runners/default.nix list, and the default is the
@@ -223,7 +223,6 @@ let
   # scope. Generators below derive all per-knob output from this registry, so
   # no per-knob lines appear anywhere else in this file.
   schema = import ./env-schema.nix;
-  driverMap = import ./driver-map.nix;
 
   # Single source of truth for the completion renderers' subcommand candidate
   # lists (issues #1575/#1577) and the man page SUBCOMMANDS section below.
@@ -467,7 +466,7 @@ let
   flakeOptionEntries = lib.filterAttrs (_: e: e.flakeOption or false) schema;
 
   # Built-in run defaults from the schema; the Consumer's `defaults` arg
-  # overrides them per key, and a matching env var overrides those at runtime.
+  # overrides them per key, and the knob's flag overrides those at runtime.
   # Non-strict (issue #2506): most flakeOption keys have no model concept and
   # cannot guarantee a `.default`, unlike the roster helper's four model keys.
   schemaDefaults = rosterSchemaDefaults.readSchemaDefaults { strict = false; } flakeOptionEntries;
@@ -1331,57 +1330,24 @@ let
   # Shared by the spindrift CLI and the daemon wrapper: sources harness.env
   # (secrets, gitignored) from $PWD, since the harness is a store path with no
   # working tree. Knobs and artifacts flow through the --input
-  # document instead (ADR 0020), so this wrapper bakes nothing per-knob.
+  # document instead (ADR 0020), so this wrapper bakes nothing per-knob; a knob
+  # assigned in a sourced file reaches the launcher and exits 6.
   runShellBody =
     let
-      # Sources `file` with every assignment exported; `pre` is extra lines run
-      # inside the existence guard, before the source.
-      sourceEnv =
-        file: pre:
-        lib.concatStringsSep "\n" (
-          [ ''if [ -f "${file}" ]; then'' ]
-          ++ map (l: "  " + l) (
-            pre
-            ++ [
-              "set -a"
-              "# shellcheck disable=SC1091"
-              ''. "${file}"''
-              "set +a"
-            ]
-          )
-          ++ [ "fi" ]
-        )
-        + "\n";
-
-      driverValuedEnvNames = map (k: schema.${k}.env) driverMap.driverValued.env;
-
-      # A Driver-valued knob in harness.env still applies, to every Driver; it
-      # belongs in harness.${driver}.env. Scans for NAME=, NAME+=, and the
-      # export/readonly/declare forms, warning once per knob.
-      warnDriverValued = lib.optionals (driverValuedEnvNames != [ ]) (
-        lib.splitString "\n" (
-          lib.removeSuffix "\n" ''
-            warned=" "
-            while IFS= read -r line || [ -n "$line" ]; do
-              if [[ $line =~ ^[[:space:]]*((export|readonly|declare([[:space:]]+-[[:alnum:]]+)*)[[:space:]]+)?(${lib.concatStringsSep "|" driverValuedEnvNames})\+?= ]]; then
-                knob=''${BASH_REMATCH[4]}
-                case $warned in
-                *" $knob "*) ;;
-                *)
-                  warned="$warned$knob "
-                  echo "spindrift: warning: harness.env sets $knob, a Driver-valued knob, so it applies to every Driver; set it in harness.${driver}.env instead" >&2
-                  ;;
-                esac
-              fi
-            done <"$PWD/harness.env"
-          ''
-        )
-      );
+      # Sources `file` with every assignment exported.
+      sourceEnv = file: ''
+        if [ -f "${file}" ]; then
+          set -a
+          # shellcheck disable=SC1091
+          . "${file}"
+          set +a
+        fi
+      '';
     in
     if !multiDriver then
-      sourceEnv "$PWD/harness.env" [ ]
+      sourceEnv "$PWD/harness.env"
     else
-      sourceEnv "$PWD/harness.env" warnDriverValued + sourceEnv "$PWD/harness.${driver}.env" [ ];
+      sourceEnv "$PWD/harness.env" + sourceEnv "$PWD/harness.${driver}.env";
 
   # Roff man page rendered from the schema so `man spindrift` carries the full
   # flag reference while `spindrift --help` stays concise.

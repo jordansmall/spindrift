@@ -1,5 +1,58 @@
 # Migration Guide
 
+## A knob env var stops the launcher (issue #6623)
+
+ADR 0020's staging is complete. The warning that named an ambient knob env var
+(a forgotten shell export, a line in `harness.env`, CI env) while still letting
+it win over the flake setting is now an error: `spindrift` and every verb,
+`--help` included, exit 6 (`config-invalid`) before doing any work when a
+non-secret knob is set in the launcher's environment. Only `--version` still
+answers. The message is one line per knob, for example:
+
+```
+MAX_JOBS=5 set in environment — knob env vars are not read; use --max-jobs or dispatch.maxJobs
+```
+
+A knob the launcher itself ignores (a daemon-only one such as
+`DAEMON_IDLE_FLOOR`) names only its settings path. A set-but-empty value counts
+only for a bool knob or one whose empty value disables it (`MEMORY_LIMIT`,
+`PIDS_LIMIT`, `MERGE_GUARD_PATHS`); for every other knob an empty export is
+still ignored. The flag/settings table in the [ADR 0020
+entry](#knob-env-overrides-deprecated-use---flag-or-settings-adr-0020) below
+maps every knob, and `spindrift --help --all` lists them. The dev-iteration
+overrides follow the same rule: use `--prompt-dir` and `--skills-dir` instead of
+`SPINDRIFT_PROMPT_DIR` and `SPINDRIFT_SKILLS_DIR`.
+
+To migrate, remove the export and set the value in your flake's
+`perSystem.spindrift` settings, or pass the `--flag` for a single run (`nix run
+. -- dispatch --max-jobs 5`). `harness.env` and `harness.<driver>.env` are
+sourced and exported by the wrapper, so a non-secret knob assigned in either
+one exits 6 too; they now hold secrets (`GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+their `_CMD` forms, and the like) and `DRIVER` only. The wrapper no longer warns
+about a Driver-valued knob such as `MODEL` in `harness.env`, since no knob
+belongs there; move it to the Driver's `agents.drivers.<name>` settings.
+
+`BOX_SIGNAL_CARRIER` has no settings path, so the launcher takes it as
+`--box-signal-carrier log|socket`, and the remedies the launcher prints name that
+flag. The daemon is unchanged for operators: it still reads
+`BOX_SIGNAL_CARRIER` from its own environment
+(`BOX_SIGNAL_CARRIER=log nix run .#daemon` works as before) and forwards it to
+each child and to the startup `doctor` preflight as `--box-signal-carrier`
+rather than as env. Any other non-secret knob in the daemon's environment that
+the input document does not name reaches a child, which exits 6 and halts the
+pool as config-invalid, so clear stray knob exports before starting a daemon.
+
+Unaffected: secrets (`GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, and the rest of the
+secret knobs) and non-knob plumbing (`DRIVER`, the `SPINDRIFT_*` internals) are
+still read from the environment. The repo's CI workflows and the daemon set no
+non-secret knob env var.
+
+The `gh-token-refresher` composite action now exports its token file as
+`GH_APP_TOKEN_FILE`, not `GH_TOKEN_REFRESH_FILE` (itself a knob, so exporting it
+into a job's environment made the launcher exit 6). A Consumer workflow that read
+`$GH_TOKEN_REFRESH_FILE` from the action must read `$GH_APP_TOKEN_FILE` and hand
+it to the launcher with `--gh-token-refresh-file "$GH_APP_TOKEN_FILE"`.
+
 ## `IMAGE` and exported artifacts no longer reach the launcher (issue #6611)
 
 The launcher now reads every input artifact (`IMAGE_TAG`, `AGENT_FILES`,

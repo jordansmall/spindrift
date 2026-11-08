@@ -210,7 +210,7 @@ let
   # step that runs `gh` must re-read that file first. Scans workflow text only:
   # the gh calls inside the agent-setup composite run on the fresh token.
   # Steps are split on the `- name:` marker.
-  rereadLine = ''GH_TOKEN=$(cat "$GH_TOKEN_REFRESH_FILE")'';
+  rereadLine = ''GH_TOKEN=$(cat "$GH_APP_TOKEN_FILE")'';
   isGhCall = line: builtins.match "[[:space:]]*gh [a-z].*" line != null;
   staleTokenSteps =
     concatMap
@@ -233,6 +233,38 @@ let
           builtins.attrNames githubWorkflows
         )
       );
+
+  # The launcher exits 6 on any non-secret schema knob in its environment
+  # (ADR 0020), so a workflow or composite action that writes one into a job
+  # `env:` map or $GITHUB_ENV breaks every dispatch run at startup. The
+  # gh-token-refresher once exported GH_TOKEN_REFRESH_FILE this way (#6623).
+  knobNames = map (k: k.env) (
+    filter (k: !(k.secret or false)) (builtins.attrValues (import ../../lib/env-schema.nix))
+  );
+  ciRoots = [
+    ../../.github/workflows
+    ../../.forgejo/workflows
+  ];
+  actionFiles = map (d: ../../.github/actions + "/${d}/action.yml") (
+    builtins.attrNames (builtins.readDir ../../.github/actions)
+  );
+  ciFiles =
+    concatMap (
+      root:
+      map (f: root + "/${f}") (filter (hasSuffix ".yml") (builtins.attrNames (builtins.readDir root)))
+    ) ciRoots
+    ++ actionFiles;
+  setsKnob =
+    knob: line:
+    builtins.match "[[:space:]]*${knob}:.*" line != null
+    || builtins.match ".*echo \"${knob}=.*" line != null
+    || builtins.match "(.*[^A-Za-z0-9_])?${knob}=.*GITHUB_ENV.*" line != null;
+  knobEnvHits = concatMap (
+    f:
+    concatMap (
+      line: map (knob: "${baseNameOf f}: ${knob}") (filter (knob: setsKnob knob line) knobNames)
+    ) (splitString "\n" (builtins.readFile f))
+  ) ciFiles;
 in
 {
   agent-workflows-control-plane-wiring =
@@ -279,6 +311,11 @@ in
 
   agent-workflows-refresh-reread =
     assert assertMsg (staleTokenSteps == [ ])
-      "GitHub agent workflow step(s) run `gh` without first re-reading $GH_TOKEN_REFRESH_FILE — agent-setup froze GH_TOKEN at job start, so once the ~1h installation token expires the call 401s (issue #5259): ${concatStringsSep ", " staleTokenSteps}";
+      "GitHub agent workflow step(s) run `gh` without first re-reading $GH_APP_TOKEN_FILE — agent-setup froze GH_TOKEN at job start, so once the ~1h installation token expires the call 401s (issue #5259): ${concatStringsSep ", " staleTokenSteps}";
     pkgs.runCommand "agent-workflows-refresh-reread" { } "touch $out";
+
+  agent-workflows-no-knob-env =
+    assert assertMsg (knobEnvHits == [ ])
+      "workflow or action file(s) set a non-secret schema knob (line heuristic: an `env:` key, `echo \"KNOB=`, or `KNOB=` on a $GITHUB_ENV line) — the launcher exits 6 on it (ADR 0020, #6623); pass a flag instead, or rename a plumbing variable: ${concatStringsSep ", " knobEnvHits}";
+    pkgs.runCommand "agent-workflows-no-knob-env" { } "touch $out";
 }
