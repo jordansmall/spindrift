@@ -5,6 +5,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/fakehook"
 )
 
 // SettleCall records one Settle invocation.
@@ -51,6 +52,10 @@ type SituationForCall struct {
 // Fake is an in-memory Settler for tests that assert call wiring rather than
 // merge-gate behavior. All methods are safe for concurrent use.
 type Fake struct {
+	// Hooks lets a test run a callback inside SettleAdopted or
+	// SettleRelayedBranch, before the call is recorded; see fakehook.
+	fakehook.Hooks
+
 	mu sync.Mutex
 
 	SettleCalls        []SettleCall
@@ -84,6 +89,7 @@ func (f *Fake) Settle(d dispatch.Dispatcher, num string, gen uint64, result disp
 
 // SettleAdopted records the call.
 func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) Settlement {
+	f.Fire("SettleAdopted")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleAdoptedCalls = append(f.SettleAdoptedCalls, SettleAdoptedCall{Num: num, PRURL: prURL, Gen: gen})
@@ -108,6 +114,7 @@ func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 // SettleRelayedBranch records the call and returns Settlement,
 // SettleRelayedBranchRelayed and SettleRelayedBranchErr.
 func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (Settlement, bool, error) {
+	f.Fire("SettleRelayedBranch")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Sit: sit, Result: result})

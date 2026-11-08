@@ -235,6 +235,7 @@ func (pf *PRForgeFake) ListPRFiles(url string) ([]string, error) {
 }
 
 func (pf *PRForgeFake) OpenPRForBranch(branch string) (PR, bool, error) {
+	pf.Fire("OpenPRForBranch")
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	if len(pf.OpenPRForBranchErrs) > 0 {

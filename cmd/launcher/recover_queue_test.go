@@ -316,32 +316,14 @@ func withControlledSignals(t *testing.T) (stop, abort func()) {
 		func() { abortOnce.Do(func() { close(abortCh) }) }
 }
 
-// stopOnPRLookup stops the run from inside the PR lookup. It embeds PRForge as
-// well because forge.ResolveOpenPR finds it by type assertion on the CodeForge,
-// which a bare embedded CodeForge would not satisfy.
-type stopOnPRLookup struct {
-	forge.CodeForge
-	forge.PRForge
-	stop func()
-}
-
-func (w stopOnPRLookup) OpenPRForBranch(branch string) (forge.PR, bool, error) {
-	w.stop()
-	return w.PRForge.OpenPRForBranch(branch)
-}
-
-// stopAfterClaim stops the run right after a Failed->InProgress transition.
-type stopAfterClaim struct {
-	forge.IssueTracker
-	stop func()
-}
-
-func (w stopAfterClaim) TransitionState(num string, from, to forge.DispatchState) error {
-	err := w.IssueTracker.TransitionState(num, from, to)
-	if from == forge.Failed && to == forge.InProgress {
-		w.stop()
-	}
-	return err
+// stopOnClaim stops the run on the claim, the first transition the
+// fixture's tracker sees (addFailed seeds the issue without one).
+func (x *queueRecoverFixture) stopOnClaim(stop func()) {
+	x.fc.On("TransitionState", func(n int) {
+		if n == 1 {
+			stop()
+		}
+	})
 }
 
 // failRestore fails the InProgress->Failed transition (restore or park) and
@@ -356,30 +338,13 @@ func (w failRestore) TransitionState(num string, from, to forge.DispatchState) e
 	}
 	return w.IssueTracker.TransitionState(num, from, to)
 }
-
 func (x *queueRecoverFixture) runOn(t *testing.T, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities) int {
-	t.Helper()
-	return x.runOnSettler(t, it, cf, caps, newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf))
-}
-
-func (x *queueRecoverFixture) runOnSettler(t *testing.T, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, s settle.WorkSettler) int {
 	t.Helper()
 	// A real runner, not nil: an abort whose watcher wins the race reaps
 	// through the factory's runner.Kill.
+	s := newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf)
 	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, runner.NewFake()), s, io.Discard, io.Discard)
 	return exitCodeFor(err)
-}
-
-// stopInSettle drain-stops the run from inside the settle, then settles as
-// normal, so the stop lands after the settle began but before its verdict.
-type stopInSettle struct {
-	settle.WorkSettler
-	stop func()
-}
-
-func (w stopInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
-	w.stop()
-	return w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
 }
 
 // A drain stop does not abandon the settle, so a settle that then fails to
@@ -390,9 +355,9 @@ func TestRecoverQueueOne_StopDuringFailedSettleParksAndExitsSeven(t *testing.T) 
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 	stop := withControlledStop(t)
-	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
+	x.fc.On("RelayBundle", func(int) { stop() })
 
-	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+	code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -410,24 +375,6 @@ func TestRecoverQueueOne_StopDuringFailedSettleParksAndExitsSeven(t *testing.T) 
 	}
 }
 
-// abortInSettle aborts from inside the settle and waits for the watcher's
-// reclaim to start, so the abort provably lands while the issue is in flight.
-type abortInSettle struct {
-	settle.WorkSettler
-	abort  func()
-	killed <-chan string
-}
-
-func (w abortInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
-	w.abort()
-	select {
-	case <-w.killed:
-	case <-time.After(5 * time.Second):
-		panic("timed out waiting for the watcher to reclaim " + num)
-	}
-	return w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
-}
-
 // An abort abandons the settle and reclaims the issue to dispatchable, so a
 // settle that fails under it must not also park the issue or count an attempt.
 func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testing.T) {
@@ -436,9 +383,21 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 	_, abort := withControlledSignals(t)
 	rf := newKillHook(runner.NewFake())
-	s := abortInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort, killed: rf.killed}
+	// Block the relay on the watcher's reclaim so the abort provably lands while
+	// the issue is in flight; only the first relay attempt waits.
+	x.fc.On("RelayBundle", func(n int) {
+		if n != 1 {
+			return
+		}
+		abort()
+		select {
+		case <-rf.killed:
+		case <-time.After(5 * time.Second):
+			panic("timed out waiting for the watcher to reclaim 42")
+		}
+	})
 
-	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
+	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), io.Discard, io.Discard)
 	code := exitCodeFor(err)
 
 	if code != int(exitcode.SignalledStop) {
@@ -462,19 +421,6 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 	}
 }
 
-// abortAfterSettle aborts as the inner settle returns, before gate.Leave, so
-// the watcher races Leave and usually loses, finding nothing in flight.
-type abortAfterSettle struct {
-	settle.WorkSettler
-	abort func()
-}
-
-func (w abortAfterSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
-	st, settled, err := w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
-	w.abort()
-	return st, settled, err
-}
-
 // An abort that reclaims nothing is handled like a drain stop: a failed settle
 // must still park the issue, counting the attempt, rather than strand it on
 // in-progress (#4694). If the watcher wins the race it reclaims the issue to
@@ -484,9 +430,12 @@ func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testin
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 	_, abort := withControlledSignals(t)
-	s := abortAfterSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort}
+	// The failed relay is the last forge call the settle makes, so aborting on it
+	// lands as the settle returns, before gate.Leave: the watcher races Leave and
+	// usually loses, finding nothing in flight.
+	x.fc.On("RelayBundle", func(int) { abort() })
 
-	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+	code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -517,9 +466,10 @@ func TestRecoverQueueOne_AbortAfterLandingSettleRemovesRecordAndExitsSeven(t *te
 	x.addFailed(t, "42", "ready")
 	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-time.Hour)})
 	_, abort := withControlledSignals(t)
-	s := abortAfterSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort}
+	// The usage comment is the settle's last forge call, after agent-complete.
+	x.fc.On("Comment", func(int) { abort() })
 
-	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+	code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -534,9 +484,9 @@ func TestRecoverQueueOne_StopDuringLandingSettleRemovesRecordAndExitsSeven(t *te
 	x.addFailed(t, "42", "ready")
 	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-time.Hour)})
 	stop := withControlledStop(t)
-	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
+	x.fc.On("RelayBundle", func(int) { stop() })
 
-	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+	code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -553,8 +503,9 @@ func TestRecoverQueueOne_StopDuringEligibilityReadsExitsSeven(t *testing.T) {
 	x.addFailed(t, "42", "ready")
 	stop := withControlledStop(t)
 	caps := capsFor(x.tracker, x.cf)
+	x.fc.On("OpenPRForBranch", func(int) { stop() })
 
-	code := x.runOn(t, x.fc, stopOnPRLookup{CodeForge: x.cf, PRForge: x.cf.(forge.PRForge), stop: stop}, caps)
+	code := x.runOn(t, x.fc, x.cf, caps)
 
 	if code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -573,7 +524,8 @@ func TestRecoverQueueOne_StopAfterClaimRestoresAgentFailed(t *testing.T) {
 	x.addFailed(t, "42", "ready")
 	stop := withControlledStop(t)
 
-	code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf))
+	x.stopOnClaim(stop)
+	code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != int(exitcode.SignalledStop) {
 		t.Errorf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -601,7 +553,8 @@ func TestRecoverQueueOne_StopAfterClaimFailedRestoreExitsOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	it := failRestore{IssueTracker: stopAfterClaim{IssueTracker: x.fc, stop: stop}}
+	x.stopOnClaim(stop)
+	it := failRestore{IssueTracker: x.fc}
 	code := x.runOn(t, it, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != 1 {
@@ -1361,19 +1314,6 @@ func TestParkQueueFailure_NormalizesCause(t *testing.T) {
 	}
 }
 
-// failThenAbortRelayed is a queue-mode settle that writes agent-failed itself
-// (as settle/ready.go does after red CI), then aborts before gate.Leave.
-type failThenAbortRelayed struct {
-	settle.WorkSettler
-	it    *issueReadCounter
-	abort func()
-}
-
-func (w failThenAbortRelayed) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
-	failThenAbort(w.it, num, w.abort)
-	return settle.Settlement{}, false, nil
-}
-
 // The queue claim strips agent-failed, so an agent-failed the issue wears at
 // abort is this run's own settle and must be spared, not reclaimed to
 // dispatchable beside it (issue #4888).
@@ -1383,7 +1323,11 @@ func TestRecoverQueueOne_AbortAfterOwnFailedSettleSpared(t *testing.T) {
 	_, abort := withControlledSignals(t)
 	rf := newKillHook(runner.NewFake())
 	it := &issueReadCounter{IssueTracker: x.fc}
-	s := failThenAbortRelayed{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), it: it, abort: abort}
+	s := settle.NewFake()
+	// The fake must report the eligible situation addFailed seeds; the real
+	// settle would have derived it from the bundle and self-report.
+	s.SituationForReturn = settle.Situation{BundlePresent: true, SelfReportSuccess: true}
+	s.On("SettleRelayedBranch", func(int) { failThenAbort(it, "42", abort) })
 
 	err := recoverQueueOne(x.c, it, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
 

@@ -78,9 +78,9 @@ func TestSettle_GithubReadOnly_DraftPRCreateTimeoutThatCreatedIsAdopted(t *testi
 	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
 	branch := fc.AgentBranch("5146")
 	fc.CreateDraftPRErrs = []error{errDraftPR504}
-	fc.CreateDraftPROnCall = func(head string) {
-		fc.SetPR(head, forge.PR{URL: draftPRRetryURL})
-	}
+	fc.On("CreateDraftPR", func(int) {
+		fc.SetPR(branch, forge.PR{URL: draftPRRetryURL})
+	})
 	greenCI(t, fc)
 
 	var got Settlement
@@ -145,12 +145,12 @@ func TestRetryingDraftPR_StopBeforeFinalLookupAbandons(t *testing.T) {
 		s, fc, _ := draftPRRetryFixture(t, maxRetries, dispatch.Clock{})
 		fc.CreateDraftPRErr = errDraftPR504
 		// The final create makes the PR and the stop lands before its backoff.
-		fc.CreateDraftPROnCall = func(head string) {
-			if len(fc.CreateDraftPRCalls) == maxRetries+1 {
-				fc.SetPR(head, forge.PR{URL: draftPRRetryURL})
+		fc.On("CreateDraftPR", func(call int) {
+			if call == maxRetries+1 {
+				fc.SetPR("b", forge.PR{URL: draftPRRetryURL})
 				s.term.Mark(draftPRRetryIssue)
 			}
-		}
+		})
 		// One tripwire entry per lookup, drained one per lookup run.
 		fc.OpenPRForBranchErrs = make([]error, maxRetries+1)
 		gen := s.term.Begin(draftPRRetryIssue)
@@ -178,11 +178,11 @@ func TestRetryingDraftPR_AdoptsPRCreatedByFinalAttempt(t *testing.T) {
 	const maxRetries = 2
 	s, fc, _ := draftPRRetryFixture(t, maxRetries, dispatch.Clock{})
 	fc.CreateDraftPRErr = errDraftPR504
-	fc.CreateDraftPROnCall = func(head string) {
-		if len(fc.CreateDraftPRCalls) == maxRetries+1 {
-			fc.SetPR(head, forge.PR{URL: draftPRRetryURL})
+	fc.On("CreateDraftPR", func(call int) {
+		if call == maxRetries+1 {
+			fc.SetPR("b", forge.PR{URL: draftPRRetryURL})
 		}
-	}
+	})
 
 	url, created, stdout, err := createViaRetry(t, s, fc)
 
@@ -259,7 +259,7 @@ func TestSettle_GithubReadOnly_DraftPRCreateStoppedDuringBackoff_PostsNothing(t 
 	clock := dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.term.Mark("5146") }}
 	s, fc, result := draftPRRetryFixture(t, 3, clock)
 	fc.CreateDraftPRErr = errDraftPR504
-	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
+	fc.On("CreateDraftPR", func(int) { fc.SetPR(fc.AgentBranch(draftPRRetryIssue), forge.PR{URL: draftPRRetryURL}) })
 	gen := s.term.Begin("5146")
 
 	captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", gen, result) })
@@ -296,7 +296,7 @@ func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedAfterTimeoutIsAnnounce
 	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
 	result = withoutPRIntent(fc, result)
 	fc.CreateDraftPRErrs = []error{errDraftPR504}
-	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
+	fc.On("CreateDraftPR", func(int) { fc.SetPR(fc.AgentBranch(draftPRRetryIssue), forge.PR{URL: draftPRRetryURL}) })
 	greenCI(t, fc)
 
 	var got Settlement
@@ -338,7 +338,7 @@ func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedByBackstopIsAnnounced(
 func TestSettle_GithubReadOnly_PRIntentDraftPRAdoptedAfterTimeoutIsNotAnnounced(t *testing.T) {
 	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
 	fc.CreateDraftPRErrs = []error{errDraftPR504}
-	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
+	fc.On("CreateDraftPR", func(int) { fc.SetPR(fc.AgentBranch(draftPRRetryIssue), forge.PR{URL: draftPRRetryURL}) })
 	greenCI(t, fc)
 
 	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })

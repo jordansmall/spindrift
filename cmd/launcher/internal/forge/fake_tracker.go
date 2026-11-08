@@ -277,6 +277,7 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 // already carries InProgress (#3887), so a test on the Fake pins the same
 // contract the real adapters must honor.
 func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) error {
+	tf.Fire("TransitionState")
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.TransitionStateCalls = append(tf.TransitionStateCalls, TransitionStateCall{num, from, to})
@@ -403,6 +404,7 @@ func (tf *IssueTrackerFake) TouchesOf(num string) ([]string, error) {
 }
 
 func (tf *IssueTrackerFake) Comment(num, body string) error {
+	tf.Fire("Comment")
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.CommentCalls = append(tf.CommentCalls, CommentCall{num, body})

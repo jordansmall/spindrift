@@ -18,19 +18,17 @@ import (
 	"spindrift.dev/launcher/internal/settle"
 )
 
-// blockingCommentTracker holds every Comment call until unblock closes, so
-// TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes can prove
-// TerminateAsync's goroutine, not its caller, waits on the network I/O.
-type blockingCommentTracker struct {
-	forge.IssueTracker
-	unblock    chan struct{}
-	commentHit int32
-}
-
-func (b *blockingCommentTracker) Comment(num, body string) error {
-	atomic.AddInt32(&b.commentHit, 1)
-	<-b.unblock
-	return b.IssueTracker.Comment(num, body)
+// blockComments holds every tracker Comment until the returned channel closes,
+// so a test can prove TerminateAsync's goroutine, not its caller, waits on the
+// network I/O. hits counts the Comment calls that reached the tracker.
+func blockComments(fc *forge.Fake) (unblock chan struct{}, hits *atomic.Int32) {
+	unblock = make(chan struct{})
+	hits = new(atomic.Int32)
+	fc.On("Comment", func(int) {
+		hits.Add(1)
+		<-unblock
+	})
+	return unblock, hits
 }
 
 func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *runner.Fake, dir string) {
@@ -303,11 +301,11 @@ func TestLauncher_TerminateThenRepick_NoOutcomeReportsBlocked(t *testing.T) {
 // pick only reaches PickTerminated once that call finishes.
 func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T) {
 	launch, fc, _, _ := newTermTestLauncher(t)
-	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
+	unblock, _ := blockComments(fc)
 
 	returned := make(chan struct{})
 	go func() {
-		launch.TerminateAsync(bt, "42")
+		launch.TerminateAsync(fc, "42")
 		close(returned)
 	}()
 
@@ -322,7 +320,7 @@ func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T)
 		t.Fatalf("queue pick = %+v, want still PickRunning before Comment unblocks", snap)
 	}
 
-	close(bt.unblock)
+	close(unblock)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -344,15 +342,15 @@ func TestLauncher_TerminateAsync_ReturnsBeforeTrackerCallCompletes(t *testing.T)
 // reports the pick PickRunning.
 func TestLauncher_TerminateAsync_DuplicateWhileInFlight_IsNoOp(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
-	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
+	unblock, hits := blockComments(fc)
 
-	launch.TerminateAsync(bt, "42")
-	launch.TerminateAsync(bt, "42")
+	launch.TerminateAsync(fc, "42")
+	launch.TerminateAsync(fc, "42")
 
-	close(bt.unblock)
+	close(unblock)
 	launch.Wait()
 
-	if got := atomic.LoadInt32(&bt.commentHit); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("Comment calls = %d, want exactly 1", got)
 	}
 	if len(fr.KillCalls) != 1 {

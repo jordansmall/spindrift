@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -525,23 +524,6 @@ func TestDispatch_DiscoveredStopPreClosed_ReleasesNothing(t *testing.T) {
 	}
 }
 
-// stopOnClaim claims through inner, then closes stop -- so the signal lands
-// in the window between a successful claim and gate.Launch, the one place a
-// self-claimed issue must still be released.
-type stopOnClaim struct {
-	inner Claimer
-	stop  chan struct{}
-	once  sync.Once
-}
-
-func (c *stopOnClaim) Claim(num string) error {
-	if err := c.inner.Claim(num); err != nil {
-		return err
-	}
-	c.once.Do(func() { close(c.stop) })
-	return nil
-}
-
 // TestDispatch_StopAfterClaimBeforeLaunch_ReleasesOwnClaim keeps the
 // self-claimed half honest: the goroutine took #1's claim itself, so a Launch
 // that declines one instruction later must hand it back.
@@ -559,7 +541,15 @@ func TestDispatch_StopAfterClaimBeforeLaunch_ReleasesOwnClaim(t *testing.T) {
 	dir := tempLogDir(t)
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
-	claimer := &stopOnClaim{inner: NewLabelClaimer(fc, label, testInProgressLabel), stop: stop}
+	// The first transition is #1's claim: closing stop there lands the signal in
+	// the window between a successful claim and gate.Launch, the one place a
+	// self-claimed issue must still be released.
+	fc.On("TransitionState", func(n int) {
+		if n == 1 {
+			close(stop)
+		}
+	})
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
 
 	in := Input{Origin: OriginDiscovered, Batch: Batch{Issues: []Issue{{Number: "1", Title: "first"}}}}
 	err := Dispatch(c, nil, fc, fc, dir, f, s, in, claimer)
