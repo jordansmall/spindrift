@@ -107,7 +107,7 @@ type PatchForge interface {
 // it a *settle.Settle built with Unclaimed true (settle.Config.Unclaimed),
 // which means no fix passes for an issue nothing is dispatched against.
 type PatchGate interface {
-	SettlePatch(owner dispatchkey.Key, num, prURL string)
+	SettlePatch(owner dispatchkey.Key, num, prURL string) settle.Settlement
 }
 
 // Kind names which of Sweep's four outcomes happened.

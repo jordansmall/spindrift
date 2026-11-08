@@ -265,7 +265,7 @@ func TestSettle_SettleRelayedBranch_RemovesBundleAfterMerge(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
 	if fc.Merged != prURL {
@@ -294,7 +294,7 @@ func TestSettle_SettleRelayedBranch_LocalPushOnly_RemovesBundleAfterMerge(t *tes
 	if !sit.BundlePresent {
 		t.Fatalf("fixture: want BundlePresent")
 	}
-	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
 	if bundleExists(t, outbox) {

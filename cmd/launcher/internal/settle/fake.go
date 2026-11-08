@@ -53,15 +53,17 @@ type SituationForCall struct {
 type Fake struct {
 	mu sync.Mutex
 
-	SettleCalls               []SettleCall
-	SettleAdoptedCalls        []SettleAdoptedCall
-	SettlePatchCalls          []SettlePatchCall
-	FailCalls                 []FailCall
-	SettleRelayedBranchCalls  []SettleRelayedBranchCall
-	SettleRelayedBranchReturn bool
-	SettleRelayedBranchErr    error
-	SituationForCalls         []SituationForCall
-	SituationForReturn        Situation
+	SettleCalls        []SettleCall
+	SettleAdoptedCalls []SettleAdoptedCall
+	SettlePatchCalls   []SettlePatchCall
+	FailCalls          []FailCall
+	// Settlement is what Settle, SettleAdopted, SettlePatch and SettleRelayedBranch return.
+	Settlement                 Settlement
+	SettleRelayedBranchCalls   []SettleRelayedBranchCall
+	SettleRelayedBranchRelayed bool
+	SettleRelayedBranchErr     error
+	SituationForCalls          []SituationForCall
+	SituationForReturn         Situation
 }
 
 var _ Settler = (*Fake)(nil)
@@ -73,24 +75,27 @@ func NewFake() *Fake {
 }
 
 // Settle records the call.
-func (f *Fake) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
+func (f *Fake) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) Settlement {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleCalls = append(f.SettleCalls, SettleCall{Num: num, Gen: gen, Result: result})
+	return f.Settlement
 }
 
 // SettleAdopted records the call.
-func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) Settlement {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleAdoptedCalls = append(f.SettleAdoptedCalls, SettleAdoptedCall{Num: num, PRURL: prURL, Gen: gen})
+	return f.Settlement
 }
 
 // SettlePatch records the call.
-func (f *Fake) SettlePatch(owner dispatchkey.Key, num, prURL string) {
+func (f *Fake) SettlePatch(owner dispatchkey.Key, num, prURL string) Settlement {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettlePatchCalls = append(f.SettlePatchCalls, SettlePatchCall{Owner: owner, Num: num, PRURL: prURL})
+	return f.Settlement
 }
 
 // Fail records the call.
@@ -100,13 +105,13 @@ func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Gen: gen, Result: result})
 }
 
-// SettleRelayedBranch records the call and returns SettleRelayedBranchReturn
-// and SettleRelayedBranchErr.
-func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
+// SettleRelayedBranch records the call and returns Settlement,
+// SettleRelayedBranchRelayed and SettleRelayedBranchErr.
+func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (Settlement, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Sit: sit, Result: result})
-	return f.SettleRelayedBranchReturn, f.SettleRelayedBranchErr
+	return f.Settlement, f.SettleRelayedBranchRelayed, f.SettleRelayedBranchErr
 }
 
 // SituationFor records the call and returns SituationForReturn.

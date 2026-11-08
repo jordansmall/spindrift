@@ -21,8 +21,8 @@ import (
 // Settle interprets result and drives num to its terminal label, routing a
 // parsed "ready" outcome to the self-heal merge gate. Called immediately after
 // a Box exits so each issue settles independently of its wave siblings.
-func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	defer s.flushSettled(d, num)
+func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) (st Settlement) {
+	defer func() { st = s.flushSettled(d, num) }()
 	RecordSettleWarnings(d, num, "", result)
 	if result.ParseErr != nil {
 		// A malformed outcome line gets the same PR-adoption safety net as no
@@ -231,9 +231,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// Never transitions, so Settled never sees this Dispatch. Reason stays
 		// empty: o.Status is Box-controlled and the banner prints only
 		// host-derived values.
+		s.latchUnrecorded(num, Verdict{state: forge.InProgress}, "")
 		tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String()})
 		s.postUsageComment(num, d)
 	}
+	return
 }
 
 // RecordSettleWarnings is the one seam that prints a settle's rejection
@@ -343,6 +345,10 @@ type settledLatch struct {
 	// merge-guard-hit, ...).
 	verdict Verdict
 	note    string
+	// unrecorded marks a decision for a Dispatch that never transitions
+	// (blockHandoff, the off-script status), so flushSettled returns it without
+	// a Record or report.
+	unrecorded bool
 }
 
 // transitionState is a best-effort dispatch-state transition that logs but
@@ -377,13 +383,26 @@ func (s *Settle) transitionState(num string, v Verdict, note string) {
 	s.settledMu.Unlock()
 }
 
+// latchUnrecorded latches a decision no transition backs, for flushSettled to
+// return as the Settlement without recording it. It names no PR on purpose: the
+// all-finished banner must not count it delivered (issue #5145).
+func (s *Settle) latchUnrecorded(num string, v Verdict, note string) {
+	s.settledMu.Lock()
+	defer s.settledMu.Unlock()
+	if s.settledLatch == nil {
+		s.settledLatch = make(map[string]settledLatch)
+	}
+	s.settledLatch[num] = settledLatch{verdict: v, note: note, unrecorded: true}
+}
+
 // flushSettled emits num's latched terminal decision, if any, exactly once
 // (issue #3627). Call it via defer at every entry point that can drive one
 // issue to a terminal transitionState call, so an issue that never reaches a
 // terminal state still produces no record, as before this latch existed.
 // Emitting here, not in transitionState, means a path that latches twice
-// (Complete demoted to Failed) still appends one dispatch_settled op.
-func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
+// (Complete demoted to Failed) still appends one dispatch_settled op. The
+// returned Settlement is that same latched decision, zero when nothing latched.
+func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) Settlement {
 	s.settledMu.Lock()
 	rec, ok := s.settledLatch[num]
 	pr := s.prLatch[num]
@@ -393,13 +412,16 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	delete(s.reportKey, num)
 	s.settledMu.Unlock()
 	if !ok {
-		return
+		return Settlement{}
+	}
+	if rec.unrecorded {
+		return Settlement{Verdict: rec.verdict, Note: rec.note}
 	}
 	if owned {
 		// A Chore owns this issue (SettlePatch) and already sent its one
 		// terminal record; an issue-keyed one would be a kind mismatch
 		// (issue #4966).
-		return
+		return Settlement{Verdict: rec.verdict, PRURL: pr, Note: rec.note}
 	}
 	ds := hostop.DispatchSettled{Note: rec.note, PRURL: pr}
 	if d != nil && dispatchrecord.ReasonLanded(rec.verdict.Reason()) && pr != "" {
@@ -408,8 +430,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	if d == nil {
 		// A nil Dispatcher has no Record, so nothing is appended: the primary
 		// log's stamp may name an unrelated one.
-		Settled(dispatchkey.Issue(num), "", rec.verdict, ds)
-		return
+		return Settled(dispatchkey.Issue(num), "", rec.verdict, ds)
 	}
 	ds.RecordID = d.RecordID()
 	var path string
@@ -418,7 +439,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	}
 	// An adopt's Dispatcher never Ran: it carries the prior Record's ID when a
 	// fix or conflict pass adopted it, else none and the stamp supplies it.
-	SettledPrior(dispatchkey.Issue(num), path, rec.verdict, ds)
+	return SettledPrior(dispatchkey.Issue(num), path, rec.verdict, ds)
 }
 
 // Settled is the single terminal-record emitter for every settle path (only
@@ -426,8 +447,9 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 // dispatchrecord.AppendSettled): it records ds as a dispatch_settled op in the
 // Dispatch's primary Pass log and the root's Record store, then reports the
 // settled record. ds's State and Reason are v's, overwritten here. Best-effort;
-// what gates the append is documented on dispatchrecord.AppendSettled.
-func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) {
+// what gates the append is documented on dispatchrecord.AppendSettled. It
+// returns the Settlement it recorded.
+func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) Settlement {
 	if v.reason == "" {
 		panic("settle: Settled needs a Verdict from ForReason, not the zero value")
 	}
@@ -435,26 +457,27 @@ func Settled(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchS
 	dispatchrecord.RecordSettled(os.Stderr, key.String(), logPath, ds)
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
 	tallyOutcome(DispatchOutcome{Key: key, State: ds.State, Reason: ds.Reason, PRURL: ds.PRURL})
+	return Settlement{Verdict: v, PRURL: ds.PRURL, Note: ds.Note}
 }
 
 // SettledPrior is Settled for a Dispatch that never Ran and so minted no
 // Record ID (recover's, an adopt's): the Record it settles is the prior
 // Dispatch's, so a ds with no RecordID takes the one stamped at the head of
 // logPath. Use it only where that prior Record is genuinely the target.
-func SettledPrior(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) {
+func SettledPrior(key dispatchkey.Key, logPath string, v Verdict, ds hostop.DispatchSettled) Settlement {
 	if ds.RecordID == "" && logPath != "" {
 		if s, ok := dispatchrecord.ReadStamp(logPath); ok {
 			ds.RecordID = s.RecordID
 		}
 	}
-	Settled(key, logPath, v, ds)
+	return Settled(key, logPath, v, ds)
 }
 
 // SettledBy settles d's own Record: the terminal state of a Dispatch that was
 // Run (or failed trying), keyed by what d minted. A Dispatch that failed before
 // minting a Record ID appends nothing rather than touching an earlier one.
-func SettledBy(d dispatch.Dispatcher, key dispatchkey.Key, v Verdict, note string) {
-	Settled(key, d.LogPath(), v, hostop.DispatchSettled{RecordID: d.RecordID(), Note: note})
+func SettledBy(d dispatch.Dispatcher, key dispatchkey.Key, v Verdict, note string) Settlement {
+	return Settled(key, d.LogPath(), v, hostop.DispatchSettled{RecordID: d.RecordID(), Note: note})
 }
 
 // latchPR records the PR num's gate is working, for flushSettled to name on

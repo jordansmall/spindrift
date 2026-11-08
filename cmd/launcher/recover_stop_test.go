@@ -129,14 +129,14 @@ type abortDuringSettle struct {
 	killSignal chan string
 }
 
-func (a *abortDuringSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+func (a *abortDuringSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) settle.Settlement {
 	close(a.abortCh)
 	select {
 	case <-a.killSignal:
 	case <-time.After(5 * time.Second):
 		panic("timed out waiting for the watcher to reclaim " + num)
 	}
-	a.Fake.SettleAdopted(d, num, gen, prURL)
+	return a.Fake.SettleAdopted(d, num, gen, prURL)
 }
 
 // TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable proves the
@@ -306,21 +306,22 @@ type abortAfterFakeSettle struct {
 	abortCh chan struct{}
 }
 
-func (a *abortAfterFakeSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
-	a.Fake.SettleAdopted(d, num, gen, prURL)
+func (a *abortAfterFakeSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) settle.Settlement {
+	st := a.Fake.SettleAdopted(d, num, gen, prURL)
 	if err := a.fc.TransitionState(a.num, forge.InProgress, forge.Complete); err != nil {
 		panic(err)
 	}
 	close(a.abortCh)
+	return st
 }
 
-func (a *abortAfterFakeSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
-	settled, err := a.Fake.SettleRelayedBranch(d, num, gen, sit, result)
+func (a *abortAfterFakeSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
+	st, settled, err := a.Fake.SettleRelayedBranch(d, num, gen, sit, result)
 	if terr := a.fc.TransitionState(a.num, forge.InProgress, forge.Complete); terr != nil {
 		panic(terr)
 	}
 	close(a.abortCh)
-	return settled, err
+	return st, settled, err
 }
 
 // TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim pins the blocking
@@ -567,9 +568,9 @@ type failThenAbortAdopted struct {
 	abort func()
 }
 
-func (a *failThenAbortAdopted) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+func (a *failThenAbortAdopted) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) settle.Settlement {
 	failThenAbort(a.it, num, a.abort)
-	a.Fake.SettleAdopted(d, num, gen, prURL)
+	return a.Fake.SettleAdopted(d, num, gen, prURL)
 }
 
 // A hand-run recover the workflow claimed (issue wears only in-progress) whose

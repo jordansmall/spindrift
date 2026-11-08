@@ -724,12 +724,16 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	st, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if err != nil {
 		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
 	}
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
+	}
+
+	if st.State() != forge.Complete || st.PRURL != prURL {
+		t.Errorf("Settlement = %+v, want complete naming %s", st, prURL)
 	}
 
 	if len(fc.CreateDraftPRCalls) != 1 {
@@ -783,7 +787,7 @@ func TestSettle_SettleRelayedBranch_AdoptRecordsPassWithAdoptedPR(t *testing.T) 
 	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
 
@@ -838,7 +842,7 @@ func TestSettle_SettleRelayedBranch_PushOnlyRecordsPassOrClearsIt(t *testing.T) 
 				Passes: tc.passes,
 			}
 			sit := s.situationFor(issNum, false, result)
-			if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+			if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
 				t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 			}
 
@@ -894,7 +898,7 @@ func TestSettle_SettleRelayedBranch_LandsFromParkedFailedIssue(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.SituationFor(issNum, false, result)
-	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+	if _, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
 		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
 	if want := (forge.RelayBundleCall{OutboxDir: "/outbox/4651", Ref: fc.AgentBranch(issNum)}); len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != want {
@@ -940,7 +944,7 @@ func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if err != nil {
 		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
 	}
@@ -991,7 +995,7 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if !errors.Is(err, errRelayBundle) || !errors.Is(err, fc.RelayBundleErr) {
 		t.Fatalf("SettleRelayedBranch err = %v, want errRelayBundle wrapping %v", err, fc.RelayBundleErr)
 	}
@@ -1037,7 +1041,7 @@ func TestSettle_SettleRelayedBranch_DraftPRCreateFailureSurfacesError(t *testing
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	_, got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
 	if !errors.Is(err, errCreateDraftPR) || !errors.Is(err, fc.CreateDraftPRErr) {
 		t.Fatalf("SettleRelayedBranch err = %v, want errCreateDraftPR wrapping %v", err, fc.CreateDraftPRErr)
 	}

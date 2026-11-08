@@ -377,7 +377,7 @@ type stopInSettle struct {
 	stop func()
 }
 
-func (w stopInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
+func (w stopInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
 	w.stop()
 	return w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
 }
@@ -418,7 +418,7 @@ type abortInSettle struct {
 	killed <-chan string
 }
 
-func (w abortInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
+func (w abortInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
 	w.abort()
 	select {
 	case <-w.killed:
@@ -469,10 +469,10 @@ type abortAfterSettle struct {
 	abort func()
 }
 
-func (w abortAfterSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
-	settled, err := w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
+func (w abortAfterSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
+	st, settled, err := w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
 	w.abort()
-	return settled, err
+	return st, settled, err
 }
 
 // An abort that reclaims nothing is handled like a drain stop: a failed settle
@@ -1369,9 +1369,9 @@ type failThenAbortRelayed struct {
 	abort func()
 }
 
-func (w failThenAbortRelayed) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
+func (w failThenAbortRelayed) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
 	failThenAbort(w.it, num, w.abort)
-	return false, nil
+	return settle.Settlement{}, false, nil
 }
 
 // The queue claim strips agent-failed, so an agent-failed the issue wears at

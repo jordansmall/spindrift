@@ -1556,7 +1556,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
 		const gen = 0 // recover settles at generation 0; the abort check below must match
-		settled, settleErr := s.SettleRelayedBranch(d, iss.number, gen, sit, result)
+		_, relayed, settleErr := s.SettleRelayedBranch(d, iss.number, gen, sit, result)
 		// Leave must run before Settle's final abort re-check, or a signal
 		// landing the instant after settling finishes would still find this
 		// issue in-flight and reclaim it right back to Dispatchable (#3522).
@@ -1572,14 +1572,14 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			return waves.ErrSignalledStop
 		}
 		if queue {
-			if err := finishQueueSettle(c, it, pwd, issueNum, rec, settled, settleErr, stdout, stderr); err != nil {
+			if err := finishQueueSettle(c, it, pwd, issueNum, rec, relayed, settleErr, stdout, stderr); err != nil {
 				return err
 			}
 		}
 		if gate.Signalled() {
 			return waves.ErrSignalledStop
 		}
-		if queue || settled {
+		if queue || relayed {
 			return nil
 		}
 		if settleErr != nil {
