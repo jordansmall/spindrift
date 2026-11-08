@@ -93,7 +93,11 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAdopted, Detail: "note=" + note})
 	s.recordLanding(num, pr, result.Passes)
-	landing, reason := s.selfHeal(d, num, gen, pr, result.Passes)
+	landing, reason, err := s.selfHeal(d, num, gen, pr, result.Passes)
+	if errors.Is(err, errAbandoned) {
+		// Another actor owns the issue, so a usage comment here would be noise.
+		return true, nil
+	}
 	switch landing {
 	case landingMerged:
 		// recover runs read-write, so s.pr may be nil here for a push-only Code
@@ -103,10 +107,6 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 		}
 	case landingFailed:
 		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
-	case landingAbandoned:
-		// See landingAbandoned: another actor owns the issue, so a usage
-		// comment here would be noise.
-		return true, nil
 	}
 	s.postUsageComment(num, d)
 	return true, nil
@@ -151,12 +151,14 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 	branch := s.cfForNum(num).AgentBranch(num)
 	s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusAdopted, Detail: "note=" + note})
 	s.recordLanding(num, branch, passes)
-	landing, reason := s.selfHeal(d, num, gen, branch, passes)
+	landing, reason, err := s.selfHeal(d, num, gen, branch, passes)
+	if errors.Is(err, errAbandoned) {
+		// Another actor owns the issue, so a usage comment here would be noise.
+		return true
+	}
 	switch landing {
 	case landingFailed:
 		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusFailed, Detail: "!! " + reason})
-	case landingAbandoned:
-		return true
 	}
 	s.postUsageComment(num, d)
 	return true

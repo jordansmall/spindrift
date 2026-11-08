@@ -258,7 +258,7 @@ func (f terminatingForge) Rebase(url string) error {
 // rewaitAfterForcePush's CI poll must be reported as errAbandoned, not wrapped
 // into errLandingNeverGreen, the gap issue #805 closes. Without the fix,
 // gateToGreen's own errAbandoned result collapses into a generic "never went
-// green" error, which selfHeal mis-routes to landingFailed, not landingAbandoned.
+// green" error, which selfHeal mis-routes to landingFailed, not errAbandoned.
 func TestMergeImmediate_TerminatedDuringRewaitAfterPlainRebase(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -360,10 +360,10 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	if len(d.FixCalls) != 1 {
 		t.Errorf("want exactly 1 fix call (termination stops the retry loop), got %d: %+v", len(d.FixCalls), d.FixCalls)
@@ -371,10 +371,10 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 }
 
 // For a termination landing during the post-force-push re-wait, selfHeal must
-// report landingAbandoned, not landingFailed, and take none of landingFailed's
+// report errAbandoned, not landingFailed, and take none of landingFailed's
 // side effects (no agent-failed transition, no "landing failed" comment). That
 // is the "no further action, Terminate already handled it" contract on
-// landingAbandoned.
+// errAbandoned.
 func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testing.T) {
 	c := baseConfig()
 	c.MaxRebaseAttempts = 5
@@ -386,10 +386,10 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoTransitionOrComment(t, fc)
 }
@@ -410,10 +410,10 @@ func TestSelfHeal_TerminatedFixPassReaped_ReportsAbandonedNotFailed(t *testing.T
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: fk, reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoPRWriteAfterTermination(t, fc)
 }
@@ -433,10 +433,10 @@ func TestSelfHeal_TerminatedDuringFixNoOpConfirmSleep_ReportsAbandoned(t *testin
 	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
 	s = newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoPRWriteAfterTermination(t, fc)
 }
@@ -453,10 +453,10 @@ func TestSelfHeal_TerminatedGateTerminal_ReportsAbandonedNotFailed(t *testing.T)
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoPRWriteAfterTermination(t, fc)
 }
@@ -474,10 +474,10 @@ func TestSelfHeal_TerminatedRedRetryFixExhausted_ReportsAbandonedNotFailed(t *te
 	tf.reg = s.Registry()
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoPRWriteAfterTermination(t, fc)
 	// No FixCalls assertion: fixConfig(0) makes attempt(0) >= MaxFixAttempts
@@ -500,10 +500,10 @@ func TestSelfHeal_TerminatedFixPassSucceeded_SkipsRelay(t *testing.T) {
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	if len(fc.RelayBundleCalls) != 0 {
 		t.Errorf("RelayBundle must not be called after termination; got %+v", fc.RelayBundleCalls)
@@ -540,7 +540,7 @@ func TestGateToGreen_RepickDoesNotClearAnAbandonedSettlesMark(t *testing.T) {
 }
 
 // Settle's "ready" branch posts no usage comment when selfHeal reports
-// landingAbandoned: Terminate already recorded its own comment, and a second,
+// errAbandoned: Terminate already recorded its own comment, and a second,
 // unrelated one from the orphaned settle goroutine would be noise the operator
 // never asked for.
 func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
@@ -617,7 +617,7 @@ func TestMergeImmediate_ConflictResolveBoxReaped_ReportsAbandonedNotNeverGreen(t
 }
 
 // The end-to-end consequence of the case above: selfHeal must report
-// landingAbandoned and leave the issue alone, since Reclaim already moved it
+// errAbandoned and leave the issue alone, since Reclaim already moved it
 // back to Dispatchable — a Failed commit here would fight that (#3523).
 func TestSelfHeal_ConflictResolveBoxReaped_ReportsAbandonedNotFailed(t *testing.T) {
 	c := baseConfig()
@@ -633,10 +633,10 @@ func TestSelfHeal_ConflictResolveBoxReaped_ReportsAbandonedNotFailed(t *testing.
 	reg := s.Registry()
 	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoTransitionOrComment(t, fc)
 }
@@ -691,10 +691,10 @@ func TestSelfHeal_TerminatedDuringSuccessConfirmSleep_ManualMode_ReportsAbandone
 	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
 	s = newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoPRWriteAfterTermination(t, fc)
 }
@@ -730,10 +730,10 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	assertNoTransitionOrComment(t, fc)
 }
@@ -773,10 +773,10 @@ func TestSelfHeal_TerminatedDuringMergeGuardHit_ReportsAbandoned(t *testing.T) {
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	_, _, err := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
@@ -824,10 +824,10 @@ func TestSelfHeal_LandPushOnly_TerminatedSkipsCompleteAndMerge(t *testing.T) {
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 	s.Registry().Mark("1")
 
-	got := s.landPushOnly("1", 0, branch, nil)
+	_, err := s.landPushOnly("1", 0, branch, nil)
 
-	if got != landingAbandoned {
-		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("landPushOnly err = %v, want errAbandoned", err)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("TransitionState must not be called after termination; got %+v", fc.TransitionStateCalls)
@@ -839,7 +839,7 @@ func TestSelfHeal_LandPushOnly_TerminatedSkipsCompleteAndMerge(t *testing.T) {
 
 // A mark landing during the merge's transient-retry backoff makes
 // mergeImmediate return errAbandoned; landPushOnly must report
-// landingAbandoned without committing Complete or posting a "landing
+// errAbandoned without committing Complete or posting a "landing
 // blocked" comment (issue #4879, #3523). Policy.Max = 1 grants the single
 // transient retry (the zero value would return the transient error at once),
 // so the backoff sleep that marks is actually reached; Unit makes that sleep
@@ -856,10 +856,10 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMergeBackoff_ReportsAbandoned(t *
 	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
 	s = newTestSettle(c, fc, fc.AsPushOnly())
 
-	got := s.landPushOnly("1", 0, "agent/issue-1", nil)
+	_, err := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
-	if got != landingAbandoned {
-		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("landPushOnly err = %v, want errAbandoned", err)
 	}
 	assertNoTransitionOrComment(t, fc)
 	if fc.Merged != "" {
@@ -907,10 +907,10 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMerge_ReportsAbandoned(t *testing
 			s := newTestSettle(c, fc, wrapper)
 			wrapper.s = s
 
-			got := s.landPushOnly("1", 0, "agent/issue-1", nil)
+			_, err := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
-			if got != landingAbandoned {
-				t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+			if !errors.Is(err, errAbandoned) {
+				t.Errorf("landPushOnly err = %v, want errAbandoned", err)
 			}
 			assertNoTransitionOrComment(t, fc)
 			if gone := !bundleExists(t, outbox); gone != tc.wantMerged {
@@ -949,10 +949,10 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringRelay_ReportsAbandoned(t *testing
 	s := newTestSettle(c, fc, wrapper)
 	wrapper.s = s
 
-	got := s.landPushOnly("1", 0, "agent/issue-1", nil)
+	_, err := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
-	if got != landingAbandoned {
-		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("landPushOnly err = %v, want errAbandoned", err)
 	}
 	if len(fc.RelayBundleCalls) != 1 {
 		t.Errorf("RelayBundleCalls = %+v, want exactly one (the marking relay)", fc.RelayBundleCalls)
@@ -964,7 +964,7 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringRelay_ReportsAbandoned(t *testing
 }
 
 // The end-to-end push-only twin of TestSettle_AbandonedSkipsUsageComment: a
-// mark landing inside Merge makes landPushOnly report landingAbandoned, so
+// mark landing inside Merge makes landPushOnly report errAbandoned, so
 // Settle's ready branch posts neither a "landing blocked" nor a usage comment.
 func TestSettle_PushOnlyAbandonedSkipsUsageComment(t *testing.T) {
 	c := baseConfig()

@@ -155,7 +155,12 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		}
 		// A read-write Box opened its PR before printing ready.
 		s.latchBranchPR(num)
-		landing, reason := s.selfHeal(d, num, gen, pr, result.Passes)
+		landing, reason, err := s.selfHeal(d, num, gen, pr, result.Passes)
+		if errors.Is(err, errAbandoned) {
+			// Another actor owns the issue, so a usage comment here would be
+			// noise.
+			return
+		}
 		switch landing {
 		case landingMerged:
 			// verifyMerged reads PR state, which a push-only Code Forge does
@@ -167,10 +172,6 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			}
 		case landingFailed:
 			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailed, Detail: "!! " + reason})
-		case landingAbandoned:
-			// See landingAbandoned: another actor owns the issue, so a usage
-			// comment here would be noise.
-			return
 		}
 		s.postUsageComment(num, d)
 	case "merged":

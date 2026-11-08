@@ -28,7 +28,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	fc.MergeErr = errors.New("required review missing")
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (CI green, merge failed)", landing)
 	}
@@ -55,7 +55,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".github/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (merge guard hit)", landing)
 	}
@@ -89,7 +89,7 @@ func TestSelfHeal_MergeGuardHit_CommentPRErrorStillHolds(t *testing.T) {
 	fc.CommentPRErr = errors.New("gh pr comment: 502")
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual", landing)
 	}
@@ -110,7 +110,7 @@ func TestSelfHeal_MergeGuardHit_ForgejoPath(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go", ".forgejo/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (merge guard hit on .forgejo/ path)", landing)
 	}
@@ -142,7 +142,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual for a guard-hit auto-mode PR", landing)
 	}
@@ -165,7 +165,7 @@ func TestSelfHeal_MergeGuardMiss_MergesNormally(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{"src/main.go"})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged for a non-guarded green PR", landing)
 	}
@@ -190,7 +190,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
 	}
@@ -221,7 +221,7 @@ func TestSelfHeal_MergeGuardCheckError_FlipsReadyBeforeHandoff(t *testing.T) {
 	fc.PRFilesErr = errors.New("gh api pulls files: 403 Forbidden")
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
@@ -247,7 +247,7 @@ func TestSelfHeal_ConflictResolveFailure_EndsFailed(t *testing.T) {
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed (conflict-resolve dispatch failed)", landing)
@@ -283,10 +283,10 @@ func TestSelfHeal_ConflictResolveAlreadyRunning_ReportsAbandonedNotFailed(t *tes
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	_, reason, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-	if landing != landingAbandoned {
-		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
+	if !errors.Is(err, errAbandoned) {
+		t.Errorf("selfHeal err = %v, want errAbandoned", err)
 	}
 	if reason != "" {
 		t.Errorf("selfHeal reason = %q, want empty", reason)
@@ -348,7 +348,7 @@ func TestSelfHeal_RewaitAfterForcePush_NeverGreen_EndsFailed(t *testing.T) {
 			d := dispatch.NewFake()
 			d.ResolveConflictErr = tc.resolveErr
 
-			landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+			landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 			if landing != landingFailed {
 				t.Errorf("selfHeal = %v, want landingFailed (force-pushed head never went green)", landing)
@@ -389,7 +389,7 @@ func TestSelfHeal_RewaitRed_DispatchesFixPassThenMerges(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v (%q), want landingMerged", landing, reason)
@@ -452,7 +452,7 @@ func TestSelfHeal_RewaitRed_SharesFixBudget(t *testing.T) {
 			s := newTestSettle(c, fc, fc)
 			d := dispatch.NewFake()
 
-			landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+			landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 			if landing != landingFailed {
 				t.Errorf("selfHeal = %v, want landingFailed", landing)
@@ -500,7 +500,7 @@ func TestSelfHeal_RewaitRed_FixOnForcePushedHeadStillRed_EndsLandingFailed(t *te
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed", landing)
@@ -549,7 +549,7 @@ func TestSelfHeal_NonRedNeverGreen_CommentHasNoFixCount(t *testing.T) {
 	d := dispatch.NewFake()
 	d.ResolveConflictErr = errors.New("conflict-resolve box exited 1")
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Fatalf("selfHeal = %v, want landingFailed", landing)
@@ -584,7 +584,7 @@ func TestSelfHeal_RelayAfterConflictResolveFailure_EndsFailedWithoutFixPass(t *t
 	s := newTestSettle(c, fc, fc.AsGithubReadOnly())
 	d := dispatch.NewFake()
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed", landing)
@@ -620,7 +620,7 @@ func TestSelfHeal_RewaitRedAfterConflictResolve_FixPassThenMerges(t *testing.T) 
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v (%q), want landingMerged", landing, reason)
@@ -699,7 +699,7 @@ func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (unresolvable conflict, no force-push attempted)", landing)
@@ -756,7 +756,7 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 	d := &labelSnapshotDispatcher{Fake: dispatch.NewFake(), fc: fc, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -797,7 +797,7 @@ func TestSelfHeal_MarksReadyBeforeMerge(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -821,7 +821,7 @@ func TestSelfHeal_MarksReadyBeforeEnqueueAutoMerge(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual (auto mode)", landing)
@@ -846,7 +846,7 @@ func TestSelfHeal_MarksReadyBeforeManualHandoff(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual", landing)
@@ -873,7 +873,7 @@ func TestSelfHeal_MergeGuardHit_FlipsReadyBeforeHandoff(t *testing.T) {
 	fc.SetPRFiles(testPR, []string{".github/workflows/ci.yml"})
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual (guard hit)", landing)
@@ -895,7 +895,7 @@ func TestSelfHeal_MarkReadyFailureDoesNotBlockMerge(t *testing.T) {
 	fc.MarkReadyErr = errors.New("HTTP 403: Resource not accessible by integration")
 	s := newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged despite MarkReady failure", landing)
@@ -928,7 +928,7 @@ func TestSelfHeal_GitForge_PushOnlyLanding(t *testing.T) {
 			branch := "agent/issue-1"
 			s := newTestSettle(c, fc, fc.AsPushOnly())
 
-			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+			landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 			if landing != tc.wantLanding {
 				t.Errorf("selfHeal = %v, want %v", landing, tc.wantLanding)
@@ -960,7 +960,7 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	branch := "agent/issue-1"
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil)
 
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual when the push fails", landing)
@@ -1054,7 +1054,7 @@ func assertHoldPRComment(t *testing.T, fc *forge.Fake, what string) {
 // host, whatever MERGE_MODE says and whichever paths it touches.
 func TestSelfHeal_TuningLabel_HoldsImmediateMerge(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
@@ -1064,7 +1064,7 @@ func TestSelfHeal_TuningLabel_HoldsImmediateMerge(t *testing.T) {
 
 func TestSelfHeal_TuningLabel_HoldsAutoMerge(t *testing.T) {
 	s, fc := tuningTestSettle("auto", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
@@ -1072,7 +1072,7 @@ func TestSelfHeal_TuningLabel_HoldsAutoMerge(t *testing.T) {
 // chore=tuning marker holds on its own.
 func TestSelfHeal_TuningMarker_HoldsOnLocal(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, tuningBody)
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
@@ -1080,7 +1080,7 @@ func TestSelfHeal_TuningMarker_HoldsOnLocal(t *testing.T) {
 // local does report holds with no marker behind it.
 func TestSelfHeal_TuningLabel_AlsoHoldsOnLocal(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress", "agent-tuning-finding"}, "")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
@@ -1088,7 +1088,7 @@ func TestSelfHeal_TuningLabel_AlsoHoldsOnLocal(t *testing.T) {
 // holds and removing it is the override.
 func TestSelfHeal_TuningLabel_HoldsOnJira(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.Jira, []string{"agent-in-progress", "agent-tuning-finding"}, "")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
@@ -1099,7 +1099,7 @@ func TestSelfHeal_TuningLabelRemoved_MarkerAloneDoesNotHold(t *testing.T) {
 	for _, tracker := range []backend.Descriptor{backend.GitHub, backend.Forgejo, backend.Jira} {
 		t.Run(tracker.Name, func(t *testing.T) {
 			s, fc := tuningTestSettle("immediate", tracker, []string{"agent-in-progress"}, tuningBody)
-			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+			landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 			if landing != landingMerged {
 				t.Errorf("selfHeal = %v, want landingMerged after the label was removed", landing)
 			}
@@ -1115,7 +1115,7 @@ func TestSelfHeal_TuningLabelRemoved_MarkerAloneDoesNotHold(t *testing.T) {
 
 func TestSelfHeal_NoTuningProvenance_LocalMergesNormally(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, "plain body\n<!-- spindrift-dedup: foo, chore=docs -->")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged", landing)
 	}
@@ -1129,7 +1129,7 @@ func TestSelfHeal_NoTuningProvenance_LocalMergesNormally(t *testing.T) {
 func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress"}, "")
 	fc.IssueErr = errors.New("gh issue view: 502")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (issue unreadable)", landing)
 	}
@@ -1155,7 +1155,7 @@ func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
 // reason must still name tuning provenance, not plain manual.
 func TestSelfHeal_TuningLabel_HoldsManualMerge(t *testing.T) {
 	s, fc := tuningTestSettle("manual", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
@@ -1164,7 +1164,7 @@ func TestSelfHeal_TuningLabel_HoldsManualMerge(t *testing.T) {
 func TestSelfHeal_TuningLabel_HoldsWithMergeGuardMiss(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	s.cfg.MergeGuardPaths = ".github/**"
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	assertTuningHeld(t, s, fc, landing)
 }
 
@@ -1172,7 +1172,7 @@ func TestSelfHeal_TuningLabel_HoldsWithMergeGuardMiss(t *testing.T) {
 func TestSelfHeal_TuningHold_CommentPRErrorStillHolds(t *testing.T) {
 	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-tuning-finding"}, "")
 	fc.CommentPRErr = errors.New("gh pr comment: 502")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual", landing)
 	}
@@ -1199,7 +1199,7 @@ func TestSelfHeal_TuningHeldUnderEveryMergeMode(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				s, fc := tuningTestSettle(mode, tc.tracker, tc.labels, tc.body)
-				landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+				landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 				assertTuningHeld(t, s, fc, landing)
 				iss, _ := fc.Issue("1")
 				if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
@@ -1242,7 +1242,7 @@ var (
 func TestSelfHeal_SyntheticMergeByHandRow_HoldsByLabel(t *testing.T) {
 	withCatalogRows(t, syntheticHold, syntheticFree)
 	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-synthetic-finding"}, "")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual {
 		t.Fatalf("selfHeal = %v, want landingManual", landing)
 	}
@@ -1265,13 +1265,13 @@ func TestSelfHeal_SyntheticMergeByHandRow_HoldsByMarkerOnLocal(t *testing.T) {
 	withCatalogRows(t, syntheticHold)
 	body := "finding\n<!-- spindrift-dedup: foo, chore=synthetic -->"
 	s, fc := tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, body)
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingManual || fc.Merged != "" {
 		t.Errorf("selfHeal = %v, Merged=%q; want landingManual and no merge", landing, fc.Merged)
 	}
 	// The tuning marker is no longer special once tuning is off the catalog.
 	s, fc = tuningTestSettle("immediate", backend.Local, []string{"agent-in-progress"}, tuningBody)
-	if landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil); landing != landingMerged || fc.Merged != testPR {
+	if landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil); landing != landingMerged || fc.Merged != testPR {
 		t.Errorf("selfHeal = %v, Merged=%q; want landingMerged for a marker no MergeByHand row owns", landing, fc.Merged)
 	}
 }
@@ -1282,7 +1282,7 @@ func TestSelfHeal_NonMergeByHandRow_DoesNotHold(t *testing.T) {
 	withCatalogRows(t, syntheticFree)
 	s, fc := tuningTestSettle("immediate", backend.GitHub, []string{"agent-in-progress", "agent-freebie-finding"}, "")
 	fc.IssueErr = errors.New("gh issue view: 502")
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 	if landing != landingMerged || fc.Merged != testPR {
 		t.Errorf("selfHeal = %v, Merged=%q; want landingMerged", landing, fc.Merged)
 	}
@@ -1312,7 +1312,7 @@ func TestSelfHeal_RewaitRed_SecondForcePushEpisodeCountsOnlyItsOwnPasses(t *test
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Fatalf("selfHeal = %v (%q), want landingFailed", landing, reason)
@@ -1353,7 +1353,7 @@ func TestSelfHeal_StaleBasePreflightRed_DispatchesFixPassThenMerges(t *testing.T
 	s := newTestSettle(c, fc, fc)
 	d := dispatch.NewFake()
 
-	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v (%q), want landingMerged", landing, reason)
@@ -1487,7 +1487,7 @@ func TestSelfHeal_HandOffConflict_RespondsBeforeHandOff(t *testing.T) {
 				fc.RebaseErr = rebaseErr
 				d := dispatch.NewFake()
 
-				landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+				landing, _, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 				assertHandedOff(t, s, fc, landing, exit.reason)
 				assertHoldCommented(t, fc)
@@ -1536,7 +1536,7 @@ func TestSelfHeal_HandOffNotConflicting_HandsOffUnchanged(t *testing.T) {
 				fc.MergeableErr = tc.err
 				var landing landingResult
 				out := testutil.CaptureStdout(t, func() {
-					landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+					landing, _, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 				})
 
 				assertHandedOff(t, s, fc, landing, exit.reason)
@@ -1587,7 +1587,7 @@ func TestSelfHeal_HandOffConflict_FailedResponseFailsLanding(t *testing.T) {
 				d := dispatch.NewFake()
 				tc.setup(s, fc, d)
 
-				landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+				landing, reason, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 				if landing != landingFailed {
 					t.Fatalf("selfHeal = %v (%q), want landingFailed", landing, reason)
@@ -1617,7 +1617,7 @@ func TestSelfHeal_HandOffConflict_RedResolvedHeadDrawsFixPass(t *testing.T) {
 	})
 	d := dispatch.NewFake()
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if len(d.FixCalls) != 1 {
 		t.Errorf("FixCalls = %+v, want one fix pass", d.FixCalls)
@@ -1652,7 +1652,7 @@ func TestSelfHeal_HandOffConflict_UnresolvableBlocksMerge(t *testing.T) {
 				s, fc := handOffSettle(exit, "immediate", forge.MergeableConflicting)
 				tc.setup(s, fc)
 
-				landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+				landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 				assertHandedOff(t, s, fc, landing, dispatchrecord.ReasonMergeBlocked)
 				if len(fc.RebasedURLs) != tc.wantRebase {
@@ -1681,10 +1681,10 @@ func TestSelfHeal_HandOffConflict_ResolveAlreadyRunning_Abandons(t *testing.T) {
 			d := dispatch.NewFake()
 			d.ResolveConflictErr = fmt.Errorf("resolve conflict: %w", runner.ErrAlreadyRunning)
 
-			landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
+			_, reason, err := s.selfHeal(d, "1", 0, testPR, nil)
 
-			if landing != landingAbandoned || reason != "" {
-				t.Errorf("selfHeal = %v, %q, want landingAbandoned and empty reason", landing, reason)
+			if !errors.Is(err, errAbandoned) || reason != "" {
+				t.Errorf("selfHeal = %v, %q, want errAbandoned and empty reason", err, reason)
 			}
 			fc.IssueErr = nil
 			assertNoTransitionOrComment(t, fc)
@@ -1702,7 +1702,7 @@ func TestSelfHeal_HandOffConflict_NonImmediateModesUnchanged(t *testing.T) {
 				s, fc := handOffSettle(exit, mode, forge.MergeableConflicting)
 				d := dispatch.NewFake()
 
-				landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
+				landing, _, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 				assertHandedOff(t, s, fc, landing, exit.reason)
 				assertHoldCommented(t, fc)
@@ -1728,7 +1728,7 @@ func TestSelfHeal_HandOff_DraftUnmergeableForge_HandsOffUnchanged(t *testing.T) 
 			fc.DraftUnmergeable = true
 			fc.SetDraft(testPR, true)
 
-			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+			landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 			assertHandedOff(t, s, fc, landing, exit.reason)
 			assertHoldCommented(t, fc)
@@ -1762,7 +1762,7 @@ func TestSelfHeal_HandOffConflict_UnrepeatedConflictHandsOffUnchanged(t *testing
 				fc.MergeableErr, fc.MergeableErrAfter = tc.err, tc.errAfter
 				var landing landingResult
 				out := testutil.CaptureStdout(t, func() {
-					landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+					landing, _, _ = s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 				})
 
 				assertHandedOff(t, s, fc, landing, exit.reason)
@@ -1786,7 +1786,7 @@ func TestSelfHeal_HandOffConflict_ConfirmedAfterUnknownRespondsBeforeHandOff(t *
 		forge.MergeableConflicting, forge.MergeableUnknown, forge.MergeableConflicting,
 	})
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
+	landing, _, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	assertHandedOff(t, s, fc, landing, guardHitExit.reason)
 	if len(fc.RebasedURLs) != 1 {
