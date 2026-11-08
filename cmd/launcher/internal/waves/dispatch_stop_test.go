@@ -307,9 +307,6 @@ func TestDispatch_AbortClosedWithBoxInFlight_ReclaimsNeitherFailsNorSettles(t *t
 	if !registry.Marked("1", 0) {
 		t.Fatal("registry.Marked(\"1\", 0): got false, want true (Reclaim must mark the shared registry Session carries)")
 	}
-	if len(s.FailCalls) != 0 {
-		t.Fatalf("FailCalls: got %+v, want none (abort abandons, never fails)", s.FailCalls)
-	}
 	if len(s.SettleCalls) != 0 {
 		t.Fatalf("SettleCalls: got %+v, want none (abort abandons, never settles)", s.SettleCalls)
 	}
@@ -385,9 +382,6 @@ func TestDispatch_AbortClosedWithBoxInFlight_NilSession_ReclaimsNeitherFailsNorS
 	}
 	if toFailed != 0 {
 		t.Fatalf("TransitionStateCalls: got %+v, want no Failed transition of #1 (abort's mark must be visible to the result switch even with a nil Session)", fc.TransitionStateCalls)
-	}
-	if len(s.FailCalls) != 0 {
-		t.Fatalf("FailCalls: got %+v, want none (abort abandons, never fails)", s.FailCalls)
 	}
 	if len(s.SettleCalls) != 0 {
 		t.Fatalf("SettleCalls: got %+v, want none (abort abandons, never settles)", s.SettleCalls)

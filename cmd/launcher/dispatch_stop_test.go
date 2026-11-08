@@ -471,7 +471,7 @@ func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testi
 			t.Fatalf("issue #1 labels = %v, want no work-family label %q", iss.Labels, workLabel)
 		}
 	}
-	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
-		t.Fatalf("FailCalls=%+v SettleCalls=%+v, want none (abort abandons, never fails or settles)", s.FailCalls, s.SettleCalls)
+	if len(s.SettleCalls) != 0 {
+		t.Fatalf("SettleCalls=%+v, want none (abort abandons, never settles)", s.SettleCalls)
 	}
 }

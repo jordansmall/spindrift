@@ -90,20 +90,14 @@ func TestQueueSettler_Settle_StaleGenerationAfterRepickDoesNotCorruptNewRow(t *t
 }
 
 // Pins issue #705: a naturally-failed Box reaches a terminal queue state
-// instead of stranding at PickRunning, and the wrapped Settler's Fail hook
-// still runs.
-func TestQueueSettler_Fail_MarksPickFailedAndDelegates(t *testing.T) {
+// instead of stranding at PickRunning.
+func TestQueueSettler_BoxFailed_MarksPickFailed(t *testing.T) {
 	q := NewQueue()
 	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickRunning})
-	inner := settle.NewFake()
-	qs := queueSettler{Settler: inner, q: q}
+	qs := queueSettler{Settler: settle.NewFake(), q: q}
 
-	result := dispatch.Result{}
-	qs.Fail("42", 0, result)
+	qs.boxFailed("42", 0)
 
-	if len(inner.FailCalls) != 1 || inner.FailCalls[0].Num != "42" {
-		t.Errorf("inner.FailCalls = %+v, want one call for #42", inner.FailCalls)
-	}
 	if got := q.Snapshot()[0].State; got != PickFailed {
 		t.Errorf("pick state = %v, want failed", got)
 	}
@@ -131,7 +125,7 @@ func TestQueueSettler_SameNumberTwoKinds_OnlyOwnKindRowChanges(t *testing.T) {
 			qs := queueSettler{Settler: settle.NewFake(), q: q, kind: tc.kind}
 
 			if tc.fail {
-				qs.Fail("42", 0, dispatch.Result{})
+				qs.boxFailed("42", 0)
 			} else {
 				qs.Settle(nil, "42", 0, dispatch.Result{})
 			}

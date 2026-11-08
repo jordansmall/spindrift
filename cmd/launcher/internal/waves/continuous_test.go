@@ -1770,12 +1770,12 @@ func TestRunContinuous_TerminatedIssueSkipsFailedTransitionAndSettle(t *testing.
 	}
 }
 
-// TestRunContinuous_FailedBoxCallsSettlerFail verifies that when a Box exits
+// TestRunContinuous_FailedBoxCallsBoxFailedHook verifies that when a Box exits
 // non-zero with no termination in play, RunContinuous transitions the tracker
-// issue to Failed and calls the Settler's Fail hook, the seam a wrapper like
-// the Console's queueSettler uses to move its queue row to a terminal state
-// instead of stranding it at "running" (issue #705).
-func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
+// issue to Failed and calls Session.BoxFailed, the seam the Console uses to
+// move its queue row to a terminal state instead of stranding it at "running"
+// (issue #705).
+func TestRunContinuous_FailedBoxCallsBoxFailedHook(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
 	c.MaxParallel = 1
@@ -1794,7 +1794,9 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
-	if err := RunContinuous(c, nil, fc, fc, f, fakeSettle, fake, fresh); err != nil {
+	var failed []string
+	session := &Session{BoxFailed: func(num string, _ uint64) { failed = append(failed, num) }}
+	if err := RunContinuous(c, session, fc, fc, f, fakeSettle, fake, fresh); err != nil {
 		t.Fatalf("RunContinuous: got %v, want nil", err)
 	}
 
@@ -1807,8 +1809,8 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 	if !found {
 		t.Errorf("must transition to Failed; got %+v", fc.TransitionStateCalls)
 	}
-	if len(fakeSettle.FailCalls) != 1 || fakeSettle.FailCalls[0].Num != "1" {
-		t.Errorf("fakeSettle.FailCalls = %+v, want one call for #1", fakeSettle.FailCalls)
+	if len(failed) != 1 || failed[0] != "1" {
+		t.Errorf("BoxFailed calls = %v, want one call for #1", failed)
 	}
 	if len(fakeSettle.SettleCalls) != 0 {
 		t.Errorf("Settle must not be called on a Box failure; got %+v", fakeSettle.SettleCalls)
@@ -1819,7 +1821,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 // when a second dispatch slot's Box reports its container is already running
 // (a live run possibly orphaned by a killed launcher, not a genuine box
 // failure), RunContinuous's goroutine switch skips it without a Failed
-// transition or a Settler.Fail call, matching dispatchWave's
+// transition or a BoxFailed call, matching dispatchWave's
 // onSkip arm (issue #3633).
 func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
 	c := baseConfig()
@@ -1840,8 +1842,10 @@ func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T)
 	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}}, Edges: map[string][]string{}}
 	fresh := func() (bool, bool, string) { return true, true, "fresh" }
 
+	var failed []string
+	session := &Session{BoxFailed: func(num string, _ uint64) { failed = append(failed, num) }}
 	out := testutil.CaptureStdout(t, func() {
-		if err := RunContinuous(c, nil, fc, fc, f, fakeSettle, fake, fresh); err != nil {
+		if err := RunContinuous(c, session, fc, fc, f, fakeSettle, fake, fresh); err != nil {
 			t.Fatalf("RunContinuous: got %v, want nil", err)
 		}
 	})
@@ -1851,8 +1855,8 @@ func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T)
 			t.Errorf("must NOT transition to Failed when already in flight; got %+v", fc.TransitionStateCalls)
 		}
 	}
-	if len(fakeSettle.FailCalls) != 0 {
-		t.Errorf("Fail must not be called when already in flight; got %+v", fakeSettle.FailCalls)
+	if len(failed) != 0 {
+		t.Errorf("BoxFailed must not be called when already in flight; got %v", failed)
 	}
 	if len(fakeSettle.SettleCalls) != 0 {
 		t.Errorf("Settle must not be called when already in flight; got %+v", fakeSettle.SettleCalls)
@@ -3051,7 +3055,8 @@ func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testin
 
 	abort := make(chan struct{})
 	c.Abort = abort
-	session := &Session{Terminated: terminate.NewRegistry()}
+	var failed []string
+	session := &Session{Terminated: terminate.NewRegistry(), BoxFailed: func(num string, _ uint64) { failed = append(failed, num) }}
 
 	var err error
 	out := captureStdout(t, func() {
@@ -3092,8 +3097,8 @@ func TestRunContinuous_AbortClosedWhileBoxInFlight_ReclaimsAndAbandons(t *testin
 	if toDispatchable != 2 {
 		t.Fatalf("TransitionStateCalls: got %+v, want two transitions of #1 to Dispatchable", fc.TransitionStateCalls)
 	}
-	if len(s.FailCalls) != 0 {
-		t.Fatalf("FailCalls: got %+v, want none (abort abandons, never fails)", s.FailCalls)
+	if len(failed) != 0 {
+		t.Fatalf("BoxFailed calls: got %v, want none (abort abandons, never fails)", failed)
 	}
 	if len(s.SettleCalls) != 0 {
 		t.Fatalf("SettleCalls: got %+v, want none (abort abandons, never settles)", s.SettleCalls)
@@ -3144,12 +3149,14 @@ func TestRunContinuous_AbortClosedWithMultipleBoxesInFlight_ReclaimsEachOne(t *t
 	f := testFactory(t, dir, kr)
 	s := settle.NewFake()
 
+	var failed []string
+	session := &Session{BoxFailed: func(num string, _ uint64) { failed = append(failed, num) }}
 	abort := make(chan struct{})
 	c.Abort = abort
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+		resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 	}()
 
 	waitOn(t, started1, "issue #1 was never dispatched")
@@ -3174,8 +3181,11 @@ func TestRunContinuous_AbortClosedWithMultipleBoxesInFlight_ReclaimsEachOne(t *t
 		t.Fatal("RunContinuous did not return")
 	}
 
-	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
-		t.Fatalf("Fail/Settle calls: got %+v / %+v, want none", s.FailCalls, s.SettleCalls)
+	if len(failed) != 0 {
+		t.Fatalf("BoxFailed calls: got %v, want none (abort abandons, never fails)", failed)
+	}
+	if len(s.SettleCalls) != 0 {
+		t.Fatalf("SettleCalls: got %+v, want none", s.SettleCalls)
 	}
 }
 
@@ -3596,11 +3606,13 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 	f := testFactory(t, dir, gate)
 	s := settle.NewFake()
 
+	var failed []string
+	session := &Session{BoxFailed: func(num string, _ uint64) { failed = append(failed, num) }}
 	var err error
 	out := captureStdout(t, func() {
 		resultCh := make(chan error, 1)
 		go func() {
-			resultCh <- RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+			resultCh <- RunContinuous(c, session, fc, fc, f, s, fake, fresh)
 		}()
 
 		if got := waitOn(t, gate.killed, "Kill was never called after abort"); got != "agent-issue-1" {
@@ -3625,8 +3637,11 @@ func TestRunContinuous_AbortBeforeContainerCreated_StopsBoxAndReleasesIssue(t *t
 		t.Fatalf("KillCalls: got %v, want exactly [agent-issue-1]", gate.Fake.KillCalls)
 	}
 	assertReclaimedToDispatchable(t, fc, "1")
-	if len(s.FailCalls) != 0 || len(s.SettleCalls) != 0 {
-		t.Fatalf("Fail/Settle calls: got %+v / %+v, want none (abort abandons)", s.FailCalls, s.SettleCalls)
+	if len(failed) != 0 {
+		t.Fatalf("BoxFailed calls: got %v, want none (abort abandons, never fails)", failed)
+	}
+	if len(s.SettleCalls) != 0 {
+		t.Fatalf("SettleCalls: got %+v, want none (abort abandons)", s.SettleCalls)
 	}
 	if !strings.Contains(out, "reclaimed; abandoning") {
 		t.Fatalf("stdout: got %q, want the abandon line from the reclaimed Box's own goroutine", out)

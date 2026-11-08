@@ -112,7 +112,7 @@ type Config struct {
 }
 
 // Settler is the "settle a dispatch result" interface every generic caller
-// depends on: the waves engine, the Console's queue hook, and newSettle.
+// depends on: the waves engine and the Console's launcher.
 type Settler interface {
 	// Settle interprets result and drives num to its terminal label. gen is the
 	// terminate.Registry generation (issue #743) this call's own dispatch was
@@ -120,12 +120,6 @@ type Settler interface {
 	// Generation 0 is that of an issue no Begin has bumped, so a caller that
 	// never calls Begin (recover, headless waves) still matches a Mark on it.
 	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) Settlement
-
-	// Fail records a Box that ran and exited non-zero. The caller already
-	// transitioned the issue to Failed, so this runs no merge-gate machinery;
-	// it exists so the Console's queueSettler can react to a Box failure the
-	// same way it reacts to a settle (issue #705).
-	Fail(num string, gen uint64, result dispatch.Result)
 }
 
 // WorkSettler is the work-only recover interface. Research never touches the
@@ -214,10 +208,6 @@ func (s *Settle) Registry() *terminate.Registry { return s.term }
 func (s *Settle) terminated(num string, gen uint64) bool {
 	return s.term.Marked(num, gen)
 }
-
-// Fail is a no-op: the caller already transitioned the issue to Failed. It
-// exists only to satisfy Settler so the Console's queueSettler has a hook.
-func (s *Settle) Fail(num string, gen uint64, result dispatch.Result) {}
 
 var _ Settler = (*Settle)(nil)
 var _ WorkSettler = (*Settle)(nil)

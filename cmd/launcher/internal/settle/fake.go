@@ -23,13 +23,6 @@ type SettlePatchCall struct {
 	Num, PRURL string
 }
 
-// FailCall records one Fail invocation.
-type FailCall struct {
-	Num    string
-	Gen    uint64
-	Result dispatch.Result
-}
-
 // RecoverCall records one Recover invocation that passed its pre-Begin
 // declines and whose Begin succeeded.
 type RecoverCall struct {
@@ -50,7 +43,6 @@ type Fake struct {
 
 	SettleCalls      []SettleCall
 	SettlePatchCalls []SettlePatchCall
-	FailCalls        []FailCall
 	// Settlement is what Settle, SettlePatch and Recover return.
 	Settlement   Settlement
 	RecoverCalls []RecoverCall
@@ -85,13 +77,6 @@ func (f *Fake) SettlePatch(owner dispatchkey.Key, num, prURL string) Settlement 
 	defer f.mu.Unlock()
 	f.SettlePatchCalls = append(f.SettlePatchCalls, SettlePatchCall{Owner: owner, Num: num, PRURL: prURL})
 	return f.Settlement
-}
-
-// Fail records the call.
-func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Gen: gen, Result: result})
 }
 
 // Recover returns RecoverDecline or ErrNothingToRecover without calling Begin
