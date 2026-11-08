@@ -134,7 +134,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				if errors.Is(err, errLandingNeverGreen) {
 					return s.failForcePushedHead(num, pr, err, "")
 				}
-				fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, pr, err)
+				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				postHoldComment()
 				return s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked), ""
@@ -150,7 +150,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			if s.terminated(num, gen) {
 				return landingAbandoned, ""
 			}
-			fmt.Printf("    #%s  landing=%s  status=gate-terminal  !! %s\n", num, pr, gateReason)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusGateTerminal, Detail: "!! " + gateReason})
 			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
 			s.transitionState(num, ForReason(dispatchrecord.ReasonGateTerminal), gateReason)
 			return landingFailed, gateReason
@@ -167,8 +167,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			if attempt >= s.cfg.MaxFixAttempts {
 				if s.cfg.MaxFixAttempts > 0 {
-					fmt.Printf("    #%s  landing=%s  status=fix-exhausted  !! exhausted %d fix pass(es)\n",
-						num, pr, s.cfg.MaxFixAttempts)
+					s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixExhausted, Detail: fmt.Sprintf("!! exhausted %d fix pass(es)", s.cfg.MaxFixAttempts)})
 				}
 				reason := fmt.Sprintf("ci-red: still red after exhausting %d fix pass(es)", s.cfg.MaxFixAttempts)
 				// With no fix pass allowed none ran, so the note's own ci-red is the
@@ -204,7 +203,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 // for a timeout or a conflict-resolve or relay failure, which no fix pass
 // answers.
 func (s *Settle) failForcePushedHead(num, pr string, err error, budgetNote string) (landingResult, string) {
-	fmt.Printf("    #%s  landing=%s  status=landing-failed  !! %v\n", num, pr, err)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusLandingFailed, Detail: fmt.Sprintf("!! %v", err)})
 	s.it.Comment(num, fmt.Sprintf("landing failed: %v%s — no green PR exists at the current head", err, budgetNote))
 	s.transitionState(num, ForReason(dispatchrecord.ReasonLandingFailed), err.Error())
 	return landingFailed, err.Error()
@@ -231,26 +230,26 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 	// CumulativeUsage's disk stat and parse over every pass log.
 	if s.cfg.MaxBudgetTokens > 0 || s.cfg.MaxBudgetUSD > 0 {
 		if exceeded, reason := budgetExceeded(s.cfg, d.CumulativeUsage()); exceeded {
-			fmt.Printf("    #%s  landing=%s  status=budget-exhausted  !! %s\n", num, pr, reason)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusBudgetExhausted, Detail: "!! " + reason})
 			s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
 			note := fmt.Sprintf("budget-exhausted: %s", reason)
 			s.transitionState(num, ForReason(dispatchrecord.ReasonBudgetExhausted), note)
 			return landingFailed, note, true
 		}
 	}
-	fmt.Printf("    #%s  landing=%s  fix-pass=%d/%d\n", num, pr, attempt+1, s.cfg.MaxFixAttempts)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Detail: fmt.Sprintf("fix-pass=%d/%d", attempt+1, s.cfg.MaxFixAttempts)})
 	// Best-effort: a failure to fetch the CI failure detail must never
 	// block the fix pass, so the summary falls back to empty.
 	detail, detailErr := s.pr.FailureDetail(pr)
 	if detailErr != nil {
-		fmt.Printf("    #%s  landing=%s  status=failure-detail-unavailable  !! %v\n", num, pr, detailErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFailureDetailUnavailable, Detail: fmt.Sprintf("!! %v", detailErr)})
 		detail = ""
 	}
 	// Best-effort: headErr suppresses the no-op check below rather than
 	// aborting the fix pass outright.
 	headBefore, headErr := s.pr.HeadCommitSHA(pr)
 	if headErr != nil {
-		fmt.Printf("    #%s  landing=%s  status=head-sha-unavailable  !! %v\n", num, pr, headErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusHeadShaUnavailable, Detail: fmt.Sprintf("!! %v", headErr)})
 	}
 	disp := d.Fix(attempt+1, detail)
 	// Catches d.Fix's own exit — a non-zero result can be Reclaim's
@@ -267,12 +266,12 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 		func() fixStop {
 			// No Box started: a live run owns this issue's in-progress claim,
 			// so leave its state alone and do not retry (issue #3655).
-			fmt.Printf("    #%s  landing=%s  status=already-in-flight  ~~ fix pass %d skipped; live run continues\n", num, pr, attempt+1)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAlreadyInFlight, Detail: fmt.Sprintf("~~ fix pass %d skipped; live run continues", attempt+1)})
 			return fixStop{landing: landingAbandoned, stop: true}
 		},
 		func(result dispatch.Result) fixStop {
 			RecordSettleWarnings(d, num, fmt.Sprintf("fix pass %d: ", attempt+1), result)
-			fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixFailed, Detail: fmt.Sprintf("!! fix pass %d exited non-zero — aborting self-heal", attempt+1)})
 			result.ReportFailureReason(num)
 			s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
 			note := fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
@@ -308,14 +307,14 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 			}
 			// Not parkRelayFailure: the PR is already open, so `recover`
 			// re-gates it rather than relaying this bundle.
-			fmt.Printf("    #%s  landing=%s  status=relay-failed  !! fix pass %d: %v\n", num, pr, attempt+1, err)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRelayFailed, Detail: fmt.Sprintf("!! fix pass %d: %v", attempt+1, err)})
 			next := relayFailureNext(num, err, fmt.Sprintf("run `spindrift recover %s` to re-gate the PR (recover does not relay this bundle).", num))
 			s.it.Comment(num, fmt.Sprintf("fix pass %d's bundle relay failed: %v. Its commits never reached the PR; %s", attempt+1, err, next))
 			note := fmt.Sprintf("relay-failed: fix pass %d's bundle relay failed; its commits never reached the PR", attempt+1)
 			s.transitionState(num, ForReason(dispatchrecord.ReasonRelayFailed), note)
 			return landingFailed, note, true
 		}
-		fmt.Printf("    #%s  landing=%s  status=fix-relay-failed  !! %v\n", num, pr, err)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixRelayFailed, Detail: fmt.Sprintf("!! %v", err)})
 	}
 	// A fix pass that exits zero but pushes no new commit leaves CI's
 	// rollup unchanged, so the next gateToGreen poll would read the
@@ -332,7 +331,7 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 				if s.terminated(num, gen) {
 					return landingAbandoned, "", true
 				}
-				fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
+				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusFixNoOp, Detail: fmt.Sprintf("!! fix pass %d produced no new commit — aborting self-heal", attempt+1)})
 				s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
 				note := fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
 				s.transitionState(num, ForReason(dispatchrecord.ReasonFixNoOp), note)
@@ -423,7 +422,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []pa
 		if s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked) == landingAbandoned {
 			return landingAbandoned
 		}
-		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
+		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
 		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
 		return landingManual
 	}
@@ -447,7 +446,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []pa
 			// upgraded landing.
 			s.recordLanding(num, landing, passes)
 		} else {
-			fmt.Printf("    #%s  landing=%s  status=landing-ref-unresolved  !! %v\n", num, branch, err)
+			s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusLandingRefUnresolved, Detail: fmt.Sprintf("!! %v", err)})
 		}
 	}
 	return landed
@@ -499,7 +498,7 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 	// poll() does no I/O of its own, so this block prints the check-state-error
 	// status line as well as formatting the operator-facing reason.
 	if obs.err != nil {
-		fmt.Printf("    #%s  landing=%s  status=check-state-error  !! %v\n", num, pr, obs.err)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusCheckStateError, Detail: fmt.Sprintf("!! %v", obs.err)})
 		return obs, gateTerminalReason(obs.err, deadline)
 	}
 	if requireRegistration && !obs.sawNonTerminal {
@@ -591,24 +590,24 @@ func (s *Settle) mergeByHandHold(num string) (chore.Row, bool, error) {
 func (s *Settle) handOffHold(num, pr string) (reason string, comment func()) {
 	matched, guardErr := s.mergeGuardHit(pr)
 	if guardErr != nil {
-		fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeGuardCheckError, Detail: fmt.Sprintf("!! %v", guardErr)})
 		return dispatchrecord.ReasonMergeGuardCheckError, func() {
 			s.commentHoldPR(num, pr, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
 		}
 	}
 	if len(matched) > 0 {
-		fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeGuardHit, Detail: fmt.Sprintf("paths=%v", matched)})
 		return dispatchrecord.ReasonMergeGuardHit, func() { s.commentHoldPR(num, pr, mergeGuardComment(matched)) }
 	}
 	heldRow, isHeld, holdErr := s.mergeByHandHold(num)
 	if holdErr != nil {
-		fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  check=tuning  !! %v\n", num, pr, holdErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeGuardCheckError, Detail: fmt.Sprintf("check=tuning  !! %v", holdErr)})
 		return dispatchrecord.ReasonMergeGuardCheckError, func() {
 			s.commentHoldPR(num, pr, holdCheckErrorComment(mergeByHandRows(), holdErr))
 		}
 	}
 	if isHeld {
-		fmt.Printf("    #%s  landing=%s  status=%s\n", num, pr, dispatchrecord.ReasonMergeByHand)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeByHand})
 		return dispatchrecord.ReasonMergeByHand, func() { s.commentHoldPR(num, pr, holdComment(heldRow)) }
 	}
 	return "", func() {}
@@ -629,14 +628,14 @@ func (s *Settle) awaitMergeable(num, pr string, interval time.Duration, noVerdic
 		}
 		state, err := s.pr.Mergeable(pr)
 		if err != nil {
-			fmt.Printf("    #%s  landing=%s  status=mergeable-check-error  !! %v\n", num, pr, err)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeableCheckError, Detail: fmt.Sprintf("!! %v", err)})
 			return forge.MergeableUnknown, false
 		}
 		if state != forge.MergeableUnknown {
 			return state, true
 		}
 	}
-	fmt.Printf("    #%s  landing=%s  status=mergeable-unknown  ~~ %s\n", num, pr, noVerdict)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeableUnknown, Detail: "~~ " + noVerdict})
 	return forge.MergeableUnknown, false
 }
 
@@ -664,13 +663,13 @@ func (s *Settle) resolveBeforeHandOff(num string, gen uint64, pr string, d dispa
 		return nil
 	}
 	if again != forge.MergeableConflicting {
-		fmt.Printf("    #%s  landing=%s  status=conflict-unconfirmed  ~~ handing off without a conflict response\n", num, pr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusConflictUnconfirmed, Detail: "~~ handing off without a conflict response"})
 		return nil
 	}
 	if s.terminated(num, gen) {
 		return errAbandoned
 	}
-	fmt.Printf("    #%s  landing=%s  status=handoff-conflict\n", num, pr)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusHandoffConflict})
 	conflictErr := fmt.Errorf("%w: PR conflicts with its base", forge.ErrMergeConflict)
 	_, err := s.respondToConflict(num, gen, pr, d, s.cfForNum(num), conflictErr, &rebaseBudget{})
 	return err
@@ -695,27 +694,24 @@ func (s *Settle) respondToConflict(num string, gen uint64, pr string, d dispatch
 	// s.pr unset.
 	if s.pr != nil {
 		if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
-			fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkDraftFailed, Detail: fmt.Sprintf("!! %v", mdErr)})
 		}
 	}
 	if budget.attempts >= s.cfg.MaxRebaseAttempts {
 		return false, conflictErr
 	}
 	budget.attempts++
-	fmt.Printf("    #%s  landing=%s  status=rebase-retry  attempt=%d/%d\n",
-		num, pr, budget.attempts, s.cfg.MaxRebaseAttempts)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebaseRetry, Detail: fmt.Sprintf("attempt=%d/%d", budget.attempts, s.cfg.MaxRebaseAttempts)})
 	rbErr := cf.Rebase(pr)
 	for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && budget.pushRetries < s.cfg.MaxRebaseAttempts {
 		budget.pushRetries++
-		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
-			num, pr, budget.pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebasePushRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", budget.pushRetries, s.cfg.MaxRebaseAttempts, rbErr)})
 		s.transientBackoff().Do(budget.pushRetries)
 		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
 		if errors.Is(rbErr, forge.ErrTransientPushFailure) {
-			fmt.Printf("    #%s  landing=%s  status=rebase-push-retries-exhausted  attempts=%d  !! %v\n",
-				num, pr, budget.pushRetries, rbErr)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebasePushRetriesExhausted, Detail: fmt.Sprintf("attempts=%d  !! %v", budget.pushRetries, rbErr)})
 			return false, rbErr
 		}
 		if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
@@ -727,7 +723,7 @@ func (s *Settle) respondToConflict(num string, gen uint64, pr string, d dispatch
 			}
 			return true, nil
 		}
-		fmt.Printf("    #%s  landing=%s  status=rebase-failed  !! %v\n", num, pr, rbErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebaseFailed, Detail: fmt.Sprintf("!! %v", rbErr)})
 		return false, rbErr
 	}
 	// The rebase force-push reset the PR's required checks, so the next merge
@@ -763,17 +759,17 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 			// no stdout or stderr, so err is only ever an *exec.ExitError, a
 			// start failure, or a message embedding the already-public prURL,
 			// never gh's stderr. Safe to surface verbatim in the comment below.
-			fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAutoMergeEnqueueFailed, Detail: fmt.Sprintf("!! %v", err)})
 			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
 			return dispatchrecord.ReasonMergeBlocked, nil
 		}
-		fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueued\n", num, pr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAutoMergeEnqueued})
 		return dispatchrecord.ReasonAutoMergeEnqueued, nil
 	case "manual":
 		// CODE_FORGE=local requires MERGE_MODE=immediate (validated at launcher
 		// startup, issue #1725), so a forge.BundleRelay hook never reaches
 		// manual mode here.
-		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAgentComplete, Detail: "merge-mode=" + s.cfg.MergeMode})
 		return dispatchrecord.ReasonManual, nil
 	default:
 		return "", fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
@@ -814,8 +810,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 				return err
 			}
 			checksBlockedAttempts++
-			fmt.Printf("    #%s  landing=%s  status=merge-blocked-by-checks  attempt=%d/%d\n",
-				num, pr, checksBlockedAttempts, s.cfg.MaxRebaseAttempts)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlockedByChecks, Detail: fmt.Sprintf("attempt=%d/%d", checksBlockedAttempts, s.cfg.MaxRebaseAttempts)})
 			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
@@ -824,8 +819,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 				return err
 			}
 			mergeTransientAttempts++
-			fmt.Printf("    #%s  landing=%s  status=merge-transient-retry  attempt=%d/%d  !! %v\n",
-				num, pr, mergeTransientAttempts, s.cfg.Policy.Max, err)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeTransientRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", mergeTransientAttempts, s.cfg.Policy.Max, err)})
 			s.transientBackoff().Do(mergeTransientAttempts)
 			continue
 		}
@@ -838,7 +832,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			// stale mergeability snapshot. Re-demoting would leave the Merge
 			// retry below attempting a draft PR (issue #1863).
 			skipRebase = false
-			fmt.Printf("    #%s  landing=%s  status=merge-retry-settle\n", num, pr)
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeRetrySettle})
 			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
@@ -870,18 +864,17 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	}
 	stale, err := s.pr.NeedsUpdate(pr)
 	if err != nil {
-		fmt.Printf("    #%s  landing=%s  status=needs-update-check-error  !! %v\n", num, pr, err)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusNeedsUpdateCheckError, Detail: fmt.Sprintf("!! %v", err)})
 		return nil
 	}
 	if !stale || s.cfg.MaxRebaseAttempts <= 0 {
 		return nil
 	}
-	fmt.Printf("    #%s  landing=%s  status=stale-base-rebase  attempt=1/%d\n", num, pr, s.cfg.MaxRebaseAttempts)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusStaleBaseRebase, Detail: fmt.Sprintf("attempt=1/%d", s.cfg.MaxRebaseAttempts)})
 	cf := s.cfForNum(num)
 	rbErr := cf.Rebase(pr)
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
-		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
-			num, pr, pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebasePushRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)})
 		s.transientBackoff().Do(pushRetries + 1)
 		rbErr = cf.Rebase(pr)
 	}
@@ -893,7 +886,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 			// guarantees s.pr is non-nil; the check repeats so this stays
 			// correct if that guard ever moves.
 			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
-				fmt.Printf("    #%s  landing=%s  status=mark-draft-failed  !! %v\n", num, pr, mdErr)
+				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkDraftFailed, Detail: fmt.Sprintf("!! %v", mdErr)})
 			}
 		}
 		if isConflict && d != nil {
@@ -906,7 +899,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 			// rewaitAfterForcePush confirms the resolved head is green.
 			return s.rewaitAfterForcePush(num, gen, pr)
 		}
-		fmt.Printf("    #%s  landing=%s  status=stale-base-rebase-failed  !! %v\n", num, pr, rbErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusStaleBaseRebaseFailed, Detail: fmt.Sprintf("!! %v", rbErr)})
 		return rbErr
 	}
 	return s.rewaitAfterForcePush(num, gen, pr)
@@ -918,7 +911,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 // a genuine dispatch failure (issue #3523), or when the issue's own Box is
 // already running (issue #3655).
 func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
-	fmt.Printf("    #%s  landing=%s  status=conflict-resolve\n", num, pr)
+	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusConflictResolve})
 	crErr := d.ResolveConflict(pr)
 	// Reclaim reaps this Box under num's own box name, so crErr can be its own
 	// SIGKILL, and the relay below would push a resolved-conflict bundle for
@@ -933,7 +926,7 @@ func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.D
 	// The issue's own Box is live and owns its state, so this is no failed
 	// resolve (issue #3655).
 	if errors.Is(crErr, runner.ErrAlreadyRunning) {
-		fmt.Printf("    #%s  landing=%s  status=already-in-flight  ~~ conflict-resolve skipped; live run continues\n", num, pr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusAlreadyInFlight, Detail: "~~ conflict-resolve skipped; live run continues"})
 		return errAbandoned
 	}
 	if crErr != nil {
@@ -941,7 +934,7 @@ func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.D
 		// stdout and stderr to the log file, not to the returned error, so crErr
 		// is only ever an *exec.ExitError or a start failure, never Box-internal
 		// output. Safe to surface verbatim in selfHeal's issue comment.
-		fmt.Printf("    #%s  landing=%s  status=conflict-resolve-failed  !! %v\n", num, pr, crErr)
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusConflictResolveFailed, Detail: fmt.Sprintf("!! %v", crErr)})
 		return fmt.Errorf("%w: conflict-resolve dispatch failed: %v", errLandingNeverGreen, crErr)
 	}
 	// A read-only Box holds no push-capable token (issue #1979): it bundled the
