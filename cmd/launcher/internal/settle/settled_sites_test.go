@@ -63,7 +63,7 @@ func TestResearchSettle_FailAppendsSettled(t *testing.T) {
 // A nil Dispatcher (the butler patch gate) has no Record: even when the
 // primary log opens with a stamp, which may name an unrelated earlier Record,
 // the settle leaves no Record in the store.
-func TestSettleAdopted_NilDispatcherSettlesNoRecord(t *testing.T) {
+func TestSettlePatch_SettlesNoRecord(t *testing.T) {
 	c := baseConfig()
 	_, path := stampedFake(t, "work:1@old")
 	c.LogPath = func(string) string { return path }
@@ -72,7 +72,7 @@ func TestSettleAdopted_NilDispatcherSettlesNoRecord(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := newTestSettle(c, fc, fc)
 
-	testutil.CaptureStdout(t, func() { s.SettleAdopted(nil, "1", 0, testPR) })
+	testutil.CaptureStdout(t, func() { s.SettlePatch(patchOwner, "1", testPR) })
 
 	if recs := logRecords(t, path); len(recs) != 0 {
 		t.Errorf("stored records = %+v, want none for a nil Dispatcher", recs)

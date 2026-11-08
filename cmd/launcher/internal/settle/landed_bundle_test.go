@@ -49,7 +49,7 @@ func (o openAfterMerge) Merge(url string) error {
 // Issue #4653: a finished issue must not leave a stale seam.bundle behind, but
 // only a settle that verified the merge may drop it; every other outcome keeps
 // the bundle as the evidence a human or `spindrift recover` works from.
-func TestSettleAdopted_BundleRemovedOnlyAfterVerifiedMerge(t *testing.T) {
+func TestRecoverOpenPR_BundleRemovedOnlyAfterVerifiedMerge(t *testing.T) {
 	green := []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess}
 	cases := []struct {
 		name        string
@@ -78,7 +78,7 @@ func TestSettleAdopted_BundleRemovedOnlyAfterVerifiedMerge(t *testing.T) {
 			fc.MergeErr = tc.mergeErr
 			s := newTestSettle(c, fc, fc)
 
-			captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR) })
+			captureStdout(t, func() { recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR) })
 
 			if got := bundleExists(t, outbox); got != tc.wantBundle {
 				t.Errorf("bundle present = %v, want %v", got, tc.wantBundle)
@@ -90,13 +90,13 @@ func TestSettleAdopted_BundleRemovedOnlyAfterVerifiedMerge(t *testing.T) {
 // The merge gate can go green and Merge return nil while the forge still
 // reports the PR unmerged; verifyMerged then fails the issue, and a failed
 // settle keeps its bundle.
-func TestSettleAdopted_MergeNotVerifiedKeepsBundle(t *testing.T) {
+func TestRecoverOpenPR_MergeNotVerifiedKeepsBundle(t *testing.T) {
 	outbox := t.TempDir()
 	writeBundle(t, outbox)
 	c, fc := bundleFixture(outbox)
 	s := newTestSettle(c, fc, openAfterMerge{fc})
 
-	out := captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR) })
+	out := captureStdout(t, func() { recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR) })
 
 	if !strings.Contains(out, "status=failed") {
 		t.Fatalf("want a failed settle, got %q", out)
@@ -107,7 +107,7 @@ func TestSettleAdopted_MergeNotVerifiedKeepsBundle(t *testing.T) {
 }
 
 // The outbox also holds the pass manifest, so only the bundle file goes.
-func TestSettleAdopted_MergedLandingLeavesOtherOutboxFiles(t *testing.T) {
+func TestRecoverOpenPR_MergedLandingLeavesOtherOutboxFiles(t *testing.T) {
 	outbox := t.TempDir()
 	writeBundle(t, outbox)
 	other := filepath.Join(outbox, "other.json")
@@ -117,7 +117,7 @@ func TestSettleAdopted_MergedLandingLeavesOtherOutboxFiles(t *testing.T) {
 	c, fc := bundleFixture(outbox)
 	s := newTestSettle(c, fc, fc)
 
-	out := captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR) })
+	out := captureStdout(t, func() { recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR) })
 
 	if !strings.Contains(out, "status=verified-merged") {
 		t.Fatalf("want a verified merge, got %q", out)
@@ -132,7 +132,7 @@ func TestSettleAdopted_MergedLandingLeavesOtherOutboxFiles(t *testing.T) {
 
 // A missing bundle (e.g. a Box that wrote none) is a silent no-op, and an
 // unset OutboxDir never panics.
-func TestSettleAdopted_MergedLandingWithoutBundleOrOutboxIsSilent(t *testing.T) {
+func TestRecoverOpenPR_MergedLandingWithoutBundleOrOutboxIsSilent(t *testing.T) {
 	for name, outboxDir := range map[string]func(string) string{
 		"missing bundle": func(string) string { return t.TempDir() },
 		"nil OutboxDir":  nil,
@@ -142,7 +142,7 @@ func TestSettleAdopted_MergedLandingWithoutBundleOrOutboxIsSilent(t *testing.T) 
 			c.OutboxDir = outboxDir
 			s := newTestSettle(c, fc, fc)
 
-			out := captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR) })
+			out := captureStdout(t, func() { recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR) })
 
 			if !strings.Contains(out, "status=verified-merged") {
 				t.Errorf("want a verified merge, got %q", out)
@@ -155,7 +155,7 @@ func TestSettleAdopted_MergedLandingWithoutBundleOrOutboxIsSilent(t *testing.T) 
 }
 
 // A failed removal is logged and must never fail the landing.
-func TestSettleAdopted_BundleRemovalFailureIsLoggedAndLandingStillMerges(t *testing.T) {
+func TestRecoverOpenPR_BundleRemovalFailureIsLoggedAndLandingStillMerges(t *testing.T) {
 	outbox := t.TempDir()
 	// A non-empty directory in the bundle's place makes os.Remove fail.
 	stuck := filepath.Join(outbox, seambundle.FileName)
@@ -165,7 +165,7 @@ func TestSettleAdopted_BundleRemovalFailureIsLoggedAndLandingStillMerges(t *test
 	c, fc := bundleFixture(outbox)
 	s := newTestSettle(c, fc, fc)
 
-	out := captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR) })
+	out := captureStdout(t, func() { recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR) })
 
 	if !strings.Contains(out, "status=verified-merged") {
 		t.Errorf("landing must still verify as merged despite the removal failure, got %q", out)

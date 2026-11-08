@@ -37,7 +37,7 @@ type readErrFixture struct {
 	readRecords func() []report.Record
 }
 
-// settleWithReadErrAfterMerge drives a green PR through SettleAdopted to a
+// settleWithReadErrAfterMerge drives a green PR through Recover to a
 // real merge and completeLanding, then arms a read failure for verifyMerged.
 func settleWithReadErrAfterMerge(t *testing.T, arm func(*forge.Fake)) readErrFixture {
 	t.Helper()
@@ -49,12 +49,12 @@ func settleWithReadErrAfterMerge(t *testing.T, arm func(*forge.Fake)) readErrFix
 	c.Policy.Max = 2
 	s := newTestSettle(c, fc, readErrAfterMerge{fc, arm})
 
-	out := captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR) })
+	out := captureStdout(t, func() { recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR) })
 	return readErrFixture{fc, outbox, out, readRecords}
 }
 
 // A transient read error must retry, not demote a genuinely merged issue.
-func TestSettleAdopted_TransientReadErrorAfterMergeRetriesThenVerifies(t *testing.T) {
+func TestRecoverOpenPR_TransientReadErrorAfterMergeRetriesThenVerifies(t *testing.T) {
 	for name, arm := range map[string]func(*forge.Fake){
 		"PRState": func(fc *forge.Fake) { fc.PRStateErrs = []error{errors.New("blip")} },
 		"Issue":   func(fc *forge.Fake) { fc.IssueErrs = []error{errors.New("blip")} },
@@ -84,7 +84,7 @@ func TestSettleAdopted_TransientReadErrorAfterMergeRetriesThenVerifies(t *testin
 // A read that keeps failing proves nothing about the merge: the issue must
 // keep the Complete that completeLanding latched, emit no second settled
 // record, and keep its bundle, rather than be demoted or closed.
-func TestSettleAdopted_PersistentReadErrorAfterMergeKeepsComplete(t *testing.T) {
+func TestRecoverOpenPR_PersistentReadErrorAfterMergeKeepsComplete(t *testing.T) {
 	for name, arm := range map[string]func(*forge.Fake){
 		"PRState": func(fc *forge.Fake) { fc.PRStateErr = errors.New("api down") },
 		"Issue":   func(fc *forge.Fake) { fc.IssueErr = errors.New("api down") },

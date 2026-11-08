@@ -113,7 +113,7 @@ func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testin
 // PR-state re-check (pr_lander.go) must reach the daemon as exactly one settled
 // record carrying the tracker's final decision, state=failed — never two
 // contradicting records.
-func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *testing.T) {
+func TestRecoverOpenPR_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	c := baseConfig()
@@ -132,7 +132,7 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, openAfterMerge{fc})
 
-	s.SettleAdopted(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9", 0, testPR)
+	recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR)
 
 	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 {
@@ -379,9 +379,9 @@ func TestSettle_GithubReadOnly_ReadyOpenedPR_LatchedDespiteCheckStateError(t *te
 	}
 }
 
-// SettleAdopted's prURL is host-discovered (reconcile, recover, butler patch),
+// The open PR is host-discovered (reconcile, recover, butler patch),
 // so it names the record even when the gate's first CheckState fails.
-func TestSettleAdopted_CheckStateError_StillCarriesPR(t *testing.T) {
+func TestRecoverOpenPR_CheckStateError_StillCarriesPR(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := forge.NewFake(testDispatchLabels)
@@ -389,7 +389,7 @@ func TestSettleAdopted_CheckStateError_StillCarriesPR(t *testing.T) {
 	fc.SetCheckStateErrors(testPR, []error{errors.New("403 rate limit")})
 	s := newTestSettle(baseConfig(), fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
+	recoverOpenPR(t, s, dispatch.NewFake(), "77", testPR)
 
 	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 || recs[0].PRURL != testPR || recs[0].State != "failed" {
@@ -489,7 +489,7 @@ func TestSettle_GithubReadOnly_BlockedDraftPR_SettledRecordCarriesPR(t *testing.
 
 // The adopted-PR entry point latches the PR it gates, so a PR that lands
 // reaches the daemon on the settled record.
-func TestSettleAdopted_SettledRecordCarriesPR(t *testing.T) {
+func TestRecoverOpenPR_SettledRecordCarriesPR(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	c := baseConfig()
@@ -498,7 +498,7 @@ func TestSettleAdopted_SettledRecordCarriesPR(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
+	recoverOpenPR(t, s, dispatch.NewFake(), "77", testPR)
 
 	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 || recs[0].Event != report.EventSettled || recs[0].PRURL != testPR {

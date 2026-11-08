@@ -27,7 +27,7 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr stri
 }
 
 // selfHealAdopted is selfHeal's counterpart for a landing discovered
-// independently of this process's own push (SettleAdopted's resume path); the
+// independently of this process's own push (settleAdopted's resume path); the
 // PR Lander's registration-evidence requirement (see selfHealGate) applies
 // only there.
 func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string, error) {

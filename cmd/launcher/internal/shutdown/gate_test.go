@@ -421,7 +421,7 @@ func TestWatch_AbortAfterStart_ReclaimsPromptly(t *testing.T) {
 // TestSettle_CalledTwice_DoesNotPanic pins Settle as call-once-safe: every
 // early-return call site in recoverByNumber defers Settle right after Watch,
 // so a caller that also settles inline on its happy path (main.go's
-// Recover/SettleAdopted arms) must be able to call Settle a
+// Recover arm) must be able to call Settle a
 // second time on the way out without the unguarded `close(g.watchDone)`
 // panicking (issue #3522, the watchSettled guard in Settle).
 func TestSettle_CalledTwice_DoesNotPanic(t *testing.T) {

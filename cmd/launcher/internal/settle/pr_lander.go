@@ -109,7 +109,7 @@ var errForcePushRed = fmt.Errorf("%w: CI went red", errLandingNeverGreen)
 // to agent-failed instead (issue #758).
 //
 // requireRegistration is set for a PR found independently of this process's own
-// push (SettleAdopted): the head SHA may not be one this process just pushed,
+// push (settleAdopted): the head SHA may not be one this process just pushed,
 // so the first gate poll requires evidence this run's checks registered before
 // trusting a SUCCESS rollup, within a bounded window (issues #1652, #2475). It
 // guards only the loop's first attempt, because a fix-pass retry always follows

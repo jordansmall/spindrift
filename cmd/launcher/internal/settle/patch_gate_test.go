@@ -4,12 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
 )
+
+// patchOwner is the dispatching Chore the gate reports under.
+var patchOwner = dispatchkey.Chore("patch-gate")
 
 // butlerPatchLabels is the label set a butler patch finding's issue actually
 // carries (ADR 0057, issue #4076): never agent-in-progress, since the issue
@@ -19,7 +21,7 @@ var butlerPatchLabels = []string{"agent-butler-finding", "agent-butler-patch"}
 // A red gate on an unclaimed PR (issue #4076) must comment the failure rather
 // than commit agent-failed: there is no InProgress state to leave, and no
 // dispatcher to run a fix pass with.
-func TestSettleAdopted_UnclaimedRedComments(t *testing.T) {
+func TestSettlePatch_UnclaimedRedComments(t *testing.T) {
 	c := baseConfig()
 	c.MaxFixAttempts = 0
 	c.Unclaimed = true
@@ -27,18 +29,14 @@ func TestSettleAdopted_UnclaimedRedComments(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: append([]string{}, butlerPatchLabels...)})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := newTestSettle(c, fc, fc)
-	d := dispatch.NewFake()
 
-	s.SettleAdopted(d, "1", 0, testPR)
+	s.SettlePatch(patchOwner, "1", testPR)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge on red CI; fc.Merged=%q", fc.Merged)
 	}
 	if len(fc.MarkReadyCalls) != 0 {
 		t.Errorf("expected the PR to stay draft (no MarkReady call) on red CI; got %v", fc.MarkReadyCalls)
-	}
-	if len(d.FixCalls) != 0 {
-		t.Errorf("expected no fix pass on an unclaimed issue; got %v", d.FixCalls)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("expected no TransitionState calls on an unclaimed issue; got %+v", fc.TransitionStateCalls)
@@ -59,7 +57,7 @@ func TestSettleAdopted_UnclaimedRedComments(t *testing.T) {
 // forgot to pair the two, issue #4076) must not panic reaching for a fix
 // pass: settle.New clamps MaxFixAttempts to 0 whenever Unclaimed is true, so
 // the nil Dispatcher here is never dereferenced.
-func TestSettleAdopted_UnclaimedIgnoresNonzeroMaxFixAttempts(t *testing.T) {
+func TestSettlePatch_UnclaimedIgnoresNonzeroMaxFixAttempts(t *testing.T) {
 	c := baseConfig()
 	c.MaxFixAttempts = 3
 	c.Unclaimed = true
@@ -68,7 +66,7 @@ func TestSettleAdopted_UnclaimedIgnoresNonzeroMaxFixAttempts(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(nil, "1", 0, testPR)
+	s.SettlePatch(patchOwner, "1", testPR)
 
 	if len(fc.MarkReadyCalls) != 0 {
 		t.Errorf("expected the PR to stay draft (no MarkReady call) on red CI; got %v", fc.MarkReadyCalls)
@@ -79,7 +77,7 @@ func TestSettleAdopted_UnclaimedIgnoresNonzeroMaxFixAttempts(t *testing.T) {
 // also comment without transitioning state (issue #4076); the gateTerminal
 // arm already comments regardless of Unclaimed, so this pins that no double
 // path and no TransitionState call happen.
-func TestSettleAdopted_UnclaimedGateTerminalComments(t *testing.T) {
+func TestSettlePatch_UnclaimedGateTerminalComments(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 1 // less than registrationWindowPolls(3) * actualIv(1)
 	c.MaxFixAttempts = 0
@@ -89,7 +87,7 @@ func TestSettleAdopted_UnclaimedGateTerminalComments(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(nil, "1", 0, testPR)
+	s.SettlePatch(patchOwner, "1", testPR)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge before the registration window elapses; fc.Merged=%q", fc.Merged)
@@ -110,7 +108,7 @@ func TestSettleAdopted_UnclaimedGateTerminalComments(t *testing.T) {
 // completes the issue (issue #4076): Complete is the one transition an
 // unclaimed issue does commit, since it reflects the PR having actually
 // landed rather than a claim being released.
-func TestSettleAdopted_UnclaimedGreenImmediateMerges(t *testing.T) {
+func TestSettlePatch_UnclaimedGreenImmediateMerges(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
@@ -120,7 +118,7 @@ func TestSettleAdopted_UnclaimedGreenImmediateMerges(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(nil, "1", 0, testPR)
+	s.SettlePatch(patchOwner, "1", testPR)
 
 	if fc.Merged != testPR {
 		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
@@ -140,7 +138,7 @@ func TestSettleAdopted_UnclaimedGreenImmediateMerges(t *testing.T) {
 // Green-but-manual/auto on an unclaimed PR must mark the PR ready without
 // ever touching tracker state: manual/auto never actually lands the PR, so
 // there is nothing for an unclaimed issue's gate to commit (issue #4076).
-func TestSettleAdopted_UnclaimedGreenManualAndAutoLeaveIssueUntouched(t *testing.T) {
+func TestSettlePatch_UnclaimedGreenManualAndAutoLeaveIssueUntouched(t *testing.T) {
 	cases := []struct {
 		mode          string
 		wantAutoMerge bool
@@ -158,7 +156,7 @@ func TestSettleAdopted_UnclaimedGreenManualAndAutoLeaveIssueUntouched(t *testing
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 			s := newTestSettle(c, fc, fc)
 
-			s.SettleAdopted(nil, "1", 0, testPR)
+			s.SettlePatch(patchOwner, "1", testPR)
 
 			if fc.Merged != "" {
 				t.Errorf("mode=%s: expected no merge; fc.Merged=%q", tc.mode, fc.Merged)
@@ -235,7 +233,9 @@ func TestSettlePatch_ReportsUnderOwnerAndEmitsNoSettled(t *testing.T) {
 
 // A nil-Dispatcher settle that no Chore owns (no SettlePatch) still reports its
 // terminal record under the issue key: only an owned issue suppresses it.
-func TestSettleAdopted_NilDispatcherUnownedEmitsIssueKeyedSettled(t *testing.T) {
+// Internal-seam test: every public entry that settles without a Dispatcher is
+// owned, so only settleAdopted reaches the unowned shape.
+func Test_settleAdopted_NilDispatcherUnownedEmitsIssueKeyedSettled(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
@@ -243,7 +243,7 @@ func TestSettleAdopted_NilDispatcherUnownedEmitsIssueKeyedSettled(t *testing.T) 
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	s := newTestSettle(c, fc, fc)
 
-	testutil.CaptureStdout(t, func() { s.SettleAdopted(nil, "1", 0, testPR) })
+	testutil.CaptureStdout(t, func() { s.settleAdopted(nil, "1", 0, testPR) })
 
 	want := dispatchkey.Issue("1")
 	for _, r := range readRecords() {

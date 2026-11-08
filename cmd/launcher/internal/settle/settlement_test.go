@@ -61,24 +61,7 @@ func TestSettle_OffScriptStatusReturnsInProgressOffScript(t *testing.T) {
 	}
 }
 
-func TestSettleAdopted_ReturnsCompleteWithLatchedPR(t *testing.T) {
-	c := baseConfig()
-	c.MergeMode = "immediate"
-	c.MaxRebaseAttempts = 0
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	s := newTestSettle(c, fc, fc)
-
-	var got Settlement
-	testutil.CaptureStdout(t, func() { got = s.SettleAdopted(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9", 0, testPR) })
-
-	if got.State() != forge.Complete || got.PRURL != testPR {
-		t.Fatalf("SettleAdopted = %+v, want complete naming %s", got, testPR)
-	}
-}
-
-func TestSettleAdopted_CompleteThenDemotedReturnsFailed(t *testing.T) {
+func TestRecoverOpenPR_CompleteThenDemotedReturnsFailed(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
@@ -88,10 +71,10 @@ func TestSettleAdopted_CompleteThenDemotedReturnsFailed(t *testing.T) {
 	s := newTestSettle(c, fc, openAfterMerge{fc})
 
 	var got Settlement
-	testutil.CaptureStdout(t, func() { got = s.SettleAdopted(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9", 0, testPR) })
+	testutil.CaptureStdout(t, func() { got = recoverOpenPR(t, s, &dispatch.Fake{RecordIDResult: "work:9@t"}, "9", testPR) })
 
 	if got.Verdict != ForReason(dispatchrecord.ReasonMergeUnverified) || got.PRURL != testPR {
-		t.Fatalf("SettleAdopted = %+v, want merge-unverified (failed) naming %s", got, testPR)
+		t.Fatalf("Recover = %+v, want merge-unverified (failed) naming %s", got, testPR)
 	}
 }
 
