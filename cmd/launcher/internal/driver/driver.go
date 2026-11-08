@@ -41,6 +41,12 @@ type Driver interface {
 	// ExtractUsage returns aggregate and per-model usage from the box log.
 	ExtractUsage(logPath string) (usage.Report, error)
 
+	// ExtractUsageAfter is ExtractUsage for a log whose sessions may have
+	// reported in earlier logs: base seeds each session's previous cumulative
+	// result, so a resumed session counts only its increment. It returns the
+	// baselines after this log, to seed the next one.
+	ExtractUsageAfter(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error)
+
 	// RenderTranscript renders the box log's assistant turns and tool calls
 	// for a Console drill-in (#648). opts.TopLevelRole is the role attributed
 	// to top-level (empty parent_tool_use_id) messages; an empty value means

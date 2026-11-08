@@ -1,0 +1,10 @@
+{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}
+{"type":"assistant","session_id":"sess-main","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_scout","name":"Agent","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":10,"output_tokens":100}}}
+{"type":"assistant","session_id":"sess-main","parent_tool_use_id":"toolu_scout","message":{"id":"msg_b","model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":5,"output_tokens":30}}}
+{"type":"result","session_id":"sess-main","num_turns":3,"total_cost_usd":1.00,"duration_ms":50000,"duration_api_ms":1000,"usage":{"input_tokens":10,"output_tokens":100},"modelUsage":{"claude-opus-4-8":{"outputTokens":120},"claude-haiku-4-5-20251001":{"outputTokens":30}}}
+{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"fix"}}
+{"type":"assistant","session_id":"sess-main","message":{"id":"msg_c","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":4,"output_tokens":40}}}
+{"type":"result","session_id":"sess-main","num_turns":2,"total_cost_usd":1.75,"duration_ms":30000,"duration_api_ms":1800,"usage":{"input_tokens":4,"output_tokens":40},"modelUsage":{"claude-opus-4-8":{"outputTokens":170},"claude-haiku-4-5-20251001":{"outputTokens":50}}}
+{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"review"}}
+{"type":"assistant","session_id":"sess-review","message":{"id":"msg_d","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":3,"output_tokens":25}}}
+{"type":"result","session_id":"sess-review","num_turns":1,"total_cost_usd":0.50,"duration_ms":9000,"duration_api_ms":200,"usage":{"input_tokens":3,"output_tokens":25},"modelUsage":{"claude-opus-4-8":{"outputTokens":25}}}

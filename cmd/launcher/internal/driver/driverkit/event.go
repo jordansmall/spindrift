@@ -76,7 +76,7 @@ const (
 	KindUnparsed Kind = "unparsed"
 
 	// KindResult is the CLI's final result text, for a CLI that reports one as
-	// its own event. Fills Text, and may carry session totals in Tokens,
+	// its own event. Fills Text, and may carry totals in Tokens,
 	// DurationMs, DurationAPIMs and NumTurns, and name the session's Models.
 	// The result reader lets it replace the text gathered so far. A CLI whose
 	// result is its last message's prose emits no KindResult.
@@ -163,8 +163,8 @@ type Event struct {
 	// Distinct from Role, which stays the loop the event is attributed to.
 	Subagent string
 
-	// Tokens is the tally for KindUsage, and the session totals a KindResult
-	// may carry.
+	// Tokens is the tally for KindUsage, and the totals a KindResult may carry
+	// (see SessionID for which of them are cumulative).
 	Tokens Tokens
 
 	// ResetAt is the rate-limit reset a KindError's payload names, else nil.
@@ -173,8 +173,15 @@ type Event struct {
 	// HostOp is the decoded payload of a KindHostOp.
 	HostOp *hostop.SpindriftOp
 
-	// DurationMs, DurationAPIMs and NumTurns are the session totals a CLI
-	// reports on its KindResult.
+	// SessionID names the CLI session a KindResult belongs to. A decoder sets
+	// it only when the CLI reports Tokens.CostUSD, DurationAPIMs and ModelOutput
+	// cumulatively for that session, carried through a resume: RebaseResults then
+	// hands the readers those three as per-query increments. A decoder whose
+	// results are already per query leaves it "".
+	SessionID string
+
+	// DurationMs, DurationAPIMs and NumTurns are the totals a CLI reports on its
+	// KindResult. DurationAPIMs is session-cumulative when SessionID is set.
 	DurationMs    int64
 	DurationAPIMs int64
 	NumTurns      int
@@ -184,10 +191,10 @@ type Event struct {
 	// heartbeat) nor a KindUsage.Model (which includes synthetic turns).
 	Models []string
 
-	// ModelOutput is the output tokens the CLI's session summary attributes
-	// to each model id, meaningful on KindResult only. Nil when the summary
-	// carries no usable per-model figure (absent, empty or mistyped), which
-	// is distinct from a model whose figure is 0.
+	// ModelOutput is the output tokens the CLI's result attributes to each model
+	// id (session-cumulative when SessionID is set), meaningful on KindResult
+	// only. Nil when the result carries no usable per-model figure (absent,
+	// empty or mistyped), which is distinct from a model whose figure is 0.
 	ModelOutput map[string]int
 
 	// NoTotals marks a KindResult whose session totals failed to decode: it

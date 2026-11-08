@@ -121,6 +121,10 @@ func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return d.base().ExtractUsage(logPath)
 }
 
+func (d fakeDriver) ExtractUsageAfter(logPath string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error) {
+	return d.base().ExtractUsageAfter(logPath, base)
+}
+
 func (d fakeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
 	return d.base().RenderTranscript(logPath, opts)
 }
