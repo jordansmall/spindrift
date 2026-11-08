@@ -786,7 +786,6 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	var budget rebaseBudget
 	checksBlockedAttempts := 0
-	mergeTransientAttempts := 0
 	skipRebase := false
 	if s.terminated(num, gen) {
 		return errAbandoned
@@ -799,11 +798,14 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	// cf is num's own parent-keyed instance when Config.CodeForgeForIssue is set
 	// (CODE_FORGE=local, issue #1734), otherwise New's cf unchanged.
 	cf := s.cfForNum(num)
+	transients := s.newRetryLoop(num, gen) // one loop: the transient budget spans every Merge below
 	for {
 		if s.terminated(num, gen) {
 			return errAbandoned
 		}
-		err := cf.Merge(pr)
+		err := transients.run(StatusMergeTransientRetry, "", pr,
+			func() error { return cf.Merge(pr) },
+			func(err error) bool { return !errors.Is(err, forge.ErrMergeTransient) }, nil)
 		if err == nil {
 			return nil
 		}
@@ -814,15 +816,6 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			checksBlockedAttempts++
 			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlockedByChecks, Detail: fmt.Sprintf("attempt=%d/%d", checksBlockedAttempts, s.cfg.MaxRebaseAttempts)})
 			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
-			continue
-		}
-		if errors.Is(err, forge.ErrMergeTransient) {
-			if mergeTransientAttempts >= s.cfg.Policy.Max {
-				return err
-			}
-			mergeTransientAttempts++
-			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeTransientRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", mergeTransientAttempts, s.cfg.Policy.Max, err)})
-			s.transientBackoff().Do(mergeTransientAttempts)
 			continue
 		}
 		if !errors.Is(err, forge.ErrMergeConflict) {

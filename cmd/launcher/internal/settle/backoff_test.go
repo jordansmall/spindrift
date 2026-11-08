@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,5 +145,87 @@ func TestRebasePushBackoff_ZeroMaxRebaseAttemptsNoSleep(t *testing.T) {
 	}
 	if len(*sleeps) != 0 {
 		t.Errorf("recorded %d sleeps, want 0 (MaxRebaseAttempts=0 disables retry): got %v", len(*sleeps), *sleeps)
+	}
+}
+
+// Merge transient retries share the retry loop, so retry N waits
+// Policy.Unit*N + Policy.Jitter in total (the loop sleeps in 1s slices).
+func TestMergeImmediateTransientBackoff_SucceedsAfterRetries(t *testing.T) {
+	c := baseConfig()
+	c.Policy = retry.Policy{Max: 3, Unit: 2 * time.Second, Jitter: 1 * time.Second}
+	var slept time.Duration
+	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(d time.Duration) { slept += d }}
+
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeTransient, forge.ErrMergeTransient, nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := newTestSettle(c, fc, fc)
+
+	if err := s.mergeImmediate("1", 0, testPR, nil); err != nil {
+		t.Fatalf("mergeImmediate: unexpected error: %v", err)
+	}
+	if want := 8 * time.Second; slept != want {
+		t.Errorf("slept %v across two merge retries, want %v", slept, want)
+	}
+}
+
+// An operator stop during a merge-transient backoff abandons the landing
+// instead of sleeping out the wait and merging again.
+func TestMergeImmediateTransientBackoff_StopMidBackoffAbandons(t *testing.T) {
+	c := baseConfig()
+	c.Policy = retry.Policy{Max: 3, Unit: 5 * time.Second}
+	var s *Settle
+	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.term.Mark("1") }}
+
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeTransient, nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	s = newTestSettle(c, fc, fc)
+	gen := s.term.Begin("1")
+
+	err := s.mergeImmediate("1", gen, testPR, nil)
+
+	if !errors.Is(err, errAbandoned) || !errors.Is(err, forge.ErrMergeTransient) {
+		t.Errorf("err = %v, want it to wrap both errAbandoned and the transient error", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge succeeded after the stop; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// The merge-transient budget spans the whole mergeImmediate call: a checks-
+// blocked wait between two transients does not refill it.
+func TestMergeImmediateTransientBackoff_BudgetSpansChecksBlockedWaits(t *testing.T) {
+	c := baseConfig()
+	c.Policy = retry.Policy{Max: 1, Unit: time.Second}
+	c.MaxRebaseAttempts = 2
+	_, c.Clock = recordingClock()
+	rec := &ProgressRecorder{}
+	c.Progress = rec
+
+	fc := forge.NewFake()
+	fc.MergeErrs = []error{forge.ErrMergeTransient, forge.ErrMergeBlockedByChecks, forge.ErrMergeTransient, nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := newTestSettle(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if !errors.Is(err, forge.ErrMergeTransient) {
+		t.Errorf("err = %v, want the second transient returned once the budget is spent", err)
+	}
+	if fc.Merged != "" {
+		t.Errorf("PR merged (%q) despite an exhausted transient budget", fc.Merged)
+	}
+	if left := len(fc.MergeErrs); left != 1 {
+		t.Errorf("%d queued Merge results left, want 1 (Merge called 3 times)", left)
+	}
+	var retries []Step
+	for _, st := range rec.Steps() {
+		if st.Status == StatusMergeTransientRetry {
+			retries = append(retries, st)
+		}
+	}
+	if len(retries) != 1 || !strings.HasPrefix(retries[0].Detail, "attempt=1/1 ") {
+		t.Errorf("transient retry steps = %+v, want exactly one with attempt=1/1", retries)
 	}
 }

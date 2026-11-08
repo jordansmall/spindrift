@@ -842,11 +842,13 @@ func TestSelfHeal_LandPushOnly_TerminatedSkipsCompleteAndMerge(t *testing.T) {
 // landingAbandoned without committing Complete or posting a "landing
 // blocked" comment (issue #4879, #3523). Policy.Max = 1 grants the single
 // transient retry (the zero value would return the transient error at once),
-// so the backoff sleep that marks is actually reached.
+// so the backoff sleep that marks is actually reached; Unit makes that sleep
+// non-zero, since a zero-length backoff never calls the clock.
 func TestSelfHeal_LandPushOnly_TerminatedDuringMergeBackoff_ReportsAbandoned(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.Policy.Max = 1
+	c.Policy.Unit = time.Second
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.MergeErrs = []error{forge.ErrMergeTransient, nil}
