@@ -1010,3 +1010,31 @@ func TestResearchSettle_RecordsWarnings(t *testing.T) {
 // testResearchFindingLabel is the label research settle files findings under,
 // handed to the constructor rather than looked up by kind.
 const testResearchFindingLabel = "agent-research-finding"
+
+func TestResearchSettle_WithProgress_RecordsInsteadOfPrinting(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend"},
+		},
+	}
+	rec := &ProgressRecorder{}
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false, testResearchFindingLabel).WithProgress(rec)
+
+	stdout := captureStdout(t, func() {
+		s.Settle(dispatch.NewFake(), "42", 0, result)
+	})
+
+	if stdout != "" {
+		t.Errorf("stdout = %q, want nothing printed", stdout)
+	}
+	landing := "https://github.com/owner/repo/issues/42#issuecomment-1"
+	want := []Step{
+		{Key: "42", Detail: "filed=ok:0,failed:0,skipped:0"},
+		{Key: "42", Landing: landing, Status: "recommend", Detail: "note="},
+	}
+	if steps := rec.Steps(); !reflect.DeepEqual(steps, want) {
+		t.Errorf("steps = %+v, want %+v", steps, want)
+	}
+}

@@ -16,7 +16,8 @@ import (
 // (ADR 0022): parse the outcome line, apply one terminal label, stop. No CI
 // watch, no fix passes, no merge, no usage comment.
 type ResearchSettle struct {
-	it forge.IssueTracker
+	progress Progress
+	it       forge.IssueTracker
 	// findingLabel is the label a filed research finding wears, read from the
 	// dispatched kind's row.
 	findingLabel string
@@ -49,7 +50,7 @@ var _ Settler = (*ResearchSettle)(nil)
 // relay even here, so a missing verdict comment must fail.
 func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, findingLabel: findingLabel, verdicts: verdicts, verdictRelayed: verdictRelayed}
+	return &ResearchSettle{it: it, progress: StdoutProgress{}, landing: landing, findingLabel: findingLabel, verdicts: verdicts, verdictRelayed: verdictRelayed}
 }
 
 // NewResearchSettleReadOnly constructs a ResearchSettle for a Dispatch under
@@ -57,7 +58,14 @@ func NewResearchSettle(it forge.IssueTracker, verdicts forge.VerdictLabels, verd
 // token, so this Settle posts the relayed comment before the verdict label.
 func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabels, verdictRelayed bool, findingLabel string) *ResearchSettle {
 	landing, _ := it.(forge.LandingRecorder)
-	return &ResearchSettle{it: it, landing: landing, findingLabel: findingLabel, readOnly: true, verdicts: verdicts, verdictRelayed: verdictRelayed}
+	return &ResearchSettle{it: it, progress: StdoutProgress{}, landing: landing, findingLabel: findingLabel, readOnly: true, verdicts: verdicts, verdictRelayed: verdictRelayed}
+}
+
+// WithProgress sends r's progress steps to p instead of stdout. Returns r so a
+// caller can chain it onto the constructor.
+func (r *ResearchSettle) WithProgress(p Progress) *ResearchSettle {
+	r.progress = p
+	return r
 }
 
 // Settle drives num to its terminal research label: a parsed verdict applies
@@ -78,11 +86,11 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		return
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
-	filed := fileIssueIntentsDetailed(r.it, num, result, r.findingLabel, backlink)
+	filed := fileIssueIntentsDetailed(r.progress, r.it, num, result, r.findingLabel, backlink)
 	// Reported right after filing, not at the function's tail: the comment-post
 	// and verdict-apply branches below both return early, and filing has already
 	// happened by then, so the tally must still print (issue #3608).
-	reportFiled(num, filed)
+	reportFiled(r.progress, num, filed)
 	// Comment != "" is redundant now that both carriers reject a zero-length
 	// payload -- outcome's classifySignalAt on the log (issue #3668) and
 	// signalwire.CheckFields on the socket; kept because the failure it guards is
@@ -94,7 +102,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 			body = strings.TrimRight(body, "\n") + "\n\n" + sections
 		}
 		if err := r.it.Comment(num, body); err != nil {
-			fmt.Printf("    #%s  status=comment-post-failed  !! %v\n", num, err)
+			r.progress.Step(Step{Key: num, Status: StatusCommentPostFailed, Detail: fmt.Sprintf("!! %v", err)})
 			return
 		}
 	} else if r.landing != nil || r.readOnly || r.verdictRelayed {
@@ -102,7 +110,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 		return
 	}
 	if err := r.it.CompleteVerdict(num, verdict); err != nil {
-		fmt.Printf("    #%s  landing=%s  status=verdict-apply-failed  !! %v\n", num, o.Landing, err)
+		r.progress.Step(Step{Key: num, Landing: o.Landing, Status: StatusVerdictApplyFailed, Detail: fmt.Sprintf("!! %v", err)})
 		return
 	}
 	// State stays DispatchState-only (forge.Complete); the verdict itself
@@ -115,7 +123,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	// verifyMerged's demotion). Every ResearchSettle path reaches exactly one,
 	// so inline is already "once".
 	SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonVerdict), "verdict "+string(verdict))
-	fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
+	r.progress.Step(Step{Key: num, Landing: o.Landing, Status: Status(o.Status), Detail: "note=" + o.Note})
 }
 
 // commentFailureNote distinguishes "the Box never emitted a comment line" from
@@ -143,7 +151,7 @@ func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) {
 	// comment at ResearchSettle's other Settled call above): this path also
 	// reaches exactly one terminal state per issue.
 	SettledBy(d, dispatchkey.Issue(num), ForReason(dispatchrecord.ReasonResearchFailed), note)
-	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
+	r.progress.Step(Step{Key: num, Status: StatusFailed, Detail: "note=" + note})
 }
 
 // Fail is a no-op but is reachable: under CONTINUOUS_DISPATCH this Settler runs

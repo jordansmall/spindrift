@@ -70,7 +70,7 @@ type ButlerFiling struct {
 // failed count (PostIssue failures only; a dedup skip or malformed payload is
 // neither), so a caller can tell a sweep whose every filing failed from one
 // that simply found nothing.
-func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, findingLabel string, dedup DedupPolicy, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
+func FileButlerFindings(progress Progress, it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, findingLabel string, dedup DedupPolicy, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
 	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
 	capped := result
 	capped.IssueIntents = kept
@@ -85,13 +85,13 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 	}
 	decide := plan(findings)
 
-	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, findingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
+	rawFiled := fileIssueIntentsDetailedFunc(progress, it, num, capped, findingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
 		d := decide(in.finding())
 		return d.Backlink, d.ExtraLabels, d.OnFiled
 	})
-	reportFiled(num, rawFiled)
+	reportFiled(progress, num, rawFiled)
 	if dropped > 0 {
-		fmt.Printf("    #%s  dropped %d finding(s) beyond the %d-per-sweep cap\n", num, dropped, maxPerSweep)
+		progress.Step(Step{Key: num, Detail: fmt.Sprintf("dropped %d finding(s) beyond the %d-per-sweep cap", dropped, maxPerSweep)})
 	}
 
 	out := ButlerFiling{Dropped: dropped}

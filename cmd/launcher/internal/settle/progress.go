@@ -79,6 +79,9 @@ const (
 	StatusDraftPRLookupFailed      Status = "draft-pr-lookup-failed"
 	StatusDraftPRAdopted           Status = "draft-pr-adopted"
 	StatusRelayRetry               Status = "relay-retry"
+
+	StatusCommentPostFailed  Status = "comment-post-failed"
+	StatusVerdictApplyFailed Status = "verdict-apply-failed"
 )
 
 // Step is one settle progress event. Key is the issue key without its "#".

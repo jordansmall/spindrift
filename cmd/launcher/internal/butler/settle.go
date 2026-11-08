@@ -61,6 +61,10 @@ type settleRun struct {
 	// its own writer so a test can read them without swapping os.Stdout.
 	out io.Writer
 
+	// progress receives settle's progress steps; newSettleRun defaults it to
+	// stdout and Runner overrides it.
+	progress settle.Progress
+
 	// labels are extra provenance labels every finding of this Chore wears
 	// beside agent-butler-finding; settle's filing derives the matching
 	// hidden-marker term from them.
@@ -117,7 +121,7 @@ type patchLanding struct {
 // promotes anything. patch backs the patch rung (ADR 0057); see Runner.run
 // for how patch.forge's presence gates it. out receives the status lines.
 func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName string, claim ledger.Tip, scope chore.Scope, now func() time.Time, room chore.Room, policy promotion, patch patchRung, labels kindLabels, out io.Writer) *settleRun {
-	return &settleRun{out: out, kindLabels: labels, it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
+	return &settleRun{out: out, progress: settle.StdoutProgress{}, kindLabels: labels, it: it, ledger: backend, chore: choreName, claim: claim, scope: scope, now: now, room: room, policy: policy, patch: patch}
 }
 
 // settle files result's findings, if any, then writes the Chore's done
@@ -172,7 +176,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if s.records != nil {
 		dedup = settle.DedupPolicy{Chore: s.chore, Terms: s.records.digest.DedupTerms, NotPlannedBefore: s.now().Add(-s.records.knobs.Cooldown)}
 	}
-	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, s.kindLabels.finding, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
+	filing := settle.FileButlerFindings(s.progress, s.it, num, result, s.room.Findings, s.kindLabels.finding, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
 		// of the day's shared promotion room. room.Promotions is Sweep's own
 		// snapshot, handed down rather than re-walked here (issue #3994): a

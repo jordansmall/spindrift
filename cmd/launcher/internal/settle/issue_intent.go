@@ -184,8 +184,8 @@ func degradeIssueIntents(num string, result dispatch.Result, reason string) []fi
 // each body before filing. Labels are host-derived, the provenanceLabel plus
 // any ensureTypeLabel match, never the payload's own (issue #1949). A package
 // function, not a *Settle method, so ResearchSettle can call it (issue #2590).
-func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
-	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, DedupPolicy{}, func(issueIntent) (string, []string, func(string)) { return bodyBacklink, nil, nil })
+func fileIssueIntentsDetailed(progress Progress, it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
+	return fileIssueIntentsDetailedFunc(progress, it, num, result, provenanceLabel, DedupPolicy{}, func(issueIntent) (string, []string, func(string)) { return bodyBacklink, nil, nil })
 }
 
 // fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
@@ -203,7 +203,7 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 // fileIssueIntentsDetailed delegates to this with a constant closure,
 // rather than the other way around, so callers with a fixed backlink keep the
 // plain (it, num, result, provenanceLabel, bodyBacklink string) shape.
-func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, dedup DedupPolicy, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
+func fileIssueIntentsDetailedFunc(progress Progress, it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, dedup DedupPolicy, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
 	}
@@ -267,7 +267,7 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 			// both -- jointly cover one intent, so a DupRef naming one of
 			// them would point a reader at a partial answer.
 			ref := strings.Join(ov.refs, ", ")
-			fmt.Printf("    #%s  skipped duplicate issue-intent: %q (already tracked: %s)\n", num, in.Title, ref)
+			progress.Step(Step{Key: num, Detail: fmt.Sprintf("skipped duplicate issue-intent: %q (already tracked: %s)", in.Title, ref)})
 			out = append(out, filedIntent{Title: in.Title, Skipped: true, DupRef: ref})
 			continue
 		}
@@ -278,7 +278,7 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		// are bracketed because both halves of the line are lists: without
 		// it, "site a, site b via #501, #502" reads as one four-item list.
 		if ov.partial() {
-			fmt.Printf("    #%s  filing issue-intent %q despite partial dedup overlap (already tracked: [%s] via %s)\n", num, in.Title, strings.Join(ov.covered, ", "), strings.Join(ov.refs, ", "))
+			progress.Step(Step{Key: num, Detail: fmt.Sprintf("filing issue-intent %q despite partial dedup overlap (already tracked: [%s] via %s)", in.Title, strings.Join(ov.covered, ", "), strings.Join(ov.refs, ", "))})
 		}
 		link, extraLabels, onFiled := decorate(in)
 		body := in.Body
@@ -381,8 +381,8 @@ func (t filedTally) String() string {
 // tally (filed=ok:0,failed:0,skipped:0) — so "reached filing and filed
 // nothing" reads differently in the transcript than "never reached filing"
 // (no line at all).
-func reportFiled(num string, filed []filedIntent) {
-	fmt.Printf("    #%s  filed=%s\n", num, tallyFiled(filed))
+func reportFiled(progress Progress, num string, filed []filedIntent) {
+	progress.Step(Step{Key: num, Detail: fmt.Sprintf("filed=%s", tallyFiled(filed))})
 }
 
 // postSkippedComment posts a standalone "## Skipped (deduplicated)" comment
