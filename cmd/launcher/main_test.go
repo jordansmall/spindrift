@@ -4156,7 +4156,7 @@ func TestSettleConfig_ButlerKindForcesUnclaimed(t *testing.T) {
 }
 
 // A green butler patch PR under immediate merges and completes its finding
-// through the production wiring (applyDispatchKind, newSettle), not a
+// through the production wiring (applyDispatchKind, newSettlers), not a
 // hand-built settle.Config (issue #4076).
 func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
 	c := minimalValidConfig()
@@ -4176,11 +4176,8 @@ func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
 
 	lw := localloop.Wire(localloopConfig(c), fc)
 	caps := forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{})
-	s := newSettle(c, fc, lw, fc, caps, nil)
-	pg, ok := s.(butler.PatchGate)
-	if !ok {
-		t.Fatalf("newSettle(butler kind) = %T, does not implement butler.PatchGate", s)
-	}
+	merge, _ := testSettlers(t, c, fc, lw, fc, caps)
+	var pg butler.PatchGate = merge
 
 	pg.SettlePatch(dispatchkey.Chore("docs-drift"), "1", prURL)
 
@@ -4252,7 +4249,7 @@ func TestRetryPolicy_ConvertsSecondsToDuration(t *testing.T) {
 	}
 }
 
-// For the research kind under read-only, newSettle wires a ResearchSettle that
+// For the research kind under read-only, newSettlers wires a ResearchSettle that
 // relays the SPINDRIFT_COMMENT verdict via it.Comment for a github-shaped
 // tracker: the same host-mediated posting local always got, now driven by the
 // read-only mode rather than the tracker's shape (issue #1917).
@@ -4266,7 +4263,7 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 	ghLike := fc.AsNoLandingRecorder()
 
-	s := newSettle(c, ghLike, nil, nil, forge.Capabilities{}, nil)
+	_, s := testSettlers(t, c, ghLike, nil, nil, forge.Capabilities{})
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
@@ -4311,7 +4308,7 @@ func TestSettleConfig_FindingLabelFromKind(t *testing.T) {
 	}
 }
 
-// newSettle hands the research settle the research row's finding label, so an
+// newSettlers hands the research settle the research row's finding label, so an
 // issue intent a research run relays (read-only or read-write) is filed as
 // agent-research-finding rather than under a blank label.
 func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
@@ -4326,7 +4323,7 @@ func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
 			fc.PostIssueURL = "https://example.com/issues/501"
 			fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 
-			s := newSettle(c, fc.AsIssueFiler(), nil, nil, forge.Capabilities{}, nil)
+			_, s := testSettlers(t, c, fc.AsIssueFiler(), nil, nil, forge.Capabilities{})
 			result := dispatch.Result{
 				Resolved: outcome.Resolved{
 					Found:   true,
@@ -4350,7 +4347,7 @@ func TestNewSettle_Research_FilesFindingWithResearchLabel(t *testing.T) {
 }
 
 // A Jira research run with the Filer off still relays its verdict (the Box
-// cannot write the tracker, issue #5245), so newSettle must build a settle
+// cannot write the tracker, issue #5245), so newSettlers must build a settle
 // that fails a run whose relayed comment never arrived.
 func TestNewSettle_ResearchJiraFilerOff_MissingCommentFails(t *testing.T) {
 	t.Setenv("FILER_MODEL", "")
@@ -4362,7 +4359,7 @@ func TestNewSettle_ResearchJiraFilerOff_MissingCommentFails(t *testing.T) {
 	fc.VerdictLabels = forge.ResearchVerdictLabels()
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
 
-	s := newSettle(c, fc.AsNoLandingRecorder(), nil, nil, forge.Capabilities{}, nil)
+	_, s := testSettlers(t, c, fc.AsNoLandingRecorder(), nil, nil, forge.Capabilities{})
 	s.Settle(dispatch.NewFake(), "42", 0, dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,

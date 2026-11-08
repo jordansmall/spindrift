@@ -70,7 +70,7 @@ func TestCmdRecover_UnreviewedReadyReportsSkipNotNoOpenPR(t *testing.T) {
 		issueTracker: x.fc,
 		codeForge:    x.cf,
 		factory:      testFactory(t, x.dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
@@ -92,7 +92,7 @@ func (x *queueRecoverFixture) openPRRecover(t *testing.T) (string, error) {
 	t.Helper()
 	x.fc.SetPR(x.fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
 	var out strings.Builder
-	ws := newWorkSettle(x.c, x.fc, testWired(x.fc), x.fc)
+	ws := testNewSettle(x.c, x.fc, testWired(x.fc), x.fc)
 	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 	return out.String(), err
 }
@@ -136,7 +136,7 @@ func TestCmdRecover_NoReportStoppedBeforeLandIsSkipped(t *testing.T) {
 		issueTracker: x.fc,
 		codeForge:    x.cf,
 		factory:      testFactory(t, x.dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() {},
 	}
@@ -192,7 +192,7 @@ func TestCmdRecover_NoReportStoppedBeforeLandNoOpenPRNamesUnreviewed(t *testing.
 			x.seedManifest(t, "42", tc.entries...)
 
 			var out strings.Builder
-			ws := newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf)
+			ws := testNewSettle(x.c, x.fc, testWired(x.fc), x.cf)
 			err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 
 			if err == nil || !strings.Contains(err.Error(), dispatchrecord.UnreviewedNote) {

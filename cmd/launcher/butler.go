@@ -376,7 +376,7 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		Knobs:             lc.config.knobLookup,
 	}
 
-	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.patchGate()).WithMergeReader(butlerMergeReader(lc.capabilities))
+	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.merge).WithMergeReader(butlerMergeReader(lc.capabilities))
 	o, err := sweeper.Sweep(candidates)
 	if err == nil {
 		err = butlerOutcomeErr(o)

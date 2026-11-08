@@ -15,14 +15,6 @@ import (
 
 // Config carries the subset of launcher config a Settle needs.
 type Config struct {
-	// Terminated is the registry every settle checkpoint reads. Every caller
-	// that marks a termination -- the Console's Terminate, the shutdown gate's
-	// abort -- must share it: a mark written into a registry the settler does
-	// not read lets an already-reclaimed issue settle on to agent-complete,
-	// merging its PR out from under the reclaim (issues #649, #743, #3522).
-	// New mints a fresh one when nil.
-	Terminated *terminate.Registry
-
 	// MergeMode is "immediate" (merge the PR), "manual" (leave it open), or
 	// "auto" (enqueue the forge's native auto-merge).
 	MergeMode string
@@ -130,11 +122,15 @@ type Settler interface {
 	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) Settlement
 }
 
-// WorkSettler is the work-only recover interface. Research never touches the
-// Code Forge, so it never needs this.
-type WorkSettler interface {
+// MergeSettler is the merge gate that work, recover and the Butler's unclaimed
+// patch gate settle through. Research never touches the Code Forge, so it
+// settles through ResearchSettle instead.
+type MergeSettler interface {
+	Settler
 	// Recover is spindrift recover's single entry; see Settle.Recover.
 	Recover(in RecoverInput) (Settlement, error)
+	// SettlePatch is the Butler patch gate's entry; see Settle.SettlePatch.
+	SettlePatch(owner dispatchkey.Key, num, prURL string) Settlement
 }
 
 // Settle is the prod adapter, constructed once per top-level dispatch entry
@@ -196,7 +192,7 @@ type Settle struct {
 }
 
 // Registry returns the termination registry this Settle's checkpoints read:
-// Config.Terminated, or the one New minted.
+// the one New minted.
 func (s *Settle) Registry() *terminate.Registry { return s.term }
 
 // terminated reports whether num was marked terminated at generation gen
@@ -206,7 +202,7 @@ func (s *Settle) terminated(num string, gen uint64) bool {
 }
 
 var _ Settler = (*Settle)(nil)
-var _ WorkSettler = (*Settle)(nil)
+var _ MergeSettler = (*Settle)(nil)
 
 // New constructs a Settle, reading pr and landing from cfg.Capabilities rather
 // than re-deriving them here (issue #2945).
@@ -229,11 +225,7 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	term := cfg.Terminated
-	if term == nil {
-		term = terminate.NewRegistry()
-	}
-	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: term}
+	s := &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
 	if pr != nil {
 		s.lander = prLander{s}
 	} else {

@@ -48,7 +48,7 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() { cleaned = true },
 	}
@@ -96,7 +96,7 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       st,
+		merge:        st,
 		terminated:   st.Registry(),
 		cleanup:      func() { cleaned = true },
 	}
@@ -599,7 +599,7 @@ func TestRecoverByNumber_StopAfterFirstCheckpoint_UnreviewedDeclineIsNotFailed(t
 	x.fc.On("OpenPRForBranch", func(int) { close(stopCh) })
 
 	var out strings.Builder
-	ws := newWorkSettle(x.c, x.fc, testWired(x.fc), x.cf)
+	ws := testNewSettle(x.c, x.fc, testWired(x.fc), x.cf)
 	err := recoverByNumber(x.c, x.fc, x.fc, capsFor(x.fc, x.fc), x.dir, testFactory(t, x.dir, nil), ws, ws.Registry(), "42", &out, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {

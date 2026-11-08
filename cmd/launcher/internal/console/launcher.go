@@ -53,10 +53,8 @@ type Launcher struct {
 	// console cannot import the main package. Nil skips orphan detection.
 	RecoverFn func(issueNum string) error
 	// Terminated is the registry Terminate marks and RunContinuous / Settle
-	// check at their loop checkpoints (ADR 0024, issue #649). It must be the
-	// work settler's own, or a mark never reaches the settle goroutine (issue
-	// #3522). A nil value is only safe in tests: when nil, registry() mints
-	// one on first use, which no production settler shares.
+	// check (ADR 0024, issue #649). It must be the work settler's own (#3522).
+	// Nil is only safe in tests: registry() mints one.
 	Terminated *terminate.Registry
 
 	mu        sync.Mutex

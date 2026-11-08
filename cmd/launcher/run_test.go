@@ -32,7 +32,7 @@ func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -56,7 +56,7 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -78,7 +78,7 @@ func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -105,7 +105,7 @@ func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -142,7 +142,7 @@ func TestRun_OneShot_NamesHeldIssueWhenRestBlocked(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -175,7 +175,7 @@ func TestRun_OneShot_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -208,7 +208,7 @@ func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testi
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -246,7 +246,7 @@ func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -272,7 +272,7 @@ func TestSelectiveDispatchExitCode_NonTTYUnlabeled_AbortsWithoutDispatch(t *test
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -303,7 +303,7 @@ func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -331,7 +331,7 @@ func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -367,7 +367,7 @@ func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -397,7 +397,7 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -431,7 +431,7 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -476,7 +476,7 @@ func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -517,7 +517,7 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       sf,
+		merge:        sf,
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -565,7 +565,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -608,7 +608,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -657,7 +657,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -762,7 +762,7 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 		issueTracker: failDepsOf{Fake: fc, num: "1"},
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -806,7 +806,7 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 		issueTracker: failDepsOf{Fake: fc, num: "1"},
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -846,7 +846,7 @@ func TestRunExitCode_ContinuousDispatch_AllHeld_NamesHeldIssue(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 	var buf bytes.Buffer
@@ -890,7 +890,7 @@ func TestRunExitCode_ContinuousDispatch_RefillDoesNotRepeatHeldAnnouncement(t *t
 		issueTracker: tracker,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 

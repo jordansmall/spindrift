@@ -971,8 +971,8 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		capabilities: forge.Capabilities{HostPostedIssueFiler: testHostFiler(t)},
 		// This test never runs the patch rung (no PatchForge is wired), so
 		// the Fake's SettlePatch is never called; it only needs to satisfy
-		// butler.PatchGate for lc.patchGate() (issue #4076).
-		settle:     settle.NewFake(),
+		// butler.PatchGate for lc.merge (issue #4076).
+		merge:      settle.NewFake(),
 		terminated: terminate.NewRegistry(),
 		cleanup:    func() {},
 	}
@@ -1109,7 +1109,7 @@ func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
 		issueTracker: fc.AsIssueFiler(),
 		codeForge:    cf,
 		capabilities: caps,
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		cleanup:      func() {},
 	}

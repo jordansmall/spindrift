@@ -39,7 +39,7 @@ func TestRunExitCode_SignalledStop_NoBoxLaunched(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -67,7 +67,7 @@ func TestRunExitCode_SignalledStop_WinsOverEmptyQueue(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -99,7 +99,7 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -130,7 +130,7 @@ func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -161,7 +161,7 @@ func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -185,7 +185,7 @@ func TestRunExitCode_AbortOnly_WinsOverEmptyQueue(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, runner.NewFake()),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -214,7 +214,7 @@ func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, fr),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -248,7 +248,7 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -280,7 +280,7 @@ func TestSelectiveDispatchExitCode_SignalledStop_BeatsNonTTYUnlabeledAbort(t *te
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -312,7 +312,7 @@ func TestSelectiveDispatchExitCode_SignalledAbort(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -338,7 +338,7 @@ func TestCmdDispatch_SignalledStop_StillRunsCleanup(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { cleaned = true },
 	}
@@ -368,7 +368,7 @@ func TestCmdDispatchSelective_SignalledStop_StillRunsCleanup(t *testing.T) {
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 		cleanup:      func() { cleaned = true },
 	}

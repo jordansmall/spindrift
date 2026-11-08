@@ -84,7 +84,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverEmptyQueue(t *test
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -118,7 +118,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverAllBlocked(t *test
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 
@@ -148,7 +148,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledAbort_ExitsSameCodeAsStop(t *te
 		issueTracker: fc,
 		codeForge:    fc,
 		factory:      testFactory(t, dir, nil),
-		settle:       settle.NewFake(),
+		merge:        settle.NewFake(),
 		terminated:   terminate.NewRegistry(),
 	}
 

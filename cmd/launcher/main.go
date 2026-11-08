@@ -958,24 +958,37 @@ func localloopConfig(c config) localloop.Config {
 	}
 }
 
-// newSettle constructs the Settler for one dispatch entry point, reused across
-// every issue in it: research's one-shot ResearchSettle, or work's merge gate.
-// The butler kind falls through to the merge gate too, configured via
+// newSettlers constructs the one settler for a dispatch entry point, reused
+// across every issue in it, and returns it in the slot its strategy names: the
+// merge gate for work and recover, or research's one-shot ResearchSettle. This
+// is the only switch on the Settle axis; Go cannot check it for exhaustiveness,
+// so TestNewSettlers_EveryStrategyYieldsExactlyOneSettler does.
+//
+// The termination registry comes out of the settler, not in; see
+// launchContext.terminated.
+//
+// The merge slot is the concrete *settle.Settle so a test can read its
+// Registry. Check it for nil before storing it in a settle.MergeSettler, or a
+// nil pointer becomes a non-nil interface.
+//
+// The Butler's SettleLedger falls to the merge gate too, configured via
 // settleConfig's Unclaimed (issue #4076): cmdButler drives it as the PatchGate
 // a landed patch PR settles through, fix-pass-free.
-func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities, terminated *terminate.Registry) settle.Settler {
-	switch c.kind().Settle {
+func newSettlers(strategy dispatchkind.Settle, c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) (merge *settle.Settle, verdict *settle.ResearchSettle, terminated *terminate.Registry, err error) {
+	switch strategy {
+	case dispatchkind.SettleMerge, dispatchkind.SettleLedger:
+		s := settle.New(settleConfig(c, lw, cf, caps), it, cf)
+		return s, nil, s.Registry(), nil
 	case dispatchkind.SettleVerdict:
 		vl := researchVerdictLabels(c)
 		verdictRelayed := backend.ResearchVerdictRelayed(c.IssueTracker, resolveAgentPresenceSignals(c.driver).filerEnabled)
 		if c.BoxForgeAndIssueAccess == "read-only" {
-			return settle.NewResearchSettleReadOnly(it, vl, verdictRelayed, c.kind().FindingLabel)
+			return nil, settle.NewResearchSettleReadOnly(it, vl, verdictRelayed, c.kind().FindingLabel), terminate.NewRegistry(), nil
 		}
-		return settle.NewResearchSettle(it, vl, verdictRelayed, c.kind().FindingLabel)
+		return nil, settle.NewResearchSettle(it, vl, verdictRelayed, c.kind().FindingLabel), terminate.NewRegistry(), nil
+	default:
+		return nil, nil, nil, fmt.Errorf("no settler wired for settle strategy %d (kind %q)", strategy, c.kind().Name)
 	}
-	cfg := settleConfig(c, lw, cf, caps)
-	cfg.Terminated = terminated
-	return settle.New(cfg, it, cf)
 }
 
 // wavesConfig builds the subset of config the wave engine (internal/waves)
@@ -1307,7 +1320,7 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 // is adopted, gated on the operator's explicit agent-recover label rather than
 // any automatic sweep (#600). With no open PR it falls back to adopting a
 // relayed finished branch out of the outbox (issue #2225).
-func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, terminated *terminate.Registry, issueNum string, stdout, stderr io.Writer) error {
+func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.MergeSettler, terminated *terminate.Registry, issueNum string, stdout, stderr io.Writer) error {
 	// Installed once, ahead of it.Issue, exactly as run() places its own
 	// install ahead of discoverIssues (#3522): a signal that fired before this
 	// call must win over recoverFailed below, not just over an adopt already
@@ -1323,7 +1336,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 // eligibility reads, still wins. Queue mode additionally refuses with
 // errRecoverIneligible when the issue is not landable, and takes the label
 // off agent-failed itself, since no workflow has claimed it first.
-func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, terminated *terminate.Registry, issueNum string, stdout, stderr io.Writer) error {
+func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.MergeSettler, terminated *terminate.Registry, issueNum string, stdout, stderr io.Writer) error {
 	reaper := f.AsReaper()
 	// Read before the gate is built, but a fetch failure is only acted on after
 	// the first checkpoint below, so a pending stop still wins over it.
@@ -1617,7 +1630,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 // stranded-issue reconciliation, discovery, dependency-graph construction, and
 // drain/wave dispatch. bootstrap wires lc in production; tests use fakes.
 func run(lc *launchContext, stdout, stderr io.Writer) error {
-	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
+	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settler(), lc.pwd
 	caps, terminated := lc.capabilities, lc.terminated
 	lp := reconcile.NewFSProbe(pwd, lc.runner)
 
@@ -1992,12 +2005,16 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	researchTracker, researchFactory, researchSettle := researchLaunchStack(lc)
+	researchTracker, researchFactory, researchSettle, err := researchLaunchStack(lc)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+		return 1
+	}
 	defer researchFactory.Cleanup()
 	launch := &console.Launcher{
 		CodeForge:       lc.codeForge,
 		Factory:         lc.factory,
-		Settle:          lc.settle,
+		Settle:          lc.merge,
 		Terminated:      lc.terminated,
 		ResearchTracker: researchTracker,
 		ResearchFactory: researchFactory,
@@ -2039,7 +2056,7 @@ func writeGithubOutput(key, value string) error {
 // runRecover runs recoverByNumber against the launch context's wiring; the
 // recover verb and console's recover action share it.
 func (lc *launchContext) runRecover(issueNum string, stdout, stderr io.Writer) error {
-	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), lc.terminated, issueNum, stdout, stderr)
+	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.merge, lc.terminated, issueNum, stdout, stderr)
 }
 
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open PR
@@ -2071,7 +2088,7 @@ func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) in
 // not failures, so neither prints to stderr.
 func cmdRecoverQueue(lc *launchContext, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	err := recoverQueueOne(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), lc.terminated, stdout, stderr)
+	err := recoverQueueOne(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.merge, lc.terminated, stdout, stderr)
 	code := exitCodeFor(err)
 	if code == int(exitcode.Failed) && err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
@@ -2097,7 +2114,7 @@ func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
 // issue, just as a queue drain can. Split out so it is testable without
 // bootstrap.
 func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool, stdout, stderr io.Writer) int {
-	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, lc.terminated, nums, forceYes, isStdinTTY(), os.Stdin, stdout)
+	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settler(), lc.terminated, nums, forceYes, isStdinTTY(), os.Stdin, stdout)
 	if err == nil {
 		return int(exitcode.Dispatched)
 	}

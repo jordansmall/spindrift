@@ -13,7 +13,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
-	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -960,7 +959,7 @@ func TestBootstrap_EnsureReadyError_AbortsBeforeLaunch(t *testing.T) {
 
 // researchLaunchStack is cmdConsole's research-kind mirror of bootstrap's
 // work-kind wiring (issue #1708): the same newIssueTracker/newDispatchFactory/
-// newSettle helpers with dispatchkind.Research applied, so it must return the
+// newSettlers with dispatchkind.Research applied, so it must return the
 // agent-research label family and a ResearchSettle. The local tracker makes
 // the label write observable from disk with no network dependency.
 func TestResearchLaunchStack_WiresResearchLabelsAndSettle(t *testing.T) {
@@ -988,7 +987,10 @@ body
 		codeForge: forge.NewFake(),
 	}
 
-	it, f, s := researchLaunchStack(lc)
+	it, f, s, err := researchLaunchStack(lc)
+	if err != nil {
+		t.Fatalf("researchLaunchStack: %v", err)
+	}
 	t.Cleanup(f.Cleanup)
 
 	if err := it.TransitionState("42", forge.Untriaged, forge.Dispatchable); err != nil {
@@ -1004,7 +1006,7 @@ body
 	if f == nil {
 		t.Fatal("researchLaunchStack factory = nil, want a research-kind *dispatch.Factory")
 	}
-	if _, ok := s.(*settle.ResearchSettle); !ok {
-		t.Errorf("researchLaunchStack settle = %T, want *settle.ResearchSettle", s)
+	if s == nil {
+		t.Error("researchLaunchStack settle = nil, want a *settle.ResearchSettle")
 	}
 }
