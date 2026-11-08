@@ -47,6 +47,15 @@ func (e FlagEntry) EmptyIsSetting() bool {
 	return e.Kind == "bool" || e.EmptyDisables
 }
 
+// Argv renders the flag with value as command-line tokens: a bool is a single
+// "--flag=value" token so a following token is never read as its value.
+func (e FlagEntry) Argv(value string) []string {
+	if e.Kind == "bool" {
+		return []string{"--" + e.Flag + "=" + value}
+	}
+	return []string{"--" + e.Flag, value}
+}
+
 // SecretKnob is a knob the schema marks secret = true, so it gets no inline
 // value flag: callers supply it through the environment, --<FileFlag>, or
 // --<CmdFlag>. nix/regen.nix generates SecretKnobs from lib/env-schema.nix,

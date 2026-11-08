@@ -332,3 +332,111 @@ func TestResolve_FlagErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestResolved_Flag_ExplicitTierOnly(t *testing.T) {
+	withSchemaFlags(t,
+		FlagEntry{Env: "BASE_BRANCH", Flag: "base-branch", Kind: "string", Dflt: "main", SettingsPath: "git.baseBranch"},
+		FlagEntry{Env: "MEMORY_LIMIT", Flag: "memory-limit", Kind: "string", SettingsPath: "box.memoryLimit", EmptyDisables: true},
+		FlagEntry{Env: "BRANCH_PREFIX", Flag: "branch-prefix", Kind: "string", SettingsPath: "git.branchPrefix"},
+	)
+	doc := docWith(map[string]string{"BASE_BRANCH": "doc", "BRANCH_PREFIX": "doc/"})
+	r := mustResolve(t, []string{"--memory-limit", "", "--branch-prefix", ""}, doc, nil)
+
+	cases := []struct {
+		env    string
+		want   string
+		wantOK bool
+	}{
+		{"BASE_BRANCH", "", false},   // document and default never count
+		{"MEMORY_LIMIT", "", true},   // EmptyIsSetting: empty is a real setting
+		{"BRANCH_PREFIX", "", false}, // a normal knob's empty flag is unset
+		{"NOT_A_KNOB", "", false},
+	}
+	for _, c := range cases {
+		got, ok := r.Flag(c.env)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("Flag(%s) = (%q, %v), want (%q, %v)", c.env, got, ok, c.want, c.wantOK)
+		}
+	}
+
+	r = mustResolve(t, []string{"--base-branch", "trunk"}, doc, nil)
+	if got, ok := r.Flag("BASE_BRANCH"); got != "trunk" || !ok {
+		t.Errorf("Flag(BASE_BRANCH) = (%q, %v), want (trunk, true)", got, ok)
+	}
+}
+
+func TestResolved_FlagArgs_RoundTripsAndSkipsLauncherIgnores(t *testing.T) {
+	rows := []FlagEntry{
+		{Env: "AUTO_FORMAT", Flag: "auto-format", Kind: "bool", SettingsPath: "agents.format.enable"},
+		{Env: "AUTO_LINT", Flag: "auto-lint", Kind: "bool", SettingsPath: "agents.lint.enable"},
+		{Env: "BASE_BRANCH", Flag: "base-branch", Kind: "string", Dflt: "main", SettingsPath: "git.baseBranch"},
+		{Env: "BRANCH_PREFIX", Flag: "branch-prefix", Kind: "string", SettingsPath: "git.branchPrefix"},
+		{Env: "MAX_PARALLEL", Flag: "max-parallel", Alias: "parallel", Kind: "int", SettingsPath: "dispatch.maxParallel"},
+		{Env: "MEMORY_LIMIT", Flag: "memory-limit", Kind: "string", SettingsPath: "box.memoryLimit", EmptyDisables: true},
+		{Env: "DAEMON_IDLE_FLOOR", Flag: "daemon-idle-floor", Kind: "string", SettingsPath: "dispatch.daemonIdleFloor", LauncherIgnores: true},
+	}
+	withSchemaFlags(t, rows...)
+	args := []string{
+		"--parallel", "3", "--auto-format", "--auto-lint=false", "--memory-limit", "",
+		"--branch-prefix", "", "--base-branch", "trunk", "--daemon-idle-floor", "5m",
+	}
+	r := mustResolve(t, args, nil, nil)
+
+	got := r.FlagArgs()
+	want := []string{
+		"--auto-format=1", "--auto-lint=", "--base-branch", "trunk",
+		"--max-parallel", "3", "--memory-limit", "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("FlagArgs() = %q, want %q", got, want)
+	}
+
+	again := mustResolve(t, got, nil, nil)
+	r.Knobs.DaemonIdleFloor = "" // LauncherIgnores: dropped on purpose
+	if !reflect.DeepEqual(again.Knobs, r.Knobs) {
+		t.Errorf("round-trip Knobs = %+v, want %+v", again.Knobs, r.Knobs)
+	}
+	if len(again.Args) != 0 {
+		t.Errorf("round-trip Args = %q, want none", again.Args)
+	}
+}
+
+func TestResolved_Source_IsTheResolvingSource(t *testing.T) {
+	r := mustResolve(t, []string{"--base-branch", "trunk"}, nil, map[string]string{"GH_TOKEN": "tok"})
+	if got := r.Source().String("BASE_BRANCH"); got != "trunk" {
+		t.Errorf("Source().String(BASE_BRANCH) = %q, want trunk", got)
+	}
+	if got := r.Source().Secret("GH_TOKEN"); got != "tok" {
+		t.Errorf("Source().Secret(GH_TOKEN) = %q, want tok", got)
+	}
+}
+
+func TestLookupSchemaFlag(t *testing.T) {
+	withSchemaFlags(t,
+		FlagEntry{Env: "ISSUE_NUMBER", Flag: "issue-number", Alias: "issue", Kind: "string"},
+		FlagEntry{Env: "CODE_FORGE", Flag: "forge-backend", DeprecatedAlias: "code-forge", Kind: "string"},
+		FlagEntry{Env: "AUTO_FORMAT", Flag: "auto-format", Kind: "bool"},
+	)
+	for _, c := range []struct {
+		arg     string
+		wantEnv string
+	}{
+		{"--issue-number", "ISSUE_NUMBER"},
+		{"--issue", "ISSUE_NUMBER"},
+		{"--forge-backend", "CODE_FORGE"},
+		{"--code-forge", "CODE_FORGE"},
+		{"--auto-format", "AUTO_FORMAT"},
+		{"--unknown", ""},
+		{"--gh-token-file", ""}, // secret flags are not schema flags
+		{"issue-number", ""},    // the dashes are part of the token
+		{"--issue-number=3", ""},
+	} {
+		e, ok := LookupSchemaFlag(c.arg)
+		if ok != (c.wantEnv != "") || e.Env != c.wantEnv {
+			t.Errorf("LookupSchemaFlag(%q) = (%q, %v), want env %q", c.arg, e.Env, ok, c.wantEnv)
+		}
+	}
+	if e, _ := LookupSchemaFlag("--auto-format"); e.Kind != "bool" {
+		t.Errorf("Kind = %q, want bool", e.Kind)
+	}
+}
