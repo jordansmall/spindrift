@@ -88,6 +88,48 @@ func Resolve(args []string, doc *Document, env map[string]string) (Resolved, err
 	return Resolved{Knobs: LoadKnobs(src), Artifacts: artifacts, Args: rest, src: src}, nil
 }
 
+// Source is the KnobSource Resolve loaded Knobs from, for a caller that wraps
+// it to override a tier (Secret, HostGitConfig) with state read after Resolve.
+func (r Resolved) Source() KnobSource { return r.src }
+
+// Flag returns the value an explicit flag gave the knob, never the document or
+// default tier, for knobs that must carry only what the operator set at
+// dispatch time (issue #3171). ok follows EmptyIsSetting.
+func (r Resolved) Flag(env string) (string, bool) { return r.src.flag(env) }
+
+// FlagArgs re-renders the explicit flags as argv for a child launcher, so it
+// sees the same configuration without tripping AmbientKnobError. A
+// LauncherIgnores knob is dropped: its flag is inert. Order follows
+// SchemaFlags.
+func (r Resolved) FlagArgs() []string {
+	var args []string
+	for _, e := range SchemaFlags {
+		v, ok := r.src.flag(e.Env)
+		if !ok || e.LauncherIgnores {
+			continue
+		}
+		args = append(args, e.Argv(v)...)
+	}
+	return args
+}
+
+// LookupSchemaFlag returns the SchemaFlags row a "--name" token spells, by its
+// flag, alias or deprecated alias. Secret --*-file/--*-cmd flags are not rows.
+// It scans SchemaFlags per call rather than caching so a test that swaps the
+// table sees its own rows.
+func LookupSchemaFlag(arg string) (FlagEntry, bool) {
+	name, ok := strings.CutPrefix(arg, "--")
+	if !ok || name == "" {
+		return FlagEntry{}, false
+	}
+	for _, e := range SchemaFlags {
+		if name == e.Flag || name == e.Alias || name == e.DeprecatedAlias {
+			return e, true
+		}
+	}
+	return FlagEntry{}, false
+}
+
 // BoxEnv resolves one BOX_ENV_VARS forwarding name: a schema knob through the
 // same tiers as Knobs, anything else (secrets, plumbing) from a non-empty env
 // value, else the document.
@@ -101,23 +143,17 @@ func (r Resolved) BoxEnv(name string) string {
 	return r.src.settings[name]
 }
 
+// CheckSchemaFlags reports the first malformed schema flag; parseFlags calls it
+// so a bad flag fails before any secret command, verb or document check.
+func CheckSchemaFlags(args []string) error {
+	_, _, err := scanSchemaFlags(args)
+	return err
+}
+
 // scanSchemaFlags lifts the schema half of cmd/launcher's parseFlags into a
 // pure pass: it returns the explicit flag values keyed by knob env (a bool is
 // "1" or "" for off) and every other token in order. "--" ends scanning.
 func scanSchemaFlags(args []string) (explicit map[string]string, rest []string, err error) {
-	byFlag := map[string]FlagEntry{}
-	byBool := map[string]FlagEntry{}
-	for _, e := range SchemaFlags {
-		m := byFlag
-		if e.Kind == "bool" {
-			m = byBool
-		}
-		for _, name := range []string{e.Flag, e.Alias, e.DeprecatedAlias} {
-			if name != "" {
-				m["--"+name] = e
-			}
-		}
-	}
 	// The next token is the secret flag's path or command, never a schema flag.
 	secretFlag := map[string]bool{}
 	for _, s := range SecretKnobs {
@@ -136,7 +172,7 @@ func scanSchemaFlags(args []string) (explicit map[string]string, rest []string, 
 			break
 		}
 		name, value, hasEquals := strings.Cut(arg, "=")
-		if e, ok := byBool[name]; ok {
+		if e, ok := LookupSchemaFlag(name); ok && e.Kind == "bool" {
 			on := !hasEquals
 			if hasEquals && value != "" {
 				b, perr := strconv.ParseBool(value)
@@ -151,7 +187,7 @@ func scanSchemaFlags(args []string) (explicit map[string]string, rest []string, 
 			}
 			continue
 		}
-		if e, ok := byFlag[arg]; ok {
+		if e, ok := LookupSchemaFlag(arg); ok {
 			i++
 			if i >= len(args) {
 				return nil, nil, fmt.Errorf("flag %s requires a value", arg)
