@@ -60,9 +60,7 @@ func unreviewedComment(label string) checkFn {
 // declines it, while a ready from a land or legacy pass still lands.
 func unreviewedCases() []prCase {
 	g := &handoffRig{}
-	merged := prSettlement(dispatchrecord.ReasonMerged)
 	unreviewed := Settlement{Verdict: ForReason(dispatchrecord.ReasonUnreviewed), Note: dispatchrecord.UnreviewedNote}
-	complete := []string{"agent-complete"}
 	failed := []string{"agent-failed"}
 	flipThenMerge := []string{"MarkReady:" + testPR, "Merge:" + testPR}
 	readyOnly := outcome.Resolved{SelfReportFound: true, SelfReport: outcome.SelfReport{Status: outcome.StatusReady}}
@@ -75,13 +73,13 @@ func unreviewedCases() []prCase {
 	failsUnreviewed := func(c prCase) prCase {
 		c.shape, c.noPR = shapeGithubReadOnly, true
 		c.setup = readOnly
-		c.want, c.prClosed, c.wantLabels, c.wantNoLabels = unreviewed, true, failed, complete
+		c.want, c.wantPRClosed, c.wantLabels, c.wantNoLabels = unreviewed, true, failed, complete
 		c.wantComments = []string{"stopped before its land pass finished"}
 		c.check = allOf(draftPRCalls(0), relayCalls(0))
 		return c
 	}
 	declines := func(c prCase) prCase {
-		c.shape, c.noPR, c.entry, c.want, c.abandoned, c.declined = shapeGithubReadOnly, true, entryRelayed, unreviewed, true, true
+		c.shape, c.noPR, c.entry, c.want, c.wantAbandoned, c.wantDeclined = shapeGithubReadOnly, true, entryRelayed, unreviewed, true, true
 		c.setup = readOnly
 		c.check = allOf(draftPRCalls(0), relayCalls(0))
 		return c
@@ -107,22 +105,25 @@ func unreviewedCases() []prCase {
 		// Issue #5973: a status=ready that came from an implement pass never
 		// cleared review, so settle fails it with its own reason and lands nothing.
 		{
-			name:   "a ready from an implement pass fails unreviewed and lands nothing",
-			result: withPasses(settleReadyResult("1", testPR), implementReadyPasses()),
-			setup:  func(_ *testing.T, _ *forge.Fake, c *Config) { c.DispatchLabel = "my-ready" },
-			want:   unreviewed, prClosed: true, wantLabels: failed, wantNoLabels: complete, wantComments: []string{"stopped before its land pass finished"},
-			wantSteps: []Step{prStep(StatusFailed, "!! "+dispatchrecord.UnreviewedNote)},
+			name:         "a ready from an implement pass fails unreviewed and lands nothing",
+			wantStatuses: []Status{detailOnly, StatusFailed},
+			result:       withPasses(settleReadyResult("1", testPR), implementReadyPasses()),
+			setup:        func(_ *testing.T, _ *forge.Fake, c *Config) { c.DispatchLabel = "my-ready" },
+			want:         unreviewed, wantPRClosed: true, wantLabels: failed, wantNoLabels: complete, wantComments: []string{"stopped before its land pass finished"},
+			wantSteps: []Step{stepAt(testPR, StatusFailed, "!! "+dispatchrecord.UnreviewedNote)},
 			check:     unreviewedComment("my-ready"),
 		},
 		{
-			name:   "a ready from a land pass still lands",
-			result: withPasses(settleReadyResult("1", testPR), landedPasses),
-			want:   merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: flipThenMerge,
+			name:         "a ready from a land pass still lands",
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			result:       withPasses(settleReadyResult("1", testPR), landedPasses),
+			want:         merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: flipThenMerge,
 		},
 		{
-			name:   "a ready from a legacy pass still lands",
-			result: withPasses(settleReadyResult("1", testPR), []passmanifest.Entry{{Pass: 1, Kind: "legacy", OutcomeFound: true}}),
-			want:   merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: flipThenMerge,
+			name:         "a ready from a legacy pass still lands",
+			wantStatuses: []Status{detailOnly, StatusVerifiedMerged},
+			result:       withPasses(settleReadyResult("1", testPR), []passmanifest.Entry{{Pass: 1, Kind: "legacy", OutcomeFound: true}}),
+			want:         merged, wantLabels: complete, wantNoLabels: failed, wantMerged: testPR, wantCalls: flipThenMerge,
 		},
 
 		// A crashed later pass behind a stale implement-pass ready is not
@@ -130,12 +131,14 @@ func unreviewedCases() []prCase {
 		// the branch. The rows differ only in how the Box's run ended: a
 		// synthetic blocked backstop, or no outcome line at all.
 		failsUnreviewed(prCase{
-			name:   "a synthetic-blocked run behind an implement-pass ready does not adopt",
-			result: withPasses(*boxRun(true, outcome.ProvenanceSynthetic, outcome.StatusReady, ""), implementReadyPasses()),
+			name:         "a synthetic-blocked run behind an implement-pass ready does not adopt",
+			wantStatuses: []Status{detailOnly, StatusFailed},
+			result:       withPasses(*boxRun(true, outcome.ProvenanceSynthetic, outcome.StatusReady, ""), implementReadyPasses()),
 		}),
 		failsUnreviewed(prCase{
-			name:   "a no-outcome run behind an implement-pass ready does not adopt",
-			result: withPasses(*boxRun(false, "", outcome.StatusReady, adoptIntent), implementReadyPasses()),
+			name:         "a no-outcome run behind an implement-pass ready does not adopt",
+			wantStatuses: []Status{StatusFailed},
+			result:       withPasses(*boxRun(false, "", outcome.StatusReady, adoptIntent), implementReadyPasses()),
 		}),
 	}
 

@@ -87,10 +87,6 @@ func selfReportReady() dispatch.Result {
 	}}
 }
 
-func pushOnlyStep(status Status, detail string) Step {
-	return Step{Key: "1", Landing: pushOnlyBranch, Status: status, Detail: detail}
-}
-
 func containsSteps(got, want []Step) (missing []Step) {
 	rest := append([]Step(nil), got...)
 	for _, w := range want {
@@ -113,7 +109,6 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 	merged := Settlement{Verdict: ForReason(dispatchrecord.ReasonMerged)}
 	blocked := Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeBlocked)}
 	manual := Settlement{Verdict: ForReason(dispatchrecord.ReasonManual)}
-	complete := []string{"agent-complete"}
 	noFailed := []string{"agent-failed"}
 	errPush := errors.New("remote rejected: non-fast-forward")
 	errRebase := errors.New("rebase: worktree dirty")
@@ -158,7 +153,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			name:      "git manual leaves the branch as pushed",
 			mergeMode: "manual",
 			want:      manual, wantLabels: complete,
-			wantSteps: []Step{pushOnlyStep(StatusAgentComplete, "merge-mode=manual")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusAgentComplete, "merge-mode=manual")},
 		},
 		{
 			name: "git immediate pushes to the target branch",
@@ -168,21 +163,21 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			name:  "git push failure stays complete with a merge-blocked comment",
 			setup: func(e *pushOnlyEnv) { e.fc.MergeErr = errPush },
 			want:  blocked, wantLabels: complete, wantNoLabels: noFailed,
-			wantSteps:    []Step{pushOnlyStep(StatusMergeBlocked, "!! remote rejected: non-fast-forward")},
+			wantSteps:    []Step{stepAt(pushOnlyBranch, StatusMergeBlocked, "!! remote rejected: non-fast-forward")},
 			wantComments: []string{"landing blocked: remote rejected: non-fast-forward"},
 		},
 		{
 			name:      "git auto merge needs a PR forge so it blocks",
 			mergeMode: "auto",
 			want:      blocked, wantLabels: complete,
-			wantSteps:    []Step{pushOnlyStep(StatusMergeBlocked, "!! MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")},
+			wantSteps:    []Step{stepAt(pushOnlyBranch, StatusMergeBlocked, "!! MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")},
 			wantComments: []string{"landing blocked: MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)"},
 		},
 		{
 			name:      "git unrecognised merge mode blocks",
 			mergeMode: "bogus",
 			want:      blocked, wantLabels: complete,
-			wantSteps:    []Step{pushOnlyStep(StatusMergeBlocked, `!! unrecognised MERGE_MODE: "bogus"`)},
+			wantSteps:    []Step{stepAt(pushOnlyBranch, StatusMergeBlocked, `!! unrecognised MERGE_MODE: "bogus"`)},
 			wantComments: []string{`landing blocked: unrecognised MERGE_MODE: "bogus"`},
 		},
 		// git shape: a stop abandons without touching the released issue
@@ -199,7 +194,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				e.c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { e.s.Registry().Mark("1") }}
 			},
 			abandoned: true,
-			wantSteps: []Step{pushOnlyStep(StatusMergeTransientRetry, "attempt=1/1  !! "+errTransientMerge)},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusMergeTransientRetry, "attempt=1/1  !! "+errTransientMerge)},
 		},
 		{
 			name:      "git stop inside a merge that succeeds drops the landed bundle",
@@ -219,7 +214,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			name:  "git conflict rebases then retries the merge without draft flips",
 			setup: func(e *pushOnlyEnv) { e.c.MaxRebaseAttempts = 3; e.fc.MergeErrs = []error{forge.ErrMergeConflict} },
 			want:  merged, wantLabels: complete, wantMerged: pushOnlyBranch, wantRebases: 1,
-			wantSteps: []Step{pushOnlyStep(StatusRebaseRetry, "attempt=1/3")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusRebaseRetry, "attempt=1/3")},
 			check: func(t *testing.T, e *pushOnlyEnv) {
 				if len(e.fc.MarkDraftCalls) != 0 || len(e.fc.MarkReadyCalls) != 0 {
 					t.Errorf("push-only forge must never flip draft state; MarkDraft=%v MarkReady=%v", e.fc.MarkDraftCalls, e.fc.MarkReadyCalls)
@@ -235,9 +230,9 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			},
 			want: blocked, wantLabels: complete, wantNoLabels: noFailed, wantRebases: 1,
 			wantSteps: []Step{
-				pushOnlyStep(StatusRebaseRetry, "attempt=1/3"),
-				pushOnlyStep(StatusRebaseFailed, "!! rebase: worktree dirty"),
-				pushOnlyStep(StatusMergeBlocked, "!! rebase: worktree dirty"),
+				stepAt(pushOnlyBranch, StatusRebaseRetry, "attempt=1/3"),
+				stepAt(pushOnlyBranch, StatusRebaseFailed, "!! rebase: worktree dirty"),
+				stepAt(pushOnlyBranch, StatusMergeBlocked, "!! rebase: worktree dirty"),
 			},
 			wantComments: []string{"landing blocked: rebase: worktree dirty"},
 		},
@@ -251,8 +246,8 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			},
 			want: blocked, wantLabels: complete, wantNoLabels: noFailed, wantRebases: 1,
 			wantSteps: []Step{
-				pushOnlyStep(StatusRebaseFailed, "!! "+forge.ErrMergeConflict.Error()),
-				pushOnlyStep(StatusMergeBlocked, "!! "+forge.ErrMergeConflict.Error()),
+				stepAt(pushOnlyBranch, StatusRebaseFailed, "!! "+forge.ErrMergeConflict.Error()),
+				stepAt(pushOnlyBranch, StatusMergeBlocked, "!! "+forge.ErrMergeConflict.Error()),
 			},
 			wantComments: []string{"landing blocked: " + forge.ErrMergeConflict.Error()},
 		},
@@ -264,7 +259,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				e.fc.RebaseErrs = []error{forge.ErrTransientPushFailure, nil}
 			},
 			want: merged, wantLabels: complete, wantMerged: pushOnlyBranch, wantRebases: 2,
-			wantSteps: []Step{pushOnlyStep(StatusRebasePushRetry, "attempt=1/3  !! "+errTransient)},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusRebasePushRetry, "attempt=1/3  !! "+errTransient)},
 		},
 		{
 			name: "git rebase push retries exhausted blocks the merge",
@@ -275,9 +270,9 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			},
 			want: blocked, wantLabels: complete, wantNoLabels: noFailed, wantRebases: 3,
 			wantSteps: []Step{
-				pushOnlyStep(StatusRebasePushRetry, "attempt=1/2  !! "+errTransient),
-				pushOnlyStep(StatusRebasePushRetry, "attempt=2/2  !! "+errTransient),
-				pushOnlyStep(StatusRebasePushRetriesExhausted, "attempts=2  !! "+errTransient),
+				stepAt(pushOnlyBranch, StatusRebasePushRetry, "attempt=1/2  !! "+errTransient),
+				stepAt(pushOnlyBranch, StatusRebasePushRetry, "attempt=2/2  !! "+errTransient),
+				stepAt(pushOnlyBranch, StatusRebasePushRetriesExhausted, "attempts=2  !! "+errTransient),
 			},
 			wantComments: []string{"landing blocked: " + errTransient},
 		},
@@ -288,7 +283,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				e.fc.MergeErrs = []error{forge.ErrMergeBlockedByChecks, nil}
 			},
 			want: merged, wantLabels: complete, wantMerged: pushOnlyBranch,
-			wantSteps: []Step{pushOnlyStep(StatusMergeBlockedByChecks, "attempt=1/3")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusMergeBlockedByChecks, "attempt=1/3")},
 			check: func(t *testing.T, e *pushOnlyEnv) {
 				if want := []time.Duration{time.Second}; !reflect.DeepEqual(*e.sleeps, want) {
 					t.Errorf("clock sleeps = %v, want %v", *e.sleeps, want)
@@ -308,7 +303,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 				e.fc.MergeErrs = []error{forge.ErrMergeTransient, nil}
 			},
 			want: merged, wantLabels: complete, wantMerged: pushOnlyBranch,
-			wantSteps: []Step{pushOnlyStep(StatusMergeTransientRetry, "attempt=1/2  !! "+errTransientMerge)},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusMergeTransientRetry, "attempt=1/2  !! "+errTransientMerge)},
 		},
 		// git shape: an unclaimed issue only transitions on an actual merge
 		{
@@ -366,13 +361,13 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			name: "local LandingRef failure stays merged without recording", local: true,
 			setup: func(e *pushOnlyEnv) { e.fc.LandingRefErr = errors.New("integration branch vanished") },
 			want:  merged, wantMerged: pushOnlyBranch, wantRelays: 1, wantLandings: placeholder,
-			wantSteps: []Step{pushOnlyStep(StatusLandingRefUnresolved, "!! integration branch vanished")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusLandingRefUnresolved, "!! integration branch vanished")},
 		},
 		{
 			name: "local conflict rebases then retries the merge", local: true,
 			setup: func(e *pushOnlyEnv) { e.c.MaxRebaseAttempts = 3; e.fc.MergeErrs = []error{forge.ErrMergeConflict} },
 			want:  merged, wantLabels: complete, wantMerged: pushOnlyBranch, wantRelays: 1, wantRebases: 1,
-			wantSteps: []Step{pushOnlyStep(StatusRebaseRetry, "attempt=1/3")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusRebaseRetry, "attempt=1/3")},
 		},
 		{
 			name: "local merge conflict after the relay blocks instead of failing", local: true,
@@ -430,8 +425,8 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			},
 			want: merged, wantMerged: pushOnlyBranch, wantRelays: 3,
 			wantSteps: []Step{
-				pushOnlyStep(StatusRelayRetry, "attempt=1/3  !! "+errBlip.Error()),
-				pushOnlyStep(StatusRelayRetry, "attempt=2/3  !! "+errBlip.Error()),
+				stepAt(pushOnlyBranch, StatusRelayRetry, "attempt=1/3  !! "+errBlip.Error()),
+				stepAt(pushOnlyBranch, StatusRelayRetry, "attempt=2/3  !! "+errBlip.Error()),
 			},
 			check: func(t *testing.T, e *pushOnlyEnv) {
 				if len(*e.sleeps) < 2 {
@@ -461,7 +456,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			},
 			want:       Settlement{Verdict: ForReason(dispatchrecord.ReasonRelayFailed), Note: "bundle relay failed; work preserved in outbox"},
 			wantRelays: 2, wantLandings: placeholder,
-			wantSteps:    []Step{pushOnlyStep(StatusRelayFailed, "!! relay bundle failed: "+errBlip.Error()), pushOnlyStep(StatusFailed, "!! ")},
+			wantSteps:    []Step{stepAt(pushOnlyBranch, StatusRelayFailed, "!! relay bundle failed: "+errBlip.Error()), stepAt(pushOnlyBranch, StatusFailed, "!! ")},
 			wantComments: []string{"bundle relay failed: relay bundle failed: ssh auth blip. The Box's bundle is preserved in the outbox; run `spindrift recover 1`"},
 			check: func(t *testing.T, e *pushOnlyEnv) {
 				if len(e.fc.TransitionStateCalls) != 1 {
@@ -494,14 +489,14 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			name: "relayed local self-report success lands the relayed branch", entry: entryRelayed, local: true,
 			labels: []string{"agent-recoverable"},
 			want:   merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1,
-			wantSteps: []Step{pushOnlyStep(StatusAdopted, "note=genuine success self-report; relayed branch landed")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusAdopted, "note=genuine success self-report; relayed branch landed")},
 		},
 		{
 			name: "relayed local bundle alone lands the relayed branch and drops the bundle", entry: entryRelayed, local: true, bundle: true,
 			labels: []string{"agent-recoverable"},
 			result: func(*pushOnlyEnv) dispatch.Result { return dispatch.Result{} },
 			want:   merged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch, wantRelays: 1, wantBundle: bundleDropped,
-			wantSteps: []Step{pushOnlyStep(StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
+			wantSteps: []Step{stepAt(pushOnlyBranch, StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
 		},
 		{
 			name: "relayed local land-last run without a report still lands", entry: entryRelayed, local: true, bundle: true,
@@ -510,7 +505,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			result: func(*pushOnlyEnv) dispatch.Result { return dispatch.Result{} },
 			want:   merged, wantMerged: pushOnlyBranch, wantRelays: 1, wantBundle: bundleDropped,
 			wantLandings: twice(placeholder),
-			wantSteps:    []Step{pushOnlyStep(StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
+			wantSteps:    []Step{stepAt(pushOnlyBranch, StatusAdopted, "note=bundle present in outbox; relayed branch landed")},
 		},
 		{
 			name: "relayed local manual clears the recorded pass despite the run's passes", entry: entryRelayed, local: true, mergeMode: "manual",

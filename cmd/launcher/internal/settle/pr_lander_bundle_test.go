@@ -22,18 +22,6 @@ func bundleExists(t *testing.T, outbox string) bool {
 	return err == nil
 }
 
-// openAfterMerge reports the PR as still OPEN after a nil Merge, as a forge
-// whose merge is queued rather than applied would.
-type openAfterMerge struct{ *forge.Fake }
-
-func (o openAfterMerge) Merge(url string) error {
-	if err := o.Fake.Merge(url); err != nil {
-		return err
-	}
-	o.SetPRState(url, forge.PROpen)
-	return nil
-}
-
 // bundleCases are the rows where the Box's seam.bundle outlives or does not
 // outlive a landing (issue #4653): a finished issue must not leave a stale
 // bundle behind, but only a settle that verified the merge may drop it; every
@@ -41,8 +29,6 @@ func (o openAfterMerge) Merge(url string) error {
 // from.
 func bundleCases() []prCase {
 	g := &handoffRig{}
-	merged := prSettlement(dispatchrecord.ReasonMerged)
-	complete := []string{"agent-complete"}
 	failed := []string{"agent-failed"}
 	// The leading Pending proves the checks registered, which Recover's open-PR arm waits for.
 	registered := []forge.RollupState{forge.StatePending, green, green}
@@ -53,35 +39,40 @@ func bundleCases() []prCase {
 	landed := func(c prCase) prCase {
 		c.entry, c.checks = entryAdopted, registered
 		c.want, c.wantLabels, c.wantNoLabels, c.wantMerged, c.wantCalls = merged, complete, failed, testPR, flipThenMerge
-		c.wantSteps = append(c.wantSteps, prStep(StatusVerifiedMerged, ""))
+		c.wantSteps = append(c.wantSteps, stepAt(testPR, StatusVerifiedMerged, ""))
 		return c
 	}
 	adopted := func(reason string) Settlement { return Settlement{Verdict: ForReason(reason), PRURL: testPR} }
 
 	return []prCase{
-		landed(prCase{name: "adopted: a verified merge removes the bundle", setup: bundled, check: g.bundle(bundleDropped)}),
+		landed(prCase{name: "adopted: a verified merge removes the bundle", wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged}, setup: bundled, check: g.bundle(bundleDropped)}),
 		{
 			name: "adopted: a gate that ends terminal keeps the bundle", entry: entryAdopted, checks: []forge.RollupState{red},
-			setup: bundled, want: Settlement{Verdict: ForReason(dispatchrecord.ReasonCIRed), PRURL: testPR, Note: "ci-red: still red after exhausting 0 fix pass(es)"}, prClosed: true, wantLabels: failed,
+			wantStatuses: []Status{StatusAdopted, StatusFailed},
+			setup:        bundled, want: Settlement{Verdict: ForReason(dispatchrecord.ReasonCIRed), PRURL: testPR, Note: "ci-red: still red after exhausting 0 fix pass(es)"}, wantPRClosed: true, wantLabels: failed,
 			check: g.bundle(bundleKept),
 		},
 		{
 			name: "adopted: manual mode keeps the bundle", entry: entryAdopted, checks: registered, mergeMode: "manual",
-			setup: bundled, want: adopted(dispatchrecord.ReasonManual), wantLabels: complete, wantCalls: flipOnly,
+			wantStatuses: []Status{StatusAdopted, StatusAgentComplete},
+			setup:        bundled, want: adopted(dispatchrecord.ReasonManual), wantLabels: complete, wantCalls: flipOnly,
 			check: g.bundle(bundleKept),
 		},
 		{
 			name: "adopted: an enqueued auto-merge keeps the bundle", entry: entryAdopted, checks: registered, mergeMode: "auto",
-			setup: bundled, want: adopted(dispatchrecord.ReasonAutoMergeEnqueued), wantLabels: complete,
+			wantStatuses: []Status{StatusAdopted, StatusAutoMergeEnqueued},
+			setup:        bundled, want: adopted(dispatchrecord.ReasonAutoMergeEnqueued), wantLabels: complete,
 			wantCalls: []string{"MarkReady:" + testPR, "EnqueueAutoMerge:" + testPR}, check: g.bundle(bundleKept),
 		},
 		{
 			name: "adopted: a merge guard hit keeps the bundle", entry: entryAdopted, checks: registered, guard: ".github/**",
-			files: workflowFile, setup: bundled, want: adopted(dispatchrecord.ReasonMergeGuardHit), wantLabels: complete,
+			wantStatuses: []Status{StatusAdopted, StatusMergeGuardHit, StatusMergeableUnknown},
+			files:        workflowFile, setup: bundled, want: adopted(dispatchrecord.ReasonMergeGuardHit), wantLabels: complete,
 			wantCalls: flipOnly, check: g.bundle(bundleKept),
 		},
 		{
 			name: "adopted: a blocked merge keeps the bundle", entry: entryAdopted, checks: registered,
+			wantStatuses: []Status{StatusAdopted, StatusMergeBlocked},
 			setup: g.setup(0, func(t *testing.T, fc *forge.Fake, c *Config) {
 				g.bundled(t, fc, c)
 				fc.MergeErr = errors.New("required review missing")
@@ -93,15 +84,17 @@ func bundleCases() []prCase {
 		// reports the PR unmerged; verifyMerged then fails the issue, and a failed
 		// settle keeps its bundle.
 		{
-			name:  "adopted: a merge the forge does not report merged fails the settle and keeps the bundle",
-			entry: entryAdopted, checks: registered, setup: bundled,
+			name:         "adopted: a merge the forge does not report merged fails the settle and keeps the bundle",
+			wantStatuses: []Status{StatusAdopted, StatusFailed},
+			entry:        entryAdopted, checks: registered, setup: bundled,
 			afterMerge: func(fc *forge.Fake) { fc.SetPRState(testPR, forge.PROpen) },
-			want:       Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeUnverified), PRURL: testPR, Note: "PR state is 'OPEN', expected MERGED"}, prClosed: true, wantLabels: failed,
-			wantMerged: testPR, wantCalls: flipThenMerge, wantSteps: []Step{prStep(StatusFailed, "!! PR state is 'OPEN', expected MERGED")}, check: g.bundle(bundleKept),
+			want:       Settlement{Verdict: ForReason(dispatchrecord.ReasonMergeUnverified), PRURL: testPR, Note: "PR state is 'OPEN', expected MERGED"}, wantPRClosed: true, wantLabels: failed,
+			wantMerged: testPR, wantCalls: flipThenMerge, wantSteps: []Step{stepAt(testPR, StatusFailed, "!! PR state is 'OPEN', expected MERGED")}, check: g.bundle(bundleKept),
 		},
 		// The outbox also holds the pass manifest, so only the bundle file goes.
 		landed(prCase{
-			name: "adopted: a verified merge leaves the outbox's other files",
+			name:         "adopted: a verified merge leaves the outbox's other files",
+			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
 			setup: g.setup(0, func(t *testing.T, fc *forge.Fake, c *Config) {
 				g.bundled(t, fc, c)
 				if err := os.WriteFile(filepath.Join(g.outbox, "other.json"), []byte("{}"), 0o644); err != nil {
@@ -118,16 +111,17 @@ func bundleCases() []prCase {
 		// unset OutboxDir never panics.
 		landed(prCase{
 			name: "adopted: a verified merge with no bundle in the outbox is silent", setup: g.setup(0, nil),
-			wantNoStatus: []Status{StatusBundleRemoveFailed},
+			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
 		}),
 		landed(prCase{
 			name:         "adopted: a verified merge with an unset OutboxDir is silent",
+			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
 			setup:        func(_ *testing.T, _ *forge.Fake, c *Config) { c.OutboxDir = nil },
-			wantNoStatus: []Status{StatusBundleRemoveFailed},
 		}),
 		// A failed removal is logged and must never fail the landing.
 		landed(prCase{
-			name: "adopted: a bundle that cannot be removed is logged and the landing still merges",
+			name:         "adopted: a bundle that cannot be removed is logged and the landing still merges",
+			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged, StatusBundleRemoveFailed},
 			setup: g.setup(0, func(t *testing.T, _ *forge.Fake, _ *Config) {
 				// A non-empty directory in the bundle's place makes os.Remove fail.
 				if err := os.MkdirAll(filepath.Join(g.outbox, seambundle.FileName, "child"), 0o755); err != nil {
@@ -139,14 +133,16 @@ func bundleCases() []prCase {
 		// A blocked hand-off never reaches the landing, so its bundle stays.
 		{
 			name: "a blocked hand-off keeps the bundle", shape: shapeReadOnly, noPR: true, result: handoffResult("blocked"),
-			setup: g.readOnly(0, func(t *testing.T, fc *forge.Fake, c *Config) { g.bundled(t, fc, c) }),
-			want:  Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), PRURL: testPR, Note: "stuck"}, prClosed: true, wantLabels: failed, wantComments: []string{"stuck"},
+			wantStatuses: []Status{detailOnly, StatusBlocked},
+			setup:        g.readOnly(0, func(t *testing.T, fc *forge.Fake, c *Config) { g.bundled(t, fc, c) }),
+			want:         Settlement{Verdict: ForReason(dispatchrecord.ReasonBlocked), PRURL: testPR, Note: "stuck"}, wantPRClosed: true, wantLabels: failed, wantComments: []string{"stuck"},
 			check: g.bundle(bundleKept),
 		},
 		// Recover's relay arm lands through the same gate and drops the bundle too.
 		{
 			name: "a relayed branch that merges drops the bundle", shape: shapeReadOnly, noPR: true,
-			entry: entryRelayed, checks: registered,
+			wantStatuses: []Status{StatusAdopted, StatusVerifiedMerged},
+			entry:        entryRelayed, checks: registered,
 			setup: g.readOnly(0, func(t *testing.T, fc *forge.Fake, c *Config) { g.bundled(t, fc, c) }),
 			want:  merged, wantLabels: complete, wantMerged: testPR, wantCalls: flipThenMerge, check: g.bundle(bundleDropped),
 		},
