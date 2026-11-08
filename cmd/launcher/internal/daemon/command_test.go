@@ -465,51 +465,77 @@ func TestChildCommandStripsAmbientReportFD(t *testing.T) {
 	}
 }
 
-// TestChildCommandCarriesSignalCarrier pins the knob's whole reason for
-// being env-only (see inputdoc/flagtable_gen.go): BOX_SIGNAL_CARRIER never lands in
-// the Launcher input document's settings map, so it is never a Knobs entry
-// and withoutKeys never strips it — it rides s.Env straight through. The
-// "beside a stripped knob" case is the one that exercises the strip path:
-// Knobs names a settings key, that key goes, and the carrier beside it
-// stays.
-func TestChildCommandCarriesSignalCarrier(t *testing.T) {
+// TestSignalCarrierRidesArgvNotEnv pins the lift for both commands: the
+// launcher exits config-invalid on a non-secret knob in its environment, so
+// BOX_SIGNAL_CARRIER is stripped from the child env and carried as
+// --box-signal-carrier instead. Absent and empty both mean unset: neither
+// the env entry nor the flag appears, and the child takes the schema default.
+func TestSignalCarrierRidesArgvNotEnv(t *testing.T) {
 	tests := []struct {
-		name  string
-		env   []string
-		knobs []string
-		want  []string
+		name     string
+		env      []string
+		knobs    []string
+		wantFlag []string
+		wantEnv  []string
 	}{
 		{
-			name: "set",
-			env:  []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket"},
-			want: []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket", "SPINDRIFT_REPORT_FD=3"},
+			name:     "socket",
+			env:      []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket"},
+			wantFlag: []string{"--box-signal-carrier", "socket"},
+			wantEnv:  []string{"PATH=/bin"},
 		},
 		{
-			name: "log",
-			env:  []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=log"},
-			want: []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=log", "SPINDRIFT_REPORT_FD=3"},
+			name:     "log",
+			env:      []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=log"},
+			wantFlag: []string{"--box-signal-carrier", "log"},
+			wantEnv:  []string{"PATH=/bin"},
 		},
 		{
-			name: "absent",
-			env:  []string{"PATH=/bin"},
-			want: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"},
+			name:    "absent",
+			env:     []string{"PATH=/bin"},
+			wantEnv: []string{"PATH=/bin"},
 		},
 		{
-			name:  "beside a stripped knob",
-			env:   []string{"PATH=/bin", "MODEL=opus", "BOX_SIGNAL_CARRIER=socket"},
-			knobs: []string{"MODEL"},
-			want:  []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket", "SPINDRIFT_REPORT_FD=3"},
+			name:    "empty",
+			env:     []string{"PATH=/bin", "BOX_SIGNAL_CARRIER="},
+			wantEnv: []string{"PATH=/bin"},
+		},
+		{
+			name:     "beside a stripped knob",
+			env:      []string{"PATH=/bin", "MODEL=opus", "BOX_SIGNAL_CARRIER=socket"},
+			knobs:    []string{"MODEL"},
+			wantFlag: []string{"--box-signal-carrier", "socket"},
+			wantEnv:  []string{"PATH=/bin"},
 		},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), Env: tc.env, Knobs: tc.knobs}
+		t.Run("child/"+tc.name, func(t *testing.T) {
+			spec := ChildSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Kind: KindOf(dispatchkind.Work), FeatureBranch: "feat", Env: tc.env, Knobs: tc.knobs}
 			got, err := ChildCommand(spec)
 			if err != nil {
 				t.Fatalf("ChildCommand(%+v): unexpected error: %v", spec, err)
 			}
-			if !reflect.DeepEqual(got.Env, tc.want) {
-				t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, tc.want)
+			wantArgv := append([]string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "dispatch", "--max-jobs", "1", "--max-parallel", "1", "--base-branch", "feat"}, tc.wantFlag...)
+			if !reflect.DeepEqual(got.Argv, wantArgv) {
+				t.Fatalf("ChildCommand(%+v) argv = %v, want %v", spec, got.Argv, wantArgv)
+			}
+			wantEnv := append(append([]string{}, tc.wantEnv...), "SPINDRIFT_REPORT_FD=3")
+			if !reflect.DeepEqual(got.Env, wantEnv) {
+				t.Fatalf("ChildCommand(%+v) env = %v, want %v", spec, got.Env, wantEnv)
+			}
+		})
+		t.Run("doctor/"+tc.name, func(t *testing.T) {
+			spec := DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", FeatureBranch: "feat", Flags: []string{"--butler"}, Env: tc.env, Knobs: tc.knobs}
+			got, err := DoctorCommand(spec)
+			if err != nil {
+				t.Fatalf("DoctorCommand(%+v): unexpected error: %v", spec, err)
+			}
+			wantArgv := append([]string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--butler", "--base-branch", "feat"}, tc.wantFlag...)
+			if !reflect.DeepEqual(got.Argv, wantArgv) {
+				t.Fatalf("DoctorCommand(%+v) argv = %v, want %v", spec, got.Argv, wantArgv)
+			}
+			if !reflect.DeepEqual(got.Env, tc.wantEnv) {
+				t.Fatalf("DoctorCommand(%+v) env = %v, want %v", spec, got.Env, tc.wantEnv)
 			}
 		})
 	}

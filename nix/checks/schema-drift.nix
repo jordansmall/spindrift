@@ -1521,6 +1521,10 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       envOnly = s: s ? signalCarrier && !(s.signalCarrier.flakeOption or false);
+      daemonCommand = builtins.readFile ../../cmd/launcher/internal/daemon/command.go;
+      carrierFlag = "--${
+        pkgs.lib.replaceStrings [ "_" ] [ "-" ] (pkgs.lib.toLower schema.signalCarrier.env)
+      }";
       badSchema = schema // {
         signalCarrier = schema.signalCarrier // {
           flakeOption = true;
@@ -1531,6 +1535,12 @@ checkedMerge {
       "lib/env-schema.nix: signalCarrier must exist and keep flakeOption unset — a settings-map knob is stripped from every child's environment (issue #3727)";
     assert assertMsg (!(envOnly badSchema))
       "signal-carrier-env-only: expected the env-only predicate to reject a signalCarrier with flakeOption = true, but it accepted one";
+    assert assertMsg
+      (
+        pkgs.lib.hasInfix "\"${schema.signalCarrier.env}\"" daemonCommand
+        && pkgs.lib.hasInfix "\"${carrierFlag}\"" daemonCommand
+      )
+      "cmd/launcher/internal/daemon/command.go no longer spells `${schema.signalCarrier.env}` and `${carrierFlag}` as string literals matching lib/env-schema.nix signalCarrier (issue #6623) — the daemon lifts the env knob into that flag by hand";
     pkgs.runCommand "signal-carrier-env-only" { } "touch $out";
 
   # Regression guard (issue #872): the completion renderers scope `choices` to

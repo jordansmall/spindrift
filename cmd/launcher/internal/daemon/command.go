@@ -52,6 +52,27 @@ func appendFeatureBranch(argv []string, featureBranch string) []string {
 	return append(argv, "--base-branch", featureBranch)
 }
 
+// signalCarrierEnv is the env-only BOX_SIGNAL_CARRIER knob (flag
+// --box-signal-carrier). internal/daemon cannot import the launcher main's
+// generated schemaFlags, so the name is spelled out here; lib/env-schema.nix's
+// signalCarrier row is the source.
+const signalCarrierEnv = "BOX_SIGNAL_CARRIER"
+
+// liftSignalCarrier strips signalCarrierEnv from env and, when its value is
+// non-empty, appends "--box-signal-carrier <value>" to argv. The launcher
+// exits config-invalid on any non-secret knob in its environment, so the
+// value must travel as a flag; empty means unset, leaving the child its
+// schema default.
+func liftSignalCarrier(argv, env []string) ([]string, []string) {
+	prefix := signalCarrierEnv + "="
+	for _, e := range env {
+		if v, ok := strings.CutPrefix(e, prefix); ok && v != "" {
+			argv = append(argv, "--box-signal-carrier", v)
+		}
+	}
+	return argv, withoutKeys(env, []string{signalCarrierEnv})
+}
+
 // ChildCommand builds the Command for one pinned child launcher invocation.
 // It is pure: no filesystem or process access, so the loop slice's seam is
 // tested by feeding it a ChildSpec and asserting on the returned Command.
@@ -62,7 +83,9 @@ func appendFeatureBranch(argv []string, featureBranch string) []string {
 // present in Knobs: those keys are the Launcher input document's settings,
 // which is itself the child's own knob source, so stripping them here keeps
 // the daemon's resolved knobs from leaking into (and shadowing) the child's
-// independent resolution of the same names.
+// independent resolution of the same names. BOX_SIGNAL_CARRIER, which the
+// daemon takes from its own environment, reaches the child as a flag instead:
+// it is lifted onto argv as --box-signal-carrier (see liftSignalCarrier).
 //
 // The flakeref is built before the kind is parsed, so a spec that is wrong in
 // both ways reports the flakeref error: the pin is what keeps the daemon off a
@@ -90,6 +113,7 @@ func ChildCommand(s ChildSpec) (Command, error) {
 		"--max-parallel", "1",
 	}
 	argv = appendFeatureBranch(argv, s.FeatureBranch)
+	argv, env := liftSignalCarrier(argv, s.Env)
 
 	return Command{
 		Argv: argv,
@@ -98,7 +122,7 @@ func ChildCommand(s ChildSpec) (Command, error) {
 		// SPINDRIFT_REPORT_FD already in the daemon's own environment (a
 		// nested daemon, an operator's stray export) cannot survive
 		// alongside the value set here — the child must see exactly one.
-		Env: append(withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv}), fmt.Sprintf("%s=%d", reportFDEnv, ReportFD)),
+		Env: append(withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv}), fmt.Sprintf("%s=%d", reportFDEnv, ReportFD)),
 	}, nil
 }
 
@@ -295,6 +319,7 @@ type DoctorSpec struct {
 // preflight emits no records, so it must see no report fd at all, not even
 // an ambient one surviving from the daemon's own environment (a stray
 // operator export, a nested daemon) — issue #3627's review finding.
+// BOX_SIGNAL_CARRIER is lifted onto argv exactly as ChildCommand does.
 func DoctorCommand(s DoctorSpec) (Command, error) {
 	flakeref, err := appFlakeref(s.RepoPath, s.AppAttr, s.Revision, "a preflight must always be pinned")
 	if err != nil {
@@ -303,5 +328,6 @@ func DoctorCommand(s DoctorSpec) (Command, error) {
 	argv := []string{"nix", "run", flakeref, "--", "doctor"}
 	argv = append(argv, s.Flags...)
 	argv = appendFeatureBranch(argv, s.FeatureBranch)
-	return Command{Argv: argv, Env: withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv})}, nil
+	argv, env := liftSignalCarrier(argv, s.Env)
+	return Command{Argv: argv, Env: withoutKeys(withoutKeys(env, s.Knobs), []string{reportFDEnv})}, nil
 }

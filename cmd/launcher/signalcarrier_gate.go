@@ -24,5 +24,5 @@ func checkSignalCarrierNetworkModeGate(c config) error {
 	if c.runnerNetworkMode() != runner.NetworkModeNone {
 		return nil
 	}
-	return newLaunchGateConfigError(signalSocketNoneModeReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", c.NetworkMode)
+	return newLaunchGateConfigError(signalSocketNoneModeReason+"; use --box-signal-carrier log or a different NETWORK_MODE", c.NetworkMode)
 }

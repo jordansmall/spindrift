@@ -69,7 +69,7 @@ func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *test
 	if err == nil {
 		t.Fatal("checkSignalCarrierNetworkModeGate() = nil, want an error")
 	}
-	const want = "BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=none -- the socket transport needs loopback, which this mode tears down; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE"
+	const want = "BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=none -- the socket transport needs loopback, which this mode tears down; use --box-signal-carrier log or a different NETWORK_MODE"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
@@ -87,7 +87,7 @@ func TestSignalCarrierNetworkModeGate_UnsetKnobUnderNoneFailsNamingLogRemedy(t *
 	if err == nil {
 		t.Fatal("checkSignalCarrierNetworkModeGate() with the knob unset under none = nil, want an error")
 	}
-	if !strings.Contains(err.Error(), "BOX_SIGNAL_CARRIER=log") {
-		t.Errorf("error %q should contain %q", err.Error(), "BOX_SIGNAL_CARRIER=log")
+	if !strings.Contains(err.Error(), "--box-signal-carrier log") {
+		t.Errorf("error %q should contain %q", err.Error(), "--box-signal-carrier log")
 	}
 }

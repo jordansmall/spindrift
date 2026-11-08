@@ -355,8 +355,8 @@ func parseBreakerWindow(raw string) (time.Duration, error) {
 // validateChoice (cmd/launcher/flags.go), whose wording it mirrors, checking
 // the same inputdoc.SchemaFlags choices. An empty value is valid and means
 // unset: the knob is env-only (never in the --input document's settings), so
-// an unset knob stays out of the child environment and the child takes the
-// schema default.
+// an unset knob adds no --box-signal-carrier flag to the child and the child
+// takes the schema default.
 func validateSignalCarrier(raw string) error {
 	e, _ := inputdoc.SchemaFlag("BOX_SIGNAL_CARRIER")
 	if raw == "" || slices.Contains(e.Choices, raw) {
@@ -913,6 +913,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// BOX_SIGNAL_CARRIER is env-only (absent from the --input document's
 	// settings map), so it is read with os.Getenv rather than doc.Resolve —
 	// Resolve would fail on a legitimately-unset knob.
+	// ChildCommand/DoctorCommand then forward it to children as a flag.
 	if err := validateSignalCarrier(os.Getenv("BOX_SIGNAL_CARRIER")); err != nil {
 		return refuse(err)
 	}
