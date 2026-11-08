@@ -46,11 +46,11 @@ func TestFileIssueIntentsDetailed_SameFindingFromEitherCarrier(t *testing.T) {
 
 	fcLog := forge.NewFake(testDispatchLabels)
 	fcLog.PostIssueURL = "https://github.com/owner/repo/issues/1"
-	fileIssueIntentsDetailed(fcLog.AsIssueFiler(), "1", dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{rawLog}}, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fcLog.AsIssueFiler(), "1", dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{rawLog}}, "agent-review-finding", "")
 
 	fcSocket := forge.NewFake(testDispatchLabels)
 	fcSocket.PostIssueURL = "https://github.com/owner/repo/issues/1"
-	fileIssueIntentsDetailed(fcSocket.AsIssueFiler(), "1", dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{rawSocket}}, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fcSocket.AsIssueFiler(), "1", dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{rawSocket}}, "agent-review-finding", "")
 
 	if len(fcLog.PostIssueCalls) != 1 || len(fcSocket.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls: log=%+v socket=%+v, want exactly 1 each", fcLog.PostIssueCalls, fcSocket.PostIssueCalls)
@@ -86,7 +86,7 @@ func TestFileIssueIntentsDetailed_InvalidClassSkipsRatherThanClears(t *testing.T
 
 	var detailed []filedIntent
 	stderr := captureStderr(t, func() {
-		detailed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		detailed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 0 {

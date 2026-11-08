@@ -253,7 +253,7 @@ func TestFileIssueIntents_FilesEachIntentWithHostDerivedLabels(t *testing.T) {
 		},
 	}
 
-	urls := filedURLs(fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", ""))
+	urls := filedURLs(fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", ""))
 
 	if len(fc.PostIssueCalls) != 2 {
 		t.Fatalf("PostIssueCalls = %+v, want 2", fc.PostIssueCalls)
@@ -298,7 +298,7 @@ func TestFileIssueIntents_MalformedPayloadSkipped(t *testing.T) {
 		},
 	}
 
-	urls := filedURLs(fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", ""))
+	urls := filedURLs(fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", ""))
 
 	if len(fc.PostIssueCalls) != 1 || fc.PostIssueCalls[0].Title != "good one" {
 		t.Fatalf("PostIssueCalls = %+v, want exactly the well-formed intent", fc.PostIssueCalls)
@@ -325,7 +325,7 @@ func TestFileIssueIntents_TrackerWithoutHostPostedIssueFilerDegrades(t *testing.
 
 	var got []filedIntent
 	stderr := captureStderr(t, func() {
-		got = fileIssueIntentsDetailed(fc, "1", result, "agent-review-finding", "")
+		got = fileIssueIntentsDetailed(StdoutProgress{}, fc, "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -362,7 +362,7 @@ func TestFileIssueIntents_RealLocalTracker_FilesIssueOnDisk(t *testing.T) {
 		},
 	}
 
-	urls := filedURLs(fileIssueIntentsDetailed(lt, "1", result, "agent-review-finding", ""))
+	urls := filedURLs(fileIssueIntentsDetailed(StdoutProgress{}, lt, "1", result, "agent-review-finding", ""))
 
 	if len(urls) != 2 {
 		t.Fatalf("urls = %v, want 2", urls)
@@ -425,7 +425,7 @@ func TestFileIssueIntents_ArbitraryProvenanceLabel(t *testing.T) {
 		},
 	}
 
-	urls := filedURLs(fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "some-other-caller-label", ""))
+	urls := filedURLs(fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "some-other-caller-label", ""))
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -553,7 +553,7 @@ func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) 
 		fc := forge.NewFake(testDispatchLabels)
 		fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
 
-		detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 		if len(detailed) != 2 {
 			t.Fatalf("detailed = %+v, want 2 entries", detailed)
@@ -572,7 +572,7 @@ func TestFileIssueIntentsDetailed_ReturnsSuccessAndFailureEntries(t *testing.T) 
 		fc := forge.NewFake(testDispatchLabels)
 		fc.PostIssueErr = errFake
 
-		detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 		if len(detailed) != 2 {
 			t.Fatalf("detailed = %+v, want 2 entries", detailed)
@@ -607,7 +607,7 @@ func TestFileIssueIntentsDetailed_AppendsBacklinkToPostedBody(t *testing.T) {
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "Filed from research on #99")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "Filed from research on #99")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -632,7 +632,7 @@ func TestFileIssueIntentsDetailed_EmptyBacklinkLeavesBodyUnchanged(t *testing.T)
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -659,7 +659,7 @@ func TestFileIssueIntentsDetailed_MalformedPayloadSkipped(t *testing.T) {
 		},
 	}
 
-	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(detailed) != 1 || detailed[0].Title != "good one" {
 		t.Fatalf("detailed = %+v, want exactly the well-formed intent", detailed)
@@ -684,7 +684,7 @@ func TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel(t *testing.T)
 				},
 			}
 
-			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+			fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 			if len(fc.PostIssueCalls) != 1 {
 				t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -720,7 +720,7 @@ func TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel(t *testing.T) 
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-research-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-research-finding", "")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -746,7 +746,7 @@ func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -775,7 +775,7 @@ func TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped(t *testing.T) {
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -805,7 +805,7 @@ func TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel(t 
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -837,7 +837,7 @@ func TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate(t *testing.T) {
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(fc.CreateLabelCalls) != 0 {
 		t.Errorf("CreateLabelCalls = %+v, want none", fc.CreateLabelCalls)
@@ -870,7 +870,7 @@ func TestFileIssueIntentsDetailed_LabelCreateFailureFilesUntypedNonFatally(t *te
 		},
 	}
 
-	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
 		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
@@ -900,7 +900,7 @@ func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t 
 		},
 	}
 
-	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
 		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
@@ -939,7 +939,7 @@ func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApp
 		},
 	}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -971,7 +971,7 @@ func TestFileIssueIntentsDetailed_ListLabelsErrAndCreateLabelErr_DropsLabelNonFa
 		},
 	}
 
-	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 
 	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
 		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
@@ -1251,7 +1251,7 @@ func TestTallyFiled_Mixed(t *testing.T) {
 // transcript than a run that never reached filing at all (no line printed).
 func TestReportFiled_ZeroTallyStillPrints(t *testing.T) {
 	stdout := captureStdout(t, func() {
-		reportFiled("42", nil)
+		reportFiled(StdoutProgress{}, "42", nil)
 	})
 	want := "    #42  filed=ok:0,failed:0,skipped:0\n"
 	if stdout != want {
@@ -1268,7 +1268,7 @@ func TestReportFiled_MixedTally(t *testing.T) {
 		{Title: "b", Failed: true, Body: "body b"},
 	}
 	stdout := captureStdout(t, func() {
-		reportFiled("7", filed)
+		reportFiled(StdoutProgress{}, "7", filed)
 	})
 	want := "    #7  filed=ok:1,failed:1,skipped:0\n"
 	if stdout != want {
@@ -1294,7 +1294,7 @@ func TestFileIssueIntentsDetailed_Dedup_SameSiteDifferentProseWithinRun(t *testi
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -1325,7 +1325,7 @@ func TestFileIssueIntentsDetailed_Dedup_SkipCarriesDupRef(t *testing.T) {
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(filed) != 2 {
@@ -1365,7 +1365,7 @@ func TestFileIssueIntentsDetailed_Dedup_MixedKindDupRef(t *testing.T) {
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(filed) != 2 {
@@ -1410,7 +1410,7 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapWithinRun(t *testing.T) {
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -1451,7 +1451,7 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapChainsAcrossRun(t *testing.T)
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -1483,7 +1483,7 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapPartialWithinRunStillFiles(t 
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 2 {
@@ -1511,7 +1511,7 @@ func TestFileIssueIntentsDetailed_Dedup_NonOverlappingLinesBothFile(t *testing.T
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 2 {
@@ -1538,7 +1538,7 @@ func TestFileIssueIntentsDetailed_Dedup_SameLinesDifferentFilesBothFile(t *testi
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 2 {
@@ -1572,7 +1572,7 @@ func TestFileIssueIntentsDetailed_Dedup_LineOverlapExcludesBacklog(t *testing.T)
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -1605,7 +1605,7 @@ func TestFileIssueIntentsDetailed_Dedup_ExactRetryMatchesBacklogMarker(t *testin
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -1645,7 +1645,7 @@ func TestFileIssueIntentsDetailed_Dedup_SharedTitleDifferentTermsBothFile(t *tes
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-research-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-research-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 2 {
@@ -1672,7 +1672,7 @@ func TestFileIssueIntentsDetailed_Dedup_DistinctFindingsBothFile(t *testing.T) {
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 2 {
@@ -1706,7 +1706,7 @@ func TestFileIssueIntentsDetailed_Dedup_PartialOverlapStillFiles(t *testing.T) {
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -1761,7 +1761,7 @@ func TestFileIssueIntentsDetailed_Dedup_DocSiteNamedDifferentlyAcrossSweeps(t *t
 
 			var filed []filedIntent
 			stdout := captureStdout(t, func() {
-				filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-butler-finding", "")
+				filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-butler-finding", "")
 			})
 
 			wantPosts := 0
@@ -1812,7 +1812,7 @@ func TestFileIssueIntentsDetailed_Dedup_PartialOverlapNamesEveryCoveringIssue(t 
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -1848,7 +1848,7 @@ func TestFileIssueIntentsDetailed_Dedup_DisjointIntentPrintsNoPartialOverlapLine
 	}
 
 	stdout := captureStdout(t, func() {
-		fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if strings.Contains(stdout, "partial dedup overlap") {
@@ -1883,7 +1883,7 @@ func TestFileIssueIntentsDetailed_Dedup_FullOverlapAcrossAllSitesSkips(t *testin
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -1919,7 +1919,7 @@ func TestFileIssueIntentsDetailed_Dedup_FullOverlapBySingleIssueSkips(t *testing
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -1966,7 +1966,7 @@ func TestFileIssueIntentsDetailed_Dedup_ClosedFullOverlapSkips(t *testing.T) {
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, stub, "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 0 {
@@ -2012,7 +2012,7 @@ func TestFileIssueIntentsDetailed_Dedup_ClosedPartialOverlapStillFiles(t *testin
 
 	var filed []filedIntent
 	stdout := captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, stub, "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -2041,7 +2041,7 @@ func TestFileIssueIntentsDetailed_Dedup_FiledBodyCarriesMarkerAndRoundTrips(t *t
 	}
 
 	captureStdout(t, func() {
-		fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -2082,7 +2082,7 @@ func TestFileIssueIntentsDetailed_Dedup_DroppedTermWarns(t *testing.T) {
 	var stderr string
 	captureStdout(t, func() {
 		stderr = captureStderr(t, func() {
-			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+			fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 		})
 	})
 
@@ -2116,7 +2116,7 @@ func TestFileIssueIntentsDetailed_Dedup_PartialDroppedTermKeepsGoodKeyAndWarns(t
 	var stderr string
 	captureStdout(t, func() {
 		stderr = captureStderr(t, func() {
-			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+			fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 		})
 	})
 
@@ -2158,7 +2158,7 @@ func TestFileIssueIntentsDetailed_Dedup_NonFindingIssueNeverSuppresses(t *testin
 
 	var filed []filedIntent
 	captureStdout(t, func() {
-		filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+		filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 	})
 
 	if len(fc.PostIssueCalls) != 1 {
@@ -2216,7 +2216,7 @@ func TestFileIssueIntentsDetailed_Dedup_ListFailureStillFiles(t *testing.T) {
 	var stderr string
 	captureStdout(t, func() {
 		stderr = captureStderr(t, func() {
-			filed = fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+			filed = fileIssueIntentsDetailed(StdoutProgress{}, stub, "1", result, "agent-review-finding", "")
 		})
 	})
 
@@ -2253,7 +2253,7 @@ func TestFileIssueIntentsDetailed_Dedup_NoTermsSkipsBacklogList(t *testing.T) {
 
 	captureStdout(t, func() {
 		captureStderr(t, func() {
-			fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+			fileIssueIntentsDetailed(StdoutProgress{}, stub, "1", result, "agent-review-finding", "")
 		})
 	})
 
@@ -2288,7 +2288,7 @@ func TestFileIssueIntentsDetailed_Dedup_BacklogListBuiltOnce(t *testing.T) {
 
 	captureStdout(t, func() {
 		captureStderr(t, func() {
-			fileIssueIntentsDetailed(stub, "1", result, "agent-review-finding", "")
+			fileIssueIntentsDetailed(StdoutProgress{}, stub, "1", result, "agent-review-finding", "")
 		})
 	})
 
@@ -2316,7 +2316,7 @@ func TestFileIssueIntentsDetailed_Dedup_NoTermsWarns(t *testing.T) {
 	var stderr string
 	captureStdout(t, func() {
 		stderr = captureStderr(t, func() {
-			filed = fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+			filed = fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 		})
 	})
 
@@ -2345,7 +2345,7 @@ func TestFileIssueIntentsDetailed_Dedup_QuotedMarkerNeverIndexed(t *testing.T) {
 
 	captureStdout(t, func() {
 		captureStderr(t, func() {
-			fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
+			fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", result, "agent-review-finding", "")
 		})
 	})
 

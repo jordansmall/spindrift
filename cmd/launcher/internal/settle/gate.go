@@ -66,8 +66,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	// (issue #2019): a run's own findings are worth tracking whether it landed
 	// ready or blocked. Best-effort, so a filing failure never changes the
 	// switch's landing decision.
-	filed := fileIssueIntentsDetailed(s.it, num, result, s.cfg.FindingLabel, "")
-	reportFiled(num, filed)
+	filed := fileIssueIntentsDetailed(s.cfg.Progress, s.it, num, result, s.cfg.FindingLabel, "")
+	reportFiled(s.cfg.Progress, num, filed)
 	// Placed and best-effort for the same reasons as reportFiled above; why the
 	// work path needs its own post is on postSkippedComment (issue #3811).
 	postSkippedComment(s.it, num, filed)

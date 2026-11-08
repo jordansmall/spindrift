@@ -36,7 +36,7 @@ func TestFileButlerFindings_PlanSeesPatch(t *testing.T) {
 		return func(Finding) Decoration { return Decoration{} }
 	}
 
-	FileButlerFindings(fc.AsIssueFiler(), "1", result, 0, testButlerFindingLabel, DedupPolicy{}, plan)
+	FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", result, 0, testButlerFindingLabel, DedupPolicy{}, plan)
 
 	if !sawFinding {
 		t.Fatal("plan was never called")
@@ -71,7 +71,7 @@ func TestFileButlerFindings_ReportsFailedCount(t *testing.T) {
 	fc.PostIssueErrForTitle = map[string]error{"two": errFake}
 	plan := func([]Finding) func(Finding) Decoration { return func(Finding) Decoration { return Decoration{} } }
 
-	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, testButlerFindingLabel, DedupPolicy{}, plan)
+	filing := FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), 0, testButlerFindingLabel, DedupPolicy{}, plan)
 
 	if len(filing.Filed) != 1 || filing.Failed != 1 {
 		t.Errorf("filed=%v failed=%d, want 1 filed and 1 failed", filing.Filed, filing.Failed)
@@ -96,7 +96,7 @@ func TestFileButlerFindings_TuningLabelWritesMarkerTerm(t *testing.T) {
 			plan := func([]Finding) func(Finding) Decoration {
 				return func(Finding) Decoration { return Decoration{ExtraLabels: []string{chore.FindingLabel("tuning")}} }
 			}
-			FileButlerFindings(fc.AsIssueFiler(), "1", result, 0, testButlerFindingLabel, DedupPolicy{}, plan)
+			FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", result, 0, testButlerFindingLabel, DedupPolicy{}, plan)
 			if len(fc.PostIssueCalls) != 1 {
 				t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
 			}
@@ -128,7 +128,7 @@ func TestFileButlerFindings_CatalogRowWritesItsChoreTerm(t *testing.T) {
 		plan := func([]Finding) func(Finding) Decoration {
 			return func(Finding) Decoration { return Decoration{ExtraLabels: []string{tc.label}} }
 		}
-		FileButlerFindings(fc.AsIssueFiler(), "1", result, 0, testButlerFindingLabel, DedupPolicy{}, plan)
+		FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", result, 0, testButlerFindingLabel, DedupPolicy{}, plan)
 		if len(fc.PostIssueCalls) != 1 {
 			t.Fatalf("%s: PostIssueCalls = %+v, want 1", tc.label, fc.PostIssueCalls)
 		}

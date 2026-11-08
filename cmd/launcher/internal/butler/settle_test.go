@@ -1980,3 +1980,25 @@ func TestSettleRun_Promotion_KeepsRunLabels(t *testing.T) {
 // testKindLabels is the butler row's finding and patch labels, spelled out so
 // a test pins the label settle files under without reading the descriptor.
 var testKindLabels = kindLabels{finding: "agent-butler-finding", patch: "agent-butler-patch"}
+
+func TestSettleRun_FilingStepsGoToProgressSink(t *testing.T) {
+	t.Parallel()
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/501"
+	now := start.Add(time.Minute)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, chore.Scope{Head: "h", NextCursor: "c"}, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{}, testKindLabels, io.Discard)
+	rec := &settle.ProgressRecorder{}
+	s.progress = rec
+
+	s.settle(dispatch.NewFake(), readyResult(`{"title":"bug in a.go","body":"repro","dedupTerms":["a.go:Foo"]}`))
+
+	for _, st := range rec.Steps() {
+		if strings.HasPrefix(st.Detail, "filed=") {
+			return
+		}
+	}
+	t.Errorf("steps = %+v, want one carrying the filed= tally", rec.Steps())
+}

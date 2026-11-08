@@ -78,7 +78,7 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 			func() *forge.Fake { return forge.NewFake(testDispatchLabels) },
 			func(fc *forge.Fake, label string) {
 				plan := func([]Finding) func(Finding) Decoration { return func(Finding) Decoration { return Decoration{} } }
-				FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, label, DedupPolicy{}, plan)
+				FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), 0, label, DedupPolicy{}, plan)
 			},
 		},
 	} {
@@ -129,7 +129,7 @@ func TestFileButlerFindings_EnsuresExtraLabels(t *testing.T) {
 	plan := func([]Finding) func(Finding) Decoration {
 		return func(Finding) Decoration { return Decoration{ExtraLabels: []string{patchLabel}} }
 	}
-	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, testButlerFindingLabel, DedupPolicy{}, plan)
+	filing := FileButlerFindings(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), 0, testButlerFindingLabel, DedupPolicy{}, plan)
 
 	if len(filing.Filed) != 2 {
 		t.Fatalf("filed = %v, want 2", filing.Filed)
@@ -156,7 +156,7 @@ func TestFileIssueIntentsDetailed_ExistingProvenanceLabelNotRecreated(t *testing
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
 	fc.Labels = []string{dispatchkind.Research.FindingLabel}
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", twoIntents(), dispatchkind.Research.FindingLabel, "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), dispatchkind.Research.FindingLabel, "")
 
 	if len(fc.CreateLabelCalls) != 0 {
 		t.Errorf("CreateLabelCalls = %+v, want none", fc.CreateLabelCalls)
@@ -172,7 +172,7 @@ func TestFileIssueIntentsDetailed_ProvenanceCreateFailureKeepsLabelAndFailsFilin
 	fc.CreateLabelErr = errFake
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
 
-	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", twoIntents(), dispatchkind.Butler.FindingLabel, "")
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), dispatchkind.Butler.FindingLabel, "")
 
 	if tally := tallyFiled(detailed); tally.failed != 2 || tally.ok != 0 {
 		t.Fatalf("tally = %v, want both failed", tally)
@@ -192,7 +192,7 @@ func TestFileIssueIntentsDetailed_UnknownProvenanceLabelNotCreated(t *testing.T)
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
 
-	fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", twoIntents(), "custom-provenance", "")
+	fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), "custom-provenance", "")
 
 	if len(fc.CreateLabelCalls) != 0 {
 		t.Errorf("CreateLabelCalls = %+v, want none", fc.CreateLabelCalls)
@@ -208,7 +208,7 @@ func TestFileIssueIntentsDetailed_EmptyProvenanceLabelRefusesFiling(t *testing.T
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
 
-	detailed := fileIssueIntentsDetailed(fc.AsIssueFiler(), "1", twoIntents(), "", "")
+	detailed := fileIssueIntentsDetailed(StdoutProgress{}, fc.AsIssueFiler(), "1", twoIntents(), "", "")
 
 	if tally := tallyFiled(detailed); tally.failed != 2 || tally.ok != 0 {
 		t.Fatalf("tally = %v, want both failed", tally)

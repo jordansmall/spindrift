@@ -154,13 +154,14 @@ type Runner struct {
 	mergeCommit forge.MergeCommitReader
 	warn        io.Writer
 	out         io.Writer
+	progress    settle.Progress
 }
 
 // New constructs a Runner. newBox builds the Dispatcher for one Chore run (a
 // real *dispatch.Factory.NewChore in production, dispatch.Fake in tests).
 // The patch rung stays off until a caller opts in with WithPatchForge.
 func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(dispatch.Chore) dispatch.Dispatcher, policy Policy, now func() time.Time) *Runner {
-	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now, warn: os.Stderr, out: os.Stdout}
+	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now, warn: os.Stderr, out: os.Stdout, progress: settle.StdoutProgress{}}
 }
 
 // WithPatchForge opts r into the patch rung (ADR 0057, issue #4074): f backs
@@ -173,6 +174,13 @@ func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(d
 func (r *Runner) WithPatchForge(f PatchForge, gate PatchGate) *Runner {
 	r.patchForge = f
 	r.patchGate = gate
+	return r
+}
+
+// WithProgress sends the Runner's settle progress steps to p instead of stdout.
+// Returns r so a caller can chain it onto New.
+func (r *Runner) WithProgress(p settle.Progress) *Runner {
+	r.progress = p
 	return r
 }
 
@@ -400,6 +408,7 @@ func (r *Runner) run(c chore.Chore, src scopeSource, tip ledger.Tip, claimedAt t
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: p.scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: p.input, ClaimTime: p.claimTime})
 	defer d.Close()
 	step := newSettleRun(r.it, r.backend, choreName, claim, p.scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate}, kindLabels{finding: r.policy.FindingLabel, patch: r.policy.PatchLabel}, r.out)
+	step.progress = r.progress
 	if p.arm != nil {
 		if err := p.arm(d, step); err != nil {
 			return Outcome{}, err
