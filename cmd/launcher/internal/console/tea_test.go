@@ -5500,7 +5500,7 @@ func TestTea_AdoptOrphanKey_Success_ClearsFlagPreventingRepeatAdopt(t *testing.T
 // second "A" press sent while the first adopt's RecoverFn call is still in
 // flight, before OrphanAdoptedMsg can clear the orphan flag, never fires a
 // second RecoverFn call: two concurrent calls for the same issue would race two
-// SettleAdopted goroutines over one PR, the race #1619 exists to prevent.
+// settling goroutines over one PR, the race #1619 exists to prevent.
 func TestTea_AdoptOrphanKey_SecondPressWhileInFlight_NeverFiresTwice(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})

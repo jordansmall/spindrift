@@ -60,7 +60,7 @@ func (s *Settle) Recover(in RecoverInput) (Settlement, error) {
 		return Settlement{}, err
 	}
 	if in.OpenPR != "" {
-		return s.SettleAdopted(d, in.Num, 0, in.OpenPR), nil
+		return s.settleAdopted(d, in.Num, RecoverGen, in.OpenPR), nil
 	}
 	return s.recoverRelay(d, in.Num, sit, in.Resolved)
 }

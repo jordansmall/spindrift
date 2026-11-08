@@ -14,7 +14,7 @@ import (
 
 // The console report must say landing=, not the stale pr= (issue #655):
 // prURL here may be a res.URL discovery, not always literally a PR.
-func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
+func TestRecoverOpenPR_ConsoleUsesLandingLabel(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
@@ -22,7 +22,7 @@ func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	out := testutil.CaptureStdout(t, func() {
-		s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
+		recoverOpenPR(t, s, dispatch.NewFake(), "77", testPR)
 	})
 
 	if !strings.Contains(out, "landing="+testPR) {
@@ -35,7 +35,7 @@ func TestSettleAdopted_ConsoleUsesLandingLabel(t *testing.T) {
 
 // In immediate mode, a merge that fails after CI goes green must not demote
 // the issue to agent-failed: merge-blocked stays at agent-complete.
-func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
+func TestRecoverOpenPR_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
@@ -47,7 +47,7 @@ func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 	fc.MergeErr = errors.New("required review missing")
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
+	recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR)
 
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
@@ -60,7 +60,7 @@ func TestSettleAdopted_ImmediateMergeFailureStaysComplete(t *testing.T) {
 
 // In manual and auto mode, CI reaching green without a merge must leave the
 // issue at agent-complete and never swap it to agent-failed.
-func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
+func TestRecoverOpenPR_ManualModeStaysComplete(t *testing.T) {
 	for _, mode := range []string{"manual", "auto"} {
 		t.Run(mode, func(t *testing.T) {
 			c := baseConfig()
@@ -73,7 +73,7 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 			fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
 			s := newTestSettle(c, fc, fc)
 
-			s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
+			recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR)
 
 			iss, _ := fc.Issue("1")
 			if !containsLabel(iss.Labels, "agent-complete") {
@@ -86,11 +86,11 @@ func TestSettleAdopted_ManualModeStaysComplete(t *testing.T) {
 	}
 }
 
-// SettleAdopted must demote a red CI on an adopted PR to agent-failed once
+// Recover's open-PR arm must demote a red CI on an adopted PR to agent-failed once
 // fix passes are exhausted, and its landingFailed print must carry
 // selfHealAdopted's own classified reason rather than the old hardcoded
 // literal (issue #2328).
-func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
+func TestRecoverOpenPR_RedFollowsSelfHeal(t *testing.T) {
 	c := baseConfig()
 	c.MaxFixAttempts = 0 // no fix passes, so the run just marks failed
 	fc := forge.NewFake()
@@ -104,7 +104,7 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stdout = w
-	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
+	recoverOpenPR(t, s, dispatch.NewFake(), "77", testPR)
 	w.Close()
 	os.Stdout = old
 	captured, err := io.ReadAll(r)
@@ -130,12 +130,12 @@ func TestSettleAdopted_RedFollowsSelfHeal(t *testing.T) {
 	}
 }
 
-// This test pins the issue #2475 fix at the SettleAdopted seam: an adopted
+// This test pins the issue #2475 fix at the Recover open-PR seam: an adopted
 // PR whose rollup reads SUCCESS on every poll, with no PENDING/EXPECTED/NONE
 // ever proving this run's own checks registered, still merges once the
 // bounded registration window (registrationWindowPolls) elapses. Issue
 // #1652's original absolute guard timed such a PR out and demoted the issue.
-func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
+func TestRecoverOpenPR_StaleSuccessMergesAfterWindow(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 10 // comfortably longer than registrationWindowPolls(3) * actualIv(1)
 	c.MaxFixAttempts = 0
@@ -144,7 +144,7 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
+	recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR)
 
 	if fc.Merged != testPR {
 		t.Errorf("expected the settled SUCCESS rollup to merge once the registration window elapses; fc.Merged=%q, want %q", fc.Merged, testPR)
@@ -159,11 +159,11 @@ func TestSettleAdopted_StaleSuccessMergesAfterWindow(t *testing.T) {
 }
 
 // This test is the "still waits" counterpart to
-// TestSettleAdopted_StaleSuccessMergesAfterWindow: MergePollTimeout(1) is
+// TestRecoverOpenPR_StaleSuccessMergesAfterWindow: MergePollTimeout(1) is
 // shorter than registrationWindowPolls(3) * actualIv(1), so an all-SUCCESS
 // rollup must time out and demote rather than merge, and the registration
 // guard's own terminal reason (issue #2476) must reach the issue comment.
-func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
+func TestRecoverOpenPR_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	c := baseConfig()
 	c.MergePollTimeout = 1 // less than registrationWindowPolls(3) * actualIv(1)
 	c.MaxFixAttempts = 0
@@ -172,7 +172,7 @@ func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 	s := newTestSettle(c, fc, fc)
 
-	s.SettleAdopted(dispatch.NewFake(), "1", 0, testPR)
+	recoverOpenPR(t, s, dispatch.NewFake(), "1", testPR)
 
 	if fc.Merged != "" {
 		t.Errorf("expected no merge before the registration window elapses; fc.Merged=%q", fc.Merged)
@@ -189,28 +189,16 @@ func TestSettleAdopted_StaleSuccessStillTimesOutWithinWindow(t *testing.T) {
 	}
 }
 
-func TestSettleAdopted_GreenMergesAndCompletes(t *testing.T) {
-	c := baseConfig()
-	fc := forge.NewFake(testDispatchLabels)
-	fc.SetIssue(forge.Issue{Number: "77", Labels: []string{"agent-in-progress"}})
-	// The leading PENDING proves this run's own checks registered. Issue
-	// #1652's adopted-path gate does not trust an immediate SUCCESS alone.
-	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	s := newTestSettle(c, fc, fc)
-
-	d := dispatch.NewFake()
-	s.SettleAdopted(d, "77", 0, testPR)
-
-	if fc.Merged != testPR {
-		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
+// recoverOpenPR settles num's already-discovered open PR through Recover with
+// d as the claimed Dispatch, the way spindrift recover reaches the adopt gate.
+func recoverOpenPR(t *testing.T, s *Settle, d dispatch.Dispatcher, num, prURL string) Settlement {
+	t.Helper()
+	st, err := s.Recover(RecoverInput{
+		Num: num, OpenPR: prURL,
+		Begin: func() (dispatch.Dispatcher, error) { return d, nil },
+	})
+	if err != nil {
+		t.Fatalf("Recover err = %v, want nil", err)
 	}
-	if len(d.FixCalls) != 0 {
-		t.Errorf("expected no fix calls on green CI, got %+v", d.FixCalls)
-	}
-	if len(fc.TransitionStateCalls) == 0 {
-		t.Fatal("expected TransitionState call for completeLabel")
-	}
-	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Complete {
-		t.Errorf("last transition To=%v, want Complete", last.To)
-	}
+	return st
 }

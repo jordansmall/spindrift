@@ -206,7 +206,7 @@ func ingestRecords(t *testing.T, root string) []dispatchrecord.Record {
 // fix log must continue the prior Record, so the dispatch_settled op the adopt
 // appends to the primary log lands on it and the ingester takes the host's
 // outcome from it, rather than leaving the prior run's stale outcome standing.
-func TestSettleAdopted_FixPassContinuesPriorRecord(t *testing.T) {
+func TestRecoverOpenPR_FixPassContinuesPriorRecord(t *testing.T) {
 	const num = "77"
 	claim := time.Date(2026, 5, 1, 7, 0, 0, 0, time.UTC)
 	prior := dispatchrecord.RecordID("work", num, claim)
@@ -234,7 +234,7 @@ func TestSettleAdopted_FixPassContinuesPriorRecord(t *testing.T) {
 	cfg.LogPath = func(n string) string { return dispatch.LogPathFor(root, n) }
 	s := newTestSettle(cfg, fc, fc)
 
-	testutil.CaptureStdout(t, func() { s.SettleAdopted(d, num, 0, testPR) })
+	testutil.CaptureStdout(t, func() { recoverOpenPR(t, s, d, num, testPR) })
 
 	if d.RecordID() != prior {
 		t.Fatalf("Dispatch RecordID = %q, want the prior Record %q", d.RecordID(), prior)

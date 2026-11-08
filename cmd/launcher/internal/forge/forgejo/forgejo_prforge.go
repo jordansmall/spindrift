@@ -193,7 +193,7 @@ func (f *forgejoCodeForge) listPulls(state string) ([]forgejoPullPayload, error)
 
 // OpenPRForBranch returns the open pull whose head matches branch, draft or not
 // (issue #2408). A stranded draft is as adoptable as a ready one, since
-// SettleAdopted calls the idempotent MarkReady at green. The returned forge.PR
+// adoption calls the idempotent MarkReady at green. The returned forge.PR
 // deliberately omits draft status, keeping adoption draft-blind.
 func (f *forgejoCodeForge) OpenPRForBranch(branch string) (forge.PR, bool, error) {
 	pulls, err := f.listPulls("open")

@@ -432,7 +432,7 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 // A box exiting with no outcome line reports status=blocked and takes no
 // action even when the discovered PR is non-draft: a no-outcome run is never
 // adopted off draft-ness (issue #1654). Adoption happens only through the
-// explicit agent-recover entry point, SettleAdopted.
+// explicit agent-recover entry point, Recover.
 func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"

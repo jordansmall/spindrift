@@ -434,7 +434,7 @@ func SettledBy(d dispatch.Dispatcher, key dispatchkey.Key, v Verdict, note strin
 
 // latchPR records the PR num's gate is working, for flushSettled to name on
 // the settled record. Only host-proven URLs latch, each at its source: Open's
-// result, the agent branch's open PR, and SettleAdopted's prURL. The Box's own
+// result, the agent branch's open PR, and settleAdopted's prURL. The Box's own
 // landing= is never latched. Latching is not tied to merge, so a red-CI or
 // failed landing still names its PR.
 func (s *Settle) latchPR(num, pr string) {

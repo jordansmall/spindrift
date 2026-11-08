@@ -122,7 +122,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 	twice := func(l []forge.RecordLandingCall) []forge.RecordLandingCall {
 		return append(append([]forge.RecordLandingCall(nil), l...), l...)
 	}
-	// SettleAdopted names the branch as the Settlement's PRURL.
+	// Recover's open-PR arm names the branch as the Settlement's PRURL.
 	adoptedManual := Settlement{Verdict: manual.Verdict, PRURL: pushOnlyBranch}
 	adoptedMerged := Settlement{Verdict: merged.Verdict, PRURL: pushOnlyBranch}
 	markNow := func(e *pushOnlyEnv) { e.s.Registry().Mark("1") }
@@ -577,7 +577,14 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 					t.Errorf("Recover err = %v, want nil", err)
 				}
 			case entryAdopted:
-				got = env.s.SettleAdopted(dispatch.NewFake(), "1", gen, pushOnlyBranch)
+				st, err := env.s.Recover(RecoverInput{
+					Num: "1", OpenPR: pushOnlyBranch,
+					Begin: func() (dispatch.Dispatcher, error) { return dispatch.NewFake(), nil },
+				})
+				got = st
+				if err != nil {
+					t.Errorf("Recover err = %v, want nil", err)
+				}
 			default:
 				got = env.s.Settle(dispatch.NewFake(), "1", gen, res)
 			}

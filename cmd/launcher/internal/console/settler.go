@@ -8,8 +8,7 @@ import (
 
 // queueSettler wraps a settle.Settler so a settle also marks the queue's
 // matching pick and signals notify, letting a tracker write trigger Run's
-// auto-refresh (#647 AC4). The continuous engine's launch path never calls
-// SettleAdopted, so the embedded Settler handles it unmodified.
+// auto-refresh (#647 AC4).
 type queueSettler struct {
 	settle.Settler
 	q      *Queue
