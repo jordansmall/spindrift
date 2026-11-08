@@ -1,6 +1,9 @@
 package dispatch
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -674,5 +677,92 @@ func TestUsageReport_EmptyModelUsageRendersOutputNA(t *testing.T) {
 
 	if want := "| claude-opus-4-8 | 80 | n/a | 3000 | 0 | 0 |"; !strings.Contains(body, want) {
 		t.Errorf("report should contain %q; got: %q", want, body)
+	}
+}
+
+// A fix dispatch's resumed session makes the driver report only each log's
+// increment, which it can do only from the previous log's baselines. An
+// erroring log must not reset that chain.
+func TestUsage_AttemptLogsThreadSessionBaselines(t *testing.T) {
+	dir := tempLogDir(t)
+	var seen []driverkit.SessionBaselines
+	fd := fakeDriver{ExtractUsageAfterFn: func(path string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error) {
+		seen = append(seen, base)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return usage.Report{}, nil, err
+		}
+		if strings.TrimSpace(string(raw)) == "bad" {
+			return usage.Report{}, nil, errors.New("unparseable")
+		}
+		n := len(strings.TrimSpace(string(raw)))
+		return usage.Report{Found: true, Totals: usage.Usage{InputTokens: n, TotalCostUSD: float64(n)}},
+			driverkit.SessionBaselines{"S": {DurationAPIMs: int64(n)}}, nil
+	}}
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fd, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("21", "test issue")
+
+	writeRunLog(t, d, "aa")
+	if err := writeFile(d.fixLogPath(1)+".1", "bad"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(d.fixLogPath(1), "aaaa"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := d.CumulativeUsage()
+	if got.InputTokens != 6 || got.TotalCostUSD != 6 {
+		t.Errorf("CumulativeUsage = %+v, want the Found logs' increments summed (6)", got)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("driver calls = %d, want 3", len(seen))
+	}
+	if len(seen[0]) != 0 {
+		t.Errorf("first log base = %v, want empty", seen[0])
+	}
+	for i, call := range seen[1:] {
+		if call["S"].DurationAPIMs != 2 {
+			t.Errorf("call %d base = %v, want the first log's baselines", i+1, call)
+		}
+	}
+}
+
+// A retried initial attempt resumes the session (RESUME_AFTER_HOLD), so the
+// initial log's cumulative figures include the rotated initial.1's and it
+// inherits that log's baselines; the fix log then threads from the initial log.
+func TestUsage_RetriedInitialLogInheritsSessionBaselines(t *testing.T) {
+	dir := tempLogDir(t)
+	baseByLog := map[string]driverkit.SessionBaselines{}
+	fd := fakeDriver{ExtractUsageAfterFn: func(path string, base driverkit.SessionBaselines) (usage.Report, driverkit.SessionBaselines, error) {
+		baseByLog[filepath.Base(path)] = base
+		return usage.Report{Found: true}, driverkit.SessionBaselines{"S": {DurationAPIMs: int64(len(base)) + 10}}, nil
+	}}
+	f, err := NewFactory(Config{}, dir, runner.NewFake(), fd, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+	d := f.New("22", "test issue")
+
+	for _, p := range []string{d.logPath() + ".1", d.logPath(), d.fixLogPath(1)} {
+		if err := writeFile(p, "x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	d.CumulativeUsage()
+
+	if len(baseByLog) != 3 {
+		t.Fatalf("driver calls = %d, want 3", len(baseByLog))
+	}
+	if b := baseByLog[filepath.Base(d.logPath())]; b["S"].DurationAPIMs != 10 {
+		t.Errorf("initial log base = %v, want initial.1's baselines", b)
+	}
+	if b := baseByLog[filepath.Base(d.fixLogPath(1))]; b["S"].DurationAPIMs != 11 {
+		t.Errorf("fix-1 log base = %v, want the initial log's baselines", b)
 	}
 }
