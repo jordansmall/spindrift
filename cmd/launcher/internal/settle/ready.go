@@ -39,35 +39,34 @@ var errLandingNeverGreen = errors.New("settle: force-pushed head never went gree
 // timeout or API error.
 var errForcePushRed = fmt.Errorf("%w: CI went red", errLandingNeverGreen)
 
-// selfHeal polls the merge gate, dispatching fix boxes on genuine red up to
-// MaxFixAttempts times, then applies the merge mode. It swaps agent-complete
-// only once the landing path settles (issue #757). A merge failure on a
-// still-green PR stays agent-complete (ADR 0012). A force-pushed head that goes
-// red gets a fix pass from the same MaxFixAttempts budget (issue #5095); one that
-// never re-confirms green demotes to agent-failed instead (issue #758).
+// selfHeal lands num through the Lander New chose.
 func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string, passes []passmanifest.Entry) (landingResult, string, error) {
-	return s.selfHealGate(d, num, gen, pr, false, passes)
+	return s.lander.land(d, num, gen, pr, false, passes)
 }
 
-// selfHealAdopted is selfHeal's counterpart for a PR discovered independently
-// of this process's own push (SettleAdopted's resume path). It cannot assume
-// the head SHA is one this process just pushed, so its first gate poll requires
-// evidence this run's checks registered before trusting a SUCCESS rollup,
-// within a bounded window (issues #1652, #2475).
+// selfHealAdopted is selfHeal's counterpart for a landing discovered
+// independently of this process's own push (SettleAdopted's resume path); the
+// PR Lander's registration-evidence requirement (see selfHealGate) applies
+// only there.
 func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string, error) {
-	return s.selfHealGate(d, num, gen, pr, true, nil)
+	return s.lander.land(d, num, gen, pr, true, nil)
 }
 
-// selfHealGate is selfHeal and selfHealAdopted's shared implementation.
-// requireRegistration guards only the loop's first attempt, because a fix-pass
-// retry always follows a push d.Fix just made in this process. passes is the
-// run's pass manifest, which landPushOnly records alongside its landing; nil
-// (selfHealAdopted has no pass evidence) clears the recorded pass.
-func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool, passes []passmanifest.Entry) (landingResult, string, error) {
-	if s.pr == nil {
-		landing, err := s.landPushOnly(num, gen, pr, passes)
-		return landing, "", err
-	}
+// selfHealGate is the PR Lander's landing: it polls the merge gate,
+// dispatching fix boxes on genuine red up to MaxFixAttempts times, then applies
+// the merge mode. It swaps agent-complete only once the landing path settles
+// (issue #757). A merge failure on a still-green PR stays agent-complete (ADR
+// 0012). A force-pushed head that goes red gets a fix pass from the same
+// MaxFixAttempts budget (issue #5095); one that never re-confirms green demotes
+// to agent-failed instead (issue #758).
+//
+// requireRegistration is set for a PR found independently of this process's own
+// push (SettleAdopted): the head SHA may not be one this process just pushed,
+// so the first gate poll requires evidence this run's checks registered before
+// trusting a SUCCESS rollup, within a bounded window (issues #1652, #2475). It
+// guards only the loop's first attempt, because a fix-pass retry always follows
+// a push d.Fix just made in this process.
+func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool) (landingResult, string, error) {
 	// forcePushFixes counts the fix passes run on the current force-pushed
 	// head, so the failure comment can name what that head consumed. It is
 	// zero until an immediate-mode force-push's head goes red, and resets
@@ -356,13 +355,13 @@ func (s *Settle) fixPass(d dispatch.Dispatcher, num string, gen uint64, pr strin
 }
 
 // completeLanding is the single Complete-commit gate for the gateGreen arm and
-// landPushOnly. The arm's top-of-switch check catches a mark that lands before
-// MarkReady, but the Registry mark is sticky (terminate/registry.go), so
-// re-checking here also catches one that lands during MarkReady's or
-// applyMergeMode's own round-trip: Reclaim already moved num to Dispatchable
-// by then, and a Complete commit here would leave the issue wearing
-// agent-complete on top, which Reconcile's InProgress-only sweep never clears
-// (issue #3523).
+// the push-only Lander. The arm's top-of-switch check catches a mark that
+// lands before MarkReady, but the Registry mark is sticky
+// (terminate/registry.go), so re-checking here also catches one that lands
+// during the forge round-trip before it (MarkReady and applyMergeMode, or
+// pushOnlyLander.applyMode): Reclaim already moved num to Dispatchable by then,
+// and a Complete commit here would leave the issue wearing agent-complete on
+// top, which Reconcile's InProgress-only sweep never clears (issue #3523).
 func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, reason string) (landingResult, error) {
 	if s.terminated(num, gen) {
 		return landingFailed, errAbandoned
@@ -384,85 +383,6 @@ func mergedLanding(reason string) landingResult {
 		return landingMerged
 	}
 	return landingManual
-}
-
-// landPushOnly lands a push-only forge, where there is no PR or CI to watch, so
-// the issue goes Complete once MERGE_MODE has applied straight against the
-// forge's Merge and Rebase. Complete commits after the merge, through
-// completeLanding, so a mark landing during the merge's retry backoff abandons
-// instead of committing tracker state (issue #4879). A merge failure leaves
-// the issue Complete with a merge-blocked note (unless Unclaimed, which has no
-// state to move), never demoted to Failed (ADR 0012). A relay that fails with
-// its bundle still in the outbox parks the issue Failed instead (issue #4651)
-// and returns landingFailed, the transition and comment already done. An
-// immediate merge drops the landed bundle here, since verifyMerged never runs
-// without a PR.
-func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []passmanifest.Entry) (landingResult, error) {
-	// No CI watch here, so this is the only checkpoint before landing —
-	// an aborted run must not merge or commit Complete (issue #3523).
-	if s.terminated(num, gen) {
-		return landingFailed, errAbandoned
-	}
-	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
-	// instead of pushing, so relay it in first (ADR 0033). It runs ahead of the
-	// Complete commit because a stop during the relay's retry backoff (issue
-	// #4649) has already released num (issue #3523). branch is re-derived from
-	// cf.AgentBranch, never trusted from the Agent-controlled outcome line
-	// (#1949).
-	relayedRef, relayErr := s.relayBoxBundle(num, gen)
-	if relayedRef != "" {
-		branch = relayedRef
-		// Host-derived placeholder the post-merge LandingRef upgrades, so
-		// reconcile can still report a merge-blocked branch stuck (#1809).
-		s.recordLanding(num, relayedRef, passes)
-	}
-	if errors.Is(relayErr, errAbandoned) {
-		return landingFailed, errAbandoned
-	}
-	if relayFailureParkable(relayErr) {
-		s.parkRelayFailure(num, branch, relayErr)
-		return landingFailed, nil
-	}
-	err := relayErr
-	mergeReason := dispatchrecord.ReasonMergeBlocked
-	if err == nil {
-		mergeReason, err = s.applyMergeMode(num, gen, branch, nil)
-	}
-	if errors.Is(err, errAbandoned) {
-		return landingFailed, errAbandoned
-	}
-	if err != nil {
-		if _, cerr := s.completeLanding(num, gen, landingManual, dispatchrecord.ReasonMergeBlocked); cerr != nil {
-			return landingFailed, cerr
-		}
-		s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusMergeBlocked, Detail: fmt.Sprintf("!! %v", err)})
-		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
-		return landingManual, nil
-	}
-	landed := mergedLanding(mergeReason)
-	if landed != landingMerged {
-		return s.completeLanding(num, gen, landed, mergeReason)
-	}
-	// Ahead of the re-check: the merge happened and the outbox bundle is
-	// not tracker state, so an abandoned landing must still drop it.
-	s.removeLandedBundle(num)
-	if _, cerr := s.completeLanding(num, gen, landed, mergeReason); cerr != nil {
-		return landingFailed, cerr
-	}
-	// CODE_FORGE=local needs the resolved Integration ref and commit sha
-	// (ADR 0029/0033), not the placeholder agent branch recorded above, so
-	// overwrite it now that Merge has landed. Best-effort: a resolution
-	// failure must never turn a successful land into a failure.
-	if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
-		if landing, err := lr.LandingRef(); err == nil {
-			// Re-recording passes is deliberate: it keeps the pair with the
-			// upgraded landing.
-			s.recordLanding(num, landing, passes)
-		} else {
-			s.cfg.Progress.Step(Step{Key: num, Landing: branch, Status: StatusLandingRefUnresolved, Detail: fmt.Sprintf("!! %v", err)})
-		}
-	}
-	return landed, nil
 }
 
 // gateToGreen polls CheckState until confirmed SUCCESS, terminal failure, or
@@ -706,59 +626,78 @@ type rebaseBudget struct{ attempts, pushRetries int }
 // conflict is the same one read from a stale snapshot and must not be rebased
 // again.
 func (s *Settle) respondToConflict(num string, gen uint64, pr string, d dispatch.Dispatcher, cf forge.CodeForge, conflictErr error, budget *rebaseBudget) (resolved bool, err error) {
-	// Best-effort; nil-guarded because landPushOnly reaches mergeImmediate with
-	// s.pr unset.
-	if s.pr != nil {
-		if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
-			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkDraftFailed, Detail: fmt.Sprintf("!! %v", mdErr)})
-		}
+	// Best-effort.
+	if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
+		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkDraftFailed, Detail: fmt.Sprintf("!! %v", mdErr)})
 	}
-	if budget.attempts >= s.cfg.MaxRebaseAttempts {
-		return false, conflictErr
-	}
-	budget.attempts++
-	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebaseRetry, Detail: fmt.Sprintf("attempt=%d/%d", budget.attempts, s.cfg.MaxRebaseAttempts)})
-	rbErr := cf.Rebase(pr)
-	for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && budget.pushRetries < s.cfg.MaxRebaseAttempts {
-		budget.pushRetries++
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebasePushRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", budget.pushRetries, s.cfg.MaxRebaseAttempts, rbErr)})
-		s.transientBackoff().Do(budget.pushRetries)
-		rbErr = cf.Rebase(pr)
-	}
-	if rbErr != nil {
-		if errors.Is(rbErr, forge.ErrTransientPushFailure) {
-			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebasePushRetriesExhausted, Detail: fmt.Sprintf("attempts=%d  !! %v", budget.pushRetries, rbErr)})
-			return false, rbErr
-		}
-		if errors.Is(rbErr, forge.ErrMergeConflict) && d != nil {
+	var resolve func() error
+	if d != nil {
+		resolve = func() error {
 			if crErr := s.resolveConflict(num, gen, pr, d); crErr != nil {
-				return false, crErr
+				return crErr
 			}
-			if rwErr := s.rewaitAfterForcePush(num, gen, pr); rwErr != nil {
-				return false, rwErr
-			}
-			return true, nil
+			return s.rewaitAfterForcePush(num, gen, pr)
 		}
-		s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusRebaseFailed, Detail: fmt.Sprintf("!! %v", rbErr)})
-		return false, rbErr
+	}
+	resolved, err = s.rebaseOnConflict(num, pr, cf, conflictErr, budget, resolve)
+	if err != nil || resolved {
+		return resolved, err
 	}
 	// The rebase force-push reset the PR's required checks, so the next merge
 	// attempt must wait for the new head to go green.
 	return false, s.rewaitAfterForcePush(num, gen, pr)
 }
 
+// rebaseOnConflict is the Code Forge half of a conflict response, shared by the
+// PR and push-only Landers so neither path needs s.pr: spend one of budget's
+// rebase attempts on ref (conflictErr unchanged once it is spent), retrying a
+// transient push failure. A rebase that itself conflicts runs resolve when it
+// is non-nil (the PR path's conflict-resolve dispatch) and reports resolved;
+// any other failure is logged and returned. A clean rebase returns (false,
+// nil) and leaves the caller to wait out whatever the force-push reset.
+func (s *Settle) rebaseOnConflict(num, ref string, cf forge.CodeForge, conflictErr error, budget *rebaseBudget, resolve func() error) (resolved bool, err error) {
+	if budget.attempts >= s.cfg.MaxRebaseAttempts {
+		return false, conflictErr
+	}
+	budget.attempts++
+	s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusRebaseRetry, Detail: fmt.Sprintf("attempt=%d/%d", budget.attempts, s.cfg.MaxRebaseAttempts)})
+	rbErr := cf.Rebase(ref)
+	for rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && budget.pushRetries < s.cfg.MaxRebaseAttempts {
+		budget.pushRetries++
+		s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusRebasePushRetry, Detail: fmt.Sprintf("attempt=%d/%d  !! %v", budget.pushRetries, s.cfg.MaxRebaseAttempts, rbErr)})
+		s.transientBackoff().Do(budget.pushRetries)
+		rbErr = cf.Rebase(ref)
+	}
+	if rbErr != nil {
+		if errors.Is(rbErr, forge.ErrTransientPushFailure) {
+			s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusRebasePushRetriesExhausted, Detail: fmt.Sprintf("attempts=%d  !! %v", budget.pushRetries, rbErr)})
+			return false, rbErr
+		}
+		if errors.Is(rbErr, forge.ErrMergeConflict) && resolve != nil {
+			if err := resolve(); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusRebaseFailed, Detail: fmt.Sprintf("!! %v", rbErr)})
+		return false, rbErr
+	}
+	return false, nil
+}
+
 // applyMergeMode performs the mode-specific action once a landing is ready to
-// merge: CI green on a PR, or straight away on a push-only forge. It runs
-// before the Complete commit, which both callers make through completeLanding
-// after it returns; see completeLanding for why that order matters (issues
-// #3523, #4879) and for the Unclaimed case. A returned merge failure settles
-// Complete with dispatchrecord.ReasonMergeBlocked (ADR 0012), except
-// errAbandoned, which commits nothing, and selfHealGate's errLandingNeverGreen,
-// which settles Failed unless it is a red head with fix budget left
-// (errForcePushRed, which takes a fix pass instead, issue #5095). A nil d makes
-// a rebase conflict immediately non-retriable, since nothing can dispatch a
-// conflict resolution. On a nil error the returned string is the reason class
-// of the landing, decided here so the mode switch is the only one.
+// merge: CI green on a PR. It runs before the Complete commit, which
+// selfHealGate makes through completeLanding after it returns; see
+// completeLanding for why that order matters (issues #3523, #4879) and for the
+// Unclaimed case. A returned merge failure settles Complete with
+// dispatchrecord.ReasonMergeBlocked (ADR 0012), except errAbandoned, which
+// commits nothing, and selfHealGate's errLandingNeverGreen, which settles
+// Failed unless it is a red head with fix budget left (errForcePushRed, which
+// takes a fix pass instead, issue #5095). A nil d makes a rebase conflict
+// immediately non-retriable, since nothing can dispatch a conflict resolution.
+// On a nil error the returned string is the reason class of the landing,
+// decided here. This is the PR forge's mode switch; a push-only forge has its
+// own in pushOnlyLander.applyMode.
 func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Dispatcher) (string, error) {
 	switch s.cfg.MergeMode {
 	case "immediate":
@@ -767,9 +706,6 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 		}
 		return dispatchrecord.ReasonMerged, nil
 	case "auto":
-		if s.pr == nil {
-			return "", fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
-		}
 		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
 			// Audited (issues #1233, #831): execClient.EnqueueAutoMerge captures
 			// no stdout or stderr, so err is only ever an *exec.ExitError, a
@@ -799,8 +735,6 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 // iteration deliberately, because preflightStaleBase force-pushes (issue #943).
 func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
 	var budget rebaseBudget
-	checksBlockedAttempts := 0
-	skipRebase := false
 	if s.terminated(num, gen) {
 		return errAbandoned
 	}
@@ -809,16 +743,39 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	if err := s.preflightStaleBase(num, gen, pr, d); err != nil {
 		return err
 	}
-	// cf is num's own parent-keyed instance when Config.CodeForgeForIssue is set
-	// (CODE_FORGE=local, issue #1734), otherwise New's cf unchanged.
 	cf := s.cfForNum(num)
+	skipRebase := false
+	return s.mergeLoop(num, gen, pr, cf, func(conflictErr error) error {
+		if skipRebase {
+			// The conflict-resolve dispatch already ran and restored ready, so
+			// this ErrMergeConflict is the same resolved conflict read from a
+			// stale mergeability snapshot. Re-demoting would leave the Merge
+			// retry attempting a draft PR (issue #1863).
+			skipRebase = false
+			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeRetrySettle})
+			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
+			return nil
+		}
+		resolved, rErr := s.respondToConflict(num, gen, pr, d, cf, conflictErr, &budget)
+		skipRebase = resolved
+		return rErr
+	})
+}
+
+// mergeLoop merges ref through cf, the Code Forge half of an immediate merge
+// shared by the PR and push-only Landers. onConflict answers each
+// forge.ErrMergeConflict: nil retries the merge, an error ends the loop with
+// it. cf is num's own parent-keyed instance when Config.CodeForgeForIssue is
+// set (CODE_FORGE=local, issue #1734), otherwise New's cf unchanged.
+func (s *Settle) mergeLoop(num string, gen uint64, ref string, cf forge.CodeForge, onConflict func(conflictErr error) error) error {
+	checksBlockedAttempts := 0
 	transients := s.newRetryLoop(num, gen) // one loop: the transient budget spans every Merge below
 	for {
 		if s.terminated(num, gen) {
 			return errAbandoned
 		}
-		err := transients.run(StatusMergeTransientRetry, "", pr,
-			func() error { return cf.Merge(pr) },
+		err := transients.run(StatusMergeTransientRetry, "", ref,
+			func() error { return cf.Merge(ref) },
 			func(err error) bool { return !errors.Is(err, forge.ErrMergeTransient) }, nil)
 		if err == nil {
 			return nil
@@ -828,28 +785,16 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 				return err
 			}
 			checksBlockedAttempts++
-			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeBlockedByChecks, Detail: fmt.Sprintf("attempt=%d/%d", checksBlockedAttempts, s.cfg.MaxRebaseAttempts)})
+			s.cfg.Progress.Step(Step{Key: num, Landing: ref, Status: StatusMergeBlockedByChecks, Detail: fmt.Sprintf("attempt=%d/%d", checksBlockedAttempts, s.cfg.MaxRebaseAttempts)})
 			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
 			continue
 		}
 		if !errors.Is(err, forge.ErrMergeConflict) {
 			return err
 		}
-		if skipRebase {
-			// The conflict-resolve dispatch already ran and restored ready, so
-			// this ErrMergeConflict is the same resolved conflict read from a
-			// stale mergeability snapshot. Re-demoting would leave the Merge
-			// retry below attempting a draft PR (issue #1863).
-			skipRebase = false
-			s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMergeRetrySettle})
-			s.clock.Sleep(time.Duration(s.cfg.MergePollInterval) * time.Second)
-			continue
+		if err := onConflict(err); err != nil {
+			return err
 		}
-		resolved, rErr := s.respondToConflict(num, gen, pr, d, cf, err, &budget)
-		if rErr != nil {
-			return rErr
-		}
-		skipRebase = resolved
 	}
 }
 
@@ -868,7 +813,7 @@ func (s *Settle) transientBackoff() retry.LinearBackoff {
 // error is swallowed, since the caller's Merge surfaces the same problem, but a
 // Rebase failure is hard (issue #940): staleness is confirmed, the fix failed.
 func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
-	if s.pr == nil || !s.cfg.PreflightStaleBase {
+	if !s.cfg.PreflightStaleBase {
 		return nil
 	}
 	stale, err := s.pr.NeedsUpdate(pr)
@@ -889,11 +834,9 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	}
 	if rbErr != nil {
 		isConflict := errors.Is(rbErr, forge.ErrMergeConflict)
-		if isConflict && s.pr != nil {
+		if isConflict {
 			// A genuine conflict: demote to draft (issue #1863) whether or not a
-			// Dispatcher can resolve it. The early return above already
-			// guarantees s.pr is non-nil; the check repeats so this stays
-			// correct if that guard ever moves.
+			// Dispatcher can resolve it.
 			if mdErr := s.pr.MarkDraft(pr); mdErr != nil {
 				s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusMarkDraftFailed, Detail: fmt.Sprintf("!! %v", mdErr)})
 			}
@@ -985,12 +928,8 @@ func (s *Settle) relayBoxBundle(num string, gen uint64) (ref string, err error) 
 // rewaitAfterForcePush waits for CI to reach green on the PR's current head
 // after a force-push reset its required checks. Its error is distinct from
 // forge.ErrMergeConflict, so the caller's conflict-retry path is never
-// re-entered for it. A push-only forge has no CI to wait for, so this is a
-// no-op there rather than a crash on s.pr.CheckState (found reviewing #1698).
+// re-entered for it.
 func (s *Settle) rewaitAfterForcePush(num string, gen uint64, pr string) error {
-	if s.pr == nil {
-		return nil
-	}
 	s.cfg.Progress.Step(Step{Key: num, Landing: pr, Status: StatusPostForcePushWait})
 	obs, gReason := s.gateToGreen(num, gen, pr, false)
 	if errors.Is(obs.err, errAbandoned) {

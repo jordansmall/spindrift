@@ -51,9 +51,9 @@ func (g gateResult) String() string {
 	}
 }
 
-// landingResult names the outcome of a landing attempt (selfHeal or
-// landPushOnly), meaningful only when the attempt's error is nil: errAbandoned
-// means no landing took place.
+// landingResult names the outcome of a landing attempt (prLander.land or
+// pushOnlyLander.land), meaningful only when the attempt's error is nil:
+// errAbandoned means no landing took place.
 type landingResult int
 
 const (

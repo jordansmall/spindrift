@@ -3268,7 +3268,7 @@ func settledOutcome(key, reason, prURL string) settle.DispatchOutcome {
 // mixedOutcomes is one delivered dispatch plus a representative mix of ways a
 // dispatch can fail to deliver, each shaped as settle really records it: a
 // Complete merge-blocked record with no PR (a push-only landing failure,
-// landPushOnly), an InProgress handoff-blocked (blockHandoff), relay-failed, a
+// the push-only Lander), an InProgress handoff-blocked (blockHandoff), relay-failed, a
 // Failed ci-red that still has its PR open, already-resolved, blocked,
 // ambiguous, a Chore key, and the off-script InProgress.
 func mixedOutcomes() []settle.DispatchOutcome {

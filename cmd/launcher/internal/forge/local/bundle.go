@@ -166,7 +166,7 @@ func landingRef(repoPath, branch string) (string, error) {
 }
 
 // parseLandingRef splits landingRef's "<branch>@<sha>" back into its parts. ok
-// is false for the raw agent-branch name settle's landPushOnly records before a
+// is false for the raw agent-branch name settle's push-only Lander records before a
 // merge is attempted, which has no "@", and for a sha starting with "-", which
 // git could otherwise misread as an option.
 func parseLandingRef(landing string) (branch, sha string, ok bool) {

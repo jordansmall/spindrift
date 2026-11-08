@@ -41,7 +41,7 @@ const (
 type bundleFate int
 
 const (
-	noBundle bundleFate = iota
+	bundleUnset bundleFate = iota // a bundle:true row must set wantBundle explicitly
 	bundleKept
 	bundleDropped
 )
@@ -119,7 +119,7 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 	errTransientMerge := forge.ErrMergeTransient.Error()
 	placeholder := []forge.RecordLandingCall{{Num: "1", Landing: pushOnlyBranch}}
 	refUpgrade := []forge.RecordLandingCall{{Num: "1", Landing: pushOnlyBranch}, {Num: "1", Landing: "integration/1694@abc123"}}
-	// Recover records the landing once itself and again in landPushOnly.
+	// Recover records the landing once itself and again in the push-only Lander.
 	twice := func(l []forge.RecordLandingCall) []forge.RecordLandingCall {
 		return append(append([]forge.RecordLandingCall(nil), l...), l...)
 	}
@@ -174,6 +174,13 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			want:      blocked, wantLabels: complete,
 			wantSteps:    []Step{pushOnlyStep(StatusMergeBlocked, "!! MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")},
 			wantComments: []string{"landing blocked: MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)"},
+		},
+		{
+			name:      "git unrecognised merge mode blocks",
+			mergeMode: "bogus",
+			want:      blocked, wantLabels: complete,
+			wantSteps:    []Step{pushOnlyStep(StatusMergeBlocked, `!! unrecognised MERGE_MODE: "bogus"`)},
+			wantComments: []string{`landing blocked: unrecognised MERGE_MODE: "bogus"`},
 		},
 		// git shape: a stop abandons without touching the released issue
 		{
@@ -507,10 +514,6 @@ func TestSettle_PushOnlyLander(t *testing.T) {
 			want: adoptedMerged, wantLabels: complete, wantNoLabels: noFailed, wantMerged: pushOnlyBranch,
 		},
 	}
-	runPushOnlyCases(t, cases)
-}
-
-func runPushOnlyCases(t *testing.T, cases []pushOnlyCase) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
@@ -624,6 +627,9 @@ func runPushOnlyCases(t *testing.T, cases []pushOnlyCase) {
 				}
 			}
 			if tc.bundle {
+				if tc.wantBundle == bundleUnset {
+					t.Fatal("bundle row must set wantBundle")
+				}
 				if gone := !bundleExists(t, env.outbox); gone != (tc.wantBundle == bundleDropped) {
 					t.Errorf("bundle removed = %v, want fate %v", gone, tc.wantBundle)
 				}
