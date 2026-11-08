@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // terminateCases are the rows where an operator's Terminate (or Reclaim) lands
@@ -90,6 +91,21 @@ func terminateCases() []prCase {
 			setup:     func(_ *testing.T, _ *forge.Fake, c *Config) { stopOnSleep(c) },
 			wire:      armSleep,
 			abandoned: true,
+		},
+		{
+			// The first pause is the gate's success-confirm; the second is the
+			// merge-transient backoff, which must not sleep out its wait and merge again.
+			name: "a stop during a merge-transient backoff abandons instead of merging again", mergeErrs: []error{forge.ErrMergeTransient, nil},
+			setup: func(_ *testing.T, _ *forge.Fake, c *Config) {
+				c.Policy = retry.Policy{Max: 3, Unit: 5 * time.Second}
+				sleeps := 0
+				c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) {
+					if sleeps++; sleeps == 2 {
+						stopNow()
+					}
+				}}
+			},
+			wire: armSleep, abandoned: true, wantCalls: []string{"MarkReady:" + testPR, "Merge:" + testPR},
 		},
 		{
 			name: "a stop during the ready flip abandons before the manual hand-off", mergeMode: "manual",

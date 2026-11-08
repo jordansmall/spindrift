@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -53,6 +54,13 @@ func mergeCases() []prCase {
 	}
 
 	pollSleep := time.Second // baseConfig's MergePollInterval; the initial gate's confirm-poll sleeps through the same clock, ahead of the retry
+	// backoff is the policy a rebase-push or merge retry sleeps out: retry N
+	// waits Unit*N + Jitter in total.
+	backoff := func(max int) func(*testing.T, *forge.Fake, *Config) {
+		return func(_ *testing.T, _ *forge.Fake, c *Config) {
+			c.Policy = retry.Policy{Max: max, Unit: 2 * time.Second, Jitter: time.Second}
+		}
+	}
 	var retrySleeps, blockedSleeps *[]time.Duration
 	sleepsInto := func(dst **[]time.Duration) func(*testing.T, *forge.Fake, *Config) {
 		return func(_ *testing.T, _ *forge.Fake, c *Config) {
@@ -150,11 +158,15 @@ func mergeCases() []prCase {
 		},
 
 		{
-			name:      "a transient merge failure is retried and the merge lands",
-			maxRebase: 3, mergeErrs: []error{forge.ErrMergeTransient},
-			setup: func(_ *testing.T, _ *forge.Fake, c *Config) { c.Policy.Max = 3 },
-			want:  merged, wantLabels: complete, wantMerged: testPR, wantCalls: []string{ready, merge, merge},
-			check: noDraft,
+			name:      "a transient merge failure is retried with a growing backoff and the merge lands",
+			maxRebase: 3, mergeErrs: []error{forge.ErrMergeTransient, forge.ErrMergeTransient},
+			setup: with(backoff(3), sleepsInto(&retrySleeps)),
+			want:  merged, wantLabels: complete, wantMerged: testPR, wantCalls: []string{ready, merge, merge, merge},
+			check: func(t *testing.T, fc *forge.Fake, d *dispatch.Fake) {
+				noDraft(t, fc, d)
+				// The confirm poll, then retries 1 and 2 waiting 3s and 5s in 1s slices.
+				sleptThrough(&retrySleeps, slices.Repeat([]time.Duration{pollSleep}, 1+3+5)...)(t, fc, d)
+			},
 		},
 		{
 			name:      "a transient merge failure that persists leaves the merge blocked once the retries are spent",
@@ -173,6 +185,16 @@ func mergeCases() []prCase {
 			wantComments: []string{"merge blocked after green CI"},
 		},
 		{
+			// A checks-blocked wait between two transients does not refill the
+			// budget: the fourth Merge result is never consumed.
+			name:      "the transient retry budget spans the whole merge, checks-blocked waits included",
+			maxRebase: 2, mergeErrs: []error{forge.ErrMergeTransient, forge.ErrMergeBlockedByChecks, forge.ErrMergeTransient, nil},
+			setup: func(_ *testing.T, _ *forge.Fake, c *Config) { c.Policy = retry.Policy{Max: 1, Unit: time.Second} },
+			want:  blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: []string{ready, merge, merge, merge},
+			wantStepsLike: []Step{prStep(StatusMergeTransientRetry, "attempt=1/1 ")},
+			wantComments:  []string{"merge blocked after green CI"},
+		},
+		{
 			name:      "a transient push failure on the rebase is retried and the merge lands",
 			checks:    fourGreen,
 			maxRebase: 3, mergeErrs: []error{errConflict}, setup: withRebaseErrs(errTransient, nil),
@@ -182,16 +204,25 @@ func mergeCases() []prCase {
 		{
 			name:         "a transient push failure that persists exhausts its retries and leaves the merge blocked",
 			wantComments: []string{"merge blocked after green CI: transient push failure"},
-			maxRebase:    2, mergeErrs: []error{errConflict}, setup: withRebaseErrs(errTransient, errTransient, errTransient),
+			maxRebase:    2, mergeErrs: []error{errConflict}, setup: with(backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errTransient, errTransient, errTransient)),
 			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted, wantRebases: 3,
+			check:     sleptThrough(&retrySleeps, pollSleep, 3*time.Second, 5*time.Second),
 			wantSteps: []Step{prStep(StatusRebasePushRetriesExhausted, fmt.Sprintf("attempts=2  !! %v", errTransient))},
 		},
 		{
 			name:         "a permanent push failure on the rebase is not retried",
 			wantComments: []string{"merge blocked after green CI: git push --force-with-lease"},
-			maxRebase:    3, mergeErrs: []error{errConflict}, setup: withRebaseErrs(errRepoGone, nil),
+			maxRebase:    3, mergeErrs: []error{errConflict}, setup: with(backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errRepoGone, nil)),
 			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted, wantRebases: 1,
 			wantSteps: []Step{prStep(StatusRebaseFailed, "!! "+errRepoGone.Error())},
+			check:     sleptThrough(&retrySleeps, pollSleep), // the backoff fires between retries, never before the first attempt
+		},
+		{
+			name:      "no rebase attempts leaves a conflict blocked without a push retry",
+			maxRebase: 0, mergeErrs: []error{errConflict}, setup: with(backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errTransient)),
+			want: blocked, wantLabels: complete, wantNoLabels: failed, wantCalls: conflicted,
+			wantComments: []string{"merge blocked after green CI"},
+			check:        sleptThrough(&retrySleeps, pollSleep),
 		},
 
 		{
@@ -257,9 +288,14 @@ func mergeCases() []prCase {
 		{
 			name:      "a transient push failure on the stale-base rebase retries without demoting",
 			checks:    fourGreen,
-			maxRebase: 3, setup: with(stale, withRebaseErrs(errTransient, nil)),
-			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: []string{ready, ready, merge}, wantRebases: 2,
-			wantSteps: []Step{prStep(StatusRebasePushRetry, fmt.Sprintf("attempt=1/3  !! %v", errTransient))}, check: noDraft,
+			maxRebase: 3, setup: with(stale, backoff(0), sleepsInto(&retrySleeps), withRebaseErrs(errTransient, errTransient, nil)),
+			want: merged, wantLabels: complete, wantMerged: testPR, wantCalls: []string{ready, ready, merge}, wantRebases: 3,
+			wantSteps: []Step{prStep(StatusRebasePushRetry, fmt.Sprintf("attempt=1/3  !! %v", errTransient))},
+			check: func(t *testing.T, fc *forge.Fake, d *dispatch.Fake) {
+				noDraft(t, fc, d)
+				// The confirm polls around the retries sleep through the same clock.
+				sleptThrough(&retrySleeps, pollSleep, 3*time.Second, 5*time.Second, pollSleep)(t, fc, d)
+			},
 		},
 		{
 			name:      "a stale-base rebase that conflicts is resolved by a Box, demoted to draft meanwhile",
