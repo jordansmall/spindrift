@@ -43,12 +43,11 @@ func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	return st
 }
 
-// Fail delegates to the wrapped Settler, then marks num failed and notifies
-// unless num was terminated in flight, so a Box that exited non-zero reaches a
-// terminal queue row instead of stranding at PickRunning (issue #705). gen is
-// as in Settle.
-func (qs queueSettler) Fail(num string, gen uint64, result dispatch.Result) {
-	qs.Settler.Fail(num, gen, result)
+// boxFailed is the waves.Session.BoxFailed hook: it marks num failed and
+// notifies unless num was terminated in flight, so a Box that exited non-zero
+// reaches a terminal queue row instead of stranding at PickRunning (issue
+// #705). gen is as in Settle.
+func (qs queueSettler) boxFailed(num string, gen uint64) {
 	if qs.terminated.Marked(num, gen) {
 		return
 	}

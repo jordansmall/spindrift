@@ -567,7 +567,8 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	// on another in-progress issue's touched files. Queue.Discover already claimed
 	// the issue from Dispatchable to InProgress, so runContinuousQueue's no-op
 	// Claim avoids a redundant second one (issue #2938).
-	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, st.factory, queueSettler{Settler: st.settle, q: l.queueRef(), notify: l.signalRefresh, terminated: l.registry(), kind: st.kind}, runContinuousQueue{
+	qs := queueSettler{Settler: st.settle, q: l.queueRef(), notify: l.signalRefresh, terminated: l.registry(), kind: st.kind}
+	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry(), BoxFailed: qs.boxFailed}, st.tracker, l.CodeForge, st.factory, qs, runContinuousQueue{
 		discover: discover,
 		pending:  func() int { return l.queueRef().PendingCount(st.kind) },
 		report:   l.recordStaleDrainReport,

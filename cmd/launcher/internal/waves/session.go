@@ -32,6 +32,11 @@ type Session struct {
 	// Tally folds the Settlement each of this session's settles returns,
 	// keyed by issue. Nil folds nothing.
 	Tally *settle.Tally
+
+	// BoxFailed, when non-nil, is called after a Box that exited non-zero was
+	// transitioned to Failed, so the Console's queue can move its row out of
+	// PickRunning (issue #705). Nil means no observer (headless runs).
+	BoxFailed func(num string, gen uint64)
 }
 
 // record folds st into the session's Tally under issue num; nil-safe on both
@@ -39,5 +44,12 @@ type Session struct {
 func (s *Session) record(num string, st settle.Settlement) {
 	if s != nil {
 		s.Tally.Record(dispatchkey.Issue(num), st)
+	}
+}
+
+// boxFailed calls the BoxFailed hook; nil-safe on both the Session and the hook.
+func (s *Session) boxFailed(num string, gen uint64) {
+	if s != nil && s.BoxFailed != nil {
+		s.BoxFailed(num, gen)
 	}
 }

@@ -152,10 +152,3 @@ func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) Settlemen
 	r.progress.Step(Step{Key: num, Status: StatusFailed, Detail: "note=" + note})
 	return st
 }
-
-// Fail is a no-op but is reachable: under CONTINUOUS_DISPATCH this Settler runs
-// inside RunContinuous, whose Box-failure branch calls Fail on any Box exit. The
-// empty body is correct because the caller already transitions the tracker to
-// Failed, so do not skip calling Fail on the assumption it cannot run.
-func (r *ResearchSettle) Fail(num string, gen uint64, result dispatch.Result) {
-}
