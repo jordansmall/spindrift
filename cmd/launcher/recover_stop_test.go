@@ -116,27 +116,22 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 	}
 }
 
-// abortDuringSettle wraps settle.Fake so the mid-flight test below can close
-// abortCh from inside the settle call itself: unlike selective dispatch's
-// Run, recoverByNumber has no Box goroutine to synchronize an external abort
-// against, so the settle stub is the one seam standing in for "CI is being
-// watched" when the operator's second signal lands. It then waits on
-// killSignal so the watcher's whole reclaimInFlight call -- not just the
-// Kill inside it -- has provably started before SettleAdopted returns.
-type abortDuringSettle struct {
-	*settle.Fake
-	abortCh    chan struct{}
-	killSignal chan string
-}
-
-func (a *abortDuringSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) settle.Settlement {
-	close(a.abortCh)
-	select {
-	case <-a.killSignal:
-	case <-time.After(5 * time.Second):
-		panic("timed out waiting for the watcher to reclaim " + num)
-	}
-	return a.Fake.SettleAdopted(d, num, gen, prURL)
+// abortDuringSettle makes s close abortCh from inside SettleAdopted: unlike
+// selective dispatch's Run, recoverByNumber has no Box goroutine to
+// synchronize an external abort against, so the settle stub is the one seam
+// standing in for "CI is being watched" when the operator's second signal
+// lands. It then waits on killSignal so the watcher's whole reclaimInFlight
+// call -- not just the Kill inside it -- has provably started before
+// SettleAdopted returns.
+func abortDuringSettle(s *settle.Fake, abortCh chan struct{}, killSignal chan string) {
+	s.On("SettleAdopted", func(int) {
+		close(abortCh)
+		select {
+		case <-killSignal:
+		case <-time.After(5 * time.Second):
+			panic("timed out waiting for the watcher to reclaim 42")
+		}
+	})
 }
 
 // TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable proves the
@@ -164,7 +159,8 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 	dir := tempLogDir(t)
 	killSignal := make(chan string, 1)
 	rf := &killHook{Fake: runner.NewFake(), killed: killSignal}
-	s := &abortDuringSettle{Fake: settle.NewFake(), abortCh: abortCh, killSignal: killSignal}
+	s := settle.NewFake()
+	abortDuringSettle(s, abortCh, killSignal)
 
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
 
@@ -211,7 +207,8 @@ func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.
 	dir := tempLogDir(t)
 	killSignal := make(chan string, 1)
 	rf := &killHook{Fake: runner.NewFake(), killed: killSignal}
-	s := &abortDuringSettle{Fake: settle.NewFake(), abortCh: abortCh, killSignal: killSignal}
+	s := settle.NewFake()
+	abortDuringSettle(s, abortCh, killSignal)
 
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
 
@@ -291,37 +288,22 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 	}
 }
 
-// abortAfterFakeSettle closes abortCh only once the underlying SettleAdopted
-// or SettleRelayedBranch call has returned, standing in for a second operator
-// signal landing the instant after the settle labelled the issue
-// agent-complete -- the blocking finding's own scenario (issue #3522,
-// recoverByNumber's SettleAdopted arm). It also flips the issue to Complete
-// first, mirroring what a real settle does on that path, so a wrongly-triggered
-// reclaim is visible as a Complete->Dispatchable transition plus a reclaim
-// comment under any trigger, not just a missing one.
-type abortAfterFakeSettle struct {
-	*settle.Fake
-	fc      *forge.Fake
-	num     string
-	abortCh chan struct{}
-}
-
-func (a *abortAfterFakeSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) settle.Settlement {
-	st := a.Fake.SettleAdopted(d, num, gen, prURL)
-	if err := a.fc.TransitionState(a.num, forge.InProgress, forge.Complete); err != nil {
-		panic(err)
+// completeThenAbort stands in for a second operator signal landing the instant
+// after the settle labelled the issue agent-complete -- the blocking finding's
+// own scenario (issue #3522, recoverByNumber's SettleAdopted arm). The hook runs
+// before the fake records its call, which changes nothing the fake reads. It
+// flips #42 to Complete first, mirroring what a real settle does on that path,
+// so a wrongly-triggered reclaim is visible as a Complete->Dispatchable
+// transition plus a reclaim comment under any trigger, not just a missing one.
+func completeThenAbort(s *settle.Fake, fc *forge.Fake, abortCh chan struct{}) {
+	hook := func(int) {
+		if err := fc.TransitionState("42", forge.InProgress, forge.Complete); err != nil {
+			panic(err)
+		}
+		close(abortCh)
 	}
-	close(a.abortCh)
-	return st
-}
-
-func (a *abortAfterFakeSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (settle.Settlement, bool, error) {
-	st, settled, err := a.Fake.SettleRelayedBranch(d, num, gen, sit, result)
-	if terr := a.fc.TransitionState(a.num, forge.InProgress, forge.Complete); terr != nil {
-		panic(terr)
-	}
-	close(a.abortCh)
-	return st, settled, err
+	s.On("SettleAdopted", hook)
+	s.On("SettleRelayedBranch", hook)
 }
 
 // TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim pins the blocking
@@ -348,7 +330,8 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 
 	dir := tempLogDir(t)
-	s := &abortAfterFakeSettle{Fake: settle.NewFake(), fc: fc, num: "42", abortCh: abortCh}
+	s := settle.NewFake()
+	completeThenAbort(s, fc, abortCh)
 
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
 
@@ -395,9 +378,9 @@ func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.InProgressLabel}})
 
 	dir := tempLogDir(t)
-	fk := settle.NewFake()
-	fk.SettleRelayedBranchErr = errors.New("relay: boom")
-	s := &abortAfterFakeSettle{Fake: fk, fc: fc, num: "42", abortCh: abortCh}
+	s := settle.NewFake()
+	s.SettleRelayedBranchErr = errors.New("relay: boom")
+	completeThenAbort(s, fc, abortCh)
 
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
 
@@ -562,17 +545,6 @@ func failThenAbort(it *issueReadCounter, num string, abort func()) {
 	}
 }
 
-type failThenAbortAdopted struct {
-	*settle.Fake
-	it    *issueReadCounter
-	abort func()
-}
-
-func (a *failThenAbortAdopted) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) settle.Settlement {
-	failThenAbort(a.it, num, a.abort)
-	return a.Fake.SettleAdopted(d, num, gen, prURL)
-}
-
 // A hand-run recover the workflow claimed (issue wears only in-progress) whose
 // own settle wrote agent-failed must not have that terminal label reclaimed
 // when an abort lands before gate.Leave (issue #4888).
@@ -588,7 +560,8 @@ func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
 	dir := tempLogDir(t)
 	rf := newKillHook(runner.NewFake())
 	it := &issueReadCounter{IssueTracker: fc}
-	s := &failThenAbortAdopted{Fake: settle.NewFake(), it: it, abort: abort}
+	s := settle.NewFake()
+	s.On("SettleAdopted", func(int) { failThenAbort(it, "42", abort) })
 
 	err := recoverByNumber(c, it, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
 

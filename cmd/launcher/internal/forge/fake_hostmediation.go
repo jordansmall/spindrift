@@ -29,10 +29,6 @@ type HostMediationFake struct {
 	// A nil entry succeeds at once with CreateDraftPRURL, bypassing
 	// CreateDraftPRAdoptHead, so the two knobs do not compose.
 	CreateDraftPRErrs []error
-	// CreateDraftPROnCall, if non-nil, runs on every CreateDraftPR call, after
-	// the call is recorded and outside the fake's lock. A test uses it to
-	// register the PR a timed-out create nonetheless made on the forge.
-	CreateDraftPROnCall func(head string)
 	// CreateDraftPRAdoptHead, if non-empty, is the head a CreateDraftPR call
 	// adopts rather than failing (issue #2407 slice 3), returning
 	// CreateDraftPRAdoptedURL with no error. Checked before
@@ -119,15 +115,10 @@ func (hm *HostMediationFake) relayBundle(outboxDir, ref string) error {
 
 // createDraftPR backs the optional DraftPRCreator interface (issue #1919).
 func (hm *HostMediationFake) createDraftPR(title, body, base, head string) (string, bool, error) {
-	hm.mu.Lock()
-	hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
-	onCall := hm.CreateDraftPROnCall
-	hm.mu.Unlock()
-	if onCall != nil {
-		onCall(head)
-	}
+	hm.Fire("CreateDraftPR")
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
+	hm.CreateDraftPRCalls = append(hm.CreateDraftPRCalls, CreateDraftPRCall{Title: title, Body: body, Base: base, Head: head})
 	if len(hm.CreateDraftPRErrs) > 0 {
 		err := hm.CreateDraftPRErrs[0]
 		hm.CreateDraftPRErrs = hm.CreateDraftPRErrs[1:]

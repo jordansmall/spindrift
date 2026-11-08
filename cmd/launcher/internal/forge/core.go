@@ -11,7 +11,9 @@ import (
 // exactly one capability stays in that capability's file (issue #2358).
 type core struct {
 	// Hooks lets a test run a callback inside a named fake method (Rebase,
-	// Merge, CheckState, MarkReady, ListPRFiles, RelayBundle); see fakehook.
+	// Merge, CheckState, MarkReady, ListPRFiles, RelayBundle, OpenPRForBranch,
+	// TransitionState, Comment, CreateDraftPR); see fakehook. A hook fires at
+	// the top of the method, before the fake records the call.
 	fakehook.Hooks
 
 	mu sync.Mutex

@@ -4425,13 +4425,13 @@ func TestTea_TerminateKey_ConfirmThenQuit_Stay_KeepsRunning(t *testing.T) {
 // TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks pins
 // that handleTerminateConfirmKey's "y" branch returns before TerminateAsync's
 // backgrounded Terminate finishes its tracker.Comment I/O (issue #745). A
-// blockingCommentTracker holds Comment open, so while it blocks the prompt must
+// blockComments hook holds Comment open, so while it blocks the prompt must
 // be gone and the queue pick must still read PickRunning (issue #1084).
 func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *testing.T) {
 	launch, fc, fr, _ := newTermTestLauncher(t)
-	bt := &blockingCommentTracker{IssueTracker: fc, unblock: make(chan struct{})}
+	unblock, hits := blockComments(fc)
 
-	tm := teatest.NewTestModel(t, newTeaModel(bt, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
+	tm := teatest.NewTestModel(t, newTeaModel(fc, t.TempDir(), launch), teatest.WithInitialTermSize(80, 24))
 	waitForOutput(t, tm, "fix the thing")
 
 	sendKey(tm, "X")
@@ -4440,15 +4440,15 @@ func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *te
 	sendKey(tm, "y")
 	// If handleTerminateConfirmKey ever called Terminate synchronously
 	// instead of TerminateAsync, Update itself would block here on
-	// bt.unblock (still closed below) and this render would never arrive;
+	// unblock (still closed below) and this render would never arrive;
 	// waitForOutput would hang until teatestTimeout and fail the test.
 	waitForOutput(t, tm, "fix the thing") // confirm prompt gone, backlog/queue view back
 
 	// The background goroutine's scheduling is not ordered against this
-	// render, so poll rather than read commentHit once; a bounded wait still
+	// render, so poll rather than read the Comment count once; a bounded wait still
 	// fails fast if Comment was never reached at all.
 	deadline := time.Now().Add(2 * time.Second)
-	for atomic.LoadInt32(&bt.commentHit) == 0 {
+	for hits.Load() == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("Comment was never called on the tracker")
 		}
@@ -4459,7 +4459,7 @@ func TestTea_TerminateKey_ConfirmThenYes_RespondsWhileTrackerCommentBlocks(t *te
 		t.Fatalf("queue pick = %+v, want still PickRunning while Comment is blocked", snap)
 	}
 
-	close(bt.unblock)
+	close(unblock)
 	sendKey(tm, "5") // PickTerminated folds into SectionFailed (ADR 0030)
 	waitForOutput(t, tm, "terminated")
 

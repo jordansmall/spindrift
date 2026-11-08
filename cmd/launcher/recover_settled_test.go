@@ -100,7 +100,8 @@ func TestRecoverQueueOne_StoppedAfterClaimAppendsSettled(t *testing.T) {
 	stop := withControlledStop(t)
 	read := testutil.InstallPipeReporter(t)
 
-	if code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf)); code != int(exitcode.SignalledStop) {
+	x.stopOnClaim(stop)
+	if code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf)); code != int(exitcode.SignalledStop) {
 		t.Fatalf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 
@@ -215,9 +216,10 @@ func TestRecoverQueueOne_RefusedRestoreCommentsAndSettlesDistinctReason(t *testi
 	stop := withControlledStop(t)
 	read := testutil.InstallPipeReporter(t)
 	x.fc.CommentCalls = nil
+	x.stopOnClaim(stop)
 
 	testutil.CaptureStderr(t, func() {
-		x.runOn(t, stopAfterClaim{IssueTracker: refuseRestore{x.fc}, stop: stop}, x.cf, capsFor(x.tracker, x.cf))
+		x.runOn(t, refuseRestore{x.fc}, x.cf, capsFor(x.tracker, x.cf))
 	})
 
 	requireRecoverSettled(t, path, "failed", "transition-refused", read())

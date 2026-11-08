@@ -28,3 +28,18 @@ func TestFake_RecordsCalls(t *testing.T) {
 		t.Errorf("SettleAdoptedCalls = %+v, want one call for num=2, pr=%s", f.SettleAdoptedCalls, testPR)
 	}
 }
+
+func TestFake_HooksFireOnSettleAdoptedAndRelayedBranch(t *testing.T) {
+	f := NewFake()
+	fired := map[string]int{}
+	for _, m := range []string{"SettleAdopted", "SettleRelayedBranch"} {
+		f.On(m, func(int) { fired[m]++ })
+	}
+
+	f.SettleAdopted(dispatch.NewFake(), "1", 0, "u")
+	_, _, _ = f.SettleRelayedBranch(dispatch.NewFake(), "1", 0, Situation{}, dispatch.Result{})
+
+	if fired["SettleAdopted"] != 1 || fired["SettleRelayedBranch"] != 1 {
+		t.Errorf("hooks fired %v, want each method once", fired)
+	}
+}

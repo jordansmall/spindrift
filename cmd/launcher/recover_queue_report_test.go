@@ -110,7 +110,8 @@ func TestRecoverQueueOne_ReportsSettledFailedWhenStoppedAfterClaim(t *testing.T)
 	stop := withControlledStop(t)
 	read := testutil.InstallPipeReporter(t)
 
-	code := x.runOn(t, stopAfterClaim{IssueTracker: x.fc, stop: stop}, x.cf, capsFor(x.tracker, x.cf))
+	x.stopOnClaim(stop)
+	code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf))
 
 	if code != int(exitcode.SignalledStop) {
 		t.Fatalf("exit = %d, want %d", code, int(exitcode.SignalledStop))
@@ -136,7 +137,8 @@ func TestRecoverQueueOne_ReportsSettledFailedWhenRestoreAfterStopFails(t *testin
 	stop := withControlledStop(t)
 	read := testutil.InstallPipeReporter(t)
 
-	it := failRestore{IssueTracker: stopAfterClaim{IssueTracker: x.fc, stop: stop}}
+	x.stopOnClaim(stop)
+	it := failRestore{IssueTracker: x.fc}
 	if code := x.runOn(t, it, x.cf, capsFor(x.tracker, x.cf)); code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
@@ -159,10 +161,10 @@ func TestRecoverQueueOne_DrainStopDuringFailedSettleReportsOneSettled(t *testing
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 	stop := withControlledStop(t)
-	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
+	x.fc.On("RelayBundle", func(int) { stop() })
 	read := testutil.InstallPipeReporter(t)
 
-	if code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s); code != int(exitcode.SignalledStop) {
+	if code := x.runOn(t, x.fc, x.cf, capsFor(x.tracker, x.cf)); code != int(exitcode.SignalledStop) {
 		t.Fatalf("exit = %d, want %d", code, int(exitcode.SignalledStop))
 	}
 
