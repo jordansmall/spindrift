@@ -94,10 +94,10 @@ func setArtifact(t *testing.T, key, value string) {
 // path (the knob's derived flake path, ADR 0037 Pass 2).
 func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("BASE_BRANCH") })
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "BASE_BRANCH", flag: "base-branch", settingsPath: "git.baseBranch"},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "BASE_BRANCH", Flag: "base-branch", SettingsPath: "git.baseBranch"},
 	}
 	os.Setenv("BASE_BRANCH", "develop")
 
@@ -116,10 +116,10 @@ func TestWarnAmbientKnobEnv_WarnsWithFlagAndSettingsEquivalent(t *testing.T) {
 // fixture leaves settingsPath empty and the warning names only the flag.
 func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("ISSUE_NUMBER") })
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "ISSUE_NUMBER", flag: "issue-number"},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "ISSUE_NUMBER", Flag: "issue-number"},
 	}
 	os.Setenv("ISSUE_NUMBER", "42")
 
@@ -135,14 +135,14 @@ func TestWarnAmbientKnobEnv_NoSettingsPath_FlagOnly(t *testing.T) {
 	}
 }
 
-// A launcherIgnores knob's flag is inert (see flagEntry), so the warning must
+// A launcherIgnores knob's flag is inert (see inputdoc.FlagEntry), so the warning must
 // name only the settings path (issue #3698).
 func TestWarnAmbientKnobEnv_LauncherIgnores_SettingsPathOnly(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("DAEMON_IDLE_FLOOR") })
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "DAEMON_IDLE_FLOOR", flag: "daemon-idle-floor", settingsPath: "dispatch.daemonIdleFloor", launcherIgnores: true},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "DAEMON_IDLE_FLOOR", Flag: "daemon-idle-floor", SettingsPath: "dispatch.daemonIdleFloor", LauncherIgnores: true},
 	}
 	os.Setenv("DAEMON_IDLE_FLOOR", "99h")
 
@@ -166,10 +166,10 @@ func TestWarnAmbientKnobEnv_LauncherIgnores_SettingsPathOnly(t *testing.T) {
 func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("MAX_PARALLEL") })
 	os.Unsetenv("MAX_PARALLEL")
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "MAX_PARALLEL", flag: "max-parallel", settingsPath: "dispatch.maxParallel"},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "MAX_PARALLEL", Flag: "max-parallel", SettingsPath: "dispatch.maxParallel"},
 	}
 
 	var buf bytes.Buffer
@@ -183,10 +183,10 @@ func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 // A bool knob's explicit off is set-but-empty (ambientSetting), and it
 // overrides the document's value, so it owes the same ADR 0020 warning.
 func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "AUTO_FORMAT", flag: "auto-format", kind: "bool", settingsPath: "agents.format.enable"},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "AUTO_FORMAT", Flag: "auto-format", Kind: "bool", SettingsPath: "agents.format.enable"},
 	}
 	t.Setenv("AUTO_FORMAT", "")
 
@@ -204,10 +204,10 @@ func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
 // An emptyDisables string knob's "" is a real setting (it disables the limit),
 // so it owes the ADR 0020 warning like a bool knob's explicit off.
 func TestWarnAmbientKnobEnv_EmptyDisablesKnobSetEmpty_Warns(t *testing.T) {
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "MEMORY_LIMIT", flag: "memory-limit", settingsPath: "box.memoryLimit", emptyDisables: true},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "MEMORY_LIMIT", Flag: "memory-limit", SettingsPath: "box.memoryLimit", EmptyDisables: true},
 	}
 	t.Setenv("MEMORY_LIMIT", "")
 
@@ -223,10 +223,10 @@ func TestWarnAmbientKnobEnv_EmptyDisablesKnobSetEmpty_Warns(t *testing.T) {
 }
 
 func TestWarnAmbientKnobEnv_SetButEmptyNonBoolKnob_NoWarning(t *testing.T) {
-	orig := schemaFlags
-	t.Cleanup(func() { schemaFlags = orig })
-	schemaFlags = []flagEntry{
-		{env: "MAX_PARALLEL", flag: "max-parallel", settingsPath: "dispatch.maxParallel"},
+	orig := inputdoc.SchemaFlags
+	t.Cleanup(func() { inputdoc.SchemaFlags = orig })
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{
+		{Env: "MAX_PARALLEL", Flag: "max-parallel", SettingsPath: "dispatch.maxParallel"},
 	}
 	t.Setenv("MAX_PARALLEL", "")
 

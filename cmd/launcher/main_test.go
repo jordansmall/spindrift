@@ -44,7 +44,7 @@ import (
 func TestMainRun_NoArgs_PrintsHelpAndDoesNotDispatch(t *testing.T) {
 	t.Setenv("SOME_KEY", "")
 	os.Unsetenv("SOME_KEY")
-	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "10"}})
+	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "10"}})
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun(nil, &stdout, &stderr)
@@ -1259,7 +1259,7 @@ func TestMaxJobsEdgeCases(t *testing.T) {
 	}
 }
 
-// loadConfig() sources LABEL's default from the generated schemaFlags table
+// loadConfig() sources LABEL's default from the generated inputdoc.SchemaFlags table
 // (issue #670) rather than a hand-written literal: swapping the table's entry
 // changes what an unset LABEL resolves to.
 func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
@@ -1268,10 +1268,10 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 	t.Setenv("LABEL", "")
 	os.Unsetenv("LABEL")
 
-	patched := append([]flagEntry(nil), schemaFlags...)
+	patched := append([]inputdoc.FlagEntry(nil), inputdoc.SchemaFlags...)
 	for i := range patched {
-		if patched[i].env == "LABEL" {
-			patched[i].dflt = "custom-default-from-table"
+		if patched[i].Env == "LABEL" {
+			patched[i].Dflt = "custom-default-from-table"
 			break
 		}
 	}
@@ -1279,12 +1279,12 @@ func TestLoadConfig_LabelDefaultComesFromSchemaTable(t *testing.T) {
 
 	c := loadConfig()
 	if c.label != "custom-default-from-table" {
-		t.Errorf("label should come from schemaFlags table, got %q", c.label)
+		t.Errorf("label should come from inputdoc.SchemaFlags table, got %q", c.label)
 	}
 }
 
 // loadConfig() sources spindriftPromptDir/spindriftSkillsDir defaults from
-// the generated schemaFlags table (issue #812) rather than raw os.Getenv.
+// the generated inputdoc.SchemaFlags table (issue #812) rather than raw os.Getenv.
 func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 	// Force each key absent for the test but restore its pre-test value
 	// (including "was unset") on cleanup.
@@ -1293,30 +1293,30 @@ func TestLoadConfig_SpindriftDirsDefaultComesFromSchemaTable(t *testing.T) {
 	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
 	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
-	withSchemaFlags(t, []flagEntry{
-		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
-		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
+	withSchemaFlags(t, []inputdoc.FlagEntry{
+		{Env: "SPINDRIFT_PROMPT_DIR", Dflt: "custom-prompt-default"},
+		{Env: "SPINDRIFT_SKILLS_DIR", Dflt: "custom-skills-default"},
 	})
 
 	c := loadConfig()
 	if c.spindriftPromptDir != "custom-prompt-default" {
-		t.Errorf("spindriftPromptDir should come from schemaFlags table, got %q", c.spindriftPromptDir)
+		t.Errorf("spindriftPromptDir should come from inputdoc.SchemaFlags table, got %q", c.spindriftPromptDir)
 	}
 	if c.spindriftSkillsDir != "custom-skills-default" {
-		t.Errorf("spindriftSkillsDir should come from schemaFlags table, got %q", c.spindriftSkillsDir)
+		t.Errorf("spindriftSkillsDir should come from inputdoc.SchemaFlags table, got %q", c.spindriftSkillsDir)
 	}
 }
 
 // A set SPINDRIFT_PROMPT_DIR/SPINDRIFT_SKILLS_DIR env var beats the
-// schemaFlags table default, the precedence half the default-only test above
+// inputdoc.SchemaFlags table default, the precedence half the default-only test above
 // leaves unexercised (issue #1180).
 func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable(t *testing.T) {
 	t.Setenv("SPINDRIFT_PROMPT_DIR", "from-env-prompt")
 	t.Setenv("SPINDRIFT_SKILLS_DIR", "from-env-skills")
 
-	withSchemaFlags(t, []flagEntry{
-		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
-		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
+	withSchemaFlags(t, []inputdoc.FlagEntry{
+		{Env: "SPINDRIFT_PROMPT_DIR", Dflt: "custom-prompt-default"},
+		{Env: "SPINDRIFT_SKILLS_DIR", Dflt: "custom-skills-default"},
 	})
 
 	c := loadConfig()
@@ -1335,9 +1335,9 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 	t.Setenv("SPINDRIFT_SKILLS_DIR", "")
 	os.Unsetenv("SPINDRIFT_SKILLS_DIR")
 
-	withSchemaFlags(t, []flagEntry{
-		{env: "SPINDRIFT_PROMPT_DIR", dflt: "custom-prompt-default"},
-		{env: "SPINDRIFT_SKILLS_DIR", dflt: "custom-skills-default"},
+	withSchemaFlags(t, []inputdoc.FlagEntry{
+		{Env: "SPINDRIFT_PROMPT_DIR", Dflt: "custom-prompt-default"},
+		{Env: "SPINDRIFT_SKILLS_DIR", Dflt: "custom-skills-default"},
 	})
 
 	c := loadConfig()
@@ -1350,14 +1350,14 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 }
 
 // loadConfig() routes PIDS_LIMIT and MEMORY_LIMIT through the schema's
-// emptyDisables rule (flagEntry.emptyIsSetting): an unset var still falls
+// emptyDisables rule (inputdoc.FlagEntry.EmptyIsSetting): an unset var still falls
 // back to the schema default, but an explicit KEY="" resolves to "" instead
 // of collapsing into it (#3048).
 func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 	cases := []struct {
 		name string
 		env  string
-		// useRealTable leaves the ambient package-level schemaFlags in
+		// useRealTable leaves the ambient package-level inputdoc.SchemaFlags in
 		// place instead of stubbing it, so a drifted flagtable_gen.go
 		// default fails this test instead of matching a disconnected stub
 		// (issue #3048). The other cases assert override behavior that is
@@ -1390,7 +1390,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 			}
 
 			if !tc.useRealTable {
-				withSchemaFlags(t, []flagEntry{{env: tc.env, dflt: tc.dflt, emptyDisables: true}})
+				withSchemaFlags(t, []inputdoc.FlagEntry{{Env: tc.env, Dflt: tc.dflt, EmptyDisables: true}})
 			}
 			// useRealTable cases call no withSchemaFlags: previous subtests'
 			// stubs are already restored by their own t.Cleanup.
@@ -1406,7 +1406,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 // intSchemaDefault directly: a numeric schema default parses, a non-numeric
 // one falls back to 0, and an absent key falls back to 0 too (issue #672).
 func TestIntSchemaDefault(t *testing.T) {
-	// nil is a placeholder: every case below reassigns schemaFlags before
+	// nil is a placeholder: every case below reassigns inputdoc.SchemaFlags before
 	// reading it, so the initial value here is never observed.
 	withSchemaFlags(t, nil)
 
@@ -1419,13 +1419,13 @@ func TestIntSchemaDefault(t *testing.T) {
 		{"non-numeric default", "abc", 0},
 	}
 	for _, tc := range cases {
-		schemaFlags = []flagEntry{{env: "SOME_KEY", dflt: tc.dflt}}
+		inputdoc.SchemaFlags = []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: tc.dflt}}
 		if got := intSchemaDefault("SOME_KEY"); got != tc.want {
 			t.Errorf("%s: intSchemaDefault(SOME_KEY) = %d, want %d", tc.name, got, tc.want)
 		}
 	}
 
-	schemaFlags = []flagEntry{}
+	inputdoc.SchemaFlags = []inputdoc.FlagEntry{}
 	if got := intSchemaDefault("ABSENT_KEY"); got != 0 {
 		t.Errorf("absent key: intSchemaDefault(ABSENT_KEY) = %d, want 0", got)
 	}
@@ -1455,7 +1455,7 @@ func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 				os.Unsetenv("PIDS_LIMIT")
 			}
 
-			withSchemaFlags(t, []flagEntry{{env: "PIDS_LIMIT", dflt: "2048", emptyDisables: true}})
+			withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "PIDS_LIMIT", Dflt: "2048", EmptyDisables: true}})
 
 			if got := getenvSchema("PIDS_LIMIT"); got != tc.want {
 				t.Errorf("getenvSchema(PIDS_LIMIT) = %q, want %q", got, tc.want)
@@ -1467,7 +1467,7 @@ func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 // atoiSchema directly: a valid positive env value beats the schema default;
 // zero, negative, non-numeric, and unset all fall back to it (issue #672).
 func TestAtoiSchema(t *testing.T) {
-	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "10"}})
+	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "10"}})
 
 	cases := []struct {
 		env  string
@@ -1490,7 +1490,7 @@ func TestAtoiSchema(t *testing.T) {
 // atoiNonnegSchema directly: zero and positive env values beat the schema
 // default; negative, non-numeric, and unset fall back to it (issue #672).
 func TestAtoiNonnegSchema(t *testing.T) {
-	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "0"}})
+	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "0"}})
 
 	cases := []struct {
 		env  string
@@ -1513,7 +1513,7 @@ func TestAtoiNonnegSchema(t *testing.T) {
 // floatNonnegSchema directly: zero and positive env values beat the schema
 // default; negative, non-numeric, infinite, and unset fall back to it.
 func TestFloatNonnegSchema(t *testing.T) {
-	withSchemaFlags(t, []flagEntry{{env: "SOME_KEY", dflt: "7.5"}})
+	withSchemaFlags(t, []inputdoc.FlagEntry{{Env: "SOME_KEY", Dflt: "7.5"}})
 
 	cases := []struct {
 		env  string
@@ -1559,13 +1559,13 @@ func TestLoadSchemaConfig_HostGitConfigMembersLoadFromHostGitConfig(t *testing.T
 	if sc.gitUserName != "Host Name" || sc.gitUserEmail != "host@example.com" {
 		t.Errorf("loadSchemaConfig identity = %q/%q, want the host git config values", sc.gitUserName, sc.gitUserEmail)
 	}
-	for _, e := range schemaFlags {
-		got, ok := sc.hostGitConfigValue(e.env)
-		if ok != (e.hostGitConfigKey != "") {
-			t.Errorf("%s: hostGitConfigValue ok = %v, hostGitConfigKey = %q", e.env, ok, e.hostGitConfigKey)
+	for _, e := range inputdoc.SchemaFlags {
+		got, ok := sc.hostGitConfigValue(e.Env)
+		if ok != (e.HostGitConfigKey != "") {
+			t.Errorf("%s: hostGitConfigValue ok = %v, hostGitConfigKey = %q", e.Env, ok, e.HostGitConfigKey)
 		}
-		if ok && got != hostGitConfigField(e.env) {
-			t.Errorf("%s: hostGitConfigValue = %q, want %q", e.env, got, hostGitConfigField(e.env))
+		if ok && got != hostGitConfigField(e.Env) {
+			t.Errorf("%s: hostGitConfigValue = %q, want %q", e.Env, got, hostGitConfigField(e.Env))
 		}
 	}
 }
@@ -1585,7 +1585,7 @@ func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 }
 
 // The Launcher input document's settings value backs a knob ahead of the
-// generated schemaFlags table when neither an explicit flag nor ambient env
+// generated inputdoc.SchemaFlags table when neither an explicit flag nor ambient env
 // supplies one (ADR 0020).
 func TestLoadConfig_DocumentSettingBeatsSchemaDefault(t *testing.T) {
 	t.Setenv("BASE_BRANCH", "")
@@ -1639,7 +1639,7 @@ func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
 
 // The prompt-dir specialization of
 // TestLoadConfig_DocumentSettingBeatsSchemaDefault: the document's settings
-// value backs spindriftPromptDir ahead of the schemaFlags table (issue #2200).
+// value backs spindriftPromptDir ahead of the inputdoc.SchemaFlags table (issue #2200).
 func TestLoadConfig_PromptDirDocumentSettingBeatsSchemaDefault(t *testing.T) {
 	t.Setenv("SPINDRIFT_PROMPT_DIR", "")
 	os.Unsetenv("SPINDRIFT_PROMPT_DIR")
@@ -3912,9 +3912,9 @@ func TestDispatchConfig_ResolveEnv_EmptyGitIdentityStaysEmpty(t *testing.T) {
 // knob of that kind cannot skip hostGitConfigResolver.
 func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testing.T) {
 	lookups := map[string]string{}
-	for _, e := range schemaFlags {
-		if e.hostGitConfigKey != "" {
-			lookups[e.hostGitConfigKey] = "host:" + e.hostGitConfigKey
+	for _, e := range inputdoc.SchemaFlags {
+		if e.HostGitConfigKey != "" {
+			lookups[e.HostGitConfigKey] = "host:" + e.HostGitConfigKey
 		}
 	}
 	c, _ := snapshotGitIdentityConfig(t, lookups)
@@ -3922,21 +3922,21 @@ func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testin
 	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
 	found := 0
-	for _, e := range schemaFlags {
-		if !e.boxHostDerived {
+	for _, e := range inputdoc.SchemaFlags {
+		if !e.BoxHostDerived {
 			continue
 		}
 		found++
-		got := cfg.ResolveEnv("42", e.env)
+		got := cfg.ResolveEnv("42", e.Env)
 		if got == "" {
-			t.Errorf("%s: ResolveEnv is empty, want the host-resolved value", e.env)
+			t.Errorf("%s: ResolveEnv is empty, want the host-resolved value", e.Env)
 		}
-		if want := hostGitConfigField(e.env); got != want {
-			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.env, got, want)
+		if want := hostGitConfigField(e.Env); got != want {
+			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.Env, got, want)
 		}
 	}
 	if found == 0 {
-		t.Fatal("no schemaFlags row has boxHostDerived; the generated field is not rendering")
+		t.Fatal("no inputdoc.SchemaFlags row has boxHostDerived; the generated field is not rendering")
 	}
 }
 
@@ -6925,7 +6925,7 @@ func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 	}
 }
 
-// Set-but-empty is an explicit value only where flagEntry.emptyIsSetting says
+// Set-but-empty is an explicit value only where inputdoc.FlagEntry.EmptyIsSetting says
 // so (bool kind or emptyDisables); any other string knob's empty env still
 // falls back to its default.
 func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {

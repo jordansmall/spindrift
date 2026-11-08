@@ -165,7 +165,7 @@ type CommandRunner interface {
 }
 
 // defaultBranchPrefix matches the launcher's own BRANCH_PREFIX default
-// (flagtable_gen.go); Quickstart doesn't prompt for it.
+// (inputdoc/flagtable_gen.go); Quickstart doesn't prompt for it.
 const defaultBranchPrefix = "agent/issue-"
 
 // defaultBaseBranch and defaultMergePolicy match the launcher's own

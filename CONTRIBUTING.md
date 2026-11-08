@@ -142,10 +142,8 @@ empty `skills` default.
 
 After editing `lib/env-schema.nix` (or a registry row's `knobs`), regenerate
 the artifacts it drives — `templates/default/harness.env.example`,
-`cmd/launcher/flagtable_gen.go`, `docs/flake-options.md`,
+`cmd/launcher/internal/inputdoc/flagtable_gen.go`, `docs/flake-options.md`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`,
-`cmd/launcher/internal/inputdoc/emptyissetting_gen.go`,
-`cmd/launcher/internal/inputdoc/schemadefaults_gen.go`,
 `cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go`, each knob-declaring row's
 `knobs_gen.go` reader (`lib/row-knob-readers.nix`), and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
@@ -248,8 +246,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   Chores render through, [ADR 0070](docs/adr/0070-a-chores-scope-source-is-a-seam-and-records-chores-plug-in-a-digest.md)),
   `hostbundle` (the host-side bundle registering built-in Digests; only the
   butler-sweep binaries import it), `usage`. The
-  flag table (`flagtable_gen.go`),
-  which also carries each knob's baked-in default (`schemaFlags[].dflt`), is
+  flag table (`internal/inputdoc/flagtable_gen.go`),
+  which also carries each knob's baked-in default (`inputdoc.SchemaFlags[].Dflt`), is
   generated and pinned by a check; don't hand-edit it — neither are
   `registry_gen.go`, `kinds_gen.go`, nor `cliflags_gen.go` (generated from
   `lib/cli-flags.nix` by `renderers.nix`'s `renderCliFlagsGo`, pinned by the

@@ -32,6 +32,7 @@ import (
 	_ "spindrift.dev/launcher/internal/driver/bundle" // registers the bundled Drivers
 	"spindrift.dev/launcher/internal/exitcode"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/launcherchecks"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/stopsignal"
 	"spindrift.dev/launcher/internal/tokenrefresh"
@@ -351,19 +352,17 @@ func parseBreakerWindow(raw string) (time.Duration, error) {
 }
 
 // validateSignalCarrier is the daemon-side counterpart of the launcher's own
-// validateChoice (cmd/launcher/flags.go), whose wording it mirrors: the two
-// are separate package mains, so the generated schemaFlags table is out of
-// reach here and the choices are spelled out instead. They mirror
-// lib/env-schema.nix's signalCarrier.choices, itself pinned against drift by
-// nix/checks/schema-drift.nix — change that list and change this one. An
-// empty value is valid and means unset: the knob is env-only (never in the
-// --input document's settings), so an unset knob stays out of the child
-// environment and the child takes the schema default.
+// validateChoice (cmd/launcher/flags.go), whose wording it mirrors, checking
+// the same inputdoc.SchemaFlags choices. An empty value is valid and means
+// unset: the knob is env-only (never in the --input document's settings), so
+// an unset knob stays out of the child environment and the child takes the
+// schema default.
 func validateSignalCarrier(raw string) error {
-	if raw == "" || raw == "log" || raw == "socket" {
+	e, _ := inputdoc.SchemaFlag("BOX_SIGNAL_CARRIER")
+	if raw == "" || slices.Contains(e.Choices, raw) {
 		return nil
 	}
-	return fmt.Errorf("BOX_SIGNAL_CARRIER=%q is not valid; must be log or socket", raw)
+	return fmt.Errorf("BOX_SIGNAL_CARRIER=%q is not valid; must be %s", raw, launcherchecks.JoinOxford(e.Choices))
 }
 
 // nixSystemDouble maps Go's GOOS/GOARCH to the nix system double the self

@@ -68,9 +68,7 @@ func (d *Document) Lookup(envVar string, stderr io.Writer) (string, bool) {
 // Setting returns the document's value for key and whether it counts as a
 // setting. A non-empty value always counts; an empty one counts only for a
 // knob where empty is itself a setting (bool knobs — Nix renders false as ""
-// — and emptyDisables knobs). Mirrors flagEntry.emptyIsSetting in
-// cmd/launcher/flags.go, whose set is generated into emptyissetting_gen.go so
-// the daemon can apply the same rule. d may be nil.
+// — and emptyDisables knobs), per FlagEntry.EmptyIsSetting. d may be nil.
 func (d *Document) Setting(key string) (string, bool) {
 	if d == nil {
 		return "", false
@@ -79,7 +77,8 @@ func (d *Document) Setting(key string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return v, v != "" || emptyIsSetting[key]
+	e, _ := SchemaFlag(key)
+	return v, v != "" || e.EmptyIsSetting()
 }
 
 // Resolve wraps Lookup for knobs that must have a value: the default lives
@@ -142,11 +141,12 @@ func ParseDuration(name, label, raw string, min time.Duration) (time.Duration, e
 }
 
 // SchemaDefault returns key's schema default, or "" when the knob has none or
-// is secret. It is the daemon's copy of the launcher's schemaDefault fallback
-// (generated from the same lib/env-schema.nix), so a knob unset in both the
-// document and the environment resolves the same in the daemon as in a child.
+// is secret. The launcher's schemaDefault falls back to it too, so a knob unset
+// in both the document and the environment resolves the same in the daemon as
+// in a child.
 func SchemaDefault(key string) string {
-	return schemaDefaults[key]
+	e, _ := SchemaFlag(key)
+	return e.Dflt
 }
 
 // IsDaemonOnly reports whether key is a knob only the daemon reads

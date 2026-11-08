@@ -726,20 +726,20 @@ func TestParseButlerArgs(t *testing.T) {
 // chore.DefaultEvery must match BUTLER_EVERY's schema default, or an unset
 // value and an overrides-only value would get different intervals.
 func TestButlerEveryDefaultMatchesSchema(t *testing.T) {
-	for _, f := range schemaFlags {
-		if f.env != "BUTLER_EVERY" {
+	for _, f := range inputdoc.SchemaFlags {
+		if f.Env != "BUTLER_EVERY" {
 			continue
 		}
-		if d, err := time.ParseDuration(f.dflt); err != nil || d != chore.DefaultEvery {
-			t.Errorf("schema default %q, want %v (chore.DefaultEvery)", f.dflt, chore.DefaultEvery)
+		if d, err := time.ParseDuration(f.Dflt); err != nil || d != chore.DefaultEvery {
+			t.Errorf("schema default %q, want %v (chore.DefaultEvery)", f.Dflt, chore.DefaultEvery)
 		}
 		return
 	}
-	t.Fatal("BUTLER_EVERY missing from schemaFlags")
+	t.Fatal("BUTLER_EVERY missing from inputdoc.SchemaFlags")
 }
 
 // The two host promotion knobs (BUTLER_MAX_PROMOTIONS_PER_DAY,
-// BUTLER_PROMOTION_MAX_FILES) resolve through the generated schemaFlags
+// BUTLER_PROMOTION_MAX_FILES) resolve through the generated inputdoc.SchemaFlags
 // table and loadSchemaConfig, the same wiring every other schema knob uses
 // (issue #3880).
 func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
@@ -751,17 +751,17 @@ func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
 		{"BUTLER_PROMOTION_MAX_FILES", "3"},
 	} {
 		found := false
-		for _, f := range schemaFlags {
-			if f.env != tc.env {
+		for _, f := range inputdoc.SchemaFlags {
+			if f.Env != tc.env {
 				continue
 			}
 			found = true
-			if f.dflt != tc.dflt {
-				t.Errorf("%s default = %q, want %q", tc.env, f.dflt, tc.dflt)
+			if f.Dflt != tc.dflt {
+				t.Errorf("%s default = %q, want %q", tc.env, f.Dflt, tc.dflt)
 			}
 		}
 		if !found {
-			t.Errorf("%s missing from schemaFlags", tc.env)
+			t.Errorf("%s missing from inputdoc.SchemaFlags", tc.env)
 		}
 	}
 
@@ -777,7 +777,7 @@ func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
 }
 
 // The two host patch knobs (BUTLER_MAX_PATCHES_PER_DAY, BUTLER_PATCH_CLASSES)
-// resolve through the generated schemaFlags table and loadSchemaConfig, the
+// resolve through the generated inputdoc.SchemaFlags table and loadSchemaConfig, the
 // same wiring every other schema knob uses (ADR 0057).
 func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 	for _, tc := range []struct {
@@ -788,17 +788,17 @@ func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 		{"BUTLER_PATCH_CLASSES", "docs-drift=stale-reference"},
 	} {
 		found := false
-		for _, f := range schemaFlags {
-			if f.env != tc.env {
+		for _, f := range inputdoc.SchemaFlags {
+			if f.Env != tc.env {
 				continue
 			}
 			found = true
-			if f.dflt != tc.dflt {
-				t.Errorf("%s default = %q, want %q", tc.env, f.dflt, tc.dflt)
+			if f.Dflt != tc.dflt {
+				t.Errorf("%s default = %q, want %q", tc.env, f.Dflt, tc.dflt)
 			}
 		}
 		if !found {
-			t.Errorf("%s missing from schemaFlags", tc.env)
+			t.Errorf("%s missing from inputdoc.SchemaFlags", tc.env)
 		}
 	}
 
@@ -814,7 +814,7 @@ func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 }
 
 // The three host patch-bound knobs (BUTLER_PATCH_PATHS, BUTLER_PATCH_MAX_FILES,
-// BUTLER_PATCH_MAX_LINES) resolve through the generated schemaFlags table and
+// BUTLER_PATCH_MAX_LINES) resolve through the generated inputdoc.SchemaFlags table and
 // loadSchemaConfig, same wiring every other schema knob uses (issue #4075,
 // ADR 0057). BUTLER_PATCH_PATHS' default must equal butler.DefaultPatchPaths
 // (the Go-side source of truth) and its doc must reproduce the built-in deny
@@ -826,33 +826,33 @@ func TestButlerPatchBoundKnobsParseFromSchema(t *testing.T) {
 	}
 
 	found := map[string]bool{}
-	for _, f := range schemaFlags {
-		switch f.env {
+	for _, f := range inputdoc.SchemaFlags {
+		switch f.Env {
 		case "BUTLER_PATCH_PATHS":
-			found[f.env] = true
-			if f.dflt != butler.DefaultPatchPaths {
-				t.Errorf("%s default = %q, want %q (butler.DefaultPatchPaths)", f.env, f.dflt, butler.DefaultPatchPaths)
+			found[f.Env] = true
+			if f.Dflt != butler.DefaultPatchPaths {
+				t.Errorf("%s default = %q, want %q (butler.DefaultPatchPaths)", f.Env, f.Dflt, butler.DefaultPatchPaths)
 			}
 			for _, entry := range wantDenyEntries {
-				if !strings.Contains(f.doc, entry) {
-					t.Errorf("%s doc missing deny entry %q verbatim: %q", f.env, entry, f.doc)
+				if !strings.Contains(f.Doc, entry) {
+					t.Errorf("%s doc missing deny entry %q verbatim: %q", f.Env, entry, f.Doc)
 				}
 			}
 		case "BUTLER_PATCH_MAX_FILES":
-			found[f.env] = true
-			if f.dflt != "3" {
-				t.Errorf("%s default = %q, want %q", f.env, f.dflt, "3")
+			found[f.Env] = true
+			if f.Dflt != "3" {
+				t.Errorf("%s default = %q, want %q", f.Env, f.Dflt, "3")
 			}
 		case "BUTLER_PATCH_MAX_LINES":
-			found[f.env] = true
-			if f.dflt != "20" {
-				t.Errorf("%s default = %q, want %q", f.env, f.dflt, "20")
+			found[f.Env] = true
+			if f.Dflt != "20" {
+				t.Errorf("%s default = %q, want %q", f.Env, f.Dflt, "20")
 			}
 		}
 	}
 	for _, env := range []string{"BUTLER_PATCH_PATHS", "BUTLER_PATCH_MAX_FILES", "BUTLER_PATCH_MAX_LINES"} {
 		if !found[env] {
-			t.Errorf("%s missing from schemaFlags", env)
+			t.Errorf("%s missing from inputdoc.SchemaFlags", env)
 		}
 	}
 
