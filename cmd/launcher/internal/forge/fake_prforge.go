@@ -223,6 +223,7 @@ func (pf *PRForgeFake) SetPRFiles(url string, files []string) {
 }
 
 func (pf *PRForgeFake) ListPRFiles(url string) ([]string, error) {
+	pf.Fire("ListPRFiles")
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	if pf.PRFilesErr != nil {
@@ -292,6 +293,7 @@ func (pf *PRForgeFake) PRState(url string) (PRState, error) {
 // first. With both queues exhausted it returns StateNone, the same answer a PR
 // with no checks registered gives.
 func (pf *PRForgeFake) CheckState(url string) (RollupState, error) {
+	pf.Fire("CheckState")
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	if eq := pf.checkErrQ[url]; len(eq) > 0 {
@@ -376,6 +378,7 @@ func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {
 // MarkReady records the call to MarkReadyCalls and, unless MarkReadyErr fails
 // it, clears the PR's draft state (see IsDraft).
 func (pf *PRForgeFake) MarkReady(prURL string) error {
+	pf.Fire("MarkReady")
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.LandingCallLog = append(pf.LandingCallLog, "MarkReady:"+prURL)

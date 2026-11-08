@@ -716,24 +716,6 @@ func TestSelfHeal_UnresolvableConflictNoForcePush_KeepsComplete(t *testing.T) {
 	}
 }
 
-// labelSnapshotDispatcher wraps a dispatch.Fake so its ResolveConflict call
-// snapshots the issue's labels before delegating, capturing what the label
-// looks like mid-landing-path (issue #757). terminate_test.go's
-// terminatingDispatcher uses the same wrapper pattern.
-type labelSnapshotDispatcher struct {
-	*dispatch.Fake
-	fc  *forge.Fake
-	num string
-
-	snapshot []string
-}
-
-func (d *labelSnapshotDispatcher) ResolveConflict(pr string) error {
-	iss, _ := d.fc.Issue(d.num)
-	d.snapshot = append([]string(nil), iss.Labels...)
-	return d.Fake.ResolveConflict(pr)
-}
-
 // The InProgress to Complete swap is held until the landing path settles
 // (issue #757): mid-conflict-resolve the issue must still carry
 // agent-in-progress, because the label must not claim the agent has nothing
@@ -754,7 +736,13 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 		forge.StateSuccess, forge.StateSuccess,
 	})
 	s := newTestSettle(c, fc, fc)
-	d := &labelSnapshotDispatcher{Fake: dispatch.NewFake(), fc: fc, num: "1"}
+	d := dispatch.NewFake()
+	// Snapshot the labels mid-landing-path, as the conflict-resolve box starts (issue #757).
+	var snapshot []string
+	d.On("ResolveConflict", func(int) {
+		iss, _ := fc.Issue("1")
+		snapshot = append([]string(nil), iss.Labels...)
+	})
 
 	landing, _, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
@@ -764,11 +752,11 @@ func TestSelfHeal_LabelStaysInProgressThroughConflictResolve(t *testing.T) {
 	if len(d.ResolveConflictCalls) != 1 {
 		t.Fatalf("expected ResolveConflict to be called once, got %d", len(d.ResolveConflictCalls))
 	}
-	if !containsLabel(d.snapshot, "agent-in-progress") {
-		t.Errorf("issue must still carry agent-in-progress during conflict-resolve; snapshot=%v", d.snapshot)
+	if !containsLabel(snapshot, "agent-in-progress") {
+		t.Errorf("issue must still carry agent-in-progress during conflict-resolve; snapshot=%v", snapshot)
 	}
-	if containsLabel(d.snapshot, "agent-complete") {
-		t.Errorf("issue must NOT carry agent-complete during conflict-resolve; snapshot=%v", d.snapshot)
+	if containsLabel(snapshot, "agent-complete") {
+		t.Errorf("issue must NOT carry agent-complete during conflict-resolve; snapshot=%v", snapshot)
 	}
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {

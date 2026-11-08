@@ -45,3 +45,18 @@ func TestFake_RecordsCalls(t *testing.T) {
 		t.Errorf("CloseCalls: got %d, want 1", f.CloseCalls)
 	}
 }
+
+func TestFake_HooksFireOnFixAndResolveConflict(t *testing.T) {
+	f := NewFake()
+	var fix, resolve []int
+	f.On("Fix", func(n int) { fix = append(fix, n) })
+	f.On("ResolveConflict", func(n int) { resolve = append(resolve, n) })
+
+	f.Fix(1, "")
+	f.Fix(2, "")
+	_ = f.ResolveConflict("pr")
+
+	if len(fix) != 2 || fix[1] != 2 || len(resolve) != 1 || resolve[0] != 1 {
+		t.Errorf("fix hook calls = %v, resolve hook calls = %v; want [1 2] and [1]", fix, resolve)
+	}
+}

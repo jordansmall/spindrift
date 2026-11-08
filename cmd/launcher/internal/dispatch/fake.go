@@ -3,6 +3,7 @@ package dispatch
 import (
 	"sync"
 
+	"spindrift.dev/launcher/internal/fakehook"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -16,6 +17,11 @@ type FixCall struct {
 // concurrent use.
 type Fake struct {
 	mu sync.Mutex
+
+	// Hooks lets a test run a callback inside a named fake method (Fix,
+	// ResolveConflict); see fakehook. A hook fires at the top of the method,
+	// before the fake records the call.
+	fakehook.Hooks
 
 	RunCalls int
 
@@ -79,6 +85,7 @@ func (f *Fake) Run() Disposition {
 
 // Fix records the call and returns the Disposition for this call index.
 func (f *Fake) Fix(pass int, ciFailureSummary string) Disposition {
+	f.Fire("Fix")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	i := len(f.FixCalls)
@@ -94,6 +101,7 @@ func (f *Fake) Fix(pass int, ciFailureSummary string) Disposition {
 
 // ResolveConflict records pr and returns ResolveConflictErr.
 func (f *Fake) ResolveConflict(pr string) error {
+	f.Fire("ResolveConflict")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ResolveConflictCalls = append(f.ResolveConflictCalls, pr)

@@ -2,12 +2,18 @@ package forge
 
 import (
 	"sync"
+
+	"spindrift.dev/launcher/internal/fakehook"
 )
 
 // core holds the Fake fields shared across multiple capability files. A field
 // belongs here only when two or more capabilities write it; a field written by
 // exactly one capability stays in that capability's file (issue #2358).
 type core struct {
+	// Hooks lets a test run a callback inside a named fake method (Rebase,
+	// Merge, CheckState, MarkReady, ListPRFiles, RelayBundle); see fakehook.
+	fakehook.Hooks
+
 	mu sync.Mutex
 
 	prStates map[string]PRState // Maps a PR URL to its canonical state.
