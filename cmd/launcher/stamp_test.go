@@ -10,9 +10,8 @@ import (
 )
 
 func TestDispatchStamp_KnobsCarryEffectiveValuesAndNeverSecrets(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	t.Setenv("BASE_BRANCH", "release")
+	useDoc(t, nil)
+	setKnob(t, "BASE_BRANCH", "release")
 	for _, s := range inputdoc.SecretKnobs {
 		t.Setenv(s.Env, "s3cret-value")
 	}
@@ -66,10 +65,9 @@ func TestStampRoleModels(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Cleanup(func() { loadedDoc = nil })
-			loadedDoc = &inputdoc.Document{Artifacts: mustArtifacts(tt.doc), Settings: map[string]string{}}
-			t.Setenv("MODEL", tt.model)
-			t.Setenv("REVIEW_MODEL", tt.review)
+			useDoc(t, &inputdoc.Document{Artifacts: mustArtifacts(tt.doc), Settings: map[string]string{}})
+			setKnob(t, "MODEL", tt.model)
+			setKnob(t, "REVIEW_MODEL", tt.review)
 			got := stampRoleModels(tt.review)
 			if !maps.Equal(got, tt.want) {
 				t.Errorf("got %v, want %v", got, tt.want)
@@ -79,11 +77,10 @@ func TestStampRoleModels(t *testing.T) {
 }
 
 func TestDispatchStamp_RedactsURLUserinfo(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	t.Setenv("CODE_FORGE_REMOTE_URL", "https://x-access-token:SECRET@github.com/o/r.git")
-	t.Setenv("FORGEJO_BASE_URL", "https://TOKENONLY@example.com/o/r")
-	t.Setenv("BASE_BRANCH", "release")
+	useDoc(t, nil)
+	setKnob(t, "CODE_FORGE_REMOTE_URL", "https://x-access-token:SECRET@github.com/o/r.git")
+	setKnob(t, "FORGEJO_BASE_URL", "https://TOKENONLY@example.com/o/r")
+	setKnob(t, "BASE_BRANCH", "release")
 
 	st := dispatchStamp("")
 
@@ -104,13 +101,12 @@ func TestDispatchStamp_RedactsURLUserinfo(t *testing.T) {
 }
 
 func TestDispatchConfig_StampExcludesSecretsAndTracksReviewModel(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 	for _, s := range inputdoc.SecretKnobs {
 		t.Setenv(s.Env, "s3cret-value")
 	}
-	t.Setenv("BASE_BRANCH", "release")
-	t.Setenv("REVIEW_MODEL", "haiku")
+	setKnob(t, "BASE_BRANCH", "release")
+	setKnob(t, "REVIEW_MODEL", "haiku")
 
 	cfg := dispatchConfig(config{}, nil, nil, nil, forge.Capabilities{})
 

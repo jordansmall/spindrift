@@ -351,7 +351,7 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 // promptassembly.ValidChoreName, which is what butlerPreflight must catch
 // first.
 func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bad.name")
 	var stderr bytes.Buffer
@@ -368,7 +368,7 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 // (k3) cmdButler rejects an enabled chore absent from the baked CHORE_CATALOG
 // before writing a Ledger claim, same guarantee as above (issue #3905).
 func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	useDoc(t, &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{"CHORE_CATALOG": "docs-drift"})})
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
@@ -387,7 +387,7 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 // letting config.kind()'s nil fallback file findings under the work label
 // (issue #5929), and does so before writing a Ledger claim.
 func TestCmdButler_RejectsUnsetDispatchKind(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	useDoc(t, &inputdoc.Document{Artifacts: mustArtifacts(map[string]string{"CHORE_CATALOG": "bugs"})})
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
@@ -436,7 +436,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("FILER_MODEL", "test-model")
+			setKnob(t, "FILER_MODEL", "test-model")
 			repo := ledgertest.NewRepo(t)
 			lc := testButlerLaunchContext(t, repo, "bugs")
 			tt.set(&lc.config)
@@ -456,7 +456,7 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 // cmdButler rejects a BUTLER_EVERY override naming a Chore not in
 // BUTLER_CHORES, so a misspelled key fails loudly instead of never firing.
 func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	lc := &launchContext{
 		config:  config{Knobs: inputdoc.Knobs{CodeForge: "local", ButlerChores: "bugs", ButlerEvery: "6h bgus=1h"}},
 		cleanup: func() {},
@@ -766,8 +766,8 @@ func TestButlerPromotionKnobsParseFromSchema(t *testing.T) {
 		}
 	}
 
-	t.Setenv("BUTLER_MAX_PROMOTIONS_PER_DAY", "7")
-	t.Setenv("BUTLER_PROMOTION_MAX_FILES", "9")
+	setKnob(t, "BUTLER_MAX_PROMOTIONS_PER_DAY", "7")
+	setKnob(t, "BUTLER_PROMOTION_MAX_FILES", "9")
 	cfg := loadSchemaConfig()
 	if cfg.ButlerMaxPromotionsPerDay != 7 {
 		t.Errorf("butlerMaxPromotionsPerDay = %d, want 7", cfg.ButlerMaxPromotionsPerDay)
@@ -803,8 +803,8 @@ func TestButlerPatchKnobsParseFromSchema(t *testing.T) {
 		}
 	}
 
-	t.Setenv("BUTLER_MAX_PATCHES_PER_DAY", "4")
-	t.Setenv("BUTLER_PATCH_CLASSES", "bugs=error-handling")
+	setKnob(t, "BUTLER_MAX_PATCHES_PER_DAY", "4")
+	setKnob(t, "BUTLER_PATCH_CLASSES", "bugs=error-handling")
 	cfg := loadSchemaConfig()
 	if cfg.ButlerMaxPatchesPerDay != 4 {
 		t.Errorf("butlerMaxPatchesPerDay = %d, want 4", cfg.ButlerMaxPatchesPerDay)
@@ -857,9 +857,9 @@ func TestButlerPatchBoundKnobsParseFromSchema(t *testing.T) {
 		}
 	}
 
-	t.Setenv("BUTLER_PATCH_PATHS", "docs/**,!docs/adr/**")
-	t.Setenv("BUTLER_PATCH_MAX_FILES", "5")
-	t.Setenv("BUTLER_PATCH_MAX_LINES", "40")
+	setKnob(t, "BUTLER_PATCH_PATHS", "docs/**,!docs/adr/**")
+	setKnob(t, "BUTLER_PATCH_MAX_FILES", "5")
+	setKnob(t, "BUTLER_PATCH_MAX_LINES", "40")
 	cfg := loadSchemaConfig()
 	if cfg.ButlerPatchPaths != "docs/**,!docs/adr/**" {
 		t.Errorf("butlerPatchPaths = %q, want %q", cfg.ButlerPatchPaths, "docs/**,!docs/adr/**")
@@ -953,7 +953,7 @@ func butlerTestSchemaConfig(chores, codeForge string, knobs map[string]string, a
 // both the configured label and the standing "agent-butler-finding"
 // provenance label.
 func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	repo := ledgertest.NewRepo(t)
 
 	fc := forge.NewFake()
@@ -1000,14 +1000,14 @@ func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
 	if got := tuningKnobs(loadSchemaConfig()); got != "20/15/49152" {
 		t.Errorf("tuning defaults = %s, want 20/15/49152", got)
 	}
-	t.Setenv("BUTLER_TUNING_MIN_RECORDS", "7")
-	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "3")
-	t.Setenv("BUTLER_TUNING_DIGEST_BYTES", "1000")
+	setKnob(t, "BUTLER_TUNING_MIN_RECORDS", "7")
+	setKnob(t, "BUTLER_TUNING_MIN_SAMPLE", "3")
+	setKnob(t, "BUTLER_TUNING_DIGEST_BYTES", "1000")
 	if got := tuningKnobs(loadSchemaConfig()); got != "7/3/1000" {
 		t.Errorf("tuning knobs = %s, want 7/3/1000", got)
 	}
 	// A malformed int falls back to its default, as the field loader did.
-	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "lots")
+	setKnob(t, "BUTLER_TUNING_MIN_SAMPLE", "lots")
 	if got := loadSchemaConfig().RowKnobs["BUTLER_TUNING_MIN_SAMPLE"]; got != "15" {
 		t.Errorf("malformed BUTLER_TUNING_MIN_SAMPLE = %q, want the default 15", got)
 	}
@@ -1055,7 +1055,7 @@ func TestConfigServesTuningKnobsToTheDigest(t *testing.T) {
 // butlerPatchForge. Only PostIssue's labels are asserted; the landing past it
 // is not this test's concern.
 func TestCmdButler_PatchFindingCarriesPatchLabel(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	repo := ledgertest.NewRepo(t, "a.md")
 	// CommitPatch needs the launcher identity, which only the remote Ledger
 	// row stamps (the local row's GitTree has none), so run against a forgejo

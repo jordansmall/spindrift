@@ -17,13 +17,13 @@ import (
 // reject an unclean one: a clean fully-local config still yields the populated
 // config/issueTracker/codeForge trio newReadContext alone would give.
 func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setArtifact(t, "RUNTIME", "echo")
 
@@ -48,16 +48,16 @@ func TestNewGatedContext_CleanConfig_SucceedsAndPopulatesFields(t *testing.T) {
 // applyDispatchKind call (issue #2944 slice 1), so the label comes from the
 // fixed research family, not from the ambient LABEL knob for work.
 func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setArtifact(t, "RUNTIME", "echo")
-	t.Setenv("LABEL", "ready-for-agent")
+	setKnob(t, "LABEL", "ready-for-agent")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Research, false)
@@ -78,13 +78,13 @@ func TestNewGatedContext_ResearchKind_AppliesKindAndLabel(t *testing.T) {
 // purpose: repoRequirementExempt (internal/launcherchecks) exempts exactly this
 // combination, so setting them would hide a regression in that exemption.
 func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setArtifact(t, "RUNTIME", "echo")
 
@@ -103,13 +103,13 @@ func TestNewGatedContext_SelfContainedResearch_SetsSelfContainedField(t *testing
 // validate rejects selfContained paired with dispatchkind.Work before any gate
 // runs.
 func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setArtifact(t, "RUNTIME", "echo")
 
@@ -130,13 +130,13 @@ func TestNewGatedContext_SelfContainedWorkKind_RejectedByValidate(t *testing.T) 
 // A config validate() rejects must never be gate-checked: the broken
 // MERGE_MODE has to come back as validate's own error.
 func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
-	t.Setenv("MERGE_MODE", "bogus")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "MERGE_MODE", "bogus")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", t.TempDir())
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setArtifact(t, "RUNTIME", "echo")
 
@@ -159,17 +159,17 @@ func TestNewGatedContext_InvalidConfig_SurfacesValidateError(t *testing.T) {
 // otherwise-valid config. That proves newGatedContext walks gateRegistry at
 // all, rather than only ever exercising the validate() short-circuit above.
 func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("CODE_FORGE", "git")
-	t.Setenv("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "manual")
+	setKnob(t, "CODE_FORGE", "git")
+	setKnob(t, "CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "manual")
 	setArtifact(t, "RUNTIME", "echo")
-	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -197,19 +197,19 @@ func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	// host has installed.
 	withFixtureBinary(t, "true")
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("CODE_FORGE", "github")
-	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "manual")
+	setKnob(t, "CODE_FORGE", "github")
+	setKnob(t, "ISSUE_TRACKER", "github")
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "manual")
 	setArtifact(t, "RUNTIME", "true")
-	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	setArtifact(t, "RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "open") // not host/none, so the pasta launch gate actually calls bwrap.ValidatePasta()
+	setKnob(t, "NETWORK_MODE", "open") // not host/none, so the pasta launch gate actually calls bwrap.ValidatePasta()
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate
 	// (readonly_token_gate.go) would also fail if the walk reached it.
 
@@ -241,19 +241,19 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	// fails before it can probe overlay support.
 	withFixtureBinary(t, "true")
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("CODE_FORGE", "github")
-	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "manual")
+	setKnob(t, "CODE_FORGE", "github")
+	setKnob(t, "ISSUE_TRACKER", "github")
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "manual")
 	setArtifact(t, "RUNTIME", "true")
-	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	setArtifact(t, "RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "host") // the pasta launch gate no-ops (issue #2666), isolating the overlay gate's failure
+	setKnob(t, "NETWORK_MODE", "host") // the pasta launch gate no-ops (issue #2666), isolating the overlay gate's failure
 	setArtifact(t, "NIX_STORE_WRITABLE", "true")
 	setArtifact(t, "NIX_CONFIG_FILE", "/nix/store/somehash-nix.conf")
 	// BOX_GH_TOKEN stays unset so the read-only-token-github gate would also
@@ -285,19 +285,19 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 	// it.
 	withFixtureBinary(t, "true")
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("CODE_FORGE", "git") // not RelayCapable (internal/backend/registry_gen.go)
-	t.Setenv("CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "manual")
+	setKnob(t, "CODE_FORGE", "git") // not RelayCapable (internal/backend/registry_gen.go)
+	setKnob(t, "CODE_FORGE_REMOTE_URL", "https://example.com/repo.git")
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "manual")
 	setArtifact(t, "RUNTIME", "true")
-	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	setArtifact(t, "RUNNER_KIND", "bwrap")
-	t.Setenv("NETWORK_MODE", "open") // not host/none, so the pasta launch gate would call bwrap.ValidatePasta() if reached
+	setKnob(t, "NETWORK_MODE", "open") // not host/none, so the pasta launch gate would call bwrap.ValidatePasta() if reached
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)
@@ -322,18 +322,18 @@ func TestNewGatedContext_BwrapGatesRunAfterCapabilityAndNetworkModeGates(t *test
 // read-write, not left unset, because a dogfood Box's ambient environment
 // carries read-only (ADR 0018, issue #470) and would trip an earlier gate.
 func TestNewGatedContext_FailingNetworkModeRuntimeGate_SurfacesGateError(t *testing.T) {
-	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-write")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "ghp_test")
-	t.Setenv("GIT_USER_NAME", "bot")
-	t.Setenv("GIT_USER_EMAIL", "bot@example.com")
+	setKnob(t, "GIT_USER_NAME", "bot")
+	setKnob(t, "GIT_USER_EMAIL", "bot@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
-	t.Setenv("CODE_FORGE", "github")
-	t.Setenv("ISSUE_TRACKER", "github")
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "manual")
+	setKnob(t, "CODE_FORGE", "github")
+	setKnob(t, "ISSUE_TRACKER", "github")
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "manual")
 	setRunner(t, "echo", "bwrap")
-	t.Setenv("NETWORK_MODE", "no-host-loopback")
+	setKnob(t, "NETWORK_MODE", "no-host-loopback")
 
 	var w bytes.Buffer
 	gc, err := newGatedContext(&w, dispatchkind.Work, false)

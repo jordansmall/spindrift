@@ -86,20 +86,19 @@ func setArtifact(t *testing.T, key, value string) {
 	if doc.Artifacts, err = artifactsFromFlat(flat); err != nil {
 		t.Fatalf("setArtifact(%s): %v (call setRunner first)", key, err)
 	}
-	loadedDoc = doc
-	t.Cleanup(func() { loadedDoc = prev })
+	useDoc(t, doc)
 }
 
 // The wrapper no longer pre-populates env (ADR 0020), so a boxEnv knob like
 // MODEL reaches the Box with its baked value only through these fallbacks: the
 // document's settings first, then the schema default table.
 func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil; os.Unsetenv("MODEL") })
+	t.Cleanup(func() { os.Unsetenv("MODEL") })
 	os.Unsetenv("MODEL")
 
-	loadedDoc = &inputdoc.Document{
+	useDoc(t, &inputdoc.Document{
 		Settings: map[string]string{"MODEL": "from-settings"},
-	}
+	})
 	if got := resolveBoxEnvVar("MODEL"); got != "from-settings" {
 		t.Errorf("MODEL = %q, want from-settings", got)
 	}
@@ -109,7 +108,7 @@ func TestResolveBoxEnvVar_FallsBackToDocumentThenSchemaDefault(t *testing.T) {
 		t.Errorf("MODEL = %q, want from-env (env beats document)", got)
 	}
 
-	loadedDoc = nil
+	useDoc(t, nil)
 	os.Unsetenv("MODEL")
 	if got := resolveBoxEnvVar("LABEL"); got != "ready-for-agent" {
 		t.Errorf("LABEL = %q, want ready-for-agent (schema default, no doc loaded)", got)
@@ -137,9 +136,7 @@ func TestLoadConfig_ArtifactsIgnoreAmbientEnv(t *testing.T) {
 // With no document entry an artifact is empty: the rows render every default,
 // so Go carries none.
 func TestLoadConfig_AbsentArtifactsAreEmpty(t *testing.T) {
-	prev := loadedDoc
-	loadedDoc = nil
-	t.Cleanup(func() { loadedDoc = prev })
+	useDoc(t, nil)
 	t.Setenv("IMAGE_TAG", "ambient")
 	c := loadConfig()
 	if c.imageTag != "" {
@@ -263,8 +260,7 @@ func unsetEnvForTest(t *testing.T, names ...string) {
 // The host git config is snapshotted once at loadConfig (issue #5333), so the
 // per-dispatch resolver never reads it, whatever the name.
 func TestResolveBoxEnvVar_NeverReadsGitConfig(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
+	useDoc(t, nil)
 	unsetEnvForTest(t, "GH_TOKEN", "BASE_BRANCH", "GIT_USER_NAME", "GIT_USER_EMAIL")
 	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 

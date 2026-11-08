@@ -250,18 +250,18 @@ func setStubFamilyLaunchEnv(t *testing.T) {
 	withFixtureBinary(t, "true")
 	for k, v := range map[string]string{
 		"REPO_SLUG":                  "owner/repo",
-		"GH_TOKEN":                   "ghp_test",
 		"GIT_USER_NAME":              "bot",
 		"GIT_USER_EMAIL":             "bot@example.com",
-		"CLAUDE_CODE_OAUTH_TOKEN":    "tok",
 		"CODE_FORGE":                 "github",
 		"ISSUE_TRACKER":              "github",
 		"BASE_BRANCH":                "main",
 		"MERGE_MODE":                 "manual",
 		"BOX_FORGE_AND_ISSUE_ACCESS": "read-write",
 	} {
-		t.Setenv(k, v)
+		setKnob(t, k, v)
 	}
+	t.Setenv("GH_TOKEN", "ghp_test")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setRunner(t, "true", stubFamily)
 }
 
@@ -368,10 +368,8 @@ func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 	t.Setenv("PATH", dir)
 	for k, v := range map[string]string{
 		"REPO_SLUG":                  "owner/repo",
-		"GH_TOKEN":                   "ghp_test",
 		"GIT_USER_NAME":              "bot",
 		"GIT_USER_EMAIL":             "bot@example.com",
-		"CLAUDE_CODE_OAUTH_TOKEN":    "tok",
 		"CODE_FORGE":                 "github",
 		"ISSUE_TRACKER":              "github",
 		"BASE_BRANCH":                "main",
@@ -379,8 +377,10 @@ func setRealRunnerLaunchEnv(t *testing.T, bwrapExit int, pasta bool) {
 		"BOX_FORGE_AND_ISSUE_ACCESS": "read-write",
 		"NETWORK_MODE":               "open",
 	} {
-		t.Setenv(k, v)
+		setKnob(t, k, v)
 	}
+	t.Setenv("GH_TOKEN", "ghp_test")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
 	setRunner(t, "bwrap", "bwrap")
 }
 

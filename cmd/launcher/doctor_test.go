@@ -312,7 +312,7 @@ func TestDoctorReport_Butler_OptInValidatesButlerConfig(t *testing.T) {
 // Issue #6343: doctor --butler refuses a tracker that cannot file issues
 // host-side, through the same resolveButlerSettings chain.
 func TestDoctorReport_Butler_TrackerCannotFileExitsConfigInvalid(t *testing.T) {
-	t.Setenv("FILER_MODEL", "claude-haiku-4-5-20251001")
+	setKnob(t, "FILER_MODEL", "claude-haiku-4-5-20251001")
 	f := forge.NewFake()
 	f.ProbeRepo = "owner/repo"
 	f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, doctor.ButlerLabelNames()...)
@@ -346,7 +346,7 @@ func TestDoctorReport_Butler_TrackerCannotFileExitsConfigInvalid(t *testing.T) {
 func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 	newHealthyConfig := func(t *testing.T) config {
 		t.Helper()
-		t.Setenv("FILER_MODEL", "claude-haiku-4-5-20251001")
+		setKnob(t, "FILER_MODEL", "claude-haiku-4-5-20251001")
 		c := minimalValidConfig()
 		c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel =
 			"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
@@ -370,7 +370,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		{
 			name: "no filer provisioned",
 			mutate: func(t *testing.T, c *config) {
-				t.Setenv("FILER_MODEL", "")
+				setKnob(t, "FILER_MODEL", "")
 			},
 			wantErr: "needs a provisioned Filer",
 		},
@@ -699,7 +699,7 @@ func TestDoctorReport_ConfigErr_CarriesFailingRowRemedy(t *testing.T) {
 // read-only work Box with a provisioned Filer. A tracker with no label
 // registry (local, jira) never gets an extra Required label (issue #4400).
 func TestRequiredLabels(t *testing.T) {
-	t.Setenv("FILER_MODEL", "test-model")
+	setKnob(t, "FILER_MODEL", "test-model")
 	cf := forge.NewFake()
 	githubDesc, _ := backend.ByName("github")
 	patchCaps := forge.Capabilities{
@@ -868,8 +868,8 @@ func TestCmdDoctor_UnregisteredBackend_ExitsTwoWithFullConfigReport(t *testing.T
 	} {
 		t.Run(tc.env, func(t *testing.T) {
 			setFullyLocalEnv(t)
-			t.Setenv(tc.env, tc.value)
-			t.Setenv("MERGE_MODE", "bogus")
+			setKnob(t, tc.env, tc.value)
+			setKnob(t, "MERGE_MODE", "bogus")
 
 			var stdout, stderr bytes.Buffer
 			got := cmdDoctor(doctorOptions{}, &stdout, &stderr)

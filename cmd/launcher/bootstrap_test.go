@@ -19,7 +19,7 @@ import (
 // bootstrap surfaces a validation error without constructing a runner, forge
 // client, or dispatch factory.
 func TestBootstrap_PropagatesValidateError(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 
@@ -36,7 +36,7 @@ func TestBootstrap_PropagatesValidateError(t *testing.T) {
 // failure from any other bootstrap failure. validate(c) itself is unchanged:
 // TestBootstrap_PropagatesValidateError still asserts the raw REPO_SLUG text.
 func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
-	t.Setenv("REPO_SLUG", "")
+	setKnob(t, "REPO_SLUG", "")
 
 	_, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 
@@ -50,10 +50,10 @@ func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 // differs from its own Probe error text (see
 // TestValidate_RequiredKnobFailure_IncludesRemedy in main_test.go).
 func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("DRIVER", "")
@@ -97,18 +97,18 @@ body
 		t.Fatal(err)
 	}
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", issuesDir)
 	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SPINDRIFT_TEST_REGISTRY_PROXY_CRED_DOES_NOT_EXIST")
 	t.Chdir(checkout)
 
@@ -134,15 +134,15 @@ func TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid(t *testin
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
 	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com/artifactory/api/cargo/crates/index/")
 	t.Chdir(checkout)
@@ -192,18 +192,18 @@ password also-wrong
 // env shape and so spell theirs out in full instead.
 func setMinimalLocalBootstrapEnv(t *testing.T, repoPath string) {
 	t.Helper()
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", t.TempDir())
 }
 
 // buildRegistryProxyRoutes' routes-file branch runs a route's credential
@@ -216,7 +216,7 @@ func TestBootstrap_RegistryProxyRoutesFile_EnvCredential_ResolvesAndUnsets(t *te
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
 	t.Setenv("SPINDRIFT_TEST_ROUTES_ENV_CRED", "s3cr3t")
-	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+	setKnob(t, "REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 upstream-origin = "https://registry.example.com"
@@ -250,7 +250,7 @@ func TestBootstrap_RegistryProxyRoutesFile_AuthSchemeAndUpstreamOrigin_Preserved
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
 	t.Setenv("SPINDRIFT_TEST_ROUTES_BASIC_CRED", "s3cr3t")
-	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+	setKnob(t, "REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 upstream-origin = "https://registry.example.com/"
@@ -290,7 +290,7 @@ func TestBootstrap_RegistryProxyRoutesFile_NetrcCredential_ResolvesByRouteHost(t
 	if err := os.WriteFile(netrcPath, []byte(multiEntryNetrc), 0o600); err != nil {
 		t.Fatalf("failed to write temp netrc file: %v", err)
 	}
-	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+	setKnob(t, "REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 upstream-origin = "https://registry.example.com"
@@ -329,7 +329,7 @@ token = "cargos3cr3t"
 	if err := os.WriteFile(credentialsPath, []byte(cargoCredentials), 0o600); err != nil {
 		t.Fatalf("failed to write temp credentials.toml file: %v", err)
 	}
-	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+	setKnob(t, "REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 upstream-origin = "https://registry.example.com"
@@ -377,7 +377,7 @@ func TestBootstrap_RegistryProxyRoutesFile_ResolveFailure_ChecksGateNamesRoute(t
 	checkout := mustSeedableCheckout(t)
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 
-	t.Setenv("REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
+	setKnob(t, "REGISTRY_PROXY_ROUTES_FILE", writeRoutesFile(t, `
 [[routes]]
 match-host = "registry.example.com"
 credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
@@ -602,17 +602,17 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 	checkout := mustSeedableCheckout(t)
 	repoPath := filepath.Join(t.TempDir(), "accum.git")
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
-	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
+	setKnob(t, "BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
@@ -653,18 +653,18 @@ body
 		t.Fatal(err)
 	}
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
@@ -728,18 +728,18 @@ body
 		t.Fatal(err)
 	}
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 	// No stubPastaOnPath(t) here, unlike every other
 	// RUNNER_KIND=bwrap test in this file: PATH holds only a stub bwrap and
@@ -816,18 +816,18 @@ body
 		t.Fatal(err)
 	}
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "podman", "bwrap")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(io.Discard, false, dispatchkind.Work, false)
@@ -863,18 +863,18 @@ body
 		t.Fatal(err)
 	}
 
-	t.Setenv("REPO_SLUG", "owner/repo")
+	setKnob(t, "REPO_SLUG", "owner/repo")
 	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	setKnob(t, "GIT_USER_NAME", "Test")
+	setKnob(t, "GIT_USER_EMAIL", "test@example.com")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
+	setKnob(t, "CODE_FORGE", "local")
+	setKnob(t, "CODE_FORGE_ACCUMULATION_REPO_DIR", repoPath)
+	setKnob(t, "BASE_BRANCH", "main")
+	setKnob(t, "MERGE_MODE", "immediate")
 	setRunner(t, "bwrap", "oci")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
+	setKnob(t, "ISSUE_TRACKER", "local")
+	setKnob(t, "LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 
 	lc, err := bootstrap(io.Discard, false, dispatchkind.Work, false)
